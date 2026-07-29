@@ -40,7 +40,7 @@ vi.mock("execa", () => ({
 }))
 
 vi.mock("fs/promises", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, any>
+	const actual = (await importOriginal()) as Record<string, unknown>
 	const mockFunctions = {
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
@@ -105,7 +105,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: unknown) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -154,13 +154,13 @@ vi.mock("../../../utils/fs", () => ({
 
 // ── Test Helpers ─────────────────────────────────────────────────────────────
 
-function makeMockProvider(mockExtensionContext: vscode.ExtensionContext, mockOutputChannel: any) {
+function makeMockProvider(mockExtensionContext: vscode.ExtensionContext, mockOutputChannel: unknown) {
 	const provider = new ClineProvider(
 		mockExtensionContext,
 		mockOutputChannel,
 		"sidebar",
 		new ContextProxy(mockExtensionContext),
-	) as any
+	) as unknown as Record<string, unknown>
 
 	provider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -243,9 +243,9 @@ function makeRecordingContext(overrides?: Partial<UsageRecordingContext>): Usage
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("Usage Stats Recording", () => {
-	let mockProvider: any
+	let mockProvider: unknown
 	let mockApiConfig: ProviderSettings
-	let mockOutputChannel: any
+	let mockOutputChannel: unknown
 	let mockExtensionContext: vscode.ExtensionContext
 
 	beforeEach(() => {
@@ -272,9 +272,9 @@ describe("Usage Stats Recording", () => {
 
 			// usageRecorder should be initialized (not null)
 			// We access it via the private property for testing
-			expect((task as any).usageRecorder).toBeDefined()
-			expect((task as any).usageRecorder).not.toBeNull()
-			expect((task as any).usageRecorder).toBeInstanceOf(UsageRecorder)
+			expect((task as unknown as Record<string, unknown>).usageRecorder).toBeDefined()
+			expect((task as unknown as Record<string, unknown>).usageRecorder).not.toBeNull()
+			expect((task as unknown as Record<string, unknown>).usageRecorder).toBeInstanceOf(UsageRecorder)
 		})
 
 		it("should record exactly one event per terminal finalize call", async () => {
@@ -288,7 +288,7 @@ describe("Usage Stats Recording", () => {
 			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
 
 			expect(mockStore.append).toHaveBeenCalledTimes(1)
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			expect(recordedEvent.schemaVersion).toBe(1)
 			expect(recordedEvent.status).toBe("completed")
 			expect(recordedEvent.taskId).toBe("test-task-001")
@@ -336,8 +336,8 @@ describe("Usage Stats Recording", () => {
 			await recorder.finalizeUsageEvent("task-1:1", "completed", ctx1)
 
 			expect(mockStore.append).toHaveBeenCalledTimes(2)
-			const event0 = (mockStore.append as any).mock.calls[0][0]
-			const event1 = (mockStore.append as any).mock.calls[1][0]
+			const event0 = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
+			const event1 = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[1][0]
 			expect(event0.attempt).toBe(0)
 			expect(event1.attempt).toBe(1)
 			expect(event1.usage.inputTokens.value).toBe(150)
@@ -374,7 +374,7 @@ describe("Usage Stats Recording", () => {
 
 			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
 
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			expect(recordedEvent.usage.inputTokens).toBeUndefined()
 			expect(recordedEvent.usage.outputTokens).toBeUndefined()
 			expect(recordedEvent.usage.cacheWriteTokens).toBeUndefined()
@@ -392,7 +392,7 @@ describe("Usage Stats Recording", () => {
 			const ctx = makeRecordingContext({ parentTaskId: "parent-task-001" })
 			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
 
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			expect(recordedEvent.parentTaskId).toBe("parent-task-001")
 		})
 
@@ -407,8 +407,8 @@ describe("Usage Stats Recording", () => {
 			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
 			await recorder.finalizeUsageEvent("task-2:0", "completed", ctx)
 
-			const event1 = (mockStore.append as any).mock.calls[0][0]
-			const event2 = (mockStore.append as any).mock.calls[1][0]
+			const event1 = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
+			const event2 = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[1][0]
 			expect(event1.eventId).not.toBe(event2.eventId)
 		})
 
@@ -422,7 +422,7 @@ describe("Usage Stats Recording", () => {
 			const ctx = makeRecordingContext()
 			await recorder.finalizeUsageEvent("task-42:3", "cancelled", ctx)
 
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			expect(recordedEvent.idempotencyKey).toBe("task-42:3:cancelled")
 		})
 
@@ -436,7 +436,7 @@ describe("Usage Stats Recording", () => {
 			const ctx = makeRecordingContext()
 			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
 
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			const date = new Date(recordedEvent.occurredAt)
 			expect(date.getTime()).not.toBeNaN()
 		})
@@ -455,7 +455,7 @@ describe("Usage Stats Recording", () => {
 			})
 			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
 
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			expect(recordedEvent.semantics.cacheReadInInput).toBe("included")
 			expect(recordedEvent.semantics.cacheWriteInInput).toBe("excluded")
 			expect(recordedEvent.semantics.reasoningInOutput).toBe("unknown")
@@ -477,8 +477,8 @@ describe("Usage Stats Recording", () => {
 			})
 
 			// usageRecorder should be a UsageRecorder instance (not null)
-			expect((task as any).usageRecorder).not.toBeNull()
-			expect((task as any).usageRecorder).toBeInstanceOf(UsageRecorder)
+			expect((task as unknown as Record<string, unknown>).usageRecorder).not.toBeNull()
+			expect((task as unknown as Record<string, unknown>).usageRecorder).toBeInstanceOf(UsageRecorder)
 		})
 
 		it("should have usageRecorder accessible as private property", () => {
@@ -490,7 +490,7 @@ describe("Usage Stats Recording", () => {
 			})
 
 			// The property should exist
-			expect((task as any).usageRecorder).toBeDefined()
+			expect((task as unknown).usageRecorder).toBeDefined()
 		})
 
 		it("should construct UsageRecorder with globalStoragePath from provider context", () => {
@@ -501,7 +501,7 @@ describe("Usage Stats Recording", () => {
 				startTask: false,
 			})
 
-			const recorder = (task as any).usageRecorder
+			const recorder = (task as unknown as Record<string, unknown>).usageRecorder
 			expect(recorder).toBeInstanceOf(UsageRecorder)
 			// The recorder should have a store that was constructed with the globalStoragePath
 			expect(recorder.store).toBeDefined()
@@ -521,7 +521,7 @@ describe("Usage Stats Recording", () => {
 			const ctx = makeRecordingContext({ taskId: "abc-123", attempt: 5 })
 			await recorder.finalizeUsageEvent("abc-123:5", "completed", ctx)
 
-			const recordedEvent = (mockStore.append as any).mock.calls[0][0]
+			const recordedEvent = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls[0][0]
 			// idempotencyKey = requestKey:status
 			expect(recordedEvent.idempotencyKey).toBe("abc-123:5:completed")
 			expect(recordedEvent.taskId).toBe("abc-123")
@@ -544,7 +544,9 @@ describe("Usage Stats Recording", () => {
 
 			// All three should be recorded (different statuses)
 			expect(mockStore.append).toHaveBeenCalledTimes(3)
-			const statuses = (mockStore.append as any).mock.calls.map((c: any) => c[0].status)
+			const statuses = (mockStore.append as unknown as { mock: { calls: unknown[][] } }).mock.calls.map(
+				(c: unknown[]) => (c[0] as Record<string, unknown>).status,
+			)
 			expect(statuses).toContain("completed")
 			expect(statuses).toContain("failed")
 			expect(statuses).toContain("cancelled")
