@@ -47,24 +47,71 @@ jobs:
 
             - name: Cache VS Code test binary
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              id: vscode-cache
               uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
               with:
                   path: |
                       apps/vscode-e2e/.vscode-test/
                   key: vscode-test-${{ runner.os }}-${{ steps.vscode-ver.outputs.version }}-v1
+                  # Fall back to the most recent stale binary so a version bump or cache
+                  # eviction doesn't force a download when the VS Code CDN is unreachable.
+                  restore-keys: |
+                      vscode-test-${{ runner.os }}-
+
+            - name: Probe VS Code update API
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              id: vscode-probe
+              run: |
+                  if curl -sf --max-time 10 https://update.code.visualstudio.com/api/releases/stable > /dev/null; then
+                      echo "reachable=true" >> "$GITHUB_OUTPUT"
+                  else
+                      echo "reachable=false" >> "$GITHUB_OUTPUT"
+                  fi
+
+            # @vscode/test-electron only skips its live version-resolution request when the
+            # requested version already exists in .vscode-test/. On an exact-key miss it calls
+            # the update API before its download retry loop, so an unreachable CDN fails the
+            # job before any test runs. When that API is down, point the runner at the stale
+            # binary restored above (runTest.ts honors VSCODE_VERSION) so the suite still runs.
+            - name: Fall back to stale VS Code binary when CDN is unreachable
+              if: (github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true') && steps.vscode-cache.outputs.cache-hit != 'true' && steps.vscode-probe.outputs.reachable == 'false'
+              id: vscode-fallback
+              run: |
+                  STALE=$(ls -d apps/vscode-e2e/.vscode-test/vscode-linux-x64-* 2>/dev/null | sort -V | tail -n 1 || true)
+                  if [ -n "$STALE" ]; then
+                      echo "VSCODE_VERSION=${STALE##*-}" >> "$GITHUB_ENV"
+                      echo "used=true" >> "$GITHUB_OUTPUT"
+                      echo "VS Code update API is unreachable; falling back to cached VS Code ${STALE##*-}"
+                  else
+                      echo "VS Code update API is unreachable and no cached binary is available; the test step may fail"
+                  fi
 
             - name: Run mocked E2E tests
               id: run-e2e
               # merge_group and workflow_dispatch always run; cache skip is pull_request only
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
-              run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:ci:mock
+              # Retry the whole step so transient CDN/network blips during version resolution
+              # or the binary download don't fail the entire merge queue run.
+              run: |
+                  for attempt in 1 2 3; do
+                      if xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:ci:mock; then
+                          exit 0
+                      fi
+                      echo "E2E attempt ${attempt} failed"
+                      if [ "$attempt" -lt 3 ]; then
+                          sleep 15
+                      fi
+                  done
+                  exit 1
 
             - name: Write mocked E2E pass marker
-              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success'
+              # Skip when the stale-binary fallback ran: a pass against an older VS Code
+              # must not mint a marker for the intended-version source hash.
+              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used != 'true'
               run: mkdir -p .cache/e2e-pass && date -u > .cache/e2e-pass/passed
 
             - name: Save mocked E2E pass marker
-              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success'
+              if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used != 'true'
               continue-on-error: true
               uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
               with:
