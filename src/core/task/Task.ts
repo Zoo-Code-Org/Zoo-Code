@@ -54,7 +54,6 @@ import {
 	ConsecutiveMistakeError,
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
-	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -79,7 +78,7 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
-import { UsageEventStore, UsageRecorder } from "../../services/stats"
+import { UsageRecorder } from "../../services/stats"
 import type { UsageRecordingContext } from "../../services/stats"
 
 // integrations
@@ -143,6 +142,100 @@ const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+
+// ── Usage Stats: endpoint domain extraction ──────────────────────────────────
+
+/**
+ * Default base URLs per provider. Only providers with a user-configurable
+ * base URL field are listed. When the user's configured URL matches the
+ * default, `endpoint` is left undefined to keep events clean.
+ */
+const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
+	openai: "https://api.openai.com/v1",
+	"openai-native": "https://api.openai.com",
+	openrouter: "https://openrouter.ai/api/v1",
+	deepseek: "https://api.deepseek.com",
+	litellm: "http://localhost:4000",
+	ollama: "http://127.0.0.1:11434",
+	lmstudio: "http://localhost:1234/v1",
+	requesty: "https://router.requesty.ai/v1",
+}
+
+/**
+ * Maps a provider name to the corresponding base URL field on ProviderSettings.
+ * Returns the raw configured value (may be undefined if the user hasn't
+ * customized it). Providers not in this map have no user-configurable base URL.
+ */
+function getProviderBaseUrlField(provider: string, config: ProviderSettings): string | undefined {
+	switch (provider) {
+		case "anthropic":
+			return config.anthropicBaseUrl
+		case "openai":
+			return config.openAiBaseUrl
+		case "openai-native":
+			return config.openAiNativeBaseUrl
+		case "openrouter":
+			return config.openRouterBaseUrl
+		case "deepseek":
+			return config.deepSeekBaseUrl
+		case "litellm":
+			return config.litellmBaseUrl
+		case "ollama":
+			return config.ollamaBaseUrl
+		case "lmstudio":
+			return config.lmStudioBaseUrl
+		case "requesty":
+			return config.requestyBaseUrl
+		case "zoo-gateway":
+			return config.zooGatewayBaseUrl
+		default:
+			return undefined
+	}
+}
+
+/**
+ * Extracts a display-friendly endpoint domain from the provider's base URL.
+ *
+ * Only returns a value when the user has configured a CUSTOM base URL that
+ * differs from the provider's default. For localhost / 127.0.0.1 hosts the
+ * port is included (e.g. "localhost:1234") so distinct local servers can be
+ * distinguished. Returns undefined for default endpoints, providers without
+ * a base URL field, or malformed URLs.
+ */
+function resolveEndpoint(config: ProviderSettings): string | undefined {
+	const provider = config.apiProvider
+	if (!provider) return undefined
+
+	const configuredUrl = getProviderBaseUrlField(provider, config)
+	if (!configuredUrl) return undefined
+
+	// Only record endpoint when the user customized the base URL.
+	const defaultUrl = PROVIDER_DEFAULT_BASE_URLS[provider]
+	if (configuredUrl === defaultUrl) return undefined
+
+	// zoo-gateway default is dynamic — skip when it matches the derived default.
+	if (provider === "zoo-gateway") {
+		// The dynamic default is `${getZooCodeBaseUrl()}/api/gateway/v1`.
+		// We can't import getZooCodeBaseUrl here without a circular dependency,
+		// so we compare against the known suffix pattern. If the configured URL
+		// ends with /api/gateway/v1 and starts with a zoocode host, treat as default.
+		if (/^https?:\/\/[^/]*zoocode\.dev\/api\/gateway\/v1\/?$/.test(configuredUrl)) {
+			return undefined
+		}
+	}
+
+	try {
+		const url = new URL(configuredUrl)
+		const hostname = url.hostname
+		// Include port for localhost / 127.0.0.1 so distinct local servers differ.
+		if ((hostname === "localhost" || hostname === "127.0.0.1") && url.port) {
+			return `${hostname}:${url.port}`
+		}
+		return hostname
+	} catch {
+		return undefined
+	}
+}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -273,14 +366,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
-	
+
 	/**
-	 * Usage 이벤트 기록기. API attempt의 terminal finalize에서만 호출된다.
-	 * store 초기화 실패 시 null이며, 이 경우 기록을 조용히 건너뛴다.
-	 * (아키텍처 보고서 섹션 5.5-5.8, rollback: writer를 optional service로 주입)
+	 * Usage event recorder. Called only at terminal finalize of API attempts.
+	 * Null if store initialization failed; in that case recording is silently skipped.
+	 * (Architecture report section 5.5-5.8, rollback: writer injected as optional service)
 	 */
 	private readonly usageRecorder: UsageRecorder | null = null
-	
+
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
@@ -437,7 +530,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	didCompleteReadingStream = false
 	private _started = false
 	private _runPromise: Promise<void> | undefined
-	private readonly _isHistoryTask: boolean
 	// No streaming parser is required.
 	assistantMessageParser?: undefined
 
@@ -519,7 +611,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			task: historyItem ? historyItem.task : task,
 			images: historyItem ? [] : images,
 		}
-		this._isHistoryTask = !!historyItem && !task && !images
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -549,12 +640,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
 
-		// Initialize usage recorder (best-effort: failure results in null recorder)
-		// Store initialization is deferred to first append; here we only construct the recorder.
-		// If the store fails at runtime, UsageRecorder catches errors internally.
+		// Initialize usage recorder (best-effort: failure results in null recorder).
+		// Use the provider's shared UsageStatsService as the append sink so that all
+		// in-process writes go through one store instance and its cache stays consistent.
+		// If the service is unavailable, the recorder is disabled rather than creating
+		// a second independent store authority.
 		try {
-			const store = new UsageEventStore(this.globalStoragePath)
-			this.usageRecorder = new UsageRecorder(store)
+			const service = provider.getUsageStatsService()
+			if (service) {
+				this.usageRecorder = new UsageRecorder(service, () => {
+					provider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
+						// View disposed, drop message silently
+					})
+				})
+			}
 		} catch (err) {
 			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
 		}
@@ -1389,7 +1488,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Wait for askResponse to be set
 		await pWaitFor(
 			() => {
-				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+				if (this.askResponse !== undefined || this.lastMessageTs !== askTs) {
 					return true
 				}
 
@@ -1413,11 +1512,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			},
 			{ interval: 100 },
 		)
-
-		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
-		if (this.abort) {
-			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
-		}
 
 		if (this.lastMessageTs !== askTs) {
 			// Could happen if we send multiple asks in a row i.e. with
@@ -1838,13 +1932,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	async sayAndCreateMissingParamError(toolName: ToolName, paramName: string, relPath?: string) {
 		await this.say(
 			"error",
-			relPath
-				? t("tools:missingToolParameterWithPath", {
-						toolName,
-						relPath: relPath.toPosix(),
-						paramName,
-					})
-				: t("tools:missingToolParameter", { toolName, paramName }),
+			`Roo tried to use ${toolName}${
+				relPath ? ` for '${relPath.toPosix()}'` : ""
+			} without value for required parameter '${paramName}'. Retrying...`,
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
@@ -2056,7 +2146,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				.find((m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task")) // Could be multiple resume tasks.
 
 			let askType: ClineAsk
-			if (this.initialStatus === "completed" || lastClineMessage?.ask === "completion_result") {
+			if (lastClineMessage?.ask === "completion_result") {
 				askType = "resume_completed_task"
 			} else {
 				askType = "resume_task"
@@ -2778,8 +2868,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				await this.diffViewProvider.reset()
 
-				await this.safeEnsureModelFetched()
-
 				// Cache model info once per API request to avoid repeated calls during streaming
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
@@ -3171,43 +3259,47 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cost: tokens.total ?? costResult.totalCost,
 								})
 
-							// ── Usage Stats: terminal finalize ──────────────────────────
-							// captureUsageData is the single terminal boundary for completed/cancelled
-							// API attempts. We record the final usage event here.
-							// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
-							if (this.usageRecorder) {
-								const requestKey = `${this.taskId}:${currentItem.retryAttempt ?? 0}`
-								const ctx: UsageRecordingContext = {
-									taskId: this.taskId,
-									parentTaskId: this.parentTaskId,
-									provider: String(
-										this.apiConfiguration.apiProvider && !isRetiredProvider(this.apiConfiguration.apiProvider)
-											? this.apiConfiguration.apiProvider
-											: "unknown",
-									),
-									model: getModelId(this.apiConfiguration) || "unknown",
-									mode: this._taskMode || defaultModeSlug,
-									attempt: currentItem.retryAttempt ?? 0,
-									inputTokens: tokens.input,
-									outputTokens: tokens.output,
-									cacheWriteTokens: tokens.cacheWrite,
-									cacheReadTokens: tokens.cacheRead,
-									totalCost: tokens.total,
-									// V1 semantics: provider-reported values, inclusion unknown
-									// (aggregator handles double-counting via inclusion metadata)
-									cacheReadInInput: "unknown",
-									cacheWriteInInput: "unknown",
-									reasoningInOutput: "unknown",
-									costSource: "provider",
-									tokenSource: "provider",
+								// ── Usage Stats: terminal finalize ──────────────────────────
+								// captureUsageData is the single terminal boundary for completed/cancelled
+								// API attempts. We record the final usage event here.
+								// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
+								if (this.usageRecorder) {
+									// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+									// requestKey. Previously requestKey = taskId:retryAttempt, which was
+									// identical for every turn of a task (retryAttempt resets to 0 per turn),
+									// causing the idempotency dedupe to drop all but the first turn's usage.
+									const requestKey = `${this.taskId}:${apiReqIndex}:${currentItem.retryAttempt ?? 0}`
+									const ctx: UsageRecordingContext = {
+										taskId: this.taskId,
+										parentTaskId: this.parentTaskId,
+										provider: String(
+											this.apiConfiguration.apiProvider &&
+												!isRetiredProvider(this.apiConfiguration.apiProvider)
+												? this.apiConfiguration.apiProvider
+												: "unknown",
+										),
+										model: getModelId(this.apiConfiguration) || "unknown",
+										mode: this._taskMode || defaultModeSlug,
+										attempt: currentItem.retryAttempt ?? 0,
+										inputTokens: tokens.input,
+										outputTokens: tokens.output,
+										cacheWriteTokens: tokens.cacheWrite,
+										cacheReadTokens: tokens.cacheRead,
+										totalCost: tokens.total,
+										// V1 semantics: provider-reported values, inclusion unknown
+										// (aggregator handles double-counting via inclusion metadata)
+										cacheReadInInput: "unknown",
+										cacheWriteInInput: "unknown",
+										reasoningInOutput: "unknown",
+										costSource: "provider",
+										tokenSource: "provider",
+										endpoint: resolveEndpoint(this.apiConfiguration),
+									}
+									// Fire-and-forget: store error must not block task
+									this.usageRecorder.finalizeUsageEvent(requestKey, status, ctx).catch(() => {})
 								}
-								// Fire-and-forget: store error must not block task
-								this.usageRecorder
-									.finalizeUsageEvent(requestKey, status, ctx)
-									.catch(() => {})
+								// ── End Usage Stats ──────────────────────────────────────────
 							}
-							// ── End Usage Stats ──────────────────────────────────────────
-						}
 						}
 
 						try {
@@ -3320,7 +3412,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// user cancellations. Record the partial usage with the appropriate status.
 						// (Architecture report section 5.5-5.8: terminal finalize only)
 						if (this.usageRecorder) {
-							const requestKey = `${this.taskId}:${currentItem.retryAttempt ?? 0}`
+							// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+							// requestKey (see completed-path comment above).
+							const requestKey = `${this.taskId}:${lastApiReqIndex}:${currentItem.retryAttempt ?? 0}`
 							const failedStatus: "failed" | "cancelled" = this.abort ? "cancelled" : "failed"
 							const ctx: UsageRecordingContext = {
 								taskId: this.taskId,
@@ -3344,11 +3438,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								reasoningInOutput: "unknown",
 								costSource: "provider",
 								tokenSource: "provider",
+								endpoint: resolveEndpoint(this.apiConfiguration),
 							}
 							// Fire-and-forget: store error must not block task
-							this.usageRecorder
-								.finalizeUsageEvent(requestKey, failedStatus, ctx)
-								.catch(() => {})
+							this.usageRecorder.finalizeUsageEvent(requestKey, failedStatus, ctx).catch(() => {})
 						}
 						// ── End Usage Stats ──────────────────────────────────────────
 
@@ -3940,22 +4033,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 	}
 
-	/**
-	 * Ensures router-provider model metadata is loaded before getModel() is used for
-	 * context management or streaming. Failures fall back to hardcoded defaults rather
-	 * than aborting the task.
-	 */
-	private async safeEnsureModelFetched(): Promise<void> {
-		try {
-			await this.api.ensureModelFetched?.()
-		} catch (error) {
-			console.error(
-				`[Task#${this.taskId}] Failed to fetch model metadata:`,
-				error instanceof Error ? error.message : error,
-			)
-		}
-	}
-
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
@@ -3964,7 +4041,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
-		await this.safeEnsureModelFetched()
 		const modelInfo = this.api.getModel().info
 
 		const maxTokens = getModelMaxOutputTokens({
@@ -4164,7 +4240,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
-			await this.safeEnsureModelFetched()
 			const modelInfo = this.api.getModel().info
 
 			const maxTokens = getModelMaxOutputTokens({
@@ -4381,7 +4456,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// but uses allowedFunctionNames to restrict which tools can be called.
 		// Other providers (Anthropic, OpenAI, etc.) don't support this feature yet,
 		// so they continue to receive only the filtered tools for the current mode.
-		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === providerIdentifiers.gemini
+		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === "gemini"
 
 		{
 			const provider = this.providerRef.deref()

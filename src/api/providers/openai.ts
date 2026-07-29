@@ -17,6 +17,7 @@ import { TagMatcher } from "../../utils/tag-matcher"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 import { getModelParams } from "../transform/model-params"
 
 import { DEFAULT_HEADERS } from "./constants"
@@ -273,14 +274,32 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	protected processUsageMetrics(usage: any, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
-		return {
+	protected processUsageMetrics(usage: any, modelInfo?: ModelInfo): ApiStreamUsageChunk {
+		const inputTokens = usage?.prompt_tokens || 0
+		const outputTokens = usage?.completion_tokens || 0
+		const cacheWriteTokens = usage?.cache_creation_input_tokens || undefined
+		const cacheReadTokens = usage?.cache_read_input_tokens || undefined
+		const effectiveModelInfo = modelInfo ?? this.getModel().info
+
+		const chunk: ApiStreamUsageChunk = {
 			type: "usage",
-			inputTokens: usage?.prompt_tokens || 0,
-			outputTokens: usage?.completion_tokens || 0,
-			cacheWriteTokens: usage?.cache_creation_input_tokens || undefined,
-			cacheReadTokens: usage?.cache_read_input_tokens || undefined,
+			inputTokens,
+			outputTokens,
+			totalCost: calculateApiCostOpenAI(
+				effectiveModelInfo,
+				inputTokens,
+				outputTokens,
+				cacheWriteTokens,
+				cacheReadTokens,
+			).totalCost,
 		}
+		if (cacheWriteTokens !== undefined) {
+			chunk.cacheWriteTokens = cacheWriteTokens
+		}
+		if (cacheReadTokens !== undefined) {
+			chunk.cacheReadTokens = cacheReadTokens
+		}
+		return chunk
 	}
 
 	override getModel() {
@@ -457,10 +476,13 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			if (chunk.usage) {
+				const inputTokens = chunk.usage.prompt_tokens || 0
+				const outputTokens = chunk.usage.completion_tokens || 0
 				yield {
 					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
+					inputTokens,
+					outputTokens,
+					totalCost: calculateApiCostOpenAI(this.getModel().info, inputTokens, outputTokens).totalCost,
 				}
 			}
 		}
