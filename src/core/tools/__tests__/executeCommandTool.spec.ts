@@ -538,6 +538,33 @@ describe("executeCommandTool", () => {
 			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
 		})
 
+		it("falls back to the command dispatch time when execution start is never reported", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockResolvedValue({ response: "messageResponse", text: "keep going", images: undefined })
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("sleep 60")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			// No onShellExecutionStarted: the pre-runCommand anchor applies.
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+		})
+
 		it("swallows ask errors without failing the command", async () => {
 			vitest.useFakeTimers()
 			mockCline.ask.mockRejectedValue(new Error("Current ask promise was ignored"))
