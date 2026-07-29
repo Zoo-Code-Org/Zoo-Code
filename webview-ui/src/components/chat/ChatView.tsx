@@ -462,6 +462,17 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "error":
 						case "text":
 						case "command_output":
+							// A non-partial command_output say means the command
+							// finished; clear any lingering Proceed/Kill controls
+							// from the interactive ask so they don't stay up after
+							// completion.
+							if (lastMessage.partial !== true && clineAskRef.current === "command_output") {
+								setClineAsk(undefined)
+								setEnableButtons(false)
+								setPrimaryButtonText(undefined)
+								setSecondaryButtonText(undefined)
+							}
+							break
 						case "mcp_server_request_started":
 						case "mcp_server_response":
 						case "completion_result":

@@ -374,8 +374,12 @@ export async function executeCommandInTerminal(
 
 			if (response === "messageResponse") {
 				message = { text, images }
-				process.continue()
 			}
+
+			// Any answer means the command should keep running in the background;
+			// continue the process so the tool resolves now instead of blocking
+			// until the command actually completes.
+			process.continue()
 		} catch (_error) {
 			// Silently handle ask errors (e.g., "Current ask promise was ignored")
 		}
@@ -421,6 +425,13 @@ export async function executeCommandInTerminal(
 		onCompleted: async (output: string | undefined) => {
 			clearTimeout(commandOutputAskTimer)
 			commandOutputAskTimer = undefined
+
+			// If an interactive command_output ask is still pending, supersede it
+			// so it resolves immediately instead of lingering until the next
+			// interactive message bumps lastMessageTs.
+			if (hasAskedForCommandOutput && !runInBackground) {
+				task.supersedePendingAsk()
+			}
 
 			clearTimeout(pendingCommandOutputEmitTimer)
 			pendingCommandOutputEmitTimer = undefined
