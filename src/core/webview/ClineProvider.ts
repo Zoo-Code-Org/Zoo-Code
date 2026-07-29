@@ -50,6 +50,7 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -479,7 +480,7 @@ export class ClineProvider
 	async performPreparationTasks(cline: Task) {
 		// LMStudio: We need to force model loading in order to read its context
 		// size; we do it now since we're starting a task with that model selected.
-		if (cline.apiConfiguration && cline.apiConfiguration.apiProvider === "lmstudio") {
+		if (cline.apiConfiguration && cline.apiConfiguration.apiProvider === providerIdentifiers.lmstudio) {
 			try {
 				if (!hasLoadedFullDetails(cline.apiConfiguration.lmStudioModelId!)) {
 					await forceFullModelDetailsLoad(
@@ -1007,7 +1008,7 @@ export class ClineProvider
 		// Using .find() would miss stale tokens in duplicate/renamed profiles since handleZooCodeCallback
 		// uses .filter() and updates all of them — the early-return guard must match.
 		const allProfiles = await this.providerSettingsManager.listConfig()
-		const zooGatewayProfiles = allProfiles.filter((p) => p.apiProvider === "zoo-gateway")
+		const zooGatewayProfiles = allProfiles.filter((p) => p.apiProvider === providerIdentifiers.zooGateway)
 
 		if (zooGatewayProfiles.length === 0) {
 			this.log("[ensureZooGatewayProfileSeeded] No zoo-gateway profile found, creating one")
@@ -1868,14 +1869,14 @@ export class ClineProvider
 
 			// Check if Zoo Gateway is the currently active profile by apiProvider identity,
 			// not by profile name (profile names are user-renameable).
-			const isZooGatewayActive = currentSettings.apiProvider === "zoo-gateway"
+			const isZooGatewayActive = currentSettings.apiProvider === providerIdentifiers.zooGateway
 
 			// Always scan ALL profiles and update every zoo-gateway profile with the new token.
 			// This ensures renamed profiles, duplicate profiles, and inactive profiles all stay
 			// in sync. The model lookup in requestRouterModels uses .find() which returns the
 			// first zoo-gateway profile it finds — if that profile has a stale token, requests fail.
 			const allProfiles = await this.providerSettingsManager.listConfig()
-			const zooProfiles = allProfiles.filter((p) => p.apiProvider === "zoo-gateway")
+			const zooProfiles = allProfiles.filter((p) => p.apiProvider === providerIdentifiers.zooGateway)
 
 			if (zooProfiles.length === 0) {
 				// No existing zoo-gateway profile — create the canonical default.

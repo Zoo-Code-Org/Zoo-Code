@@ -7,7 +7,7 @@ import NodeCache from "node-cache"
 import { z } from "zod"
 
 import type { ProviderName, ModelRecord } from "@roo-code/types"
-import { modelInfoSchema, TelemetryEventName } from "@roo-code/types"
+import { modelInfoSchema, providerIdentifiers, TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -43,33 +43,36 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // deduplicate each other's in-flight refreshes.
 const inFlightRefresh = new Map<string, Promise<ModelRecord>>()
 
-// Providers whose model lists are scoped to the signed-in user (e.g. per-account
-// allowlists or org policies). For these we MUST NOT cache results on disk or
-// in memory: a sign-in/out cycle could otherwise serve a previous user's model
-// list to the next user, and stale data could mask backend allowlist updates.
-const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set(["zoo-gateway", "kimi-code"])
-
 // Providers whose model list is determined by the server URL, not just by the provider name.
 // Each unique baseUrl must be cached independently so that switching endpoints never serves
 // stale results from a previously-cached server.
 const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
-	"litellm",
-	"poe",
-	"deepseek",
-	"moonshot",
-	"ollama",
-	"lmstudio",
-	"requesty",
+	providerIdentifiers.litellm,
+	providerIdentifiers.poe,
+	providerIdentifiers.deepseek,
+	providerIdentifiers.moonshot,
+	providerIdentifiers.ollama,
+	providerIdentifiers.lmstudio,
+	providerIdentifiers.requesty,
 ])
 
 // Providers where the API key itself determines which models are visible (e.g. per-key
 // allowlists). For these the cache key also includes a short hash of
 // the API key so that two different keys on the same server never share a cache entry.
 const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
-	"litellm", // Per-key model allowlists are a first-class LiteLLM proxy feature
-	"poe", // Per-account model availability
-	"requesty", // Per-account custom model policies
-	"moonshot", // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
+	providerIdentifiers.poe, // Per-account model availability
+	providerIdentifiers.requesty, // Per-account custom model policies
+	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+])
+
+// Providers whose model lists are scoped to the signed-in user (e.g. per-account
+// allowlists or org policies). For these we MUST NOT cache results on disk or
+// in memory: a sign-in/out cycle could otherwise serve a previous user's model
+// list to the next user, and stale data could mask backend allowlist updates.
+const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
+	providerIdentifiers.zooGateway,
+	providerIdentifiers.kimiCode,
 ])
 
 function isAuthScopedProvider(provider: RouterName): boolean {
@@ -191,47 +194,47 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 	let models: ModelRecord
 
 	switch (provider) {
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			models = await getOpenRouterModels()
 			break
-		case "requesty":
+		case providerIdentifiers.requesty:
 			// Requesty models endpoint requires an API key for per-user custom policies.
 			models = await getRequestyModels(options.baseUrl, options.apiKey)
 			break
-		case "unbound":
+		case providerIdentifiers.unbound:
 			models = await getUnboundModels(options.apiKey)
 			break
-		case "litellm":
+		case providerIdentifiers.litellm:
 			models = await getLiteLLMModels(options.apiKey ?? "", options.baseUrl)
 			break
-		case "ollama":
+		case providerIdentifiers.ollama:
 			models = await getOllamaModels(options.baseUrl, options.apiKey)
 			break
-		case "lmstudio":
+		case providerIdentifiers.lmstudio:
 			models = await getLMStudioModels(options.baseUrl)
 			break
-		case "vercel-ai-gateway":
+		case providerIdentifiers.vercelAiGateway:
 			models = await getVercelAiGatewayModels()
 			break
-		case "opencode-go":
+		case providerIdentifiers.opencodeGo:
 			models = await getOpencodeGoModels(options.apiKey)
 			break
-		case "kenari":
+		case providerIdentifiers.kenari:
 			models = await getKenariModels(options.apiKey)
 			break
-		case "poe":
+		case providerIdentifiers.poe:
 			models = await getPoeModels(options.apiKey, options.baseUrl)
 			break
-		case "deepseek":
+		case providerIdentifiers.deepseek:
 			models = await getDeepSeekModels(options.baseUrl, options.apiKey)
 			break
-		case "moonshot":
+		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey)
 			break
-		case "zoo-gateway":
+		case providerIdentifiers.zooGateway:
 			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
 			break
-		case "kimi-code":
+		case providerIdentifiers.kimiCode:
 			models = await getKimiCodeModels(options.apiKey)
 			break
 		default: {
@@ -399,8 +402,14 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 	setTimeout(async () => {
 		// Providers that work without API keys
 		const publicProviders: Array<{ provider: RouterName; options: GetModelsOptions }> = [
-			{ provider: "openrouter", options: { provider: "openrouter" } },
-			{ provider: "vercel-ai-gateway", options: { provider: "vercel-ai-gateway" } },
+			{
+				provider: providerIdentifiers.openrouter,
+				options: { provider: providerIdentifiers.openrouter },
+			},
+			{
+				provider: providerIdentifiers.vercelAiGateway,
+				options: { provider: providerIdentifiers.vercelAiGateway },
+			},
 		]
 
 		// Refresh each provider in background (fire and forget)

@@ -62,6 +62,9 @@ import { zooGatewayDefaultModelId } from "./zoo-gateway.js"
 
 // Import the ProviderName type from provider-settings to avoid duplication
 import type { ProviderName } from "../provider-settings.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+
+const NO_DEFAULT_MODEL_ID = ""
 
 /**
  * Get the default model ID for a given provider.
@@ -73,71 +76,70 @@ export function getProviderDefaultModelId(
 	options: { isChina?: boolean } = { isChina: false },
 ): string {
 	switch (provider) {
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			return openRouterDefaultModelId
-		case "requesty":
+		case providerIdentifiers.requesty:
 			return requestyDefaultModelId
-		case "litellm":
+		case providerIdentifiers.litellm:
 			return litellmDefaultModelId
-		case "xai":
+		case providerIdentifiers.xai:
 			return xaiDefaultModelId
-		case "baseten":
+		case providerIdentifiers.baseten:
 			return basetenDefaultModelId
-		case "bedrock":
+		case providerIdentifiers.bedrock:
 			return bedrockDefaultModelId
-		case "vertex":
+		case providerIdentifiers.vertex:
 			return vertexDefaultModelId
-		case "gemini":
+		case providerIdentifiers.gemini:
 			return geminiDefaultModelId
-		case "deepseek":
+		case providerIdentifiers.deepseek:
 			return deepSeekDefaultModelId
-		case "moonshot":
+		case providerIdentifiers.moonshot:
 			return moonshotDefaultModelId
-		case "minimax":
+		case providerIdentifiers.minimax:
 			return minimaxDefaultModelId
-		case "mimo":
+		case providerIdentifiers.mimo:
 			return mimoDefaultModelId
-		case "zai":
+		case providerIdentifiers.zai:
 			return options?.isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId
-		case "openai-native":
+		case providerIdentifiers.openaiNative:
+			// TODO(#992): Replace this stale fallback with openAiNativeDefaultModelId.
 			return "gpt-4o" // Based on openai-native patterns
-		case "openai-codex":
+		case providerIdentifiers.openaiCodex:
 			return openAiCodexDefaultModelId
-		case "mistral":
+		case providerIdentifiers.mistral:
 			return mistralDefaultModelId
-		case "openai":
-			return "" // OpenAI provider uses custom model configuration
-		case "ollama":
-			return "" // Ollama uses dynamic model selection
-		case "lmstudio":
-			return "" // LMStudio uses dynamic model selection
-		case "vscode-lm":
+		case providerIdentifiers.openai:
+		case providerIdentifiers.ollama:
+		case providerIdentifiers.lmstudio:
+			return NO_DEFAULT_MODEL_ID
+		case providerIdentifiers.vscodeLm:
 			return vscodeLlmDefaultModelId
-		case "sambanova":
+		case providerIdentifiers.sambanova:
 			return sambaNovaDefaultModelId
-		case "fireworks":
+		case providerIdentifiers.fireworks:
 			return fireworksDefaultModelId
-		case "friendli":
+		case providerIdentifiers.friendli:
 			return friendliDefaultModelId
-		case "qwen-code":
+		case providerIdentifiers.qwenCode:
 			return qwenCodeDefaultModelId
-		case "poe":
+		case providerIdentifiers.poe:
 			return poeDefaultModelId
-		case "unbound":
+		case providerIdentifiers.unbound:
 			return unboundDefaultModelId
-		case "vercel-ai-gateway":
+		case providerIdentifiers.vercelAiGateway:
 			return vercelAiGatewayDefaultModelId
-		case "opencode-go":
+		case providerIdentifiers.opencodeGo:
 			return opencodeGoDefaultModelId
-		case "kenari":
+		case providerIdentifiers.kenari:
 			return kenariDefaultModelId
-		case "kimi-code":
+		case providerIdentifiers.kimiCode:
 			return kimiCodeDefaultModelId
-		case "zoo-gateway":
+		case providerIdentifiers.zooGateway:
 			return zooGatewayDefaultModelId
-		case "anthropic":
-		case "gemini-cli":
-		case "fake-ai":
+		case providerIdentifiers.anthropic:
+		case providerIdentifiers.geminiCli:
+		case providerIdentifiers.fakeAi:
 		default:
 			return anthropicDefaultModelId
 	}

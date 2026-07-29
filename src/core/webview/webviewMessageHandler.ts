@@ -22,6 +22,7 @@ import {
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -2777,11 +2778,11 @@ export const webviewMessageHandler = async (
 					const allProfiles = await provider.providerSettingsManager.listConfig()
 					// Check if Zoo Gateway is the currently active profile by apiProvider identity
 					const currentSettings = provider.contextProxy.getProviderSettings()
-					const isZooGatewayActive = currentSettings.apiProvider === "zoo-gateway"
+					const isZooGatewayActive = currentSettings.apiProvider === providerIdentifiers.zooGateway
 					const currentApiConfigName = provider.contextProxy.getValues().currentApiConfigName
 
 					for (const entry of allProfiles) {
-						if (entry.apiProvider !== "zoo-gateway") {
+						if (entry.apiProvider !== providerIdentifiers.zooGateway) {
 							continue
 						}
 
