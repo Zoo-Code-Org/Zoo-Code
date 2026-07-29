@@ -7,20 +7,22 @@ import type {
 	UsageValueSource,
 } from "@roo-code/types"
 
+import { getEffectiveCost, computeEventCost } from "./costRecalculation"
+
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/** 집계에 사용할 내부 이벤트 표현 (UsageEventV1 + 파생 필드) */
+/** Internal event representation used for aggregation (UsageEventV1 + derived fields) */
 interface AggregatableEvent {
 	event: UsageEventV1
-	/** timezone 기준 calendar bucket key (예: "2026-07-19") */
+	/** Calendar bucket key based on timezone (e.g. "2026-07-19") */
 	dayBucket?: string
-	/** timezone 기준 week bucket key (예: "2026-W29") */
+	/** Calendar week bucket key based on timezone (e.g. "2026-W29") */
 	weekBucket?: string
-	/** timezone 기준 month bucket key (예: "2026-07") */
+	/** Calendar month bucket key based on timezone (e.g. "2026-07") */
 	monthBucket?: string
 }
 
-/** source별 cost 분리를 위한 내부 구조 */
+/** Internal structure for separating cost by source */
 interface SourceSeparatedCost {
 	provider: number
 	estimated: number
@@ -50,30 +52,26 @@ function createEmptyBucket(key: Record<string, string> = {}): StatsBucket {
 // ── UsageAggregator ────────────────────────────────────────────────────────
 
 /**
- * 사용량 이벤트 집계 엔진.
+ * Usage event aggregation engine.
  *
- * 설계 원칙 (아키텍처 보고서 섹션 5.17):
- * - day/week/month/provider/model/mode/status/source 그룹화 (최대 3축)
- * - timezone calendar bucket (DST 처리)
- * - unknown field 분리 (unknownEventCount)
- * - source별 cost 분리 (provider/estimated/backfilled)
- * - inclusion semantics 처리 (cacheReadInInput 등)
- * - 결과 정렬: 시간 오름차순, category는 known total 내림차순 후 이름 오름차순
+ * Design principles (architecture report section 5.17):
+ * - Group by day/week/month/provider/model/mode/status/source (up to 3 axes)
+ * - Timezone calendar bucket (DST handling)
+ * - Separate unknown fields (unknownEventCount)
+ * - Separate cost by source (provider/estimated/backfilled)
+ * - Handle inclusion semantics (cacheReadInInput etc.)
+ * - Result sorting: time ascending, category by known total descending then name ascending
  */
 export class UsageAggregator {
 	/**
-	 * 이벤트 배열을 쿼리 조건에 따라 집계하여 StatsSnapshot을 반환한다.
+	 * Aggregates an array of events according to the query conditions and returns a StatsSnapshot.
 	 *
-	 * @param events 집계 대상 이벤트 배열 (UsageEventStore.readAll() 결과)
-	 * @param query 통계 조회 쿼리
-	 * @param options 추가 옵션 (recordingPaused 등)
+	 * @param events Array of events to aggregate (result of UsageEventStore.readAll())
+	 * @param query Statistics query
+	 * @param options Additional options (e.g. recordingPaused)
 	 */
-	query(
-		events: UsageEventV1[],
-		query: StatsQuery,
-		options: { recordingPaused?: boolean } = {},
-	): StatsSnapshot {
-		// 1. 시간 범위 필터링
+	query(events: UsageEventV1[], query: StatsQuery, options: { recordingPaused?: boolean } = {}): StatsSnapshot {
+		// 1. Time range filtering
 		const { from, to } = this.resolveTimeRange(query)
 		const filtered = events.filter((event) => {
 			const eventTime = new Date(event.occurredAt).getTime()
@@ -82,21 +80,20 @@ export class UsageAggregator {
 			return true
 		})
 
-		// 2. cancelled 이벤트 필터링
+		// 2. Cancelled event filtering
 		const includeCancelled = query.includeCancelled ?? false
-		const visibleEvents = includeCancelled
-			? filtered
-			: filtered.filter((e) => e.status !== "cancelled")
+		const visibleEvents = includeCancelled ? filtered : filtered.filter((e) => e.status !== "cancelled")
 
-		// 3. timezone 기준 bucket key 계산
+		// 3. Compute bucket keys based on timezone
 		const aggregatable: AggregatableEvent[] = visibleEvents.map((event) => {
 			const bucketKeys = this.computeTimeBuckets(event, query.timezone)
 			return { event, ...bucketKeys }
 		})
 
-		// 4. 그룹화 및 집계
+		// 4. Grouping and aggregation
 		const groupBy = query.groupBy
 		const bucketMap = new Map<string, StatsBucket>()
+		const cacheRatio = query.cacheRatio
 
 		for (const item of aggregatable) {
 			const bucketKeys = this.getGroupKeys(item, groupBy)
@@ -107,20 +104,20 @@ export class UsageAggregator {
 					bucket = createEmptyBucket(bucketKey)
 					bucketMap.set(mapKey, bucket)
 				}
-				this.accumulateIntoBucket(bucket, item.event)
+				this.accumulateIntoBucket(bucket, item.event, cacheRatio)
 			}
 		}
 
-		// 5. totals 계산
+		// 5. Compute totals
 		const totals = createEmptyBucket()
 		for (const item of aggregatable) {
-			this.accumulateIntoBucket(totals, item.event)
+			this.accumulateIntoBucket(totals, item.event, cacheRatio)
 		}
 
-		// 6. 정렬
+		// 6. Sorting
 		const buckets = this.sortBuckets(Array.from(bucketMap.values()), groupBy)
 
-		// 7. coverage 계산
+		// 7. Compute coverage
 		const coverage = this.computeCoverage(events, aggregatable, options.recordingPaused)
 
 		return {
@@ -135,10 +132,10 @@ export class UsageAggregator {
 	// ── Time Range Resolution ───────────────────────────────────────────────
 
 	/**
-	 * 쿼리의 preset/from/to를 기반으로 시간 범위를 결정한다.
-	 * - today: query timezone의 오늘 00:00부터 다음 날 00:00 미만
-	 * - 7d/30d: 오늘 포함 calendar day 7/30개
-	 * - all: 모든 지원 event
+	 * Determines the time range based on the query's preset/from/to.
+	 * - today: from 00:00 today in the query timezone up to (but not including) 00:00 the next day
+	 * - 7d/30d: 7/30 calendar days including today
+	 * - all: all supported events
 	 */
 	private resolveTimeRange(query: StatsQuery): { from?: Date; to?: Date } {
 		if (query.preset) {
@@ -171,18 +168,18 @@ export class UsageAggregator {
 			}
 		}
 
-		// 명시적 from/to
+		// Explicit from/to
 		const from = query.from ? new Date(query.from) : undefined
 		const to = query.to ? new Date(query.to) : undefined
 		return { from, to }
 	}
 
 	/**
-	 * UTC Date를 지정된 timezone의 같은 순간으로 변환한다.
-	 * Intl API를 사용하여 DST를 자동 처리한다.
+	 * Converts a UTC Date to the same instant in the specified timezone.
+	 * Uses the Intl API to handle DST automatically.
 	 */
 	private toTimezoneDate(date: Date, timezone: string): Date {
-		// timezone에서의 wall-clock 시간을 구한다
+		// Get the wall-clock time in the timezone
 		const formatter = new Intl.DateTimeFormat("en-US", {
 			timeZone: timezone,
 			year: "numeric",
@@ -199,23 +196,23 @@ export class UsageAggregator {
 		const year = parseInt(get("year"), 10)
 		const month = parseInt(get("month"), 10) - 1
 		const day = parseInt(get("day"), 10)
-		const hour = parseInt(get("hour"), 10) % 24 // 24시를 0시로 변환
+		const hour = parseInt(get("hour"), 10) % 24 // Convert 24-hour to 0-hour
 		const minute = parseInt(get("minute"), 10)
 		const second = parseInt(get("second"), 10)
 
-		// timezone의 wall-clock 시간을 UTC로 변환
+		// Convert timezone wall-clock time to UTC
 		// tzOffset = UTC - (timezone wall-clock as UTC)
-		// timezone wall-clock의 실제 UTC = wall-clock as UTC + tzOffset
+		// Actual UTC of timezone wall-clock = wall-clock as UTC + tzOffset
 		const utcGuess = Date.UTC(year, month, day, hour, minute, second)
 		const tzOffset = this.getTimezoneOffsetMinutes(date, timezone)
 		return new Date(utcGuess + tzOffset * 60 * 1000)
 	}
 
 	/**
-	 * 지정된 timezone에서의 UTC offset을 분 단위로 반환한다.
+	 * Returns the UTC offset for the specified timezone in minutes.
 	 */
 	private getTimezoneOffsetMinutes(date: Date, timezone: string): number {
-		// UTC 시간을 timezone에서 포맷팅
+		// Format the UTC time in the timezone
 		const utcDate = new Date(date.toISOString())
 		const tzFormatter = new Intl.DateTimeFormat("en-US", {
 			timeZone: timezone,
@@ -228,28 +225,28 @@ export class UsageAggregator {
 			hour12: false,
 		})
 		const tzParts = tzFormatter.formatToParts(utcDate)
-		const get = (type: string) => tzParts.find((p) => p.type === type)?.value ?? "0"
-		const tzYear = parseInt(get("year"), 10)
-		const tzMonth = parseInt(get("month"), 10) - 1
-		const tzDay = parseInt(get("day"), 10)
-		const tzHour = parseInt(get("hour"), 10) % 24
-		const tzMinute = parseInt(get("minute"), 10)
-		const tzSecond = parseInt(get("second"), 10)
+		const get = (type: string) => parseInt(tzParts.find((p) => p.type === type)?.value ?? "0", 10)
+		const tzYear = get("year")
+		const tzMonth = get("month") - 1
+		const tzDay = get("day")
+		const tzHour = get("hour") % 24
+		const tzMinute = get("minute")
+		const tzSecond = get("second")
 
-		// timezone wall-clock을 UTC epoch로
+		// Convert timezone wall-clock to UTC epoch
 		const tzEpoch = Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMinute, tzSecond)
-		// offset = UTC epoch - timezone epoch (분 단위)
-		// timezone이 UTC보다 앞서면 (예: Asia/Seoul = +9), tzEpoch이 UTC epoch보다 작음
+		// offset = UTC epoch - timezone epoch (in minutes)
+		// If the timezone is ahead of UTC (e.g. Asia/Seoul = +9), tzEpoch is less than the UTC epoch
 		// offset = (utcEpoch - tzEpoch) / 60000
 		return Math.round((utcDate.getTime() - tzEpoch) / 60000)
 	}
 
 	/**
-	 * timezone 기준으로 해당 날짜의 00:00:00 UTC를 반환한다.
+	 * Returns the 00:00:00 UTC for the given date based on the timezone.
 	 */
 	private startOfDay(date: Date, timezone: string): Date {
 		const tzDate = this.toTimezoneDate(date, timezone)
-		// timezone에서의 wall-clock 날짜만 추출
+		// Extract only the wall-clock date in the timezone
 		const formatter = new Intl.DateTimeFormat("en-US", {
 			timeZone: timezone,
 			year: "numeric",
@@ -262,19 +259,19 @@ export class UsageAggregator {
 		const month = parseInt(get("month"), 10) - 1
 		const day = parseInt(get("day"), 10)
 
-		// timezone의 00:00:00을 UTC로 변환
+		// Convert 00:00:00 in the timezone to UTC
 		const midnightEpoch = Date.UTC(year, month, day, 0, 0, 0)
 		const tzOffset = this.getTimezoneOffsetMinutes(date, timezone)
 		// tzOffset = UTC - (timezone wall-clock as UTC)
-		// timezone 자정의 실제 UTC = timezone 자정 wall-clock as UTC + tzOffset
+		// Actual UTC of timezone midnight = timezone midnight wall-clock as UTC + tzOffset
 		return new Date(midnightEpoch + tzOffset * 60 * 1000)
 	}
 
 	// ── Time Bucket Computation ─────────────────────────────────────────────
 
 	/**
-	 * 이벤트의 timezone 기준 calendar bucket key를 계산한다.
-	 * DST는 Intl API로 자동 처리된다.
+	 * Computes calendar bucket keys for an event based on the timezone.
+	 * DST is handled automatically by the Intl API.
 	 */
 	private computeTimeBuckets(
 		event: UsageEventV1,
@@ -282,7 +279,7 @@ export class UsageAggregator {
 	): { dayBucket?: string; weekBucket?: string; monthBucket?: string } {
 		const date = new Date(event.occurredAt)
 
-		// day bucket: YYYY-MM-DD (timezone 기준)
+		// day bucket: YYYY-MM-DD (timezone-based)
 		const dayFormatter = new Intl.DateTimeFormat("en-CA", {
 			timeZone: timezone,
 			year: "numeric",
@@ -306,11 +303,11 @@ export class UsageAggregator {
 	}
 
 	/**
-	 * ISO 8601 주 번호를 계산한다 (YYYY-Www 형식).
-	 * timezone 기준으로 계산한다.
+	 * Computes the ISO 8601 week number (YYYY-Www format).
+	 * Calculated based on the timezone.
 	 */
 	private computeIsoWeekBucket(date: Date, timezone: string): string {
-		// timezone 기준 날짜 구하기
+		// Get the date in the timezone
 		const formatter = new Intl.DateTimeFormat("en-CA", {
 			timeZone: timezone,
 			year: "numeric",
@@ -323,7 +320,7 @@ export class UsageAggregator {
 		const month = get("month") - 1
 		const day = get("day")
 
-		// ISO week 계산
+		// ISO week calculation
 		const d = new Date(Date.UTC(year, month, day))
 		const dayNum = d.getUTCDay() || 7 // Sunday=0 → 7
 		d.setUTCDate(d.getUTCDate() + 4 - dayNum)
@@ -336,18 +333,15 @@ export class UsageAggregator {
 	// ── Grouping ────────────────────────────────────────────────────────────
 
 	/**
-	 * 이벤트에서 groupBy 축에 따른 bucket key 조합을 반환한다.
-	 * 최대 3축까지 조합할 수 있다.
+	 * Returns the bucket key combinations for the groupBy axes from the event.
+	 * Up to 3 axes can be combined.
 	 */
-	private getGroupKeys(
-		item: AggregatableEvent,
-		groupBy: StatsQuery["groupBy"],
-	): Record<string, string>[] {
+	private getGroupKeys(item: AggregatableEvent, groupBy: StatsQuery["groupBy"]): Record<string, string>[] {
 		if (groupBy.length === 0) {
 			return [{}]
 		}
 
-		// 각 축의 가능한 값을 배열로 구한 후 Cartesian product
+		// Get possible values for each axis as arrays, then compute Cartesian product
 		const axisValues: Record<string, string[]> = {}
 
 		for (const axis of groupBy) {
@@ -373,8 +367,8 @@ export class UsageAggregator {
 	}
 
 	/**
-	 * 단일 축에 대한 이벤트의 값을 반환한다.
-	 * source 축은 costUsd의 source에 따라 여러 값을 가질 수 있다.
+	 * Returns the values of an event for a single axis.
+	 * The source axis can have multiple values depending on the source of costUsd.
 	 */
 	private getAxisValues(item: AggregatableEvent, axis: string): string[] {
 		const { event } = item
@@ -387,7 +381,10 @@ export class UsageAggregator {
 			case "month":
 				return item.monthBucket ? [item.monthBucket] : []
 			case "provider":
-				return [event.provider]
+				// When an endpoint domain is recorded (custom base URL), append it
+				// to the provider key so distinct servers appear as separate rows.
+				// e.g. "openai (kimi.ai)" vs plain "openai" for the default endpoint.
+				return [event.endpoint ? `${event.provider} (${event.endpoint})` : event.provider]
 			case "model":
 				return [event.model]
 			case "mode":
@@ -395,13 +392,22 @@ export class UsageAggregator {
 			case "status":
 				return [event.status]
 			case "source": {
-				// costUsd의 source에 따라 분리
-				// 이벤트에 costUsd가 있으면 그 source를, 없으면 "unknown"
+				// Separate by the source of costUsd.
+				// Feature 1: If the event has no costUsd but the cost can be
+				// computed on-the-fly from model pricing, treat the source as
+				// "estimated" (since it is derived, not provider-reported).
 				const sources = new Set<string>()
 				if (event.usage.costUsd) {
 					sources.add(event.usage.costUsd.source)
+				} else {
+					// Check if cost can be computed; if so, mark as "estimated".
+					// Otherwise the source remains "unknown".
+					const computedCost = computeEventCost(event)
+					if (computedCost > 0) {
+						sources.add("estimated")
+					}
 				}
-				// input/output tokens의 source도 고려
+				// Also consider the source of input/output tokens
 				if (event.usage.inputTokens) {
 					sources.add(event.usage.inputTokens.source)
 				}
@@ -421,13 +427,13 @@ export class UsageAggregator {
 	// ── Accumulation ────────────────────────────────────────────────────────
 
 	/**
-	 * 이벤트의 값을 bucket에 누적한다.
-	 * inclusion semantics를 처리한다.
+	 * Accumulates the event's values into the bucket.
+	 * Handles inclusion semantics.
 	 */
-	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1): void {
+	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1, cacheRatio?: number): void {
 		bucket.events++
 
-		// status 카운트
+		// Status count
 		switch (event.status) {
 			case "completed":
 				bucket.completedCalls++
@@ -440,20 +446,29 @@ export class UsageAggregator {
 				break
 		}
 
-		// 토큰 누적 (inclusion semantics 처리)
-		// cacheReadInInput이 "included"면 cacheReadTokens를 inputTokens에서 차감하지 않음 (이미 포함됨)
-		// "excluded"면 별도 추가
-		// "unknown"이면 unknownEventCount 증가
+		// Token accumulation (inclusion semantics handling)
+		// If cacheReadInInput is "included", do not subtract cacheReadTokens from inputTokens (already included)
+		// If "excluded", add separately
+		// If "unknown", increment unknownEventCount
 
 		const inputTokens = this.extractValue(event.usage.inputTokens)
 		const outputTokens = this.extractValue(event.usage.outputTokens)
-		const cacheReadTokens = this.extractValue(event.usage.cacheReadTokens)
+		let cacheReadTokens = this.extractValue(event.usage.cacheReadTokens)
 		const cacheWriteTokens = this.extractValue(event.usage.cacheWriteTokens)
 		const reasoningTokens = this.extractValue(event.usage.reasoningTokens)
 		const totalTokens = this.extractValue(event.usage.totalTokens)
-		const costUsd = this.extractValue(event.usage.costUsd)
+		// Feature 1: If costUsd is missing on old events, compute it on-the-fly
+		// from the model's pricing info. Never modifies the stored event.
+		const costUsd = getEffectiveCost(event)
 
-		// inclusion semantics 검사
+		// Cache ratio estimation: if provider doesn't report cacheReadTokens
+		// and cacheRatio is provided, estimate it as inputTokens * cacheRatio
+		const isCacheReadEstimated = cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0
+		if (isCacheReadEstimated) {
+			cacheReadTokens = Math.round(inputTokens * cacheRatio)
+		}
+
+		// Inclusion semantics check
 		const hasUnknownInclusion =
 			event.semantics.cacheReadInInput === "unknown" ||
 			event.semantics.cacheWriteInInput === "unknown" ||
@@ -463,21 +478,21 @@ export class UsageAggregator {
 			bucket.unknownEventCount++
 		}
 
-		// 토큰 값 누적
-		// cacheReadInInput이 "included"면 inputTokens에 이미 cacheRead가 포함되어 있으므로
-		// cacheReadTokens를 별도로 더하지 않음 (중복 방지)
-		// "excluded"면 cacheReadTokens를 별도로 더함
+		// Accumulate token values
+		// If cacheReadInInput is "included", cacheRead is already included in inputTokens,
+		// so do not add cacheReadTokens separately (prevent duplication)
+		// If "excluded", add cacheReadTokens separately
 		bucket.inputTokens += inputTokens
 		bucket.outputTokens += outputTokens
 
 		if (event.semantics.cacheReadInInput === "excluded") {
 			bucket.cacheReadTokens += cacheReadTokens
 		} else if (event.semantics.cacheReadInInput === "included") {
-			// inputTokens에 이미 포함되어 있으므로 별도 추가 없음
-			// 하지만 cacheReadTokens 필드에는 기록 (참고용)
+			// Already included in inputTokens, so no separate addition
+			// But record it in the cacheReadTokens field (for reference)
 			bucket.cacheReadTokens += cacheReadTokens
 		} else {
-			// unknown: 일단 더하되 unknownEventCount로 표시
+			// unknown: add for now, but mark via unknownEventCount
 			bucket.cacheReadTokens += cacheReadTokens
 		}
 
@@ -497,12 +512,14 @@ export class UsageAggregator {
 			bucket.reasoningTokens += reasoningTokens
 		}
 
-		bucket.totalTokens += totalTokens
+		// Recompute from input + output (provider-neutral) to repair historical events
+		// that may have been persisted with the old double-counted sum.
+		bucket.totalTokens += inputTokens + outputTokens
 		bucket.costUsd += costUsd
 	}
 
 	/**
-	 * SourcedNumber에서 값을 추출한다.
+	 * Extracts the value from a SourcedNumber.
 	 */
 	private extractValue(sourced?: SourcedNumber): number {
 		return sourced?.value ?? 0
@@ -511,15 +528,15 @@ export class UsageAggregator {
 	// ── Sorting ────────────────────────────────────────────────────────────
 
 	/**
-	 * bucket을 정렬한다.
-	 * - 시간 축(day/week/month)이 있으면 시간 오름차순
-	 * - category 축만 있으면 known total 내림차순 후 이름 오름차순
+	 * Sorts the buckets.
+	 * - If a time axis (day/week/month) is present, sort by time ascending
+	 * - If only category axes are present, sort by known total descending then name ascending
 	 */
 	private sortBuckets(buckets: StatsBucket[], groupBy: StatsQuery["groupBy"]): StatsBucket[] {
 		const hasTimeAxis = groupBy.some((g) => g === "day" || g === "week" || g === "month")
 
 		if (hasTimeAxis) {
-			// 시간 축 기준으로 정렬
+			// Sort by time axis
 			const timeAxis = groupBy.find((g) => g === "day" || g === "week" || g === "month")!
 			return buckets.sort((a, b) => {
 				const aTime = a.key[timeAxis] ?? ""
@@ -528,13 +545,13 @@ export class UsageAggregator {
 			})
 		}
 
-		// category만 있는 경우: known total 내림차순 후 이름 오름차순
+		// Category only: sort by known total descending then name ascending
 		return buckets.sort((a, b) => {
-			// totalTokens 기준 내림차순
+			// Sort by totalTokens descending
 			const diff = b.totalTokens - a.totalTokens
 			if (diff !== 0) return diff
 
-			// 이름 오름차순
+			// Sort by name ascending
 			const aName = Object.values(a.key).join("/")
 			const bName = Object.values(b.key).join("/")
 			return aName.localeCompare(bName)
@@ -544,7 +561,7 @@ export class UsageAggregator {
 	// ── Coverage ────────────────────────────────────────────────────────────
 
 	/**
-	 * coverage 정보를 계산한다.
+	 * Computes coverage information.
 	 */
 	private computeCoverage(
 		allEvents: UsageEventV1[],
@@ -553,9 +570,7 @@ export class UsageAggregator {
 	): StatsSnapshot["coverage"] {
 		const times = visibleEvents.map((e) => new Date(e.event.occurredAt).getTime()).sort((a, b) => a - b)
 
-		const backfilledEventCount = visibleEvents.filter(
-			(e) => e.event.provenance === "history-backfill",
-		).length
+		const backfilledEventCount = visibleEvents.filter((e) => e.event.provenance === "history-backfill").length
 
 		return {
 			firstEventAt: times.length > 0 ? new Date(times[0]).toISOString() : undefined,
@@ -568,7 +583,7 @@ export class UsageAggregator {
 	// ── Utilities ───────────────────────────────────────────────────────────
 
 	/**
-	 * bucket key 객체를 직렬화하여 Map key로 사용한다.
+	 * Serializes the bucket key object for use as a Map key.
 	 */
 	private serializeKey(key: Record<string, string>): string {
 		return Object.keys(key)
