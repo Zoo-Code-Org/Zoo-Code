@@ -284,7 +284,7 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 			currentApiConfigName: "view-local-profile",
 		} as any)
 		;(mockClineProvider as any).setViewStateId = vi.fn().mockResolvedValue(undefined)
-		;(mockClineProvider as any).workspaceTracker = { initializeFilePaths: vi.fn() }
+		;(mockClineProvider as any).workspaceTracker = { initializeFilePaths: vi.fn().mockResolvedValue(undefined) }
 		;(mockClineProvider as any).providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", apiProvider: "anthropic" }]),
 			hasConfig: vi.fn().mockResolvedValue(false),
