@@ -1230,11 +1230,7 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				void this.taskScheduler
-					.schedule(task, () => task.run())
-					.catch((error) => {
-						console.error("[createTaskWithHistoryItem] taskScheduler.schedule (rehydrate) failed:", error)
-					})
+				this.scheduleTask(task, "createTaskWithHistoryItem")
 			}
 		} else {
 			await this.addClineToStack(task)
@@ -1244,11 +1240,7 @@ export class ClineProvider
 			)
 
 			if (options?.startTask !== false) {
-				void this.taskScheduler
-					.schedule(task, () => task.run())
-					.catch((error) => {
-						console.error("[createTaskWithHistoryItem] taskScheduler.schedule failed:", error)
-					})
+				this.scheduleTask(task, "createTaskWithHistoryItem")
 			}
 		}
 
@@ -3208,11 +3200,7 @@ export class ClineProvider
 
 		await this.addClineToStack(task)
 		if (options.startTask !== false) {
-			void this.taskScheduler
-				.schedule(task, () => task.run())
-				.catch((error) => {
-					console.error("[createTask] taskScheduler.schedule failed:", error)
-				})
+			this.scheduleTask(task, "createTask")
 		}
 
 		this.log(
@@ -3231,6 +3219,12 @@ export class ClineProvider
 
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
 		await this.cancelTaskInternal(task)
+	}
+
+	private scheduleTask(task: Task, source: string): void {
+		void this.taskScheduler
+			.schedule(task, () => task.run())
+			.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 	}
 
 	private async cancelTaskInternal(task: Task): Promise<void> {
@@ -3724,11 +3718,7 @@ export class ClineProvider
 		}
 
 		// 6) Start the child task now that parent metadata is safely persisted.
-		void this.taskScheduler
-			.schedule(child, () => child.run())
-			.catch((error) => {
-				console.error("[delegateParentAndOpenChild] taskScheduler.schedule failed:", error)
-			})
+		this.scheduleTask(child, "delegateParentAndOpenChild")
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {
