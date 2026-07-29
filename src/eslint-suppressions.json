@@ -1036,7 +1036,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.parallelMode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 141
+			"count": 143
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {

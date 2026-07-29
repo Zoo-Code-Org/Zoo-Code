@@ -658,17 +658,8 @@ export class ClineProvider
 	 * Save a single view-local state value. Only non-secret selections are persisted durably.
 	 */
 	private async saveViewState(key: keyof ExtensionState, value: any): Promise<void> {
-		if (key === "mode") {
-			await this.savePersistedViewState({ mode: value })
-		} else if (key === "currentApiConfigName") {
-			await this.savePersistedViewState({ currentApiConfigName: value })
-		}
-
-		if (value === undefined || value === null) {
-			delete this.viewLocalState[key]
-		} else {
-			this.viewLocalState[key] = value
-		}
+		await this._saveViewLocalStateFromMutation({ [key]: value } as Partial<RooCodeSettings> &
+			Partial<ExtensionState>)
 
 		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
 	}
@@ -2070,9 +2061,13 @@ export class ClineProvider
 						this.updateGlobalState("currentApiConfigName", name),
 						this.providerSettingsManager.setModeConfig(mode, id),
 						this.contextProxy.setProviderSettings(providerSettings),
-						this.saveViewState("currentApiConfigName", name),
-						this.saveViewState("apiConfiguration", providerSettings),
 					])
+
+					await this._saveViewLocalStateFromMutation({
+						listApiConfigMeta,
+						currentApiConfigName: name,
+						apiConfiguration: providerSettings,
+					})
 
 					// Change the provider for the current task.
 					// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2197,9 +2192,13 @@ export class ClineProvider
 				this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 				this.contextProxy.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
-				this.saveViewState("currentApiConfigName", name),
-				this.saveViewState("apiConfiguration", providerSettings),
 			])
+
+			await this._saveViewLocalStateFromMutation({
+				listApiConfigMeta,
+				currentApiConfigName: name,
+				apiConfiguration: providerSettings,
+			})
 		}
 
 		const { mode } = await this.getState()
@@ -3373,8 +3372,7 @@ export class ClineProvider
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
 		await this.contextProxy.setValue(key, value)
-		this._updateViewLocalStateFromMutation({ [key]: value })
-		await this._persistViewLocalStateFromMutation({ [key]: value })
+		await this._saveViewLocalStateFromMutation({ [key]: value })
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -3387,8 +3385,14 @@ export class ClineProvider
 
 	public async setValues(values: RooCodeSettings) {
 		await this.contextProxy.setValues(values)
-		this._updateViewLocalStateFromMutation(values)
+		await this._saveViewLocalStateFromMutation(values)
+	}
+
+	private async _saveViewLocalStateFromMutation(
+		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
+	): Promise<void> {
 		await this._persistViewLocalStateFromMutation(values)
+		this._updateViewLocalStateFromMutation(values)
 	}
 
 	/**
