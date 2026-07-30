@@ -460,12 +460,9 @@ describe("MimoHandler", () => {
 
 		it("should retry without parallel_tool_calls when endpoint rejects the field", async () => {
 			// First call rejects with a 400 error mentioning parallel_tool_calls
-			const rejectionError = Object.assign(
-				new Error("400 - Unrecognized request parameter: parallel_tool_calls"),
-				{
-					status: 400,
-				},
-			)
+			const rejectionError = Object.assign(new Error("400 - Unrecognized request parameter: parallel_tool_calls"), {
+				status: 400,
+			})
 			mockCreate.mockRejectedValueOnce(rejectionError)
 
 			// Second call (retry) succeeds
