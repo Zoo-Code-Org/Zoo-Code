@@ -11,6 +11,7 @@ export type OrchestratorFanOutChildStep = {
 
 export type OrchestratorRepeatedDelegationRole = "requirements" | "design" | "implementation"
 export type OrchestratorNestedDelegationRole = "child-orchestrator" | "requirements" | "implementation"
+export type OrchestratorCancellationRecoveryRole = "cancellation-child"
 
 export type OrchestratorRepeatedDelegationChildStep = OrchestratorFanOutChildStep & {
 	readonly round: number
@@ -19,6 +20,11 @@ export type OrchestratorRepeatedDelegationChildStep = OrchestratorFanOutChildSte
 
 export type OrchestratorNestedDelegationStep = OrchestratorFanOutChildStep & {
 	readonly role: OrchestratorNestedDelegationRole
+}
+
+export type OrchestratorCancellationRecoveryStep = OrchestratorFanOutChildStep & {
+	readonly role: OrchestratorCancellationRecoveryRole
+	readonly followupAnswer: string
 }
 
 export type OrchestratorResumeExpectation = {
@@ -31,6 +37,7 @@ export const ORCHESTRATOR_FAN_OUT_MARKER = "ORCHESTRATOR_SINGLE_ROUND_FAN_OUT"
 export const ORCHESTRATOR_FAN_OUT_RESULT_INJECTION = "completed.\\n\\nResult:"
 export const ORCHESTRATOR_REPEATED_DELEGATION_MARKER = "ORCHESTRATOR_REPEATED_DELEGATION_STRESS"
 export const ORCHESTRATOR_NESTED_DELEGATION_MARKER = "ORCHESTRATOR_NESTED_DELEGATION"
+export const ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER = "ORCHESTRATOR_CANCELLATION_RECOVERY"
 
 export const ORCHESTRATOR_FAN_OUT_CHILD_STEPS: readonly OrchestratorFanOutChildStep[] = [
 	{
@@ -158,6 +165,23 @@ export const ORCHESTRATOR_NESTED_DELEGATION_PARENT_PROMPT = `${ORCHESTRATOR_NEST
 
 export const ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT = `Nested top-level orchestrator complete:\n- B: ${ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT}`
 
+export const ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER = "resume recovered cancellation child"
+
+export const ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP: OrchestratorCancellationRecoveryStep = {
+	role: "cancellation-child",
+	mode: "ask",
+	marker: "ORCH_CANCEL_RECOVERY_CHILD",
+	prompt: `ORCH_CANCEL_RECOVERY_CHILD: Ask the user exactly this follow-up question: Type "${ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER}" to recover the cancelled child. After the user answers, complete with the exact result "Cancellation recovery child summary: resumed after interruption."`,
+	summary: "Cancellation recovery child summary: resumed after interruption.",
+	followupAnswer: ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER,
+	newTaskToolCallId: "call_orchestrator_cancellation_parent_new_task_001",
+	completionToolCallId: "call_orchestrator_cancellation_child_completion_002",
+}
+
+export const ORCHESTRATOR_CANCELLATION_RECOVERY_PARENT_PROMPT = `${ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER}: Delegate exactly one ask-mode child B with this exact message: "${ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.prompt}". Wait for B to return; do not complete before B returns. After B returns, complete with a final cancellation recovery summary containing B's result.`
+
+export const ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT = `Orchestrator cancellation recovery complete:\n- B: ${ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.summary}`
+
 function buildResumeExpectations(steps: readonly OrchestratorFanOutChildStep[]): OrchestratorResumeExpectation[] {
 	return steps.map((_step, index) => ({
 		stepIndex: index + 1,
@@ -182,13 +206,53 @@ export function buildOrchestratorNestedParentResumeExpectations(): OrchestratorR
 	return buildResumeExpectations([ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP])
 }
 
+export function buildOrchestratorCancellationRecoveryResumeExpectations(): OrchestratorResumeExpectation[] {
+	return buildResumeExpectations([ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP])
+}
+
 export function shouldMatchOrchestratorChildRequest(rawRequest: string, childMarker: string): boolean {
 	return (
 		rawRequest.includes(childMarker) &&
 		!rawRequest.includes(ORCHESTRATOR_FAN_OUT_MARKER) &&
 		!rawRequest.includes(ORCHESTRATOR_REPEATED_DELEGATION_MARKER) &&
 		!rawRequest.includes(ORCHESTRATOR_NESTED_DELEGATION_MARKER) &&
+		!rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER) &&
 		!rawRequest.includes(ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP.marker)
+	)
+}
+
+function shouldMatchOrchestratorCancellationChildBase(rawRequest: string): boolean {
+	return (
+		rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.marker) &&
+		!rawRequest.includes(`${ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER}: Delegate exactly one ask-mode child B`) &&
+		!rawRequest.includes(ORCHESTRATOR_FAN_OUT_MARKER) &&
+		!rawRequest.includes(ORCHESTRATOR_REPEATED_DELEGATION_MARKER) &&
+		!rawRequest.includes(ORCHESTRATOR_NESTED_DELEGATION_MARKER)
+	)
+}
+
+export function shouldMatchOrchestratorCancellationChildRequest(rawRequest: string): boolean {
+	const followupToolCallId = ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.completionToolCallId.replace(
+		"completion_002",
+		"followup_001",
+	)
+
+	return shouldMatchOrchestratorCancellationChildBase(rawRequest) && !rawRequest.includes(followupToolCallId)
+}
+
+export function shouldMatchOrchestratorCancellationChildCompletionRequest(rawRequest: string): boolean {
+	const followupToolCallId = ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.completionToolCallId.replace(
+		"completion_002",
+		"followup_001",
+	)
+
+	return (
+		shouldMatchOrchestratorCancellationChildBase(rawRequest) &&
+		((rawRequest.includes(followupToolCallId) &&
+			rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER)) ||
+			rawRequest.includes(
+				`<user_message>\\n${ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER}\\n</user_message>`,
+			))
 	)
 }
 function requestContainsResultSummary(rawRequest: string, summary: string): boolean {
@@ -236,6 +300,17 @@ export function shouldMatchOrchestratorNestedParentResumeRequest(
 ): boolean {
 	return (
 		rawRequest.includes(ORCHESTRATOR_NESTED_DELEGATION_MARKER) &&
+		rawRequest.includes(ORCHESTRATOR_FAN_OUT_RESULT_INJECTION) &&
+		requiredSummaries.every((summary) => requestContainsResultSummary(rawRequest, summary))
+	)
+}
+
+export function shouldMatchOrchestratorCancellationRecoveryResumeRequest(
+	rawRequest: string,
+	requiredSummaries: readonly string[],
+): boolean {
+	return (
+		rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER) &&
 		rawRequest.includes(ORCHESTRATOR_FAN_OUT_RESULT_INJECTION) &&
 		requiredSummaries.every((summary) => requestContainsResultSummary(rawRequest, summary))
 	)

@@ -9,6 +9,10 @@ import {
 	getResourceDiagnosticsConvergenceIssues,
 } from "../fixtures/resource-diagnostics"
 import {
+	ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_PARENT_PROMPT,
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
@@ -388,6 +392,164 @@ suite("Roo Code Orchestrator", function () {
 			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
 			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after nested cleanup")
 			await sleep(100)
+		}
+	})
+
+	test("orchestrator child cancellation stays delegated until explicit recovery", async () => {
+		const api = globalThis.api
+		const baselineDiagnostics = api.getResourceDiagnostics()
+		const asks: Record<string, ClineMessage[]> = {}
+		const says: Record<string, ClineMessage[]> = {}
+		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "ask") {
+				asks[taskId] = asks[taskId] || []
+				asks[taskId].push(message)
+			}
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		const delegationCompletedHandler = (parentId: string, childId: string, summary: string) => {
+			delegationCompletions.push({ parentId, childId, summary })
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+		api.on(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "orchestrator",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: ORCHESTRATOR_CANCELLATION_RECOVERY_PARENT_PROMPT,
+			})
+
+			let childTaskId: string | undefined
+			await waitFor(() => {
+				const stack = api.getCurrentTaskStack()
+				const current = stack[stack.length - 1]
+				if (current && current !== parentTaskId) {
+					childTaskId = current
+					return true
+				}
+				return false
+			})
+
+			await waitFor(() => asks[childTaskId!]?.some(({ ask }) => ask === "followup") ?? false)
+			await waitFor(async () => (await api.getTaskApiConversationHistoryLength(childTaskId!)) > 0)
+
+			const delegatedChild = await api.getTaskHistoryItem(childTaskId!)
+			assert.ok(delegatedChild, "Cancellation child history item should exist after delegation")
+			assert.strictEqual(delegatedChild.parentTaskId, parentTaskId, "B parentTaskId should point to A")
+			assert.strictEqual(delegatedChild.mode, ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.mode)
+
+			await api.cancelCurrentTask()
+
+			await waitFor(() => api.getCurrentTaskStack().at(-1) === childTaskId)
+			await waitFor(
+				() => asks[childTaskId!]?.some(({ type, ask }) => type === "ask" && ask === "resume_task") ?? false,
+			)
+
+			const interruptedChild = await api.getTaskHistoryItem(childTaskId!)
+			assert.strictEqual(interruptedChild?.status, "interrupted", "B should be interrupted after cancellation")
+			assert.strictEqual(
+				interruptedChild?.parentTaskId,
+				parentTaskId,
+				"Interrupted B should retain its parent link to A",
+			)
+
+			const delegatedParent = await api.getTaskHistoryItem(parentTaskId)
+			assert.strictEqual(delegatedParent?.status, "delegated", "A should stay delegated after B cancellation")
+			assert.strictEqual(delegatedParent?.awaitingChildId, childTaskId, "A should keep awaiting interrupted B")
+			assert.strictEqual(delegationCompletions.length, 0, "B cancellation should not emit a completion to A")
+			assert.strictEqual(
+				says[parentTaskId]?.find(({ say }) => say === "completion_result"),
+				undefined,
+				"A must not receive premature final completion after B cancellation",
+			)
+
+			const completedParentTaskId = await waitUntilCompleted({
+				api,
+				start: async () => {
+					await api.sendMessage(ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER)
+					return parentTaskId
+				},
+			})
+
+			assert.strictEqual(
+				completedParentTaskId,
+				parentTaskId,
+				"Explicitly recovered B should report back and complete A",
+			)
+			assert.deepStrictEqual(
+				delegationCompletions,
+				[
+					{
+						parentId: parentTaskId,
+						childId: childTaskId,
+						summary: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.summary,
+					},
+				],
+				"Recovered B should emit exactly one completion to A",
+			)
+
+			const recoveredChild = await api.getTaskHistoryItem(childTaskId!)
+			assert.strictEqual(recoveredChild?.status, "completed", "B should complete after explicit recovery")
+			assert.strictEqual(
+				recoveredChild?.completionResultSummary,
+				ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.summary,
+				"B recovery summary should be persisted",
+			)
+
+			const completedParent = await api.getTaskHistoryItem(parentTaskId)
+			assert.strictEqual(completedParent?.status, "completed", "A should complete after explicit recovery")
+			assert.deepStrictEqual(completedParent?.childIds, [childTaskId], "A childIds should contain only B")
+
+			const parentCompletionText = says[parentTaskId]
+				?.filter(({ say }) => say === "completion_result")
+				.map(({ text }) => text?.trim())
+				.find((text): text is string => text === ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT)
+			assert.strictEqual(parentCompletionText, ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT)
+			assert.ok(
+				parentCompletionText.includes("cancellation recovery"),
+				"A final summary should explicitly identify cancellation recovery",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after recovery cleanup")
+
+			const observedChildTaskIds = delegationCompletions.map(({ childId }) => childId)
+			await waitFor(() => {
+				const final = api.getResourceDiagnostics()
+
+				return (
+					getResourceDiagnosticsConvergenceIssues({
+						baseline: baselineDiagnostics,
+						final,
+						observedChildTaskIds,
+					}).length === 0
+				)
+			}).catch(() => {})
+
+			const finalDiagnostics = api.getResourceDiagnostics()
+			assertResourceDiagnosticsConverged({
+				baseline: baselineDiagnostics,
+				final: finalDiagnostics,
+				observedChildTaskIds,
+			})
 		}
 	})
 })

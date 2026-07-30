@@ -2,6 +2,11 @@ import { LLMock } from "@copilotkit/aimock"
 import type { ChatCompletionRequest } from "@copilotkit/aimock"
 
 import {
+	ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_PARENT_PROMPT,
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_MARKER,
@@ -17,10 +22,14 @@ import {
 	ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT,
 	ORCHESTRATOR_REPEATED_DELEGATION_MARKER,
 	ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
+	buildOrchestratorCancellationRecoveryResumeExpectations,
 	buildOrchestratorNestedChildResumeExpectations,
 	buildOrchestratorNestedParentResumeExpectations,
 	buildOrchestratorRepeatedResumeExpectations,
 	buildOrchestratorResumeExpectations,
+	shouldMatchOrchestratorCancellationChildCompletionRequest,
+	shouldMatchOrchestratorCancellationChildRequest,
+	shouldMatchOrchestratorCancellationRecoveryResumeRequest,
 	shouldMatchOrchestratorChildRequest,
 	shouldMatchOrchestratorNestedChildResumeRequest,
 	shouldMatchOrchestratorNestedParentResumeRequest,
@@ -29,6 +38,11 @@ import {
 } from "./orchestrator-plan"
 
 export {
+	ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_PARENT_PROMPT,
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_MARKER,
@@ -44,10 +58,14 @@ export {
 	ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT,
 	ORCHESTRATOR_REPEATED_DELEGATION_MARKER,
 	ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
+	buildOrchestratorCancellationRecoveryResumeExpectations,
 	buildOrchestratorNestedChildResumeExpectations,
 	buildOrchestratorNestedParentResumeExpectations,
 	buildOrchestratorRepeatedResumeExpectations,
 	buildOrchestratorResumeExpectations,
+	shouldMatchOrchestratorCancellationChildCompletionRequest,
+	shouldMatchOrchestratorCancellationChildRequest,
+	shouldMatchOrchestratorCancellationRecoveryResumeRequest,
 	shouldMatchOrchestratorChildRequest,
 	shouldMatchOrchestratorNestedChildResumeRequest,
 	shouldMatchOrchestratorNestedParentResumeRequest,
@@ -298,6 +316,81 @@ export function addOrchestratorFixtures(mock: InstanceType<typeof LLMock>) {
 						name: "attempt_completion",
 						arguments: JSON.stringify({ result: ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT }),
 						id: "call_orchestrator_nested_parent_completion_002",
+					},
+				],
+			},
+		})
+	}
+
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.mode,
+						message: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.prompt,
+					}),
+					id: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.newTaskToolCallId,
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				shouldMatchOrchestratorCancellationChildRequest(requestText(req)),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "ask_followup_question",
+					arguments: JSON.stringify({
+						question: `Type "${ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.followupAnswer}" to recover the cancelled child.`,
+						follow_up: [{ text: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.followupAnswer }],
+					}),
+					id: "call_orchestrator_cancellation_child_followup_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				shouldMatchOrchestratorCancellationChildCompletionRequest(requestText(req)),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.summary }),
+					id: ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.completionToolCallId,
+				},
+			],
+		},
+	})
+
+	for (const expectation of [...buildOrchestratorCancellationRecoveryResumeExpectations()].reverse()) {
+		mock.addFixture({
+			match: {
+				predicate: (req: ChatCompletionRequest) =>
+					shouldMatchOrchestratorCancellationRecoveryResumeRequest(
+						requestText(req),
+						expectation.requiredSummaries,
+					),
+			},
+			response: {
+				toolCalls: [
+					{
+						name: "attempt_completion",
+						arguments: JSON.stringify({ result: ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT }),
+						id: "call_orchestrator_cancellation_parent_completion_002",
 					},
 				],
 			},
