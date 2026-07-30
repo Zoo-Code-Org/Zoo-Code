@@ -1499,11 +1499,6 @@
 			"count": 3
 		}
 	},
-	"services/code-index/semble/semble-downloader.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"services/code-index/shared/__tests__/validation-helpers.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
