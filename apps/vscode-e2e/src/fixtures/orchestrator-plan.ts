@@ -9,6 +9,13 @@ export type OrchestratorFanOutChildStep = {
 	readonly completionToolCallId: string
 }
 
+export type OrchestratorRepeatedDelegationRole = "requirements" | "design" | "implementation"
+
+export type OrchestratorRepeatedDelegationChildStep = OrchestratorFanOutChildStep & {
+	readonly round: number
+	readonly role: OrchestratorRepeatedDelegationRole
+}
+
 export type OrchestratorResumeExpectation = {
 	readonly stepIndex: number
 	readonly requiredSummaries: string[]
@@ -17,6 +24,7 @@ export type OrchestratorResumeExpectation = {
 
 export const ORCHESTRATOR_FAN_OUT_MARKER = "ORCHESTRATOR_SINGLE_ROUND_FAN_OUT"
 export const ORCHESTRATOR_FAN_OUT_RESULT_INJECTION = "completed.\\n\\nResult:"
+export const ORCHESTRATOR_REPEATED_DELEGATION_MARKER = "ORCHESTRATOR_REPEATED_DELEGATION_STRESS"
 
 export const ORCHESTRATOR_FAN_OUT_CHILD_STEPS: readonly OrchestratorFanOutChildStep[] = [
 	{
@@ -45,20 +53,90 @@ export const ORCHESTRATOR_FAN_OUT_CHILD_STEPS: readonly OrchestratorFanOutChildS
 	},
 ]
 
-export const ORCHESTRATOR_FAN_OUT_PARENT_PROMPT = `${ORCHESTRATOR_FAN_OUT_MARKER}: Delegate exactly three children in order. First create an ask-mode child with this exact message: "${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[0].prompt}". After it returns, create an architect-mode child with this exact message: "${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[1].prompt}". After it returns, create a code-mode child with this exact message: "${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[2].prompt}". After all three return, complete with the final fan-in summary containing every child summary.`
+export const ORCHESTRATOR_FAN_OUT_PARENT_PROMPT = `${ORCHESTRATOR_FAN_OUT_MARKER}: Delegate exactly three children in order. First create an ask-mode child with this exact message: "${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[0]!.prompt}". After it returns, create an architect-mode child with this exact message: "${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[1]!.prompt}". After it returns, create a code-mode child with this exact message: "${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[2]!.prompt}". After all three return, complete with the final fan-in summary containing every child summary.`
 
-export const ORCHESTRATOR_FAN_OUT_FINAL_RESULT = `Orchestrator fan-in complete:\n- ${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[0].summary}\n- ${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[1].summary}\n- ${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[2].summary}`
+export const ORCHESTRATOR_FAN_OUT_FINAL_RESULT = `Orchestrator fan-in complete:\n- ${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[0]!.summary}\n- ${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[1]!.summary}\n- ${ORCHESTRATOR_FAN_OUT_CHILD_STEPS[2]!.summary}`
 
-export function buildOrchestratorResumeExpectations(): OrchestratorResumeExpectation[] {
-	return ORCHESTRATOR_FAN_OUT_CHILD_STEPS.map((_step, index) => ({
+const ORCHESTRATOR_REPEATED_DELEGATION_ROLES: ReadonlyArray<{
+	readonly role: OrchestratorRepeatedDelegationRole
+	readonly mode: OrchestratorFanOutMode
+	readonly summaryByRound: readonly [string, string, string]
+}> = [
+	{
+		role: "requirements",
+		mode: "ask",
+		summaryByRound: [
+			"capture reporting workflow constraints.",
+			"confirm dashboard stakeholder needs.",
+			"verify rollout acceptance criteria.",
+		],
+	},
+	{
+		role: "design",
+		mode: "architect",
+		summaryByRound: [
+			"outline fan-in checkpoints.",
+			"refine retry-safe orchestration boundaries.",
+			"document final aggregation shape.",
+		],
+	},
+	{
+		role: "implementation",
+		mode: "code",
+		summaryByRound: [
+			"stub delegated workflow shell.",
+			"wire summary collection fixtures.",
+			"validate repeated delegation convergence.",
+		],
+	},
+]
+
+export const ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS: readonly OrchestratorRepeatedDelegationChildStep[] = (
+	[1, 2, 3] as const
+).flatMap((round, roundIndex) =>
+	ORCHESTRATOR_REPEATED_DELEGATION_ROLES.map(({ role, mode, summaryByRound }, roleIndex) => {
+		const summary = `Round ${round} ${role} summary: ${summaryByRound[roundIndex]!}`
+		const marker = `ORCHESTRATOR_REPEATED_ROUND_${round}_${role.toUpperCase()}_CHILD`
+
+		return {
+			round,
+			role,
+			mode,
+			marker,
+			prompt: `${marker}: Complete immediately with the exact result "${summary}"`,
+			summary,
+			newTaskToolCallId: `call_orchestrator_repeated_parent_new_task_${String((round - 1) * 3 + roleIndex + 1).padStart(3, "0")}`,
+			completionToolCallId: `call_orchestrator_repeated_${role}_round_${round}_completion_001`,
+		}
+	}),
+)
+
+export const ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT = `${ORCHESTRATOR_REPEATED_DELEGATION_MARKER}: Run exactly three rounds. In each round, delegate exactly three children in order: ask-mode requirements, architect-mode design, then code-mode implementation. Use these exact child messages in order: ${ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(({ prompt }) => `"${prompt}"`).join("; ")}. After each child returns, resume the parent before creating the next child. After all nine children return, complete with a final summary containing every round and child summary.`
+
+export const ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT = `Orchestrator repeated delegation complete:\n${ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(({ round, role, summary }) => `- Round ${round} ${role}: ${summary}`).join("\\n")}`
+
+function buildResumeExpectations(steps: readonly OrchestratorFanOutChildStep[]): OrchestratorResumeExpectation[] {
+	return steps.map((_step, index) => ({
 		stepIndex: index + 1,
-		requiredSummaries: ORCHESTRATOR_FAN_OUT_CHILD_STEPS.slice(0, index + 1).map(({ summary }) => summary),
-		nextMode: ORCHESTRATOR_FAN_OUT_CHILD_STEPS[index + 1]?.mode,
+		requiredSummaries: steps.slice(0, index + 1).map(({ summary }) => summary),
+		nextMode: steps[index + 1]?.mode,
 	}))
 }
 
+export function buildOrchestratorResumeExpectations(): OrchestratorResumeExpectation[] {
+	return buildResumeExpectations(ORCHESTRATOR_FAN_OUT_CHILD_STEPS)
+}
+
+export function buildOrchestratorRepeatedResumeExpectations(): OrchestratorResumeExpectation[] {
+	return buildResumeExpectations(ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS)
+}
+
 export function shouldMatchOrchestratorChildRequest(rawRequest: string, childMarker: string): boolean {
-	return rawRequest.includes(childMarker) && !rawRequest.includes(ORCHESTRATOR_FAN_OUT_MARKER)
+	return (
+		rawRequest.includes(childMarker) &&
+		!rawRequest.includes(ORCHESTRATOR_FAN_OUT_MARKER) &&
+		!rawRequest.includes(ORCHESTRATOR_REPEATED_DELEGATION_MARKER)
+	)
 }
 
 export function shouldMatchOrchestratorResumeRequest(
@@ -67,6 +145,17 @@ export function shouldMatchOrchestratorResumeRequest(
 ): boolean {
 	return (
 		rawRequest.includes(ORCHESTRATOR_FAN_OUT_MARKER) &&
+		rawRequest.includes(ORCHESTRATOR_FAN_OUT_RESULT_INJECTION) &&
+		requiredSummaries.every((summary) => rawRequest.includes(`Result:\\n${summary}`))
+	)
+}
+
+export function shouldMatchOrchestratorRepeatedResumeRequest(
+	rawRequest: string,
+	requiredSummaries: readonly string[],
+): boolean {
+	return (
+		rawRequest.includes(ORCHESTRATOR_REPEATED_DELEGATION_MARKER) &&
 		rawRequest.includes(ORCHESTRATOR_FAN_OUT_RESULT_INJECTION) &&
 		requiredSummaries.every((summary) => rawRequest.includes(`Result:\\n${summary}`))
 	)

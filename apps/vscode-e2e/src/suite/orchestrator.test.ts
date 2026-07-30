@@ -8,6 +8,9 @@ import {
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
+	ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS,
+	ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT,
+	ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
 } from "../fixtures/orchestrator"
 
 suite("Roo Code Orchestrator", function () {
@@ -88,6 +91,123 @@ suite("Roo Code Orchestrator", function () {
 			assert.strictEqual(parentCompletionText, ORCHESTRATOR_FAN_OUT_FINAL_RESULT)
 			for (const { summary } of ORCHESTRATOR_FAN_OUT_CHILD_STEPS) {
 				assert.ok(parentCompletionText.includes(summary), `Final parent completion should include ${summary}`)
+			}
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after cleanup")
+			await sleep(100)
+		}
+	})
+
+	test("orchestrator parent repeats three rounds of delegated child fan-in without stack duplication", async () => {
+		const api = globalThis.api
+		const says: Record<string, ClineMessage[]> = {}
+		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
+		const parentStackSnapshots: string[][] = []
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		const delegationCompletedHandler = (parentId: string, childId: string, summary: string) => {
+			delegationCompletions.push({ parentId, childId, summary })
+			parentStackSnapshots.push(api.getCurrentTaskStack())
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+		api.on(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+
+		try {
+			const parentTaskId = await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "orchestrator",
+							alwaysAllowModeSwitch: true,
+							alwaysAllowSubtasks: true,
+							autoApprovalEnabled: true,
+							enableCheckpoints: false,
+						},
+						text: ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
+					}),
+			})
+
+			await waitFor(() => delegationCompletions.length === ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.length)
+
+			const childIds = delegationCompletions.map(({ childId }) => childId)
+			assert.strictEqual(childIds.length, 9, "Repeated delegation should create nine child tasks")
+			assert.strictEqual(new Set(childIds).size, 9, "Repeated delegation should create nine distinct child tasks")
+			assert.deepStrictEqual(
+				delegationCompletions.map(({ parentId }) => parentId),
+				ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(() => parentTaskId),
+				"Every repeated delegation completed event should point to the orchestrator parent",
+			)
+			assert.deepStrictEqual(
+				delegationCompletions.map(({ summary }) => summary),
+				ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(({ summary }) => summary),
+				"Repeated delegation completed events should preserve every round summary in order",
+			)
+
+			for (const [index, snapshot] of parentStackSnapshots.entries()) {
+				const parentOccurrences = snapshot.filter((taskId) => taskId === parentTaskId).length
+				assert.ok(
+					parentOccurrences <= 1,
+					`Parent should not be duplicated in stack after child ${index + 1} resumes`,
+				)
+			}
+
+			const parent = await api.getTaskHistoryItem(parentTaskId)
+			assert.ok(parent, "Repeated delegation parent history item should exist")
+			assert.strictEqual(
+				parent.status,
+				"completed",
+				"Repeated delegation parent should complete after final fan-in",
+			)
+			assert.deepStrictEqual(
+				parent.childIds,
+				childIds,
+				"Parent childIds should contain all nine children in order",
+			)
+			assert.strictEqual(new Set(parent.childIds ?? []).size, 9, "Parent childIds should not contain duplicates")
+
+			for (const [index, childId] of childIds.entries()) {
+				const expectedStep = ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS[index]!
+				const child = await api.getTaskHistoryItem(childId)
+				assert.ok(child, `Repeated delegation child ${index + 1} history item should exist`)
+				assert.strictEqual(child.parentTaskId, parentTaskId, `Child ${index + 1} should point back to parent`)
+				assert.strictEqual(child.status, "completed", `Child ${index + 1} should be completed`)
+				assert.strictEqual(
+					child.mode,
+					expectedStep.mode,
+					`Child ${index + 1} mode should match the repeated plan`,
+				)
+				assert.strictEqual(
+					child.completionResultSummary,
+					expectedStep.summary,
+					`Child ${index + 1} round ${expectedStep.round} ${expectedStep.role} summary should be persisted`,
+				)
+			}
+
+			const parentCompletionText = says[parentTaskId]
+				?.filter(({ say }) => say === "completion_result")
+				.map(({ text }) => text?.trim())
+				.find((text): text is string => !!text)
+
+			assert.strictEqual(parentCompletionText, ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT)
+			for (const { round, role, summary } of ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS) {
+				assert.ok(
+					parentCompletionText.includes(`Round ${round} ${role}: ${summary}`),
+					`Final parent completion should include round ${round} ${role} summary`,
+				)
 			}
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
