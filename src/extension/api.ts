@@ -32,16 +32,18 @@ import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
-const RESOURCE_DIAGNOSTIC_EVENTS = [
-	RooCodeEventName.Message,
-	RooCodeEventName.TaskCreated,
-	RooCodeEventName.TaskStarted,
-	RooCodeEventName.TaskCompleted,
-	RooCodeEventName.TaskAborted,
-	RooCodeEventName.TaskDelegationCompleted,
-	RooCodeEventName.TaskDelegationResumed,
-	RooCodeEventName.TaskModeSwitched,
-] as const satisfies readonly RooCodeResourceDiagnosticEventName[]
+const RESOURCE_DIAGNOSTIC_EVENT_MAP = {
+	[RooCodeEventName.Message]: true,
+	[RooCodeEventName.TaskCreated]: true,
+	[RooCodeEventName.TaskStarted]: true,
+	[RooCodeEventName.TaskCompleted]: true,
+	[RooCodeEventName.TaskAborted]: true,
+	[RooCodeEventName.TaskDelegationCompleted]: true,
+	[RooCodeEventName.TaskDelegationResumed]: true,
+	[RooCodeEventName.TaskModeSwitched]: true,
+} satisfies Record<RooCodeResourceDiagnosticEventName, true>
+
+const RESOURCE_DIAGNOSTIC_EVENTS = Object.keys(RESOURCE_DIAGNOSTIC_EVENT_MAP) as RooCodeResourceDiagnosticEventName[]
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
