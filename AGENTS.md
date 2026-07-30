@@ -17,6 +17,22 @@ When writing new code:
 - After editing a file, run `pnpm --dir src exec eslint --prune-suppressions --max-warnings=0 <relative-file>` and confirm the count for that file did not increase.
 - If a suppression is truly unavoidable (e.g. `vi.spyOn(Cls.prototype as any, "privateMethod")` where no typed alternative exists), document why in a comment next to the cast.
 
+## Persisted Setting Checklist
+
+When adding or changing a user setting, trace the complete round trip. A setting is not complete merely because its control renders or its value reaches storage.
+
+- [ ] Define the setting, validation, and optionality in `packages/types/src/global-settings.ts` (or the appropriate provider/settings schema). Define a shared default constant when multiple readers need the same default.
+- [ ] If the webview uses the setting, include it in `ExtensionState` in `packages/types/src/vscode-extension-host.ts` and any relevant message types.
+- [ ] In `SettingsView`, initialize and read the control from local `cachedState`, NOT directly from live `useExtensionState()`. The cache buffers edits until the user explicitly clicks Save; binding to live state causes races and discarded edits.
+- [ ] Update `cachedState` from the control and include the setting in the `updateSettings` payload sent by `SettingsView.handleSubmit()` (or document and test a deliberate immediate-save flow).
+- [ ] Verify `webviewMessageHandler` handles any setting-specific normalization or side effects and persists the final value through `ContextProxy`. Generic settings normally use `contextProxy.setValue()`.
+- [ ] Add the setting to `ClineProvider.getState()` with the intended default so extension/runtime consumers can read it.
+- [ ] Add the setting to both the destructuring and returned object in `ClineProvider.getStateToPostToWebview()`. This completes the storage-to-webview round trip and prevents a saved control from reverting visually.
+- [ ] Update every runtime consumer and ensure all consumers use the same default semantics.
+- [ ] If users can import/export the setting, verify its schema inclusion makes it round-trip and add special handling only when required (for example, secrets or non-exportable state).
+- [ ] Add focused tests for: UI binding/save behavior, persistence or normalization, and the saved value returned by `getStateToPostToWebview()`. Include both `true` and `false`/unset cases when defaulting can hide omissions.
+- [ ] Run the narrowest relevant Vitest suites from the package directory that declares Vitest.
+
 ## Test Placement Guidance
 
 Prefer the narrowest test layer that proves the behavior. This follows standard test-pyramid guidance: keep most coverage in fast, focused tests; add integration tests for cross-module contracts; reserve end-to-end tests for full workflow confidence.

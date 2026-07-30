@@ -33,6 +33,7 @@ export type AutoApprovalStateOptions =
 	| "mcpServers" // For `alwaysAllowMcp`.
 	| "allowedCommands" // For `alwaysAllowExecute`.
 	| "deniedCommands"
+	| "destructiveCommandGuardEnabled"
 
 export type CheckAutoApprovalResult =
 	| { decision: "approve" }
@@ -115,8 +116,18 @@ export async function checkAutoApproval({
 		if (!text) {
 			return { decision: "ask" }
 		}
+		if (isProtected) {
+			return { decision: "ask" }
+		}
 
 		if (state.alwaysAllowExecute === true) {
+			// Execute commands immediately when DCG allows them. ExecuteCommandTool
+			// marks commands blocked by DCG as protected before reaching this check,
+			// which keeps the explicit user approval prompt for those commands.
+			if (state.destructiveCommandGuardEnabled === true) {
+				return { decision: "approve" }
+			}
+
 			const decision = getCommandDecision(text, state.allowedCommands || [], state.deniedCommands || [])
 
 			if (decision === "auto_approve") {

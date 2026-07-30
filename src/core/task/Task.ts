@@ -1185,6 +1185,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const state = provider ? await provider.getState() : undefined
 		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
+		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
@@ -1248,6 +1249,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.isProtected = isProtected
 					if (isAutoAnswered) {
 						lastMessage.isAnswered = true
+						lastMessage.autoApprovalDecision = autoApprovalDecision
 					}
 					await this.saveClineMessages()
 					// Fire-and-forget: see updateClineMessage call above for the
@@ -1269,6 +1271,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						text,
 						isProtected,
 						isAnswered: isAutoAnswered || undefined,
+						autoApprovalDecision,
 					})
 				}
 			}
@@ -1286,6 +1289,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				text,
 				isProtected,
 				isAnswered: isAutoAnswered || undefined,
+				autoApprovalDecision,
 			})
 		}
 

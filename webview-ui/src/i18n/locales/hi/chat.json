@@ -233,6 +233,7 @@
 		"exitStatus": "{{exitCode}} स्थिति के साथ बाहर निकल गया",
 		"malformedCommand": "गलत कमांड: shell सिंटैक्स त्रुटि",
 		"manageCommands": "स्वतः-अनुमोदित कमांड",
+		"denied": "कमांड अस्वीकृत",
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",
 		"addToDenied": "अस्वीकृत सूची में जोड़ें",
