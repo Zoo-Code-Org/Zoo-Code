@@ -659,6 +659,17 @@ describe("ZooGatewayHandler", () => {
 			expect(getModels).not.toHaveBeenCalled()
 		})
 
+		it("short-circuits a subsequent fetchModel call after models are populated", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+
+			await handler.ensureModelFetched()
+			vitest.mocked(getModels).mockClear()
+
+			await handler.fetchModel()
+			expect(getModels).not.toHaveBeenCalled()
+		})
+
 		it("deduplicates concurrent calls into a single fetch", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")
@@ -667,6 +678,26 @@ describe("ZooGatewayHandler", () => {
 			await Promise.all([handler.ensureModelFetched(), handler.ensureModelFetched()])
 
 			expect(getModels).toHaveBeenCalledTimes(1)
+		})
+
+		it("recovers after a rejected fetch so later calls are not poisoned", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const { getModels } = await import("../fetchers/modelCache")
+
+			vitest.mocked(getModels).mockRejectedValueOnce(new Error("network down"))
+			await expect(handler.ensureModelFetched()).rejects.toThrow("network down")
+
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"anthropic/claude-sonnet-4": {
+					maxTokens: 64000,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: true,
+				},
+			})
+			await handler.ensureModelFetched()
+
+			expect(handler.getModel().info.contextWindow).toBe(1000000)
 		})
 
 		it("makes getModel return the fetched context window instead of the default", async () => {

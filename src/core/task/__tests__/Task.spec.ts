@@ -32,6 +32,7 @@ type TaskTestAccess = {
 	presentAssistantMessageSafe: () => void
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
+	safeEnsureModelFetched: () => Promise<void>
 }
 
 function getTaskTestAccess(task: Task): TaskTestAccess {
@@ -184,6 +185,14 @@ vi.mock("../../../integrations/misc/extract-text", () => ({
 vi.mock("../../environment/getEnvironmentDetails", () => ({
 	getEnvironmentDetails: vi.fn().mockResolvedValue(""),
 }))
+
+vi.mock("../../mentions/processUserContentMentions", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../mentions/processUserContentMentions")>()
+	return {
+		...actual,
+		processUserContentMentions: vi.fn().mockImplementation(actual.processUserContentMentions),
+	}
+})
 
 vi.mock("../../ignore/RooIgnoreController")
 
@@ -2504,6 +2513,230 @@ describe("Cline", () => {
 				expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
 				expect(options.metadata?.abortSignal?.aborted).toBe(false)
 			})
+		})
+	})
+
+	describe("safeEnsureModelFetched", () => {
+		it("loads model metadata before getModel is used", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched })
+
+			await getTaskTestAccess(task).safeEnsureModelFetched()
+
+			expect(ensureModelFetched).toHaveBeenCalledTimes(1)
+		})
+
+		it("swallows fetch failures so callers can fall back to defaults", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const ensureModelFetched = vi.fn().mockRejectedValue(new Error("network down"))
+			Object.assign(task.api, { ensureModelFetched })
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBeUndefined()
+
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to fetch model metadata"),
+				"network down",
+			)
+			errorSpy.mockRestore()
+		})
+
+		it("is a no-op when the api handler does not implement ensureModelFetched", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBeUndefined()
+		})
+
+		it("calls safeEnsureModelFetched from attemptApiRequest when context tokens are present", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "text", text: "ok" }
+				},
+				async next() {
+					return { done: true, value: undefined }
+				},
+				async return() {
+					return { done: true, value: undefined }
+				},
+				async throw(error: unknown) {
+					throw error
+				},
+				async [Symbol.asyncDispose]() {},
+			} as AsyncGenerator<ApiStreamChunk>)
+
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			const iterator = task.attemptApiRequest(0)
+			await iterator.next()
+
+			expect(safeSpy).toHaveBeenCalled()
+		})
+
+		it("continues attemptApiRequest when model metadata fetch fails", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			const ensureModelFetched = vi.fn().mockRejectedValue(new Error("fetch failed"))
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "text", text: "ok" }
+				},
+				async next() {
+					return { done: false, value: { type: "text", text: "ok" } }
+				},
+				async return() {
+					return { done: true, value: undefined }
+				},
+				async throw(error: unknown) {
+					throw error
+				},
+				async [Symbol.asyncDispose]() {},
+			} as AsyncGenerator<ApiStreamChunk>)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			const iterator = task.attemptApiRequest(0)
+			await expect(iterator.next()).resolves.toMatchObject({
+				done: false,
+				value: { type: "text", text: "ok" },
+			})
+			expect(errorSpy).toHaveBeenCalled()
+			errorSpy.mockRestore()
+		})
+
+		it("fetches model metadata before caching the streaming model", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+				content: [{ type: "text", text: "hello" }],
+				mode: undefined,
+			})
+			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				throw new Error("stop after model metadata fetch")
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+			vi.spyOn(task, "addToApiConversationHistory").mockResolvedValue(undefined as never)
+
+			task.clineMessages = [
+				{
+					ts: Date.now(),
+					type: "say",
+					say: "api_req_started",
+					text: "{}",
+				},
+			]
+			vi.spyOn(task, "say").mockImplementation(async (type) => {
+				if (type === "api_req_started") {
+					task.clineMessages.push({
+						ts: Date.now(),
+						type: "say",
+						say: "api_req_started",
+						text: "{}",
+					})
+				}
+				return undefined as never
+			})
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
+
+			expect(result).toBe(true)
+			expect(safeSpy).toHaveBeenCalled()
+			expect(ensureModelFetched).toHaveBeenCalled()
+			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})
 	})
 
