@@ -46,7 +46,9 @@ suite("Roo Code View State", function () {
 			}
 		}
 
-		globalThis.api.on(RooCodeEventName.TaskModeSwitched, (taskId, mode) => modeEvents.push({ taskId, mode }))
+		const modeHandler = (taskId: string, mode: string) => modeEvents.push({ taskId, mode })
+
+		globalThis.api.on(RooCodeEventName.TaskModeSwitched, modeHandler)
 		globalThis.api.on(RooCodeEventName.Message, completionHandler)
 
 		try {
@@ -110,6 +112,7 @@ suite("Roo Code View State", function () {
 				)
 			}
 		} finally {
+			globalThis.api.off(RooCodeEventName.TaskModeSwitched, modeHandler)
 			globalThis.api.off(RooCodeEventName.Message, completionHandler)
 		}
 	})

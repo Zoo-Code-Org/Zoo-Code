@@ -8,6 +8,8 @@ import {
 } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import type { WebviewMessage } from "@roo-code/types"
+
 import type { ClineProvider } from "../ClineProvider"
 
 const [kimiCodeOAuthAuthMethod, kimiCodeApiKeyAuthMethod] = kimiCodeAuthMethodSchema.options
@@ -57,9 +59,15 @@ vi.mock("vscode", () => ({
 // Mock modelCache getModels/flushModels used by the handler
 const getModelsMock = vi.fn()
 const flushModelsMock = vi.fn()
+const kimiCodeGetAccessTokenMock = vi.fn()
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: (...args: any[]) => getModelsMock(...args),
 	flushModels: (...args: any[]) => flushModelsMock(...args),
+}))
+vi.mock("../../../integrations/kimi-code/oauth", () => ({
+	kimiCodeOAuthManager: {
+		getAccessToken: (...args: unknown[]) => kimiCodeGetAccessTokenMock(...args),
+	},
 }))
 
 describe("webviewMessageHandler - requestRouterModels provider filter", () => {
@@ -426,6 +434,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 	})
 
 	it("flushes DeepSeek models when an unsaved base URL is paired with the stored API key", async () => {
+	it("flushes DeepSeek models when an unsaved base URL is paired with the stored API key", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
 				deepSeekApiKey: "stored-deepseek-key",
@@ -445,6 +454,31 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		}
 		expect(flushModelsMock).toHaveBeenCalledWith(deepSeekOptions, true)
 		expect(getModelsMock).toHaveBeenCalledWith(deepSeekOptions)
+	})
+
+	it("continues posting routerModels when Kimi Code OAuth lookup fails", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				kimiCodeAuthMethod: "oauth",
+			},
+		})
+		kimiCodeGetAccessTokenMock.mockRejectedValueOnce(new Error("refresh failed"))
+
+		await webviewMessageHandler(mockProvider, {
+			type: "requestRouterModels",
+			values: { provider: "kimi-code" },
+		} satisfies WebviewMessage)
+
+		expect(kimiCodeGetAccessTokenMock).toHaveBeenCalledOnce()
+		expect(mockProvider.log).toHaveBeenCalledWith(
+			"[requestRouterModels] kimi-code credential lookup failed: refresh failed",
+		)
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "kimi-code" }))
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {},
+			values: { provider: "kimi-code" },
+		})
 	})
 
 	it("fetches Moonshot models when stored Moonshot credentials exist", async () => {
