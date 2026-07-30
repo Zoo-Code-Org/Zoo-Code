@@ -428,10 +428,9 @@ function assembleRollupSnapshotFast(
 			if (isAllTime) {
 				breakdownRows = db.queryBreakdownRollups("lifetime", "all", "all", axis, includeCancelled)
 			} else {
-				// Use monthly rollups for date ranges (covers cross-day aggregation)
-				const fromMonth = fromDay.slice(0, 7)
-				const toMonth = toDay.slice(0, 7)
-				breakdownRows = db.queryBreakdownRollups("monthly", fromMonth, toMonth, axis, includeCancelled)
+				// Use daily rollups for date ranges — daily breakdown rows are written
+				// at append time and already handle per-day granularity correctly
+				breakdownRows = db.queryBreakdownRollups("daily", fromDay, toDay, axis, includeCancelled)
 			}
 
 			buckets = breakdownRows.map((row) => breakdownRowToBucket(row, axis))
