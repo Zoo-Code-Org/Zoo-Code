@@ -33,6 +33,7 @@ type TaskTestAccess = {
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
+	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
 }
 
 function getTaskTestAccess(task: Task): TaskTestAccess {
@@ -2709,7 +2710,7 @@ describe("Cline", () => {
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
 			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
-			vi.spyOn(task, "addToApiConversationHistory").mockResolvedValue(undefined as never)
+			vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
 
 			task.clineMessages = [
 				{
