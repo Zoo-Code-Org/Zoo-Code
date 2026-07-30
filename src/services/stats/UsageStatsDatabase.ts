@@ -1,19 +1,34 @@
-﻿import { DatabaseSync } from "node:sqlite"
+import { DatabaseSync } from "node:sqlite"
 import * as fs from "fs"
 import * as path from "path"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
+import { getEffectiveCost } from "./costRecalculation"
+
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
 
 /** Maximum number of events returned in a single batch read. */
 const MAX_BATCH_SIZE = 100
+
+/**
+ * Special root_task_id value used for non-cancelled-only rollup rows.
+ * When includeCancelled=false, queries use this key to exclude cancelled events.
+ */
+const NON_CANCELLED_KEY = "__nc__"
+
+/**
+ * Axes supported by breakdown rollup rows.
+ * For each event, per-axis breakdown rows are stored in stats_rollup.
+ * The 'day' axis is handled via daily aggregate rollups (no separate breakdown needed).
+ */
+const BREAKDOWN_AXES = ["model", "provider", "mode"] as const
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -85,6 +100,45 @@ export interface DailyRollupRow {
 	totalCost: number
 	totalTokens: number
 	eventCount: number
+}
+
+/** A detailed daily rollup row with all token breakdowns. */
+export interface DailyRollupDetailedRow {
+	day: string
+	eventCount: number
+	completedCalls: number
+	failedCalls: number
+	cancelledCalls: number
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	reasoningTokens: number
+	totalTokens: number
+	costUsd: number
+}
+
+/** A breakdown rollup row for a specific axis. */
+export interface BreakdownRollupRow {
+	axisValue: string
+	eventCount: number
+	completedCalls: number
+	failedCalls: number
+	cancelledCalls: number
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	reasoningTokens: number
+	totalTokens: number
+	costUsd: number
+}
+
+/** Coverage statistics for a time range. */
+export interface CoverageStats {
+	firstEventAt: string | undefined
+	lastEventAt: string | undefined
+	backfilledEventCount: number
 }
 
 /** Migration checkpoint stored in stats_meta. */
@@ -333,7 +387,6 @@ export class UsageStatsDatabase {
 
 	/**
 	 * Runs schema version migrations.
-	 * Currently only version 1 exists.
 	 */
 	private runMigrations(): void {
 		const db = this.getDb()
@@ -341,6 +394,12 @@ export class UsageStatsDatabase {
 
 		if (meta.schemaVersion < 2) {
 			this.migrateToV2(db)
+		}
+
+		// Re-read meta after v2 migration (it updates schemaVersion)
+		const metaAfterV2 = this.readMetaInternal(db)
+		if (metaAfterV2.schemaVersion < 3) {
+			this.migrateToV3(db)
 		}
 	}
 
@@ -493,6 +552,296 @@ export class UsageStatsDatabase {
 		}
 	}
 
+	/**
+	 * Migration v2 → v3: Backfill breakdown rollup rows and non-cancelled-only rollups.
+	 *
+	 * In v2, only aggregate rollup rows (axis='', root_task_id='') were stored.
+	 * In v3, per-axis breakdown rows (axis='model'/'provider'/'mode') and
+	 * non-cancelled-only rollup rows (root_task_id='__nc__') are also stored
+	 * for fast snapshot assembly without scanning all events.
+	 *
+	 * This migration:
+	 * 1. Deletes existing breakdown rows (axis != '') and non-cancelled rows
+	 * 2. Reads all usage_events in batches and generates breakdown + non-cancelled rollups
+	 * 3. Uses getEffectiveCost() for cost (matching computeEventDelta)
+	 *
+	 * Idempotent: running twice produces the same result (delete + rebuild).
+	 */
+	private migrateToV3(db: DatabaseSync): void {
+		try {
+			db.exec("BEGIN")
+
+			// 1. Delete existing breakdown rows and non-cancelled rows
+			db.exec("DELETE FROM stats_rollup WHERE axis != '' OR root_task_id = '__nc__'")
+
+			// 2. Read all events in batches and rebuild breakdown + non-cancelled rollups
+			let afterSeq = 0
+			const batchSize = 1000
+
+			while (true) {
+				const rows = db
+					.prepare(
+						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id,
+						 provider, model, mode, usage_json, provenance
+						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
+					)
+					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
+
+				if (rows.length === 0) {
+					break
+				}
+
+				for (const row of rows) {
+					const epochMs = row.occurred_epoch_ms as number
+					const tzOffset = row.timezone_offset_minutes as number
+					const dayBucket = computeLocalDayBucket(epochMs, tzOffset)
+					const monthBucket = dayBucket.slice(0, 7)
+					const status = row.status as string
+					const provider = row.provider as string
+					const model = row.model as string
+					const mode = row.mode as string
+					const provenance = (row.provenance as string) ?? "live"
+					const usage = JSON.parse(row.usage_json as string)
+
+					const inputTokens = usage.inputTokens?.value ?? 0
+					const outputTokens = usage.outputTokens?.value ?? 0
+					const cacheReadTokens = usage.cacheReadTokens?.value ?? 0
+					const cacheWriteTokens = usage.cacheWriteTokens?.value ?? 0
+					const reasoningTokens = usage.reasoningTokens?.value ?? 0
+					const totalTokens = inputTokens + outputTokens
+					// Use getEffectiveCost for consistency with computeEventDelta
+					const eventForCost = {
+						provider,
+						model,
+						usage: { ...usage },
+					} as UsageEventV1
+					const costUsd = getEffectiveCost(eventForCost)
+
+					const completedCalls = status === "completed" ? 1 : 0
+					const failedCalls = status === "failed" ? 1 : 0
+					const cancelledCalls = status === "cancelled" ? 1 : 0
+
+					// Build breakdown rows for each axis
+					const axisValues: Array<{ axis: string; axisValue: string }> = [
+						{ axis: "model", axisValue: model },
+						{ axis: "provider", axisValue: provider },
+						{ axis: "mode", axisValue: mode },
+					]
+
+					for (const { axis, axisValue } of axisValues) {
+						// Daily breakdown
+						this.updateRollup(db, {
+							periodType: "daily",
+							periodKey: dayBucket,
+							rootTaskId: "",
+							axis,
+							axisValue,
+							eventCount: 1,
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+
+						// Monthly breakdown
+						this.updateRollup(db, {
+							periodType: "monthly",
+							periodKey: monthBucket,
+							rootTaskId: "",
+							axis,
+							axisValue,
+							eventCount: 1,
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+
+						// Lifetime breakdown
+						this.updateRollup(db, {
+							periodType: "lifetime",
+							periodKey: "all",
+							rootTaskId: "",
+							axis,
+							axisValue,
+							eventCount: 1,
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+					}
+
+					// Non-cancelled-only rollups (root_task_id = '__nc__')
+					if (status !== "cancelled") {
+						// Daily non-cancelled
+						this.updateRollup(db, {
+							periodType: "daily",
+							periodKey: dayBucket,
+							rootTaskId: NON_CANCELLED_KEY,
+							axis: "",
+							axisValue: "",
+							eventCount: 1,
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+
+						// Monthly non-cancelled
+						this.updateRollup(db, {
+							periodType: "monthly",
+							periodKey: monthBucket,
+							rootTaskId: NON_CANCELLED_KEY,
+							axis: "",
+							axisValue: "",
+							eventCount: 1,
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+
+						// Lifetime non-cancelled
+						this.updateRollup(db, {
+							periodType: "lifetime",
+							periodKey: "all",
+							rootTaskId: NON_CANCELLED_KEY,
+							axis: "",
+							axisValue: "",
+							eventCount: 1,
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+
+						// Non-cancelled breakdown rows for each axis
+						for (const { axis, axisValue } of [
+							{ axis: "model", axisValue: model },
+							{ axis: "provider", axisValue: provider },
+							{ axis: "mode", axisValue: mode },
+						]) {
+							// Daily non-cancelled breakdown
+							this.updateRollup(db, {
+								periodType: "daily",
+								periodKey: dayBucket,
+								rootTaskId: NON_CANCELLED_KEY,
+								axis,
+								axisValue,
+								eventCount: 1,
+								completedCalls,
+								failedCalls,
+								cancelledCalls,
+								inputTokens,
+								outputTokens,
+								cacheReadTokens,
+								cacheWriteTokens,
+								reasoningTokens,
+								totalTokens,
+								costUsd,
+							})
+
+							// Monthly non-cancelled breakdown
+							this.updateRollup(db, {
+								periodType: "monthly",
+								periodKey: monthBucket,
+								rootTaskId: NON_CANCELLED_KEY,
+								axis,
+								axisValue,
+								eventCount: 1,
+								completedCalls,
+								failedCalls,
+								cancelledCalls,
+								inputTokens,
+								outputTokens,
+								cacheReadTokens,
+								cacheWriteTokens,
+								reasoningTokens,
+								totalTokens,
+								costUsd,
+							})
+
+							// Lifetime non-cancelled breakdown
+							this.updateRollup(db, {
+								periodType: "lifetime",
+								periodKey: "all",
+								rootTaskId: NON_CANCELLED_KEY,
+								axis,
+								axisValue,
+								eventCount: 1,
+								completedCalls,
+								failedCalls,
+								cancelledCalls,
+								inputTokens,
+								outputTokens,
+								cacheReadTokens,
+								cacheWriteTokens,
+								reasoningTokens,
+								totalTokens,
+								costUsd,
+							})
+						}
+					}
+				}
+
+				afterSeq = (rows[rows.length - 1].seq as number) ?? afterSeq
+			}
+
+			// 3. Update schema version
+			this.updateMeta(db, { schemaVersion: 3 })
+
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/001",
+				"Failed to migrate to schema v3 (breakdown rollup backfill)",
+				err,
+			)
+		}
+	}
+
 	// ── Public API: Append ─────────────────────────────────────────────────
 
 	/**
@@ -536,7 +885,8 @@ export class UsageStatsDatabase {
 		const cacheWriteTokens = event.usage.cacheWriteTokens?.value ?? 0
 		const reasoningTokens = event.usage.reasoningTokens?.value ?? 0
 		const totalTokens = event.usage.totalTokens?.value ?? inputTokens + outputTokens
-		const costUsd = event.usage.costUsd?.value ?? 0
+		// Use getEffectiveCost for rollup consistency with computeEventDelta
+		const costUsd = getEffectiveCost(event)
 
 		const status = event.status
 		const completedCalls = status === "completed" ? 1 : 0
@@ -655,6 +1005,36 @@ export class UsageStatsDatabase {
 					costUsd,
 				})
 
+				// Update breakdown rollups for each supported axis
+				this.updateBreakdownRollups(db, event, dayBucket, monthBucket, {
+					completedCalls,
+					failedCalls,
+					cancelledCalls,
+					inputTokens,
+					outputTokens,
+					cacheReadTokens,
+					cacheWriteTokens,
+					reasoningTokens,
+					totalTokens,
+					costUsd,
+				})
+
+				// Update non-cancelled-only rollups (root_task_id = '__nc__')
+				if (status !== "cancelled") {
+					this.updateNonCancelledRollups(db, dayBucket, monthBucket, {
+						completedCalls,
+						failedCalls,
+						cancelledCalls,
+						inputTokens,
+						outputTokens,
+						cacheReadTokens,
+						cacheWriteTokens,
+						reasoningTokens,
+						totalTokens,
+						costUsd,
+					})
+				}
+
 				// Update session projection
 				this.upsertSession(db, {
 					rootTaskId,
@@ -721,7 +1101,8 @@ export class UsageStatsDatabase {
 				const cacheWriteTokens = event.usage.cacheWriteTokens?.value ?? 0
 				const reasoningTokens = event.usage.reasoningTokens?.value ?? 0
 				const totalTokens = event.usage.totalTokens?.value ?? inputTokens + outputTokens
-				const costUsd = event.usage.costUsd?.value ?? 0
+				// Use getEffectiveCost for rollup consistency with computeEventDelta
+				const costUsd = getEffectiveCost(event)
 
 				const status = event.status
 				const completedCalls = status === "completed" ? 1 : 0
@@ -832,33 +1213,63 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 					})
-
-					// Update session projection
-					this.upsertSession(db, {
-						rootTaskId,
-						model: event.model,
-						provider: event.provider,
-						costUsd,
-						totalTokens,
-						lastActivityMs: occurredEpochMs,
-						dayBucket,
-					})
-
-					this.updateMeta(db, { lastSequence: sequence })
+	
+						// Update breakdown rollups for each supported axis
+						this.updateBreakdownRollups(db, event, dayBucket, monthBucket, {
+							completedCalls,
+							failedCalls,
+							cancelledCalls,
+							inputTokens,
+							outputTokens,
+							cacheReadTokens,
+							cacheWriteTokens,
+							reasoningTokens,
+							totalTokens,
+							costUsd,
+						})
+	
+						// Update non-cancelled-only rollups
+						if (status !== "cancelled") {
+							this.updateNonCancelledRollups(db, dayBucket, monthBucket, {
+								completedCalls,
+								failedCalls,
+								cancelledCalls,
+								inputTokens,
+								outputTokens,
+								cacheReadTokens,
+								cacheWriteTokens,
+								reasoningTokens,
+								totalTokens,
+								costUsd,
+							})
+						}
+	
+						// Update session projection
+						this.upsertSession(db, {
+							rootTaskId,
+							model: event.model,
+							provider: event.provider,
+							costUsd,
+							totalTokens,
+							lastActivityMs: occurredEpochMs,
+							dayBucket,
+						})
+	
+						this.updateMeta(db, { lastSequence: sequence })
+					}
 				}
+	
+				db.exec("COMMIT")
+				return insertedCount
+			} catch (err) {
+				try {
+					db.exec("ROLLBACK")
+				} catch {
+					// Ignore
+				}
+				throw new StatsDbError("STATS_DB/append/001", `Failed to bulk append ${events.length} events`, err)
 			}
-
-			db.exec("COMMIT")
-			return insertedCount
-		} catch (err) {
-			try {
-				db.exec("ROLLBACK")
-			} catch {
-				// Ignore
-			}
-			throw new StatsDbError("STATS_DB/append/001", `Failed to bulk append ${events.length} events`, err)
 		}
-	}
 
 	// ── Public API: Read ───────────────────────────────────────────────────
 
@@ -1104,6 +1515,295 @@ export class UsageStatsDatabase {
 		}
 	}
 
+	/**
+	 * Queries breakdown rollup rows for a specific axis within a time range.
+	 * Returns one row per axis_value, ordered by total_tokens descending.
+	 *
+	 * @param periodType 'daily', 'monthly', or 'lifetime'
+	 * @param fromKey Period key range start (inclusive). Use 'all' for lifetime.
+	 * @param toKey Period key range end (inclusive). Use 'all' for lifetime.
+	 * @param axis The breakdown axis ('model', 'provider', 'mode')
+	 * @param includeCancelled If true, queries aggregate rows (root_task_id='').
+	 *                         If false, queries non-cancelled rows (root_task_id='__nc__').
+	 */
+	queryBreakdownRollups(
+		periodType: string,
+		fromKey: string,
+		toKey: string,
+		axis: string,
+		includeCancelled: boolean = false,
+	): BreakdownRollupRow[] {
+		const db = this.getDb()
+		const rootTaskId = includeCancelled ? "" : NON_CANCELLED_KEY
+
+		try {
+			let rows: Array<Record<string, unknown>>
+
+			if (periodType === "lifetime") {
+				rows = db
+					.prepare(
+						`SELECT axis_value, event_count, completed_calls, failed_calls, cancelled_calls,
+							input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+							reasoning_tokens, total_tokens, cost_usd
+						 FROM stats_rollup
+						 WHERE period_type = 'lifetime' AND period_key = 'all'
+						 AND root_task_id = ? AND axis = ?
+						 ORDER BY total_tokens DESC`,
+					)
+					.all(rootTaskId, axis) as Array<Record<string, unknown>>
+			} else {
+				rows = db
+					.prepare(
+						`SELECT axis_value,
+							SUM(event_count) as event_count,
+							SUM(completed_calls) as completed_calls,
+							SUM(failed_calls) as failed_calls,
+							SUM(cancelled_calls) as cancelled_calls,
+							SUM(input_tokens) as input_tokens,
+							SUM(output_tokens) as output_tokens,
+							SUM(cache_read_tokens) as cache_read_tokens,
+							SUM(cache_write_tokens) as cache_write_tokens,
+							SUM(reasoning_tokens) as reasoning_tokens,
+							SUM(total_tokens) as total_tokens,
+							SUM(cost_usd) as cost_usd
+						 FROM stats_rollup
+						 WHERE period_type = ? AND root_task_id = ? AND axis = ?
+						 AND period_key >= ? AND period_key <= ?
+						 GROUP BY axis_value
+						 ORDER BY total_tokens DESC`,
+					)
+					.all(periodType, rootTaskId, axis, fromKey, toKey) as Array<Record<string, unknown>>
+			}
+
+			return rows.map((row) => ({
+				axisValue: row.axis_value as string,
+				eventCount: row.event_count as number,
+				completedCalls: row.completed_calls as number,
+				failedCalls: row.failed_calls as number,
+				cancelledCalls: row.cancelled_calls as number,
+				inputTokens: row.input_tokens as number,
+				outputTokens: row.output_tokens as number,
+				cacheReadTokens: row.cache_read_tokens as number,
+				cacheWriteTokens: row.cache_write_tokens as number,
+				reasoningTokens: row.reasoning_tokens as number,
+				totalTokens: row.total_tokens as number,
+				costUsd: row.cost_usd as number,
+			}))
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/read/001",
+				`Failed to query breakdown rollups for axis ${axis}`,
+				err,
+			)
+		}
+	}
+
+	/**
+	 * Queries detailed daily rollup rows (with all token breakdowns) for a range.
+	 * Returns one row per day, oldest first.
+	 *
+	 * @param fromDay Start day (YYYY-MM-DD, inclusive)
+	 * @param toDay End day (YYYY-MM-DD, inclusive)
+	 * @param includeCancelled If true, queries aggregate rows. If false, non-cancelled.
+	 */
+	queryDailyRollupsDetailed(
+		fromDay: string,
+		toDay: string,
+		includeCancelled: boolean = false,
+	): DailyRollupDetailedRow[] {
+		const db = this.getDb()
+		const rootTaskId = includeCancelled ? "" : NON_CANCELLED_KEY
+
+		try {
+			const rows = db
+				.prepare(
+					`SELECT period_key as day, event_count, completed_calls, failed_calls, cancelled_calls,
+						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+						reasoning_tokens, total_tokens, cost_usd
+					 FROM stats_rollup
+					 WHERE period_type = 'daily' AND root_task_id = ? AND axis = ''
+					 AND period_key >= ? AND period_key <= ?
+					 ORDER BY period_key ASC`,
+				)
+				.all(rootTaskId, fromDay, toDay) as Array<Record<string, unknown>>
+
+			return rows.map((row) => ({
+				day: row.day as string,
+				eventCount: row.event_count as number,
+				completedCalls: row.completed_calls as number,
+				failedCalls: row.failed_calls as number,
+				cancelledCalls: row.cancelled_calls as number,
+				inputTokens: row.input_tokens as number,
+				outputTokens: row.output_tokens as number,
+				cacheReadTokens: row.cache_read_tokens as number,
+				cacheWriteTokens: row.cache_write_tokens as number,
+				reasoningTokens: row.reasoning_tokens as number,
+				totalTokens: row.total_tokens as number,
+				costUsd: row.cost_usd as number,
+			}))
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/read/001",
+				`Failed to query detailed daily rollups from ${fromDay} to ${toDay}`,
+				err,
+			)
+		}
+	}
+
+	/**
+	 * Queries lifetime totals, optionally excluding cancelled events.
+	 */
+	queryLifetimeTotalsFiltered(includeCancelled: boolean = false): {
+		eventCount: number
+		totalCost: number
+		totalTokens: number
+		inputTokens: number
+		outputTokens: number
+		cacheReadTokens: number
+		cacheWriteTokens: number
+		reasoningTokens: number
+		completedCalls: number
+		failedCalls: number
+		cancelledCalls: number
+	} {
+		const db = this.getDb()
+		const rootTaskId = includeCancelled ? "" : NON_CANCELLED_KEY
+
+		try {
+			const row = db
+				.prepare(
+					`SELECT event_count, cost_usd as total_cost, total_tokens,
+						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+						reasoning_tokens, completed_calls, failed_calls, cancelled_calls
+					 FROM stats_rollup
+					 WHERE period_type = 'lifetime' AND root_task_id = ? AND axis = ''
+					 AND period_key = 'all'`,
+				)
+				.get(rootTaskId) as Record<string, unknown> | undefined
+
+			if (!row) {
+				return {
+					eventCount: 0,
+					totalCost: 0,
+					totalTokens: 0,
+					inputTokens: 0,
+					outputTokens: 0,
+					cacheReadTokens: 0,
+					cacheWriteTokens: 0,
+					reasoningTokens: 0,
+					completedCalls: 0,
+					failedCalls: 0,
+					cancelledCalls: 0,
+				}
+			}
+
+			return {
+				eventCount: row.event_count as number,
+				totalCost: row.total_cost as number,
+				totalTokens: row.total_tokens as number,
+				inputTokens: row.input_tokens as number,
+				outputTokens: row.output_tokens as number,
+				cacheReadTokens: row.cache_read_tokens as number,
+				cacheWriteTokens: row.cache_write_tokens as number,
+				reasoningTokens: row.reasoning_tokens as number,
+				completedCalls: row.completed_calls as number,
+				failedCalls: row.failed_calls as number,
+				cancelledCalls: row.cancelled_calls as number,
+			}
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query lifetime totals (filtered)", err)
+		}
+	}
+
+	/**
+	 * Queries coverage statistics (first/last event timestamps, backfill count)
+	 * for a given time range.
+	 *
+	 * @param fromEpochMs Start epoch ms (inclusive). 0 for no lower bound.
+	 * @param toEpochMs End epoch ms (exclusive). Infinity for no upper bound.
+	 * @param includeCancelled If true, includes cancelled events.
+	 */
+	queryCoverageStats(
+		fromEpochMs: number,
+		toEpochMs: number,
+		includeCancelled: boolean = false,
+	): CoverageStats {
+		const db = this.getDb()
+
+		try {
+			let query = `SELECT MIN(occurred_epoch_ms) as first_ms, MAX(occurred_epoch_ms) as last_ms,
+						SUM(CASE WHEN provenance = 'history-backfill' THEN 1 ELSE 0 END) as backfilled
+						FROM usage_events
+						WHERE occurred_epoch_ms >= ? AND occurred_epoch_ms < ?`
+			const params: Array<number | string> = [fromEpochMs, toEpochMs]
+
+			if (!includeCancelled) {
+				query += ` AND status != 'cancelled'`
+			}
+
+			const row = db.prepare(query).get(...params) as Record<string, unknown> | undefined
+
+			if (!row || row.first_ms === null) {
+				return {
+					firstEventAt: undefined,
+					lastEventAt: undefined,
+					backfilledEventCount: 0,
+				}
+			}
+
+			return {
+				firstEventAt: new Date(row.first_ms as number).toISOString(),
+				lastEventAt: new Date(row.last_ms as number).toISOString(),
+				backfilledEventCount: row.backfilled as number,
+			}
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query coverage stats", err)
+		}
+	}
+
+	/**
+	 * Queries a single session by root_task_id.
+	 * This is a direct lookup (O(1) via primary key) replacing the
+	 * previous pattern of querySessions(100).find(...).
+	 *
+	 * @returns The session row, or undefined if not found.
+	 */
+	querySessionByRootTaskId(rootTaskId: string): SessionRow | undefined {
+		const db = this.getDb()
+
+		try {
+			const row = db
+				.prepare(
+					`SELECT root_task_id, title, total_cost, total_tokens, model, provider,
+						last_activity_ms, event_count
+					 FROM session_metadata
+					 WHERE root_task_id = ?`,
+				)
+				.get(rootTaskId) as Record<string, unknown> | undefined
+
+			if (!row) {
+				return undefined
+			}
+
+			return {
+				rootTaskId: row.root_task_id as string,
+				title: row.title as string,
+				totalCost: row.total_cost as number,
+				totalTokens: row.total_tokens as number,
+				model: row.model as string,
+				provider: row.provider as string,
+				lastActivity: row.last_activity_ms as number,
+				eventCount: row.event_count as number,
+			}
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/read/001",
+				`Failed to query session by root_task_id: ${rootTaskId}`,
+				err,
+			)
+		}
+	}
+
 	// ── Public API: Clear ─────────────────────────────────────────────────
 
 	/**
@@ -1250,6 +1950,168 @@ export class UsageStatsDatabase {
 			reasoningTokens: params.reasoningTokens,
 			totalTokens: params.totalTokens,
 			costUsd: params.costUsd,
+		})
+	}
+
+	/**
+	 * Updates breakdown rollup rows for each supported axis (model, provider, mode).
+	 * For each axis, writes daily, monthly, and lifetime breakdown rows.
+	 * Also writes non-cancelled-only breakdown rows (root_task_id='__nc__')
+	 * for non-cancelled events to support includeCancelled=false queries.
+	 */
+	private updateBreakdownRollups(
+		db: DatabaseSync,
+		event: UsageEventV1,
+		dayBucket: string,
+		monthBucket: string,
+		values: {
+			completedCalls: number
+			failedCalls: number
+			cancelledCalls: number
+			inputTokens: number
+			outputTokens: number
+			cacheReadTokens: number
+			cacheWriteTokens: number
+			reasoningTokens: number
+			totalTokens: number
+			costUsd: number
+		},
+	): void {
+		const axisValueMap: Record<string, string> = {
+			model: event.model,
+			provider: event.endpoint ? `${event.provider} (${event.endpoint})` : event.provider,
+			mode: event.mode,
+		}
+
+		const isCancelled = event.status === "cancelled"
+
+		for (const axis of BREAKDOWN_AXES) {
+			const axisValue = axisValueMap[axis]
+
+			// Aggregate breakdown (root_task_id = "")
+			// Daily breakdown
+			this.updateRollup(db, {
+				periodType: "daily",
+				periodKey: dayBucket,
+				rootTaskId: "",
+				axis,
+				axisValue,
+				eventCount: 1,
+				...values,
+			})
+
+			// Monthly breakdown
+			this.updateRollup(db, {
+				periodType: "monthly",
+				periodKey: monthBucket,
+				rootTaskId: "",
+				axis,
+				axisValue,
+				eventCount: 1,
+				...values,
+			})
+
+			// Lifetime breakdown
+			this.updateRollup(db, {
+				periodType: "lifetime",
+				periodKey: "all",
+				rootTaskId: "",
+				axis,
+				axisValue,
+				eventCount: 1,
+				...values,
+			})
+
+			// Non-cancelled-only breakdown (root_task_id = NON_CANCELLED_KEY)
+			if (!isCancelled) {
+				// Daily non-cancelled breakdown
+				this.updateRollup(db, {
+					periodType: "daily",
+					periodKey: dayBucket,
+					rootTaskId: NON_CANCELLED_KEY,
+					axis,
+					axisValue,
+					eventCount: 1,
+					...values,
+				})
+
+				// Monthly non-cancelled breakdown
+				this.updateRollup(db, {
+					periodType: "monthly",
+					periodKey: monthBucket,
+					rootTaskId: NON_CANCELLED_KEY,
+					axis,
+					axisValue,
+					eventCount: 1,
+					...values,
+				})
+
+				// Lifetime non-cancelled breakdown
+				this.updateRollup(db, {
+					periodType: "lifetime",
+					periodKey: "all",
+					rootTaskId: NON_CANCELLED_KEY,
+					axis,
+					axisValue,
+					eventCount: 1,
+					...values,
+				})
+			}
+		}
+	}
+
+	/**
+	 * Updates non-cancelled-only aggregate rollup rows (root_task_id = '__nc__').
+	 * These rows exclude cancelled events for fast includeCancelled=false queries.
+	 */
+	private updateNonCancelledRollups(
+		db: DatabaseSync,
+		dayBucket: string,
+		monthBucket: string,
+		values: {
+			completedCalls: number
+			failedCalls: number
+			cancelledCalls: number
+			inputTokens: number
+			outputTokens: number
+			cacheReadTokens: number
+			cacheWriteTokens: number
+			reasoningTokens: number
+			totalTokens: number
+			costUsd: number
+		},
+	): void {
+		// Daily non-cancelled
+		this.updateRollup(db, {
+			periodType: "daily",
+			periodKey: dayBucket,
+			rootTaskId: NON_CANCELLED_KEY,
+			axis: "",
+			axisValue: "",
+			eventCount: 1,
+			...values,
+		})
+
+		// Monthly non-cancelled
+		this.updateRollup(db, {
+			periodType: "monthly",
+			periodKey: monthBucket,
+			rootTaskId: NON_CANCELLED_KEY,
+			axis: "",
+			axisValue: "",
+			eventCount: 1,
+			...values,
+		})
+
+		// Lifetime non-cancelled
+		this.updateRollup(db, {
+			periodType: "lifetime",
+			periodKey: "all",
+			rootTaskId: NON_CANCELLED_KEY,
+			axis: "",
+			axisValue: "",
+			eventCount: 1,
+			...values,
 		})
 	}
 

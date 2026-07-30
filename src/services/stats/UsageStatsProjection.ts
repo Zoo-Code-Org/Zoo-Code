@@ -1,4 +1,4 @@
-﻿// src/services/stats/UsageStatsProjection.ts
+// src/services/stats/UsageStatsProjection.ts
 //
 // Sub-task 3: Rollup snapshot assembly, edge-day correction, bucket-key
 // serialization, and session page projection.
@@ -7,6 +7,12 @@
 // return typed projection results. Cost recalculation remains single-source
 // logic (delegated to computeEventDelta / getEffectiveCost) — no cost
 // arithmetic is duplicated in SQL.
+//
+// ST-1 Optimization: assembleRollupSnapshot() now uses pre-computed rollup
+// tables instead of scanning all events. For single-axis queries on
+// model/provider/mode/day, the fast path reads O(distinct values) rows
+// instead of O(N) events. Multi-axis, week/month/source/status axes, or
+// cacheRatio estimation fall back to event scan.
 
 import type {
 	UsageEventV1,
@@ -21,7 +27,13 @@ import type {
 	HeatmapSnapshot,
 } from "@roo-code/types"
 
-import { UsageStatsDatabase, type SessionRow, type DailyRollupRow } from "./UsageStatsDatabase"
+import {
+	UsageStatsDatabase,
+	type SessionRow,
+	type DailyRollupRow,
+	type BreakdownRollupRow,
+	type DailyRollupDetailedRow,
+} from "./UsageStatsDatabase"
 import {
 	computeEventContribution,
 	computeEventDelta,
@@ -179,17 +191,159 @@ function computeHeatmapRange(rangeDays: number, timezone: string): { fromDay: st
 	return { fromDay, toDay, days }
 }
 
+// ── Internal: Rollup Fast Path Helpers ──────────────────────────────────────
+
+/**
+ * Axes that have pre-computed breakdown rollup rows in the database.
+ * The 'day' axis is handled via daily rollup queries (not per-axis breakdown).
+ */
+const ROLLUP_SUPPORTED_AXES = new Set(["model", "provider", "mode", "day"])
+
+/**
+ * Determines whether the fast rollup path can be used for the given query.
+ *
+ * The fast path is available when:
+ * 1. No cacheRatio estimation is needed (cacheRatio is undefined or 0)
+ * 2. All groupBy axes are supported by pre-computed rollups
+ * 3. At most one non-day axis (multi-axis Cartesian products are not pre-computed)
+ *
+ * When cacheRatio is set, the cacheReadTokens may be estimated differently
+ * per event, so we cannot use pre-aggregated rollup values.
+ */
+function canUseRollupFastPath(query: StatsQuery): boolean {
+	// cacheRatio estimation changes cacheReadTokens per-event, so rollups
+	// (which store raw cacheReadTokens) would be incorrect.
+	if (query.cacheRatio !== undefined && query.cacheRatio > 0) {
+		return false
+	}
+
+	// Check all axes are supported
+	for (const axis of query.groupBy) {
+		if (!ROLLUP_SUPPORTED_AXES.has(axis)) {
+			return false
+		}
+	}
+
+	// Multi-axis queries (excluding day) are not pre-computed.
+	// e.g., [model, provider] would need Cartesian product rows.
+	// But [day, model] is also multi-axis and not pre-computed.
+	// Only single-axis queries use the fast path.
+	if (query.groupBy.length > 1) {
+		return false
+	}
+
+	return true
+}
+
+/**
+ * Converts a BreakdownRollupRow to a StatsBucket with the given key.
+ */
+function breakdownRowToBucket(row: BreakdownRollupRow, axis: string): StatsBucket {
+	return {
+		key: { [axis]: row.axisValue },
+		events: row.eventCount,
+		completedCalls: row.completedCalls,
+		failedCalls: row.failedCalls,
+		cancelledCalls: row.cancelledCalls,
+		inputTokens: row.inputTokens,
+		outputTokens: row.outputTokens,
+		cacheReadTokens: row.cacheReadTokens,
+		cacheWriteTokens: row.cacheWriteTokens,
+		reasoningTokens: row.reasoningTokens,
+		totalTokens: row.totalTokens,
+		costUsd: row.costUsd,
+		unknownEventCount: 0,
+	}
+}
+
+/**
+ * Converts a DailyRollupDetailedRow to a StatsBucket with a day key.
+ */
+function dailyRowToBucket(row: DailyRollupDetailedRow): StatsBucket {
+	return {
+		key: { day: row.day },
+		events: row.eventCount,
+		completedCalls: row.completedCalls,
+		failedCalls: row.failedCalls,
+		cancelledCalls: row.cancelledCalls,
+		inputTokens: row.inputTokens,
+		outputTokens: row.outputTokens,
+		cacheReadTokens: row.cacheReadTokens,
+		cacheWriteTokens: row.cacheWriteTokens,
+		reasoningTokens: row.reasoningTokens,
+		totalTokens: row.totalTokens,
+		costUsd: row.costUsd,
+		unknownEventCount: 0,
+	}
+}
+
+/**
+ * Sums an array of DailyRollupDetailedRow into a single totals bucket.
+ */
+function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[]): StatsBucket {
+	const totals = createEmptyBucket()
+	for (const row of rows) {
+		totals.events += row.eventCount
+		totals.completedCalls += row.completedCalls
+		totals.failedCalls += row.failedCalls
+		totals.cancelledCalls += row.cancelledCalls
+		totals.inputTokens += row.inputTokens
+		totals.outputTokens += row.outputTokens
+		totals.cacheReadTokens += row.cacheReadTokens
+		totals.cacheWriteTokens += row.cacheWriteTokens
+		totals.reasoningTokens += row.reasoningTokens
+		totals.totalTokens += row.totalTokens
+		totals.costUsd += row.costUsd
+	}
+	return totals
+}
+
+/**
+ * Converts lifetime totals (from queryLifetimeTotalsFiltered) to a StatsBucket.
+ */
+function lifetimeTotalsToBucket(totals: {
+	eventCount: number
+	totalCost: number
+	totalTokens: number
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	reasoningTokens: number
+	completedCalls: number
+	failedCalls: number
+	cancelledCalls: number
+}): StatsBucket {
+	return {
+		key: {},
+		events: totals.eventCount,
+		completedCalls: totals.completedCalls,
+		failedCalls: totals.failedCalls,
+		cancelledCalls: totals.cancelledCalls,
+		inputTokens: totals.inputTokens,
+		outputTokens: totals.outputTokens,
+		cacheReadTokens: totals.cacheReadTokens,
+		cacheWriteTokens: totals.cacheWriteTokens,
+		reasoningTokens: totals.reasoningTokens,
+		totalTokens: totals.totalTokens,
+		costUsd: totals.totalCost,
+		unknownEventCount: 0,
+	}
+}
+
 // ── Public API: assembleRollupSnapshot ──────────────────────────────────────
 
 /**
  * Reads persisted rollups for the given query range and assembles a
  * StatsSnapshot from the database.
  *
- * This function reads all events matching the query's time range from the
- * database and aggregates them using the same pure logic as UsageAggregator.
- * The rollup tables in the DB are used for fast heatmap and session queries,
- * but the main snapshot is assembled from events to ensure exact correctness
- * (including cost recalculation, cache ratio, and inclusion semantics).
+ * ST-1 Optimization: This function now uses pre-computed rollup tables
+ * instead of scanning all events. For single-axis queries on
+ * model/provider/mode/day without cacheRatio estimation, the fast path
+ * reads O(distinct values) rows instead of O(N) events.
+ *
+ * For complex queries (multi-axis, week/month/source/status axes, or
+ * cacheRatio estimation), it falls back to the original event-scan path.
  *
  * @param db The initialized UsageStatsDatabase
  * @param query The statistics query
@@ -201,72 +355,181 @@ export function assembleRollupSnapshot(
 	options: { recordingPaused?: boolean } = {},
 ): StatsSnapshot {
 	try {
-		// Read all events from the database
-		const allEvents = db.readAllEvents()
-
-		// Filter by time range
-		const { from, to } = resolveTimeRange(query)
-		const filtered = allEvents.filter((event) => {
-			const eventTime = new Date(event.occurredAt).getTime()
-			if (from && eventTime < from.getTime()) return false
-			if (to && eventTime >= to.getTime()) return false
-			return true
-		})
-
-		// Filter cancelled
-		const includeCancelled = query.includeCancelled ?? false
-		const visibleEvents = includeCancelled ? filtered : filtered.filter((e) => e.status !== "cancelled")
-
-		// Compute bucket keys
-		const groupBy = query.groupBy
-		const cacheRatio = query.cacheRatio
-		const bucketMap = new Map<string, StatsBucket>()
-
-		for (const event of visibleEvents) {
-			const timeBuckets = computeTimeBuckets(event, query.timezone)
-			const item = { event, ...timeBuckets }
-			const groupKeys = computeGroupKeys(event, groupBy, query.timezone)
-
-			for (const bucketKey of groupKeys) {
-				const mapKey = serializeBucketKey(bucketKey)
-				let bucket = bucketMap.get(mapKey)
-				if (!bucket) {
-					bucket = createEmptyBucket(bucketKey)
-					bucketMap.set(mapKey, bucket)
-				}
-				const delta = computeEventDelta(event, cacheRatio)
-				applyDeltaToBucket(bucket, delta)
-			}
+		// Check if we can use the fast rollup path
+		if (canUseRollupFastPath(query)) {
+			return assembleRollupSnapshotFast(db, query, options)
 		}
-
-		// Compute totals
-		const totals = createEmptyBucket()
-		for (const event of visibleEvents) {
-			const delta = computeEventDelta(event, cacheRatio)
-			applyDeltaToBucket(totals, delta)
-		}
-
-		// Sort buckets
-		const buckets = sortBuckets(Array.from(bucketMap.values()), groupBy)
-
-		// Compute coverage
-		const times = visibleEvents.map((e) => new Date(e.occurredAt).getTime()).sort((a, b) => a - b)
-		const backfilledEventCount = visibleEvents.filter((e) => e.provenance === "history-backfill").length
-
-		return {
-			query,
-			generatedAt: new Date().toISOString(),
-			buckets,
-			totals,
-			coverage: {
-				firstEventAt: times.length > 0 ? new Date(times[0]).toISOString() : undefined,
-				lastEventAt: times.length > 0 ? new Date(times[times.length - 1]).toISOString() : undefined,
-				recordingPaused: options.recordingPaused ?? false,
-				backfilledEventCount,
-			},
-		}
+		return assembleRollupSnapshotFromEvents(db, query, options)
 	} catch (err) {
 		throw new StatsProjError("STATS_PROJ/assembleRollupSnapshot/001", "Failed to assemble rollup snapshot", err)
+	}
+}
+
+/**
+ * Fast path: assembles a snapshot from pre-computed rollup tables.
+ * Used for single-axis queries on model/provider/mode/day without cacheRatio.
+ */
+function assembleRollupSnapshotFast(
+	db: UsageStatsDatabase,
+	query: StatsQuery,
+	options: { recordingPaused?: boolean },
+): StatsSnapshot {
+	const includeCancelled = query.includeCancelled ?? false
+	const groupBy = query.groupBy
+	const { from, to } = resolveTimeRange(query)
+
+	// Determine the time range for rollup queries
+	const isAllTime = !from && !to
+
+	// Compute fromDay/toDay for daily rollup queries
+	let fromDay = "0000-01-01"
+	let toDay = "9999-12-31"
+	let fromEpochMs = 0
+	let toEpochMs = Number.MAX_SAFE_INTEGER
+
+	if (from) {
+		fromDay = computeDayBucket(from.toISOString(), query.timezone)
+		fromEpochMs = from.getTime()
+	}
+	if (to) {
+		// to is exclusive, so use the day before for inclusive query
+		const dayBefore = new Date(to.getTime() - 1)
+		toDay = computeDayBucket(dayBefore.toISOString(), query.timezone)
+		toEpochMs = to.getTime()
+	}
+
+	// Compute totals
+	let totals: StatsBucket
+	if (isAllTime) {
+		const lifetimeTotals = db.queryLifetimeTotalsFiltered(includeCancelled)
+		totals = lifetimeTotalsToBucket(lifetimeTotals)
+	} else {
+		const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
+		totals = sumDailyRowsToTotals(dailyRows)
+	}
+
+	// Compute breakdown buckets
+	let buckets: StatsBucket[] = []
+
+	if (groupBy.length === 0) {
+		// No grouping — return a single bucket with totals
+		buckets = []
+	} else {
+		const axis = groupBy[0]
+
+		if (axis === "day") {
+			// Day axis: use detailed daily rollups
+			const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
+			buckets = dailyRows.map(dailyRowToBucket)
+		} else {
+			// model/provider/mode axis: use breakdown rollups
+			let breakdownRows: BreakdownRollupRow[]
+
+			if (isAllTime) {
+				breakdownRows = db.queryBreakdownRollups("lifetime", "all", "all", axis, includeCancelled)
+			} else {
+				// Use monthly rollups for date ranges (covers cross-day aggregation)
+				const fromMonth = fromDay.slice(0, 7)
+				const toMonth = toDay.slice(0, 7)
+				breakdownRows = db.queryBreakdownRollups("monthly", fromMonth, toMonth, axis, includeCancelled)
+			}
+
+			buckets = breakdownRows.map((row) => breakdownRowToBucket(row, axis))
+		}
+	}
+
+	// Sort buckets
+	buckets = sortBuckets(buckets, groupBy)
+
+	// Compute coverage from the DB (fast indexed query)
+	const coverageStats = db.queryCoverageStats(fromEpochMs, toEpochMs, includeCancelled)
+
+	return {
+		query,
+		generatedAt: new Date().toISOString(),
+		buckets,
+		totals,
+		coverage: {
+			firstEventAt: coverageStats.firstEventAt,
+			lastEventAt: coverageStats.lastEventAt,
+			recordingPaused: options.recordingPaused ?? false,
+			backfilledEventCount: coverageStats.backfilledEventCount,
+		},
+	}
+}
+
+/**
+ * Fallback path: assembles a snapshot by scanning all events.
+ * Used for multi-axis queries, week/month/source/status axes, or cacheRatio estimation.
+ */
+function assembleRollupSnapshotFromEvents(
+	db: UsageStatsDatabase,
+	query: StatsQuery,
+	options: { recordingPaused?: boolean },
+): StatsSnapshot {
+	// Read all events from the database
+	const allEvents = db.readAllEvents()
+
+	// Filter by time range
+	const { from, to } = resolveTimeRange(query)
+	const filtered = allEvents.filter((event) => {
+		const eventTime = new Date(event.occurredAt).getTime()
+		if (from && eventTime < from.getTime()) return false
+		if (to && eventTime >= to.getTime()) return false
+		return true
+	})
+
+	// Filter cancelled
+	const includeCancelled = query.includeCancelled ?? false
+	const visibleEvents = includeCancelled ? filtered : filtered.filter((e) => e.status !== "cancelled")
+
+	// Compute bucket keys
+	const groupBy = query.groupBy
+	const cacheRatio = query.cacheRatio
+	const bucketMap = new Map<string, StatsBucket>()
+
+	for (const event of visibleEvents) {
+		const timeBuckets = computeTimeBuckets(event, query.timezone)
+		const item = { event, ...timeBuckets }
+		const groupKeys = computeGroupKeys(event, groupBy, query.timezone)
+
+		for (const bucketKey of groupKeys) {
+			const mapKey = serializeBucketKey(bucketKey)
+			let bucket = bucketMap.get(mapKey)
+			if (!bucket) {
+				bucket = createEmptyBucket(bucketKey)
+				bucketMap.set(mapKey, bucket)
+			}
+			const delta = computeEventDelta(event, cacheRatio)
+			applyDeltaToBucket(bucket, delta)
+		}
+	}
+
+	// Compute totals
+	const totals = createEmptyBucket()
+	for (const event of visibleEvents) {
+		const delta = computeEventDelta(event, cacheRatio)
+		applyDeltaToBucket(totals, delta)
+	}
+
+	// Sort buckets
+	const buckets = sortBuckets(Array.from(bucketMap.values()), groupBy)
+
+	// Compute coverage
+	const times = visibleEvents.map((e) => new Date(e.occurredAt).getTime()).sort((a, b) => a - b)
+	const backfilledEventCount = visibleEvents.filter((e) => e.provenance === "history-backfill").length
+
+	return {
+		query,
+		generatedAt: new Date().toISOString(),
+		buckets,
+		totals,
+		coverage: {
+			firstEventAt: times.length > 0 ? new Date(times[0]).toISOString() : undefined,
+			lastEventAt: times.length > 0 ? new Date(times[times.length - 1]).toISOString() : undefined,
+			recordingPaused: options.recordingPaused ?? false,
+			backfilledEventCount,
+		},
 	}
 }
 
@@ -413,9 +676,9 @@ export function applyEventToProjection(
 		// 4. Read updated session metadata for session upserts
 		// The event was already appended to the DB by the caller (UsageStatsService).
 		// We read the current session state to produce the upsert.
-		const sessionPage = db.querySessions(100, undefined)
+		// ST-1: Use direct lookup by root_task_id instead of querySessions(100).find(...)
 		const rootTaskId = event.rootTaskId ?? event.taskId
-		const sessionRow = sessionPage.sessions.find((s) => s.rootTaskId === rootTaskId)
+		const sessionRow = db.querySessionByRootTaskId(rootTaskId)
 
 		const sessionUpsert: DashboardSessionUpsert[] = []
 		if (sessionRow) {
