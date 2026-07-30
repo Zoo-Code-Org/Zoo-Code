@@ -22,6 +22,7 @@ import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 import { toolResultContains } from "./fixtures/tool-result"
+import { addViewStateFixtures } from "./fixtures/view-state"
 
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
@@ -130,6 +131,7 @@ async function main() {
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 				addDeepSeekV4Fixtures(mock)
+				addViewStateFixtures(mock)
 
 				mock.addFixture({
 					match: {

@@ -26,6 +26,7 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}): Promise<string>
 	/**
 	 * Resumes a task with the given ID.
@@ -96,6 +97,11 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * Programmatically approves the pending ask for a task by ID. Intended for use in tests only.
 	 */
 	approveTaskAsk(taskId: string): Promise<boolean>
+	/**
+	 * Simulates selecting a follow-up suggestion for a task by ID, including its optional mode switch.
+	 * Intended for use in tests only.
+	 */
+	selectTaskFollowupSuggestion(options: { taskId: string; answer: string; mode?: string }): Promise<boolean>
 	/**
 	 * Returns true if the API is ready to use.
 	 */
