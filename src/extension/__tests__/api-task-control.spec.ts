@@ -170,7 +170,7 @@ describe("API task controls", () => {
 			expect(task.approveAsk).toHaveBeenCalledOnce()
 		})
 
-		it("removes completed and aborted tasks from the registry", async () => {
+		it("removes completed, aborted, and unfocused tasks from the registry", async () => {
 			const completedTask = createTask("completed-task")
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, completedTask)
 			completedTask.emit(RooCodeEventName.TaskCompleted, completedTask.taskId, {}, {})
@@ -182,6 +182,12 @@ describe("API task controls", () => {
 			abortedTask.emit(RooCodeEventName.TaskAborted)
 
 			await expect(api.approveTaskAsk(abortedTask.taskId)).resolves.toBe(false)
+
+			const unfocusedTask = createTask("unfocused-task")
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, unfocusedTask)
+			unfocusedTask.emit(RooCodeEventName.TaskUnfocused)
+
+			await expect(api.approveTaskAsk(unfocusedTask.taskId)).resolves.toBe(false)
 		})
 	})
 
@@ -218,8 +224,9 @@ describe("API task controls", () => {
 			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Use architect")
 		})
 
-		it("responds without switching modes when the requested mode is invalid", async () => {
+		it("responds without switching modes and logs when the requested mode is invalid", async () => {
 			const task = createTask("task-invalid-mode")
+			api = new API(outputChannel, asClineProvider(sidebarProvider), undefined, true)
 			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
 
 			await expect(
@@ -229,6 +236,9 @@ describe("API task controls", () => {
 			expect(sidebarProvider.getState).toHaveBeenCalledOnce()
 			expect(sidebarProvider.handleModeSwitch).not.toHaveBeenCalled()
 			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Use invalid")
+			expect(outputChannel.appendLine).toHaveBeenCalledWith(
+				'[API#selectTaskFollowupSuggestion] ignoring unknown mode "not-a-mode" for task task-invalid-mode',
+			)
 		})
 
 		it("treats custom modes from the task provider state as valid", async () => {

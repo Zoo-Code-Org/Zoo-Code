@@ -898,15 +898,6 @@ export class ClineProvider
 		this.customModesManager?.dispose()
 		this.taskHistoryStore.dispose()
 		this.flushGlobalStateWriteThrough()
-		if (this.renderContext === "editor") {
-			try {
-				await this.clearPersistedViewState()
-			} catch (error) {
-				this.log(
-					`[dispose] Failed to clear persisted view state for ${this.viewStateId}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-		}
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
 

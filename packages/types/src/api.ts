@@ -21,6 +21,7 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
 		configuration?: RooCodeSettings
 		text?: string

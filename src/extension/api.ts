@@ -358,6 +358,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			if (isValidMode) {
 				await entry.provider.handleModeSwitch(mode)
+			} else {
+				this.log(`[API#selectTaskFollowupSuggestion] ignoring unknown mode "${mode}" for task ${taskId}`)
 			}
 		}
 
@@ -416,6 +418,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskUnfocused, () => {
 				this.emit(RooCodeEventName.TaskUnfocused, task.taskId)
+				this.tasksById.delete(task.taskId)
 			})
 
 			task.on(RooCodeEventName.TaskActive, () => {

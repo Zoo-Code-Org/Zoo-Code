@@ -1206,16 +1206,16 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		it("should clean up persisted viewStates entry when a tab provider is disposed", async () => {
+		it("should preserve persisted viewStates entry when an editor provider is disposed during teardown", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
 
-			await (provider as any).setViewStateId("tab-to-dispose")
+			await (provider as any).setViewStateId("tab-to-preserve")
 			await (provider as any).saveViewState("mode", "architect")
-			expect(provider.contextProxy.getValue("viewStates" as any)).toHaveProperty("tab-to-dispose")
+			expect(provider.contextProxy.getValue("viewStates" as any)).toHaveProperty("tab-to-preserve")
 
 			await provider.dispose()
 
-			expect(provider.contextProxy.getValue("viewStates" as any)).not.toHaveProperty("tab-to-dispose")
+			expect(provider.contextProxy.getValue("viewStates" as any)).toHaveProperty("tab-to-preserve")
 		})
 	})
 
