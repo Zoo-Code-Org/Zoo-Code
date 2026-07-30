@@ -21,6 +21,7 @@ import { addSearchFilesResultFixtures } from "./fixtures/search-files"
 import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
+import { toolResultContains } from "./fixtures/tool-result"
 
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
@@ -129,6 +130,36 @@ async function main() {
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 				addDeepSeekV4Fixtures(mock)
+
+				mock.addFixture({
+					match: {
+						predicate: (req) => toolResultContains(req, "call_modes_switch_001", []),
+					},
+					response: {
+						toolCalls: [
+							{
+								name: "attempt_completion",
+								arguments: JSON.stringify({ result: "Switched to ❓ Ask mode as requested." }),
+								id: "call_modes_post_switch_001",
+							},
+						],
+					},
+				})
+
+				mock.addFixture({
+					match: {
+						predicate: (req) => toolResultContains(req, "call_modes_switch_002", []),
+					},
+					response: {
+						toolCalls: [
+							{
+								name: "attempt_completion",
+								arguments: JSON.stringify({ result: "Switched to 🪲 Debug mode as requested." }),
+								id: "call_modes_post_switch_002",
+							},
+						],
+					},
+				})
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last
 				// user message starts with <environment_details> directly — no <user_message>

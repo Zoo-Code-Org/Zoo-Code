@@ -8,6 +8,7 @@ import pWaitFor from "p-wait-for"
 
 import {
 	type RooCodeAPI,
+	type GlobalState,
 	type RooCodeSettings,
 	type RooCodeEvents,
 	type ProviderSettings,
@@ -35,6 +36,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
+	private readonly tasksById = new Map<string, { approveAsk(): void }>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -309,6 +311,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		this.sidebarProvider.getCurrentTask()?.approveAsk()
 	}
 
+	public async approveTaskAsk(taskId: string): Promise<boolean> {
+		const task = this.tasksById.get(taskId)
+
+		if (!task) {
+			return false
+		}
+
+		task.approveAsk()
+		return true
+	}
+
 	public isReady() {
 		return this.sidebarProvider.viewLaunched
 	}
@@ -329,6 +342,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
+			this.tasksById.set(task.taskId, task)
+
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -340,6 +355,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
 					isSubtask: !!task.parentTaskId,
 				})
+				this.tasksById.delete(task.taskId)
 
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
@@ -348,6 +364,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
+				this.tasksById.delete(task.taskId)
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
@@ -506,6 +523,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		await this.sidebarProvider.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
+		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
 	public setTerminalProfile(name: string | undefined): void {
