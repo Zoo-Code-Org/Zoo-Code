@@ -25,7 +25,7 @@ import {
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
-import type { Mode } from "../shared/modes"
+import { getAllModes, type Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -33,12 +33,22 @@ import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
+type TaskAskController = {
+	approveAsk(): void
+	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
+}
+
+type RegisteredTask = {
+	task: TaskAskController
+	provider: ClineProvider
+}
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
-	private readonly tasksById = new Map<string, { approveAsk(): void }>()
+	private readonly tasksById = new Map<string, RegisteredTask>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -176,17 +186,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
 		configuration: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}) {
 		let provider: ClineProvider
 
 		if (newTab) {
-			await vscode.commands.executeCommand("workbench.action.files.revert")
-			await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			if (!preserveOpenTabs) {
+				await vscode.commands.executeCommand("workbench.action.files.revert")
+				await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			}
 
 			provider = await openClineInNewTab({ context: this.context, outputChannel: this.outputChannel })
 			this.registerListeners(provider)
@@ -314,13 +328,41 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async approveTaskAsk(taskId: string): Promise<boolean> {
-		const task = this.tasksById.get(taskId)
+		const entry = this.tasksById.get(taskId)
 
-		if (!task) {
+		if (!entry) {
 			return false
 		}
 
-		task.approveAsk()
+		entry.task.approveAsk()
+		return true
+	}
+
+	public async selectTaskFollowupSuggestion({
+		taskId,
+		answer,
+		mode,
+	}: {
+		taskId: string
+		answer: string
+		mode?: string
+	}): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		if (mode) {
+			const { customModes } = await entry.provider.getState()
+			const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
+
+			if (isValidMode) {
+				await entry.provider.handleModeSwitch(mode)
+			}
+		}
+
+		entry.task.handleWebviewAskResponse("messageResponse", answer)
 		return true
 	}
 
@@ -352,7 +394,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
-			this.tasksById.set(task.taskId, task)
+			this.tasksById.set(task.taskId, { task: task as unknown as TaskAskController, provider })
 
 			// Task Lifecycle
 
