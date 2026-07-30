@@ -5,6 +5,10 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { sleep, waitFor, waitUntilCompleted } from "./utils"
 import {
+	assertResourceDiagnosticsConverged,
+	getResourceDiagnosticsConvergenceIssues,
+} from "../fixtures/resource-diagnostics"
+import {
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
@@ -106,6 +110,7 @@ suite("Roo Code Orchestrator", function () {
 
 	test("orchestrator parent repeats three rounds of delegated child fan-in without stack duplication", async () => {
 		const api = globalThis.api
+		const baselineDiagnostics = api.getResourceDiagnostics()
 		const says: Record<string, ClineMessage[]> = {}
 		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
 		const parentStackSnapshots: string[][] = []
@@ -217,7 +222,26 @@ suite("Roo Code Orchestrator", function () {
 			}
 			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
 			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after cleanup")
-			await sleep(100)
+
+			const observedChildTaskIds = delegationCompletions.map(({ childId }) => childId)
+			await waitFor(() => {
+				const final = api.getResourceDiagnostics()
+
+				return (
+					getResourceDiagnosticsConvergenceIssues({
+						baseline: baselineDiagnostics,
+						final,
+						observedChildTaskIds,
+					}).length === 0
+				)
+			}).catch(() => {})
+
+			const finalDiagnostics = api.getResourceDiagnostics()
+			assertResourceDiagnosticsConverged({
+				baseline: baselineDiagnostics,
+				final: finalDiagnostics,
+				observedChildTaskIds,
+			})
 		}
 	})
 })
