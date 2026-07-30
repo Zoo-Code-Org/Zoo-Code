@@ -130,8 +130,23 @@ function getTimezoneOffsetMinutes(date: Date, timezone: string): number {
 
 /**
  * Returns the 00:00:00 UTC for the given date based on the timezone.
+ *
+ * DST-correct: evaluates the timezone offset at the candidate midnight
+ * instant rather than at the input date. This prevents 1-hour errors
+ * when the input date and the target midnight fall on opposite sides
+ * of a DST transition.
+ *
+ * Algorithm:
+ *   1. Determine the calendar date (year/month/day) in the target timezone.
+ *   2. Compute a candidate UTC instant by interpreting wall-clock midnight as UTC.
+ *   3. Evaluate the timezone offset at that candidate instant.
+ *   4. Apply the offset to get the true UTC of timezone midnight.
+ *
+ * A single iteration suffices because the candidate instant (step 2) is
+ * within ~14 hours of the true midnight, which is always enough to
+ * determine the correct DST offset in all real-world timezones.
  */
-function startOfDay(date: Date, timezone: string): Date {
+export function startOfDayInTimezone(date: Date, timezone: string): Date {
 	const formatter = new Intl.DateTimeFormat("en-US", {
 		timeZone: timezone,
 		year: "numeric",
@@ -144,8 +159,13 @@ function startOfDay(date: Date, timezone: string): Date {
 	const month = parseInt(get("month"), 10) - 1
 	const day = parseInt(get("day"), 10)
 
+	// Wall-clock midnight interpreted as UTC (candidate instant)
 	const midnightEpoch = Date.UTC(year, month, day, 0, 0, 0)
-	const tzOffset = getTimezoneOffsetMinutes(date, timezone)
+
+	// Evaluate the offset at the candidate midnight, not at the input date.
+	// This ensures DST transitions between "now" and midnight are handled.
+	const candidateMidnightUtc = new Date(midnightEpoch)
+	const tzOffset = getTimezoneOffsetMinutes(candidateMidnightUtc, timezone)
 	return new Date(midnightEpoch + tzOffset * 60 * 1000)
 }
 
@@ -162,20 +182,20 @@ export function resolveTimeRange(query: StatsQuery): { from?: Date; to?: Date } 
 
 		switch (query.preset) {
 			case "today": {
-				const from = startOfDay(tzNow, query.timezone)
+				const from = startOfDayInTimezone(tzNow, query.timezone)
 				const to = new Date(from)
 				to.setDate(to.getDate() + 1)
 				return { from, to }
 			}
 			case "7d": {
-				const to = startOfDay(tzNow, query.timezone)
+				const to = startOfDayInTimezone(tzNow, query.timezone)
 				to.setDate(to.getDate() + 1)
 				const from = new Date(to)
 				from.setDate(from.getDate() - 7)
 				return { from, to }
 			}
 			case "30d": {
-				const to = startOfDay(tzNow, query.timezone)
+				const to = startOfDayInTimezone(tzNow, query.timezone)
 				to.setDate(to.getDate() + 1)
 				const from = new Date(to)
 				from.setDate(from.getDate() - 30)

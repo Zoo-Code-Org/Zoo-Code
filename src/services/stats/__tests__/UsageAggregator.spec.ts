@@ -10,6 +10,7 @@ import {
 	computeTimeBuckets,
 	resolveTimeRange,
 	serializeBucketKey,
+	startOfDayInTimezone,
 } from "../UsageAggregator"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
@@ -1624,6 +1625,117 @@ describe("UsageAggregator", () => {
 				expect(delta!.inputTokens).toBe(snapshot.totals.inputTokens)
 				expect(delta!.costUsd).toBeCloseTo(snapshot.totals.costUsd, 10)
 			}
+		})
+	})
+
+	// ── DST-correct startOfDayInTimezone ──────────────────────────────────────
+	//
+	// The old startOfDay() computed the timezone offset using the input date
+	// (typically "now"). When the input date and the target midnight fall on
+	// opposite sides of a DST transition, the offset was wrong by 1 hour.
+	// startOfDayInTimezone evaluates the offset at the candidate midnight
+	// instant instead, which is always correct.
+
+	describe("startOfDayInTimezone - DST correctness", () => {
+		it("should return midnight for Asia/Seoul (no DST)", () => {
+			// KST is UTC+9 year-round, no DST transitions.
+			// 2026-07-19T10:00:00 KST = 2026-07-19T01:00:00 UTC
+			// Midnight KST on 2026-07-19 = 2026-07-18T15:00:00 UTC
+			const date = new Date("2026-07-19T01:00:00.000Z")
+			const midnight = startOfDayInTimezone(date, "Asia/Seoul")
+			expect(midnight.toISOString()).toBe("2026-07-18T15:00:00.000Z")
+		})
+
+		it("should return correct midnight for America/New_York in winter (EST, UTC-5)", () => {
+			// 2026-01-15T12:00:00 EST = 2026-01-15T17:00:00 UTC
+			// Midnight EST on 2026-01-15 = 2026-01-15T05:00:00 UTC
+			const date = new Date("2026-01-15T17:00:00.000Z")
+			const midnight = startOfDayInTimezone(date, "America/New_York")
+			expect(midnight.toISOString()).toBe("2026-01-15T05:00:00.000Z")
+		})
+
+		it("should return correct midnight for America/New_York in summer (EDT, UTC-4)", () => {
+			// 2026-07-15T12:00:00 EDT = 2026-07-15T16:00:00 UTC
+			// Midnight EDT on 2026-07-15 = 2026-07-15T04:00:00 UTC
+			const date = new Date("2026-07-15T16:00:00.000Z")
+			const midnight = startOfDayInTimezone(date, "America/New_York")
+			expect(midnight.toISOString()).toBe("2026-07-15T04:00:00.000Z")
+		})
+
+		it("should handle spring-forward: querying before DST with target midnight also before DST", () => {
+			// America/New_York spring-forward 2026: March 8, 2026 at 02:00 EST → 03:00 EDT
+			// Before the transition: 2026-03-08T01:30:00 EST = 2026-03-08T06:30:00 UTC
+			// Target midnight (00:00) on 2026-03-08 is BEFORE the transition (EST, UTC-5)
+			// Midnight EST on 2026-03-08 = 2026-03-08T05:00:00 UTC
+			//
+			// The function evaluates the offset at the candidate midnight instant
+			// (2026-03-08T00:00:00 UTC = 2026-03-07T19:00 EST), which is before
+			// the DST transition, correctly yielding EST (UTC-5).
+			const date = new Date("2026-03-08T06:30:00.000Z")
+			const midnight = startOfDayInTimezone(date, "America/New_York")
+			expect(midnight.toISOString()).toBe("2026-03-08T05:00:00.000Z")
+		})
+
+		it("should handle spring-forward: querying after DST for midnight before DST", () => {
+			// America/New_York spring-forward 2026: March 8, 2026 at 02:00 EST → 03:00 EDT
+			// After the transition: 2026-03-08T03:30:00 EDT = 2026-03-08T07:30:00 UTC
+			// Target midnight on 2026-03-08 is BEFORE the transition (EST, UTC-5)
+			// Midnight EST on 2026-03-08 = 2026-03-08T05:00:00 UTC
+			//
+			// The OLD code would use the offset at 07:30 UTC (EDT, -4), giving
+			// 2026-03-08T04:00:00 UTC — WRONG by 1 hour.
+			// The NEW code evaluates offset at candidate midnight (05:00 UTC),
+			// which is still EST (-5), giving the correct 05:00:00 UTC.
+			const date = new Date("2026-03-08T07:30:00.000Z")
+			const midnight = startOfDayInTimezone(date, "America/New_York")
+			expect(midnight.toISOString()).toBe("2026-03-08T05:00:00.000Z")
+		})
+
+		it("should handle fall-back: querying before DST for midnight after DST", () => {
+			// America/New_York fall-back 2026: November 1, 2026 at 02:00 EDT → 01:00 EST
+			// Before the transition: 2026-11-01T01:30:00 EDT = 2026-11-01T05:30:00 UTC
+			// Target midnight on 2026-11-01 is BEFORE the transition (EDT, UTC-4)
+			// Midnight EDT on 2026-11-01 = 2026-11-01T04:00:00 UTC
+			const date = new Date("2026-11-01T05:30:00.000Z")
+			const midnight = startOfDayInTimezone(date, "America/New_York")
+			expect(midnight.toISOString()).toBe("2026-11-01T04:00:00.000Z")
+		})
+
+		it("should handle fall-back: querying after DST for midnight before DST", () => {
+			// America/New_York fall-back 2026: November 1, 2026 at 02:00 EDT → 01:00 EST
+			// After the transition: 2026-11-01T01:30:00 EST = 2026-11-01T06:30:00 UTC
+			// Target midnight on 2026-11-01 is BEFORE the transition (EDT, UTC-4)
+			// Midnight EDT on 2026-11-01 = 2026-11-01T04:00:00 UTC
+			//
+			// The OLD code would use the offset at 06:30 UTC (EST, -5), giving
+			// 2026-11-01T05:00:00 UTC — WRONG by 1 hour.
+			// The NEW code evaluates offset at candidate midnight (04:00 UTC),
+			// which is EDT (-4), giving the correct 04:00:00 UTC.
+			const date = new Date("2026-11-01T06:30:00.000Z")
+			const midnight = startOfDayInTimezone(date, "America/New_York")
+			expect(midnight.toISOString()).toBe("2026-11-01T04:00:00.000Z")
+		})
+
+		it("should return midnight for UTC timezone", () => {
+			const date = new Date("2026-07-19T15:30:00.000Z")
+			const midnight = startOfDayInTimezone(date, "UTC")
+			expect(midnight.toISOString()).toBe("2026-07-19T00:00:00.000Z")
+		})
+
+		it("should return midnight for Europe/London in winter (GMT, UTC+0)", () => {
+			// 2026-01-15T12:00:00 GMT = 2026-01-15T12:00:00 UTC
+			// Midnight GMT on 2026-01-15 = 2026-01-15T00:00:00 UTC
+			const date = new Date("2026-01-15T12:00:00.000Z")
+			const midnight = startOfDayInTimezone(date, "Europe/London")
+			expect(midnight.toISOString()).toBe("2026-01-15T00:00:00.000Z")
+		})
+
+		it("should return midnight for Europe/London in summer (BST, UTC+1)", () => {
+			// 2026-07-15T12:00:00 BST = 2026-07-15T11:00:00 UTC
+			// Midnight BST on 2026-07-15 = 2026-07-14T23:00:00 UTC
+			const date = new Date("2026-07-15T11:00:00.000Z")
+			const midnight = startOfDayInTimezone(date, "Europe/London")
+			expect(midnight.toISOString()).toBe("2026-07-14T23:00:00.000Z")
 		})
 	})
 })

@@ -2,7 +2,7 @@
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
-import { UsageAggregator } from "./UsageAggregator"
+import { UsageAggregator, startOfDayInTimezone } from "./UsageAggregator"
 import { UsageStatsDatabase } from "./UsageStatsDatabase"
 import { UsageStatsMigration } from "./UsageStatsMigration"
 import { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
@@ -461,7 +461,7 @@ export class UsageStatsService {
 		timezone: string,
 		now: Date,
 	): { from?: Date; to?: Date } {
-		const tzNow = this.toTimezoneStartOfDay(now, timezone)
+		const tzNow = startOfDayInTimezone(now, timezone)
 
 		switch (preset) {
 			case "today": {
@@ -487,58 +487,6 @@ export class UsageStatsService {
 			case "all":
 				return {}
 		}
-	}
-
-	/**
-	 * Returns the 00:00:00 UTC for the given date based on the timezone.
-	 */
-	private toTimezoneStartOfDay(date: Date, timezone: string): Date {
-		const formatter = new Intl.DateTimeFormat("en-CA", {
-			timeZone: timezone,
-			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
-		})
-		const parts = formatter.formatToParts(date)
-		const get = (type: string) => parseInt(parts.find((p) => p.type === type)?.value ?? "0", 10)
-		const year = get("year")
-		const month = get("month") - 1
-		const day = get("day")
-
-		// Convert timezone wall-clock midnight to UTC
-		const midnightEpoch = Date.UTC(year, month, day, 0, 0, 0)
-		const tzOffset = this.getTimezoneOffsetMinutes(date, timezone)
-		// tzOffset = UTC - (timezone wall-clock as UTC)
-		// Actual UTC of timezone midnight = timezone midnight wall-clock as UTC + tzOffset
-		return new Date(midnightEpoch + tzOffset * 60 * 1000)
-	}
-
-	/**
-	 * Returns the UTC offset for the specified timezone in minutes.
-	 */
-	private getTimezoneOffsetMinutes(date: Date, timezone: string): number {
-		const utcDate = new Date(date.toISOString())
-		const tzFormatter = new Intl.DateTimeFormat("en-US", {
-			timeZone: timezone,
-			year: "numeric",
-			month: "2-digit",
-			day: "2-digit",
-			hour: "2-digit",
-			minute: "2-digit",
-			second: "2-digit",
-			hour12: false,
-		})
-		const tzParts = tzFormatter.formatToParts(utcDate)
-		const get = (type: string) => parseInt(tzParts.find((p) => p.type === type)?.value ?? "0", 10)
-		const tzYear = get("year")
-		const tzMonth = get("month") - 1
-		const tzDay = get("day")
-		const tzHour = get("hour") % 24
-		const tzMinute = get("minute")
-		const tzSecond = get("second")
-
-		const tzEpoch = Date.UTC(tzYear, tzMonth, tzDay, tzHour, tzMinute, tzSecond)
-		return Math.round((utcDate.getTime() - tzEpoch) / 60000)
 	}
 
 	// ── Internal: CSV ────────────────────────────────────────────────────────
