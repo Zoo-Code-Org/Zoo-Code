@@ -53,6 +53,7 @@ export const getResourceDiagnosticsConvergenceIssues = ({
 		})
 	}
 
+	// A final zero intentionally treats a shrinking task stack as converged, unlike registeredTaskCount.
 	if (final.currentTaskStackLength !== baseline.currentTaskStackLength && final.currentTaskStackLength !== 0) {
 		issues.push({
 			name: "currentTaskStackLength",

@@ -1,6 +1,6 @@
 import * as assert from "assert"
 
-import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
+import { RooCodeEventName, type ClineMessage, type RooCodeAPI, type RooCodeResourceDiagnostics } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { sleep, waitFor, waitUntilCompleted } from "./utils"
@@ -26,11 +26,84 @@ import {
 	ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
 } from "../fixtures/orchestrator"
 
+const getDefaultOpenRouterConfiguration = () => {
+	const aimockUrl = process.env.AIMOCK_URL
+	const isRecord = process.env.AIMOCK_RECORD === "true"
+
+	return {
+		apiProvider: "openrouter" as const,
+		openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
+		openRouterModelId: "openai/gpt-4.1",
+		currentApiConfigName: "default",
+		mode: "ask" as const,
+		autoApprovalEnabled: false,
+		alwaysAllowModeSwitch: false,
+		alwaysAllowSubtasks: false,
+		modeApiConfigs: {},
+		...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+	}
+}
+
+async function restoreDefaultOpenRouterConfiguration(api: RooCodeAPI): Promise<void> {
+	const configuration = getDefaultOpenRouterConfiguration()
+	await api.upsertProfile("default", configuration, true)
+	await api.setConfiguration(configuration)
+}
+
+async function drainTaskStack(api: RooCodeAPI, message: string, maxAttempts = 10): Promise<void> {
+	let attempts = 0
+	while (api.getCurrentTaskStack().length > 0) {
+		assert.ok(attempts < maxAttempts, `Task stack did not drain within ${maxAttempts} clear attempts`)
+		attempts += 1
+		await api.clearCurrentTask()
+	}
+	await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+	assert.strictEqual(api.getCurrentTaskStack().length, 0, message)
+	await sleep(100)
+}
+
+async function expectDiagnosticsConverged({
+	api,
+	baseline,
+	observedChildTaskIds,
+}: {
+	api: RooCodeAPI
+	baseline: RooCodeResourceDiagnostics
+	observedChildTaskIds: string[]
+}): Promise<void> {
+	await waitFor(() => {
+		const final = api.getResourceDiagnostics()
+
+		return (
+			getResourceDiagnosticsConvergenceIssues({
+				baseline,
+				final,
+				observedChildTaskIds,
+			}).length === 0
+		)
+	}).catch(() => {})
+
+	assertResourceDiagnosticsConverged({
+		baseline,
+		final: api.getResourceDiagnostics(),
+		observedChildTaskIds,
+	})
+}
+
 suite("Roo Code Orchestrator", function () {
 	setDefaultSuiteTimeout(this)
 
+	setup(async () => {
+		await drainTaskStack(globalThis.api, "Task stack should be empty before orchestrator test")
+	})
+
+	suiteTeardown(async () => {
+		await restoreDefaultOpenRouterConfiguration(globalThis.api)
+	})
+
 	test("orchestrator parent fans out once and fans in three delegated child summaries", async () => {
 		const api = globalThis.api
+		const baselineDiagnostics = api.getResourceDiagnostics()
 		const says: Record<string, ClineMessage[]> = {}
 		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
 
@@ -108,12 +181,12 @@ suite("Roo Code Orchestrator", function () {
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
-			while (api.getCurrentTaskStack().length > 0) {
-				await api.clearCurrentTask()
-			}
-			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
-			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after cleanup")
-			await sleep(100)
+			await drainTaskStack(api, "Task stack should be empty after cleanup")
+			await expectDiagnosticsConverged({
+				api,
+				baseline: baselineDiagnostics,
+				observedChildTaskIds: delegationCompletions.map(({ childId }) => childId),
+			})
 		}
 	})
 
@@ -226,36 +299,18 @@ suite("Roo Code Orchestrator", function () {
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
-			while (api.getCurrentTaskStack().length > 0) {
-				await api.clearCurrentTask()
-			}
-			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
-			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after cleanup")
-
-			const observedChildTaskIds = delegationCompletions.map(({ childId }) => childId)
-			await waitFor(() => {
-				const final = api.getResourceDiagnostics()
-
-				return (
-					getResourceDiagnosticsConvergenceIssues({
-						baseline: baselineDiagnostics,
-						final,
-						observedChildTaskIds,
-					}).length === 0
-				)
-			}).catch(() => {})
-
-			const finalDiagnostics = api.getResourceDiagnostics()
-			assertResourceDiagnosticsConverged({
+			await drainTaskStack(api, "Task stack should be empty after cleanup")
+			await expectDiagnosticsConverged({
+				api,
 				baseline: baselineDiagnostics,
-				final: finalDiagnostics,
-				observedChildTaskIds,
+				observedChildTaskIds: delegationCompletions.map(({ childId }) => childId),
 			})
 		}
 	})
 
 	test("orchestrator parent fans in through a nested child orchestrator", async () => {
 		const api = globalThis.api
+		const baselineDiagnostics = api.getResourceDiagnostics()
 		const says: Record<string, ClineMessage[]> = {}
 		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
 
@@ -386,12 +441,12 @@ suite("Roo Code Orchestrator", function () {
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
-			while (api.getCurrentTaskStack().length > 0) {
-				await api.clearCurrentTask()
-			}
-			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
-			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after nested cleanup")
-			await sleep(100)
+			await drainTaskStack(api, "Task stack should be empty after nested cleanup")
+			await expectDiagnosticsConverged({
+				api,
+				baseline: baselineDiagnostics,
+				observedChildTaskIds: delegationCompletions.map(({ childId }) => childId),
+			})
 		}
 	})
 
@@ -525,30 +580,11 @@ suite("Roo Code Orchestrator", function () {
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
-			while (api.getCurrentTaskStack().length > 0) {
-				await api.clearCurrentTask()
-			}
-			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
-			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after recovery cleanup")
-
-			const observedChildTaskIds = delegationCompletions.map(({ childId }) => childId)
-			await waitFor(() => {
-				const final = api.getResourceDiagnostics()
-
-				return (
-					getResourceDiagnosticsConvergenceIssues({
-						baseline: baselineDiagnostics,
-						final,
-						observedChildTaskIds,
-					}).length === 0
-				)
-			}).catch(() => {})
-
-			const finalDiagnostics = api.getResourceDiagnostics()
-			assertResourceDiagnosticsConverged({
+			await drainTaskStack(api, "Task stack should be empty after recovery cleanup")
+			await expectDiagnosticsConverged({
+				api,
 				baseline: baselineDiagnostics,
-				final: finalDiagnostics,
-				observedChildTaskIds,
+				observedChildTaskIds: delegationCompletions.map(({ childId }) => childId),
 			})
 		}
 	})

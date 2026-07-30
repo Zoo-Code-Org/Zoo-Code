@@ -6,6 +6,7 @@ import {
 	ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP,
 	ORCHESTRATOR_CANCELLATION_RECOVERY_FINAL_RESULT,
 	ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER,
+	ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_TOOL_CALL_ID,
 	ORCHESTRATOR_CANCELLATION_RECOVERY_MARKER,
 	ORCHESTRATOR_CANCELLATION_RECOVERY_PARENT_PROMPT,
 	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
@@ -34,7 +35,7 @@ import {
 	shouldMatchOrchestratorResumeRequest,
 } from "./orchestrator-plan"
 
-describe("orchestrator fan-out delegation plan", () => {
+describe("orchestrator delegation plans", () => {
 	it("defines the first commit single-round ask/architect/code child sequence", () => {
 		expect(ORCHESTRATOR_FAN_OUT_PARENT_PROMPT).toContain("ORCHESTRATOR_SINGLE_ROUND_FAN_OUT")
 		expect(ORCHESTRATOR_FAN_OUT_CHILD_STEPS).toEqual([
@@ -320,7 +321,7 @@ describe("orchestrator fan-out delegation plan", () => {
 	it("matches cancellation child completion only after the recovery answer", () => {
 		expect(
 			shouldMatchOrchestratorCancellationChildCompletionRequest(
-				`${ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.marker} call_orchestrator_cancellation_child_followup_001 ${ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER}`,
+				`${ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.marker} ${ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_TOOL_CALL_ID} ${ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER}`,
 			),
 		).toBe(true)
 		expect(

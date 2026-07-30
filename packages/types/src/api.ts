@@ -1,7 +1,7 @@
 import type { EventEmitter } from "events"
 import type { Socket } from "net"
 
-import type { RooCodeEvents } from "./events.js"
+import { RooCodeEventName, type RooCodeEvents } from "./events.js"
 import type { RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
@@ -9,7 +9,8 @@ import type { IpcMessage, IpcServerEvents } from "./ipc.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
 
-export type RooCodeResourceDiagnosticEventName =
+export type RooCodeResourceDiagnosticEventName = Extract<
+	`${RooCodeEventName}`,
 	| "message"
 	| "taskCreated"
 	| "taskStarted"
@@ -18,6 +19,7 @@ export type RooCodeResourceDiagnosticEventName =
 	| "taskDelegationCompleted"
 	| "taskDelegationResumed"
 	| "taskModeSwitched"
+>
 
 export interface RooCodeResourceDiagnostics {
 	registeredTaskCount: number

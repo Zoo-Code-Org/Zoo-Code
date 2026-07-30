@@ -126,7 +126,7 @@ export const ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS: readonly Orchestrator
 
 export const ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT = `${ORCHESTRATOR_REPEATED_DELEGATION_MARKER}: Run exactly three rounds. In each round, delegate exactly three children in order: ask-mode requirements, architect-mode design, then code-mode implementation. Use these exact child messages in order: ${ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(({ prompt }) => `"${prompt}"`).join("; ")}. After each child returns, resume the parent before creating the next child. After all nine children return, complete with a final summary containing every round and child summary.`
 
-export const ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT = `Orchestrator repeated delegation complete:\n${ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(({ round, role, summary }) => `- Round ${round} ${role}: ${summary}`).join("\\n")}`
+export const ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT = `Orchestrator repeated delegation complete:\n${ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS.map(({ round, role, summary }) => `- Round ${round} ${role}: ${summary}`).join("\n")}`
 
 export const ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS: readonly OrchestratorNestedDelegationStep[] = [
 	{
@@ -166,6 +166,8 @@ export const ORCHESTRATOR_NESTED_DELEGATION_PARENT_PROMPT = `${ORCHESTRATOR_NEST
 export const ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT = `Nested top-level orchestrator complete:\n- B: ${ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT}`
 
 export const ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER = "resume recovered cancellation child"
+export const ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_TOOL_CALL_ID =
+	"call_orchestrator_cancellation_child_followup_001"
 
 export const ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP: OrchestratorCancellationRecoveryStep = {
 	role: "cancellation-child",
@@ -232,23 +234,16 @@ function shouldMatchOrchestratorCancellationChildBase(rawRequest: string): boole
 }
 
 export function shouldMatchOrchestratorCancellationChildRequest(rawRequest: string): boolean {
-	const followupToolCallId = ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.completionToolCallId.replace(
-		"completion_002",
-		"followup_001",
+	return (
+		shouldMatchOrchestratorCancellationChildBase(rawRequest) &&
+		!rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_TOOL_CALL_ID)
 	)
-
-	return shouldMatchOrchestratorCancellationChildBase(rawRequest) && !rawRequest.includes(followupToolCallId)
 }
 
 export function shouldMatchOrchestratorCancellationChildCompletionRequest(rawRequest: string): boolean {
-	const followupToolCallId = ORCHESTRATOR_CANCELLATION_RECOVERY_CHILD_STEP.completionToolCallId.replace(
-		"completion_002",
-		"followup_001",
-	)
-
 	return (
 		shouldMatchOrchestratorCancellationChildBase(rawRequest) &&
-		((rawRequest.includes(followupToolCallId) &&
+		((rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_TOOL_CALL_ID) &&
 			rawRequest.includes(ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER)) ||
 			rawRequest.includes(
 				`<user_message>\\n${ORCHESTRATOR_CANCELLATION_RECOVERY_FOLLOWUP_ANSWER}\\n</user_message>`,

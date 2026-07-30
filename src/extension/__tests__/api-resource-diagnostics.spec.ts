@@ -91,6 +91,7 @@ describe("API#getResourceDiagnostics", () => {
 
 	it("tracks registered task count across task creation, completion, and abortion", () => {
 		const completedTask = createTask("completed-task")
+		sidebarProvider.getCurrentTaskStack.mockReturnValue([completedTask.taskId])
 		sidebarProvider.emit(RooCodeEventName.TaskCreated, completedTask)
 
 		expect(api.getResourceDiagnostics().registeredTaskCount).toBe(1)
@@ -100,11 +101,24 @@ describe("API#getResourceDiagnostics", () => {
 		expect(api.getResourceDiagnostics().registeredTaskCount).toBe(0)
 
 		const abortedTask = createTask("aborted-task")
+		sidebarProvider.getCurrentTaskStack.mockReturnValue([abortedTask.taskId])
 		sidebarProvider.emit(RooCodeEventName.TaskCreated, abortedTask)
 
 		expect(api.getResourceDiagnostics().registeredTaskCount).toBe(1)
 
 		abortedTask.emit(RooCodeEventName.TaskAborted)
+
+		expect(api.getResourceDiagnostics().registeredTaskCount).toBe(0)
+	})
+
+	it("prunes registered tasks that are no longer in the provider task stack", () => {
+		const evictedTask = createTask("evicted-task")
+		sidebarProvider.getCurrentTaskStack.mockReturnValue([evictedTask.taskId])
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, evictedTask)
+
+		expect(api.getResourceDiagnostics().registeredTaskCount).toBe(1)
+
+		sidebarProvider.getCurrentTaskStack.mockReturnValue([])
 
 		expect(api.getResourceDiagnostics().registeredTaskCount).toBe(0)
 	})

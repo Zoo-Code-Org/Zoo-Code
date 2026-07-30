@@ -10,6 +10,7 @@ import {
 	type RooCodeAPI,
 	type RooCodeSettings,
 	type RooCodeEvents,
+	type RooCodeResourceDiagnosticEventName,
 	type RooCodeResourceDiagnostics,
 	type ProviderSettings,
 	type ProviderSettingsEntry,
@@ -40,7 +41,7 @@ const RESOURCE_DIAGNOSTIC_EVENTS = [
 	RooCodeEventName.TaskDelegationCompleted,
 	RooCodeEventName.TaskDelegationResumed,
 	RooCodeEventName.TaskModeSwitched,
-] as const
+] as const satisfies readonly RooCodeResourceDiagnosticEventName[]
 
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
@@ -267,6 +268,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public getResourceDiagnostics(): RooCodeResourceDiagnostics {
+		const activeTaskIds = new Set(this.getCurrentTaskStack())
+		for (const taskId of this.registeredTaskIds) {
+			if (!activeTaskIds.has(taskId)) {
+				this.registeredTaskIds.delete(taskId)
+			}
+		}
+
 		const listenerCounts = Object.fromEntries(
 			RESOURCE_DIAGNOSTIC_EVENTS.map((eventName) => [eventName, this.listenerCount(eventName)]),
 		) as RooCodeResourceDiagnostics["listenerCounts"]
@@ -355,6 +363,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
 			this.registeredTaskIds.add(task.taskId)
+			const unregisterTask = () => this.registeredTaskIds.delete(task.taskId)
 
 			// Task Lifecycle
 
@@ -367,7 +376,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
 					isSubtask: !!task.parentTaskId,
 				})
-				this.registeredTaskIds.delete(task.taskId)
+				unregisterTask()
 
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
@@ -376,7 +385,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
-				this.registeredTaskIds.delete(task.taskId)
+				unregisterTask()
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
