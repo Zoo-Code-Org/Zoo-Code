@@ -1,0 +1,103 @@
+import * as assert from "assert"
+
+import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
+
+import { setDefaultSuiteTimeout } from "./test-utils"
+import { sleep, waitFor, waitUntilCompleted } from "./utils"
+import {
+	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
+	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
+	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
+} from "../fixtures/orchestrator"
+
+suite("Roo Code Orchestrator", function () {
+	setDefaultSuiteTimeout(this)
+
+	test("orchestrator parent fans out once and fans in three delegated child summaries", async () => {
+		const api = globalThis.api
+		const says: Record<string, ClineMessage[]> = {}
+		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		const delegationCompletedHandler = (parentId: string, childId: string, summary: string) => {
+			delegationCompletions.push({ parentId, childId, summary })
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+		api.on(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+
+		try {
+			const parentTaskId = await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "orchestrator",
+							alwaysAllowModeSwitch: true,
+							alwaysAllowSubtasks: true,
+							autoApprovalEnabled: true,
+							enableCheckpoints: false,
+						},
+						text: ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
+					}),
+			})
+
+			await waitFor(() => delegationCompletions.length === ORCHESTRATOR_FAN_OUT_CHILD_STEPS.length)
+
+			const childIds = delegationCompletions.map(({ childId }) => childId)
+			assert.strictEqual(new Set(childIds).size, 3, "Orchestrator should create three distinct child tasks")
+			assert.deepStrictEqual(
+				delegationCompletions.map(({ parentId }) => parentId),
+				[parentTaskId, parentTaskId, parentTaskId],
+				"Every delegation completed event should point to the orchestrator parent",
+			)
+			assert.deepStrictEqual(
+				delegationCompletions.map(({ summary }) => summary),
+				ORCHESTRATOR_FAN_OUT_CHILD_STEPS.map(({ summary }) => summary),
+				"Delegation completed events should preserve each child summary in order",
+			)
+
+			const parent = await api.getTaskHistoryItem(parentTaskId)
+			assert.ok(parent, "Parent history item should exist")
+			assert.strictEqual(parent.status, "completed", "Parent should be completed after final fan-in")
+			assert.deepStrictEqual(parent.childIds, childIds, "Parent childIds should contain all three children")
+
+			for (const [index, childId] of childIds.entries()) {
+				const child = await api.getTaskHistoryItem(childId)
+				assert.ok(child, `Child ${index + 1} history item should exist`)
+				assert.strictEqual(child.parentTaskId, parentTaskId, `Child ${index + 1} should point back to parent`)
+				assert.strictEqual(child.status, "completed", `Child ${index + 1} should be completed`)
+				assert.strictEqual(
+					child.completionResultSummary,
+					ORCHESTRATOR_FAN_OUT_CHILD_STEPS[index]!.summary,
+					`Child ${index + 1} completion summary should be persisted`,
+				)
+			}
+
+			const parentCompletionText = says[parentTaskId]
+				?.filter(({ say }) => say === "completion_result")
+				.map(({ text }) => text?.trim())
+				.find((text): text is string => !!text)
+
+			assert.strictEqual(parentCompletionText, ORCHESTRATOR_FAN_OUT_FINAL_RESULT)
+			for (const { summary } of ORCHESTRATOR_FAN_OUT_CHILD_STEPS) {
+				assert.ok(parentCompletionText.includes(summary), `Final parent completion should include ${summary}`)
+			}
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after cleanup")
+			await sleep(100)
+		}
+	})
+})
