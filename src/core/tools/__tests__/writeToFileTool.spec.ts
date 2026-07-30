@@ -191,6 +191,7 @@ describe("writeToFileTool", () => {
 		mockCline.finalizePartialToolAsk = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
+		mockCline.processQueuedMessages = vi.fn()
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
 		mockHandleError = vi.fn().mockResolvedValue(undefined)
@@ -395,6 +396,20 @@ describe("writeToFileTool", () => {
 
 			// Should process normally without issues
 			expect(mockCline.consecutiveMistakeCount).toBe(0)
+		})
+
+		it("does not report a successful write as failed when final diff reset rejects", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalledWith("Tool result message")
+			expect(mockCline.didEditFile).toBe(true)
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
+
+			consoleErrorSpy.mockRestore()
 		})
 	})
 
@@ -632,10 +647,7 @@ describe("writeToFileTool", () => {
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"Error resetting write_to_file diff view after partial failure:",
-				expect.any(Error),
-			)
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
 
 			consoleErrorSpy.mockRestore()
 		})
