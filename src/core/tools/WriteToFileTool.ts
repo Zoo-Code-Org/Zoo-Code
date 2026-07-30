@@ -63,6 +63,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		})
 	}
 
+	private async finalizePartialToolAskAfterFailure(task: Task, text?: string): Promise<void> {
+		await task.finalizePartialToolAsk(text).catch((finalizeError) => {
+			console.error("Error finalizing write_to_file partial tool ask:", finalizeError)
+		})
+	}
+
 	override resetPartialState(): void {
 		super.resetPartialState()
 		this.partialStreamFailuresByTaskId.clear()
@@ -153,105 +159,93 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
 			)
 
-			try {
-				if (isPreventFocusDisruptionEnabled) {
-					task.diffViewProvider.editType = fileExists ? "modify" : "create"
-					if (fileExists) {
-						const absolutePath = path.resolve(task.cwd, relPath)
-						task.diffViewProvider.originalContent = await fs.readFile(absolutePath, "utf-8")
-					} else {
-						task.diffViewProvider.originalContent = ""
-					}
-
-					let unified = fileExists
-						? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
-						: convertNewFileToUnifiedDiff(newContent, relPath)
-					unified = sanitizeUnifiedDiff(unified)
-					const completeMessage = JSON.stringify({
-						...sharedMessageProps,
-						content: unified,
-						diffStats: computeDiffStats(unified) || undefined,
-					} satisfies ClineSayTool)
-
-					const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
-
-					if (!didApprove) {
-						return
-					}
-
-					await task.diffViewProvider.saveDirectly(
-						relPath,
-						newContent,
-						false,
-						diagnosticsEnabled,
-						writeDelayMs,
-					)
+			if (isPreventFocusDisruptionEnabled) {
+				task.diffViewProvider.editType = fileExists ? "modify" : "create"
+				if (fileExists) {
+					const absolutePath = path.resolve(task.cwd, relPath)
+					task.diffViewProvider.originalContent = await fs.readFile(absolutePath, "utf-8")
 				} else {
-					if (!task.diffViewProvider.isEditing) {
-						const partialMessage = JSON.stringify(sharedMessageProps)
-						await task.ask("tool", partialMessage, true).catch(() => {})
-						await task.diffViewProvider.open(relPath)
-					}
-
-					await task.diffViewProvider.update(
-						everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
-						true,
-					)
-
-					await delay(300)
-					task.diffViewProvider.scrollToFirstDiff()
-
-					let unified = fileExists
-						? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
-						: convertNewFileToUnifiedDiff(newContent, relPath)
-					unified = sanitizeUnifiedDiff(unified)
-					const completeMessage = JSON.stringify({
-						...sharedMessageProps,
-						content: unified,
-						diffStats: computeDiffStats(unified) || undefined,
-					} satisfies ClineSayTool)
-
-					const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
-
-					if (!didApprove) {
-						await task.diffViewProvider.revertChanges()
-						return
-					}
-
-					await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+					task.diffViewProvider.originalContent = ""
 				}
 
-				if (relPath) {
-					await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+				let unified = fileExists
+					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
+					: convertNewFileToUnifiedDiff(newContent, relPath)
+				unified = sanitizeUnifiedDiff(unified)
+				const completeMessage = JSON.stringify({
+					...sharedMessageProps,
+					content: unified,
+					diffStats: computeDiffStats(unified) || undefined,
+				} satisfies ClineSayTool)
+
+				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
+
+				if (!didApprove) {
+					return
 				}
 
-				task.didEditFile = true
+				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+			} else {
+				if (!task.diffViewProvider.isEditing) {
+					const partialMessage = JSON.stringify(sharedMessageProps)
+					await task.ask("tool", partialMessage, true).catch(() => {})
+					await task.diffViewProvider.open(relPath)
+				}
 
-				const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
+				await task.diffViewProvider.update(
+					everyLineHasLineNumbers(newContent) ? stripLineNumbers(newContent) : newContent,
+					true,
+				)
 
-				pushToolResult(message)
+				await delay(300)
+				task.diffViewProvider.scrollToFirstDiff()
 
-				await this.resetDiffViewAfterWrite(task)
+				let unified = fileExists
+					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
+					: convertNewFileToUnifiedDiff(newContent, relPath)
+				unified = sanitizeUnifiedDiff(unified)
+				const completeMessage = JSON.stringify({
+					...sharedMessageProps,
+					content: unified,
+					diffStats: computeDiffStats(unified) || undefined,
+				} satisfies ClineSayTool)
 
-				task.processQueuedMessages()
+				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
-				return
-			} finally {
-				this.resetTaskPartialState(task)
+				if (!didApprove) {
+					await task.diffViewProvider.revertChanges()
+					return
+				}
+
+				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
+
+			if (relPath) {
+				await task.fileContextTracker.trackFileContext(relPath, "roo_edited" as RecordSource)
+			}
+
+			task.didEditFile = true
+
+			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
+
+			pushToolResult(message)
+
+			await this.resetDiffViewAfterWrite(task)
+
+			task.processQueuedMessages()
+
+			return
 		} catch (error) {
 			// Finalize any open partial tool message so the UI spinner doesn't get stuck.
 			// The partial ask fired during streaming (handlePartial) or early in execute sets
 			// partial: true on the webview message; without this, the spinner persists even
 			// after the error bubble appears.
-			try {
-				await task.finalizePartialToolAsk()
-				await handleError("writing file", error as Error)
-				await this.resetDiffViewAfterWrite(task)
-			} finally {
-				this.resetTaskPartialState(task)
-			}
+			await this.finalizePartialToolAskAfterFailure(task)
+			await handleError("writing file", error as Error)
+			await this.resetDiffViewAfterWrite(task)
 			return
+		} finally {
+			this.resetTaskPartialState(task)
 		}
 	}
 
@@ -332,7 +326,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
 				// partial tool message each time.
 				this.partialStreamFailuresByTaskId.add(partialStreamFailureKey)
-				await task.finalizePartialToolAsk(partialMessage)
+				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
 				await this.resetDiffViewAfterWrite(task)
 			}
 		}
