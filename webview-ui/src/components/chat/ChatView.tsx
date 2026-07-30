@@ -9,6 +9,7 @@ import { useDebounceEffect } from "@src/utils/useDebounceEffect"
 import { appendImages } from "@src/utils/imageUtils"
 import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchNearby } from "@src/utils/batchNearby"
+import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
 import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
 import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
@@ -1277,37 +1278,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				...batch[0],
 				text: JSON.stringify({ ...firstTool, batchDiffs }),
 			}
-		}
-
-		// Messages that can be safely skipped over when batching tool asks.
-		// These are low-information or invisible messages that don't affect semantics:
-		// - api_req_started (API request metadata row)
-		// - empty text rows (partial streaming with no visible content)
-		// - reasoning rows (hidden from user by default)
-		const isIgnorableBetweenTargets = (msg: ClineMessage): boolean => {
-			if (msg.type !== "say") return false
-			return msg.say === "api_req_started" || (msg.say === "text" && !msg.text?.trim()) || msg.say === "reasoning"
-		}
-
-		// Semantic boundaries that stop batching. When we hit one of these,
-		// any current batch is finalized and the boundary message is preserved as-is:
-		// - user feedback / new user messages
-		// - visible assistant text (the model spoke to the user)
-		// - completion result (turn ended)
-		// - checkpoint saved
-		// - errors
-		const isBoundary = (msg: ClineMessage): boolean => {
-			if (msg.type !== "say") return false
-			return (
-				msg.say === "user_feedback" ||
-				msg.say === "user_feedback_diff" ||
-				(msg.say === "text" && !!msg.text?.trim()) ||
-				msg.say === "completion_result" ||
-				msg.say === "checkpoint_saved" ||
-				msg.say === "error" ||
-				msg.say === "condense_context" ||
-				msg.say === "codebase_search_result"
-			)
 		}
 
 		// Consolidate tool asks into batches, allowing ignorable messages between targets.

@@ -1,4 +1,5 @@
 import { batchNearby } from "../batchNearby"
+import { isBoundary, isIgnorableBetweenTargets } from "../chatBatchingPredicates"
 
 interface TestItem {
 	ts: number
@@ -17,32 +18,6 @@ const isMatch = (m: TestItem) => !!m.text?.startsWith("match")
 
 /** Predicate for realistic qwen tests: matches JSON tool calls. */
 const isToolCall = (m: TestItem) => !!m.text?.startsWith("{")
-
-/** Ignorable: api_req_started/finished, empty text, reasoning. */
-const isIgnorableBetweenTargets = (m: TestItem): boolean => {
-	if (m.type !== "say") return false
-	return (
-		m.say === "api_req_started" ||
-		m.say === "api_req_finished" ||
-		(m.say === "text" && !m.text?.trim()) ||
-		m.say === "reasoning"
-	)
-}
-
-/** Boundary: user_feedback, visible text, completion_result, checkpoint_saved, error. */
-const isBoundary = (m: TestItem): boolean => {
-	if (m.type !== "say") return false
-	return (
-		m.say === "user_feedback" ||
-		m.say === "user_feedback_diff" ||
-		(m.say === "text" && !!m.text?.trim()) ||
-		m.say === "completion_result" ||
-		m.say === "checkpoint_saved" ||
-		m.say === "error" ||
-		m.say === "condense_context" ||
-		m.say === "codebase_search_result"
-	)
-}
 
 /** Synthesize: merges a batch into a single item with a "BATCH:" marker. */
 const synthesizeBatch = (batch: TestItem[]): TestItem => ({
@@ -346,25 +321,11 @@ describe("batchNearby", () => {
 		expect(result[1].text).toBe("BATCH:match-1,match-2")
 	})
 
-	test("batch at the beginning of the array", () => {
-		const items = [msg("match-1", "ask"), msg("", "say", "api_req_finished"), msg("match-2", "ask"), msg("other")]
-		const result = batchNearby(items, {
-			isTarget: isMatch,
-			isIgnorableBetweenTargets,
-			isBoundary,
-			synthesize: synthesizeBatch,
-		})
-		expect(result).toHaveLength(2)
-		expect(result[0].text).toBe("BATCH:match-1,match-2")
-		expect(result[1].text).toBe("other")
-	})
-
 	test("multiple ignorable messages between targets", () => {
 		const items = [
 			msg("match-1", "ask"),
 			msg("", "say", "api_req_started"),
 			msg("", "say", "reasoning"),
-			msg("", "say", "api_req_finished"),
 			msg("match-2", "ask"),
 		]
 		const result = batchNearby(items, {
@@ -383,7 +344,7 @@ describe("batchNearby", () => {
 			msg("", "say", "api_req_started"),
 			msg("", "say", "text"), // empty streaming row
 			msg('{"tool":"readFile","path":"b.ts"}', "ask"),
-			msg("", "say", "api_req_finished"),
+			msg("", "say", "reasoning"),
 			msg('{"tool":"editFile","path":"c.ts"}', "ask"),
 		]
 		const result = batchNearby(messages, {
