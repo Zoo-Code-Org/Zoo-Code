@@ -12,6 +12,11 @@ import {
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
+	ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+	ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP,
+	ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT,
+	ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS,
+	ORCHESTRATOR_NESTED_DELEGATION_PARENT_PROMPT,
 	ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS,
 	ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT,
 	ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
@@ -242,6 +247,147 @@ suite("Roo Code Orchestrator", function () {
 				final: finalDiagnostics,
 				observedChildTaskIds,
 			})
+		}
+	})
+
+	test("orchestrator parent fans in through a nested child orchestrator", async () => {
+		const api = globalThis.api
+		const says: Record<string, ClineMessage[]> = {}
+		const delegationCompletions: Array<{ parentId: string; childId: string; summary: string }> = []
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		const delegationCompletedHandler = (parentId: string, childId: string, summary: string) => {
+			delegationCompletions.push({ parentId, childId, summary })
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+		api.on(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+
+		try {
+			const parentTaskId = await waitUntilCompleted({
+				api,
+				start: () =>
+					api.startNewTask({
+						configuration: {
+							mode: "orchestrator",
+							alwaysAllowModeSwitch: true,
+							alwaysAllowSubtasks: true,
+							autoApprovalEnabled: true,
+							enableCheckpoints: false,
+						},
+						text: ORCHESTRATOR_NESTED_DELEGATION_PARENT_PROMPT,
+					}),
+			})
+
+			await waitFor(() => delegationCompletions.length === 3)
+
+			assert.deepStrictEqual(
+				delegationCompletions.map(({ summary }) => summary),
+				[
+					ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS[0]!.summary,
+					ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS[1]!.summary,
+					ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+				],
+				"Nested fan-in events should complete C/D before B completes to A",
+			)
+
+			const childOrchestratorCompletion = delegationCompletions.find(
+				({ parentId, summary }) =>
+					parentId === parentTaskId && summary === ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+			)
+			assert.ok(childOrchestratorCompletion, "A should receive B's nested orchestrator completion")
+
+			const childOrchestratorId = childOrchestratorCompletion.childId
+			const grandchildCompletions = delegationCompletions.filter(
+				({ parentId }) => parentId === childOrchestratorId,
+			)
+			const grandchildIds = grandchildCompletions.map(({ childId }) => childId)
+			assert.deepStrictEqual(
+				grandchildCompletions.map(({ summary }) => summary),
+				ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS.map(({ summary }) => summary),
+				"C/D completions should resume only B before B resumes A",
+			)
+			assert.ok(
+				delegationCompletions
+					.filter(({ summary }) =>
+						ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS.some((step) => step.summary === summary),
+					)
+					.every(({ parentId }) => parentId === childOrchestratorId),
+				"C/D completion events should not directly resume A",
+			)
+
+			const parent = await api.getTaskHistoryItem(parentTaskId)
+			assert.ok(parent, "Nested parent A history item should exist")
+			assert.strictEqual(parent.status, "completed", "Nested parent A should complete after B fan-in")
+			assert.deepStrictEqual(parent.childIds, [childOrchestratorId], "A childIds should contain only B")
+
+			const childOrchestrator = await api.getTaskHistoryItem(childOrchestratorId)
+			assert.ok(childOrchestrator, "Nested child orchestrator B history item should exist")
+			assert.strictEqual(childOrchestrator.parentTaskId, parentTaskId, "B parentTaskId should point to A")
+			assert.strictEqual(childOrchestrator.mode, ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP.mode)
+			assert.strictEqual(childOrchestrator.status, "completed", "B should complete after C/D fan-in")
+			assert.deepStrictEqual(childOrchestrator.childIds, grandchildIds, "B childIds should contain C/D")
+			assert.strictEqual(
+				childOrchestrator.completionResultSummary,
+				ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+				"B completion summary should include nested C/D result",
+			)
+
+			for (const [index, grandchildId] of grandchildIds.entries()) {
+				const expectedStep = ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS[index]!
+				const grandchild = await api.getTaskHistoryItem(grandchildId)
+				assert.ok(grandchild, `Nested grandchild ${index + 1} history item should exist`)
+				assert.strictEqual(
+					grandchild.parentTaskId,
+					childOrchestratorId,
+					`Grandchild ${index + 1} should point to B`,
+				)
+				assert.strictEqual(
+					grandchild.mode,
+					expectedStep.mode,
+					`Grandchild ${index + 1} mode should match the nested plan`,
+				)
+				assert.strictEqual(grandchild.status, "completed", `Grandchild ${index + 1} should be completed`)
+				assert.strictEqual(
+					grandchild.completionResultSummary,
+					expectedStep.summary,
+					`Grandchild ${index + 1} summary should be persisted`,
+				)
+			}
+
+			const childCompletionText = says[childOrchestratorId]
+				?.filter(({ say }) => say === "completion_result")
+				.map(({ text }) => text?.trim())
+				.find((text) => text === ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT)
+			assert.strictEqual(childCompletionText, ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT)
+			for (const { summary } of ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS) {
+				assert.ok(childCompletionText.includes(summary), `B completion should include nested ${summary}`)
+			}
+
+			const parentCompletionText = says[parentTaskId]
+				?.filter(({ say }) => say === "completion_result")
+				.map(({ text }) => text?.trim())
+				.find((text) => text === ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT)
+			assert.strictEqual(parentCompletionText, ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT)
+			assert.ok(
+				parentCompletionText.includes(ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT),
+				"Final top-level completion should include B's nested summary",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			api.off(RooCodeEventName.TaskDelegationCompleted, delegationCompletedHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+			assert.strictEqual(api.getCurrentTaskStack().length, 0, "Task stack should be empty after nested cleanup")
+			await sleep(100)
 		}
 	})
 })

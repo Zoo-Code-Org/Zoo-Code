@@ -4,13 +4,23 @@ import {
 	ORCHESTRATOR_FAN_OUT_CHILD_STEPS,
 	ORCHESTRATOR_FAN_OUT_FINAL_RESULT,
 	ORCHESTRATOR_FAN_OUT_PARENT_PROMPT,
+	ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+	ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP,
+	ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT,
+	ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS,
+	ORCHESTRATOR_NESTED_DELEGATION_MARKER,
+	ORCHESTRATOR_NESTED_DELEGATION_PARENT_PROMPT,
 	ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS,
 	ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT,
 	ORCHESTRATOR_REPEATED_DELEGATION_MARKER,
 	ORCHESTRATOR_REPEATED_DELEGATION_PARENT_PROMPT,
+	buildOrchestratorNestedChildResumeExpectations,
+	buildOrchestratorNestedParentResumeExpectations,
 	buildOrchestratorRepeatedResumeExpectations,
 	buildOrchestratorResumeExpectations,
 	shouldMatchOrchestratorChildRequest,
+	shouldMatchOrchestratorNestedChildResumeRequest,
+	shouldMatchOrchestratorNestedParentResumeRequest,
 	shouldMatchOrchestratorRepeatedResumeRequest,
 	shouldMatchOrchestratorResumeRequest,
 } from "./orchestrator-plan"
@@ -176,5 +186,94 @@ describe("orchestrator fan-out delegation plan", () => {
 		for (const { round, role, summary } of ORCHESTRATOR_REPEATED_DELEGATION_CHILD_STEPS) {
 			expect(ORCHESTRATOR_REPEATED_DELEGATION_FINAL_RESULT).toContain(`Round ${round} ${role}: ${summary}`)
 		}
+	})
+
+	it("defines a nested parent/child orchestrator plan with A/B/C/D roles, modes, and summaries", () => {
+		expect(ORCHESTRATOR_NESTED_DELEGATION_PARENT_PROMPT).toContain(ORCHESTRATOR_NESTED_DELEGATION_MARKER)
+		expect(ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP).toEqual(
+			expect.objectContaining({
+				role: "child-orchestrator",
+				mode: "orchestrator",
+				summary: ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+			}),
+		)
+		expect(ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS).toEqual([
+			expect.objectContaining({
+				role: "requirements",
+				mode: "ask",
+				summary: "Nested requirement summary: capture child orchestrator requirements.",
+			}),
+			expect.objectContaining({
+				role: "implementation",
+				mode: "code",
+				summary: "Nested implementation summary: produce child orchestrator implementation notes.",
+			}),
+		])
+	})
+
+	it("matches nested child orchestrator resumes only after cumulative C/D result injection", () => {
+		const expectations = buildOrchestratorNestedChildResumeExpectations()
+		expect(expectations).toEqual([
+			{
+				stepIndex: 1,
+				requiredSummaries: ["Nested requirement summary: capture child orchestrator requirements."],
+				nextMode: "code",
+			},
+			{
+				stepIndex: 2,
+				requiredSummaries: ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS.map(({ summary }) => summary),
+				nextMode: undefined,
+			},
+		])
+
+		const secondExpectation = expectations[1]!
+		const childResumeRequest = `${ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP.marker} completed.\\n\\nResult:\\n${secondExpectation.requiredSummaries.join(" completed.\\n\\nResult:\\n")}`
+
+		expect(
+			shouldMatchOrchestratorNestedChildResumeRequest(childResumeRequest, secondExpectation.requiredSummaries),
+		).toBe(true)
+		expect(
+			shouldMatchOrchestratorNestedChildResumeRequest(
+				`${ORCHESTRATOR_NESTED_DELEGATION_CHILD_ORCHESTRATOR_STEP.marker} completed.\\n\\nResult:\\nmissing ${secondExpectation.requiredSummaries[1]}`,
+				secondExpectation.requiredSummaries,
+			),
+		).toBe(false)
+		expect(
+			shouldMatchOrchestratorNestedChildResumeRequest(
+				`${ORCHESTRATOR_NESTED_DELEGATION_MARKER} completed.\\n\\nResult:\\n${secondExpectation.requiredSummaries[0]}`,
+				[secondExpectation.requiredSummaries[0]!],
+			),
+		).toBe(false)
+	})
+
+	it("matches top-level nested parent resumes only after the B nested result", () => {
+		const expectations = buildOrchestratorNestedParentResumeExpectations()
+		expect(expectations).toEqual([
+			{
+				stepIndex: 1,
+				requiredSummaries: [ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT],
+				nextMode: undefined,
+			},
+		])
+
+		const parentResumeRequest = `${ORCHESTRATOR_NESTED_DELEGATION_MARKER} completed.\\n\\nResult:\\n${ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT}`
+		expect(
+			shouldMatchOrchestratorNestedParentResumeRequest(parentResumeRequest, [
+				ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT,
+			]),
+		).toBe(true)
+		expect(
+			shouldMatchOrchestratorNestedParentResumeRequest(
+				`${ORCHESTRATOR_NESTED_DELEGATION_MARKER} completed.\\n\\nResult:\\n${ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS[0]!.summary}`,
+				[ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT],
+			),
+		).toBe(false)
+	})
+
+	it("composes nested child and final parent results with the nested summaries", () => {
+		for (const { summary } of ORCHESTRATOR_NESTED_DELEGATION_GRANDCHILD_STEPS) {
+			expect(ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT).toContain(summary)
+		}
+		expect(ORCHESTRATOR_NESTED_DELEGATION_FINAL_RESULT).toContain(ORCHESTRATOR_NESTED_DELEGATION_CHILD_FINAL_RESULT)
 	})
 })
