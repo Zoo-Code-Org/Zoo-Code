@@ -499,7 +499,7 @@ describe("UsageStatsProjection", () => {
 			expect(heatmap.values.every((v) => v === 0)).toBe(true)
 		})
 
-		it("should show cost for days with events", () => {
+		it("should show tokens for days with events", () => {
 			db.append(
 				makeEvent({
 					eventId: "evt-1",
@@ -514,7 +514,8 @@ describe("UsageStatsProjection", () => {
 			)
 
 			const heatmap = computeHeatmapSnapshot(db, 7, "Asia/Seoul")
-			// At least one day should have non-zero cost
+			// ST-3: Heatmap values are token counts, not cost
+			// At least one day should have non-zero tokens
 			expect(heatmap.values.some((v) => v > 0)).toBe(true)
 		})
 
@@ -632,7 +633,8 @@ describe("UsageStatsProjection", () => {
 
 			expect(delta.heatmapDayDelta).toBeDefined()
 			expect(delta.heatmapDayDelta!.dayIndex).toBeGreaterThanOrEqual(0)
-			expect(delta.heatmapDayDelta!.delta).toBe(0.05)
+			// ST-3: Heatmap delta is token count (1000 input + 500 output = 1500), not cost
+			expect(delta.heatmapDayDelta!.delta).toBe(1500)
 		})
 
 		it("should not compute heatmap delta for events outside the heatmap range", () => {

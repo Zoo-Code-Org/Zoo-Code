@@ -585,14 +585,15 @@ export function computeHeatmapSnapshot(db: UsageStatsDatabase, rangeDays: number
 		// Query daily rollups from the DB
 		const rollups: DailyRollupRow[] = db.queryDailyRollups(fromDay, toDay)
 
-		// Build a map of day → cost for fast lookup
-		const costByDay = new Map<string, number>()
+		// Build a map of day → tokens for fast lookup
+		// ST-3: Heatmap displays tokens, not cost — use totalTokens for consistency
+		const tokensByDay = new Map<string, number>()
 		for (const rollup of rollups) {
-			costByDay.set(rollup.day, rollup.totalCost)
+			tokensByDay.set(rollup.day, rollup.totalTokens)
 		}
 
 		// Assemble values array (one per day, oldest first, 0 for missing days)
-		const values = days.map((day) => costByDay.get(day) ?? 0)
+		const values = days.map((day) => tokensByDay.get(day) ?? 0)
 
 		return {
 			rangeDays,
@@ -669,8 +670,9 @@ export function applyEventToProjection(
 
 		if (dayIndex >= 0) {
 			// The event falls within the heatmap range
-			const eventCost = computeEventDelta(event, query.cacheRatio).costUsd
-			heatmapDayDelta = { dayIndex, delta: eventCost }
+			// ST-3: Heatmap displays tokens, not cost — use totalTokens for consistency
+			const eventTokens = computeEventDelta(event, query.cacheRatio).totalTokens
+			heatmapDayDelta = { dayIndex, delta: eventTokens }
 		}
 
 		// 4. Read updated session metadata for session upserts

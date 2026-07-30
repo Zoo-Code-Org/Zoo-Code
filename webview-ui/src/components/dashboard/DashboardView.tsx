@@ -112,20 +112,14 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			let to: string | undefined
 			let queryPreset: StatsQuery["preset"]
 
+			// ST-5: Named presets (today/7d/30d/all) must NOT send from/to.
+			// The backend resolves date ranges from the preset string itself.
+			// Only the "custom" preset sends explicit from/to values.
 			if (currentPreset === "today") {
-				const startOfDay = new Date(now)
-				startOfDay.setHours(0, 0, 0, 0)
-				from = startOfDay.toISOString()
 				queryPreset = "today"
 			} else if (currentPreset === "7d") {
-				const start = new Date(now)
-				start.setDate(start.getDate() - 7)
-				from = start.toISOString()
 				queryPreset = "7d"
 			} else if (currentPreset === "30d") {
-				const start = new Date(now)
-				start.setDate(start.getDate() - 30)
-				from = start.toISOString()
 				queryPreset = "30d"
 			} else if (currentPreset === "custom") {
 				const fromStr = fromOverride ?? customFrom
