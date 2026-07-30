@@ -1,4 +1,4 @@
-import { SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS, ProviderSettings } from "@roo-code/types"
+import { SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS, providerIdentifiers, ProviderSettings } from "@roo-code/types"
 
 /**
  * Returns whether a provider profile is sufficiently configured to leave the
@@ -14,17 +14,22 @@ export function checkExistKey(config: ProviderSettings | undefined, zooCodeIsAut
 	}
 
 	// Special case for fake-ai, openai-codex, and qwen-code providers which don't need any configuration.
-	if (config.apiProvider && ["fake-ai", "openai-codex", "qwen-code"].includes(config.apiProvider)) {
+	const configurationFreeProviders: ProviderSettings["apiProvider"][] = [
+		providerIdentifiers.fakeAi,
+		providerIdentifiers.openaiCodex,
+		providerIdentifiers.qwenCode,
+	]
+	if (config.apiProvider && configurationFreeProviders.includes(config.apiProvider)) {
 		return true
 	}
 
-	if (config.apiProvider === "kimi-code" && (config.kimiCodeAuthMethod ?? "oauth") === "oauth") {
+	if (config.apiProvider === providerIdentifiers.kimiCode && (config.kimiCodeAuthMethod ?? "oauth") === "oauth") {
 		return true
 	}
 
 	// Zoo Gateway uses session auth (profile token and/or global Zoo Code login),
 	// not a traditional API key listed in SECRET_STATE_KEYS.
-	if (config.apiProvider === "zoo-gateway") {
+	if (config.apiProvider === providerIdentifiers.zooGateway) {
 		return Boolean(config.zooSessionToken) || Boolean(zooCodeIsAuthenticated)
 	}
 

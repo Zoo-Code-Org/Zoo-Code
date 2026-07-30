@@ -1,107 +1,123 @@
-import { getApiProtocol } from "../provider-settings.js"
+import { ANTHROPIC_API_PROTOCOL, getApiProtocol, OPENAI_API_PROTOCOL, providerIdentifiers } from "../index.js"
 
 describe("getApiProtocol", () => {
-	describe("Anthropic-style providers", () => {
-		it("should return 'anthropic' for anthropic provider", () => {
-			expect(getApiProtocol("anthropic")).toBe("anthropic")
-			expect(getApiProtocol("anthropic", "gpt-4")).toBe("anthropic")
-		})
+	it("preserves API protocol wire values", () => {
+		expect(ANTHROPIC_API_PROTOCOL).toBe("anthropic")
+		expect(OPENAI_API_PROTOCOL).toBe("openai")
+	})
 
-		it("should return 'anthropic' for bedrock provider", () => {
-			expect(getApiProtocol("bedrock")).toBe("anthropic")
-			expect(getApiProtocol("bedrock", "gpt-4")).toBe("anthropic")
-			expect(getApiProtocol("bedrock", "claude-3-opus")).toBe("anthropic")
-		})
+	describe("Anthropic-style providers", () => {
+		it.each([providerIdentifiers.anthropic, providerIdentifiers.bedrock, providerIdentifiers.minimax])(
+			"should return 'anthropic' for %s provider",
+			(provider) => {
+				expect(getApiProtocol(provider)).toBe(ANTHROPIC_API_PROTOCOL)
+				expect(getApiProtocol(provider, "gpt-4")).toBe(ANTHROPIC_API_PROTOCOL)
+			},
+		)
 	})
 
 	describe("Vertex provider with Claude models", () => {
 		it("should return 'anthropic' for vertex provider with claude models", () => {
-			expect(getApiProtocol("vertex", "claude-3-opus")).toBe("anthropic")
-			expect(getApiProtocol("vertex", "Claude-3-Sonnet")).toBe("anthropic")
-			expect(getApiProtocol("vertex", "CLAUDE-instant")).toBe("anthropic")
-			expect(getApiProtocol("vertex", "anthropic/claude-3-haiku")).toBe("anthropic")
+			expect(getApiProtocol(providerIdentifiers.vertex, "claude-3-opus")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "Claude-3-Sonnet")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "CLAUDE-instant")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "anthropic/claude-3-haiku")).toBe(ANTHROPIC_API_PROTOCOL)
 		})
 
 		it("should return 'openai' for vertex provider with non-claude models", () => {
-			expect(getApiProtocol("vertex", "gpt-4")).toBe("openai")
-			expect(getApiProtocol("vertex", "gemini-pro")).toBe("openai")
-			expect(getApiProtocol("vertex", "llama-2")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.vertex, "gpt-4")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "gemini-pro")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "llama-2")).toBe(OPENAI_API_PROTOCOL)
 		})
 
 		it("should return 'openai' for vertex provider without model", () => {
-			expect(getApiProtocol("vertex")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.vertex)).toBe(OPENAI_API_PROTOCOL)
 		})
 	})
 
-	describe("Vercel AI Gateway provider", () => {
+	describe("Gateway providers", () => {
+		it("uses the canonical Zoo Gateway identifier for Anthropic model protocol selection", () => {
+			expect(getApiProtocol(providerIdentifiers.zooGateway, "anthropic/claude-3-opus")).toBe(
+				ANTHROPIC_API_PROTOCOL,
+			)
+		})
+
 		it("should return 'anthropic' for vercel-ai-gateway provider with anthropic models", () => {
-			expect(getApiProtocol("vercel-ai-gateway", "anthropic/claude-3-opus")).toBe("anthropic")
-			expect(getApiProtocol("vercel-ai-gateway", "anthropic/claude-3.5-sonnet")).toBe("anthropic")
-			expect(getApiProtocol("vercel-ai-gateway", "ANTHROPIC/claude-sonnet-4")).toBe("anthropic")
-			expect(getApiProtocol("vercel-ai-gateway", "anthropic/claude-opus-4.1")).toBe("anthropic")
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "anthropic/claude-3-opus")).toBe(
+				ANTHROPIC_API_PROTOCOL,
+			)
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "anthropic/claude-3.5-sonnet")).toBe(
+				ANTHROPIC_API_PROTOCOL,
+			)
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "ANTHROPIC/claude-sonnet-4")).toBe(
+				ANTHROPIC_API_PROTOCOL,
+			)
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "anthropic/claude-opus-4.1")).toBe(
+				ANTHROPIC_API_PROTOCOL,
+			)
 		})
 
 		it("should return 'openai' for vercel-ai-gateway provider with non-anthropic models", () => {
-			expect(getApiProtocol("vercel-ai-gateway", "openai/gpt-4")).toBe("openai")
-			expect(getApiProtocol("vercel-ai-gateway", "google/gemini-pro")).toBe("openai")
-			expect(getApiProtocol("vercel-ai-gateway", "meta/llama-3")).toBe("openai")
-			expect(getApiProtocol("vercel-ai-gateway", "mistral/mixtral")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "openai/gpt-4")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "google/gemini-pro")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "meta/llama-3")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway, "mistral/mixtral")).toBe(OPENAI_API_PROTOCOL)
 		})
 
 		it("should return 'openai' for vercel-ai-gateway provider without model", () => {
-			expect(getApiProtocol("vercel-ai-gateway")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.vercelAiGateway)).toBe(OPENAI_API_PROTOCOL)
 		})
 	})
 
 	describe("Opencode Go provider", () => {
 		it("should return 'anthropic' for opencode-go Anthropic-format models (Qwen/MiniMax)", () => {
-			expect(getApiProtocol("opencode-go", "qwen3.7-max")).toBe("anthropic")
-			expect(getApiProtocol("opencode-go", "qwen3.7-plus")).toBe("anthropic")
-			expect(getApiProtocol("opencode-go", "qwen3.6-plus")).toBe("anthropic")
-			expect(getApiProtocol("opencode-go", "minimax-m3")).toBe("anthropic")
-			expect(getApiProtocol("opencode-go", "minimax-m2.7")).toBe("anthropic")
-			expect(getApiProtocol("opencode-go", "minimax-m2.5")).toBe("anthropic")
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.7-max")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.7-plus")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.6-plus")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "minimax-m3")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "minimax-m2.7")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "minimax-m2.5")).toBe(ANTHROPIC_API_PROTOCOL)
 		})
 
 		it("should return 'openai' for opencode-go OpenAI-format models (GLM/DeepSeek/etc.)", () => {
-			expect(getApiProtocol("opencode-go", "glm-5.2")).toBe("openai")
-			expect(getApiProtocol("opencode-go", "deepseek-v4-pro")).toBe("openai")
-			expect(getApiProtocol("opencode-go", "kimi-k2.5")).toBe("openai")
-			expect(getApiProtocol("opencode-go", "mimo-v2.5")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.2")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "deepseek-v4-pro")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "kimi-k2.5")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "mimo-v2.5")).toBe(OPENAI_API_PROTOCOL)
 		})
 
 		it("should return 'openai' for opencode-go without a model", () => {
-			expect(getApiProtocol("opencode-go")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.opencodeGo)).toBe(OPENAI_API_PROTOCOL)
 		})
 
 		it("should return 'openai' for opencode-go with an unknown model id", () => {
-			expect(getApiProtocol("opencode-go", "some-future-model")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "some-future-model")).toBe(OPENAI_API_PROTOCOL)
 		})
 	})
 
 	describe("Other providers", () => {
 		it("should return 'openai' for non-anthropic providers regardless of model", () => {
-			expect(getApiProtocol("openrouter", "claude-3-opus")).toBe("openai")
-			expect(getApiProtocol("openai", "claude-3-sonnet")).toBe("openai")
-			expect(getApiProtocol("litellm", "claude-instant")).toBe("openai")
-			expect(getApiProtocol("ollama", "claude-model")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.openrouter, "claude-3-opus")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.openai, "claude-3-sonnet")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.litellm, "claude-instant")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.ollama, "claude-model")).toBe(OPENAI_API_PROTOCOL)
 		})
 	})
 
 	describe("Edge cases", () => {
 		it("should return 'openai' when provider is undefined", () => {
-			expect(getApiProtocol(undefined)).toBe("openai")
-			expect(getApiProtocol(undefined, "claude-3-opus")).toBe("openai")
+			expect(getApiProtocol(undefined)).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(undefined, "claude-3-opus")).toBe(OPENAI_API_PROTOCOL)
 		})
 
 		it("should handle empty strings", () => {
-			expect(getApiProtocol("vertex", "")).toBe("openai")
+			expect(getApiProtocol(providerIdentifiers.vertex, "")).toBe(OPENAI_API_PROTOCOL)
 		})
 
 		it("should be case-insensitive for claude detection", () => {
-			expect(getApiProtocol("vertex", "CLAUDE-3-OPUS")).toBe("anthropic")
-			expect(getApiProtocol("vertex", "claude-3-opus")).toBe("anthropic")
-			expect(getApiProtocol("vertex", "ClAuDe-InStAnT")).toBe("anthropic")
+			expect(getApiProtocol(providerIdentifiers.vertex, "CLAUDE-3-OPUS")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "claude-3-opus")).toBe(ANTHROPIC_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.vertex, "ClAuDe-InStAnT")).toBe(ANTHROPIC_API_PROTOCOL)
 		})
 	})
 })

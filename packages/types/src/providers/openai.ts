@@ -3,6 +3,7 @@ import type { ModelInfo } from "../model.js"
 // https://openai.com/api/pricing/
 export type OpenAiNativeModelId = keyof typeof openAiNativeModels
 
+export const OPENAI_API_PROTOCOL = "openai"
 export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.6-sol"
 
 export const openAiNativeModels = {

@@ -8,6 +8,7 @@ import type { Mock } from "vitest"
 import {
 	ProviderSettings,
 	ModelInfo,
+	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
 	kenariDefaultModelId,
@@ -22,6 +23,8 @@ import {
 	vscodeLlmDefaultModelId,
 	moonshotDefaultModelId,
 	moonshotModels,
+	kimiCodeDefaultModelInfo,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useSelectedModel } from "../useSelectedModel"
@@ -87,7 +90,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "test-model",
 				openRouterSpecificProvider: "test-provider",
 			}
@@ -148,7 +151,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "test-model", // This model doesn't exist in available models
 				openRouterSpecificProvider: "test-provider",
 			}
@@ -211,7 +214,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "test-model",
 				openRouterSpecificProvider: "test-provider",
 			}
@@ -263,7 +266,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "test-model",
 			}
 
@@ -304,7 +307,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "non-existent-model",
 				openRouterSpecificProvider: "non-existent-provider",
 			}
@@ -404,7 +407,7 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(), { wrapper })
 
-			expect(result.current.provider).toBe("openrouter")
+			expect(result.current.provider).toBe(providerIdentifiers.openrouter)
 			expect(result.current.id).toBe(openRouterDefaultModelId)
 			expect(result.current.info).toBeUndefined()
 		})
@@ -427,7 +430,7 @@ describe("useSelectedModel", () => {
 
 		it("should apply 1M pricing tier for Claude Sonnet 4.6 when enabled", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiModelId: "claude-sonnet-4-6",
 				anthropicBeta1MContext: true,
 			}
@@ -440,6 +443,39 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.inputPrice).toBe(6.0)
 			expect(result.current.info?.outputPrice).toBe(22.5)
 		})
+
+		it("should apply 1M pricing tier for Claude Opus 4.6 when enabled", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-opus-4-6",
+				anthropicBeta1MContext: true,
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("claude-opus-4-6")
+			expect(result.current.info?.contextWindow).toBe(1_000_000)
+			expect(result.current.info?.inputPrice).toBe(10.0)
+			expect(result.current.info?.outputPrice).toBe(37.5)
+		})
+
+		it.each([providerIdentifiers.anthropic, providerIdentifiers.geminiCli, providerIdentifiers.fakeAi] as const)(
+			"should explicitly resolve configured models for %s",
+			(apiProvider) => {
+				const apiConfiguration: ProviderSettings = {
+					apiProvider,
+					apiModelId: "claude-sonnet-4-6",
+				}
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+				expect(result.current.provider).toBe(apiProvider)
+				expect(result.current.id).toBe("claude-sonnet-4-6")
+				expect(result.current.info).toEqual(anthropicModels["claude-sonnet-4-6"])
+			},
+		)
 	})
 
 	describe("bedrock provider with 1M context", () => {
@@ -463,7 +499,7 @@ describe("useSelectedModel", () => {
 
 		it("should enable 1M context window for Bedrock Claude Sonnet 4 when awsBedrock1MContext is true", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: BEDROCK_1M_CONTEXT_MODEL_IDS[0],
 				awsBedrock1MContext: true,
 			}
@@ -477,7 +513,7 @@ describe("useSelectedModel", () => {
 
 		it("should use default context window for Bedrock Claude Sonnet 4 when awsBedrock1MContext is false", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: BEDROCK_1M_CONTEXT_MODEL_IDS[0],
 				awsBedrock1MContext: false,
 			}
@@ -491,7 +527,7 @@ describe("useSelectedModel", () => {
 
 		it("should not affect context window for non-Claude Sonnet 4 Bedrock models", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
 				awsBedrock1MContext: true,
 			}
@@ -525,7 +561,7 @@ describe("useSelectedModel", () => {
 
 		it("should enable supportsPromptCache for custom-arn model", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "custom-arn",
 			}
 
@@ -538,7 +574,7 @@ describe("useSelectedModel", () => {
 
 		it("should enable supportsImages for custom-arn model", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "custom-arn",
 			}
 
@@ -571,14 +607,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "litellm",
+				apiProvider: providerIdentifiers.litellm,
 				litellmModelId: "some-model",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("litellm")
+			expect(result.current.provider).toBe(providerIdentifiers.litellm)
 			// Should preserve configured model ID since "some-model" doesn't exist in empty litellm models
 			expect(result.current.id).toBe("some-model")
 			// Should use litellmDefaultModelInfo as fallback
@@ -597,14 +633,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "litellm",
+				apiProvider: providerIdentifiers.litellm,
 				// litellmModelId intentionally omitted
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("litellm")
+			expect(result.current.provider).toBe(providerIdentifiers.litellm)
 			// LiteLLM has no inherent default; with nothing configured the ID is empty rather than a phantom model
 			expect(result.current.id).toBe("")
 			expect(result.current.info).toEqual(litellmDefaultModelInfo)
@@ -632,7 +668,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "litellm",
+				apiProvider: providerIdentifiers.litellm,
 				litellmModelId: "my-custom-model",
 			}
 
@@ -677,14 +713,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "litellm",
+				apiProvider: providerIdentifiers.litellm,
 				litellmModelId: "non-existing-model",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("litellm")
+			expect(result.current.provider).toBe(providerIdentifiers.litellm)
 			// Falls back to default model ID
 			expect(result.current.id).toBe("claude-3-7-sonnet-20250219")
 			// Should use litellmDefaultModelInfo as fallback since default model also not in router models
@@ -713,14 +749,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "litellm",
+				apiProvider: providerIdentifiers.litellm,
 				litellmModelId: "custom-model",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("litellm")
+			expect(result.current.provider).toBe(providerIdentifiers.litellm)
 			expect(result.current.id).toBe("custom-model")
 			expect(result.current.info).toEqual(customModelInfo)
 		})
@@ -758,14 +794,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "kenari",
+				apiProvider: providerIdentifiers.kenari,
 				kenariModelId: "glm-5-2",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("kenari")
+			expect(result.current.provider).toBe(providerIdentifiers.kenari)
 			expect(result.current.id).toBe("glm-5-2")
 			expect(result.current.info).toEqual(customModelInfo)
 		})
@@ -783,14 +819,14 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "kenari",
+				apiProvider: providerIdentifiers.kenari,
 				kenariModelId: "some-model",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("kenari")
+			expect(result.current.provider).toBe(providerIdentifiers.kenari)
 			// Falls back to the kenari default model ID when the router list is empty
 			expect(result.current.id).toBe(kenariDefaultModelId)
 			// Should use kenariDefaultModelInfo as fallback
@@ -819,14 +855,14 @@ describe("useSelectedModel", () => {
 
 		it("should use openAiModelInfoSaneDefaults when no custom model info is provided", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "gpt-4o",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("openai")
+			expect(result.current.provider).toBe(providerIdentifiers.openai)
 			expect(result.current.id).toBe("gpt-4o")
 			expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
 		})
@@ -843,7 +879,7 @@ describe("useSelectedModel", () => {
 			}
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "custom-model",
 				openAiCustomModelInfo: customModelInfo,
 			}
@@ -851,7 +887,7 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("openai")
+			expect(result.current.provider).toBe(providerIdentifiers.openai)
 			expect(result.current.id).toBe("custom-model")
 			expect(result.current.info).toEqual(customModelInfo)
 		})
@@ -865,7 +901,7 @@ describe("useSelectedModel", () => {
 			}
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "custom-model-no-tools",
 				openAiCustomModelInfo: customModelInfo,
 			}
@@ -873,7 +909,7 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("openai")
+			expect(result.current.provider).toBe(providerIdentifiers.openai)
 			expect(result.current.id).toBe("custom-model-no-tools")
 			expect(result.current.info).toEqual(customModelInfo)
 		})
@@ -900,27 +936,27 @@ describe("useSelectedModel", () => {
 
 		it("should return default minimax model when no custom model is specified", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "minimax",
+				apiProvider: providerIdentifiers.minimax,
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("minimax")
+			expect(result.current.provider).toBe(providerIdentifiers.minimax)
 			expect(result.current.id).toBe(minimaxDefaultModelId)
 			expect(result.current.info).toEqual(minimaxModels[minimaxDefaultModelId])
 		})
 
 		it("should use custom model ID and info when model exists in minimaxModels", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "minimax",
+				apiProvider: providerIdentifiers.minimax,
 				apiModelId: "MiniMax-M2.7",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("minimax")
+			expect(result.current.provider).toBe(providerIdentifiers.minimax)
 			expect(result.current.id).toBe("MiniMax-M2.7")
 			expect(result.current.info).toEqual(minimaxModels["MiniMax-M2.7"])
 		})
@@ -948,14 +984,14 @@ describe("useSelectedModel", () => {
 		it("resolves a listed family's contextWindow to its maxInputTokens", () => {
 			const family = vscodeLlmDefaultModelId
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "vscode-lm",
+				apiProvider: providerIdentifiers.vscodeLm,
 				vsCodeLmModelSelector: { vendor: "copilot", family },
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
 			expect(result.current.id).toBe(`copilot/${family}`)
 			// The bar and the condense gate share one source of truth: contextWindow === maxInputTokens.
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens)
@@ -967,14 +1003,14 @@ describe("useSelectedModel", () => {
 			// the advertised window would be caught here.
 			const family = "claude-opus-4.8"
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "vscode-lm",
+				apiProvider: providerIdentifiers.vscodeLm,
 				vsCodeLmModelSelector: { vendor: "copilot", family },
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("vscode-lm")
+			expect(result.current.provider).toBe(providerIdentifiers.vscodeLm)
 			expect(result.current.id).toBe(`copilot/${family}`)
 			expect(result.current.info?.contextWindow).toBe(vscodeLlmModels[family].maxInputTokens) // 197897
 			expect(result.current.info?.contextWindow).not.toBe(vscodeLlmModels[family].contextWindow) // NOT 679560
@@ -983,7 +1019,7 @@ describe("useSelectedModel", () => {
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "vscode-lm",
+				apiProvider: providerIdentifiers.vscodeLm,
 				vsCodeLmModelSelector: { vendor: "copilot", family: "totally-unknown-family" },
 			}
 
@@ -1018,30 +1054,74 @@ describe("useSelectedModel", () => {
 
 		it("should return default Friendli model when no custom model is specified", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "friendli",
+				apiProvider: providerIdentifiers.friendli,
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("friendli")
+			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe(friendliDefaultModelId)
 			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
 		})
 
 		it("should use custom model ID and info when model exists in friendliModels", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "friendli",
+				apiProvider: providerIdentifiers.friendli,
 				apiModelId: "zai-org/GLM-5.1",
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("friendli")
+			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
 		})
+	})
+
+	describe("Kimi Code provider", () => {
+		it("should resolve the configured model from router models", () => {
+			const modelInfo: ModelInfo = {
+				...kimiCodeDefaultModelInfo,
+				description: "Configured Kimi Code model",
+			}
+
+			mockUseRouterModels.mockReturnValue({
+				data: { "kimi-code": { "kimi-for-coding": modelInfo } },
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.kimiCode,
+				apiModelId: "kimi-for-coding",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe(providerIdentifiers.kimiCode)
+			expect(result.current.id).toBe("kimi-for-coding")
+			expect(result.current.info).toEqual(modelInfo)
+		})
+	})
+
+	it("should reject providers unsupported by model selection", () => {
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+		const preventExpectedError = (event: ErrorEvent) => event.preventDefault()
+		window.addEventListener("error", preventExpectedError)
+		const apiConfiguration = {
+			apiProvider: "unsupported-provider",
+		} as unknown as ProviderSettings
+
+		const wrapper = createWrapper()
+
+		expect(() => renderHook(() => useSelectedModel(apiConfiguration), { wrapper })).toThrow(
+			"Unsupported provider: unsupported-provider",
+		)
+		window.removeEventListener("error", preventExpectedError)
+		consoleError.mockRestore()
 	})
 
 	describe("moonshot provider", () => {
@@ -1066,13 +1146,13 @@ describe("useSelectedModel", () => {
 
 		it("should return default moonshot model when no custom model is specified", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "moonshot",
+				apiProvider: providerIdentifiers.moonshot,
 			}
 
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			expect(result.current.provider).toBe("moonshot")
+			expect(result.current.provider).toBe(providerIdentifiers.moonshot)
 			expect(result.current.id).toBe(moonshotDefaultModelId)
 			expect(result.current.info).toEqual(moonshotModels[moonshotDefaultModelId])
 		})
@@ -1101,7 +1181,7 @@ describe("useSelectedModel", () => {
 			} as any)
 
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "moonshot",
+				apiProvider: providerIdentifiers.moonshot,
 			}
 
 			const wrapper = createWrapper()
@@ -1114,7 +1194,7 @@ describe("useSelectedModel", () => {
 
 		it("should fallback to default when model ID is not in static or router models", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "moonshot",
+				apiProvider: providerIdentifiers.moonshot,
 				apiModelId: "non-existent-model",
 			}
 
@@ -1127,7 +1207,7 @@ describe("useSelectedModel", () => {
 
 		it("should use getValidatedModelId to return apiModelId when valid", () => {
 			const apiConfiguration: ProviderSettings = {
-				apiProvider: "moonshot",
+				apiProvider: providerIdentifiers.moonshot,
 				apiModelId: "kimi-k2-turbo-preview",
 			}
 

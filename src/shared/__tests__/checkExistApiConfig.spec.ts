@@ -1,6 +1,6 @@
 // npx vitest run src/shared/__tests__/checkExistApiConfig.spec.ts
 
-import type { ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { checkExistKey } from "../checkExistApiConfig"
 
@@ -66,16 +66,20 @@ describe("checkExistKey", () => {
 		expect(checkExistKey(config)).toBe(true)
 	})
 
+	it("recognizes keyless providers through their canonical identifiers", () => {
+		expect(checkExistKey({ apiProvider: providerIdentifiers.fakeAi })).toBe(true)
+	})
+
 	it("should return true for openai-codex provider without API key", () => {
 		const config: ProviderSettings = {
-			apiProvider: "openai-codex",
+			apiProvider: providerIdentifiers.openaiCodex,
 		}
 		expect(checkExistKey(config)).toBe(true)
 	})
 
 	it("should return true for qwen-code provider without API key", () => {
 		const config: ProviderSettings = {
-			apiProvider: "qwen-code",
+			apiProvider: providerIdentifiers.qwenCode,
 		}
 		expect(checkExistKey(config)).toBe(true)
 	})
@@ -93,6 +97,10 @@ describe("checkExistKey", () => {
 			kimiCodeAuthMethod: "oauth",
 		}
 		expect(checkExistKey(config)).toBe(true)
+	})
+
+	it("recognizes OAuth authentication through the canonical Kimi Code identifier", () => {
+		expect(checkExistKey({ apiProvider: providerIdentifiers.kimiCode, kimiCodeAuthMethod: "oauth" })).toBe(true)
 	})
 
 	it("should return true for kimi-code provider without auth method (defaults to OAuth)", () => {
@@ -126,6 +134,10 @@ describe("checkExistKey", () => {
 		}
 		expect(checkExistKey(config)).toBe(false)
 		expect(checkExistKey(config, false)).toBe(false)
+	})
+
+	it("recognizes session authentication through the canonical Zoo Gateway identifier", () => {
+		expect(checkExistKey({ apiProvider: providerIdentifiers.zooGateway }, true)).toBe(true)
 	})
 
 	it("should return true for zoo-gateway when profile has zooSessionToken", () => {
