@@ -551,12 +551,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.emit(RooCodeEventName.QueuedMessagesUpdated, this.taskId, this.messageQueueService.messages)
 			void this.providerRef
 				.deref()
-				?.postStateToWebviewWithoutTaskHistory()
+				?.postStateToWebviewThrottled()
 				.catch((error) => {
-					console.error(
-						"[Task#messageQueueStateChangedHandler] postStateToWebviewWithoutTaskHistory failed:",
-						error,
-					)
+					console.error("[Task#messageQueueStateChangedHandler] postStateToWebviewThrottled failed:", error)
 				})
 		}
 
@@ -1047,9 +1044,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async addToClineMessages(message: ClineMessage) {
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
-		// Avoid resending large, mostly-static fields (notably taskHistory) on every chat message update.
-		// taskHistory is maintained in-memory in the webview and updated via taskHistoryItemUpdated.
-		await provider?.postStateToWebviewWithoutTaskHistory()
+		await provider?.postStateToWebviewThrottled()
+		if (message.partial === true) {
+			await provider?.flushPostStateToWebviewThrottled()
+		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()
 
@@ -2249,6 +2247,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Force final token usage update before abort event
 		this.emitFinalTokenUsageUpdate()
+
+		await this.providerRef.deref()?.flushPostStateToWebviewThrottled()
 
 		this.emit(RooCodeEventName.TaskAborted)
 

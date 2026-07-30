@@ -86,6 +86,25 @@ vi.mock("../ChatRow", () => ({
 	},
 }))
 
+const mockTaskHeaderState = vi.hoisted(() => ({
+	renders: [] as Array<{ taskId?: string; aggregatedCost?: number }>,
+}))
+
+vi.mock("../TaskHeader", () => ({
+	default: function MockTaskHeader({ task, aggregatedCost }: { task: ClineMessage; aggregatedCost?: number }) {
+		mockTaskHeaderState.renders.push({ taskId: task.text, aggregatedCost })
+
+		return (
+			<div
+				data-aggregated-cost={aggregatedCost ?? ""}
+				data-task-id={task.text}
+				data-task-ts={task.ts}
+				data-testid="task-header"
+			/>
+		)
+	},
+}))
+
 vi.mock("../AutoApproveMenu", () => ({
 	default: () => null,
 }))
@@ -331,6 +350,54 @@ const mockPostMessage = (state: Partial<ExtensionState>) => {
 	)
 }
 
+const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
+	await act(async () => {
+		window.dispatchEvent(new MessageEvent("message", { data }))
+	})
+}
+
+const dispatchTaskState = async (id: string, taskTs: number, childIds: string[] = []) => {
+	await dispatchExtensionMessage({
+		type: "state",
+		state: {
+			version: "1.0.0",
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: taskTs,
+					text: id,
+				},
+			],
+			currentTaskId: id,
+			currentTaskItem: {
+				id,
+				ts: taskTs,
+				task: id,
+				childIds,
+			},
+			taskHistory: [],
+			shouldShowAnnouncement: false,
+			allowedCommands: [],
+			alwaysAllowExecute: false,
+			cloudIsAuthenticated: false,
+			telemetrySetting: "enabled",
+		},
+	})
+}
+
+const dispatchAggregatedCosts = async (taskId: string, totalCost: number) => {
+	await dispatchExtensionMessage({
+		type: "taskWithAggregatedCosts",
+		text: taskId,
+		aggregatedCosts: {
+			totalCost,
+			ownCost: 1,
+			childrenCost: totalCost - 1,
+		},
+	})
+}
+
 const defaultProps: ChatViewProps = {
 	isHidden: false,
 	showAnnouncement: false,
@@ -348,6 +415,65 @@ const renderChatView = (props: Partial<ChatViewProps> = {}) => {
 		</ExtensionStateContextProvider>,
 	)
 }
+
+describe("ChatView - Aggregated Costs Lifecycle", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockTaskHeaderState.renders.length = 0
+	})
+
+	it("clears cached aggregated costs when switching tasks", async () => {
+		const { getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 1_000, ["child-a"])
+		await dispatchAggregatedCosts("task-a", 9)
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "9")
+		})
+
+		// Use the same message timestamp to prove task identity, rather than task.ts,
+		// drives the reset.
+		await dispatchTaskState("task-b", 1_000)
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-b")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		await dispatchTaskState("task-a", 1_000, ["child-a"])
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+	})
+
+	it("rejects a delayed aggregated-cost response from the previous task", async () => {
+		const { getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 1_001, ["child-a"])
+		await dispatchTaskState("task-b", 2_001)
+		await dispatchAggregatedCosts("task-a", 13)
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-b")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		mockTaskHeaderState.renders.length = 0
+		await dispatchTaskState("task-a", 1_001, ["child-a"])
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		expect(
+			mockTaskHeaderState.renders.some(
+				({ taskId, aggregatedCost }) => taskId === "task-a" && aggregatedCost === 13,
+			),
+		).toBe(false)
+	})
+})
 
 describe("ChatView - Sound Playing Tests", () => {
 	beforeEach(() => vi.clearAllMocks())

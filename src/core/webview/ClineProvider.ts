@@ -6,6 +6,7 @@ import EventEmitter from "events"
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
 import axios from "axios"
+import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
@@ -188,6 +189,21 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private readonly _postStateToWebviewThrottled = debounce(
+		async () => {
+			try {
+				await this.postStateToWebviewWithoutTaskHistory()
+			} catch (error) {
+				this.log(
+					`[ClineProvider#postStateToWebviewThrottled] Failed to post state: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+		},
+		500,
+		{ leading: true, trailing: true, maxWait: 1000 },
+	)
 	private readonly rateLimitClock: RateLimitClock = createRateLimitClock()
 
 	private recentTasksCache?: string[]
@@ -689,6 +705,7 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -2176,6 +2193,22 @@ export class ClineProvider
 		state.clineMessagesSeq = this.clineMessagesSeq
 		const { taskHistory: _omit, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
+	}
+
+	async postStateToWebviewThrottled(): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		await this._postStateToWebviewThrottled()
+	}
+
+	async flushPostStateToWebviewThrottled(): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		await this._postStateToWebviewThrottled.flush()
 	}
 
 	/**
