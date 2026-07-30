@@ -27,7 +27,10 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 		const message = error.message.toLowerCase()
 		const status = (error as { status?: number }).status
 		// OpenAI SDK APIError carries an HTTP status; some endpoints return 400
-		if (message.includes("parallel_tool_calls") || (status === 400 && message.includes("unrecognized"))) {
+		if (
+			message.includes("parallel_tool_calls") ||
+			(status === 400 && message.includes("unrecognized"))
+		) {
 			return true
 		}
 	}
