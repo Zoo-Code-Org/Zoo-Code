@@ -67,6 +67,16 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 		expectNoImmediateUpdateSettings()
 	})
 
+	it("buffers an allowed command submitted with Enter", () => {
+		const { setCachedStateField } = renderSettings()
+
+		const input = screen.getByTestId("command-input")
+		fireEvent.change(input, { target: { value: "pnpm test" } })
+		fireEvent.keyDown(input, { key: "Enter" })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("allowedCommands", ["pnpm test"])
+	})
+
 	// Case 2: allowedCommands remove
 	it("buffers a removed allowed command without persisting before Save", () => {
 		const { setCachedStateField } = renderSettings({ allowedCommands: ["npm test"] })
@@ -88,6 +98,16 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 		expectNoImmediateUpdateSettings()
 	})
 
+	it("buffers a denied command submitted with Enter", () => {
+		const { setCachedStateField } = renderSettings()
+
+		const input = screen.getByTestId("denied-command-input")
+		fireEvent.change(input, { target: { value: "sudo rm" } })
+		fireEvent.keyDown(input, { key: "Enter" })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("deniedCommands", ["sudo rm"])
+	})
+
 	// Case 3b: deniedCommands remove
 	it("buffers a removed denied command without persisting before Save", () => {
 		const { setCachedStateField } = renderSettings({ deniedCommands: ["rm -rf"] })
@@ -96,5 +116,42 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 
 		expect(setCachedStateField).toHaveBeenCalledWith("deniedCommands", [])
 		expectNoImmediateUpdateSettings()
+	})
+
+	it("buffers the destructive command guard setting", () => {
+		const { setCachedStateField } = renderSettings()
+
+		fireEvent.click(screen.getByTestId("destructive-command-guard-checkbox"))
+
+		expect(setCachedStateField).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("renders destructive command guard disabled by default", () => {
+		renderSettings()
+
+		expect(screen.getByTestId("destructive-command-guard-checkbox")).not.toBeChecked()
+	})
+
+	it("renders destructive command guard enabled from cached settings", () => {
+		renderSettings({ destructiveCommandGuardEnabled: true })
+
+		expect(screen.getByTestId("destructive-command-guard-checkbox")).toBeChecked()
+	})
+
+	it("buffers disabling destructive command guard", () => {
+		const { setCachedStateField } = renderSettings({ destructiveCommandGuardEnabled: true })
+
+		fireEvent.click(screen.getByTestId("destructive-command-guard-checkbox"))
+
+		expect(setCachedStateField).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("hides Zoo command list editors while destructive command guard is enabled", () => {
+		renderSettings({ destructiveCommandGuardEnabled: true, deniedCommands: ["rm -rf"] })
+
+		expect(screen.queryByTestId("allowed-commands-heading")).not.toBeInTheDocument()
+		expect(screen.queryByTestId("denied-commands-heading")).not.toBeInTheDocument()
 	})
 })

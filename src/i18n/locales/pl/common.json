@@ -72,6 +72,10 @@
 		"url_fetch_failed": "Błąd pobierania zawartości URL: {{error}}",
 		"url_fetch_error_with_url": "Błąd pobierania zawartości dla {{url}}: {{error}}",
 		"command_timeout": "Przekroczono limit czasu wykonania polecenia po {{seconds}} sekundach",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard jest włączony, ale nie jest dostępny dla tej platformy"
+		},
+		"destructive_command_guard_enable_failed": "Nie udało się włączyć Destructive Command Guard: {{error}}",
 		"share_task_failed": "Nie udało się udostępnić zadania",
 		"share_no_active_task": "Brak aktywnego zadania do udostępnienia",
 		"share_auth_required": "Wymagana autoryzacja. Zaloguj się, aby udostępniać zadania.",

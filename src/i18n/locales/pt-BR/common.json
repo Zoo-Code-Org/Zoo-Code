@@ -76,6 +76,10 @@
 		"url_fetch_failed": "Falha ao buscar conteúdo da URL: {{error}}",
 		"url_fetch_error_with_url": "Erro ao buscar conteúdo para {{url}}: {{error}}",
 		"command_timeout": "A execução do comando excedeu o tempo limite após {{seconds}} segundos",
+		"destructiveCommandGuard": {
+			"unavailable": "O Destructive Command Guard está ativado, mas não está disponível para esta plataforma"
+		},
+		"destructive_command_guard_enable_failed": "Não foi possível ativar o Destructive Command Guard: {{error}}",
 		"share_task_failed": "Falha ao compartilhar tarefa",
 		"share_no_active_task": "Nenhuma tarefa ativa para compartilhar",
 		"share_auth_required": "Autenticação necessária. Faça login para compartilhar tarefas.",

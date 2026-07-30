@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "执行",
 			"description": "自动执行白名单中的命令而无需批准",
+			"destructiveCommandGuard": {
+				"label": "启用破坏性命令防护",
+				"description": "下载并使用适用于此平台的 Destructive Command Guard（DCG）。DCG 允许的命令会自动执行。被 DCG 拦截的命令需要你批准后才能执行。启用后，Zoo 的命令列表将被禁用。关闭此选项时，已下载的可执行文件会保留。"
+			},
 			"allowedCommands": "命令白名单",
 			"allowedCommandsDescription": "当\"自动批准命令行操作\"启用时可以自动执行的命令前缀。添加 * 以允许所有命令（谨慎使用）。",
 			"deniedCommands": "拒绝的命令",

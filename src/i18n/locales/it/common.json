@@ -72,6 +72,10 @@
 		"url_fetch_failed": "Errore nel recupero del contenuto URL: {{error}}",
 		"url_fetch_error_with_url": "Errore nel recupero del contenuto per {{url}}: {{error}}",
 		"command_timeout": "Esecuzione del comando scaduta dopo {{seconds}} secondi",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard è abilitato, ma non è disponibile per questa piattaforma"
+		},
+		"destructive_command_guard_enable_failed": "Impossibile abilitare Destructive Command Guard: {{error}}",
 		"share_task_failed": "Condivisione dell'attività fallita. Riprova.",
 		"share_no_active_task": "Nessuna attività attiva da condividere",
 		"share_auth_required": "Autenticazione richiesta. Accedi per condividere le attività.",
