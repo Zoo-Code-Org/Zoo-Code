@@ -2,7 +2,7 @@ import path from "path"
 import delay from "delay"
 import fs from "fs/promises"
 
-import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS, RooCodeEventName } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -39,11 +39,29 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 */
 	private lastSeenPartialPathByTaskId = new Map<string, string | undefined>()
 
+	/**
+	 * Tracks abort cleanup listeners for per-task partial state so normal execute()
+	 * finalization can unregister them and abandoned streams are torn down on abort.
+	 */
+	private partialStateAbortCleanupByTaskId = new Map<string, { task: Task; cleanup: () => void }>()
+
 	private getPartialStreamFailureKey(task: Task): string {
 		return `${task.taskId}.${task.instanceId}`
 	}
 
+	private registerTaskPartialStateCleanup(task: Task): void {
+		const key = this.getPartialStreamFailureKey(task)
+		if (this.partialStateAbortCleanupByTaskId.has(key)) {
+			return
+		}
+
+		const cleanup = () => this.resetTaskPartialState(task)
+		this.partialStateAbortCleanupByTaskId.set(key, { task, cleanup })
+		task.once(RooCodeEventName.TaskAborted, cleanup)
+	}
+
 	private hasPathStabilizedForTask(task: Task, partialPath: string | undefined): boolean {
+		this.registerTaskPartialStateCleanup(task)
 		const key = this.getPartialStreamFailureKey(task)
 		const lastSeenPath = this.lastSeenPartialPathByTaskId.get(key)
 		const pathHasStabilized = lastSeenPath !== undefined && lastSeenPath === partialPath
@@ -53,6 +71,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
+		const abortCleanup = this.partialStateAbortCleanupByTaskId.get(key)
+		if (abortCleanup) {
+			task.off(RooCodeEventName.TaskAborted, abortCleanup.cleanup)
+			this.partialStateAbortCleanupByTaskId.delete(key)
+		}
 		this.lastSeenPartialPathByTaskId.delete(key)
 		this.partialStreamFailuresByTaskId.delete(key)
 	}
@@ -71,8 +94,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 	override resetPartialState(): void {
 		super.resetPartialState()
+		for (const { task, cleanup } of this.partialStateAbortCleanupByTaskId.values()) {
+			task.off(RooCodeEventName.TaskAborted, cleanup)
+		}
 		this.partialStreamFailuresByTaskId.clear()
 		this.lastSeenPartialPathByTaskId.clear()
+		this.partialStateAbortCleanupByTaskId.clear()
 	}
 
 	async execute(params: WriteToFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {

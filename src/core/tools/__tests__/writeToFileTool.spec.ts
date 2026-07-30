@@ -1,5 +1,6 @@
 import * as path from "path"
 
+import { RooCodeEventName } from "@roo-code/types"
 import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath, createDirectoriesForFile } from "../../../utils/fs"
@@ -188,6 +189,8 @@ describe("writeToFileTool", () => {
 		}
 		mockCline.say = vi.fn().mockResolvedValue(undefined)
 		mockCline.ask = vi.fn().mockResolvedValue(undefined)
+		mockCline.once = vi.fn()
+		mockCline.off = vi.fn()
 		mockCline.finalizePartialToolAsk = vi.fn().mockResolvedValue(undefined)
 		mockCline.recordToolError = vi.fn()
 		mockCline.sayAndCreateMissingParamError = vi.fn().mockResolvedValue("Missing param error")
@@ -457,6 +460,29 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(2)
 		})
+
+		it("cleans per-task partial state when the task aborts before execute finalization", async () => {
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+
+			abortCleanup?.()
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	describe("user interaction", () => {
@@ -612,22 +638,24 @@ describe("writeToFileTool", () => {
 
 		it("continues execute error cleanup when finalizing partial ask fails", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-			mockedCreateDirectoriesForFile.mockRejectedValue(
-				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
-			)
-			mockCline.finalizePartialToolAsk.mockRejectedValue(new Error("finalize failed"))
+			try {
+				mockedCreateDirectoriesForFile.mockRejectedValue(
+					Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
+				)
+				mockCline.finalizePartialToolAsk.mockRejectedValue(new Error("finalize failed"))
 
-			await executeWriteFileTool({}, { fileExists: false })
+				await executeWriteFileTool({}, { fileExists: false })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
-			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"Error finalizing write_to_file partial tool ask:",
-				expect.any(Error),
-			)
-
-			consoleErrorSpy.mockRestore()
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error finalizing write_to_file partial tool ask:",
+					expect.any(Error),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 
 		it("keeps partial stream failures isolated per task", async () => {
@@ -674,23 +702,25 @@ describe("writeToFileTool", () => {
 
 		it("continues partial failure cleanup when finalizing partial ask fails", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-			mockCline.diffViewProvider.open.mockRejectedValue(
-				Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
-			)
-			mockCline.finalizePartialToolAsk.mockRejectedValue(new Error("finalize failed"))
+			try {
+				mockCline.diffViewProvider.open.mockRejectedValue(
+					Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+				)
+				mockCline.finalizePartialToolAsk.mockRejectedValue(new Error("finalize failed"))
 
-			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
-			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-			expect(mockHandleError).not.toHaveBeenCalled()
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"Error finalizing write_to_file partial tool ask:",
-				expect.any(Error),
-			)
-
-			consoleErrorSpy.mockRestore()
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error finalizing write_to_file partial tool ask:",
+					expect.any(Error),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 
 		it.skipIf(process.platform === "win32")(
