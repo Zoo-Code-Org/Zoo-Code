@@ -9,6 +9,22 @@ import type { IpcMessage, IpcServerEvents } from "./ipc.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
 
+export type RooCodeResourceDiagnosticEventName =
+	| "message"
+	| "taskCreated"
+	| "taskStarted"
+	| "taskCompleted"
+	| "taskAborted"
+	| "taskDelegationCompleted"
+	| "taskDelegationResumed"
+	| "taskModeSwitched"
+
+export interface RooCodeResourceDiagnostics {
+	registeredTaskCount: number
+	currentTaskStackLength: number
+	listenerCounts: Record<RooCodeResourceDiagnosticEventName, number>
+}
+
 export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	/**
 	 * Starts a new task with an optional initial message and images.
@@ -56,6 +72,10 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * @returns An array of task IDs.
 	 */
 	getCurrentTaskStack(): string[]
+	/**
+	 * Returns stable task resource counters for test diagnostics.
+	 */
+	getResourceDiagnostics(): RooCodeResourceDiagnostics
 	/**
 	 * Clears the current task.
 	 */

@@ -10,6 +10,7 @@ import {
 	type RooCodeAPI,
 	type RooCodeSettings,
 	type RooCodeEvents,
+	type RooCodeResourceDiagnostics,
 	type ProviderSettings,
 	type ProviderSettingsEntry,
 	type TaskEvent,
@@ -30,11 +31,23 @@ import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
+const RESOURCE_DIAGNOSTIC_EVENTS = [
+	RooCodeEventName.Message,
+	RooCodeEventName.TaskCreated,
+	RooCodeEventName.TaskStarted,
+	RooCodeEventName.TaskCompleted,
+	RooCodeEventName.TaskAborted,
+	RooCodeEventName.TaskDelegationCompleted,
+	RooCodeEventName.TaskDelegationResumed,
+	RooCodeEventName.TaskModeSwitched,
+] as const
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
+	private readonly registeredTaskIds = new Set<string>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -253,6 +266,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return this.sidebarProvider.getCurrentTaskStack()
 	}
 
+	public getResourceDiagnostics(): RooCodeResourceDiagnostics {
+		const listenerCounts = Object.fromEntries(
+			RESOURCE_DIAGNOSTIC_EVENTS.map((eventName) => [eventName, this.listenerCount(eventName)]),
+		) as RooCodeResourceDiagnostics["listenerCounts"]
+
+		return {
+			registeredTaskCount: this.registeredTaskIds.size,
+			currentTaskStackLength: this.getCurrentTaskStack().length,
+			listenerCounts,
+		}
+	}
+
 	public async clearCurrentTask(_lastMessage?: string) {
 		// Legacy finishSubTask removed; clear current by closing active task instance.
 		await this.sidebarProvider.evictCurrentTask()
@@ -329,6 +354,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
+			this.registeredTaskIds.add(task.taskId)
+
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -340,6 +367,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
 					isSubtask: !!task.parentTaskId,
 				})
+				this.registeredTaskIds.delete(task.taskId)
 
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
@@ -348,6 +376,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
+				this.registeredTaskIds.delete(task.taskId)
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
