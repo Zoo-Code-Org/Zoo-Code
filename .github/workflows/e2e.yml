@@ -144,6 +144,10 @@ jobs:
                       apps/vscode-e2e/.vscode-test/
                   key: vscode-test-${{ runner.os }}-${{ steps.vscode-ver.outputs.version }}-v1
 
+            - name: Run vscode-e2e unit tests
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              run: pnpm --filter @roo-code/vscode-e2e test:unit
+
             - name: Run mocked E2E tests
               id: run-e2e
               # merge_group and workflow_dispatch always run; cache skip is pull_request only
