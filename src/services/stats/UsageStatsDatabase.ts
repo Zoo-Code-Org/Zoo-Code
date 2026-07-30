@@ -7,7 +7,7 @@ import type { UsageEventV1 } from "@roo-code/types"
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 1
+const SCHEMA_VERSION = 2
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
@@ -105,6 +105,26 @@ interface MetaData {
 	generation: number
 	lastSequence: number
 	migrationCheckpoint: MigrationCheckpoint
+}
+
+/**
+ * Computes a local day bucket (YYYY-MM-DD) from epoch milliseconds and timezone offset.
+ *
+ * The timezone offset is added to the UTC epoch to derive the local calendar date.
+ * This ensures events near midnight UTC are bucketed into the correct local day,
+ * matching the user's perception of "today".
+ *
+ * @param epochMs - UTC epoch milliseconds
+ * @param timezoneOffsetMinutes - Offset from UTC in minutes (e.g., 540 for UTC+9 Seoul)
+ * @returns YYYY-MM-DD string in local time
+ */
+export function computeLocalDayBucket(epochMs: number, timezoneOffsetMinutes: number): string {
+	const localMs = epochMs + timezoneOffsetMinutes * 60_000
+	const d = new Date(localMs)
+	const year = d.getUTCFullYear()
+	const month = String(d.getUTCMonth() + 1).padStart(2, "0")
+	const day = String(d.getUTCDate()).padStart(2, "0")
+	return `${year}-${month}-${day}`
 }
 
 // ── UsageStatsDatabase ──────────────────────────────────────────────────────
@@ -316,8 +336,161 @@ export class UsageStatsDatabase {
 	 * Currently only version 1 exists.
 	 */
 	private runMigrations(): void {
-		// No migrations needed yet — schema is at version 1.
-		// Future versions will check and migrate here.
+		const db = this.getDb()
+		const meta = this.readMetaInternal(db)
+
+		if (meta.schemaVersion < 2) {
+			this.migrateToV2(db)
+		}
+	}
+
+	/**
+	 * Migration v1 → v2: Recompute day/month buckets using local timezone.
+	 *
+	 * In v1, dayBucket was derived from `occurredAt.slice(0, 10)` which is a UTC
+	 * calendar date. In UTC+9, events near midnight UTC were bucketed into the
+	 * wrong local day, causing heatmap and rollup misalignment.
+	 *
+	 * This migration:
+	 * 1. Deletes existing daily/monthly rollups and session_activity rows
+	 * 2. Reads all usage_events and recomputes day/month buckets using
+	 *    occurred_epoch_ms + timezone_offset_minutes
+	 * 3. Rebuilds daily/monthly rollups and session_activity
+	 *
+	 * Idempotent: running twice produces the same result (delete + rebuild).
+	 * session_metadata is NOT touched (lifetime totals are timezone-independent).
+	 */
+	private migrateToV2(db: DatabaseSync): void {
+		try {
+			db.exec("BEGIN")
+
+			// 1. Delete existing daily and monthly rollups (main aggregates only)
+			db.exec(
+				"DELETE FROM stats_rollup WHERE period_type IN ('daily', 'monthly') AND root_task_id = '' AND axis = ''",
+			)
+
+			// 2. Delete session_activity (will be rebuilt with local day buckets)
+			db.exec("DELETE FROM session_activity")
+
+			// 3. Read all events in batches and rebuild rollups + session_activity
+			let afterSeq = 0
+			const batchSize = 1000
+
+			const sessionActivityStmt = db.prepare(`
+				INSERT INTO session_activity (
+					root_task_id, day, total_cost, total_tokens, event_count, last_activity_ms
+				) VALUES (
+					@rootTaskId, @day, @costUsd, @totalTokens, 1, @lastActivityMs
+				)
+				ON CONFLICT(root_task_id, day) DO UPDATE SET
+					total_cost = total_cost + @costUsd,
+					total_tokens = total_tokens + @totalTokens,
+					event_count = event_count + 1,
+					last_activity_ms = @lastActivityMs
+			`)
+
+			while (true) {
+				const rows = db
+					.prepare(
+						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id, usage_json
+						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
+					)
+					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
+
+				if (rows.length === 0) {
+					break
+				}
+
+				for (const row of rows) {
+					const epochMs = row.occurred_epoch_ms as number
+					const tzOffset = row.timezone_offset_minutes as number
+					const dayBucket = computeLocalDayBucket(epochMs, tzOffset)
+					const monthBucket = dayBucket.slice(0, 7)
+					const rootTaskId = (row.root_task_id as string) ?? ""
+					const status = row.status as string
+					const usage = JSON.parse(row.usage_json as string)
+
+					const inputTokens = usage.inputTokens?.value ?? 0
+					const outputTokens = usage.outputTokens?.value ?? 0
+					const cacheReadTokens = usage.cacheReadTokens?.value ?? 0
+					const cacheWriteTokens = usage.cacheWriteTokens?.value ?? 0
+					const reasoningTokens = usage.reasoningTokens?.value ?? 0
+					const totalTokens = usage.totalTokens?.value ?? inputTokens + outputTokens
+					const costUsd = usage.costUsd?.value ?? 0
+
+					const completedCalls = status === "completed" ? 1 : 0
+					const failedCalls = status === "failed" ? 1 : 0
+					const cancelledCalls = status === "cancelled" ? 1 : 0
+
+					// Rebuild daily rollup
+					this.updateRollup(db, {
+						periodType: "daily",
+						periodKey: dayBucket,
+						rootTaskId: "",
+						axis: "",
+						axisValue: "",
+						eventCount: 1,
+						completedCalls,
+						failedCalls,
+						cancelledCalls,
+						inputTokens,
+						outputTokens,
+						cacheReadTokens,
+						cacheWriteTokens,
+						reasoningTokens,
+						totalTokens,
+						costUsd,
+					})
+
+					// Rebuild monthly rollup
+					this.updateRollup(db, {
+						periodType: "monthly",
+						periodKey: monthBucket,
+						rootTaskId: "",
+						axis: "",
+						axisValue: "",
+						eventCount: 1,
+						completedCalls,
+						failedCalls,
+						cancelledCalls,
+						inputTokens,
+						outputTokens,
+						cacheReadTokens,
+						cacheWriteTokens,
+						reasoningTokens,
+						totalTokens,
+						costUsd,
+					})
+
+					// Rebuild session_activity (without touching session_metadata)
+					sessionActivityStmt.run({
+						rootTaskId,
+						day: dayBucket,
+						costUsd,
+						totalTokens,
+						lastActivityMs: epochMs,
+					})
+				}
+
+				afterSeq = (rows[rows.length - 1].seq as number) ?? afterSeq
+			}
+
+			// 4. Update schema version
+			this.updateMeta(db, { schemaVersion: 2 })
+
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/001",
+				"Failed to migrate to schema v2 (local day bucket recompute)",
+				err,
+			)
+		}
 	}
 
 	// ── Public API: Append ─────────────────────────────────────────────────
@@ -348,9 +521,9 @@ export class UsageStatsDatabase {
 		// Compute epoch ms for indexing
 		const occurredEpochMs = new Date(event.occurredAt).getTime()
 
-		// Compute day bucket (UTC date string for rollup)
-		const dayBucket = event.occurredAt.slice(0, 10) // YYYY-MM-DD
-		const monthBucket = event.occurredAt.slice(0, 7) // YYYY-MMO
+		// Compute day bucket using local timezone (not UTC calendar date)
+		const dayBucket = computeLocalDayBucket(occurredEpochMs, event.timezoneOffsetMinutes)
+		const monthBucket = dayBucket.slice(0, 7) // YYYY-MM
 
 		// Serialize usage and semantics as JSON
 		const usageJson = JSON.stringify(event.usage)
@@ -537,8 +710,8 @@ export class UsageStatsDatabase {
 			for (const event of events) {
 				const rootTaskId = event.rootTaskId ?? event.taskId
 				const occurredEpochMs = new Date(event.occurredAt).getTime()
-				const dayBucket = event.occurredAt.slice(0, 10)
-				const monthBucket = event.occurredAt.slice(0, 7)
+				const dayBucket = computeLocalDayBucket(occurredEpochMs, event.timezoneOffsetMinutes)
+				const monthBucket = dayBucket.slice(0, 7) // YYYY-MM
 				const usageJson = JSON.stringify(event.usage)
 				const semanticsJson = JSON.stringify(event.semantics)
 

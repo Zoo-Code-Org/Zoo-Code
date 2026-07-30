@@ -1,4 +1,4 @@
-﻿import * as path from "path"
+import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
 
@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
-import { UsageStatsDatabase, StatsDbError } from "../UsageStatsDatabase"
+import { UsageStatsDatabase, StatsDbError, computeLocalDayBucket } from "../UsageStatsDatabase"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -314,6 +314,294 @@ describe("UsageStatsDatabase", () => {
 			expect(rollups[0].day).toBe("2026-01-15")
 			expect(rollups[0].totalCost).toBeCloseTo(0.05, 10)
 			expect(rollups[0].eventCount).toBe(1)
+		})
+	})
+
+	describe("computeLocalDayBucket", () => {
+		it("should return the correct local day for UTC+9 (Seoul)", () => {
+			// 2026-07-29T23:30:00Z → in Seoul (UTC+9) this is 2026-07-30T08:30:00+09:00
+			const epochMs = new Date("2026-07-29T23:30:00Z").getTime()
+			const day = computeLocalDayBucket(epochMs, 540)
+			expect(day).toBe("2026-07-30")
+		})
+
+		it("should return the same UTC day when offset is 0", () => {
+			const epochMs = new Date("2026-07-29T23:30:00Z").getTime()
+			const day = computeLocalDayBucket(epochMs, 0)
+			expect(day).toBe("2026-07-29")
+		})
+
+		it("should handle negative offsets (UTC-5)", () => {
+			// 2026-07-30T02:00:00Z → in UTC-5 this is 2026-07-29T21:00:00-05:00
+			const epochMs = new Date("2026-07-30T02:00:00Z").getTime()
+			const day = computeLocalDayBucket(epochMs, -300)
+			expect(day).toBe("2026-07-29")
+		})
+
+		it("should handle midnight boundary exactly", () => {
+			// 2026-07-30T00:00:00Z + 540 min = 2026-07-30T09:00:00 local → same day
+			const epochMs = new Date("2026-07-30T00:00:00Z").getTime()
+			const day = computeLocalDayBucket(epochMs, 540)
+			expect(day).toBe("2026-07-30")
+		})
+
+		it("should handle year boundary (UTC+9)", () => {
+			// 2026-12-31T23:30:00Z → Seoul: 2027-01-01T08:30:00+09:00
+			const epochMs = new Date("2026-12-31T23:30:00Z").getTime()
+			const day = computeLocalDayBucket(epochMs, 540)
+			expect(day).toBe("2027-01-01")
+		})
+	})
+
+	describe("local timezone day bucketing", () => {
+		it("should bucket events using local timezone, not UTC", () => {
+			// Event at 2026-07-29T23:30:00Z with Seoul offset (540 min)
+			// UTC day = 2026-07-29, but local day = 2026-07-30
+			const event = makeEvent({
+				occurredAt: "2026-07-29T23:30:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					costUsd: { value: 0.05, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// Query for the LOCAL day — should find the event
+			const rollupsLocal = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollupsLocal).toHaveLength(1)
+			expect(rollupsLocal[0].day).toBe("2026-07-30")
+			expect(rollupsLocal[0].eventCount).toBe(1)
+
+			// Query for the UTC day — should NOT find the event
+			const rollupsUtc = db.queryDailyRollups("2026-07-29", "2026-07-29")
+			expect(rollupsUtc).toHaveLength(0)
+		})
+
+		it("should bucket events correctly in bulkAppend", () => {
+			const events: UsageEventV1[] = [
+				makeEvent({
+					eventId: "evt-bulk-1",
+					idempotencyKey: "idem-bulk-1",
+					occurredAt: "2026-07-29T23:30:00Z",
+					timezoneOffsetMinutes: 540,
+				}),
+				makeEvent({
+					eventId: "evt-bulk-2",
+					idempotencyKey: "idem-bulk-2",
+					occurredAt: "2026-07-30T00:30:00Z",
+					timezoneOffsetMinutes: 540,
+				}),
+			]
+
+			db.bulkAppend(events)
+
+			// Both events should be in the 2026-07-30 local day
+			const rollups = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollups).toHaveLength(1)
+			expect(rollups[0].day).toBe("2026-07-30")
+			expect(rollups[0].eventCount).toBe(2)
+		})
+
+		it("should project session_activity with local day bucket", () => {
+			const event = makeEvent({
+				taskId: "task-tz",
+				rootTaskId: "task-tz",
+				occurredAt: "2026-07-29T23:30:00Z",
+				timezoneOffsetMinutes: 540,
+			})
+
+			db.append(event)
+
+			// session_activity should have the local day
+			const db2 = new UsageStatsDatabase(tempDir)
+			db2.initialize()
+			try {
+				// Use raw SQL to check session_activity
+				const rawDb = (
+					db2 as unknown as {
+						db: {
+							prepare: (sql: string) => { all: (...args: unknown[]) => Array<Record<string, unknown>> }
+						}
+					}
+				).db
+				const rows = rawDb.prepare("SELECT day FROM session_activity WHERE root_task_id = ?").all("task-tz")
+				expect(rows).toHaveLength(1)
+				expect(rows[0].day).toBe("2026-07-30")
+			} finally {
+				db2.close()
+			}
+		})
+	})
+
+	describe("v2 migration (local day bucket recompute)", () => {
+		/**
+		 * Seeds a database at schema v1 with UTC-based day buckets,
+		 * then re-opens to trigger migration to v2.
+		 */
+		function seedV1Database(
+			dir: string,
+			events: Array<{ occurredAt: string; tzOffset: number; rootTaskId: string; cost: number }>,
+		): void {
+			// Create the database with v1 schema
+			const v1Db = new UsageStatsDatabase(dir)
+			v1Db.initialize()
+			for (const e of events) {
+				v1Db.append(
+					makeEvent({
+						taskId: e.rootTaskId,
+						rootTaskId: e.rootTaskId,
+						occurredAt: e.occurredAt,
+						timezoneOffsetMinutes: e.tzOffset,
+						usage: {
+							inputTokens: { value: 1000, source: "provider" },
+							costUsd: { value: e.cost, source: "provider" },
+						},
+					}),
+				)
+			}
+			v1Db.close()
+
+			// Manually downgrade meta to v1 to simulate pre-migration state
+			const { DatabaseSync } = require("node:sqlite")
+			const rawDb = new DatabaseSync(path.join(dir, "usage.db"))
+			const row = rawDb.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+				value: string
+			}
+			const meta = JSON.parse(row.value)
+			meta.schemaVersion = 1
+			rawDb.prepare("UPDATE stats_meta SET value = ? WHERE key = ?").run(JSON.stringify(meta), "singleton")
+			rawDb.close()
+		}
+
+		it("should migrate UTC-bucketed rows to local day buckets", () => {
+			// Seed an event at 2026-07-29T23:30:00Z with Seoul offset
+			// In v1, this would be bucketed as 2026-07-29 (UTC date)
+			// After migration, it should be 2026-07-30 (local date)
+			seedV1Database(tempDir, [
+				{
+					occurredAt: "2026-07-29T23:30:00Z",
+					tzOffset: 540,
+					rootTaskId: "task-migrate-1",
+					cost: 0.05,
+				},
+			])
+
+			// Re-open — this triggers migration
+			db.close()
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			// The daily rollup should now show the LOCAL day
+			const rollups = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollups).toHaveLength(1)
+			expect(rollups[0].day).toBe("2026-07-30")
+			expect(rollups[0].eventCount).toBe(1)
+			expect(rollups[0].totalCost).toBeCloseTo(0.05, 10)
+
+			// The old UTC day should be empty
+			const oldRollups = db.queryDailyRollups("2026-07-29", "2026-07-29")
+			expect(oldRollups).toHaveLength(0)
+		})
+
+		it("should rebuild session_activity with local day buckets during migration", () => {
+			seedV1Database(tempDir, [
+				{
+					occurredAt: "2026-07-29T23:30:00Z",
+					tzOffset: 540,
+					rootTaskId: "task-sa-1",
+					cost: 0.03,
+				},
+			])
+
+			db.close()
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			// Check session_activity has local day
+			const rawDb = (
+				db as unknown as {
+					db: { prepare: (sql: string) => { all: (...args: unknown[]) => Array<Record<string, unknown>> } }
+				}
+			).db
+			const rows = rawDb.prepare("SELECT day FROM session_activity WHERE root_task_id = ?").all("task-sa-1")
+			expect(rows).toHaveLength(1)
+			expect(rows[0].day).toBe("2026-07-30")
+		})
+
+		it("should be idempotent (running migration twice produces same result)", () => {
+			seedV1Database(tempDir, [
+				{
+					occurredAt: "2026-07-29T23:30:00Z",
+					tzOffset: 540,
+					rootTaskId: "task-idem-1",
+					cost: 0.05,
+				},
+				{
+					occurredAt: "2026-07-30T00:30:00Z",
+					tzOffset: 540,
+					rootTaskId: "task-idem-2",
+					cost: 0.1,
+				},
+			])
+
+			// First migration
+			db.close()
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			const rollups1 = db.queryDailyRollups("2026-07-30", "2026-07-30")
+
+			// Second "migration" — re-open (should be no-op since schemaVersion is already 2)
+			db.close()
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			const rollups2 = db.queryDailyRollups("2026-07-30", "2026-07-30")
+
+			expect(rollups1).toEqual(rollups2)
+			expect(rollups2).toHaveLength(1)
+			expect(rollups2[0].eventCount).toBe(2)
+			expect(rollups2[0].totalCost).toBeCloseTo(0.15, 10)
+		})
+
+		it("should preserve lifetime totals after migration", () => {
+			seedV1Database(tempDir, [
+				{
+					occurredAt: "2026-07-29T23:30:00Z",
+					tzOffset: 540,
+					rootTaskId: "task-life-1",
+					cost: 0.05,
+				},
+				{
+					occurredAt: "2026-07-30T00:30:00Z",
+					tzOffset: 540,
+					rootTaskId: "task-life-2",
+					cost: 0.1,
+				},
+			])
+
+			db.close()
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			const totals = db.queryLifetimeTotals()
+			expect(totals.eventCount).toBe(2)
+			expect(totals.totalCost).toBeCloseTo(0.15, 10)
+		})
+
+		it("should handle empty database migration gracefully", () => {
+			// Fresh database with no events — migration should be a no-op
+			db.close()
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			const rollups = db.queryDailyRollups("2026-01-01", "2026-12-31")
+			expect(rollups).toHaveLength(0)
+
+			const totals = db.queryLifetimeTotals()
+			expect(totals.eventCount).toBe(0)
 		})
 	})
 
