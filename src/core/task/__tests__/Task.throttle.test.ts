@@ -64,10 +64,12 @@ describe("Task token usage throttling", () => {
 	let mockProvider: any
 	let mockApiConfiguration: ProviderSettings
 	let task: Task
+	let consoleLogSpy: ReturnType<typeof vi.spyOn>
 
 	beforeEach(() => {
 		// Reset all mocks
 		vi.clearAllMocks()
+		consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 		vi.useFakeTimers()
 
 		// Mock provider
@@ -101,6 +103,7 @@ describe("Task token usage throttling", () => {
 		if (task && !task.abort) {
 			task.dispose()
 		}
+		consoleLogSpy.mockRestore()
 	})
 
 	test("should emit TaskTokenUsageUpdated immediately on first change", async () => {

@@ -1832,18 +1832,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-		* Finalize the last partial "tool" ask message without blocking for user input.
-		* Call this in error paths where a partial tool message was opened during streaming
-		* but execution failed before the normal approval flow could close it, so the webview
-		* spinner does not get stuck in a loading state.
-		*/
-	async finalizePartialToolAsk(): Promise<void> {
-		const lastMessage = this.clineMessages.at(-1)
+	 * Finalize a partial "tool" ask message without blocking for user input.
+	 * Call this in error paths where a partial tool message was opened during streaming
+	 * but execution failed before the normal approval flow could close it, so the webview
+	 * spinner does not get stuck in a loading state.
+	 *
+	 * The matching partial message may no longer be the final entry if another asynchronous
+	 * message was inserted between the partial ask and the error handler, so search backward
+	 * instead of relying on clineMessages.at(-1).
+	 */
+	async finalizePartialToolAsk(text?: string): Promise<void> {
+		const partialToolAsk = this.clineMessages
+			.slice()
+			.reverse()
+			.find(
+				(message) =>
+					message.partial === true &&
+					message.type === "ask" &&
+					message.ask === "tool" &&
+					(text === undefined || message.text === text),
+			)
 
-		if (lastMessage && lastMessage.partial && lastMessage.type === "ask" && lastMessage.ask === "tool") {
-			lastMessage.partial = false
-			await this.updateClineMessage(lastMessage)
+		if (!partialToolAsk) {
+			return
 		}
+
+		partialToolAsk.partial = false
+		await this.saveClineMessages()
+		await this.updateClineMessage(partialToolAsk).catch((error) => {
+			console.error("[Task#finalizePartialToolAsk] updateClineMessage failed:", error)
+		})
 	}
 
 	// Lifecycle

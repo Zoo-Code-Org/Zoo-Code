@@ -2857,6 +2857,78 @@ describe("Cline", () => {
 			saveSpy.mockRestore()
 		})
 
+		it("finalizePartialToolAsk persists and updates a non-last partial tool ask", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "say",
+				say: "error",
+				text: "intervening async message",
+			})
+
+			await task.finalizePartialToolAsk("partial tool message")
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk ignores non-matching partial tool asks when text is provided", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			task.clineMessages.push({
+				ts: Date.now() - 1,
+				type: "ask",
+				ask: "tool",
+				text: "other partial tool message",
+				partial: true,
+			})
+
+			await task.finalizePartialToolAsk("target partial tool message")
+			await flushMicrotasks()
+
+			expect(task.clineMessages[0].partial).toBe(true)
+			expect(saveSpy).not.toHaveBeenCalled()
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
 		it("logs (instead of crashing) when updateClineMessage rejects from the ask() ignore-partial path", async () => {
 			// Pins the .catch arm on the fire-and-forget updateClineMessage call
 			// in ask() when a new partial ask arrives while the previous partial

@@ -27,22 +27,47 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	readonly name = "write_to_file" as const
 
 	/**
-	 * Set when a filesystem error aborts diff-view streaming during handlePartial for the
-	 * current tool invocation. Subsequent streaming deltas for the same block then skip the
-	 * doomed open()/update() retry, which would otherwise create a fresh "Zoo wants to edit
-	 * this file" message on every delta. Cleared by resetPartialState() between invocations.
+	 * Tracks filesystem failures from diff-view streaming by task id. Tool instances are
+	 * singletons, so this state must be keyed per task to avoid one task's failing partial
+	 * stream suppressing another task's streaming deltas.
 	 */
-	private partialStreamFailed = false
+	private partialStreamFailuresByTaskId = new Set<string>()
+
+	/**
+	 * Tracks partial path stabilization by task id. The tool is a singleton, so using the
+	 * BaseTool singleton path state lets concurrent tasks incorrectly stabilize each other.
+	 */
+	private lastSeenPartialPathByTaskId = new Map<string, string | undefined>()
+
+	private getPartialStreamFailureKey(task: Task): string {
+		return `${task.taskId}.${task.instanceId}`
+	}
+
+	private hasPathStabilizedForTask(task: Task, partialPath: string | undefined): boolean {
+		const key = this.getPartialStreamFailureKey(task)
+		const lastSeenPath = this.lastSeenPartialPathByTaskId.get(key)
+		const pathHasStabilized = lastSeenPath !== undefined && lastSeenPath === partialPath
+		this.lastSeenPartialPathByTaskId.set(key, partialPath)
+		return pathHasStabilized && !!partialPath
+	}
+
+	private resetTaskPartialState(task: Task): void {
+		const key = this.getPartialStreamFailureKey(task)
+		this.lastSeenPartialPathByTaskId.delete(key)
+		this.partialStreamFailuresByTaskId.delete(key)
+	}
 
 	override resetPartialState(): void {
 		super.resetPartialState()
-		this.partialStreamFailed = false
+		this.partialStreamFailuresByTaskId.clear()
+		this.lastSeenPartialPathByTaskId.clear()
 	}
 
 	async execute(params: WriteToFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { pushToolResult, handleError, askApproval } = callbacks
 		const relPath = params.path
 		let newContent = params.content
+		const partialStreamFailureKey = this.getPartialStreamFailureKey(task)
 
 		if (!relPath) {
 			task.consecutiveMistakeCount++
@@ -104,14 +129,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		}
 
 		try {
-			task.consecutiveMistakeCount = 0
-
 			// Create parent directories for new files inside the try block so filesystem
 			// errors (EROFS, EACCES, etc.) route through handleError with proper cleanup
 			// and consecutive-mistake counting, rather than escaping unhandled.
 			if (!fileExists) {
 				await createDirectoriesForFile(absolutePath)
 			}
+
+			task.consecutiveMistakeCount = 0
 
 			const provider = task.providerRef.deref()
 			const state = await provider?.getState()
@@ -194,7 +219,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			pushToolResult(message)
 
 			await task.diffViewProvider.reset()
-			this.resetPartialState()
+			this.resetTaskPartialState(task)
 
 			task.processQueuedMessages()
 
@@ -207,7 +232,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			await task.finalizePartialToolAsk()
 			await handleError("writing file", error as Error)
 			await task.diffViewProvider.reset()
-			this.resetPartialState()
+			this.resetTaskPartialState(task)
 			return
 		}
 	}
@@ -216,15 +241,17 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const relPath: string | undefined = block.params.path
 		const newContent: string | undefined = block.params.content
 
-		// A prior streaming delta for this invocation already hit a fatal filesystem error.
+		const partialStreamFailureKey = this.getPartialStreamFailureKey(task)
+
+		// A prior streaming delta for this task already hit a fatal filesystem error.
 		// Skip further streaming work so we don't create a new partial tool message on every
 		// subsequent delta. execute() will report the error once when the block completes.
-		if (this.partialStreamFailed) {
+		if (this.partialStreamFailuresByTaskId.has(partialStreamFailureKey)) {
 			return
 		}
 
 		// Wait for path to stabilize before showing UI (prevents truncated paths)
-		if (!this.hasPathStabilized(relPath) || newContent === undefined) {
+		if (!this.hasPathStabilizedForTask(task, relPath) || newContent === undefined) {
 			return
 		}
 
@@ -286,9 +313,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				console.error(`Error streaming write_to_file diff view:`, error)
 				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
 				// partial tool message each time.
-				this.partialStreamFailed = true
-				await task.finalizePartialToolAsk()
-				await task.diffViewProvider.reset()
+				this.partialStreamFailuresByTaskId.add(partialStreamFailureKey)
+				await task.finalizePartialToolAsk(partialMessage)
+				await task.diffViewProvider.reset().catch((resetError) => {
+					console.error("Error resetting write_to_file diff view after partial failure:", resetError)
+				})
 			}
 		}
 	}

@@ -128,6 +128,8 @@ describe("writeToFileTool", () => {
 			return content
 		})
 
+		mockCline.taskId = "task-1"
+		mockCline.instanceId = "instance-1"
 		mockCline.cwd = "/"
 		mockCline.consecutiveMistakeCount = 0
 		mockCline.didEditFile = false
@@ -421,6 +423,25 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledWith(testFilePath)
 			expect(mockCline.diffViewProvider.update).toHaveBeenCalledWith(testContent, false)
 		})
+		it("does not share path stabilization between tasks with the same path", async () => {
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			mockCline.taskId = "task-2"
+			mockCline.instanceId = "instance-2"
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			mockCline.taskId = "task-1"
+			mockCline.instanceId = "instance-1"
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			mockCline.taskId = "task-2"
+			mockCline.instanceId = "instance-2"
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	describe("user interaction", () => {
@@ -560,6 +581,63 @@ describe("writeToFileTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledTimes(1)
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+		})
+
+		it("does not reset consecutive mistake count when directory creation fails", async () => {
+			mockCline.consecutiveMistakeCount = 3
+			mockedCreateDirectoriesForFile.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
+			)
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.consecutiveMistakeCount).toBe(3)
+		})
+
+		it("keeps partial stream failures isolated per task", async () => {
+			mockCline.diffViewProvider.open.mockRejectedValueOnce(
+				Object.assign(new Error("EROFS: read-only file system, mkdir '/task-a'"), { code: "EROFS" }),
+			)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			mockCline.taskId = "task-2"
+			mockCline.instanceId = "instance-2"
+			mockCline.diffViewProvider.open.mockResolvedValue(undefined)
+			mockCline.diffViewProvider.update.mockResolvedValue(undefined)
+			mockCline.diffViewProvider.editType = undefined
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.ask).toHaveBeenCalledTimes(2)
+			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(2)
+		})
+
+		it("swallows diff view reset errors during partial failure cleanup", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockCline.diffViewProvider.open.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+			)
+			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Error resetting write_to_file diff view after partial failure:",
+				expect.any(Error),
+			)
+
+			consoleErrorSpy.mockRestore()
 		})
 
 		it.skipIf(process.platform === "win32")(
