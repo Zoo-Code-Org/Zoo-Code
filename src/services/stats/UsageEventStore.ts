@@ -1,10 +1,12 @@
-import * as fs from "fs/promises"
+﻿import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
 import * as lockfile from "proper-lockfile"
 
 import type { UsageEventV1 } from "@roo-code/types"
 import { UsageEventV1 as UsageEventV1Schema } from "@roo-code/types"
+
+import type { UsageStatsDatabase } from "./UsageStatsDatabase"
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -123,6 +125,9 @@ export class UsageEventStore {
 	private readonly quarantineDir: string
 	private readonly quarantineReportPath: string
 
+	/** Optional SQLite database for indexed dashboard paths. */
+	private database: UsageStatsDatabase | null = null
+
 	/** In-process promise queue for serialization */
 	private queue: Promise<void> = Promise.resolve()
 
@@ -155,12 +160,16 @@ export class UsageEventStore {
 
 	/**
 	 * @param globalStoragePath VS Code globalStorageUri.fsPath
+	 * @param database Optional SQLite database for indexed dashboard paths.
+	 *   When provided, appends are also written to the database, and
+	 *   readAll can use the database for indexed access.
 	 */
-	constructor(globalStoragePath: string) {
+	constructor(globalStoragePath: string, database?: UsageStatsDatabase) {
 		this.statsDir = path.join(globalStoragePath, "usage-stats")
 		this.manifestPath = path.join(this.statsDir, MANIFEST_FILENAME)
 		this.quarantineDir = path.join(this.statsDir, QUARANTINE_DIRNAME)
 		this.quarantineReportPath = path.join(this.quarantineDir, QUARANTINE_REPORT_FILENAME)
+		this.database = database ?? null
 	}
 
 	// ── Public API ──────────────────────────────────────────────────────────
@@ -223,6 +232,18 @@ export class UsageEventStore {
 		this.queue = this.queue.then(async () => {
 			try {
 				const result = await this.appendInternal(event)
+
+				// Also append to the SQLite database if available.
+				// Database writes are synchronous and idempotent.
+				// Failures are logged but do not fail the NDJSON append.
+				if (this.database && this.database._isInitialized()) {
+					try {
+						this.database.append(event)
+					} catch (dbErr) {
+						console.warn(`[UsageEventStore] database append failed for event ${event.eventId}:`, dbErr)
+					}
+				}
+
 				// Incremental cache update: only after durable success.
 				if (result && this.cachedEvents) {
 					// If a segment rotation happened during the append, the cached
@@ -840,5 +861,13 @@ export class UsageEventStore {
 	 */
 	_getStatsDir(): string {
 		return this.statsDir
+	}
+
+	/**
+	 * Returns the associated SQLite database, if one was provided.
+	 * Used by UsageStatsService for indexed dashboard queries.
+	 */
+	getDatabase(): UsageStatsDatabase | null {
+		return this.database
 	}
 }

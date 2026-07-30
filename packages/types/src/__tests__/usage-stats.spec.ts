@@ -1,4 +1,4 @@
-import {
+﻿import {
 	UsageEventStatus,
 	UsageValueSource,
 	InclusionRule,
@@ -135,6 +135,16 @@ describe("usage-stats schemas", () => {
 			// This test confirms the schema accepts any number (no min constraint in V1)
 			const result = UsageEventV1.parse({ ...validEvent, attempt: 0 })
 			expect(result.attempt).toBe(0)
+		})
+
+		it("should accept optional rootTaskId (dashboard streaming)", () => {
+			const result = UsageEventV1.parse({ ...validEvent, rootTaskId: "root-task-001" })
+			expect(result.rootTaskId).toBe("root-task-001")
+		})
+
+		it("should work without rootTaskId (backward compatible)", () => {
+			const result = UsageEventV1.parse(validEvent)
+			expect(result.rootTaskId).toBeUndefined()
 		})
 	})
 

@@ -1,4 +1,4 @@
-// npx vitest run src/components/dashboard/__tests__/DashboardSummary.spec.tsx
+﻿// npx vitest run src/components/dashboard/__tests__/DashboardSummary.spec.tsx
 
 import React from "react"
 import { render } from "@/utils/test-utils"
@@ -60,6 +60,13 @@ describe("DashboardSummary", () => {
 		expect(summary?.textContent).toContain("dashboard:summary.outputTokens")
 		expect(summary?.textContent).toContain("dashboard:summary.cacheTokens")
 		expect(summary?.textContent).toContain("dashboard:summary.cost")
+	})
+
+	it("renders animated number elements for each card", () => {
+		const { container } = render(<DashboardSummary totals={makeBucket()} />)
+		const animatedNumbers = container.querySelectorAll('[data-testid="animated-number"]')
+		// 5 cards: totalTokens, inputTokens, outputTokens, cacheTokens, cost
+		expect(animatedNumbers.length).toBe(5)
 	})
 
 	it("displays formatted total tokens", () => {

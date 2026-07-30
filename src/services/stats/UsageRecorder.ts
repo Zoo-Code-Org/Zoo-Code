@@ -1,4 +1,4 @@
-// src/services/stats/UsageRecorder.ts
+﻿// src/services/stats/UsageRecorder.ts
 //
 // Commit 3: Final usage measurement for API attempts.
 // No per-chunk recording; records only at terminal finalize.
@@ -25,6 +25,12 @@ export interface UsageEventSink {
 export interface UsageRecordingContext {
 	taskId: string
 	parentTaskId?: string
+	/**
+	 * Root task ID for session grouping. When absent, the recorder falls back
+	 * to taskId (single-task session). Supplied by Task.ts from the task
+	 * hierarchy so that sub-tasks share the same root session identity.
+	 */
+	rootTaskId?: string
 	provider: string
 	model: string
 	mode: string
@@ -113,6 +119,7 @@ export class UsageRecorder {
 			attempt: ctx.attempt,
 			taskId: ctx.taskId,
 			parentTaskId: ctx.parentTaskId,
+			rootTaskId: ctx.rootTaskId,
 			provider: ctx.provider,
 			model: ctx.model,
 			mode: ctx.mode,

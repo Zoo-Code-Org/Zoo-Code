@@ -1,8 +1,16 @@
-import { describe, it, expect } from "vitest"
+﻿import { describe, it, expect } from "vitest"
 
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
-import { UsageAggregator } from "../UsageAggregator"
+import {
+	UsageAggregator,
+	computeEventContribution,
+	computeEventDelta,
+	computeGroupKeys,
+	computeTimeBuckets,
+	resolveTimeRange,
+	serializeBucketKey,
+} from "../UsageAggregator"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -1074,6 +1082,548 @@ describe("UsageAggregator", () => {
 
 			const parsed = new Date(result.generatedAt)
 			expect(parsed.getTime()).not.toBeNaN()
+		})
+	})
+
+	// ── computeEventContribution (Sub-task 3) ──────────────────────────────
+
+	describe("computeEventContribution", () => {
+		it("should return a delta for an event matching the query", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const delta = computeEventContribution(event, query)
+
+			expect(delta).not.toBeNull()
+			expect(delta!.events).toBe(1)
+			expect(delta!.completedCalls).toBe(1)
+			expect(delta!.inputTokens).toBe(1000)
+			expect(delta!.outputTokens).toBe(500)
+			expect(delta!.costUsd).toBe(0.01)
+			expect(delta!.totalTokens).toBe(1500)
+			expect(delta!.key).toEqual({})
+		})
+
+		it("should return null for an event outside the time range", () => {
+			const event = makeEvent({ occurredAt: "2026-07-19T10:00:00.000Z" })
+			const query = makeQuery({
+				from: "2026-07-20T00:00:00.000Z",
+				to: "2026-07-21T00:00:00.000Z",
+				groupBy: [],
+			})
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).toBeNull()
+		})
+
+		it("should return null for a cancelled event when includeCancelled is false", () => {
+			const event = makeEvent({ status: "cancelled" })
+			const query = makeQuery({ groupBy: [], includeCancelled: false })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).toBeNull()
+		})
+
+		it("should return a delta for a cancelled event when includeCancelled is true", () => {
+			const event = makeEvent({ status: "cancelled" })
+			const query = makeQuery({ groupBy: [], includeCancelled: true })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.cancelledCalls).toBe(1)
+			expect(delta!.completedCalls).toBe(0)
+		})
+
+		it("should count failed status correctly", () => {
+			const event = makeEvent({ status: "failed" })
+			const query = makeQuery({ groupBy: [] })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.failedCalls).toBe(1)
+			expect(delta!.completedCalls).toBe(0)
+		})
+
+		it("should compute cost fallback when costUsd is missing", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// costUsd missing — should compute from pricing
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			// Anthropic claude-sonnet-4: $3/1M input, $15/1M output
+			// 1000 * 3/1M + 500 * 15/1M = 0.003 + 0.0075 = 0.0105
+			expect(delta!.costUsd).toBeCloseTo(0.0105, 5)
+		})
+
+		it("should handle unknown inclusion semantics", () => {
+			const event = makeEvent({
+				semantics: {
+					cacheReadInInput: "unknown",
+					cacheWriteInInput: "excluded",
+					reasoningInOutput: "excluded",
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.unknownEventCount).toBe(1)
+		})
+
+		it("should not double-count unknownEventCount for multiple unknowns", () => {
+			const event = makeEvent({
+				semantics: {
+					cacheReadInInput: "unknown",
+					cacheWriteInInput: "unknown",
+					reasoningInOutput: "unknown",
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.unknownEventCount).toBe(1)
+		})
+
+		it("should estimate cacheReadTokens from cacheRatio", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// cacheReadTokens missing
+				},
+			})
+			const query = makeQuery({ groupBy: [], cacheRatio: 0.5 })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			// 1000 * 0.5 = 500
+			expect(delta!.cacheReadTokens).toBe(500)
+		})
+
+		it("should not estimate cacheReadTokens when already present", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					cacheReadTokens: { value: 200, source: "provider" },
+				},
+			})
+			const query = makeQuery({ groupBy: [], cacheRatio: 0.5 })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.cacheReadTokens).toBe(200)
+		})
+
+		it("should recompute totalTokens as input + output (not from stored field)", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 100, source: "provider" },
+					outputTokens: { value: 50, source: "provider" },
+					cacheReadTokens: { value: 40, source: "provider" },
+					cacheWriteTokens: { value: 10, source: "provider" },
+					reasoningTokens: { value: 20, source: "provider" },
+					totalTokens: { value: 220, source: "provider" }, // bad old value
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.totalTokens).toBe(150) // 100 + 50, not 220
+		})
+	})
+
+	// ── computeEventDelta (pure function) ──────────────────────────────────
+
+	describe("computeEventDelta", () => {
+		it("should return delta values without a key", () => {
+			const event = makeEvent()
+			const delta = computeEventDelta(event)
+
+			expect(delta.events).toBe(1)
+			expect(delta.completedCalls).toBe(1)
+			expect("key" in delta).toBe(false)
+		})
+
+		it("should handle all status types", () => {
+			for (const status of ["completed", "failed", "cancelled"] as const) {
+				const event = makeEvent({ status })
+				const delta = computeEventDelta(event)
+
+				if (status === "completed") {
+					expect(delta.completedCalls).toBe(1)
+					expect(delta.failedCalls).toBe(0)
+					expect(delta.cancelledCalls).toBe(0)
+				} else if (status === "failed") {
+					expect(delta.completedCalls).toBe(0)
+					expect(delta.failedCalls).toBe(1)
+					expect(delta.cancelledCalls).toBe(0)
+				} else {
+					expect(delta.completedCalls).toBe(0)
+					expect(delta.failedCalls).toBe(0)
+					expect(delta.cancelledCalls).toBe(1)
+				}
+			}
+		})
+	})
+
+	// ── computeGroupKeys ──────────────────────────────────────────────────
+
+	describe("computeGroupKeys", () => {
+		it("should return single empty key for empty groupBy", () => {
+			const event = makeEvent()
+			const keys = computeGroupKeys(event, [], "Asia/Seoul")
+			expect(keys).toEqual([{}])
+		})
+
+		it("should compute day bucket key", () => {
+			const event = makeEvent({ occurredAt: "2026-07-19T10:00:00.000Z" })
+			const keys = computeGroupKeys(event, ["day"], "Asia/Seoul")
+			expect(keys).toHaveLength(1)
+			expect(keys[0].day).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+		})
+
+		it("should compute provider bucket key with endpoint", () => {
+			const event = makeEvent({ provider: "openai", endpoint: "kimi.ai" })
+			const keys = computeGroupKeys(event, ["provider"], "Asia/Seoul")
+			expect(keys[0].provider).toBe("openai (kimi.ai)")
+		})
+
+		it("should compute multi-axis keys (Cartesian product)", () => {
+			const event = makeEvent({
+				occurredAt: "2026-07-19T10:00:00.000Z",
+				provider: "anthropic",
+				model: "claude-sonnet-4-20250514",
+			})
+			const keys = computeGroupKeys(event, ["day", "provider", "model"], "Asia/Seoul")
+			expect(keys).toHaveLength(1)
+			expect(keys[0].day).toBeDefined()
+			expect(keys[0].provider).toBe("anthropic")
+			expect(keys[0].model).toBe("claude-sonnet-4-20250514")
+		})
+
+		it("should produce multiple source keys for events with mixed sources", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "estimated" },
+					costUsd: { value: 0.01, source: "backfilled" },
+				},
+			})
+			const keys = computeGroupKeys(event, ["source"], "Asia/Seoul")
+			expect(keys).toHaveLength(3)
+			const sources = keys.map((k) => k.source).sort()
+			expect(sources).toEqual(["backfilled", "estimated", "provider"])
+		})
+	})
+
+	// ── serializeBucketKey ─────────────────────────────────────────────────
+
+	describe("serializeBucketKey", () => {
+		it("should produce stable serialization regardless of key insertion order", () => {
+			const key1 = { b: "2", a: "1", c: "3" }
+			const key2 = { c: "3", a: "1", b: "2" }
+			expect(serializeBucketKey(key1)).toBe(serializeBucketKey(key2))
+		})
+
+		it("should produce pipe-separated key=value pairs", () => {
+			const result = serializeBucketKey({ a: "1", b: "2" })
+			expect(result).toBe("a=1|b=2")
+		})
+
+		it("should return empty string for empty key", () => {
+			expect(serializeBucketKey({})).toBe("")
+		})
+	})
+
+	// ── resolveTimeRange ───────────────────────────────────────────────────
+
+	describe("resolveTimeRange", () => {
+		it("should resolve 'today' preset", () => {
+			const query = makeQuery({ preset: "today", groupBy: [] })
+			const { from, to } = resolveTimeRange(query)
+			expect(from).toBeDefined()
+			expect(to).toBeDefined()
+			expect(to!.getTime()).toBeGreaterThan(from!.getTime())
+		})
+
+		it("should resolve '7d' preset", () => {
+			const query = makeQuery({ preset: "7d", groupBy: [] })
+			const { from, to } = resolveTimeRange(query)
+			expect(from).toBeDefined()
+			expect(to).toBeDefined()
+			const diffDays = (to!.getTime() - from!.getTime()) / (24 * 60 * 60 * 1000)
+			expect(diffDays).toBe(7)
+		})
+
+		it("should resolve '30d' preset", () => {
+			const query = makeQuery({ preset: "30d", groupBy: [] })
+			const { from, to } = resolveTimeRange(query)
+			expect(from).toBeDefined()
+			expect(to).toBeDefined()
+			const diffDays = (to!.getTime() - from!.getTime()) / (24 * 60 * 60 * 1000)
+			expect(diffDays).toBe(30)
+		})
+
+		it("should resolve 'all' preset as unbounded", () => {
+			const query = makeQuery({ preset: "all", groupBy: [] })
+			const { from, to } = resolveTimeRange(query)
+			expect(from).toBeUndefined()
+			expect(to).toBeUndefined()
+		})
+
+		it("should resolve explicit from/to", () => {
+			const query = makeQuery({
+				from: "2026-07-01T00:00:00.000Z",
+				to: "2026-07-31T00:00:00.000Z",
+				groupBy: [],
+			})
+			const { from, to } = resolveTimeRange(query)
+			expect(from).toBeDefined()
+			expect(to).toBeDefined()
+			expect(from!.toISOString()).toBe("2026-07-01T00:00:00.000Z")
+			expect(to!.toISOString()).toBe("2026-07-31T00:00:00.000Z")
+		})
+	})
+
+	// ── computeTimeBuckets ───────────────────────────────────────────────
+
+	describe("computeTimeBuckets", () => {
+		it("should compute day, week, and month buckets", () => {
+			const event = makeEvent({ occurredAt: "2026-07-19T10:00:00.000Z" })
+			const buckets = computeTimeBuckets(event, "Asia/Seoul")
+
+			expect(buckets.dayBucket).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+			expect(buckets.weekBucket).toMatch(/^\d{4}-W\d{2}$/)
+			expect(buckets.monthBucket).toMatch(/^\d{4}-\d{2}$/)
+		})
+
+		it("should handle timezone edge at midnight UTC", () => {
+			// 2026-07-19T15:00:00Z = 2026-07-20T00:00:00 KST (midnight)
+			const event = makeEvent({ occurredAt: "2026-07-19T15:00:00.000Z" })
+			const buckets = computeTimeBuckets(event, "Asia/Seoul")
+			expect(buckets.dayBucket).toBe("2026-07-20")
+		})
+
+		it("should handle UTC timezone", () => {
+			const event = makeEvent({ occurredAt: "2026-07-19T10:00:00.000Z" })
+			const buckets = computeTimeBuckets(event, "UTC")
+			expect(buckets.dayBucket).toBe("2026-07-19")
+		})
+	})
+
+	// ── Property: folding deltas equals full aggregate ───────────────────
+
+	describe("property: folding per-event deltas equals full aggregate", () => {
+		it("should produce the same totals as aggregator.query for the same event set", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					status: "completed",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					occurredAt: "2026-07-19T15:00:00.000Z",
+					status: "failed",
+					usage: {
+						inputTokens: { value: 2000, source: "provider" },
+						outputTokens: { value: 1000, source: "provider" },
+						costUsd: { value: 0.02, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-3",
+					idempotencyKey: "idem-3",
+					occurredAt: "2026-07-20T10:00:00.000Z",
+					status: "cancelled",
+					usage: {
+						inputTokens: { value: 3000, source: "provider" },
+						outputTokens: { value: 1500, source: "provider" },
+						costUsd: { value: 0.03, source: "provider" },
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [], includeCancelled: true })
+
+			// Full aggregate
+			const snapshot = aggregator.query(events, query)
+
+			// Fold per-event deltas
+			const folded = {
+				events: 0,
+				completedCalls: 0,
+				failedCalls: 0,
+				cancelledCalls: 0,
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadTokens: 0,
+				cacheWriteTokens: 0,
+				reasoningTokens: 0,
+				totalTokens: 0,
+				costUsd: 0,
+				unknownEventCount: 0,
+			}
+
+			for (const event of events) {
+				const delta = computeEventContribution(event, query)
+				expect(delta).not.toBeNull()
+				folded.events += delta!.events
+				folded.completedCalls += delta!.completedCalls
+				folded.failedCalls += delta!.failedCalls
+				folded.cancelledCalls += delta!.cancelledCalls
+				folded.inputTokens += delta!.inputTokens
+				folded.outputTokens += delta!.outputTokens
+				folded.cacheReadTokens += delta!.cacheReadTokens
+				folded.cacheWriteTokens += delta!.cacheWriteTokens
+				folded.reasoningTokens += delta!.reasoningTokens
+				folded.totalTokens += delta!.totalTokens
+				folded.costUsd += delta!.costUsd
+				folded.unknownEventCount += delta!.unknownEventCount
+			}
+
+			expect(folded.events).toBe(snapshot.totals.events)
+			expect(folded.completedCalls).toBe(snapshot.totals.completedCalls)
+			expect(folded.failedCalls).toBe(snapshot.totals.failedCalls)
+			expect(folded.cancelledCalls).toBe(snapshot.totals.cancelledCalls)
+			expect(folded.inputTokens).toBe(snapshot.totals.inputTokens)
+			expect(folded.outputTokens).toBe(snapshot.totals.outputTokens)
+			expect(folded.cacheReadTokens).toBe(snapshot.totals.cacheReadTokens)
+			expect(folded.cacheWriteTokens).toBe(snapshot.totals.cacheWriteTokens)
+			expect(folded.reasoningTokens).toBe(snapshot.totals.reasoningTokens)
+			expect(folded.totalTokens).toBe(snapshot.totals.totalTokens)
+			expect(folded.costUsd).toBeCloseTo(snapshot.totals.costUsd, 10)
+			expect(folded.unknownEventCount).toBe(snapshot.totals.unknownEventCount)
+		})
+
+		it("should produce the same totals across different statuses", () => {
+			for (const status of ["completed", "failed", "cancelled"] as const) {
+				const event = makeEvent({ status })
+				const query = makeQuery({ groupBy: [], includeCancelled: true })
+				const delta = computeEventContribution(event, query)
+				expect(delta).not.toBeNull()
+				expect(delta!.events).toBe(1)
+			}
+		})
+
+		it("should produce the same cost for cost fallback events", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// costUsd missing
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const snapshot = aggregator.query([event], query)
+			const delta = computeEventContribution(event, query)
+
+			expect(delta).not.toBeNull()
+			expect(delta!.costUsd).toBeCloseTo(snapshot.totals.costUsd, 10)
+		})
+
+		it("should produce the same cacheReadTokens with cacheRatio", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			const query = makeQuery({ groupBy: [], cacheRatio: 0.94 })
+
+			const snapshot = aggregator.query([event], query)
+			const delta = computeEventContribution(event, query)
+
+			expect(delta).not.toBeNull()
+			expect(delta!.cacheReadTokens).toBe(snapshot.totals.cacheReadTokens)
+		})
+
+		it("should produce the same unknownEventCount for unknown semantics", () => {
+			const event = makeEvent({
+				semantics: {
+					cacheReadInInput: "unknown",
+					cacheWriteInInput: "unknown",
+					reasoningInOutput: "unknown",
+				},
+			})
+			const query = makeQuery({ groupBy: [] })
+
+			const snapshot = aggregator.query([event], query)
+			const delta = computeEventContribution(event, query)
+
+			expect(delta).not.toBeNull()
+			expect(delta!.unknownEventCount).toBe(snapshot.totals.unknownEventCount)
+		})
+
+		it("should produce the same results across different timezones", () => {
+			for (const tz of ["UTC", "Asia/Seoul", "America/New_York", "Europe/London"]) {
+				const event = makeEvent({ occurredAt: "2026-07-19T10:00:00.000Z" })
+				const query = makeQuery({ groupBy: ["day"], timezone: tz })
+
+				const snapshot = aggregator.query([event], query)
+				const delta = computeEventContribution(event, query)
+
+				expect(delta).not.toBeNull()
+				expect(delta!.events).toBe(snapshot.totals.events)
+				expect(delta!.inputTokens).toBe(snapshot.totals.inputTokens)
+			}
+		})
+
+		it("should produce the same results for each supported group axis", () => {
+			const event = makeEvent({
+				occurredAt: "2026-07-19T10:00:00.000Z",
+				provider: "anthropic",
+				model: "claude-sonnet-4-20250514",
+				mode: "code",
+				status: "completed",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			})
+
+			for (const groupBy of [
+				["day"],
+				["week"],
+				["month"],
+				["provider"],
+				["model"],
+				["mode"],
+				["status"],
+				["source"],
+			] as StatsQuery["groupBy"][]) {
+				const query = makeQuery({ groupBy })
+				const snapshot = aggregator.query([event], query)
+				const delta = computeEventContribution(event, query)
+
+				expect(delta).not.toBeNull()
+				expect(delta!.events).toBe(snapshot.totals.events)
+				expect(delta!.inputTokens).toBe(snapshot.totals.inputTokens)
+				expect(delta!.costUsd).toBeCloseTo(snapshot.totals.costUsd, 10)
+			}
 		})
 	})
 })

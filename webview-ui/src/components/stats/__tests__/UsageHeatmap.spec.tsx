@@ -1,9 +1,7 @@
-// pnpm --filter @roo-code/vscode-webview test src/components/stats/__tests__/UsageHeatmap.spec.tsx
+﻿// npx vitest run src/components/stats/__tests__/UsageHeatmap.spec.tsx
 
 import React from "react"
-import { render, fireEvent, waitFor } from "@/utils/test-utils"
-
-import type { StatsBucket } from "@roo-code/types"
+import { render, fireEvent } from "@/utils/test-utils"
 
 import UsageHeatmap from "../UsageHeatmap"
 
@@ -19,58 +17,7 @@ vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
-// ── vscode mock ──────────────────────────────────────────────────────────────
-
-// Captures postMessage calls so tests can inspect the query and simulate
-// the extension host's response.
-const postMessageMock = vi.fn()
-vi.mock("@/utils/vscode", () => ({
-	vscode: {
-		postMessage: (msg: unknown) => postMessageMock(msg),
-	},
-}))
-
 // ── Test helpers ─────────────────────────────────────────────────────────────
-
-/**
- * Simulates the extension host responding to a getUsageStats request.
- * Finds the latest requestId from the captured postMessage calls and
- * dispatches a matching getUsageStatsResponse MessageEvent on window.
- */
-function simulateStatsResponse(buckets: StatsBucket[]) {
-	const calls = postMessageMock.mock.calls
-	expect(calls.length).toBeGreaterThan(0)
-
-	const lastCall = calls[calls.length - 1][0] as { requestId: string }
-	const requestId = lastCall.requestId
-
-	const snapshot = {
-		query: { from: new Date().toISOString(), timezone: "UTC", groupBy: ["day"], includeCancelled: false },
-		generatedAt: new Date().toISOString(),
-		buckets,
-		totals: buckets.reduce(
-			(acc, b) => {
-				acc.totalTokens += b.totalTokens
-				acc.events += b.events
-				return acc
-			},
-			{ totalTokens: 0, events: 0 } as Record<string, number>,
-		),
-		coverage: { firstEventAt: undefined, lastEventAt: undefined },
-	}
-
-	window.dispatchEvent(
-		new MessageEvent("message", {
-			data: {
-				type: "getUsageStatsResponse",
-				requestId,
-				usageStatsSnapshot: snapshot,
-			},
-		}),
-	)
-}
-
-// ── Test fixtures ────────────────────────────────────────────────────────────
 
 /**
  * Returns a YYYY-MM-DD key for N days ago relative to today.
@@ -85,430 +32,246 @@ function daysAgoKey(daysAgo: number): string {
 	return `${year}-${month}-${day}`
 }
 
-function makeBucket(overrides: Partial<StatsBucket> = {}): StatsBucket {
-	return {
-		key: {},
-		events: 1,
-		completedCalls: 1,
-		failedCalls: 0,
-		cancelledCalls: 0,
-		inputTokens: 1000,
-		outputTokens: 500,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0,
-		reasoningTokens: 0,
-		totalTokens: 1500,
-		costUsd: 0.01,
-		unknownEventCount: 0,
-		...overrides,
-	}
+/**
+ * Builds a values array (oldest-first) for the given range, with the
+ * specified day having the given token count.
+ */
+function makeValues(rangeDays: number, dayIndex: number, tokens: number): number[] {
+	const values = new Array(rangeDays).fill(0)
+	values[dayIndex] = tokens
+	return values
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
-describe("UsageHeatmap", () => {
-	beforeEach(() => {
-		postMessageMock.mockClear()
-	})
-
+describe("UsageHeatmap (controlled)", () => {
 	it("renders the heatmap container with title", () => {
-		const { container } = render(<UsageHeatmap />)
+		const { container } = render(
+			<UsageHeatmap values={[]} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
 		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
 		expect(heatmap).toBeTruthy()
 		expect(heatmap?.textContent).toContain("stats:heatmap.title")
 	})
 
-	it("renders no-data message when buckets are empty", async () => {
-		const { container } = render(<UsageHeatmap />)
+	it("renders no-data message when values are empty", () => {
+		const { container } = render(
+			<UsageHeatmap values={[]} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		simulateStatsResponse([])
-
-		await waitFor(() => {
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).toContain("stats:heatmap.noData")
-		})
+		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
+		expect(heatmap?.textContent).toContain("stats:heatmap.noData")
 	})
 
-	it("renders no-data message when all buckets have zero totalTokens", async () => {
-		const buckets = [
-			makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 0, events: 0 }),
-			makeBucket({ key: { day: daysAgoKey(1) }, totalTokens: 0, events: 0 }),
-		]
+	it("renders no-data message when all values are zero", () => {
+		const values = new Array(30).fill(0)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).toContain("stats:heatmap.noData")
-		})
+		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
+		expect(heatmap?.textContent).toContain("stats:heatmap.noData")
 	})
 
-	it("renders heatmap grid when data exists", async () => {
-		const buckets = [
-			makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 5000, events: 3 }),
-			makeBucket({ key: { day: daysAgoKey(1) }, totalTokens: 3000, events: 2 }),
-		]
+	it("renders heatmap grid when data exists", () => {
+		// 30 days, day index 29 = today, 5000 tokens
+		const values = makeValues(30, 29, 5000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			// noData message should not be displayed
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
-
-			// Verify grid role attribute
-			const grid = container.querySelector('[role="img"]')
-			expect(grid).toBeTruthy()
-		})
+		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
+		expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
+		const grid = container.querySelector('[role="img"]')
+		expect(grid).toBeTruthy()
 	})
 
 	it("renders 30d, 60d, 120d, and 360d range toggle buttons", () => {
-		const { container } = render(<UsageHeatmap />)
+		const { container } = render(
+			<UsageHeatmap values={[]} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const btn30d = container.querySelector('[data-testid="heatmap-range-30d"]')
+		expect(container.querySelector('[data-testid="heatmap-range-30d"]')).toBeTruthy()
+		expect(container.querySelector('[data-testid="heatmap-range-60d"]')).toBeTruthy()
+		expect(container.querySelector('[data-testid="heatmap-range-120d"]')).toBeTruthy()
+		expect(container.querySelector('[data-testid="heatmap-range-360d"]')).toBeTruthy()
+	})
+
+	it("highlights the selected range button", () => {
+		const { container } = render(
+			<UsageHeatmap values={[]} rangeDays={60} selectedRange="60d" onRangeChange={vi.fn()} />,
+		)
+
 		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]')
-		const btn120d = container.querySelector('[data-testid="heatmap-range-120d"]')
-		const btn360d = container.querySelector('[data-testid="heatmap-range-360d"]')
-
-		expect(btn30d).toBeTruthy()
-		expect(btn60d).toBeTruthy()
-		expect(btn120d).toBeTruthy()
-		expect(btn360d).toBeTruthy()
-		expect(btn30d?.textContent).toContain("stats:heatmap.30d")
-		expect(btn60d?.textContent).toContain("stats:heatmap.60d")
-		expect(btn120d?.textContent).toContain("stats:heatmap.120d")
-		expect(btn360d?.textContent).toContain("stats:heatmap.360d")
+		expect(btn60d?.className).toContain("primary")
 	})
 
-	it("defaults to 30d range", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
-
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// In 30d mode, 30 date cells are generated
-		await waitFor(() => {
-			const cells = container.querySelectorAll('[role="img"] [aria-label]')
-			expect(cells.length).toBe(30)
-		})
-	})
-
-	it("switches to 60d range when 60d button is clicked", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
-
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Wait for initial data to load
-		await waitFor(() => {
-			expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(30)
-		})
+	it("calls onRangeChange when a range button is clicked", () => {
+		const onRangeChange = vi.fn()
+		const { container } = render(
+			<UsageHeatmap values={[]} rangeDays={30} selectedRange="30d" onRangeChange={onRangeChange} />,
+		)
 
 		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
 		fireEvent.click(btn60d)
 
-		// Simulate response for the 60d request
-		simulateStatsResponse(buckets)
-
-		// In 60d mode, 60 date cells are generated
-		await waitFor(() => {
-			expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(60)
-		})
+		expect(onRangeChange).toHaveBeenCalledWith("60d")
 	})
 
-	it("switches back to 30d range when 30d button is clicked after 60d", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
+	it("renders 30 cells in 30d mode", () => {
+		const values = makeValues(30, 29, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Wait for initial data to load
-		await waitFor(() => {
-			expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(30)
-		})
-
-		// Switch to 60d
-		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
-		fireEvent.click(btn60d)
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(60)
-		})
-
-		// Switch back to 30d
-		const btn30d = container.querySelector('[data-testid="heatmap-range-30d"]') as HTMLButtonElement
-		fireEvent.click(btn30d)
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			expect(container.querySelectorAll('[role="img"] [aria-label]').length).toBe(30)
-		})
+		const cells = container.querySelectorAll('[role="img"] [aria-label]')
+		expect(cells.length).toBe(30)
 	})
 
-	it("renders legend with less/more labels when data exists", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
+	it("renders 60 cells in 60d mode", () => {
+		const values = makeValues(60, 59, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={60} selectedRange="60d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).toContain("stats:heatmap.less")
-			expect(heatmap?.textContent).toContain("stats:heatmap.more")
-		})
+		const cells = container.querySelectorAll('[role="img"] [aria-label]')
+		expect(cells.length).toBe(60)
 	})
 
-	it("does not render legend when no data exists", async () => {
-		const { container } = render(<UsageHeatmap />)
+	it("renders 120 cells in 120d mode", () => {
+		const values = makeValues(120, 119, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={120} selectedRange="120d" onRangeChange={vi.fn()} />,
+		)
 
-		simulateStatsResponse([])
-
-		await waitFor(() => {
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			// Only noData message present, no legend
-			expect(heatmap?.textContent).toContain("stats:heatmap.noData")
-			expect(heatmap?.textContent).not.toContain("stats:heatmap.less")
-			expect(heatmap?.textContent).not.toContain("stats:heatmap.more")
-		})
+		const cells = container.querySelectorAll('[role="img"] [aria-label]')
+		expect(cells.length).toBe(120)
 	})
 
-	it("aggregates multiple buckets with the same day key", async () => {
-		const dayKey = daysAgoKey(0)
-		const buckets = [
-			makeBucket({ key: { day: dayKey }, totalTokens: 1000, events: 1 }),
-			makeBucket({ key: { day: dayKey }, totalTokens: 2000, events: 2 }),
-		]
+	it("renders 360 cells in 360d mode", () => {
+		const values = makeValues(360, 359, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={360} selectedRange="360d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Tokens for the same day key should be summed to 3000
-		// Verify the aria-label of today's cell
-		await waitFor(() => {
-			const cells = container.querySelectorAll('[role="img"] [aria-label]')
-			const todayCell = Array.from(cells).find((cell) => {
-				const aria = cell.getAttribute("aria-label") ?? ""
-				return aria.startsWith(dayKey)
-			})
-			expect(todayCell).toBeTruthy()
-			expect(todayCell?.getAttribute("aria-label")).toContain("3000")
-			expect(todayCell?.getAttribute("aria-label")).toContain("3")
-		})
+		const cells = container.querySelectorAll('[role="img"] [aria-label]')
+		expect(cells.length).toBe(360)
 	})
 
-	it("ignores buckets without a day key", async () => {
-		const buckets = [
-			makeBucket({ key: { provider: "anthropic" }, totalTokens: 1000, events: 1 }),
-			makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 2000, events: 2 }),
-		]
+	it("renders legend with less/more labels when data exists", () => {
+		const values = makeValues(30, 29, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Buckets without a day key are ignored, so there is 1 valid entry
-		// However 2000 > 0, so hasData = true
-		await waitFor(() => {
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
-		})
+		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
+		expect(heatmap?.textContent).toContain("stats:heatmap.less")
+		expect(heatmap?.textContent).toContain("stats:heatmap.more")
 	})
 
-	it("renders aria-label with date and token count for each cell", async () => {
-		const dayKey = daysAgoKey(0)
-		const buckets = [makeBucket({ key: { day: dayKey }, totalTokens: 5000, events: 4 })]
+	it("does not render legend when no data exists", () => {
+		const { container } = render(
+			<UsageHeatmap values={[]} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			const cells = container.querySelectorAll('[role="img"] [aria-label]')
-			const todayCell = Array.from(cells).find((cell) => {
-				const aria = cell.getAttribute("aria-label") ?? ""
-				return aria.startsWith(dayKey)
-			})
-			expect(todayCell).toBeTruthy()
-			const aria = todayCell?.getAttribute("aria-label") ?? ""
-			expect(aria).toContain(dayKey)
-			expect(aria).toContain("5000")
-		})
+		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
+		expect(heatmap?.textContent).toContain("stats:heatmap.noData")
+		expect(heatmap?.textContent).not.toContain("stats:heatmap.less")
+		expect(heatmap?.textContent).not.toContain("stats:heatmap.more")
 	})
 
-	it("renders aria-label with no-data for zero-token days", async () => {
-		const { container } = render(<UsageHeatmap />)
+	it("renders aria-label with date and token count for each cell", () => {
+		const values = makeValues(30, 29, 5000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		simulateStatsResponse([])
-
-		await waitFor(() => {
-			// In noData state, the grid is not rendered
-			const grid = container.querySelector('[role="img"]')
-			expect(grid).toBeFalsy()
+		const cells = container.querySelectorAll('[role="img"] [aria-label]')
+		const todayCell = Array.from(cells).find((cell) => {
+			const aria = cell.getAttribute("aria-label") ?? ""
+			return aria.startsWith(daysAgoKey(0))
 		})
+		expect(todayCell).toBeTruthy()
+		const aria = todayCell?.getAttribute("aria-label") ?? ""
+		expect(aria).toContain(daysAgoKey(0))
+		expect(aria).toContain("5000")
 	})
 
-	it("uses tighter gap in 360d mode", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
+	it("renders aria-label with no-data for zero-token days", () => {
+		// Only one day has data, the rest should have 0 tokens
+		const values = makeValues(30, 29, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Wait for initial data
-		await waitFor(() => {
-			expect(container.querySelector('[role="img"]')).toBeTruthy()
+		const cells = container.querySelectorAll('[role="img"] [aria-label]')
+		// Find a zero-token day (yesterday)
+		const yesterdayCell = Array.from(cells).find((cell) => {
+			const aria = cell.getAttribute("aria-label") ?? ""
+			return aria.startsWith(daysAgoKey(1))
 		})
-
-		// Switch to 360d mode
-		const btn360d = container.querySelector('[data-testid="heatmap-range-360d"]') as HTMLButtonElement
-		fireEvent.click(btn360d)
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			// In 360d mode, gap-px class is applied
-			const grid = container.querySelector('[role="img"]')
-			expect(grid).toBeTruthy()
-			expect(grid?.className).toContain("gap-px")
-		})
+		expect(yesterdayCell).toBeTruthy()
+		expect(yesterdayCell?.getAttribute("aria-label")).toContain("0")
 	})
 
-	it("uses gap-0.5 in 30d mode", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
+	it("uses tighter gap in 360d mode", () => {
+		const values = makeValues(360, 359, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={360} selectedRange="360d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Default 30d mode
-		await waitFor(() => {
-			const grid = container.querySelector('[role="img"]')
-			expect(grid).toBeTruthy()
-			// In 30d mode, gap-0.5 class is applied
-			expect(grid?.className).toContain("gap-0.5")
-		})
+		const grid = container.querySelector('[role="img"]')
+		expect(grid?.className).toContain("gap-px")
 	})
 
-	it("computes intensity levels based on max token value", async () => {
-		const buckets = [
-			makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 4000, events: 4 }), // 100% → level 5
-			makeBucket({ key: { day: daysAgoKey(1) }, totalTokens: 1000, events: 1 }), // 25% → level 1
-		]
+	it("uses gap-0.5 in 30d mode", () => {
+		const values = makeValues(30, 29, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			// Data should be rendered
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
-
-			// Legend should be rendered (6 level colors: 0-5)
-			const legendCells = container.querySelectorAll(".w-3.h-3.rounded-sm")
-			expect(legendCells.length).toBe(6)
-		})
+		const grid = container.querySelector('[role="img"]')
+		expect(grid?.className).toContain("gap-0.5")
 	})
 
-	it("handles buckets with day key but zero events", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 0, events: 0 })]
+	it("computes intensity levels based on max token value", () => {
+		const values = makeValues(30, 29, 4000)
+		values[28] = 1000 // yesterday = 25% → level 1
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
+		const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
+		expect(heatmap?.textContent).not.toContain("stats:heatmap.noData")
 
-		simulateStatsResponse(buckets)
-
-		// totalTokens is 0, so hasData = false
-		await waitFor(() => {
-			const heatmap = container.querySelector('[data-testid="usage-heatmap"]')
-			expect(heatmap?.textContent).toContain("stats:heatmap.noData")
-		})
+		const legendCells = container.querySelectorAll(".w-3.h-3.rounded-sm")
+		expect(legendCells.length).toBe(6)
 	})
 
-	it("renders grid with correct column count for 30d mode", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
+	it("renders grid with correct column count for 30d mode", () => {
+		const values = makeValues(30, 29, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={30} selectedRange="30d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			const grid = container.querySelector('[role="img"]')
-			expect(grid).toBeTruthy()
-			// 30d mode: 30 cells / 7 rows = 5 columns (ceil(30/7) = 5)
-			// CSS property is rendered in kebab-case
-			const style = grid?.getAttribute("style") ?? ""
-			expect(style.toLowerCase()).toContain("grid-template-columns")
-			expect(style).toContain("repeat(5")
-		})
+		const grid = container.querySelector('[role="img"]')
+		expect(grid).toBeTruthy()
+		const style = grid?.getAttribute("style") ?? ""
+		expect(style.toLowerCase()).toContain("grid-template-columns")
+		expect(style).toContain("repeat(5")
 	})
 
-	it("renders grid with correct column count for 60d mode", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
+	it("renders grid with correct column count for 60d mode", () => {
+		const values = makeValues(60, 59, 1000)
+		const { container } = render(
+			<UsageHeatmap values={values} rangeDays={60} selectedRange="60d" onRangeChange={vi.fn()} />,
+		)
 
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		// Wait for initial data
-		await waitFor(() => {
-			expect(container.querySelector('[role="img"]')).toBeTruthy()
-		})
-
-		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
-		fireEvent.click(btn60d)
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			const grid = container.querySelector('[role="img"]')
-			expect(grid).toBeTruthy()
-			// 60d mode: 60 cells / 7 rows = 9 columns (ceil(60/7) = 9)
-			const style = grid?.getAttribute("style") ?? ""
-			expect(style.toLowerCase()).toContain("grid-template-columns")
-			expect(style).toContain("repeat(9")
-		})
-	})
-
-	it("sends getUsageStats message on mount with heatmap- requestId prefix", () => {
-		render(<UsageHeatmap />)
-
-		expect(postMessageMock).toHaveBeenCalledTimes(1)
-		const msg = postMessageMock.mock.calls[0][0]
-		expect(msg.type).toBe("getUsageStats")
-		expect(msg.requestId).toMatch(/^heatmap-/)
-		expect(msg.usageStatsQuery.groupBy).toEqual(["day"])
-		expect(msg.usageStatsQuery.includeCancelled).toBe(false)
-	})
-
-	it("sends a new getUsageStats message when range changes", async () => {
-		const buckets = [makeBucket({ key: { day: daysAgoKey(0) }, totalTokens: 1000, events: 1 })]
-
-		const { container } = render(<UsageHeatmap />)
-
-		simulateStatsResponse(buckets)
-
-		await waitFor(() => {
-			expect(container.querySelector('[role="img"]')).toBeTruthy()
-		})
-
-		// Clear mock to count only the new request
-		postMessageMock.mockClear()
-
-		const btn60d = container.querySelector('[data-testid="heatmap-range-60d"]') as HTMLButtonElement
-		fireEvent.click(btn60d)
-
-		expect(postMessageMock).toHaveBeenCalledTimes(1)
-		const msg = postMessageMock.mock.calls[0][0]
-		expect(msg.type).toBe("getUsageStats")
-		expect(msg.requestId).toMatch(/^heatmap-/)
+		const grid = container.querySelector('[role="img"]')
+		expect(grid).toBeTruthy()
+		const style = grid?.getAttribute("style") ?? ""
+		expect(style.toLowerCase()).toContain("grid-template-columns")
+		expect(style).toContain("repeat(9")
 	})
 })

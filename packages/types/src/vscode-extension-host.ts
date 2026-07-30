@@ -3,6 +3,11 @@ import { z } from "zod"
 import type { GlobalSettings, RooCodeSettings } from "./global-settings.js"
 import type { ProviderSettings, ProviderSettingsEntry } from "./provider-settings.js"
 import type { HistoryItem } from "./history.js"
+import type {
+	TaskOrganizationStateV1,
+	TaskOrganizationMutationRequestV1,
+	TaskOrganizationMutationResultV1,
+} from "./task-organization.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
 import type { ClineMessage, QueuedMessage } from "./message.js"
@@ -18,7 +23,17 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
-import type { StatsQuery, StatsSnapshot, SessionSummary, SessionDetail } from "./usage-stats.js"
+import type {
+	StatsQuery,
+	StatsSnapshot,
+	SessionSummary,
+	SessionDetail,
+	DashboardStatsSubscription,
+	DashboardStatsSnapshot,
+	DashboardStatsDelta,
+	DashboardSessionPage,
+	DashboardStatsError,
+} from "./usage-stats.js"
 
 /**
  * ExtensionMessage
@@ -114,6 +129,13 @@ export interface ExtensionMessage {
 		| "dashboardStatsResponse"
 		| "dashboardSessionsResponse"
 		| "dashboardSessionDetailResponse"
+		// Dashboard streaming response types
+		| "dashboardStatsStreamSnapshot"
+		| "dashboardStatsStreamDelta"
+		| "dashboardStatsStreamError"
+		| "dashboardSessionPageResponse"
+		| "taskOrganizationUpdated"
+		| "taskOrganizationMutationResult"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -276,6 +298,29 @@ export interface ExtensionMessage {
 	// taskId is not found, or an error occurred (see `error`). On success it
 	// contains the full session summary plus the per-API-call records.
 	dashboardSessionDetail?: SessionDetail | null
+
+	/**
+	 * Full authoritative snapshot of the task organization aggregate.
+	 * Sent on initial state hydration and after every committed mutation
+	 * or cross-instance watcher reload.
+	 */
+	taskOrganization?: TaskOrganizationStateV1
+
+	/**
+	 * Acknowledgement or typed rejection for a `taskOrganizationMutation`
+	 * request. Correlated by `requestId`.
+	 */
+	taskOrganizationMutationResult?: TaskOrganizationMutationResultV1
+
+	// Dashboard streaming response payloads
+	/** Full state snapshot for `dashboardStatsStreamSnapshot`. */
+	dashboardStatsStreamSnapshot?: DashboardStatsSnapshot
+	/** Incremental delta for `dashboardStatsStreamDelta`. */
+	dashboardStatsStreamDelta?: DashboardStatsDelta
+	/** Typed error for `dashboardStatsStreamError`. */
+	dashboardStatsStreamError?: DashboardStatsError
+	/** Cursor-paged session page for `dashboardSessionPageResponse`. */
+	dashboardSessionPage?: DashboardSessionPage
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -447,6 +492,12 @@ export type ExtensionState = Pick<
 	 * (captured during async getStateToPostToWebview) from overwriting newer messages.
 	 */
 	clineMessagesSeq?: number
+
+	/**
+	 * Local task organization aggregate (manual folders and pins).
+	 * Sent on initial state hydration and replaced on every update.
+	 */
+	taskOrganization?: TaskOrganizationStateV1
 }
 
 export interface Command {
@@ -669,6 +720,15 @@ export interface WebviewMessage {
 		| "getDashboardStats"
 		| "getDashboardSessionDetail"
 		| "getDashboardSessions"
+		// Dashboard streaming request types
+		| "subscribeDashboardStats"
+		| "unsubscribeDashboardStats"
+		| "replaceDashboardStatsSubscription"
+		| "pauseDashboardStats"
+		| "resumeDashboardStats"
+		| "resyncDashboardStats"
+		| "getDashboardSessionPage"
+		| "taskOrganizationMutation"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -795,6 +855,22 @@ export interface WebviewMessage {
 		model?: string
 		provider?: string
 	}
+
+	// Dashboard streaming request payloads.
+	// `dashboardStatsSubscription` carries the validated subscription
+	// descriptor for subscribe/replace operations.
+	dashboardStatsSubscription?: DashboardStatsSubscription
+	// Opaque cursor for `getDashboardSessionPage` requests.
+	dashboardSessionCursor?: string
+	// Page size for `getDashboardSessionPage` requests (1–100).
+	dashboardSessionLimit?: number
+
+	/**
+	 * Task organization mutation request from webview to extension host.
+	 * The host validates, applies the mutation atomically, and returns a
+	 * `taskOrganizationMutationResult` correlated by `requestId`.
+	 */
+	taskOrganizationMutation?: TaskOrganizationMutationRequestV1
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {

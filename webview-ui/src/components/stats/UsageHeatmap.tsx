@@ -1,12 +1,10 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+﻿import React, { memo, useCallback, useMemo } from "react"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
-import { vscode } from "@/utils/vscode"
-import type { StatsBucket } from "@roo-code/types"
 
 import { Button, StandardTooltip } from "@/components/ui"
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
 interface DailyActivity {
 	date: string // YYYY-MM-DD
@@ -65,114 +63,56 @@ function formatDisplayDate(dateKey: string): string {
 
 type HeatmapRange = "30d" | "60d" | "120d" | "360d"
 
-const RANGE_DAYS: Record<HeatmapRange, number> = {
-	"30d": 30,
-	"60d": 60,
-	"120d": 120,
-	"360d": 360,
-}
-
 const RANGE_OPTIONS: HeatmapRange[] = ["30d", "60d", "120d", "360d"]
 
-// ── UsageHeatmap ────────────────────────────────────────────────────────────
+// ── UsageHeatmap (controlled) ────────────────────────────────────────────────
 
-const UsageHeatmap = memo(() => {
+export interface UsageHeatmapProps {
+	/** Daily heatmap values from the stream (oldest first). */
+	values: number[]
+	/** Number of days the values array covers. */
+	rangeDays: number
+	/** Currently selected range label for button highlighting. */
+	selectedRange: HeatmapRange
+	/** Called when the user changes the range. */
+	onRangeChange: (range: HeatmapRange) => void
+}
+
+const UsageHeatmap = memo(({ values, rangeDays, selectedRange, onRangeChange }: UsageHeatmapProps) => {
 	const { t } = useAppTranslation()
-	const [range, setRange] = useState<HeatmapRange>("30d")
-	const [heatmapBuckets, setHeatmapBuckets] = useState<StatsBucket[]>([])
-	const [loading, setLoading] = useState(true)
-	const latestHeatmapRequestIdRef = useRef<string>("")
-
-	// Fetch heatmap data independently from the top-level date picker.
-	// Sends a getUsageStats message with a "heatmap-" requestId prefix so
-	// responses can be filtered from DashboardView's own requests.
-	const fetchHeatmapData = useCallback((rangeArg: HeatmapRange) => {
-		const days = RANGE_DAYS[rangeArg]
-		const requestId = `heatmap-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-		latestHeatmapRequestIdRef.current = requestId
-		setLoading(true)
-
-		const from = new Date(Date.now() - days * 86400000)
-		from.setHours(0, 0, 0, 0)
-
-		let timezone: string
-		try {
-			timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-		} catch {
-			timezone = "UTC"
-		}
-
-		vscode.postMessage({
-			type: "getUsageStats",
-			requestId,
-			usageStatsQuery: {
-				from: from.toISOString(),
-				timezone,
-				groupBy: ["day"],
-				includeCancelled: false,
-			},
-		})
-	}, [])
-
-	// Listen for responses to our heatmap requests and perform initial fetch.
-	useEffect(() => {
-		const handleMessage = (e: MessageEvent) => {
-			const message = e.data
-
-			if (
-				message.type === "getUsageStatsResponse" &&
-				typeof message.requestId === "string" &&
-				message.requestId.startsWith("heatmap-") &&
-				message.requestId === latestHeatmapRequestIdRef.current
-			) {
-				if (message.usageStatsSnapshot) {
-					setHeatmapBuckets(message.usageStatsSnapshot.buckets ?? [])
-				}
-				setLoading(false)
-			}
-		}
-
-		window.addEventListener("message", handleMessage)
-		fetchHeatmapData(range) // Initial fetch
-
-		return () => window.removeEventListener("message", handleMessage)
-	}, []) // eslint-disable-line react-hooks/exhaustive-deps
 
 	const handleRangeChange = useCallback(
 		(newRange: HeatmapRange) => {
-			setRange(newRange)
-			fetchHeatmapData(newRange)
+			onRangeChange(newRange)
 		},
-		[fetchHeatmapData],
+		[onRangeChange],
 	)
 
-	// Extract daily activity from buckets that have a "day" key
+	// Build a map of day-index → value from the stream's values array.
+	// The values array is oldest-first, so index 0 = oldest day.
 	const dailyMap = useMemo(() => {
 		const map = new Map<string, DailyActivity>()
+		const today = new Date()
+		today.setHours(0, 0, 0, 0)
 
-		for (const bucket of heatmapBuckets) {
-			const dayKey = bucket.key?.day
-			if (!dayKey) continue
-
-			const existing = map.get(dayKey)
-			if (existing) {
-				existing.totalTokens += bucket.totalTokens
-				existing.events += bucket.events
-			} else {
-				map.set(dayKey, {
-					date: dayKey,
-					totalTokens: bucket.totalTokens,
-					events: bucket.events,
-				})
-			}
+		for (let i = 0; i < values.length; i++) {
+			const daysAgo = values.length - 1 - i
+			const date = new Date(today)
+			date.setDate(date.getDate() - daysAgo)
+			const key = formatDateKey(date)
+			map.set(key, {
+				date: key,
+				totalTokens: values[i] ?? 0,
+				events: 0,
+			})
 		}
 
 		return map
-	}, [heatmapBuckets])
+	}, [values])
 
 	// Generate the date range for display
 	const days = useMemo(() => {
-		const count = RANGE_DAYS[range]
+		const count = rangeDays
 		const today = new Date()
 		today.setHours(0, 0, 0, 0)
 		const result: DailyActivity[] = []
@@ -192,7 +132,7 @@ const UsageHeatmap = memo(() => {
 		}
 
 		return result
-	}, [dailyMap, range])
+	}, [dailyMap, rangeDays])
 
 	const maxTokens = useMemo(() => {
 		let max = 0
@@ -205,7 +145,7 @@ const UsageHeatmap = memo(() => {
 	const hasData = maxTokens > 0
 
 	// Gap between cells: tighter for longer ranges
-	const gap = range === "30d" ? "gap-0.5" : "gap-px"
+	const gap = selectedRange === "30d" ? "gap-0.5" : "gap-px"
 
 	return (
 		<div className="flex flex-col gap-2" data-testid="usage-heatmap">
@@ -215,7 +155,7 @@ const UsageHeatmap = memo(() => {
 					{RANGE_OPTIONS.map((option) => (
 						<Button
 							key={option}
-							variant={range === option ? "primary" : "ghost"}
+							variant={selectedRange === option ? "primary" : "ghost"}
 							size="sm"
 							onClick={() => handleRangeChange(option)}
 							data-testid={`heatmap-range-${option}`}>
@@ -225,9 +165,7 @@ const UsageHeatmap = memo(() => {
 				</div>
 			</div>
 
-			{loading && !hasData ? (
-				<div className="text-xs text-vscode-descriptionForeground py-4">{t("stats:heatmap.loading")}</div>
-			) : !hasData ? (
+			{!hasData ? (
 				<div className="text-xs text-vscode-descriptionForeground py-4">{t("stats:heatmap.noData")}</div>
 			) : (
 				<>
@@ -245,7 +183,7 @@ const UsageHeatmap = memo(() => {
 									key={day.date}
 									content={
 										day.totalTokens > 0
-											? `${formatDisplayDate(day.date)}: ${day.totalTokens.toLocaleString()} tokens (${day.events} requests)`
+											? `${formatDisplayDate(day.date)}: ${day.totalTokens.toLocaleString()} tokens`
 											: `${formatDisplayDate(day.date)}: ${t("stats:heatmap.noData")}`
 									}>
 									<div
@@ -281,5 +219,7 @@ const UsageHeatmap = memo(() => {
 		</div>
 	)
 })
+
+UsageHeatmap.displayName = "UsageHeatmap"
 
 export default UsageHeatmap

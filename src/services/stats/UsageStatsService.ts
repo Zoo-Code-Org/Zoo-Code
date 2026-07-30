@@ -1,8 +1,11 @@
-import * as vscode from "vscode"
+﻿import * as vscode from "vscode"
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
 import { UsageAggregator } from "./UsageAggregator"
+import { UsageStatsDatabase } from "./UsageStatsDatabase"
+import { UsageStatsMigration } from "./UsageStatsMigration"
+import { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
 
 // ── Export Format ───────────────────────────────────────────────────────────
 
@@ -91,6 +94,10 @@ export class UsageStatsService {
 	private readonly store: UsageEventStore
 	private readonly aggregator: UsageAggregator
 	private readonly storageDir: string
+	private readonly database: UsageStatsDatabase
+
+	/** Demand-driven host stream coordinator for dashboard stats. */
+	private coordinator: UsageStatsStreamCoordinator | null = null
 
 	/** Nonce for clear verification (short-lived) */
 	private clearNonce: string | null = null
@@ -110,7 +117,8 @@ export class UsageStatsService {
 
 	constructor(globalStoragePath: string) {
 		this.storageDir = globalStoragePath
-		this.store = new UsageEventStore(globalStoragePath)
+		this.database = new UsageStatsDatabase(this.getStatsDir(globalStoragePath))
+		this.store = new UsageEventStore(globalStoragePath, this.database)
 		this.aggregator = new UsageAggregator()
 	}
 
@@ -118,20 +126,78 @@ export class UsageStatsService {
 
 	/**
 	 * Initializes the service.
-	 * Performs store initialization and sets up the file system watcher.
+	 * Performs store initialization, database initialization, migration,
+	 * and sets up the file system watcher.
 	 */
 	async initialize(): Promise<void> {
+		// Initialize the SQLite database
+		try {
+			this.database.initialize()
+		} catch (err) {
+			console.warn("[UsageStatsService] Failed to initialize SQLite database:", err)
+		}
+
+		// Initialize the NDJSON store (also appends to database when available)
 		await this.store.initialize()
+
+		// Run migration from legacy NDJSON segments if not yet complete
+		if (this.database._isInitialized()) {
+			try {
+				const migration = new UsageStatsMigration(
+					this.database._getDbPath().replace(/[/\\]usage\.db$/, ""),
+					this.database,
+				)
+				const result = migration.migrate()
+				if (result.totalMigrated > 0) {
+					console.log(
+						`[UsageStatsService] Migrated ${result.totalMigrated} events from NDJSON to SQLite (${result.totalSkipped} duplicates skipped)`,
+					)
+				}
+			} catch (err) {
+				console.warn("[UsageStatsService] NDJSON migration failed:", err)
+			}
+		}
+
 		this.setupFileWatcher()
+
+		// Create the stream coordinator after the database is initialized
+		this.coordinator = new UsageStatsStreamCoordinator(this.database._isInitialized() ? this.database : null)
 	}
 
 	/**
-	 * Disposes the service, releasing the file system watcher.
+	 * Disposes the service, releasing the file system watcher and database.
 	 */
 	dispose(): void {
+		this.coordinator?.dispose()
+		this.coordinator = null
 		this.watcher?.dispose()
 		this.watcher = null
 		this.changeListeners.length = 0
+		this.database.close()
+	}
+
+	/**
+	 * Returns the SQLite database for indexed dashboard queries.
+	 * Returns null if the database is not initialized.
+	 */
+	getDatabase(): UsageStatsDatabase | null {
+		return this.database._isInitialized() ? this.database : null
+	}
+
+	/**
+	 * Returns the stream coordinator for dashboard stats subscriptions.
+	 * Returns null if the service has not been initialized or the coordinator
+	 * could not be created (e.g., database unavailable).
+	 */
+	getCoordinator(): UsageStatsStreamCoordinator | null {
+		return this.coordinator
+	}
+
+	/**
+	 * Returns the stats directory path for the given global storage path.
+	 */
+	private getStatsDir(globalStoragePath: string): string {
+		return globalStoragePath + "/usage-stats"
 	}
 
 	/**
@@ -157,8 +223,15 @@ export class UsageStatsService {
 	 *
 	 * @returns true if appended, false if deduplicated
 	 */
-	append(event: UsageEventV1): Promise<boolean> {
-		return this.store.append(event)
+	async append(event: UsageEventV1): Promise<boolean> {
+		const appended = await this.store.append(event)
+		if (appended) {
+			// Notify the coordinator that a new event was committed.
+			// The coordinator only schedules an indexed drain; it never
+			// carries uncommitted data.
+			this.coordinator?.notifyEventAppended(event)
+		}
+		return appended
 	}
 
 	/**
@@ -328,6 +401,8 @@ export class UsageStatsService {
 					for (const listener of this.changeListeners) {
 						listener()
 					}
+					// Notify the coordinator of external (cross-window) changes
+					this.coordinator?.notifyExternalChange()
 					debounceTimer = null
 				}, 300)
 			}

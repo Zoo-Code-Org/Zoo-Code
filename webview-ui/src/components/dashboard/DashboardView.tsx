@@ -1,7 +1,7 @@
-import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+﻿import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
-import type { ExtensionMessage, StatsQuery, StatsSnapshot, SessionSummary, SessionDetail } from "@roo-code/types"
+import type { ExtensionMessage, StatsQuery, StatsBucket, SessionDetail, DashboardSessionSummary } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -23,6 +23,7 @@ import { Tab, TabHeader, TabContent } from "../common/Tab"
 import DashboardSummary from "./DashboardSummary"
 import SessionList from "./SessionList"
 import UsageHeatmap from "../stats/UsageHeatmap"
+import { useDashboardStatsStream } from "./useDashboardStatsStream"
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -31,6 +32,14 @@ import UsageHeatmap from "../stats/UsageHeatmap"
 // (the backend StatsQuery schema only allows today/7d/30d/all for `preset`).
 type DashboardPreset = "today" | "7d" | "30d" | "custom" | "all"
 type DashboardGroupBy = "model" | "provider" | "mode"
+type HeatmapRange = "30d" | "60d" | "120d" | "360d"
+
+const HEATMAP_RANGE_DAYS: Record<HeatmapRange, number> = {
+	"30d": 30,
+	"60d": 60,
+	"120d": 120,
+	"360d": 360,
+}
 
 interface DashboardViewProps {
 	onDone: () => void
@@ -43,13 +52,24 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const [preset, setPreset] = useState<DashboardPreset>("today")
 	const [groupBy, setGroupBy] = useState<DashboardGroupBy>("model")
-	const [snapshot, setSnapshot] = useState<StatsSnapshot | null>(null)
-	const [loading, setLoading] = useState(true)
-	const [error, setError] = useState<string | null>(null)
 	const [showClearDialog, setShowClearDialog] = useState(false)
 	const [clearNonce, setClearNonce] = useState<string | null>(null)
 	// Cache ratio for estimation when provider doesn't report cacheReadTokens (default 94%)
 	const [cacheRatio, setCacheRatio] = useState<number>(0.94)
+	const [heatmapRange, setHeatmapRange] = useState<HeatmapRange>("30d")
+
+	// ── Session detail state ────────────────────────────────────────────────
+	// Only one session is expanded at a time (accordion pattern). The detail
+	// is fetched on first expansion via `getDashboardSessionDetail` and cached
+	// in `sessionDetails` so re-expanding does not refetch.
+	const [expandedTaskId, setExpandedTaskId] = useState<string | undefined>(undefined)
+	const [sessionDetails, setSessionDetails] = useState<Record<string, SessionDetail | null>>({})
+	const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string | null>>({})
+	const [sessionDetailLoading, setSessionDetailLoading] = useState<Set<string>>(new Set())
+	const latestSessionDetailRequestIdRef = useRef<string>("")
+
+	// ── Error state (for clear/export errors) ───────────────────────────────
+	const [error, setError] = useState<string | null>(null)
 
 	// Custom range date inputs (YYYY-MM-DD). Only used when preset === "custom".
 	// Default to yesterday~today so the inputs are never empty on first selection.
@@ -69,42 +89,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const [customFrom, setCustomFrom] = useState<string>(defaultDateRange.from)
 	const [customTo, setCustomTo] = useState<string>(defaultDateRange.to)
-
-	// Track the latest request to ignore stale responses
-	const latestRequestIdRef = useRef<string>("")
-
-	// ── Sessions state (Commit 3) ──────────────────────────────────────────
-	// Sessions are fetched independently from the stats snapshot so that the
-	// session list can update without re-fetching the full aggregation. The
-	// session request reuses the same `buildQuery()` time range so the two
-	// views stay consistent.
-	const [sessions, setSessions] = useState<SessionSummary[]>([])
-	const [sessionsLoading, setSessionsLoading] = useState(false)
-	const [sessionsError, setSessionsError] = useState<string | null>(null)
-	const latestSessionsRequestIdRef = useRef<string>("")
-
-	// ── Session detail state (Commit 4) ────────────────────────────────────
-	// Only one session is expanded at a time (accordion pattern). The detail
-	// is fetched on first expansion via `getDashboardSessionDetail` and cached
-	// in `sessionDetails` so re-expanding does not refetch. The
-	// `latestSessionDetailRequestIdRef` correlates the IPC response so stale
-	// responses (e.g. from a previous expansion) are ignored.
-	const [expandedTaskId, setExpandedTaskId] = useState<string | undefined>(undefined)
-	const [sessionDetails, setSessionDetails] = useState<Record<string, SessionDetail | null>>({})
-	const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string | null>>({})
-	const [sessionDetailLoading, setSessionDetailLoading] = useState<Set<string>>(new Set())
-	const latestSessionDetailRequestIdRef = useRef<string>("")
-
-	// ── Auto-refresh debounce timer (Commit 4) ─────────────────────────────
-	// The `usageStatsChanged` listener uses a ref-based timer so the cleanup
-	// function returned from the event handler does not get mistaken for a
-	// React effect cleanup. The previous implementation returned
-	// `clearTimeout` from inside the `MessageEvent` handler, which React's
-	// synthetic event system treated as an effect cleanup — causing the timer
-	// to be cleared immediately on the next render cycle. The ref-based
-	// approach decouples the debounce lifecycle from the event handler return
-	// value.
-	const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	// ── Query construction ──────────────────────────────────────────────────
 
@@ -126,8 +110,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			const now = new Date()
 			let from: string | undefined
 			let to: string | undefined
-			// The backend preset enum is ["today", "7d", "30d", "all"].
-			// For "custom" we omit preset and send explicit from/to ISO strings.
 			let queryPreset: StatsQuery["preset"]
 
 			if (currentPreset === "today") {
@@ -146,9 +128,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				from = start.toISOString()
 				queryPreset = "30d"
 			} else if (currentPreset === "custom") {
-				// Convert YYYY-MM-DD inputs to ISO start-of-day / end-of-day.
-				// fromOverride/toOverride let a fresh input value be used
-				// immediately without waiting for state to flush.
 				const fromStr = fromOverride ?? customFrom
 				const toStr = toOverride ?? customTo
 				if (fromStr) {
@@ -157,10 +136,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				if (toStr) {
 					to = new Date(`${toStr}T23:59:59.999`).toISOString()
 				}
-				// No preset for custom range
-			}
-			// "all" → no from/to, preset "all"
-			else if (currentPreset === "all") {
+			} else if (currentPreset === "all") {
 				queryPreset = "all"
 			}
 
@@ -181,73 +157,61 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		[timezone, customFrom, customTo, cacheRatio],
 	)
 
-	// ── Fetch statistics ─────────────────────────────────────────────────────
+	// ── Streaming hook ──────────────────────────────────────────────────────
 
-	const fetchStats = useCallback(
-		(
-			currentPreset: DashboardPreset,
-			currentGroupBy: DashboardGroupBy,
-			fromOverride?: string,
-			toOverride?: string,
-		) => {
-			const requestId = `dashboard-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-			latestRequestIdRef.current = requestId
-			setLoading(true)
-			setError(null)
+	const streamRange = useMemo(() => buildQuery(preset, groupBy), [buildQuery, preset, groupBy])
+	const streamHeatmapRangeDays = HEATMAP_RANGE_DAYS[heatmapRange]
 
-			const query = buildQuery(currentPreset, currentGroupBy, fromOverride, toOverride)
-			vscode.postMessage({
-				type: "getUsageStats",
-				requestId,
-				usageStatsQuery: query,
-			})
-		},
-		[buildQuery],
-	)
+	const {
+		state: streamState,
+		requestSessionPage,
+		replaceSubscription,
+	} = useDashboardStatsStream({
+		range: streamRange,
+		heatmapRangeDays: streamHeatmapRangeDays,
+		sessionPageSize: 50,
+	})
 
-	// ── Fetch sessions (Commit 3) ──────────────────────────────────────────
-	// Sends `getDashboardSessions` with the same time-range query as the
-	// stats fetch. The response is correlated via `latestSessionsRequestIdRef`
-	// to ignore stale results.
-	const fetchSessions = useCallback(
-		(
-			currentPreset: DashboardPreset,
-			currentGroupBy: DashboardGroupBy,
-			fromOverride?: string,
-			toOverride?: string,
-		) => {
-			const requestId = `dashboard-sessions-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-			latestSessionsRequestIdRef.current = requestId
-			setSessionsLoading(true)
-			setSessionsError(null)
+	// ── Replace subscription when preset/groupBy/heatmapRange changes ───────
 
-			const query = buildQuery(currentPreset, currentGroupBy, fromOverride, toOverride)
-			vscode.postMessage({
-				type: "getDashboardSessions",
-				requestId,
-				usageStatsQuery: query,
-			})
-		},
-		[buildQuery],
-	)
+	const prevPresetRef = useRef(preset)
+	const prevGroupByRef = useRef(groupBy)
+	const prevHeatmapRangeRef = useRef(heatmapRange)
+	const prevCacheRatioRef = useRef(cacheRatio)
 
-	// ── Fetch session detail (Commit 4) ───────────────────────────────────
-	// Sends `getDashboardSessionDetail` with the taskId. The response is
-	// correlated via `latestSessionDetailRequestIdRef` to ignore stale
-	// results. The detail is cached in `sessionDetails` so re-expanding a
-	// row does not trigger a refetch.
+	useEffect(() => {
+		const presetChanged = prevPresetRef.current !== preset
+		const groupByChanged = prevGroupByRef.current !== groupBy
+		const heatmapRangeChanged = prevHeatmapRangeRef.current !== heatmapRange
+		const cacheRatioChanged = prevCacheRatioRef.current !== cacheRatio
+
+		if (presetChanged || groupByChanged || heatmapRangeChanged || cacheRatioChanged) {
+			prevPresetRef.current = preset
+			prevGroupByRef.current = groupBy
+			prevHeatmapRangeRef.current = heatmapRange
+			prevCacheRatioRef.current = cacheRatio
+
+			// For custom preset, only replace if both dates are present
+			if (preset === "custom" && (!customFrom || !customTo)) {
+				return
+			}
+
+			replaceSubscription(buildQuery(preset, groupBy), HEATMAP_RANGE_DAYS[heatmapRange], 50)
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [preset, groupBy, heatmapRange, cacheRatio])
+
+	// ── Fetch session detail (on expand) ───────────────────────────────────
+
 	const fetchSessionDetail = useCallback((taskId: string) => {
 		const requestId = `dashboard-session-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 		latestSessionDetailRequestIdRef.current = requestId
 
-		// Mark this task as loading. Using a new Set instance so React
-		// detects the state change.
 		setSessionDetailLoading((prev) => {
 			const next = new Set(prev)
 			next.add(taskId)
 			return next
 		})
-		// Clear any previous error for this task.
 		setSessionDetailErrors((prev) => {
 			if (prev[taskId] === undefined) return prev
 			const next = { ...prev }
@@ -262,19 +226,10 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		})
 	}, [])
 
-	// ── Toggle session expansion (Commit 4) ───────────────────────────────
-	// Accordion pattern: clicking a row toggles its expansion. Clicking
-	// another row closes the previous one. The detail is fetched on first
-	// expansion; if already cached, the cached value is shown immediately.
 	const handleToggleSession = useCallback(
 		(taskId: string) => {
 			setExpandedTaskId((current) => {
-				// Toggling the already-expanded row collapses it.
 				if (current === taskId) return undefined
-
-				// Expanding a new row: fetch detail if not already cached.
-				// We check the cache outside the state setter to avoid
-				// stale-closure issues with `sessionDetails`.
 				if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
 					fetchSessionDetail(taskId)
 				}
@@ -284,125 +239,43 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		[sessionDetails, sessionDetailLoading, fetchSessionDetail],
 	)
 
-	// Initial fetch on mount
-	useEffect(() => {
-		fetchStats(preset, groupBy)
-		fetchSessions(preset, groupBy)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [])
-
-	// Refetch when preset or groupBy changes
-	const handlePresetChange = useCallback(
-		(newPreset: DashboardPreset) => {
-			setPreset(newPreset)
-			// For custom, only fetch if both dates are present
-			if (newPreset === "custom" && (!customFrom || !customTo)) {
-				return
-			}
-			fetchStats(newPreset, groupBy)
-			fetchSessions(newPreset, groupBy)
-		},
-		[groupBy, fetchStats, fetchSessions, customFrom, customTo],
-	)
-
-	const handleGroupByChange = useCallback(
-		(newGroupBy: DashboardGroupBy) => {
-			setGroupBy(newGroupBy)
-			fetchStats(preset, newGroupBy)
-			fetchSessions(preset, newGroupBy)
-		},
-		[preset, fetchStats, fetchSessions],
-	)
+	// ── Manual refresh = explicit background resync ────────────────────────
 
 	const handleRefresh = useCallback(() => {
-		fetchStats(preset, groupBy)
-		fetchSessions(preset, groupBy)
-	}, [preset, groupBy, fetchStats, fetchSessions])
+		replaceSubscription(buildQuery(preset, groupBy), HEATMAP_RANGE_DAYS[heatmapRange], 50)
+	}, [preset, groupBy, heatmapRange, buildQuery, replaceSubscription])
 
-	// Apply a custom date range: triggered when both inputs are filled and
-	// the user wants to run the query (e.g. on "To" date change, or explicitly).
+	// ── Preset / groupBy / heatmap range handlers ───────────────────────────
+
+	const handlePresetChange = useCallback((newPreset: DashboardPreset) => {
+		setPreset(newPreset)
+	}, [])
+
+	const handleGroupByChange = useCallback((newGroupBy: DashboardGroupBy) => {
+		setGroupBy(newGroupBy)
+	}, [])
+
+	const handleHeatmapRangeChange = useCallback((newRange: HeatmapRange) => {
+		setHeatmapRange(newRange)
+	}, [])
+
 	const handleApplyCustomRange = useCallback(() => {
 		if (!customFrom || !customTo) return
-		fetchStats("custom", groupBy, customFrom, customTo)
-		fetchSessions("custom", groupBy, customFrom, customTo)
-	}, [customFrom, customTo, groupBy, fetchStats, fetchSessions])
+		replaceSubscription(buildQuery("custom", groupBy, customFrom, customTo), HEATMAP_RANGE_DAYS[heatmapRange], 50)
+	}, [customFrom, customTo, groupBy, heatmapRange, buildQuery, replaceSubscription])
 
-	// Refetch when cacheRatio changes
-	useEffect(() => {
-		// Skip initial mount (already fetched in the mount effect)
-		if (snapshot !== null) {
-			fetchStats(preset, groupBy)
-			fetchSessions(preset, groupBy)
-		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [cacheRatio])
-
-	// ── Listen for responses ────────────────────────────────────────────────
+	// ── Listen for session detail + clear/export responses ──────────────────
 
 	useEffect(() => {
 		const handleMessage = (e: MessageEvent) => {
 			const message: ExtensionMessage = e.data
 
-			if (message.type === "getUsageStatsResponse") {
-				// Only accept the latest request's response
-				if (message.requestId !== latestRequestIdRef.current) return
-
-				if (message.usageStatsSnapshot) {
-					setSnapshot(message.usageStatsSnapshot)
-					setLoading(false)
-					setError(null)
-				} else {
-					setError(t("dashboard:states.error"))
-					setLoading(false)
-				}
-			}
-
-			if (message.type === "usageStatsChanged") {
-				// Data changed externally — refetch both stats and sessions with
-				// a 250ms debounce. The timer is stored in a ref (not returned as
-				// a cleanup) so React's synthetic event system does not mistake it
-				// for an effect cleanup and clear it on the next render cycle.
-				// Multiple `usageStatsChanged` events within the debounce window
-				// coalesce into a single refetch.
-				if (refreshTimerRef.current) {
-					clearTimeout(refreshTimerRef.current)
-				}
-				refreshTimerRef.current = setTimeout(() => {
-					fetchStats(preset, groupBy)
-					fetchSessions(preset, groupBy)
-					refreshTimerRef.current = null
-				}, 250)
-				// Do NOT return a cleanup here — the ref-based timer is cleared
-				// above on the next event and in the effect cleanup below.
-			}
-
-			if (message.type === "dashboardSessionsResponse") {
-				// Only accept the latest sessions request's response
-				if (message.requestId !== latestSessionsRequestIdRef.current) return
-
-				if (message.dashboardSessions) {
-					setSessions(message.dashboardSessions)
-					setSessionsLoading(false)
-					setSessionsError(null)
-				} else {
-					setSessionsError(message.error || t("dashboard:states.error"))
-					setSessionsLoading(false)
-				}
-			}
-
 			if (message.type === "dashboardSessionDetailResponse") {
-				// Only accept the latest session detail request's response
 				if (message.requestId !== latestSessionDetailRequestIdRef.current) return
 
-				// ExtensionMessage does not carry `taskId` for this response type,
-				// so we correlate via the currently expanded task. Because only
-				// one session is expanded at a time (accordion pattern) and the
-				// request is only sent when expanding, the expanded task is the
-				// one whose detail we are receiving.
 				const taskId = expandedTaskId
 				if (!taskId) return
 
-				// Clear loading state for this task
 				setSessionDetailLoading((prev) => {
 					if (!prev.has(taskId)) return prev
 					const next = new Set(prev)
@@ -410,11 +283,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					return next
 				})
 
-				// Capture the detail and error into locals so TypeScript can
-				// narrow the type before the deferred setState callbacks. Without
-				// this, `message.dashboardSessionDetail` would be
-				// `SessionDetail | null | undefined` inside the closure, which is
-				// not assignable to `Record<string, SessionDetail | null>`.
 				const detail = message.dashboardSessionDetail ?? null
 				const detailError = message.error || t("dashboard:states.error")
 
@@ -429,8 +297,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			}
 
 			if (message.type === "requestClearNonceResponse") {
-				// Host issues the nonce; store it and open the confirm dialog.
-				// If the host returned null/error, surface it without opening the dialog.
 				if (message.clearNonce) {
 					setClearNonce(message.clearNonce)
 					setShowClearDialog(true)
@@ -445,8 +311,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				if (message.clearUsageStatsResult?.success) {
 					setShowClearDialog(false)
 					setClearNonce(null)
-					fetchStats(preset, groupBy)
-					fetchSessions(preset, groupBy)
+					// Trigger a resync after clear
+					replaceSubscription(buildQuery(preset, groupBy), HEATMAP_RANGE_DAYS[heatmapRange], 50)
 				} else {
 					setError(message.clearUsageStatsResult?.error || t("dashboard:states.error"))
 					setShowClearDialog(false)
@@ -455,8 +321,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			}
 
 			if (message.type === "exportUsageStatsResponse") {
-				// Host handles the save dialog; nothing to do in webview
-				// unless there's an error
 				if (message.exportUsageStatsResult?.error) {
 					setError(message.exportUsageStatsResult.error)
 				}
@@ -464,16 +328,9 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		}
 
 		window.addEventListener("message", handleMessage)
-		return () => {
-			window.removeEventListener("message", handleMessage)
-			// Clear any pending debounce timer so a refetch does not fire
-			// after the component unmounts or the effect re-runs.
-			if (refreshTimerRef.current) {
-				clearTimeout(refreshTimerRef.current)
-				refreshTimerRef.current = null
-			}
-		}
-	}, [t, preset, groupBy, fetchStats, fetchSessions, fetchSessionDetail, expandedTaskId])
+		return () => window.removeEventListener("message", handleMessage)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [t, expandedTaskId, preset, groupBy, heatmapRange])
 
 	// ── Export ───────────────────────────────────────────────────────────────
 
@@ -494,8 +351,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	// ── Clear ────────────────────────────────────────────────────────────────
 
 	const handleClearRequest = useCallback(() => {
-		// Ask the host to issue a clear nonce. The host-generated nonce is
-		// returned via `requestClearNonceResponse` and stored in `clearNonce`.
 		const requestId = `dashboard-clear-nonce-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 		vscode.postMessage({
 			type: "requestClearNonce",
@@ -512,12 +367,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		})
 	}, [clearNonce])
 
-	// ── Derived data ─────────────────────────────────────────────────────────
+	// ── Derived data from stream state ──────────────────────────────────────
 
-	const buckets = useMemo(() => snapshot?.buckets ?? [], [snapshot])
-	const totals = useMemo(
+	const totals: StatsBucket = useMemo(
 		() =>
-			snapshot?.totals ?? {
+			streamState.totals ?? {
 				key: {},
 				events: 0,
 				completedCalls: 0,
@@ -532,10 +386,27 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				costUsd: 0,
 				unknownEventCount: 0,
 			},
-		[snapshot],
+		[streamState.totals],
+	)
+
+	const buckets = useMemo(
+		() => streamState.bucketOrder.map((key) => streamState.buckets[key]).filter(Boolean),
+		[streamState.buckets, streamState.bucketOrder],
+	)
+
+	const sessions: DashboardSessionSummary[] = useMemo(
+		() => streamState.sessionOrder.map((id) => streamState.sessions[id]).filter(Boolean),
+		[streamState.sessions, streamState.sessionOrder],
 	)
 
 	const hasData = totals.events > 0
+
+	// Loading is only true before the first snapshot arrives.
+	// After the first snapshot, we never show a loading spinner (architecture goal 1.1#1).
+	const isLoading = streamState.isLoading
+
+	// Background error is non-fatal; existing data stays visible.
+	const backgroundError = streamState.backgroundError
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
@@ -563,7 +434,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								onClick={handleRefresh}
 								data-testid="dashboard-refresh-button"
 								aria-label={t("dashboard:actions.refresh")}>
-								<RefreshCw className={loading ? "animate-spin" : ""} />
+								<RefreshCw className={isLoading ? "animate-spin" : ""} />
 							</Button>
 						</StandardTooltip>
 						<StandardTooltip content={t("dashboard:actions.exportCsv")}>
@@ -674,8 +545,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			</TabHeader>
 
 			<TabContent className="flex flex-col gap-4">
-				{/* Loading state */}
-				{loading && (
+				{/* Loading state — only before first snapshot */}
+				{isLoading && (
 					<div className="flex items-center justify-center py-8" data-testid="dashboard-loading">
 						<RefreshCw className="size-5 animate-spin text-vscode-descriptionForeground" />
 						<span className="ml-2 text-sm text-vscode-descriptionForeground">
@@ -684,8 +555,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					</div>
 				)}
 
-				{/* Error state */}
-				{!loading && error && (
+				{/* Error state — only when no data and a fatal error occurred */}
+				{!isLoading && error && !hasData && (
 					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-error">
 						<span className="text-sm text-vscode-errorForeground">{error}</span>
 						<Button variant="secondary" size="sm" onClick={handleRefresh}>
@@ -694,8 +565,29 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					</div>
 				)}
 
+				{/* Background error banner — non-fatal, data stays visible */}
+				{!isLoading && backgroundError && hasData && (
+					<div
+						className="flex items-center gap-2 rounded-md border border-vscode-inputValidation-warningBorder bg-vscode-inputValidation-warningBackground px-3 py-2 text-xs text-vscode-foreground"
+						data-testid="dashboard-background-error">
+						<span>{backgroundError.message}</span>
+						<Button variant="ghost" size="sm" onClick={handleRefresh}>
+							{t("dashboard:actions.refresh")}
+						</Button>
+					</div>
+				)}
+
+				{/* Clear/export error — non-fatal, data stays visible */}
+				{!isLoading && error && hasData && (
+					<div
+						className="flex items-center gap-2 rounded-md border border-vscode-inputValidation-warningBorder bg-vscode-inputValidation-warningBackground px-3 py-2 text-xs text-vscode-foreground"
+						data-testid="dashboard-error-banner">
+						<span>{error}</span>
+					</div>
+				)}
+
 				{/* Empty state */}
-				{!loading && !error && !hasData && (
+				{!isLoading && !error && !hasData && (
 					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-empty">
 						<span className="text-sm text-vscode-descriptionForeground">{t("dashboard:states.empty")}</span>
 						<span className="text-xs text-vscode-descriptionForeground">
@@ -705,13 +597,18 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				)}
 
 				{/* Data display */}
-				{!loading && !error && hasData && (
+				{!isLoading && !error && hasData && (
 					<>
 						{/* Summary cards */}
 						<DashboardSummary totals={totals} />
 
-						{/* Heatmap */}
-						<UsageHeatmap />
+						{/* Heatmap — controlled by stream */}
+						<UsageHeatmap
+							values={streamState.heatmapValues}
+							rangeDays={streamState.heatmapRangeDays ?? HEATMAP_RANGE_DAYS[heatmapRange]}
+							selectedRange={heatmapRange}
+							onRangeChange={handleHeatmapRangeChange}
+						/>
 
 						{/* Breakdown table */}
 						<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">
@@ -809,60 +706,45 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 							</div>
 						</div>
 
-						{/* Sessions list (Commit 3) */}
-						{sessionsLoading ? (
-							<div
-								className="flex items-center justify-center py-4"
-								data-testid="dashboard-sessions-loading">
-								<RefreshCw className="size-4 animate-spin text-vscode-descriptionForeground" />
-								<span className="ml-2 text-xs text-vscode-descriptionForeground">
-									{t("dashboard:states.loading")}
-								</span>
-							</div>
-						) : sessionsError ? (
-							<div
-								className="flex items-center justify-center py-4 text-xs text-vscode-errorForeground"
-								data-testid="dashboard-sessions-error">
-								{sessionsError}
-							</div>
-						) : (
-							<SessionList
-								sessions={sessions}
-								expandedTaskId={expandedTaskId}
-								sessionDetails={sessionDetails}
-								sessionDetailErrors={sessionDetailErrors}
-								sessionDetailLoading={sessionDetailLoading}
-								onToggleSession={handleToggleSession}
-							/>
-						)}
+						{/* Sessions list — virtualized, stream-controlled */}
+						<SessionList
+							sessions={sessions}
+							expandedTaskId={expandedTaskId}
+							sessionDetails={sessionDetails}
+							sessionDetailErrors={sessionDetailErrors}
+							sessionDetailLoading={sessionDetailLoading}
+							onToggleSession={handleToggleSession}
+							onLoadMore={() => requestSessionPage()}
+							totalEstimate={streamState.sessionTotalEstimate}
+						/>
 
 						{/* Data coverage */}
-						{snapshot?.coverage && (
+						{streamState.coverage && (
 							<div
 								className="flex flex-col gap-1 rounded-md border border-vscode-panel-border p-3 text-xs text-vscode-descriptionForeground"
 								data-testid="dashboard-coverage">
 								<span className="font-medium text-vscode-foreground">
 									{t("dashboard:coverage.title")}
 								</span>
-								{snapshot.coverage.firstEventAt && (
+								{streamState.coverage.firstEventAt && (
 									<span>
 										{t("dashboard:coverage.liveFrom")}:{" "}
-										{new Date(snapshot.coverage.firstEventAt).toLocaleString()}
+										{new Date(streamState.coverage.firstEventAt).toLocaleString()}
 									</span>
 								)}
-								{snapshot.coverage.lastEventAt && (
+								{streamState.coverage.lastEventAt && (
 									<span>
 										{t("dashboard:coverage.lastUpdated")}:{" "}
-										{new Date(snapshot.coverage.lastEventAt).toLocaleString()}
+										{new Date(streamState.coverage.lastEventAt).toLocaleString()}
 									</span>
 								)}
-								{snapshot.coverage.backfilledEventCount > 0 && (
+								{streamState.coverage.backfilledEventCount > 0 && (
 									<span>
 										{t("dashboard:coverage.backfilledEvents")}:{" "}
-										{snapshot.coverage.backfilledEventCount}
+										{streamState.coverage.backfilledEventCount}
 									</span>
 								)}
-								{snapshot.coverage.recordingPaused && (
+								{streamState.coverage.recordingPaused && (
 									<span className="text-vscode-errorForeground">
 										{t("dashboard:coverage.paused")}
 									</span>

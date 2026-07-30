@@ -1,4 +1,4 @@
-import * as vscode from "vscode"
+﻿import * as vscode from "vscode"
 import * as path from "path"
 import * as os from "os"
 
@@ -10,12 +10,17 @@ import type {
 	SessionDetail,
 	APICallRecord,
 	UsageEventV1,
+	ExtensionMessage,
 } from "@roo-code/types"
-import { StatsQuery as StatsQuerySchema } from "@roo-code/types"
+import {
+	StatsQuery as StatsQuerySchema,
+	DashboardStatsSubscription as DashboardStatsSubscriptionSchema,
+} from "@roo-code/types"
 
 import type { ClineProvider } from "./ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../services/stats"
 import { StatsServiceError } from "../../services/stats"
+import type { UsageStatsStreamCoordinator, StatsStreamSink } from "../../services/stats"
 import { getEffectiveCost } from "../../services/stats/costRecalculation"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { readTaskMessages } from "../task-persistence/taskMessages"
@@ -39,6 +44,39 @@ export type UsageStatsHandlerErrorCode =
 	| "STATS_HANDLER/sessionDetail/001" // invalid payload (missing taskId)
 	| "STATS_HANDLER/sessionDetail/002" // service unavailable
 	| "STATS_HANDLER/sessionDetail/003" // service error
+	| "STATS_HANDLER/stream/001" // invalid subscription payload
+	| "STATS_HANDLER/stream/002" // service/coordinator unavailable
+	| "STATS_HANDLER/stream/003" // coordinator error
+	| "STATS_HANDLER/stream/004" // invalid page request (missing cursor or limit)
+	| "STATS_HANDLER/stream/005" // page query error
+
+// ── Stream Sink Adapter ──────────────────────────────────────────────────────
+
+/**
+ * Adapter that bridges the coordinator's narrow {@link StatsStreamSink}
+ * interface to the provider's `postMessageToWebview` and webview visibility.
+ *
+ * The coordinator never depends on ClineProvider directly; this adapter is
+ * the only glue. One instance is created per provider and reused for the
+ * lifetime of the subscription.
+ */
+export class ProviderStreamSink implements StatsStreamSink {
+	constructor(private readonly provider: ClineProvider) {}
+
+	postMessage(message: ExtensionMessage): void {
+		this.provider.postMessageToWebview(message).catch(() => {
+			// Swallow — the coordinator handles delivery failure by marking
+			// the subscriber for snapshot fallback.
+		})
+	}
+
+	isVisible(): boolean {
+		// Access the private `view` property via cast. The coordinator's
+		// StatsStreamSink interface requires this; the alternative would be
+		// adding a public getter to ClineProvider, which is a larger scope change.
+		return (this.provider as unknown as { view?: { visible?: boolean } }).view?.visible === true
+	}
+}
 
 // ── Handlers ────────────────────────────────────────────────────────────────
 
@@ -858,6 +896,372 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 			requestId,
 			dashboardSessionDetail: null,
 			error: `[STATS_HANDLER/sessionDetail/003] Failed to query dashboard session detail: ${errorMessage}`,
+		})
+	}
+}
+
+// ── Dashboard Stats Stream Handlers ──────────────────────────────────────────
+
+/**
+ * Lazily creates (or retrieves) the {@link ProviderStreamSink} for a provider.
+ * The sink is stored on the provider as a non-enumerable property so it
+ * persists across messages but is cleaned up when the provider is disposed.
+ *
+ * The coordinator is obtained from the UsageStatsService. If the service or
+ * coordinator is unavailable, an error response is sent.
+ */
+function getCoordinatorAndSink(
+	provider: ClineProvider,
+	requestId: string | undefined,
+): { coordinator: UsageStatsStreamCoordinator; sink: ProviderStreamSink } | null {
+	const service = provider.getUsageStatsService()
+
+	if (!service) {
+		if (requestId) {
+			provider
+				.postMessageToWebview({
+					type: "dashboardStatsStreamError",
+					dashboardStatsStreamError: {
+						requestId,
+						code: "STATS_HANDLER/stream/002",
+						message: "[STATS_HANDLER/stream/002] Usage stats service is unavailable",
+					},
+				})
+				.catch(() => {})
+		}
+		return null
+	}
+
+	const coordinator = service.getCoordinator()
+
+	if (!coordinator) {
+		if (requestId) {
+			provider
+				.postMessageToWebview({
+					type: "dashboardStatsStreamError",
+					dashboardStatsStreamError: {
+						requestId,
+						code: "STATS_HANDLER/stream/002",
+						message: "[STATS_HANDLER/stream/002] Stream coordinator is unavailable",
+					},
+				})
+				.catch(() => {})
+		}
+		return null
+	}
+
+	// Reuse a single sink per provider instance.
+	let sink = (provider as unknown as { _streamSink?: ProviderStreamSink })._streamSink
+
+	if (!sink) {
+		sink = new ProviderStreamSink(provider)
+		;(provider as unknown as { _streamSink?: ProviderStreamSink })._streamSink = sink
+	}
+
+	return { coordinator, sink }
+}
+
+/**
+ * Handles the `subscribeDashboardStats` message.
+ *
+ * Validates the subscription payload, obtains the coordinator, and subscribes
+ * the provider's sink. The coordinator sends the initial snapshot immediately.
+ */
+export function handleSubscribeDashboardStats(provider: ClineProvider, message: WebviewMessage): void {
+	const requestId = message.requestId
+
+	const result = getCoordinatorAndSink(provider, requestId)
+
+	if (!result) return
+
+	const { coordinator, sink } = result
+
+	// Validate subscription payload
+	const subResult = DashboardStatsSubscriptionSchema.safeParse(message.dashboardStatsSubscription)
+
+	if (!subResult.success) {
+		const errorMsg = subResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+
+		provider
+			.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/001",
+					message: `[STATS_HANDLER/stream/001] Invalid subscription payload: ${errorMsg}`,
+				},
+			})
+			.catch(() => {})
+		return
+	}
+
+	try {
+		coordinator.subscribe(sink, subResult.data)
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/stream/003] Error subscribing to dashboard stats: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		provider
+			.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/003",
+					message: `[STATS_HANDLER/stream/003] Failed to subscribe: ${errorMessage}`,
+				},
+			})
+			.catch(() => {})
+	}
+}
+
+/**
+ * Handles the `unsubscribeDashboardStats` message.
+ * Releases the provider's subscription from the coordinator.
+ */
+export function handleUnsubscribeDashboardStats(provider: ClineProvider, _message: WebviewMessage): void {
+	const result = getCoordinatorAndSink(provider, undefined)
+
+	if (!result) return
+
+	const { coordinator, sink } = result
+
+	coordinator.unsubscribe(sink)
+}
+
+/**
+ * Handles the `replaceDashboardStatsSubscription` message.
+ *
+ * Validates the new subscription payload and replaces the existing subscription.
+ * The coordinator sends a fresh snapshot for the new query.
+ */
+export function handleReplaceDashboardStatsSubscription(provider: ClineProvider, message: WebviewMessage): void {
+	const requestId = message.requestId
+
+	const result = getCoordinatorAndSink(provider, requestId)
+
+	if (!result) return
+
+	const { coordinator, sink } = result
+
+	// Validate subscription payload
+	const subResult = DashboardStatsSubscriptionSchema.safeParse(message.dashboardStatsSubscription)
+
+	if (!subResult.success) {
+		const errorMsg = subResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+
+		provider
+			.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/001",
+					message: `[STATS_HANDLER/stream/001] Invalid subscription payload: ${errorMsg}`,
+				},
+			})
+			.catch(() => {})
+		return
+	}
+
+	try {
+		coordinator.replaceSubscription(sink, subResult.data)
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/stream/003] Error replacing dashboard stats subscription: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		provider
+			.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/003",
+					message: `[STATS_HANDLER/stream/003] Failed to replace subscription: ${errorMessage}`,
+				},
+			})
+			.catch(() => {})
+	}
+}
+
+/**
+ * Handles the `pauseDashboardStats` message.
+ * Pauses delta delivery for the provider's subscription, retaining the cursor.
+ */
+export function handlePauseDashboardStats(provider: ClineProvider, _message: WebviewMessage): void {
+	const result = getCoordinatorAndSink(provider, undefined)
+
+	if (!result) return
+
+	const { coordinator, sink } = result
+
+	coordinator.pause(sink)
+}
+
+/**
+ * Handles the `resumeDashboardStats` message.
+ *
+ * Resumes delta delivery from the last acknowledged sequence. If the gap is
+ * too large or the generation changed, the coordinator sends a full snapshot.
+ *
+ * The `value` field carries the last sequence number acknowledged by the webview.
+ */
+export function handleResumeDashboardStats(provider: ClineProvider, message: WebviewMessage): void {
+	const result = getCoordinatorAndSink(provider, undefined)
+
+	if (!result) return
+
+	const { coordinator, sink } = result
+
+	// The last sequence is carried in `message.value` (a numeric field).
+	const lastSequence = typeof message.value === "number" ? message.value : 0
+
+	coordinator.resume(sink, lastSequence)
+}
+
+/**
+ * Handles the `resyncDashboardStats` message.
+ *
+ * Forces a full snapshot replacement for the provider's subscription.
+ * This is used when the webview detects inconsistency or after an error recovery.
+ * Internally, this calls `replaceSubscription` with the same subscription
+ * descriptor to trigger a fresh snapshot.
+ */
+export function handleResyncDashboardStats(provider: ClineProvider, message: WebviewMessage): void {
+	const requestId = message.requestId
+
+	const result = getCoordinatorAndSink(provider, requestId)
+
+	if (!result) return
+
+	const { coordinator, sink } = result
+
+	// Validate subscription payload (required for resync to know the query)
+	const subResult = DashboardStatsSubscriptionSchema.safeParse(message.dashboardStatsSubscription)
+
+	if (!subResult.success) {
+		const errorMsg = subResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")
+
+		provider
+			.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/001",
+					message: `[STATS_HANDLER/stream/001] Invalid subscription payload for resync: ${errorMsg}`,
+				},
+			})
+			.catch(() => {})
+		return
+	}
+
+	try {
+		// Replace subscription triggers a fresh snapshot for the same query.
+		coordinator.replaceSubscription(sink, subResult.data)
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/stream/003] Error resyncing dashboard stats: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		provider
+			.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/003",
+					message: `[STATS_HANDLER/stream/003] Failed to resync: ${errorMessage}`,
+				},
+			})
+			.catch(() => {})
+	}
+}
+
+/**
+ * Handles the `getDashboardSessionPage` message.
+ *
+ * Fetches the next page of sessions from the database using the opaque cursor
+ * from the previous page. Posts the result back as `dashboardSessionPageResponse`.
+ *
+ * Security: only session summaries (rootTaskId, title, totals, model, provider,
+ * lastActivity, eventCount) are sent. No prompt bodies, response bodies, or
+ * API keys are transmitted.
+ */
+export async function handleGetDashboardSessionPage(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const requestId = message.requestId
+
+	try {
+		const service = provider.getUsageStatsService()
+
+		if (!service) {
+			await provider.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/002",
+					message: "[STATS_HANDLER/stream/002] Usage stats service is unavailable",
+				},
+			})
+			return
+		}
+
+		const database = service.getDatabase()
+
+		if (!database) {
+			await provider.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/002",
+					message: "[STATS_HANDLER/stream/002] Database is unavailable",
+				},
+			})
+			return
+		}
+
+		// Validate cursor and limit
+		const cursor = message.dashboardSessionCursor
+		const limit = message.dashboardSessionLimit
+
+		if (typeof limit !== "number" || limit < 1 || limit > 100) {
+			await provider.postMessageToWebview({
+				type: "dashboardStatsStreamError",
+				dashboardStatsStreamError: {
+					requestId: requestId ?? "",
+					code: "STATS_HANDLER/stream/004",
+					message: "[STATS_HANDLER/stream/004] Invalid or missing page limit (must be 1-100)",
+				},
+			})
+			return
+		}
+
+		// Import computeSessionPage lazily to avoid circular dependency at module load.
+		const { computeSessionPage } = await import("../../services/stats/UsageStatsProjection")
+
+		const page = computeSessionPage(database, requestId ?? "", cursor, limit)
+
+		await provider.postMessageToWebview({
+			type: "dashboardSessionPageResponse",
+			dashboardSessionPage: page,
+		})
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/stream/005] Error fetching dashboard session page: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		await provider.postMessageToWebview({
+			type: "dashboardStatsStreamError",
+			dashboardStatsStreamError: {
+				requestId: requestId ?? "",
+				code: "STATS_HANDLER/stream/005",
+				message: `[STATS_HANDLER/stream/005] Failed to fetch session page: ${errorMessage}`,
+			},
 		})
 	}
 }

@@ -1,4 +1,4 @@
-import { safeWriteJson } from "../../utils/safeWriteJson"
+﻿import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
@@ -50,14 +50,6 @@ import {
 	handleOpenRuleFile,
 	handleOpenRulesDirectory,
 } from "./rulesMessageHandler"
-import {
-	handleGetUsageStats,
-	handleClearUsageStats,
-	handleExportUsageStats,
-	handleRequestClearNonce,
-	handleGetDashboardSessions,
-	handleGetDashboardSessionDetail,
-} from "./usageStatsMessageHandler"
 import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import { type RouterName, toRouterName } from "../../shared/api"
@@ -109,6 +101,22 @@ import {
 	handleCreateWorktreeInclude,
 	handleCheckoutBranch,
 } from "./worktree"
+import { handleTaskOrganizationMessage } from "./taskOrganizationMessageHandler"
+import {
+	handleGetUsageStats,
+	handleClearUsageStats,
+	handleExportUsageStats,
+	handleRequestClearNonce,
+	handleGetDashboardSessions,
+	handleGetDashboardSessionDetail,
+	handleSubscribeDashboardStats,
+	handleUnsubscribeDashboardStats,
+	handleReplaceDashboardStatsSubscription,
+	handlePauseDashboardStats,
+	handleResumeDashboardStats,
+	handleResyncDashboardStats,
+	handleGetDashboardSessionPage,
+} from "./usageStatsMessageHandler"
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -854,6 +862,50 @@ export const webviewMessageHandler = async (
 			}
 
 			vscode.window.showErrorMessage(t("common:errors.share_not_enabled"))
+			break
+		case "taskOrganizationMutation":
+			await handleTaskOrganizationMessage(provider, message)
+			break
+		// ── Usage Stats Handlers ────────────────────────────────────────────
+		case "getUsageStats":
+			await handleGetUsageStats(provider, message)
+			break
+		case "clearUsageStats":
+			await handleClearUsageStats(provider, message)
+			break
+		case "exportUsageStats":
+			await handleExportUsageStats(provider, message)
+			break
+		case "requestClearNonce":
+			await handleRequestClearNonce(provider, message)
+			break
+		case "getDashboardSessions":
+			await handleGetDashboardSessions(provider, message)
+			break
+		case "getDashboardSessionDetail":
+			await handleGetDashboardSessionDetail(provider, message)
+			break
+		// ── Dashboard Stats Stream Handlers ────────────────────────────────
+		case "subscribeDashboardStats":
+			handleSubscribeDashboardStats(provider, message)
+			break
+		case "unsubscribeDashboardStats":
+			handleUnsubscribeDashboardStats(provider, message)
+			break
+		case "replaceDashboardStatsSubscription":
+			handleReplaceDashboardStatsSubscription(provider, message)
+			break
+		case "pauseDashboardStats":
+			handlePauseDashboardStats(provider, message)
+			break
+		case "resumeDashboardStats":
+			handleResumeDashboardStats(provider, message)
+			break
+		case "resyncDashboardStats":
+			handleResyncDashboardStats(provider, message)
+			break
+		case "getDashboardSessionPage":
+			await handleGetDashboardSessionPage(provider, message)
 			break
 		case "showTaskWithId":
 			await provider.showTaskWithId(message.text!)
@@ -4067,36 +4119,6 @@ export const webviewMessageHandler = async (
 				provider.log(`Error opening folder picker: ${errorMessage}`)
 			}
 
-			break
-		}
-
-		case "getUsageStats": {
-			await handleGetUsageStats(provider, message)
-			break
-		}
-
-		case "clearUsageStats": {
-			await handleClearUsageStats(provider, message)
-			break
-		}
-
-		case "requestClearNonce": {
-			await handleRequestClearNonce(provider, message)
-			break
-		}
-
-		case "exportUsageStats": {
-			await handleExportUsageStats(provider, message)
-			break
-		}
-
-		case "getDashboardSessions": {
-			await handleGetDashboardSessions(provider, message)
-			break
-		}
-
-		case "getDashboardSessionDetail": {
-			await handleGetDashboardSessionDetail(provider, message)
 			break
 		}
 

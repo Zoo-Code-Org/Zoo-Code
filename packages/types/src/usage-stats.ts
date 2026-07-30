@@ -1,4 +1,4 @@
-import { z } from "zod"
+﻿import { z } from "zod"
 
 // ── Enums ──────────────────────────────────────────────────────────────────
 
@@ -42,6 +42,13 @@ export const UsageEventV1 = z.object({
 	attempt: z.number(),
 	taskId: z.string(),
 	parentTaskId: z.string().optional(),
+	/**
+	 * Stable root-session identity for dashboard streaming.
+	 * Resolved from the task hierarchy by the recorder; migration resolves
+	 * legacy parent chains with the existing cycle guard. Absent on events
+	 * recorded before this field was introduced (backward compatible).
+	 */
+	rootTaskId: z.string().optional(),
 	provider: z.string(),
 	model: z.string(),
 	mode: z.string(),
@@ -187,3 +194,206 @@ export interface APICallRecord {
 	status: "completed" | "failed" | "cancelled"
 	model: string
 }
+
+// ── Dashboard Streaming Protocol ────────────────────────────────────────────
+//
+// The types below define the versioned dashboard subscription protocol.
+// Runtime validation (Zod) is required for every webview-originated query.
+// See docs/260729_0001_session_branch-recovery/dashboard-streaming-architecture.md
+// for the full specification.
+
+/**
+ * Cursor-paged session page request.
+ * The cursor is host-issued, query-bound, and invalid after a generation or
+ * query change.
+ */
+export const DashboardSessionPageRequest = z.object({
+	/** Page size, 1–100. Default 50. */
+	limit: z.number().int().min(1).max(100).default(50),
+	/** Opaque cursor returned by the host. Absent for the first page. */
+	cursor: z.string().optional(),
+})
+export type DashboardSessionPageRequest = z.infer<typeof DashboardSessionPageRequest>
+
+/**
+ * Subscribe request for the dashboard stats stream.
+ * Contains the main stats query, heatmap range, and session page request.
+ */
+export const DashboardStatsSubscription = z.object({
+	/** Correlation ID for the subscription request. */
+	requestId: z.string(),
+	/** Main dashboard time range query. */
+	range: StatsQuery,
+	/** Maximum sessions per page (1–100). */
+	sessionPageSize: z.number().int().min(1).max(100).default(50),
+	/** Number of days for the heatmap (30, 60, 120, 360). */
+	heatmapRangeDays: z.number().int().min(1).max(365),
+})
+export type DashboardStatsSubscription = z.infer<typeof DashboardStatsSubscription>
+
+/**
+ * A single session row in the dashboard sessions list.
+ * Derived from aggregated usage events sharing the same root task.
+ *
+ * Security: does not include prompt bodies, response bodies, API keys, or
+ * workspace paths. The `title` is derived from the first user message text
+ * (truncated); if unavailable, falls back to the rootTaskId.
+ */
+export const DashboardSessionSummary = z.object({
+	rootTaskId: z.string(),
+	title: z.string(),
+	totalCost: z.number(),
+	totalTokens: z.number(),
+	model: z.string(),
+	provider: z.string(),
+	/** Last activity timestamp (epoch ms). */
+	lastActivity: z.number(),
+	/** Number of API calls in this session. */
+	eventCount: z.number(),
+})
+export type DashboardSessionSummary = z.infer<typeof DashboardSessionSummary>
+
+/**
+ * Cursor-paged session list response.
+ */
+export const DashboardSessionPage = z.object({
+	/** Correlation ID matching the subscription request. */
+	requestId: z.string(),
+	/** Session summaries for this page (at most `sessionPageSize` items). */
+	sessions: z.array(DashboardSessionSummary),
+	/** Opaque cursor for the next page. Absent if this is the last page. */
+	cursor: z.string().optional(),
+	/** Estimated total session count (may be approximate). */
+	totalEstimate: z.number().int(),
+})
+export type DashboardSessionPage = z.infer<typeof DashboardSessionPage>
+
+/**
+ * Daily heatmap values snapshot.
+ */
+export const HeatmapSnapshot = z.object({
+	/** Number of days the values array covers. */
+	rangeDays: z.number().int().min(1),
+	/** Daily cost values, one per day, oldest first. */
+	values: z.array(z.number()),
+})
+export type HeatmapSnapshot = z.infer<typeof HeatmapSnapshot>
+
+/**
+ * Full state snapshot sent on initial subscription or recovery.
+ * Authoritative for its query and epoch. Applied atomically by the reducer.
+ */
+export const DashboardStatsSnapshot = z.object({
+	/** Correlation ID matching the subscription request. */
+	requestId: z.string(),
+	/** Store generation at the time of snapshot. */
+	generation: z.number().int(),
+	/** Monotonic sequence of the last committed event included. */
+	sequence: z.number().int(),
+	/** Full stats snapshot for the main dashboard. */
+	stats: StatsSnapshot,
+	/** First page of sessions. */
+	sessions: DashboardSessionPage,
+	/** Opaque cursor for fetching the next session page. */
+	cursor: z.string().optional(),
+	/** Heatmap daily values. */
+	heatmap: HeatmapSnapshot,
+})
+export type DashboardStatsSnapshot = z.infer<typeof DashboardStatsSnapshot>
+
+/**
+ * Signed delta for a single stats bucket.
+ * Key fields are identities; numeric fields are signed deltas.
+ * Signed values support correction/reset migrations.
+ */
+export const StatsBucketDelta = z.object({
+	/** Stable serialized bucket key (e.g. JSON of group dimensions). */
+	key: z.record(z.string()),
+	/** Signed delta for events count. */
+	events: z.number(),
+	/** Signed delta for completed calls. */
+	completedCalls: z.number(),
+	/** Signed delta for failed calls. */
+	failedCalls: z.number(),
+	/** Signed delta for cancelled calls. */
+	cancelledCalls: z.number(),
+	/** Signed delta for input tokens. */
+	inputTokens: z.number(),
+	/** Signed delta for output tokens. */
+	outputTokens: z.number(),
+	/** Signed delta for cache read tokens. */
+	cacheReadTokens: z.number(),
+	/** Signed delta for cache write tokens. */
+	cacheWriteTokens: z.number(),
+	/** Signed delta for reasoning tokens. */
+	reasoningTokens: z.number(),
+	/** Signed delta for total tokens. */
+	totalTokens: z.number(),
+	/** Signed delta for cost in USD. */
+	costUsd: z.number(),
+	/** Signed delta for unknown event count. */
+	unknownEventCount: z.number(),
+})
+export type StatsBucketDelta = z.infer<typeof StatsBucketDelta>
+
+/**
+ * Session upsert: a complete current summary for a root session.
+ * Existing rows update in place. A newly created session may be inserted at
+ * the top; ordinary numeric updates do not reorder the visible page.
+ */
+export const DashboardSessionUpsert = z.object({
+	rootTaskId: z.string(),
+	title: z.string(),
+	totalCost: z.number(),
+	totalTokens: z.number(),
+	model: z.string(),
+	provider: z.string(),
+	lastActivity: z.number(),
+	eventCount: z.number(),
+})
+export type DashboardSessionUpsert = z.infer<typeof DashboardSessionUpsert>
+
+/**
+ * Incremental delta message sent after the initial snapshot.
+ * The reducer accepts it only when generation matches and afterSequence
+ * equals the local through-sequence.
+ */
+export const DashboardStatsDelta = z.object({
+	/** Correlation ID matching the subscription request. */
+	requestId: z.string(),
+	/** Store generation at the time of delta. */
+	generation: z.number().int(),
+	/** Monotonic sequence of the last committed event included. */
+	sequence: z.number().int(),
+	/** Signed delta for totals. */
+	totalDelta: StatsBucketDelta,
+	/** Signed deltas for breakdown buckets. */
+	breakdownDelta: z.array(StatsBucketDelta),
+	/** Signed delta for a single heatmap day. */
+	heatmapDayDelta: z
+		.object({
+			/** Day index within the heatmap range (0-based). */
+			dayIndex: z.number().int().min(0),
+			/** Signed delta for that day's cost. */
+			delta: z.number(),
+		})
+		.optional(),
+	/** Session upserts for changed sessions. */
+	sessionUpsert: z.array(DashboardSessionUpsert),
+})
+export type DashboardStatsDelta = z.infer<typeof DashboardStatsDelta>
+
+/**
+ * Typed error message for the dashboard stats stream.
+ * Existing data stays visible for recoverable errors.
+ * No stack trace crosses the boundary.
+ */
+export const DashboardStatsError = z.object({
+	/** Correlation ID matching the subscription request. */
+	requestId: z.string(),
+	/** Stable error code (e.g. "STATS_STREAM/subscribe/001"). */
+	code: z.string(),
+	/** Safe, user-facing error message (no stack traces). */
+	message: z.string(),
+})
+export type DashboardStatsError = z.infer<typeof DashboardStatsError>

@@ -1,8 +1,9 @@
-import React, { memo, useCallback } from "react"
+﻿import React, { memo, useCallback, useRef } from "react"
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import i18next from "i18next"
 
-import type { SessionSummary, SessionDetail as SessionDetailType } from "@roo-code/types"
+import type { DashboardSessionSummary, SessionDetail as SessionDetailType } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { formatCompact, formatCost } from "@/utils/formatNumber"
@@ -38,7 +39,7 @@ function formatRelativeTime(timestamp: number): string {
 	return new Date(timestamp).toLocaleDateString()
 }
 
-// ── Session row ──────────────────────────────────────────────────────────────
+// ── Session detail loading / error states ───────────────────────────────────
 
 /**
  * The loading state for a session row whose detail is being fetched.
@@ -76,8 +77,10 @@ const SessionDetailError = memo(({ error }: { error: string }) => {
 
 SessionDetailError.displayName = "SessionDetailError"
 
+// ── Session row ──────────────────────────────────────────────────────────────
+
 interface SessionRowProps {
-	session: SessionSummary
+	session: DashboardSessionSummary
 	/** Whether this row is currently expanded. */
 	isExpanded: boolean
 	/** The loaded detail for this session, or undefined if not loaded/failed. */
@@ -94,17 +97,17 @@ const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoadi
 	const { t } = useAppTranslation()
 
 	const handleClick = useCallback(() => {
-		onToggle(session.taskId)
-	}, [onToggle, session.taskId])
+		onToggle(session.rootTaskId)
+	}, [onToggle, session.rootTaskId])
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault()
-				onToggle(session.taskId)
+				onToggle(session.rootTaskId)
 			}
 		},
-		[onToggle, session.taskId],
+		[onToggle, session.rootTaskId],
 	)
 
 	return (
@@ -128,9 +131,9 @@ const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoadi
 							{session.title}
 						</span>
 						<span className="text-[10px] text-vscode-descriptionForeground">
-							{formatRelativeTime(session.timestamp)}
+							{formatRelativeTime(session.lastActivity)}
 							{" \u00b7 "}
-							{session.models && session.models.length > 0 ? session.models.join(", ") : session.model}
+							{session.model}
 							{" \u00b7 "}
 							{session.provider}
 						</span>
@@ -143,7 +146,7 @@ const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoadi
 					<span className="text-[10px] text-vscode-descriptionForeground tabular-nums">
 						{formatCost(session.totalCost)}
 						{" \u00b7 "}
-						{t("dashboard:sessions.callCount", { count: session.callCount })}
+						{t("dashboard:sessions.callCount", { count: session.eventCount })}
 					</span>
 				</div>
 			</div>
@@ -167,17 +170,22 @@ SessionRow.displayName = "SessionRow"
 // ── SessionList ─────────────────────────────────────────────────────────────
 
 interface SessionListProps {
-	sessions: SessionSummary[]
-	/** The taskId of the currently expanded session, or undefined if none. */
+	/** Ordered list of session summaries from the stream. */
+	sessions: DashboardSessionSummary[]
+	/** The rootTaskId of the currently expanded session, or undefined if none. */
 	expandedTaskId?: string
-	/** Map of taskId -> loaded session detail (only populated for expanded rows). */
+	/** Map of rootTaskId -> loaded session detail (only populated for expanded rows). */
 	sessionDetails: Record<string, SessionDetailType | null>
-	/** Map of taskId -> detail fetch error message (only populated for failed fetches). */
+	/** Map of rootTaskId -> detail fetch error message (only populated for failed fetches). */
 	sessionDetailErrors: Record<string, string | null>
-	/** Set of taskIds whose detail is currently being fetched. */
+	/** Set of rootTaskIds whose detail is currently being fetched. */
 	sessionDetailLoading: Set<string>
 	/** Called when the user clicks a session row to toggle its expansion. */
 	onToggleSession: (taskId: string) => void
+	/** Called when the user scrolls near the bottom (for cursor paging). Optional. */
+	onLoadMore?: () => void
+	/** Estimated total session count for display. Optional. */
+	totalEstimate?: number
 }
 
 const SessionList = memo(
@@ -188,13 +196,21 @@ const SessionList = memo(
 		sessionDetailErrors,
 		sessionDetailLoading,
 		onToggleSession,
+		onLoadMore,
+		totalEstimate,
 	}: SessionListProps) => {
 		const { t } = useAppTranslation()
+		const virtuosoRef = useRef<VirtuosoHandle>(null)
 
 		return (
 			<div className="flex flex-col gap-2" data-testid="dashboard-sessions">
 				<div className="flex items-center justify-between">
-					<h4 className="m-0 text-sm font-medium text-vscode-foreground">{t("dashboard:sessions.title")}</h4>
+					<h4 className="m-0 text-sm font-medium text-vscode-foreground">
+						{t("dashboard:sessions.title")}
+						{totalEstimate !== undefined && totalEstimate > 0 && (
+							<span className="ml-1 text-xs text-vscode-descriptionForeground">({totalEstimate})</span>
+						)}
+					</h4>
 				</div>
 
 				{sessions.length === 0 ? (
@@ -205,22 +221,32 @@ const SessionList = memo(
 					</div>
 				) : (
 					<div className="overflow-hidden rounded-md border border-vscode-panel-border">
-						{sessions.map((session) => {
-							const isExpanded = expandedTaskId === session.taskId
-							return (
-								<SessionRow
-									key={session.taskId}
-									session={session}
-									isExpanded={isExpanded}
-									detail={isExpanded ? sessionDetails[session.taskId] : undefined}
-									detailError={
-										isExpanded ? (sessionDetailErrors[session.taskId] ?? undefined) : undefined
-									}
-									detailLoading={isExpanded && sessionDetailLoading.has(session.taskId)}
-									onToggle={onToggleSession}
-								/>
-							)
-						})}
+						<Virtuoso
+							ref={virtuosoRef}
+							data={sessions}
+							style={{ maxHeight: 400 }}
+							itemContent={(_index, session) => {
+								const isExpanded = expandedTaskId === session.rootTaskId
+								return (
+									<SessionRow
+										key={session.rootTaskId}
+										session={session}
+										isExpanded={isExpanded}
+										detail={isExpanded ? sessionDetails[session.rootTaskId] : undefined}
+										detailError={
+											isExpanded
+												? (sessionDetailErrors[session.rootTaskId] ?? undefined)
+												: undefined
+										}
+										detailLoading={isExpanded && sessionDetailLoading.has(session.rootTaskId)}
+										onToggle={onToggleSession}
+									/>
+								)
+							}}
+							endReached={() => {
+								onLoadMore?.()
+							}}
+						/>
 					</div>
 				)}
 			</div>

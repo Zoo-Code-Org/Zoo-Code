@@ -1,4 +1,4 @@
-import type { WebviewMessage, StatsQuery, StatsSnapshot, UsageEventV1 } from "@roo-code/types"
+﻿import type { WebviewMessage, StatsQuery, StatsSnapshot, UsageEventV1 } from "@roo-code/types"
 import type { ClineProvider } from "../ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../../services/stats"
 import { StatsServiceError } from "../../../services/stats"
@@ -28,6 +28,14 @@ vi.mock("../../../services/stats/costRecalculation", () => ({
 	getEffectiveCost: vi.fn((event: UsageEventV1) => event.usage.costUsd?.value ?? 0),
 }))
 
+vi.mock("../../../services/stats/UsageStatsProjection", () => ({
+	computeSessionPage: vi.fn(() => ({
+		requestId: "test-req",
+		sessions: [],
+		totalEstimate: 0,
+	})),
+}))
+
 import * as vscode from "vscode"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../../utils/export"
 import { getEffectiveCost } from "../../../services/stats/costRecalculation"
@@ -38,6 +46,13 @@ import {
 	handleRequestClearNonce,
 	handleGetDashboardSessions,
 	handleGetDashboardSessionDetail,
+	handleSubscribeDashboardStats,
+	handleUnsubscribeDashboardStats,
+	handleReplaceDashboardStatsSubscription,
+	handlePauseDashboardStats,
+	handleResumeDashboardStats,
+	handleResyncDashboardStats,
+	handleGetDashboardSessionPage,
 } from "../usageStatsMessageHandler"
 
 // ── Test Fixtures ────────────────────────────────────────────────────────────
@@ -84,7 +99,7 @@ const mockJsonExport: JsonExport = {
 
 const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider => {
 	const mockLog = vi.fn()
-	const mockPostMessageToWebview = vi.fn()
+	const mockPostMessageToWebview = vi.fn().mockResolvedValue(undefined)
 	const mockContextProxy = {
 		getValue: vi.fn(),
 		setValue: vi.fn(),
@@ -113,8 +128,38 @@ const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider
 		postMessageToWebview: mockPostMessageToWebview,
 		getUsageStatsService: vi.fn(() => mockService),
 		contextProxy: mockContextProxy,
+		view: { visible: true },
 	} as unknown as ClineProvider
 }
+
+// ── Mock Coordinator Factory ─────────────────────────────────────────────────
+
+const createMockCoordinator = () => ({
+	subscribe: vi.fn(),
+	unsubscribe: vi.fn(),
+	replaceSubscription: vi.fn(),
+	pause: vi.fn(),
+	resume: vi.fn(),
+	notifyEventAppended: vi.fn(),
+	notifyExternalChange: vi.fn(),
+	resetGeneration: vi.fn(),
+	dispose: vi.fn(),
+	_subscriptionCount: vi.fn(() => 0),
+	_isDrainPending: vi.fn(() => false),
+	_forceDrain: vi.fn(),
+})
+
+const createMockDatabase = () => ({
+	getGeneration: vi.fn(() => 1),
+	getLastSequence: vi.fn(() => 0),
+	readEventsAfter: vi.fn(() => ({ events: [], hasMore: false })),
+	querySessions: vi.fn(() => ({ sessions: [], cursor: undefined, totalEstimate: 0 })),
+	clearGeneration: vi.fn(() => 2),
+	_isInitialized: vi.fn(() => true),
+	_getDbPath: vi.fn(() => "/tmp/usage.db"),
+	initialize: vi.fn(),
+	close: vi.fn(),
+})
 
 // ── Tests ───────────────────────────────────────────────────────────────────
 
@@ -1230,6 +1275,403 @@ describe("usageStatsMessageHandler", () => {
 			expect(apiCalls?.[0].status).toBe("completed")
 			expect(apiCalls?.[1].status).toBe("failed")
 			expect(apiCalls?.[2].status).toBe("cancelled")
+		})
+	})
+
+	// ── handleSubscribeDashboardStats ──────────────────────────────────────────
+
+	describe("handleSubscribeDashboardStats", () => {
+		const validSubscription = {
+			requestId: "sub-1",
+			range: validQuery,
+			sessionPageSize: 50,
+			heatmapRangeDays: 30,
+		}
+
+		it("calls coordinator.subscribe with validated subscription", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "subscribeDashboardStats",
+				requestId: "sub-1",
+				dashboardStatsSubscription: validSubscription as unknown,
+			}
+
+			handleSubscribeDashboardStats(provider, message)
+
+			expect(coordinator.subscribe).toHaveBeenCalledTimes(1)
+			expect(coordinator.subscribe).toHaveBeenCalledWith(
+				expect.objectContaining({ postMessage: expect.any(Function), isVisible: expect.any(Function) }),
+				expect.objectContaining({ requestId: "sub-1" }),
+			)
+		})
+
+		it("posts stream error when service is unavailable", async () => {
+			const provider = createMockProvider(undefined)
+
+			const message: WebviewMessage = {
+				type: "subscribeDashboardStats",
+				requestId: "sub-2",
+				dashboardStatsSubscription: validSubscription as unknown,
+			}
+
+			handleSubscribeDashboardStats(provider, message)
+
+			// Wait for async postMessageToWebview
+			await vi.waitFor(() => {
+				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "dashboardStatsStreamError",
+						dashboardStatsStreamError: expect.objectContaining({
+							code: "STATS_HANDLER/stream/002",
+						}),
+					}),
+				)
+			})
+		})
+
+		it("posts stream error when coordinator is unavailable", async () => {
+			const provider = createMockProvider({ getCoordinator: () => null } as unknown)
+
+			const message: WebviewMessage = {
+				type: "subscribeDashboardStats",
+				requestId: "sub-3",
+				dashboardStatsSubscription: validSubscription as unknown,
+			}
+
+			handleSubscribeDashboardStats(provider, message)
+
+			await vi.waitFor(() => {
+				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "dashboardStatsStreamError",
+						dashboardStatsStreamError: expect.objectContaining({
+							code: "STATS_HANDLER/stream/002",
+						}),
+					}),
+				)
+			})
+		})
+
+		it("posts stream error for invalid subscription payload", async () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "subscribeDashboardStats",
+				requestId: "sub-4",
+				dashboardStatsSubscription: { requestId: "sub-4" } as unknown, // missing range, sessionPageSize, heatmapRangeDays
+			}
+
+			handleSubscribeDashboardStats(provider, message)
+
+			await vi.waitFor(() => {
+				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "dashboardStatsStreamError",
+						dashboardStatsStreamError: expect.objectContaining({
+							code: "STATS_HANDLER/stream/001",
+						}),
+					}),
+				)
+			})
+			expect(coordinator.subscribe).not.toHaveBeenCalled()
+		})
+	})
+
+	// ── handleUnsubscribeDashboardStats ────────────────────────────────────────
+
+	describe("handleUnsubscribeDashboardStats", () => {
+		it("calls coordinator.unsubscribe", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "unsubscribeDashboardStats",
+				requestId: "unsub-1",
+			}
+
+			handleUnsubscribeDashboardStats(provider, message)
+
+			expect(coordinator.unsubscribe).toHaveBeenCalledTimes(1)
+		})
+
+		it("does nothing when service is unavailable", () => {
+			const provider = createMockProvider(undefined)
+
+			handleUnsubscribeDashboardStats(provider, { type: "unsubscribeDashboardStats" } as WebviewMessage)
+
+			// No error posted for unsubscribe (fire-and-forget)
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+		})
+	})
+
+	// ── handleReplaceDashboardStatsSubscription ────────────────────────────────
+
+	describe("handleReplaceDashboardStatsSubscription", () => {
+		const validSubscription = {
+			requestId: "replace-1",
+			range: validQuery,
+			sessionPageSize: 50,
+			heatmapRangeDays: 30,
+		}
+
+		it("calls coordinator.replaceSubscription", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "replaceDashboardStatsSubscription",
+				requestId: "replace-1",
+				dashboardStatsSubscription: validSubscription as unknown,
+			}
+
+			handleReplaceDashboardStatsSubscription(provider, message)
+
+			expect(coordinator.replaceSubscription).toHaveBeenCalledTimes(1)
+			expect(coordinator.replaceSubscription).toHaveBeenCalledWith(
+				expect.any(Object),
+				expect.objectContaining({ requestId: "replace-1" }),
+			)
+		})
+
+		it("posts error for invalid payload", async () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "replaceDashboardStatsSubscription",
+				requestId: "replace-2",
+				dashboardStatsSubscription: {} as unknown,
+			}
+
+			handleReplaceDashboardStatsSubscription(provider, message)
+
+			await vi.waitFor(() => {
+				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "dashboardStatsStreamError",
+						dashboardStatsStreamError: expect.objectContaining({
+							code: "STATS_HANDLER/stream/001",
+						}),
+					}),
+				)
+			})
+			expect(coordinator.replaceSubscription).not.toHaveBeenCalled()
+		})
+	})
+
+	// ── handlePauseDashboardStats ──────────────────────────────────────────────
+
+	describe("handlePauseDashboardStats", () => {
+		it("calls coordinator.pause", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			handlePauseDashboardStats(provider, { type: "pauseDashboardStats" } as WebviewMessage)
+
+			expect(coordinator.pause).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// ── handleResumeDashboardStats ─────────────────────────────────────────────
+
+	describe("handleResumeDashboardStats", () => {
+		it("calls coordinator.resume with lastSequence from message.value", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "resumeDashboardStats",
+				requestId: "resume-1",
+				value: 42,
+			}
+
+			handleResumeDashboardStats(provider, message)
+
+			expect(coordinator.resume).toHaveBeenCalledWith(expect.any(Object), 42)
+		})
+
+		it("defaults to 0 when value is missing", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			handleResumeDashboardStats(provider, { type: "resumeDashboardStats" } as WebviewMessage)
+
+			expect(coordinator.resume).toHaveBeenCalledWith(expect.any(Object), 0)
+		})
+	})
+
+	// ── handleResyncDashboardStats ────────────────────────────────────────────
+
+	describe("handleResyncDashboardStats", () => {
+		const validSubscription = {
+			requestId: "resync-1",
+			range: validQuery,
+			sessionPageSize: 50,
+			heatmapRangeDays: 30,
+		}
+
+		it("calls coordinator.replaceSubscription for resync", () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "resyncDashboardStats",
+				requestId: "resync-1",
+				dashboardStatsSubscription: validSubscription as unknown,
+			}
+
+			handleResyncDashboardStats(provider, message)
+
+			expect(coordinator.replaceSubscription).toHaveBeenCalledTimes(1)
+		})
+
+		it("posts error for invalid payload", async () => {
+			const coordinator = createMockCoordinator()
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+
+			const message: WebviewMessage = {
+				type: "resyncDashboardStats",
+				requestId: "resync-2",
+				dashboardStatsSubscription: {} as unknown,
+			}
+
+			handleResyncDashboardStats(provider, message)
+
+			await vi.waitFor(() => {
+				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+					expect.objectContaining({
+						type: "dashboardStatsStreamError",
+						dashboardStatsStreamError: expect.objectContaining({
+							code: "STATS_HANDLER/stream/001",
+						}),
+					}),
+				)
+			})
+		})
+	})
+
+	// ── handleGetDashboardSessionPage ──────────────────────────────────────────
+
+	describe("handleGetDashboardSessionPage", () => {
+		it("posts dashboardSessionPageResponse on valid request", async () => {
+			const mockDb = createMockDatabase()
+			const provider = createMockProvider({
+				getCoordinator: () => null,
+				getDatabase: () => mockDb,
+			} as unknown)
+
+			const message: WebviewMessage = {
+				type: "getDashboardSessionPage",
+				requestId: "page-1",
+				dashboardSessionCursor: undefined,
+				dashboardSessionLimit: 50,
+			}
+
+			await handleGetDashboardSessionPage(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "dashboardSessionPageResponse",
+				}),
+			)
+		})
+
+		it("posts error when service is unavailable", async () => {
+			const provider = createMockProvider(undefined)
+
+			const message: WebviewMessage = {
+				type: "getDashboardSessionPage",
+				requestId: "page-2",
+				dashboardSessionLimit: 50,
+			}
+
+			await handleGetDashboardSessionPage(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "dashboardStatsStreamError",
+					dashboardStatsStreamError: expect.objectContaining({
+						code: "STATS_HANDLER/stream/002",
+					}),
+				}),
+			)
+		})
+
+		it("posts error when database is unavailable", async () => {
+			const provider = createMockProvider({
+				getCoordinator: () => null,
+				getDatabase: () => null,
+			} as unknown)
+
+			const message: WebviewMessage = {
+				type: "getDashboardSessionPage",
+				requestId: "page-3",
+				dashboardSessionLimit: 50,
+			}
+
+			await handleGetDashboardSessionPage(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "dashboardStatsStreamError",
+					dashboardStatsStreamError: expect.objectContaining({
+						code: "STATS_HANDLER/stream/002",
+					}),
+				}),
+			)
+		})
+
+		it("posts error for invalid limit", async () => {
+			const mockDb = createMockDatabase()
+			const provider = createMockProvider({
+				getCoordinator: () => null,
+				getDatabase: () => mockDb,
+			} as unknown)
+
+			const message: WebviewMessage = {
+				type: "getDashboardSessionPage",
+				requestId: "page-4",
+				dashboardSessionLimit: 0, // invalid
+			}
+
+			await handleGetDashboardSessionPage(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "dashboardStatsStreamError",
+					dashboardStatsStreamError: expect.objectContaining({
+						code: "STATS_HANDLER/stream/004",
+					}),
+				}),
+			)
+		})
+
+		it("posts error for limit > 100", async () => {
+			const mockDb = createMockDatabase()
+			const provider = createMockProvider({
+				getCoordinator: () => null,
+				getDatabase: () => mockDb,
+			} as unknown)
+
+			const message: WebviewMessage = {
+				type: "getDashboardSessionPage",
+				requestId: "page-5",
+				dashboardSessionLimit: 101,
+			}
+
+			await handleGetDashboardSessionPage(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "dashboardStatsStreamError",
+					dashboardStatsStreamError: expect.objectContaining({
+						code: "STATS_HANDLER/stream/004",
+					}),
+				}),
+			)
 		})
 	})
 })
