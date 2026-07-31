@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { OpenAiNativeHandler } from "../openai-native"
-import { openAiNativeModels } from "@roo-code/types"
+import { OpenAiServiceTier, openAiNativeModels } from "@roo-code/types"
 
 describe("OpenAiNativeHandler - normalizeUsage", () => {
 	let handler: OpenAiNativeHandler
@@ -468,7 +468,7 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 		it("should not apply GPT-5.4 long-context pricing to priority tier", () => {
 			handler = new OpenAiNativeHandler({
 				openAiNativeApiKey: "test-key",
-				openAiNativeServiceTier: "priority",
+				openAiNativeServiceTier: OpenAiServiceTier.Priority,
 			})
 
 			const usage = {
