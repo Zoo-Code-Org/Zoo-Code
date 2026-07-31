@@ -179,6 +179,11 @@
 			"count": 3
 		}
 	},
+	"api/providers/__tests__/lmstudio.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 1
+		}
+	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -221,7 +226,7 @@
 	},
 	"api/providers/__tests__/openai-native.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 74
+			"count": 78
 		}
 	},
 	"api/providers/__tests__/openai-timeout.spec.ts": {
@@ -272,6 +277,11 @@
 	"api/providers/__tests__/vertex.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
+		}
+	},
+	"api/providers/__tests__/xai.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 1
 		}
 	},
 	"api/providers/__tests__/zai.spec.ts": {
@@ -377,11 +387,6 @@
 	"api/providers/lm-studio.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"api/providers/mimo.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"api/providers/moonshot.ts": {
@@ -1066,7 +1071,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 37
+			"count": 40
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
@@ -1196,7 +1201,7 @@
 	},
 	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 310
+			"count": 311
 		}
 	},
 	"integrations/editor/__tests__/EditorUtils.spec.ts": {
