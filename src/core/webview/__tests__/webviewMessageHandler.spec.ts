@@ -2058,4 +2058,34 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		const calls = vi.mocked(TelemetryService.instance.updateTelemetryState).mock.calls
 		expect(calls.at(-1)).toEqual([false])
 	})
+
+	// CodeRabbit finding: webviewDidLaunch's queued telemetry update called
+	// TelemetryService.instance directly, unlike the "telemetrySetting" case a few lines
+	// below which checks hasInstance() first. If webviewDidLaunch fires before the service
+	// is created (e.g. during activation), TelemetryService.instance throws -- and since
+	// this whole chain isn't awaited by the "webviewDidLaunch" case, that throw becomes an
+	// unhandled promise rejection instead of a no-op.
+	it("does not throw or update telemetry state when webviewDidLaunch fires before TelemetryService exists", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(false)
+
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue("unset")
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		const providerForLaunch = mockClineProvider as unknown as {
+			getMcpHub: ReturnType<typeof vi.fn>
+			providerSettingsManager: { listConfig: ReturnType<typeof vi.fn> }
+			getStateToPostToWebview: ReturnType<typeof vi.fn>
+		}
+		providerForLaunch.getMcpHub = vi.fn().mockReturnValue(undefined)
+		providerForLaunch.providerSettingsManager = { listConfig: vi.fn().mockResolvedValue(undefined) }
+		providerForLaunch.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "unset" })
+
+		await expect(webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })).resolves.not.toThrow()
+
+		// The queued telemetry update is fire-and-forget from the handler's own point of
+		// view -- flush a microtask turn so its .then() callback runs before asserting.
+		await Promise.resolve()
+
+		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
 })
