@@ -1002,8 +1002,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Cho phép báo cáo lỗi và sử dụng ẩn danh",
-			"description": "Giúp cải thiện Zoo Code bằng cách gửi dữ liệu sử dụng ẩn danh và báo cáo lỗi. Telemetry này không thu thập mã, prompt hoặc thông tin cá nhân. Xem <privacyLink>chính sách bảo mật</privacyLink> của chúng tôi để biết thêm chi tiết. Bạn có thể tắt tính năng này bất cứ lúc nào."
+			"label": "Cho phép báo cáo lỗi và dữ liệu sử dụng",
+			"description": "Giúp cải thiện Zoo Code bằng cách gửi dữ liệu sử dụng và báo cáo lỗi, được liên kết với mã định danh cài đặt thay vì tên hoặc tài khoản của bạn. Telemetry này không thu thập mã nguồn hoặc lời nhắc của bạn. Xem <privacyLink>chính sách bảo mật</privacyLink> của chúng tôi để biết thêm chi tiết. Bạn có thể tắt tính năng này bất cứ lúc nào."
 		},
 		"settings": {
 			"import": "Nhập",

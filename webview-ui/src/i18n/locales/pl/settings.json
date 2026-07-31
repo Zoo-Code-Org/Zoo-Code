@@ -1002,8 +1002,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Zezwól na anonimowe raportowanie błędów i użycia",
-			"description": "Pomóż ulepszyć Zoo Code, wysyłając anonimowe dane użytkowania i raporty błędów. Ta telemetria nie zbiera kodu, promptów ani danych osobowych. Zobacz naszą <privacyLink>politykę prywatności</privacyLink>, aby uzyskać więcej szczegółów. Możesz to wyłączyć w dowolnym momencie."
+			"label": "Zezwól na raportowanie błędów i użycia",
+			"description": "Pomóż ulepszyć Zoo Code, wysyłając dane użytkowania i raporty błędów powiązane z identyfikatorem instalacji, a nie z Twoim imieniem czy kontem. Ta telemetria nie zbiera Twojego kodu ani podpowiedzi. Zobacz naszą <privacyLink>politykę prywatności</privacyLink>, aby uzyskać więcej szczegółów. Możesz to wyłączyć w dowolnym momencie."
 		},
 		"settings": {
 			"import": "Importuj",
