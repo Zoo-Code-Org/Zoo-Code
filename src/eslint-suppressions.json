@@ -179,11 +179,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/__tests__/mimo.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
 	"api/providers/__tests__/minimax.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
@@ -377,11 +372,6 @@
 	"api/providers/lm-studio.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"api/providers/mimo.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"api/providers/moonshot.ts": {

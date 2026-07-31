@@ -37,6 +37,51 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 	return false
 }
 
+/**
+	* Filters a streamed delta so that only the FIRST tool call (index 0) survives.
+	* MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
+	* parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
+	* configured for maxCallsPerTurn === 1; dropping extras here prevents the
+	* "multiple-valid-calls-under-single-policy" rejection path that triggers the
+	* error-interception retry loop.
+	*
+	* Confined to MimoHandler — no other provider is affected.
+	*/
+function filterToFirstToolCall(
+	delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta,
+	state: { firstToolCallId: string | undefined },
+): OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta {
+	if (!delta.tool_calls || delta.tool_calls.length === 0) {
+		return delta
+	}
+
+	const kept = delta.tool_calls.filter((toolCall) => {
+		const index = toolCall.index ?? 0
+		if (index > 0) {
+			return false // parallel call — drop
+		}
+		if (toolCall.id) {
+			if (state.firstToolCallId === undefined) {
+				state.firstToolCallId = toolCall.id
+				return true
+			}
+			// A second distinct id at index 0 is a disguised parallel call.
+			return toolCall.id === state.firstToolCallId
+		}
+		// Argument-continuation fragment for the kept call.
+		return true
+	})
+
+	if (kept.length === delta.tool_calls.length) {
+		return delta
+	}
+	if (kept.length === 0) {
+		const { tool_calls: _omit, ...rest } = delta
+		return rest
+	}
+	return { ...delta, tool_calls: kept }
+}
+
 type MiMoCompletionParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & {
 	extra_body: { thinking: { type: string } }
 }
@@ -153,19 +198,23 @@ export class MimoHandler extends OpenAiHandler {
 
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
+		const firstCallState: { firstToolCallId: string | undefined } = {
+			firstToolCallId: undefined,
+		}
 
 		for await (const chunk of stream) {
 			const delta = chunk.choices?.[0]?.delta ?? {}
 			const finishReason = chunk.choices?.[0]?.finish_reason
-			const sanitizedDelta = delta.tool_calls
+			const filteredDelta = filterToFirstToolCall(delta, firstCallState)
+			const sanitizedDelta = filteredDelta.tool_calls
 				? {
-						...delta,
-						tool_calls: delta.tool_calls.map((toolCall) => ({
+						...filteredDelta,
+						tool_calls: filteredDelta.tool_calls.map((toolCall) => ({
 							...toolCall,
 							id: toolCall.id ? sanitizeOpenAiCallId(toolCall.id) : toolCall.id,
 						})),
 					}
-				: delta
+				: filteredDelta
 
 			if (delta.content) {
 				yield {
