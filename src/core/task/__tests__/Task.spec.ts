@@ -3124,12 +3124,14 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 	})
 
 	function createTask() {
-		return new Task({
+		const task = new Task({
 			provider: mockProvider,
 			apiConfiguration: mockApiConfig,
 			task: "test task",
 			startTask: false,
 		})
+		task.startIdleTelemetryCheck()
+		return task
 	}
 
 	describe("flushTelemetryInstallment", () => {

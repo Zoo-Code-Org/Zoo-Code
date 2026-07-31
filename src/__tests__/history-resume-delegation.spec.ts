@@ -1255,6 +1255,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				userMessageContent: [],
 				consecutiveMistakeCount: 0,
 				emitFinalTokenUsageUpdate: vi.fn(),
+				flushTelemetryInstallment: vi.fn(),
 			} as unknown as import("../core/task/Task").Task
 
 			const block = {

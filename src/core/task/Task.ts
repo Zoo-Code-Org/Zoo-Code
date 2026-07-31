@@ -617,12 +617,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			{ leading: true, trailing: true, maxWait: this.TOKEN_USAGE_EMIT_INTERVAL_MS },
 		)
 
-		this.startIdleTelemetryCheck()
-
 		onCreated?.(this)
 
 		if (startTask) {
 			this._started = true
+			this.startIdleTelemetryCheck()
 			if (task || images) {
 				void this.startTask(task, images).catch((error) => {
 					console.error("[Task#constructor] startTask failed:", error)
@@ -1900,6 +1899,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 		this._started = true
+		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -3697,8 +3697,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// userMessageWasRemoved so the message (and its count) is restored
 							// exactly once when the retry succeeds, keeping the total symmetric
 							// regardless of how many empty-response cycles occur first.
+							// Guard: only reverse a count this iteration actually added. The
+							// popped message may predate this turn (resumed history, or a
+							// message appended by flushPendingToolResultsToHistory, neither
+							// of which incremented messageCounts.user).
 							this.apiConversationHistory.pop()
-							this.messageCounts.user--
+							if (shouldAddUserMessage) {
+								this.messageCounts.user--
+							}
 						}
 					}
 
@@ -4755,8 +4761,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		const messageCountDelta = {
-			user: this.messageCounts.user - this.telemetryMessageCountsBaseline.user,
-			assistant: this.messageCounts.assistant - this.telemetryMessageCountsBaseline.assistant,
+			user: Math.max(0, this.messageCounts.user - this.telemetryMessageCountsBaseline.user),
+			assistant: Math.max(0, this.messageCounts.assistant - this.telemetryMessageCountsBaseline.assistant),
 		}
 
 		const hasToolUsageDelta = Object.keys(toolUsageDelta).length > 0
@@ -4774,7 +4780,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.lastTelemetryFlushAt = Date.now()
 	}
 
-	private startIdleTelemetryCheck(): void {
+	startIdleTelemetryCheck(): void {
 		this.idleTelemetryCheckInterval = setInterval(() => {
 			// lastMessageTs only moves forward on activity, so comparing it against the
 			// last flush tells us whether anything happened since that flush -- if the

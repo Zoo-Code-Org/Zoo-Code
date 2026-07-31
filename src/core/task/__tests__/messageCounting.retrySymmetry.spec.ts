@@ -25,10 +25,17 @@ describe("empty-assistant-response retry keeps messageCounts.user symmetric", ()
 		}
 	}
 
-	function simulatePopOnEmptyResponse(messageCounts: { user: number; assistant: number }) {
-		// Mirrors Task.ts: popping the just-added user message from apiConversationHistory
-		// is paired with decrementing messageCounts.user to match.
-		messageCounts.user--
+	function simulatePopOnEmptyResponse(
+		messageCounts: { user: number; assistant: number },
+		shouldAddUserMessage = true,
+	) {
+		// Mirrors Task.ts: pop the last user message from apiConversationHistory and
+		// decrement messageCounts.user only if this iteration actually incremented it.
+		// Messages added by flushPendingToolResultsToHistory or loaded from resumed
+		// history are not counted, so popping them must not decrement.
+		if (shouldAddUserMessage) {
+			messageCounts.user--
+		}
 	}
 
 	function simulateDeclineRetry(messageCounts: { user: number; assistant: number }) {
@@ -102,5 +109,23 @@ describe("empty-assistant-response retry keeps messageCounts.user symmetric", ()
 		// occurred overall, so both counters must end at 1, not 0.
 		simulateDeclineRetry(messageCounts)
 		expect(messageCounts).toEqual({ user: 1, assistant: 1 })
+	})
+
+	it("does not go negative when the popped message was not counted by this iteration (e.g. flushPendingToolResultsToHistory)", () => {
+		// Scenario: a user message was appended to apiConversationHistory by
+		// flushPendingToolResultsToHistory (or loaded from resumed history) without
+		// incrementing messageCounts.user. shouldAddUserMessage is false for this
+		// turn (empty content). The assistant returns nothing and the pop fires.
+		// The count must stay at 0, not go to -1.
+		const messageCounts = { user: 0, assistant: 0 }
+
+		// This turn: empty content, so shouldAddUserMessageToHistory returns false.
+		const shouldAddUserMessage = false
+		simulateAttempt(messageCounts, { retryAttempt: 0, isEmptyUserContent: true, userMessageWasRemoved: false })
+		expect(messageCounts.user).toBe(0)
+
+		// Assistant returns nothing -- pop fires but guard skips the decrement.
+		simulatePopOnEmptyResponse(messageCounts, shouldAddUserMessage)
+		expect(messageCounts.user).toBe(0)
 	})
 })
