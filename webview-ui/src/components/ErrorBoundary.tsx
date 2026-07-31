@@ -6,6 +6,7 @@ import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
 
 type ErrorProps = {
 	children: React.ReactNode
+	onRetry?: () => void
 } & WithTranslation
 
 type ErrorState = {
@@ -33,6 +34,11 @@ class ErrorBoundary extends Component<ErrorProps, ErrorState> {
 			error: errorMessage,
 			timestamp: Date.now(),
 		}
+	}
+
+	handleRetry = () => {
+		this.setState({ error: undefined, componentStack: undefined, timestamp: undefined })
+		this.props.onRetry?.()
 	}
 
 	async componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
@@ -88,6 +94,14 @@ class ErrorBoundary extends Component<ErrorProps, ErrorState> {
 						<h3 className="text-md font-bold mb-1">{t("errorBoundary.componentStack")}</h3>
 						<pre className="p-2 border rounded text-sm overflow-auto">{componentStackDisplay}</pre>
 					</div>
+				)}
+
+				{this.props.onRetry && (
+					<button
+						className="mt-4 px-4 py-2 bg-vscode-button-background text-vscode-button-foreground rounded hover:bg-vscode-button-hoverBackground cursor-pointer"
+						onClick={this.handleRetry}>
+						{t("errorBoundary.retry")}
+					</button>
 				)}
 			</div>
 		)

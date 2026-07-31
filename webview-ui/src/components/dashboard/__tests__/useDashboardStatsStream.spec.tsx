@@ -668,7 +668,7 @@ describe("useDashboardStatsStream", () => {
 
 	describe("didBecomeVisible action", () => {
 		it("should handle didBecomeVisible action message", () => {
-			renderHook(() =>
+			const { result: _result } = renderHook(() =>
 				useDashboardStatsStream({
 					range: makeQuery(),
 					heatmapRangeDays: 30,

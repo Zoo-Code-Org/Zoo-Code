@@ -248,7 +248,11 @@ const App = () => {
 					targetTab={currentMarketplaceTab as "mcp" | "mode" | undefined}
 				/>
 			)}
-			{tab === "dashboard" && <DashboardView onDone={() => switchTab("chat")} />}
+			{tab === "dashboard" && (
+				<ErrorBoundary onRetry={() => switchTab("dashboard")}>
+					<DashboardView onDone={() => switchTab("chat")} />
+				</ErrorBoundary>
+			)}
 			<ChatView
 				ref={chatViewRef}
 				isHidden={tab !== "chat"}

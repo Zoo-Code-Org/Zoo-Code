@@ -1,6 +1,5 @@
 ﻿// npx vitest run src/components/stats/__tests__/UsageHeatmap.spec.tsx
 
-import React from "react"
 import { render, fireEvent } from "@/utils/test-utils"
 
 import UsageHeatmap from "../UsageHeatmap"

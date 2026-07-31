@@ -117,6 +117,14 @@ const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider
 		})
 	}
 
+	// ensureInitialized is called by streaming handlers before accessing the coordinator.
+	// Provide a no-op default so tests that don't explicitly mock it still pass.
+	// Only add when a service was actually provided (not undefined) to preserve
+	// the "service unavailable" test path.
+	if (service && !legacyService.ensureInitialized) {
+		legacyService.ensureInitialized = vi.fn().mockResolvedValue(undefined)
+	}
+
 	let mockService: UsageStatsService | undefined = legacyService as UsageStatsService | undefined
 	if (Object.keys(legacyService).length === 0) {
 		// caller passed undefined explicitly
@@ -1288,7 +1296,7 @@ describe("usageStatsMessageHandler", () => {
 			heatmapRangeDays: 30,
 		}
 
-		it("calls coordinator.subscribe with validated subscription", () => {
+		it("calls coordinator.subscribe with validated subscription", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
@@ -1298,7 +1306,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			void handleSubscribeDashboardStats(provider, message)
+			await handleSubscribeDashboardStats(provider, message)
 
 			expect(coordinator.subscribe).toHaveBeenCalledTimes(1)
 			expect(coordinator.subscribe).toHaveBeenCalledWith(
@@ -1383,7 +1391,7 @@ describe("usageStatsMessageHandler", () => {
 	// ── handleUnsubscribeDashboardStats ────────────────────────────────────────
 
 	describe("handleUnsubscribeDashboardStats", () => {
-		it("calls coordinator.unsubscribe", () => {
+		it("calls coordinator.unsubscribe", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
@@ -1392,7 +1400,7 @@ describe("usageStatsMessageHandler", () => {
 				requestId: "unsub-1",
 			}
 
-			void handleUnsubscribeDashboardStats(provider, message)
+			await handleUnsubscribeDashboardStats(provider, message)
 
 			expect(coordinator.unsubscribe).toHaveBeenCalledTimes(1)
 		})
@@ -1417,7 +1425,7 @@ describe("usageStatsMessageHandler", () => {
 			heatmapRangeDays: 30,
 		}
 
-		it("calls coordinator.replaceSubscription", () => {
+		it("calls coordinator.replaceSubscription", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
@@ -1427,7 +1435,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			void handleReplaceDashboardStatsSubscription(provider, message)
+			await handleReplaceDashboardStatsSubscription(provider, message)
 
 			expect(coordinator.replaceSubscription).toHaveBeenCalledTimes(1)
 			expect(coordinator.replaceSubscription).toHaveBeenCalledWith(
@@ -1465,11 +1473,11 @@ describe("usageStatsMessageHandler", () => {
 	// ── handlePauseDashboardStats ──────────────────────────────────────────────
 
 	describe("handlePauseDashboardStats", () => {
-		it("calls coordinator.pause", () => {
+		it("calls coordinator.pause", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
-			void handlePauseDashboardStats(provider, { type: "pauseDashboardStats" } as WebviewMessage)
+			await handlePauseDashboardStats(provider, { type: "pauseDashboardStats" } as WebviewMessage)
 
 			expect(coordinator.pause).toHaveBeenCalledTimes(1)
 		})
@@ -1478,7 +1486,7 @@ describe("usageStatsMessageHandler", () => {
 	// ── handleResumeDashboardStats ─────────────────────────────────────────────
 
 	describe("handleResumeDashboardStats", () => {
-		it("calls coordinator.resume with lastSequence from message.value", () => {
+		it("calls coordinator.resume with lastSequence from message.value", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
@@ -1488,16 +1496,16 @@ describe("usageStatsMessageHandler", () => {
 				value: 42,
 			}
 
-			void handleResumeDashboardStats(provider, message)
+			await handleResumeDashboardStats(provider, message)
 
 			expect(coordinator.resume).toHaveBeenCalledWith(expect.any(Object), 42)
 		})
 
-		it("defaults to 0 when value is missing", () => {
+		it("defaults to 0 when value is missing", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
-			void handleResumeDashboardStats(provider, { type: "resumeDashboardStats" } as WebviewMessage)
+			await handleResumeDashboardStats(provider, { type: "resumeDashboardStats" } as WebviewMessage)
 
 			expect(coordinator.resume).toHaveBeenCalledWith(expect.any(Object), 0)
 		})
@@ -1513,7 +1521,7 @@ describe("usageStatsMessageHandler", () => {
 			heatmapRangeDays: 30,
 		}
 
-		it("calls coordinator.replaceSubscription for resync", () => {
+		it("calls coordinator.replaceSubscription for resync", async () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
@@ -1523,7 +1531,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			void handleResyncDashboardStats(provider, message)
+			await handleResyncDashboardStats(provider, message)
 
 			expect(coordinator.replaceSubscription).toHaveBeenCalledTimes(1)
 		})

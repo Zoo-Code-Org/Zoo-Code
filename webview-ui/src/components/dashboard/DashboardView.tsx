@@ -108,6 +108,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			fromOverride?: string,
 			toOverride?: string,
 		): StatsQuery => {
+			const _now = new Date()
 			let from: string | undefined
 			let to: string | undefined
 			let queryPreset: StatsQuery["preset"]
