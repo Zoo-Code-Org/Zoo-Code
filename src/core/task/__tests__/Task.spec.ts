@@ -27,6 +27,8 @@ import type { ApiMessage } from "../../task-persistence"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
+	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
+	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	presentAssistantMessageSafe: () => void
@@ -2846,6 +2848,50 @@ describe("Cline", () => {
 			expect(safeSpy).toHaveBeenCalled()
 			expect(ensureModelFetched).toHaveBeenCalled()
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
+		})
+	})
+
+	describe("startTask", () => {
+		it("posts a clean state immediately before adding the first task message", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "new task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+
+			task.clineMessages = [{ ts: 1, type: "say", say: "text", text: "stale message" }]
+
+			let resolvePostState: (() => void) | undefined
+			const pendingPostState = new Promise<void>((resolve) => {
+				resolvePostState = resolve
+			})
+			const postStateSpy = vi
+				.mocked(mockProvider.postStateToWebviewWithoutTaskHistory)
+				.mockImplementationOnce(async () => {
+					expect(task.clineMessages).toEqual([])
+					await pendingPostState
+				})
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
+				enabledToolCount: 0,
+				enabledServerCount: 0,
+			})
+			const initiateTaskLoopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
+
+			const startPromise = taskAccess.startTask("new task")
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+			expect(mockProvider.postStateToWebviewThrottled).not.toHaveBeenCalled()
+			expect(saySpy).not.toHaveBeenCalled()
+
+			resolvePostState?.()
+			await startPromise
+
+			expect(saySpy).toHaveBeenCalledOnce()
+			expect(saySpy).toHaveBeenCalledWith("text", "new task", undefined)
+			expect(initiateTaskLoopSpy).toHaveBeenCalledOnce()
 		})
 	})
 
