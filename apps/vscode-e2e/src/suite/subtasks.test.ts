@@ -70,9 +70,12 @@ const findAimockRequest = (entries: AimockJournalEntry[], expectedText: string, 
 		)
 	})
 
-// Returns the journal timestamp of the matching request so callers can anchor
-// post-test drains to the exact request this test created.
-const waitForAimockRequestContaining = async (expectedText: string, excludeText?: string) => {
+// Waits for a matching request to appear in the aimock journal and returns its journal
+// timestamp, so callers can anchor post-test drains to the exact request this test created.
+const waitForAimockRequestContaining = async (
+	expectedText: string,
+	excludeText?: string,
+): Promise<number | undefined> => {
 	let matchedAt: number | undefined
 
 	await waitFor(async () => {
@@ -83,8 +86,9 @@ const waitForAimockRequestContaining = async (expectedText: string, excludeText?
 	return matchedAt
 }
 
-// Grace period after the delayed window for aimock to flush the stream's remaining
-// chunks to the dead socket.
+// Grace period after the delayed window for aimock to flush the stream's remaining chunks to
+// the dead socket. 500ms is an empirical margin for that flush plus socket teardown; if this
+// suite becomes flaky again on slow CI runners, widen this value first.
 const SUBTASK_API_HANG_DRAIN_GRACE_MS = 500
 
 // aimock does not observe client disconnects: after the API-hang child request is cancelled,

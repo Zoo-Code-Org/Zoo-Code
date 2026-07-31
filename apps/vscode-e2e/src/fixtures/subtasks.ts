@@ -35,6 +35,8 @@ export const SUBTASK_API_HANG_PARENT_RESULT = "API hang parent resumed"
 
 // How long the API-hang child's first mocked response stays pending before its first SSE
 // chunk. Shared with the subtask suite so its post-test drain waits exactly one window.
+// Correctness depends on no flat `latency` (fixture or LLMock default) being set on that
+// fixture — a flat latency would apply to every chunk after the first, not just the ttft.
 export const SUBTASK_API_HANG_RESPONSE_LATENCY_MS = 15_000
 
 // Abandon-subtask scenario (#559) — separate markers to avoid sequenceIndex collisions with the
@@ -270,9 +272,8 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		// applies `latency` to EVERY chunk and never observes client disconnects, so after the test
 		// cancels, a flat-latency stream would stay pending server-side for chunks × latency before
 		// flushing to the dead socket. With ttft the pending window is exactly
-		// SUBTASK_API_HANG_RESPONSE_LATENCY_MS, which is what the suite's post-test drain waits out.
-		// This relies on no flat `latency` (fixture or LLMock default) being set — a flat latency
-		// would still apply to every chunk after the first.
+		// SUBTASK_API_HANG_RESPONSE_LATENCY_MS (see its doc comment for the no-flat-latency
+		// invariant this relies on), which is what the suite's post-test drain waits out.
 		streamingProfile: { ttft: SUBTASK_API_HANG_RESPONSE_LATENCY_MS },
 		response: {
 			toolCalls: [
