@@ -37,7 +37,7 @@ const isDeepSeekThinkingEnabled = (modelId: string, options: ApiHandlerOptions) 
 		return false
 	}
 
-	return modelId === "deepseek-reasoner" || supportsDeepSeekThinkingToggle(modelId)
+	return supportsDeepSeekThinkingToggle(modelId)
 }
 
 const normalizeDeepSeekReasoningEffort = (reasoningEffort?: string): "high" | "max" | undefined => {
