@@ -601,7 +601,7 @@
 	},
 	"core/assistant-message/presentAssistantMessage.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 3
 		}
 	},
 	"core/auto-approval/__tests__/AutoApprovalHandler.spec.ts": {
