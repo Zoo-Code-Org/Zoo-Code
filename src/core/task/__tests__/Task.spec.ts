@@ -8,6 +8,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import {
 	providerIdentifiers,
+	RooCodeEventName,
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
@@ -1692,6 +1693,65 @@ describe("Cline", () => {
 			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
 			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(mockProvider.postStateToWebviewWithoutTaskHistory).not.toHaveBeenCalled()
+		})
+
+		it("waits for an unanswered ask flush before emitting the message", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
+			let releaseFlush!: () => void
+			const pendingFlush = new Promise<void>((resolve) => {
+				releaseFlush = resolve
+			})
+			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockReturnValueOnce(pendingFlush)
+			const messageListener = vi.fn()
+			task.on(RooCodeEventName.Message, messageListener)
+			const message = {
+				ts: 1,
+				type: "ask" as const,
+				ask: "resume_task" as const,
+			}
+
+			const addPromise = taskAccess.addToClineMessages(message)
+
+			await Promise.resolve()
+			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledOnce()
+			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
+			expect(flushSpy).toHaveBeenCalledOnce()
+			expect(flushSpy).toHaveBeenCalledWith()
+			expect(messageListener).not.toHaveBeenCalled()
+
+			releaseFlush()
+			await addPromise
+
+			expect(flushSpy.mock.invocationCallOrder[0]).toBeLessThan(messageListener.mock.invocationCallOrder[0])
+			expect(messageListener).toHaveBeenCalledWith({ action: "created", message })
+		})
+
+		it("keeps an already answered ask on the throttled path", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			await getTaskTestAccess(task).addToClineMessages({
+				ts: 1,
+				type: "ask",
+				ask: "tool",
+				isAnswered: true,
+			})
+
+			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledOnce()
+			expect(mockProvider.postStateToWebviewThrottled).toHaveBeenCalledWith()
+			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 		})
 
 		it("waits for a new partial message flush before a following message update", async () => {

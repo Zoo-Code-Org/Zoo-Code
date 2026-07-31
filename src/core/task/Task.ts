@@ -1044,8 +1044,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async addToClineMessages(message: ClineMessage) {
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
+		// Unanswered asks must reach the webview before Message listeners can respond against its state.
+		const requiresImmediateState =
+			message.partial === true || (message.type === "ask" && message.isAnswered !== true)
 		await provider?.postStateToWebviewThrottled()
-		if (message.partial === true) {
+		if (requiresImmediateState) {
 			await provider?.flushPostStateToWebviewThrottled()
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
