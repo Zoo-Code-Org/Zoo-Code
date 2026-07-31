@@ -1,4 +1,4 @@
-﻿// AnimatedNumber: displays a numeric value with smooth count-up animation.
+// AnimatedNumber: displays a numeric value with smooth count-up animation.
 // See docs/260729_0001_session_branch-recovery/dashboard-streaming-architecture.md
 // (Sub-task 7: animate numeric values, reduced-motion disables animation).
 
@@ -32,7 +32,7 @@ const defaultFormat = (value: number) => Math.round(value).toLocaleString()
  *
  * Respects `prefers-reduced-motion`: when active, the value snaps immediately.
  */
-const AnimatedNumber = memo(({ value, format = defaultFormat, duration = 600, className }: AnimatedNumberProps) => {
+const AnimatedNumber = memo(({ value, format = defaultFormat, duration = 200, className }: AnimatedNumberProps) => {
 	const displayValue = useAnimatedCounter(value, { duration })
 	return (
 		<span className={className} data-testid="animated-number">

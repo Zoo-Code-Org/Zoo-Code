@@ -211,12 +211,6 @@ const ROLLUP_SUPPORTED_AXES = new Set(["model", "provider", "mode", "day"])
  * per event, so we cannot use pre-aggregated rollup values.
  */
 function canUseRollupFastPath(query: StatsQuery): boolean {
-	// cacheRatio estimation changes cacheReadTokens per-event, so rollups
-	// (which store raw cacheReadTokens) would be incorrect.
-	if (query.cacheRatio !== undefined && query.cacheRatio > 0) {
-		return false
-	}
-
 	// Check all axes are supported
 	for (const axis of query.groupBy) {
 		if (!ROLLUP_SUPPORTED_AXES.has(axis)) {
@@ -238,7 +232,11 @@ function canUseRollupFastPath(query: StatsQuery): boolean {
 /**
  * Converts a BreakdownRollupRow to a StatsBucket with the given key.
  */
-function breakdownRowToBucket(row: BreakdownRollupRow, axis: string): StatsBucket {
+function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?: number): StatsBucket {
+	let cacheReadTokens = row.cacheReadTokens
+	if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
+		cacheReadTokens = Math.round(row.inputTokens * cacheRatio)
+	}
 	return {
 		key: { [axis]: row.axisValue },
 		events: row.eventCount,
@@ -247,7 +245,7 @@ function breakdownRowToBucket(row: BreakdownRollupRow, axis: string): StatsBucke
 		cancelledCalls: row.cancelledCalls,
 		inputTokens: row.inputTokens,
 		outputTokens: row.outputTokens,
-		cacheReadTokens: row.cacheReadTokens,
+		cacheReadTokens,
 		cacheWriteTokens: row.cacheWriteTokens,
 		reasoningTokens: row.reasoningTokens,
 		totalTokens: row.totalTokens,
@@ -259,7 +257,11 @@ function breakdownRowToBucket(row: BreakdownRollupRow, axis: string): StatsBucke
 /**
  * Converts a DailyRollupDetailedRow to a StatsBucket with a day key.
  */
-function dailyRowToBucket(row: DailyRollupDetailedRow): StatsBucket {
+function dailyRowToBucket(row: DailyRollupDetailedRow, cacheRatio?: number): StatsBucket {
+	let cacheReadTokens = row.cacheReadTokens
+	if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
+		cacheReadTokens = Math.round(row.inputTokens * cacheRatio)
+	}
 	return {
 		key: { day: row.day },
 		events: row.eventCount,
@@ -268,7 +270,7 @@ function dailyRowToBucket(row: DailyRollupDetailedRow): StatsBucket {
 		cancelledCalls: row.cancelledCalls,
 		inputTokens: row.inputTokens,
 		outputTokens: row.outputTokens,
-		cacheReadTokens: row.cacheReadTokens,
+		cacheReadTokens,
 		cacheWriteTokens: row.cacheWriteTokens,
 		reasoningTokens: row.reasoningTokens,
 		totalTokens: row.totalTokens,
@@ -280,7 +282,7 @@ function dailyRowToBucket(row: DailyRollupDetailedRow): StatsBucket {
 /**
  * Sums an array of DailyRollupDetailedRow into a single totals bucket.
  */
-function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[]): StatsBucket {
+function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[], cacheRatio?: number): StatsBucket {
 	const totals = createEmptyBucket()
 	for (const row of rows) {
 		totals.events += row.eventCount
@@ -289,7 +291,11 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[]): StatsBucket {
 		totals.cancelledCalls += row.cancelledCalls
 		totals.inputTokens += row.inputTokens
 		totals.outputTokens += row.outputTokens
-		totals.cacheReadTokens += row.cacheReadTokens
+		let cacheReadTokens = row.cacheReadTokens
+		if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
+			cacheReadTokens = Math.round(row.inputTokens * cacheRatio)
+		}
+		totals.cacheReadTokens += cacheReadTokens
 		totals.cacheWriteTokens += row.cacheWriteTokens
 		totals.reasoningTokens += row.reasoningTokens
 		totals.totalTokens += row.totalTokens
@@ -301,19 +307,26 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[]): StatsBucket {
 /**
  * Converts lifetime totals (from queryLifetimeTotalsFiltered) to a StatsBucket.
  */
-function lifetimeTotalsToBucket(totals: {
-	eventCount: number
-	totalCost: number
-	totalTokens: number
-	inputTokens: number
-	outputTokens: number
-	cacheReadTokens: number
-	cacheWriteTokens: number
-	reasoningTokens: number
-	completedCalls: number
-	failedCalls: number
-	cancelledCalls: number
-}): StatsBucket {
+function lifetimeTotalsToBucket(
+	totals: {
+		eventCount: number
+		totalCost: number
+		totalTokens: number
+		inputTokens: number
+		outputTokens: number
+		cacheReadTokens: number
+		cacheWriteTokens: number
+		reasoningTokens: number
+		completedCalls: number
+		failedCalls: number
+		cancelledCalls: number
+	},
+	cacheRatio?: number,
+): StatsBucket {
+	let cacheReadTokens = totals.cacheReadTokens
+	if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
+		cacheReadTokens = Math.round(totals.inputTokens * cacheRatio)
+	}
 	return {
 		key: {},
 		events: totals.eventCount,
@@ -322,7 +335,7 @@ function lifetimeTotalsToBucket(totals: {
 		cancelledCalls: totals.cancelledCalls,
 		inputTokens: totals.inputTokens,
 		outputTokens: totals.outputTokens,
-		cacheReadTokens: totals.cacheReadTokens,
+		cacheReadTokens,
 		cacheWriteTokens: totals.cacheWriteTokens,
 		reasoningTokens: totals.reasoningTokens,
 		totalTokens: totals.totalTokens,
@@ -376,6 +389,7 @@ function assembleRollupSnapshotFast(
 ): StatsSnapshot {
 	const includeCancelled = query.includeCancelled ?? false
 	const groupBy = query.groupBy
+	const cacheRatio = query.cacheRatio
 	const { from, to } = resolveTimeRange(query)
 
 	// Determine the time range for rollup queries
@@ -402,10 +416,10 @@ function assembleRollupSnapshotFast(
 	let totals: StatsBucket
 	if (isAllTime) {
 		const lifetimeTotals = db.queryLifetimeTotalsFiltered(includeCancelled)
-		totals = lifetimeTotalsToBucket(lifetimeTotals)
+		totals = lifetimeTotalsToBucket(lifetimeTotals, cacheRatio)
 	} else {
 		const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
-		totals = sumDailyRowsToTotals(dailyRows)
+		totals = sumDailyRowsToTotals(dailyRows, cacheRatio)
 	}
 
 	// Compute breakdown buckets
@@ -420,7 +434,7 @@ function assembleRollupSnapshotFast(
 		if (axis === "day") {
 			// Day axis: use detailed daily rollups
 			const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
-			buckets = dailyRows.map(dailyRowToBucket)
+			buckets = dailyRows.map((row) => dailyRowToBucket(row, cacheRatio))
 		} else {
 			// model/provider/mode axis: use breakdown rollups
 			let breakdownRows: BreakdownRollupRow[]
@@ -433,7 +447,7 @@ function assembleRollupSnapshotFast(
 				breakdownRows = db.queryBreakdownRollups("daily", fromDay, toDay, axis, includeCancelled)
 			}
 
-			buckets = breakdownRows.map((row) => breakdownRowToBucket(row, axis))
+			buckets = breakdownRows.map((row) => breakdownRowToBucket(row, axis, cacheRatio))
 		}
 	}
 

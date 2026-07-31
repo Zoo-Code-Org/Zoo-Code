@@ -1298,7 +1298,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			handleSubscribeDashboardStats(provider, message)
+			void handleSubscribeDashboardStats(provider, message)
 
 			expect(coordinator.subscribe).toHaveBeenCalledTimes(1)
 			expect(coordinator.subscribe).toHaveBeenCalledWith(
@@ -1316,7 +1316,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			handleSubscribeDashboardStats(provider, message)
+			void handleSubscribeDashboardStats(provider, message)
 
 			// Wait for async postMessageToWebview
 			await vi.waitFor(() => {
@@ -1340,7 +1340,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			handleSubscribeDashboardStats(provider, message)
+			void handleSubscribeDashboardStats(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1364,7 +1364,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: { requestId: "sub-4" } as unknown, // missing range, sessionPageSize, heatmapRangeDays
 			}
 
-			handleSubscribeDashboardStats(provider, message)
+			void handleSubscribeDashboardStats(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1392,7 +1392,7 @@ describe("usageStatsMessageHandler", () => {
 				requestId: "unsub-1",
 			}
 
-			handleUnsubscribeDashboardStats(provider, message)
+			void handleUnsubscribeDashboardStats(provider, message)
 
 			expect(coordinator.unsubscribe).toHaveBeenCalledTimes(1)
 		})
@@ -1400,7 +1400,7 @@ describe("usageStatsMessageHandler", () => {
 		it("does nothing when service is unavailable", () => {
 			const provider = createMockProvider(undefined)
 
-			handleUnsubscribeDashboardStats(provider, { type: "unsubscribeDashboardStats" } as WebviewMessage)
+			void handleUnsubscribeDashboardStats(provider, { type: "unsubscribeDashboardStats" } as WebviewMessage)
 
 			// No error posted for unsubscribe (fire-and-forget)
 			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
@@ -1427,7 +1427,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			handleReplaceDashboardStatsSubscription(provider, message)
+			void handleReplaceDashboardStatsSubscription(provider, message)
 
 			expect(coordinator.replaceSubscription).toHaveBeenCalledTimes(1)
 			expect(coordinator.replaceSubscription).toHaveBeenCalledWith(
@@ -1446,7 +1446,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: {} as unknown,
 			}
 
-			handleReplaceDashboardStatsSubscription(provider, message)
+			void handleReplaceDashboardStatsSubscription(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1469,7 +1469,7 @@ describe("usageStatsMessageHandler", () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
-			handlePauseDashboardStats(provider, { type: "pauseDashboardStats" } as WebviewMessage)
+			void handlePauseDashboardStats(provider, { type: "pauseDashboardStats" } as WebviewMessage)
 
 			expect(coordinator.pause).toHaveBeenCalledTimes(1)
 		})
@@ -1488,7 +1488,7 @@ describe("usageStatsMessageHandler", () => {
 				value: 42,
 			}
 
-			handleResumeDashboardStats(provider, message)
+			void handleResumeDashboardStats(provider, message)
 
 			expect(coordinator.resume).toHaveBeenCalledWith(expect.any(Object), 42)
 		})
@@ -1497,7 +1497,7 @@ describe("usageStatsMessageHandler", () => {
 			const coordinator = createMockCoordinator()
 			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
 
-			handleResumeDashboardStats(provider, { type: "resumeDashboardStats" } as WebviewMessage)
+			void handleResumeDashboardStats(provider, { type: "resumeDashboardStats" } as WebviewMessage)
 
 			expect(coordinator.resume).toHaveBeenCalledWith(expect.any(Object), 0)
 		})
@@ -1523,7 +1523,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: validSubscription as unknown,
 			}
 
-			handleResyncDashboardStats(provider, message)
+			void handleResyncDashboardStats(provider, message)
 
 			expect(coordinator.replaceSubscription).toHaveBeenCalledTimes(1)
 		})
@@ -1538,7 +1538,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardStatsSubscription: {} as unknown,
 			}
 
-			handleResyncDashboardStats(provider, message)
+			void handleResyncDashboardStats(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
