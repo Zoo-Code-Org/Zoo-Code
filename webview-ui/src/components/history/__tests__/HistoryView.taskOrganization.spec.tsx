@@ -945,7 +945,7 @@ describe("HistoryView task organization integration", () => {
 				UNFILED_DROP_ZONE_ID,
 			})
 			const localTask = makeTask("t-local", { workspace: "/test/workspace" })
-			const otherTask = makeTask("t-other", { workspace: "/other/workspace" })
+			const _otherTask = makeTask("t-other", { workspace: "/other/workspace" })
 
 			mockUseExtensionState.mockReturnValue({
 				taskOrganization: {
