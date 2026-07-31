@@ -1,4 +1,4 @@
-﻿// Pure reducer for the dashboard stats stream.
+// Pure reducer for the dashboard stats stream.
 // See docs/260729_0001_session_branch-recovery/dashboard-streaming-architecture.md
 // for the full specification.
 
@@ -416,6 +416,7 @@ export function dashboardStreamReducer(
 			return {
 				...state,
 				status: "error",
+				isLoading: false,
 				backgroundError: { code: action.error.code, message: action.error.message },
 			}
 		}

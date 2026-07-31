@@ -1,4 +1,4 @@
-﻿import * as vscode from "vscode"
+import * as vscode from "vscode"
 import * as path from "path"
 import * as os from "os"
 
@@ -983,10 +983,10 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
  * The coordinator is obtained from the UsageStatsService. If the service or
  * coordinator is unavailable, an error response is sent.
  */
-function getCoordinatorAndSink(
+async function getCoordinatorAndSink(
 	provider: ClineProvider,
 	requestId: string | undefined,
-): { coordinator: UsageStatsStreamCoordinator; sink: ProviderStreamSink } | null {
+): Promise<{ coordinator: UsageStatsStreamCoordinator; sink: ProviderStreamSink } | null> {
 	const service = provider.getUsageStatsService()
 
 	if (!service) {
@@ -1004,6 +1004,8 @@ function getCoordinatorAndSink(
 		}
 		return null
 	}
+
+	await service.ensureInitialized()
 
 	const coordinator = service.getCoordinator()
 
@@ -1040,10 +1042,10 @@ function getCoordinatorAndSink(
  * Validates the subscription payload, obtains the coordinator, and subscribes
  * the provider's sink. The coordinator sends the initial snapshot immediately.
  */
-export function handleSubscribeDashboardStats(provider: ClineProvider, message: WebviewMessage): void {
+export async function handleSubscribeDashboardStats(provider: ClineProvider, message: WebviewMessage): Promise<void> {
 	const requestId = message.requestId
 
-	const result = getCoordinatorAndSink(provider, requestId)
+	const result = await getCoordinatorAndSink(provider, requestId)
 
 	if (!result) return
 
@@ -1094,8 +1096,8 @@ export function handleSubscribeDashboardStats(provider: ClineProvider, message: 
  * Handles the `unsubscribeDashboardStats` message.
  * Releases the provider's subscription from the coordinator.
  */
-export function handleUnsubscribeDashboardStats(provider: ClineProvider, _message: WebviewMessage): void {
-	const result = getCoordinatorAndSink(provider, undefined)
+export async function handleUnsubscribeDashboardStats(provider: ClineProvider, _message: WebviewMessage): Promise<void> {
+	const result = await getCoordinatorAndSink(provider, undefined)
 
 	if (!result) return
 
@@ -1110,10 +1112,10 @@ export function handleUnsubscribeDashboardStats(provider: ClineProvider, _messag
  * Validates the new subscription payload and replaces the existing subscription.
  * The coordinator sends a fresh snapshot for the new query.
  */
-export function handleReplaceDashboardStatsSubscription(provider: ClineProvider, message: WebviewMessage): void {
+export async function handleReplaceDashboardStatsSubscription(provider: ClineProvider, message: WebviewMessage): Promise<void> {
 	const requestId = message.requestId
 
-	const result = getCoordinatorAndSink(provider, requestId)
+	const result = await getCoordinatorAndSink(provider, requestId)
 
 	if (!result) return
 
@@ -1164,8 +1166,8 @@ export function handleReplaceDashboardStatsSubscription(provider: ClineProvider,
  * Handles the `pauseDashboardStats` message.
  * Pauses delta delivery for the provider's subscription, retaining the cursor.
  */
-export function handlePauseDashboardStats(provider: ClineProvider, _message: WebviewMessage): void {
-	const result = getCoordinatorAndSink(provider, undefined)
+export async function handlePauseDashboardStats(provider: ClineProvider, _message: WebviewMessage): Promise<void> {
+	const result = await getCoordinatorAndSink(provider, undefined)
 
 	if (!result) return
 
@@ -1182,8 +1184,8 @@ export function handlePauseDashboardStats(provider: ClineProvider, _message: Web
  *
  * The `value` field carries the last sequence number acknowledged by the webview.
  */
-export function handleResumeDashboardStats(provider: ClineProvider, message: WebviewMessage): void {
-	const result = getCoordinatorAndSink(provider, undefined)
+export async function handleResumeDashboardStats(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const result = await getCoordinatorAndSink(provider, undefined)
 
 	if (!result) return
 
@@ -1203,10 +1205,10 @@ export function handleResumeDashboardStats(provider: ClineProvider, message: Web
  * Internally, this calls `replaceSubscription` with the same subscription
  * descriptor to trigger a fresh snapshot.
  */
-export function handleResyncDashboardStats(provider: ClineProvider, message: WebviewMessage): void {
+export async function handleResyncDashboardStats(provider: ClineProvider, message: WebviewMessage): Promise<void> {
 	const requestId = message.requestId
 
-	const result = getCoordinatorAndSink(provider, requestId)
+	const result = await getCoordinatorAndSink(provider, requestId)
 
 	if (!result) return
 

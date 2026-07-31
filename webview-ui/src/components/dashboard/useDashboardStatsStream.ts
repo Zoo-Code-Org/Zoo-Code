@@ -1,4 +1,4 @@
-﻿// React hook for the dashboard stats stream subscription lifecycle.
+// React hook for the dashboard stats stream subscription lifecycle.
 // See docs/260729_0001_session_branch-recovery/dashboard-streaming-architecture.md
 // for the full specification.
 
@@ -175,6 +175,23 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 			})
 		}
 	}, [visible])
+
+	// ── Loading timeout guard ──────────────────────────────────────────────
+	useEffect(() => {
+		if (state.isLoading) {
+			const timer = setTimeout(() => {
+				dispatch({
+					type: "ERROR",
+					error: {
+						requestId: subscriptionIdRef.current ?? "",
+						code: "STATS_HANDLER/stream/timeout",
+						message: "Dashboard request timed out",
+					},
+				})
+			}, 10000)
+			return () => clearTimeout(timer)
+		}
+	}, [state.isLoading, state.subscriptionId])
 
 	// ── requestSessionPage ──────────────────────────────────────────────────
 	const requestSessionPage = useCallback(

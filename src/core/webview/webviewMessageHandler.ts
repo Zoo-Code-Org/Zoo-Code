@@ -1,4 +1,4 @@
-﻿import { safeWriteJson } from "../../utils/safeWriteJson"
+import { safeWriteJson } from "../../utils/safeWriteJson"
 import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
@@ -891,22 +891,22 @@ export const webviewMessageHandler = async (
 			break
 		// ── Dashboard Stats Stream Handlers ────────────────────────────────
 		case "subscribeDashboardStats":
-			handleSubscribeDashboardStats(provider, message)
+			await handleSubscribeDashboardStats(provider, message)
 			break
 		case "unsubscribeDashboardStats":
-			handleUnsubscribeDashboardStats(provider, message)
+			await handleUnsubscribeDashboardStats(provider, message)
 			break
 		case "replaceDashboardStatsSubscription":
-			handleReplaceDashboardStatsSubscription(provider, message)
+			await handleReplaceDashboardStatsSubscription(provider, message)
 			break
 		case "pauseDashboardStats":
-			handlePauseDashboardStats(provider, message)
+			await handlePauseDashboardStats(provider, message)
 			break
 		case "resumeDashboardStats":
-			handleResumeDashboardStats(provider, message)
+			await handleResumeDashboardStats(provider, message)
 			break
 		case "resyncDashboardStats":
-			handleResyncDashboardStats(provider, message)
+			await handleResyncDashboardStats(provider, message)
 			break
 		case "getDashboardSessionPage":
 			await handleGetDashboardSessionPage(provider, message)

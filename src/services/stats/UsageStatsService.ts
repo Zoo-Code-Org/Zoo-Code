@@ -1,4 +1,4 @@
-﻿import * as vscode from "vscode"
+import * as vscode from "vscode"
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
@@ -124,12 +124,21 @@ export class UsageStatsService {
 
 	// ── Public API ──────────────────────────────────────────────────────────
 
+	private initPromise: Promise<void> | null = null
+
 	/**
 	 * Initializes the service.
 	 * Performs store initialization, database initialization, migration,
 	 * and sets up the file system watcher.
 	 */
 	async initialize(): Promise<void> {
+		if (!this.initPromise) {
+			this.initPromise = this.doInitialize()
+		}
+		return this.initPromise
+	}
+
+	private async doInitialize(): Promise<void> {
 		// Initialize the SQLite database
 		try {
 			this.database.initialize()
@@ -162,6 +171,12 @@ export class UsageStatsService {
 
 		// Create the stream coordinator after the database is initialized
 		this.coordinator = new UsageStatsStreamCoordinator(this.database._isInitialized() ? this.database : null)
+	}
+
+	async ensureInitialized(): Promise<void> {
+		if (this.initPromise) {
+			await this.initPromise
+		}
 	}
 
 	/**
