@@ -57,6 +57,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	// Cache ratio for estimation when provider doesn't report cacheReadTokens (default 94%)
 	const [cacheRatio, setCacheRatio] = useState<number>(0.94)
 	const [heatmapRange, setHeatmapRange] = useState<HeatmapRange>("30d")
+	const [isResyncing, setIsResyncing] = useState(false)
 
 	// ── Session detail state ────────────────────────────────────────────────
 	// Only one session is expanded at a time (accordion pattern). The detail
@@ -194,6 +195,15 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [preset, groupBy, heatmapRange, cacheRatio])
 
+	// ── Clear isResyncing when new snapshot arrives ──────────────────────────
+
+	useEffect(() => {
+		if (isResyncing) {
+			setIsResyncing(false)
+		}
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [streamState.generatedAt])
+
 	// ── Fetch session detail (on expand) ───────────────────────────────────
 
 	const fetchSessionDetail = useCallback((taskId: string) => {
@@ -242,6 +252,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const handlePresetChange = useCallback((newPreset: DashboardPreset) => {
 		setPreset(newPreset)
+		setIsResyncing(true)
 	}, [])
 
 	const handleGroupByChange = useCallback((newGroupBy: DashboardGroupBy) => {
@@ -622,6 +633,16 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				{/* Data display */}
 				{!isLoading && !error && hasData && (
 					<>
+						{/* Resync loading indicator — shown during preset transitions */}
+						{isResyncing && (
+							<div
+								className="flex items-center justify-center gap-2 rounded-md border border-vscode-inputValidation-infoBorder bg-vscode-inputValidation-infoBackground px-3 py-2 text-xs text-vscode-foreground"
+								data-testid="dashboard-resyncing">
+								<RefreshCw className="size-3.5 animate-spin" />
+								<span>{t("dashboard:states.loading")}</span>
+							</div>
+						)}
+
 						{/* Summary cards */}
 						<DashboardSummary totals={totals} />
 
