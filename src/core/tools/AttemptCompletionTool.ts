@@ -1,7 +1,6 @@
 import * as vscode from "vscode"
 
 import { RooCodeEventName, type HistoryItem } from "@roo-code/types"
-import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -81,6 +80,19 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			await task.say("completion_result", result, undefined, false)
 
+			// Whether this attempt_completion call is a stale replay of an already-completed
+			// subtask (user revisiting it from history) rather than a live model-initiated
+			// completion. Determined below, before telemetry is flushed, so a replay -- which
+			// runs this handler again on a fresh Task instance with a zero telemetry baseline
+			// -- doesn't produce a duplicate "attempt_completion" installment for work that
+			// was already reported when the subtask first completed.
+			let isStaleHistoryReplay = false
+			// Whether the delegation branch below already flushed telemetry (it needs to
+			// flush before delegateToParent, which may return early) -- prevents the shared
+			// fallthrough flush from double-reporting when delegation falls through to
+			// "continue" instead of returning.
+			let hasFlushedTelemetry = false
+
 			// Check for subtask using parentTaskId (metadata-driven delegation)
 			if (task.parentTaskId) {
 				// Check if this subtask has already completed and returned to parent
@@ -97,6 +109,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 							// Fall through to normal completion ask flow below (outside this if block)
 							// This shows the user the completion result and waits for acceptance
 							// without injecting another tool_result to the parent
+							isStaleHistoryReplay = true
 						} else if (status === "active" || status === "interrupted") {
 							historyLookupTaskId = task.parentTaskId
 							const { historyItem: parentHistory } = await provider.getTaskWithId(task.parentTaskId)
@@ -105,6 +118,15 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								(parentHistory?.status === "delegated" || parentHistory?.status === "active") &&
 								parentHistory?.awaitingChildId === task.taskId
 							) {
+								// Known not to be a stale history replay (status was "active", not
+								// "completed"), so flush telemetry before the delegation call, which
+								// may return early below. hasFlushedTelemetry prevents the shared
+								// fallthrough flush further down from double-reporting if delegation
+								// falls through to "continue" instead of returning.
+								task.emitFinalTokenUsageUpdate()
+								task.flushTelemetryInstallment("attempt_completion")
+								hasFlushedTelemetry = true
+
 								const delegation = await this.delegateToParent(
 									task,
 									result,
@@ -113,7 +135,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 									pushToolResult,
 								)
 								if (delegation === "delegated") {
-									this.emitTaskCompleted(task)
+									this.emitPublicTaskCompleted(task)
 								}
 								if (delegation !== "continue") return
 							} else {
@@ -147,10 +169,30 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				}
 			}
 
+			// PostHog telemetry: report here, once per model-initiated attempt_completion
+			// call, regardless of whether the user goes on to accept, decline, or give
+			// feedback. Gating this on user acceptance previously meant a task that never
+			// got an explicit "yes" (declined, abandoned mid-review, etc.) reported nothing
+			// at all. This is independent of the public TaskCompleted API event, which still
+			// only fires once the task is genuinely finished. Skipped for a stale history
+			// replay (revisiting an already-completed subtask) since that reruns this handler
+			// on a fresh Task instance and would otherwise double-report work already flushed
+			// when the subtask first completed, and skipped if the delegation branch above
+			// already flushed.
+			if (!isStaleHistoryReplay && !hasFlushedTelemetry) {
+				task.emitFinalTokenUsageUpdate()
+				task.flushTelemetryInstallment("attempt_completion")
+			}
+
 			const { response, text, images } = await task.ask("completion_result", "", false)
 
 			if (response === "yesButtonClicked") {
-				this.emitTaskCompleted(task)
+				// A stale history replay reruns this handler on a fresh Task instance for a
+				// subtask that already completed (and already emitted TaskCompleted) the first
+				// time through -- re-acknowledging it from history must not emit it again.
+				if (!isStaleHistoryReplay) {
+					this.emitPublicTaskCompleted(task)
+				}
 				return
 			}
 
@@ -217,12 +259,17 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 		}
 	}
 
-	private emitTaskCompleted(task: Task): void {
+	/**
+	 * Emits the public RooCodeEventName.TaskCompleted API event. Only called once the
+	 * task is genuinely finished (user accepted, or a subtask was successfully delegated
+	 * back to its parent) -- unlike the PostHog telemetry flush, which reports on every
+	 * model-initiated attempt_completion call regardless of outcome.
+	 */
+	private emitPublicTaskCompleted(task: Task): void {
 		// Force final token usage update before emitting TaskCompleted.
 		// This ensures the latest stats are captured regardless of throttle timer.
 		task.emitFinalTokenUsageUpdate()
 
-		TelemetryService.instance.captureTaskCompleted(task.taskId)
 		task.emit(RooCodeEventName.TaskCompleted, task.taskId, task.getTokenUsage(), task.toolUsage)
 	}
 }

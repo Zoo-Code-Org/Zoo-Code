@@ -5,6 +5,7 @@ import {
 	type TelemetryPropertiesProvider,
 	TelemetryEventName,
 	type TelemetrySetting,
+	type ToolUsage,
 } from "@roo-code/types"
 
 /**
@@ -86,8 +87,31 @@ export class TelemetryService {
 		this.captureEvent(TelemetryEventName.TASK_RESTARTED, { taskId })
 	}
 
-	public captureTaskCompleted(taskId: string): void {
-		this.captureEvent(TelemetryEventName.TASK_COMPLETED, { taskId })
+	/**
+	 * Captures task completion, summarizing per-task tool and message counts that
+	 * were previously reported as separate per-turn events to reduce event volume.
+	 *
+	 * A single task may emit this more than once (e.g. an "idle" or "shutdown"
+	 * installment followed by a final "attempt_completion" one). toolsUsed and
+	 * messageCount are always deltas since the previous emission for that task,
+	 * not running totals -- summing installments for a taskId reconstructs the
+	 * full-task counts without double-counting.
+	 *
+	 * Note: "attempt_completion" means the model called that tool, not that the
+	 * user accepted the result.
+	 */
+	public captureTaskCompleted(
+		taskId: string,
+		toolsUsed?: ToolUsage,
+		messageCount?: { user: number; assistant: number },
+		completionReason: "attempt_completion" | "idle" | "shutdown" = "attempt_completion",
+	): void {
+		this.captureEvent(TelemetryEventName.TASK_COMPLETED, {
+			taskId,
+			completionReason,
+			...(toolsUsed !== undefined && { toolsUsed }),
+			...(messageCount !== undefined && { messageCount }),
+		})
 	}
 
 	public captureConversationMessage(taskId: string, source: "user" | "assistant"): void {

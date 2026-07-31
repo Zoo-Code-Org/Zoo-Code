@@ -3059,6 +3059,233 @@ describe("Queued message processing after condense", () => {
 	})
 })
 
+describe("Telemetry installments (idle/shutdown flush)", () => {
+	let mockProvider: ClineProvider
+	let mockApiConfig: ProviderSettings
+	let mockExtensionContext: vscode.ExtensionContext
+	let captureTaskCompletedSpy: ReturnType<typeof vi.spyOn>
+
+	beforeEach(() => {
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+
+		captureTaskCompletedSpy = vi.spyOn(TelemetryService.instance, "captureTaskCompleted")
+
+		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
+
+		mockExtensionContext = {
+			globalState: {
+				get: vi.fn().mockReturnValue(undefined),
+				update: vi.fn().mockResolvedValue(undefined),
+				keys: vi.fn().mockReturnValue([]),
+			},
+			globalStorageUri: storageUri,
+			workspaceState: {
+				get: vi.fn().mockReturnValue(undefined),
+				update: vi.fn().mockResolvedValue(undefined),
+				keys: vi.fn().mockReturnValue([]),
+			},
+			secrets: {
+				get: vi.fn().mockResolvedValue(undefined),
+				store: vi.fn().mockResolvedValue(undefined),
+				delete: vi.fn().mockResolvedValue(undefined),
+			},
+			extensionUri: { fsPath: "/mock/extension/path" },
+			extension: { packageJSON: { version: "1.0.0" } },
+		} as unknown as vscode.ExtensionContext
+
+		mockProvider = new ClineProvider(
+			mockExtensionContext,
+			{
+				appendLine: vi.fn(),
+				append: vi.fn(),
+				clear: vi.fn(),
+				show: vi.fn(),
+				hide: vi.fn(),
+				dispose: vi.fn(),
+			} as unknown as vscode.OutputChannel,
+			"sidebar",
+			new ContextProxy(mockExtensionContext),
+		)
+		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
+
+		mockApiConfig = {
+			apiProvider: "anthropic",
+			apiModelId: "claude-3-5-sonnet-20241022",
+			apiKey: "test-api-key",
+		}
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+		captureTaskCompletedSpy.mockRestore()
+	})
+
+	function createTask() {
+		return new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+	}
+
+	describe("flushTelemetryInstallment", () => {
+		it("reports nothing and does not call captureTaskCompleted when there is no new activity", () => {
+			const task = createTask()
+
+			task.flushTelemetryInstallment("idle")
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("reports the current toolUsage/messageCounts as the delta on the first flush", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 2, assistant: 3 }
+
+			task.flushTelemetryInstallment("idle")
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 2, failures: 0 } },
+				{ user: 2, assistant: 3 },
+				"idle",
+			)
+		})
+
+		it("does not mutate task.toolUsage/messageCounts (they stay running totals for the public API/UI)", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 1, assistant: 1 }
+
+			task.flushTelemetryInstallment("idle")
+
+			expect(task.toolUsage).toEqual({ read_file: { attempts: 1, failures: 0 } })
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("reports only the delta since the previous installment on a second flush", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 1, assistant: 1 }
+			task.flushTelemetryInstallment("idle")
+			captureTaskCompletedSpy.mockClear()
+
+			task.recordToolUsage("read_file")
+			task.recordToolUsage("write_to_file")
+			task.messageCounts = { user: 3, assistant: 2 }
+			task.flushTelemetryInstallment("shutdown")
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 1, failures: 0 }, write_to_file: { attempts: 1, failures: 0 } },
+				{ user: 2, assistant: 1 },
+				"shutdown",
+			)
+		})
+
+		it("does not emit an empty second installment when nothing changed since the first flush", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.flushTelemetryInstallment("idle")
+			captureTaskCompletedSpy.mockClear()
+
+			task.flushTelemetryInstallment("shutdown")
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("includes failure deltas alongside attempt deltas", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.flushTelemetryInstallment("idle")
+			captureTaskCompletedSpy.mockClear()
+
+			task.recordToolError("read_file")
+
+			task.flushTelemetryInstallment("shutdown")
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 0, failures: 1 } },
+				{ user: 0, assistant: 0 },
+				"shutdown",
+			)
+		})
+	})
+
+	describe("idle flush timer", () => {
+		it("flushes once activity has been quiet for the idle threshold", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+
+			vi.advanceTimersByTime(31 * 60 * 1000)
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 1, failures: 0 } },
+				{ user: 0, assistant: 0 },
+				"idle",
+			)
+		})
+
+		it("does not flush before the idle threshold has elapsed", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+
+			vi.advanceTimersByTime(10 * 60 * 1000)
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("dispose", () => {
+		it("flushes unreported activity as a shutdown installment", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 1, assistant: 1 }
+
+			task.dispose()
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 1, failures: 0 } },
+				{ user: 1, assistant: 1 },
+				"shutdown",
+			)
+		})
+
+		it("does not flush again if everything was already reported before dispose", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.flushTelemetryInstallment("attempt_completion")
+			captureTaskCompletedSpy.mockClear()
+
+			task.dispose()
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("stops the idle timer so a disposed task never flushes again", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.dispose()
+			captureTaskCompletedSpy.mockClear()
+
+			vi.advanceTimersByTime(60 * 60 * 1000)
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+	})
+})
+
 describe("pushToolResultToUserContent", () => {
 	let mockProvider: any
 	let mockApiConfig: ProviderSettings
