@@ -28,7 +28,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	readonly name = "use_mcp_tool" as const
 
 	async execute(params: UseMcpToolParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { askApproval, handleError, pushToolResult } = callbacks
+		const { askApproval, handleError, pushToolResult, onValidated } = callbacks
 
 		try {
 			// Validate parameters
@@ -65,6 +65,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 			// Reset mistake count on successful validation
 			task.consecutiveMistakeCount = 0
+
+			// All internal validation (params, tool existence, server allow-list) has
+			// passed. Only now is it safe to attribute this as an attempted tool use.
+			onValidated?.()
 
 			// Get user approval
 			const completeMessage = JSON.stringify({

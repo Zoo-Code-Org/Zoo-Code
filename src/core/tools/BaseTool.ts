@@ -11,6 +11,15 @@ export interface ToolCallbacks {
 	handleError: HandleError
 	pushToolResult: PushToolResult
 	toolCallId?: string
+	/**
+	 * Optional hook invoked once a tool's own internal validation (params,
+	 * target existence, permissions) has passed, before side-effecting
+	 * execution begins. Used by callers that must defer telemetry attribution
+	 * until validation this deep can't be done from the outside (e.g. native
+	 * MCP tool calls, whose server/tool/allow-list checks live inside
+	 * UseMcpToolTool rather than the shared validateToolUse path).
+	 */
+	onValidated?: () => void
 }
 
 /**

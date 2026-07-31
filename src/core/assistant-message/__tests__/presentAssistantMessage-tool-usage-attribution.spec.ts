@@ -4,9 +4,17 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
+import { getModeBySlug } from "../../../shared/modes"
 import type { Task } from "../../task/Task"
 
 vi.mock("../../task/Task")
+vi.mock("../../../shared/modes", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../shared/modes")>()
+	return {
+		...actual,
+		getModeBySlug: vi.fn(actual.getModeBySlug),
+	}
+})
 vi.mock("../../tools/validateToolUse", () => ({
 	validateToolUse: vi.fn(),
 	isValidToolName: vi.fn((toolName: string) =>
@@ -53,7 +61,12 @@ interface MockTask {
 	recordToolUsage: ReturnType<typeof vi.fn>
 	recordToolError: ReturnType<typeof vi.fn>
 	toolRepetitionDetector: { check: ReturnType<typeof vi.fn> }
-	providerRef: { deref: () => { getState: ReturnType<typeof vi.fn> } }
+	providerRef: {
+		deref: () => {
+			getState: ReturnType<typeof vi.fn>
+			getMcpHub?: () => { findServerNameBySanitizedName: (name: string) => string | undefined }
+		}
+	}
 	say: ReturnType<typeof vi.fn>
 	ask: ReturnType<typeof vi.fn>
 	pushToolResultToUserContent: ReturnType<typeof vi.fn>
@@ -217,5 +230,81 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 		expect(mockTask.recordToolError).toHaveBeenCalledWith("invalid_tool_call", expect.any(String))
 		expect(mockTask.recordToolError).not.toHaveBeenCalledWith("totally_made_up_tool", expect.anything())
 		expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
+	})
+
+	describe("native mcp_tool_use block", () => {
+		it("records exactly one attempt once the MCP tool's own validation passes", async () => {
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+					}),
+				}),
+			}
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			expect(mockTask.recordToolUsage).toHaveBeenCalledTimes(1)
+			expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
+			expect(TelemetryService.instance.captureToolUsage).toHaveBeenCalledTimes(1)
+			expect(TelemetryService.instance.captureToolUsage).toHaveBeenCalledWith(mockTask.taskId, "use_mcp_tool")
+		})
+
+		it("records no attempt when the MCP server is not on the mode's allow-list", async () => {
+			vi.mocked(getModeBySlug).mockReturnValueOnce({
+				slug: "code",
+				name: "Code",
+				roleDefinition: "",
+				groups: [],
+				allowedMcpServers: ["some-other-server"],
+			})
+
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						mode: "code",
+						customModes: [],
+					}),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "my_server",
+					}),
+				}),
+			}
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_disallowed",
+					name: "mcp_my_server_do_thing",
+					serverName: "my_server",
+					toolName: "do_thing",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask as unknown as Task)
+
+			// The server is disallowed, so the call never reaches onValidated:
+			// no success attempt is recorded for a call that was never permitted to execute.
+			expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureToolUsage).not.toHaveBeenCalled()
+		})
 	})
 })
