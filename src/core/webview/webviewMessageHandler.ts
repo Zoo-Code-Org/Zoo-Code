@@ -105,6 +105,7 @@ import { handleTaskOrganizationMessage } from "./taskOrganizationMessageHandler"
 import {
 	handleGetUsageStats,
 	handleClearUsageStats,
+	handleRebuildUsageStats,
 	handleExportUsageStats,
 	handleRequestClearNonce,
 	handleGetDashboardSessions,
@@ -872,6 +873,9 @@ export const webviewMessageHandler = async (
 			break
 		case "clearUsageStats":
 			await handleClearUsageStats(provider, message)
+			break
+		case "rebuildUsageStats":
+			await handleRebuildUsageStats(provider, message)
 			break
 		case "exportUsageStats":
 			await handleExportUsageStats(provider, message)

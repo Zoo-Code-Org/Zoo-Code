@@ -7,10 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import type { UsageEventV1, StatsQuery } from "@roo-code/types"
 
 import { UsageStatsDatabase } from "../UsageStatsDatabase"
-import {
-	assembleRollupSnapshot,
-	applyEventToProjection,
-} from "../UsageStatsProjection"
+import { assembleRollupSnapshot, applyEventToProjection } from "../UsageStatsProjection"
 import { UsageAggregator } from "../UsageAggregator"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
@@ -561,7 +558,6 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			expect(snapshot.buckets.length).toBe(models.length)
 			expect(elapsed).toBeLessThan(200)
 
-			// eslint-disable-next-line no-console
 			console.log(`  10K events snapshot assembly: ${elapsed.toFixed(1)}ms`)
 		}, 300000) // 5 minute timeout for seeding
 
@@ -605,7 +601,6 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			expect(snapshot.totals.events).toBe(totalEvents)
 			expect(elapsed).toBeLessThan(200)
 
-			// eslint-disable-next-line no-console
 			console.log(`  10K events [day] snapshot assembly: ${elapsed.toFixed(1)}ms`)
 		}, 300000)
 	})

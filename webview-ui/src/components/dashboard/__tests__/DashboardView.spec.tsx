@@ -710,7 +710,104 @@ describe("DashboardView (streaming)", () => {
 		})
 	})
 
-	// ── 10. onDone ────────────────────────────────────────────────────────
+	// ── 10. Rebuild Stats ────────────────────────────────────────────────
+
+	describe("handleRebuildStats", () => {
+		it("sends rebuildUsageStats message on rebuild button click", async () => {
+			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
+
+			setConnectedState()
+			rerender(<DashboardView onDone={() => {}} />)
+
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
+			})
+
+			postMessageMock.mockClear()
+
+			const rebuildBtn = container.querySelector('[data-testid="dashboard-rebuild-button"]') as HTMLButtonElement
+			fireEvent.click(rebuildBtn)
+
+			expect(postMessageMock).toHaveBeenCalledTimes(1)
+			const msg = postMessageMock.mock.calls[0][0] as { type: string; requestId: string }
+			expect(msg.type).toBe("rebuildUsageStats")
+			expect(msg.requestId).toContain("dashboard-rebuild-")
+		})
+
+		it("disables rebuild button when no data", async () => {
+			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
+
+			setStreamState({
+				isLoading: false,
+				status: "connected",
+				totals: makeBucket({ events: 0, totalTokens: 0 }),
+				bucketOrder: [],
+				buckets: {},
+				heatmapRangeDays: 30,
+				heatmapValues: [],
+				coverage: null,
+			})
+			rerender(<DashboardView onDone={() => {}} />)
+
+			await waitFor(() => {
+				const rebuildBtn = container.querySelector(
+					'[data-testid="dashboard-rebuild-button"]',
+				) as HTMLButtonElement
+				expect(rebuildBtn.disabled).toBe(true)
+			})
+		})
+
+		it("triggers replaceSubscription on rebuildUsageStatsResponse success", async () => {
+			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
+
+			setConnectedState()
+			rerender(<DashboardView onDone={() => {}} />)
+
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
+			})
+
+			replaceSubscriptionMock.mockClear()
+
+			// Simulate rebuild response message
+			const messageEvent = new MessageEvent("message", {
+				data: {
+					type: "rebuildUsageStatsResponse",
+					rebuildUsageStatsResult: { success: true },
+				},
+			})
+			window.dispatchEvent(messageEvent)
+
+			expect(replaceSubscriptionMock).toHaveBeenCalledTimes(1)
+		})
+
+		it("sets error on rebuildUsageStatsResponse failure", async () => {
+			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
+
+			setConnectedState()
+			rerender(<DashboardView onDone={() => {}} />)
+
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
+			})
+
+			// Simulate rebuild failure response
+			const messageEvent = new MessageEvent("message", {
+				data: {
+					type: "rebuildUsageStatsResponse",
+					rebuildUsageStatsResult: { success: false, error: "Rebuild failed" },
+				},
+			})
+			window.dispatchEvent(messageEvent)
+
+			// setError is called, which renders dashboard-error-banner when hasData is true
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-error-banner"]')).toBeTruthy()
+			})
+		})
+	})
+
+	// ── 11. onDone ────────────────────────────────────────────────────────
 
 	describe("onDone", () => {
 		it("calls onDone when done button is clicked", () => {

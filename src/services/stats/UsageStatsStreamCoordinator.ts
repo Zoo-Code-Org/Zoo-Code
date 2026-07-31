@@ -130,6 +130,9 @@ export class UsageStatsStreamCoordinator {
 	/** Whether the coordinator has been disposed. */
 	private disposed = false
 
+	/** Whether rollups have already been auto-rebuilt (one-time check). */
+	private rollupsRebuilt = false
+
 	/** The database to read from (may be null if not initialized). */
 	private readonly database: UsageStatsDatabase | null
 
@@ -446,10 +449,10 @@ export class UsageStatsStreamCoordinator {
 			const recordingPaused = this.recordingPausedProvider?.() ?? false
 
 			// Assemble the rollup snapshot (stats)
-			const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+			let stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
 
 			// Compute session page
-			const sessions = computeSessionPage(
+			let sessions = computeSessionPage(
 				this.database,
 				state.subscription.requestId,
 				undefined,
@@ -457,7 +460,39 @@ export class UsageStatsStreamCoordinator {
 			)
 
 			// Compute heatmap
-			const heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
+			let heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
+
+			// Auto-detect rollup staleness: if stats has data but sessions/heatmap
+			// are empty, the derived tables (stats_rollup, session_metadata) are
+			// stale or missing. Trigger a one-time rebuild from usage_events.
+			if (!this.rollupsRebuilt && stats.totals.events > 0) {
+				const hasEmptyDerivedTables = sessions.sessions.length === 0 && heatmap.values.every((v) => v === 0)
+
+				if (hasEmptyDerivedTables) {
+					try {
+						this.database.rebuildRollupsFromEvents()
+						this.rollupsRebuilt = true
+						// Re-assemble after rebuild
+						stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+						sessions = computeSessionPage(
+							this.database,
+							state.subscription.requestId,
+							undefined,
+							state.subscription.sessionPageSize,
+						)
+						heatmap = computeHeatmapSnapshot(
+							this.database,
+							state.subscription.heatmapRangeDays,
+							query.timezone,
+						)
+					} catch (err) {
+						console.error("[UsageStatsStreamCoordinator] Auto-rebuild failed:", err)
+						this.rollupsRebuilt = true
+					}
+				} else {
+					this.rollupsRebuilt = true
+				}
+			}
 
 			// Get current generation and sequence
 			const generation = this.database.getGeneration()

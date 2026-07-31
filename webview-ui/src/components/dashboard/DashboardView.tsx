@@ -1,5 +1,5 @@
 ﻿import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
+import { ArrowLeft, Download, Trash2, RefreshCw, Database } from "lucide-react"
 
 import type { ExtensionMessage, StatsQuery, StatsBucket, SessionDetail, DashboardSessionSummary } from "@roo-code/types"
 
@@ -107,7 +107,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			fromOverride?: string,
 			toOverride?: string,
 		): StatsQuery => {
-			const now = new Date()
 			let from: string | undefined
 			let to: string | undefined
 			let queryPreset: StatsQuery["preset"]
@@ -319,6 +318,15 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setError(message.exportUsageStatsResult.error)
 				}
 			}
+
+			if (message.type === "rebuildUsageStatsResponse") {
+				if (message.rebuildUsageStatsResult?.success) {
+					// Trigger a resync after rebuild
+					replaceSubscription(buildQuery(preset, groupBy), HEATMAP_RANGE_DAYS[heatmapRange], 50)
+				} else {
+					setError(message.rebuildUsageStatsResult?.error || t("dashboard:states.error"))
+				}
+			}
 		}
 
 		window.addEventListener("message", handleMessage)
@@ -360,6 +368,16 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			clearUsageStatsNonce: clearNonce,
 		})
 	}, [clearNonce])
+
+	// ── Rebuild stats (rebuild rollup tables from raw events) ───────────────
+
+	const handleRebuildStats = useCallback(() => {
+		const requestId = `dashboard-rebuild-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+		vscode.postMessage({
+			type: "rebuildUsageStats",
+			requestId,
+		})
+	}, [])
 
 	// ── Derived data from stream state ──────────────────────────────────────
 
@@ -440,6 +458,17 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								disabled={!hasData}>
 								<Download className="size-3.5" />
 								<span className="hidden sm:inline">{t("dashboard:actions.exportCsv")}</span>
+							</Button>
+						</StandardTooltip>
+						<StandardTooltip content={t("dashboard:actions.rebuild")}>
+							<Button
+								variant="ghost"
+								size="sm"
+								onClick={handleRebuildStats}
+								data-testid="dashboard-rebuild-button"
+								disabled={!hasData}>
+								<Database className="size-3.5" />
+								<span className="hidden sm:inline">{t("dashboard:actions.rebuild")}</span>
 							</Button>
 						</StandardTooltip>
 						<StandardTooltip content={t("dashboard:actions.clear")}>

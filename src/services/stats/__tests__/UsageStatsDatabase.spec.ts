@@ -899,4 +899,335 @@ describe("UsageStatsDatabase", () => {
 			expect(totals.eventCount).toBe(1000000)
 		}, 600000) // 10 minute timeout for 1M events
 	})
+
+	describe("rebuildRollupsFromEvents", () => {
+		it("should rebuild rollups from events after clearing derived tables", () => {
+			const event = makeEvent({
+				eventId: "evt-rebuild-1",
+				idempotencyKey: "idem-rebuild-1",
+				rootTaskId: "task-rebuild-1",
+				occurredAt: "2026-07-30T10:00:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.05, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// Verify initial state has data
+			const rollupsBefore = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollupsBefore).toHaveLength(1)
+			expect(rollupsBefore[0].eventCount).toBe(1)
+
+			const sessionsBefore = db.querySessions(50)
+			expect(sessionsBefore.sessions).toHaveLength(1)
+
+			const totalsBefore = db.queryLifetimeTotals()
+			expect(totalsBefore.eventCount).toBe(1)
+
+			// Simulate stale derived tables by directly clearing them
+			const rawDb = (
+				db as unknown as {
+					db: { exec: (sql: string) => void }
+				}
+			).db
+			rawDb.exec("DELETE FROM stats_rollup")
+			rawDb.exec("DELETE FROM session_metadata")
+			rawDb.exec("DELETE FROM session_activity")
+
+			// Verify derived tables are now empty
+			const rollupsAfter = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollupsAfter).toHaveLength(0)
+
+			const sessionsAfter = db.querySessions(50)
+			expect(sessionsAfter.sessions).toHaveLength(0)
+
+			// Rebuild from events
+			db.rebuildRollupsFromEvents()
+
+			// Verify rollups are rebuilt
+			const rollupsRebuilt = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollupsRebuilt).toHaveLength(1)
+			expect(rollupsRebuilt[0].eventCount).toBe(1)
+			expect(rollupsRebuilt[0].totalCost).toBeCloseTo(0.05, 10)
+
+			// Verify sessions are rebuilt
+			const sessionsRebuilt = db.querySessions(50)
+			expect(sessionsRebuilt.sessions).toHaveLength(1)
+
+			// Verify lifetime totals are rebuilt
+			const totalsRebuilt = db.queryLifetimeTotals()
+			expect(totalsRebuilt.eventCount).toBe(1)
+			expect(totalsRebuilt.totalCost).toBeCloseTo(0.05, 10)
+		})
+
+		it("should be idempotent (running twice produces same result)", () => {
+			const event = makeEvent({
+				eventId: "evt-rebuild-idem-1",
+				idempotencyKey: "idem-rebuild-idem-1",
+				rootTaskId: "task-rebuild-idem-1",
+				occurredAt: "2026-07-30T10:00:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 2000, source: "provider" },
+					outputTokens: { value: 1000, source: "provider" },
+					costUsd: { value: 0.1, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// First rebuild
+			db.rebuildRollupsFromEvents()
+			const rollups1 = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			const sessions1 = db.querySessions(50)
+			const totals1 = db.queryLifetimeTotals()
+
+			// Second rebuild (should produce same result)
+			db.rebuildRollupsFromEvents()
+			const rollups2 = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			const sessions2 = db.querySessions(50)
+			const totals2 = db.queryLifetimeTotals()
+
+			expect(rollups1).toEqual(rollups2)
+			expect(sessions1.sessions).toHaveLength(sessions2.sessions.length)
+			expect(totals1).toEqual(totals2)
+			expect(totals2.eventCount).toBe(1)
+			expect(totals2.totalCost).toBeCloseTo(0.1, 10)
+		})
+
+		it("should handle empty database gracefully (no events)", () => {
+			// Rebuild with no events — should not throw
+			db.rebuildRollupsFromEvents()
+
+			const rollups = db.queryDailyRollups("2026-01-01", "2026-12-31")
+			expect(rollups).toHaveLength(0)
+
+			const sessions = db.querySessions(50)
+			expect(sessions.sessions).toHaveLength(0)
+
+			const totals = db.queryLifetimeTotals()
+			expect(totals.eventCount).toBe(0)
+		})
+
+		it("should rebuild with correct local day buckets", () => {
+			// Event at 2026-07-29T23:30:00Z with Seoul offset (UTC+9)
+			// Local time is 2026-07-30T08:30:00+09:00 → day bucket = 2026-07-30
+			const event = makeEvent({
+				eventId: "evt-rebuild-tz-1",
+				idempotencyKey: "idem-rebuild-tz-1",
+				rootTaskId: "task-rebuild-tz-1",
+				occurredAt: "2026-07-29T23:30:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 500, source: "provider" },
+					outputTokens: { value: 250, source: "provider" },
+					costUsd: { value: 0.03, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// Clear derived tables
+			const rawDb = (
+				db as unknown as {
+					db: { exec: (sql: string) => void }
+				}
+			).db
+			rawDb.exec("DELETE FROM stats_rollup")
+			rawDb.exec("DELETE FROM session_metadata")
+			rawDb.exec("DELETE FROM session_activity")
+
+			// Rebuild
+			db.rebuildRollupsFromEvents()
+
+			// Day bucket should be 2026-07-30 (local), not 2026-07-29 (UTC)
+			const rollups = db.queryDailyRollups("2026-07-30", "2026-07-30")
+			expect(rollups).toHaveLength(1)
+			expect(rollups[0].day).toBe("2026-07-30")
+			expect(rollups[0].eventCount).toBe(1)
+
+			// UTC day should be empty
+			const oldRollups = db.queryDailyRollups("2026-07-29", "2026-07-29")
+			expect(oldRollups).toHaveLength(0)
+		})
+
+		it("should rebuild breakdown rollups (per model/provider/mode axis)", () => {
+			const event = makeEvent({
+				eventId: "evt-rebuild-bd-1",
+				idempotencyKey: "idem-rebuild-bd-1",
+				rootTaskId: "task-rebuild-bd-1",
+				provider: "anthropic",
+				model: "claude-sonnet-4-20250514",
+				mode: "code",
+				occurredAt: "2026-07-30T10:00:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.05, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// Clear derived tables
+			const rawDb = (
+				db as unknown as {
+					db: { exec: (sql: string) => void }
+				}
+			).db
+			rawDb.exec("DELETE FROM stats_rollup")
+			rawDb.exec("DELETE FROM session_metadata")
+			rawDb.exec("DELETE FROM session_activity")
+
+			// Rebuild
+			db.rebuildRollupsFromEvents()
+
+			// Verify breakdown rollups exist for each axis
+			const breakdownRows = rawDb
+				? (() => {
+						const stmt = (
+							db as unknown as {
+								db: {
+									prepare: (sql: string) => {
+										all: (...args: unknown[]) => Array<Record<string, unknown>>
+									}
+								}
+							}
+						).db.prepare(
+							`SELECT axis, axis_value, event_count FROM stats_rollup
+							 WHERE period_type = 'daily' AND period_key = '2026-07-30'
+							 AND root_task_id = '' AND axis != ''`,
+						)
+						return stmt.all()
+					})()
+				: []
+
+			// Should have 3 breakdown rows (model, provider, mode)
+			expect(breakdownRows).toHaveLength(3)
+			const axes = breakdownRows.map((r) => r.axis).sort()
+			expect(axes).toEqual(["mode", "model", "provider"])
+		})
+
+		it("should rebuild non-cancelled-only rollups", () => {
+			// One completed event and one cancelled event
+			const completedEvent = makeEvent({
+				eventId: "evt-rebuild-nc-1",
+				idempotencyKey: "idem-rebuild-nc-1",
+				rootTaskId: "task-rebuild-nc-1",
+				status: "completed",
+				occurredAt: "2026-07-30T10:00:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.05, source: "provider" },
+				},
+			})
+
+			const cancelledEvent = makeEvent({
+				eventId: "evt-rebuild-nc-2",
+				idempotencyKey: "idem-rebuild-nc-2",
+				rootTaskId: "task-rebuild-nc-2",
+				status: "cancelled",
+				occurredAt: "2026-07-30T11:00:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 500, source: "provider" },
+					outputTokens: { value: 0, source: "provider" },
+					costUsd: { value: 0, source: "provider" },
+				},
+			})
+
+			db.append(completedEvent)
+			db.append(cancelledEvent)
+
+			// Clear derived tables
+			const rawDb = (
+				db as unknown as {
+					db: { exec: (sql: string) => void }
+				}
+			).db
+			rawDb.exec("DELETE FROM stats_rollup")
+			rawDb.exec("DELETE FROM session_metadata")
+			rawDb.exec("DELETE FROM session_activity")
+
+			// Rebuild
+			db.rebuildRollupsFromEvents()
+
+			// Total events should be 2
+			const totals = db.queryLifetimeTotals()
+			expect(totals.eventCount).toBe(2)
+
+			// Non-cancelled rollup should have 1 event
+			const ncRows = (
+				db as unknown as {
+					db: {
+						prepare: (sql: string) => {
+							all: (...args: unknown[]) => Array<Record<string, unknown>>
+						}
+					}
+				}
+			).db
+				.prepare(
+					`SELECT event_count FROM stats_rollup
+					 WHERE period_type = 'lifetime' AND period_key = 'all'
+					 AND root_task_id = '__nc__' AND axis = ''`,
+				)
+				.all()
+
+			expect(ncRows).toHaveLength(1)
+			expect(ncRows[0].event_count).toBe(1)
+		})
+
+		it("should rebuild session_activity with local day buckets", () => {
+			const event = makeEvent({
+				eventId: "evt-rebuild-sa-1",
+				idempotencyKey: "idem-rebuild-sa-1",
+				rootTaskId: "task-rebuild-sa-1",
+				occurredAt: "2026-07-29T23:30:00Z",
+				timezoneOffsetMinutes: 540,
+				usage: {
+					inputTokens: { value: 500, source: "provider" },
+					outputTokens: { value: 250, source: "provider" },
+					costUsd: { value: 0.03, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// Clear derived tables
+			const rawDb = (
+				db as unknown as {
+					db: { exec: (sql: string) => void }
+				}
+			).db
+			rawDb.exec("DELETE FROM stats_rollup")
+			rawDb.exec("DELETE FROM session_metadata")
+			rawDb.exec("DELETE FROM session_activity")
+
+			// Rebuild
+			db.rebuildRollupsFromEvents()
+
+			// Check session_activity has local day
+			const rows = (
+				db as unknown as {
+					db: {
+						prepare: (sql: string) => {
+							all: (...args: unknown[]) => Array<Record<string, unknown>>
+						}
+					}
+				}
+			).db
+				.prepare("SELECT day FROM session_activity WHERE root_task_id = ?")
+				.all("task-rebuild-sa-1")
+
+			expect(rows).toHaveLength(1)
+			expect(rows[0].day).toBe("2026-07-30")
+		})
+	})
 })

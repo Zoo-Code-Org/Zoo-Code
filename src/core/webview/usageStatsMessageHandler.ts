@@ -34,6 +34,9 @@ export type UsageStatsHandlerErrorCode =
 	| "STATS_HANDLER/clear/001" // invalid payload (missing nonce)
 	| "STATS_HANDLER/clear/002" // service unavailable
 	| "STATS_HANDLER/clear/003" // service error
+	| "STATS_HANDLER/rebuild/001" // database not initialized
+	| "STATS_HANDLER/rebuild/002" // service unavailable
+	| "STATS_HANDLER/rebuild/003" // service error
 	| "STATS_HANDLER/export/001" // invalid payload
 	| "STATS_HANDLER/export/002" // service unavailable
 	| "STATS_HANDLER/export/003" // service error
@@ -214,6 +217,76 @@ export async function handleClearUsageStats(provider: ClineProvider, message: We
 			clearUsageStatsResult: {
 				success: false,
 				error: `[STATS_HANDLER/clear/003] Failed to clear usage stats: ${errorMessage}`,
+			},
+		})
+	}
+}
+
+/**
+ * Handles the `rebuildUsageStats` message.
+ * Rebuilds all derived tables (stats_rollup, session_metadata, session_activity)
+ * from the raw usage_events table. This is a maintenance operation for fixing
+ * stale or missing rollup data.
+ */
+export async function handleRebuildUsageStats(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const requestId = message.requestId
+
+	try {
+		const service = provider.getUsageStatsService()
+
+		if (!service) {
+			await provider.postMessageToWebview({
+				type: "rebuildUsageStatsResponse",
+				requestId,
+				rebuildUsageStatsResult: {
+					success: false,
+					error: "[STATS_HANDLER/rebuild/002] Usage stats service is unavailable",
+				},
+			})
+			return
+		}
+
+		const database = service.getDatabase()
+
+		if (!database) {
+			await provider.postMessageToWebview({
+				type: "rebuildUsageStatsResponse",
+				requestId,
+				rebuildUsageStatsResult: {
+					success: false,
+					error: "[STATS_HANDLER/rebuild/001] Database is not initialized",
+				},
+			})
+			return
+		}
+
+		database.rebuildRollupsFromEvents()
+
+		// Notify this window's webview that stats changed
+		await provider.postMessageToWebview({
+			type: "usageStatsChanged",
+		})
+
+		await provider.postMessageToWebview({
+			type: "rebuildUsageStatsResponse",
+			requestId,
+			rebuildUsageStatsResult: {
+				success: true,
+			},
+		})
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+
+		provider.log(
+			`[STATS_HANDLER/rebuild/003] Error rebuilding usage stats: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+		)
+
+		await provider.postMessageToWebview({
+			type: "rebuildUsageStatsResponse",
+			requestId,
+			rebuildUsageStatsResult: {
+				success: false,
+				error: `[STATS_HANDLER/rebuild/003] Failed to rebuild usage stats: ${errorMessage}`,
 			},
 		})
 	}

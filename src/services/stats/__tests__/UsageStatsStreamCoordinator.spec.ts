@@ -677,6 +677,142 @@ describe("UsageStatsStreamCoordinator", () => {
 
 			coordinator.dispose()
 		})
+
+		describe("auto-rebuild stale rollups", () => {
+			/**
+			 * Helper: clears derived tables (stats_rollup, session_metadata, session_activity)
+			 * to simulate a migration gap or stale derived data.
+			 */
+			function clearDerivedTables(): void {
+				const rawDb = db as unknown as { db: { exec: (sql: string) => void } }
+				rawDb.db.exec("DELETE FROM stats_rollup")
+				rawDb.db.exec("DELETE FROM session_metadata")
+				rawDb.db.exec("DELETE FROM session_activity")
+			}
+
+			it("should auto-rebuild when events exist but derived tables are empty", () => {
+				// Append an event (populates all tables), then clear derived tables
+				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+				clearDerivedTables()
+
+				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
+
+				const coordinator = new UsageStatsStreamCoordinator(db)
+				const sink = new MockSink()
+				coordinator.subscribe(sink, makeSubscription())
+
+				// Rebuild should have been triggered
+				expect(rebuildSpy).toHaveBeenCalledTimes(1)
+
+				// Snapshot should have been sent with rebuilt data
+				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+				expect(snapshots).toHaveLength(1)
+				const snapshot = snapshots[0].dashboardStatsStreamSnapshot
+				expect(snapshot).toBeDefined()
+
+				// After rebuild, sessions should be populated
+				expect(snapshot!.sessions.sessions.length).toBeGreaterThan(0)
+
+				// After rebuild, heatmap should have at least one non-zero value
+				expect(snapshot!.heatmap.values.some((v) => v > 0)).toBe(true)
+
+				coordinator.dispose()
+				rebuildSpy.mockRestore()
+			})
+
+			it("should NOT rebuild when derived tables are already consistent", () => {
+				// Append an event normally — all derived tables are populated
+				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+
+				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
+
+				const coordinator = new UsageStatsStreamCoordinator(db)
+				const sink = new MockSink()
+				coordinator.subscribe(sink, makeSubscription())
+
+				// Rebuild should NOT have been called
+				expect(rebuildSpy).not.toHaveBeenCalled()
+
+				// Snapshot should still be sent with data
+				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+				expect(snapshots).toHaveLength(1)
+				const snapshot = snapshots[0].dashboardStatsStreamSnapshot
+				expect(snapshot!.sessions.sessions.length).toBeGreaterThan(0)
+
+				coordinator.dispose()
+				rebuildSpy.mockRestore()
+			})
+
+			it("should send original snapshot when rebuildRollupsFromEvents throws", () => {
+				// Append an event, then clear derived tables
+				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+				clearDerivedTables()
+
+				// Mock rebuild to throw
+				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents").mockImplementation(() => {
+					throw new Error("rebuild failed")
+				})
+
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				const coordinator = new UsageStatsStreamCoordinator(db)
+				const sink = new MockSink()
+
+				// Should not throw
+				expect(() => coordinator.subscribe(sink, makeSubscription())).not.toThrow()
+
+				// Rebuild was attempted
+				expect(rebuildSpy).toHaveBeenCalledTimes(1)
+
+				// Error was logged
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Auto-rebuild failed"),
+					expect.any(Error),
+				)
+
+				// Snapshot should still be sent (with stale/empty derived data)
+				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+				expect(snapshots).toHaveLength(1)
+
+				// No error message should be sent (the catch handles it gracefully)
+				const errors = sink.messagesOfType("dashboardStatsStreamError")
+				expect(errors).toHaveLength(0)
+
+				coordinator.dispose()
+				rebuildSpy.mockRestore()
+				consoleErrorSpy.mockRestore()
+			})
+
+			it("should only attempt rebuild once across multiple snapshots (one-time check)", () => {
+				// Append an event, then clear derived tables
+				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+				clearDerivedTables()
+
+				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
+
+				const coordinator = new UsageStatsStreamCoordinator(db)
+				const sink = new MockSink()
+
+				// First subscribe — triggers rebuild
+				coordinator.subscribe(sink, makeSubscription({ requestId: "req-1" }))
+				expect(rebuildSpy).toHaveBeenCalledTimes(1)
+
+				// Replace subscription — triggers sendSnapshot again
+				coordinator.replaceSubscription(sink, makeSubscription({ requestId: "req-2" }))
+
+				// Rebuild should NOT have been called again (rollupsRebuilt flag is true)
+				expect(rebuildSpy).toHaveBeenCalledTimes(1)
+
+				// Both snapshots should have been sent
+				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+				expect(snapshots).toHaveLength(2)
+				expect(snapshots[0].dashboardStatsStreamSnapshot?.requestId).toBe("req-1")
+				expect(snapshots[1].dashboardStatsStreamSnapshot?.requestId).toBe("req-2")
+
+				coordinator.dispose()
+				rebuildSpy.mockRestore()
+			})
+		})
 	})
 
 	describe("force drain", () => {
