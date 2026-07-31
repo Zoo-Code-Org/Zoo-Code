@@ -902,6 +902,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { images, task, historyItem } = options
 		let promise
 
+		instance.startIdleTelemetryCheck()
+
 		if (images || task) {
 			promise = instance.startTask(task, images)
 		} else if (historyItem) {
@@ -1924,6 +1926,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return Promise.resolve()
 		}
 		this._started = true
+		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -3689,22 +3692,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// we need to remove that message before retrying to avoid having two consecutive
 					// user messages (which would cause tool_result validation errors).
 					const state = await this.providerRef.deref()?.getState()
-					if (this.apiConversationHistory.length > 0) {
+					// Only pop the user message that this iteration added. When
+					// shouldAddUserMessage is false (empty continuation, resumed history,
+					// or flushPendingToolResultsToHistory message) there is nothing to
+					// remove, and popping would corrupt history.
+					let removedCurrentUserMessage = false
+					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 						if (lastMessage.role === "user") {
-							// Remove the last user message that we added earlier. Decrement
-							// messageCounts.user to match -- both retry branches below mark
-							// userMessageWasRemoved so the message (and its count) is restored
-							// exactly once when the retry succeeds, keeping the total symmetric
-							// regardless of how many empty-response cycles occur first.
-							// Guard: only reverse a count this iteration actually added. The
-							// popped message may predate this turn (resumed history, or a
-							// message appended by flushPendingToolResultsToHistory, neither
-							// of which incremented messageCounts.user).
 							this.apiConversationHistory.pop()
-							if (shouldAddUserMessage) {
-								this.messageCounts.user--
-							}
+							this.messageCounts.user--
+							removedCurrentUserMessage = true
 						}
 					}
 
@@ -3727,13 +3725,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							break
 						}
 
-						// Push the same content back onto the stack to retry, incrementing the retry attempt counter
-						// Mark that user message was removed so it gets re-added on retry
+						// Push the same content back onto the stack to retry, incrementing the retry attempt counter.
+						// Only mark userMessageWasRemoved when we actually removed one -- the
+						// restore branch in shouldAddUserMessageToHistory must only fire once.
 						stack.push({
 							userContent: currentUserContent,
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							userMessageWasRemoved: true,
+							userMessageWasRemoved: removedCurrentUserMessage,
 						})
 
 						// Continue to retry the request
@@ -3748,31 +3747,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
 
-							// Push the same content back to retry. Mark that user message was
-							// removed (same as the auto-retry path above) so it gets re-added --
-							// and messageCounts.user re-incremented -- on the retried attempt;
-							// otherwise shouldAddUserMessageToHistory sees retryAttempt > 0 with
-							// userMessageWasRemoved unset and skips re-adding it entirely.
+							// Push the same content back to retry. Only mark userMessageWasRemoved
+							// when we actually removed one so the restore fires exactly once.
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-								userMessageWasRemoved: true,
+								userMessageWasRemoved: removedCurrentUserMessage,
 							})
 
 							// Continue to retry the request
 							continue
 						} else {
-							// User declined to retry
-							// Re-add the user message we removed (see messageCounts.user-- above)
-							// and increment messageCounts.user to match, same as the normal
-							// add-to-history path -- otherwise this abandoned-task path
-							// permanently undercounts by one.
-							await this.addToApiConversationHistory({
-								role: "user",
-								content: currentUserContent,
-							})
-							this.messageCounts.user++
+							// User declined to retry. Re-add the user message only if this
+							// iteration removed one, so the history and counter stay consistent.
+							if (removedCurrentUserMessage) {
+								await this.addToApiConversationHistory({
+									role: "user",
+									content: currentUserContent,
+								})
+								this.messageCounts.user++
+							}
 
 							await this.say(
 								"error",
@@ -4781,6 +4776,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	startIdleTelemetryCheck(): void {
+		if (this.idleTelemetryCheckInterval !== undefined) {
+			return
+		}
 		this.idleTelemetryCheckInterval = setInterval(() => {
 			// Measure idleness from the later of the last activity and the last flush.
 			// Using lastMessageTs alone would keep the condition true forever after the
