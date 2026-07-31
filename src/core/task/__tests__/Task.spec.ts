@@ -3118,7 +3118,13 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 		}
 	})
 
+	const createdTasks: Task[] = []
+
 	afterEach(() => {
+		for (const task of createdTasks) {
+			task.dispose()
+		}
+		createdTasks.length = 0
 		vi.useRealTimers()
 		captureTaskCompletedSpy.mockRestore()
 	})
@@ -3131,6 +3137,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			startTask: false,
 		})
 		task.startIdleTelemetryCheck()
+		createdTasks.push(task)
 		return task
 	}
 

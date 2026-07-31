@@ -4782,12 +4782,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	startIdleTelemetryCheck(): void {
 		this.idleTelemetryCheckInterval = setInterval(() => {
-			// lastMessageTs only moves forward on activity, so comparing it against the
-			// last flush tells us whether anything happened since that flush -- if the
-			// task has been quiet since well before the last flush, there's nothing new
-			// to report and flushTelemetryInstallment's own empty-check would no-op anyway,
-			// but skipping here avoids waking up to do that check needlessly.
-			const idleForMs = Date.now() - (this.lastMessageTs ?? this.lastTelemetryFlushAt)
+			// Measure idleness from the later of the last activity and the last flush.
+			// Using lastMessageTs alone would keep the condition true forever after the
+			// first idle flush, re-running the empty-delta check on every interval tick.
+			const lastEventAt = Math.max(this.lastMessageTs ?? 0, this.lastTelemetryFlushAt)
+			const idleForMs = Date.now() - lastEventAt
 
 			if (idleForMs >= Task.IDLE_TELEMETRY_THRESHOLD_MS) {
 				this.flushTelemetryInstallment("idle")
