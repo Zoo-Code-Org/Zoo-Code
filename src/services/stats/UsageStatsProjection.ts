@@ -234,8 +234,11 @@ function canUseRollupFastPath(query: StatsQuery): boolean {
  */
 function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?: number): StatsBucket {
 	let cacheReadTokens = row.cacheReadTokens
-	if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
-		cacheReadTokens = Math.round(row.inputTokens * cacheRatio)
+	if (cacheRatio !== undefined && cacheRatio > 0) {
+		const uncached = row.uncachedInputTokens ?? (row.cacheReadTokens === 0 ? row.inputTokens : 0)
+		if (uncached > 0) {
+			cacheReadTokens += Math.round(uncached * cacheRatio)
+		}
 	}
 	return {
 		key: { [axis]: row.axisValue },
@@ -259,8 +262,11 @@ function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?
  */
 function dailyRowToBucket(row: DailyRollupDetailedRow, cacheRatio?: number): StatsBucket {
 	let cacheReadTokens = row.cacheReadTokens
-	if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
-		cacheReadTokens = Math.round(row.inputTokens * cacheRatio)
+	if (cacheRatio !== undefined && cacheRatio > 0) {
+		const uncached = row.uncachedInputTokens ?? (row.cacheReadTokens === 0 ? row.inputTokens : 0)
+		if (uncached > 0) {
+			cacheReadTokens += Math.round(uncached * cacheRatio)
+		}
 	}
 	return {
 		key: { day: row.day },
@@ -292,8 +298,11 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[], cacheRatio?: numbe
 		totals.inputTokens += row.inputTokens
 		totals.outputTokens += row.outputTokens
 		let cacheReadTokens = row.cacheReadTokens
-		if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
-			cacheReadTokens = Math.round(row.inputTokens * cacheRatio)
+		if (cacheRatio !== undefined && cacheRatio > 0) {
+			const uncached = row.uncachedInputTokens ?? (row.cacheReadTokens === 0 ? row.inputTokens : 0)
+			if (uncached > 0) {
+				cacheReadTokens += Math.round(uncached * cacheRatio)
+			}
 		}
 		totals.cacheReadTokens += cacheReadTokens
 		totals.cacheWriteTokens += row.cacheWriteTokens
@@ -320,12 +329,16 @@ function lifetimeTotalsToBucket(
 		completedCalls: number
 		failedCalls: number
 		cancelledCalls: number
+		uncachedInputTokens?: number
 	},
 	cacheRatio?: number,
 ): StatsBucket {
 	let cacheReadTokens = totals.cacheReadTokens
-	if (cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0) {
-		cacheReadTokens = Math.round(totals.inputTokens * cacheRatio)
+	if (cacheRatio !== undefined && cacheRatio > 0) {
+		const uncached = totals.uncachedInputTokens ?? (totals.cacheReadTokens === 0 ? totals.inputTokens : 0)
+		if (uncached > 0) {
+			cacheReadTokens += Math.round(uncached * cacheRatio)
+		}
 	}
 	return {
 		key: {},

@@ -117,6 +117,7 @@ export interface DailyRollupDetailedRow {
 	reasoningTokens: number
 	totalTokens: number
 	costUsd: number
+	uncachedInputTokens: number
 }
 
 /** A breakdown rollup row for a specific axis. */
@@ -133,6 +134,7 @@ export interface BreakdownRollupRow {
 	reasoningTokens: number
 	totalTokens: number
 	costUsd: number
+	uncachedInputTokens: number
 }
 
 /** Coverage statistics for a time range. */
@@ -326,8 +328,15 @@ export class UsageStatsDatabase {
 				reasoning_tokens INTEGER NOT NULL DEFAULT 0,
 				total_tokens INTEGER NOT NULL DEFAULT 0,
 				cost_usd REAL NOT NULL DEFAULT 0,
+				uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (period_type, period_key, root_task_id, axis, axis_value)
 			);
+
+			try {
+				db.exec("ALTER TABLE stats_rollup ADD COLUMN uncached_input_tokens INTEGER NOT NULL DEFAULT 0")
+			} catch {
+				// Column already exists
+			}
 
 			CREATE TABLE IF NOT EXISTS session_metadata (
 				root_task_id TEXT PRIMARY KEY,
@@ -1945,7 +1954,7 @@ export class UsageStatsDatabase {
 					.prepare(
 						`SELECT axis_value, event_count, completed_calls, failed_calls, cancelled_calls,
 							input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-							reasoning_tokens, total_tokens, cost_usd
+							reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens
 						 FROM stats_rollup
 						 WHERE period_type = 'lifetime' AND period_key = 'all'
 						 AND root_task_id = ? AND axis = ?
@@ -1966,7 +1975,8 @@ export class UsageStatsDatabase {
 							SUM(cache_write_tokens) as cache_write_tokens,
 							SUM(reasoning_tokens) as reasoning_tokens,
 							SUM(total_tokens) as total_tokens,
-							SUM(cost_usd) as cost_usd
+							SUM(cost_usd) as cost_usd,
+							SUM(uncached_input_tokens) as uncached_input_tokens
 						 FROM stats_rollup
 						 WHERE period_type = ? AND root_task_id = ? AND axis = ?
 						 AND period_key >= ? AND period_key <= ?
@@ -1989,6 +1999,7 @@ export class UsageStatsDatabase {
 				reasoningTokens: row.reasoning_tokens as number,
 				totalTokens: row.total_tokens as number,
 				costUsd: row.cost_usd as number,
+				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
 			}))
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", `Failed to query breakdown rollups for axis ${axis}`, err)
@@ -2016,7 +2027,7 @@ export class UsageStatsDatabase {
 				.prepare(
 					`SELECT period_key as day, event_count, completed_calls, failed_calls, cancelled_calls,
 						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-						reasoning_tokens, total_tokens, cost_usd
+						reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens
 					 FROM stats_rollup
 					 WHERE period_type = 'daily' AND root_task_id = ? AND axis = ''
 					 AND period_key >= ? AND period_key <= ?
@@ -2037,6 +2048,7 @@ export class UsageStatsDatabase {
 				reasoningTokens: row.reasoning_tokens as number,
 				totalTokens: row.total_tokens as number,
 				costUsd: row.cost_usd as number,
+				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
 			}))
 		} catch (err) {
 			throw new StatsDbError(
@@ -2062,6 +2074,7 @@ export class UsageStatsDatabase {
 		completedCalls: number
 		failedCalls: number
 		cancelledCalls: number
+		uncachedInputTokens: number
 	} {
 		const db = this.getDb()
 		const rootTaskId = includeCancelled ? "" : NON_CANCELLED_KEY
@@ -2071,7 +2084,8 @@ export class UsageStatsDatabase {
 				.prepare(
 					`SELECT event_count, cost_usd as total_cost, total_tokens,
 						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-						reasoning_tokens, completed_calls, failed_calls, cancelled_calls
+						reasoning_tokens, completed_calls, failed_calls, cancelled_calls,
+						uncached_input_tokens
 					 FROM stats_rollup
 					 WHERE period_type = 'lifetime' AND root_task_id = ? AND axis = ''
 					 AND period_key = 'all'`,
@@ -2091,6 +2105,7 @@ export class UsageStatsDatabase {
 					completedCalls: 0,
 					failedCalls: 0,
 					cancelledCalls: 0,
+					uncachedInputTokens: 0,
 				}
 			}
 
@@ -2106,6 +2121,7 @@ export class UsageStatsDatabase {
 				completedCalls: row.completed_calls as number,
 				failedCalls: row.failed_calls as number,
 				cancelledCalls: row.cancelled_calls as number,
+				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
 			}
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", "Failed to query lifetime totals (filtered)", err)
@@ -2295,19 +2311,23 @@ export class UsageStatsDatabase {
 			reasoningTokens: number
 			totalTokens: number
 			costUsd: number
+			uncachedInputTokens?: number
 		},
 	): void {
+		const uncachedInputTokens =
+			params.uncachedInputTokens ?? (params.cacheReadTokens === 0 ? params.inputTokens : 0)
+
 		db.prepare(
 			`INSERT INTO stats_rollup (
 				period_type, period_key, root_task_id, axis, axis_value,
 				event_count, completed_calls, failed_calls, cancelled_calls,
 				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-				reasoning_tokens, total_tokens, cost_usd
+				reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens
 			) VALUES (
 				@periodType, @periodKey, @rootTaskId, @axis, @axisValue,
 				@eventCount, @completedCalls, @failedCalls, @cancelledCalls,
 				@inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens,
-				@reasoningTokens, @totalTokens, @costUsd
+				@reasoningTokens, @totalTokens, @costUsd, @uncachedInputTokens
 			)
 			ON CONFLICT(period_type, period_key, root_task_id, axis, axis_value)
 			DO UPDATE SET
@@ -2321,7 +2341,8 @@ export class UsageStatsDatabase {
 				cache_write_tokens = cache_write_tokens + @cacheWriteTokens,
 				reasoning_tokens = reasoning_tokens + @reasoningTokens,
 				total_tokens = total_tokens + @totalTokens,
-				cost_usd = cost_usd + @costUsd`,
+				cost_usd = cost_usd + @costUsd,
+				uncached_input_tokens = uncached_input_tokens + @uncachedInputTokens`,
 		).run({
 			periodType: params.periodType,
 			periodKey: params.periodKey,
@@ -2339,6 +2360,7 @@ export class UsageStatsDatabase {
 			reasoningTokens: params.reasoningTokens,
 			totalTokens: params.totalTokens,
 			costUsd: params.costUsd,
+			uncachedInputTokens,
 		})
 	}
 
