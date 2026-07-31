@@ -305,62 +305,71 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 		return models
 	}
 
-	// Route the cache-miss fetch through the same single-flight coordinator refreshModels()
-	// uses (inFlightRefresh), keyed on the same compound cacheKey. Without this, concurrent
+	// Route the cache-miss fetch through dedupedFetch(), the same single-flight coordinator
+	// refreshModels() uses, keyed on the same compound cacheKey. Without this, concurrent
 	// getModels() calls for the same key each independently miss the cache and fire their own
 	// redundant provider fetch, and a getModels() fetch racing a refreshModels() fetch for the
 	// same key has no ordering guarantee -- whichever call's memoryCache.set() lands last wins,
-	// even if it started (and thus reflects) an earlier, staler request. Sharing the map means
-	// every caller for a given key -- get or refresh -- converges on one in-flight fetch.
-	if (!shouldSkipCache) {
-		const existingRequest = inFlightRefresh.get(cacheKey)
-		if (existingRequest) {
-			return existingRequest
-		}
-	}
+	// even if it started (and thus reflects) an earlier, staler request. Sharing dedupedFetch()
+	// means every caller for a given key -- get or refresh -- converges on one underlying
+	// provider fetch. Each entry point still applies its own success/failure contract on top
+	// (see below) rather than returning the shared promise directly, so a fetch failure that
+	// refreshModels() degrades to cached data doesn't surface as a silent stale result to
+	// getModels(), and a fetch failure joined from refreshModels() still re-throws for
+	// getModels() callers.
+	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
 
-	const fetchPromise = (async (): Promise<ModelRecord> => {
-		try {
-			const fetched = await fetchModelsFromProvider(options)
-			const modelCount = Object.keys(fetched).length
+	try {
+		const fetched = await sharedFetch
+		const modelCount = Object.keys(fetched).length
 
-			// Only cache non-empty results so a failed API response doesn't get persisted
-			// as if the provider had no models. Auth-scoped providers skip caching entirely.
-			if (modelCount > 0) {
-				// Clear the empty-response throttle for any non-empty response, including from
-				// auth-scoped providers that skip caching, so a later empty response is reported again.
-				reportedEmptyModelResponse.delete(cacheKey)
+		// Only cache non-empty results so a failed API response doesn't get persisted
+		// as if the provider had no models. Auth-scoped providers skip caching entirely.
+		if (modelCount > 0) {
+			// Clear the empty-response throttle for any non-empty response, including from
+			// auth-scoped providers that skip caching, so a later empty response is reported again.
+			reportedEmptyModelResponse.delete(cacheKey)
 
-				if (!shouldSkipCache) {
-					memoryCache.set(cacheKey, fetched)
-
-					await writeModels(cacheKey, fetched).catch((err) =>
-						console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
-					)
-				}
-			} else {
-				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
-					context: "getModels",
-					hasExistingCache: false,
-				})
-			}
-
-			return fetched
-		} catch (error) {
-			// Log the error and re-throw it so the caller can handle it (e.g., show a UI message).
-			console.error(`[getModels] Failed to fetch models in modelCache for ${provider}:`, error)
-
-			throw error // Re-throw the original error to be handled by the caller.
-		} finally {
 			if (!shouldSkipCache) {
-				inFlightRefresh.delete(cacheKey)
-			}
-		}
-	})()
+				memoryCache.set(cacheKey, fetched)
 
-	if (!shouldSkipCache) {
-		inFlightRefresh.set(cacheKey, fetchPromise)
+				await writeModels(cacheKey, fetched).catch((err) =>
+					console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
+				)
+			}
+		} else {
+			captureModelCacheEmptyResponseOnce(provider, cacheKey, {
+				context: "getModels",
+				hasExistingCache: false,
+			})
+		}
+
+		return fetched
+	} catch (error) {
+		// Log the error and re-throw it so the caller can handle it (e.g., show a UI message).
+		console.error(`[getModels] Failed to fetch models in modelCache for ${provider}:`, error)
+
+		throw error // Re-throw the original error to be handled by the caller.
 	}
+}
+
+/**
+ * Single-flight the raw provider fetch for a cache key across getModels() and refreshModels().
+ * Callers apply their own caching/degradation/telemetry behavior on top of the resolved value
+ * or rejection -- this only ensures at most one fetchModelsFromProvider() call is in flight per
+ * cache key at a time.
+ */
+function dedupedFetch(cacheKey: string, options: GetModelsOptions): Promise<ModelRecord> {
+	const existingRequest = inFlightRefresh.get(cacheKey)
+	if (existingRequest) {
+		return existingRequest
+	}
+
+	const fetchPromise = fetchModelsFromProvider(options).finally(() => {
+		inFlightRefresh.delete(cacheKey)
+	})
+
+	inFlightRefresh.set(cacheKey, fetchPromise)
 
 	return fetchPromise
 }
@@ -380,30 +389,20 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 
 	const shouldSkipCache = isAuthScopedProvider(provider)
 
-	// Check if there's already an in-flight refresh for this provider+url combination.
-	// This prevents race conditions where multiple concurrent refreshes might
-	// overwrite each other's results. Skip de-duplication for auth-scoped
-	// providers because two concurrent calls may carry different tokens
-	// (e.g., after a sign-out/sign-in within the same session) and we must
-	// not return the first caller's results to the second caller.
-	if (!shouldSkipCache) {
-		const existingRequest = inFlightRefresh.get(cacheKey)
-		if (existingRequest) {
-			return existingRequest
-		}
-	}
-
-	// Create the refresh promise and track it.
+	// De-duplication is skipped for auth-scoped providers because two concurrent calls may
+	// carry different tokens (e.g., after a sign-out/sign-in within the same session) and we
+	// must not return the first caller's results to the second caller.
 	//
-	// The `finally` cleanup below runs only after the first `await` inside this async
-	// function yields, which cannot happen until the current synchronous run -- including
-	// the `inFlightRefresh.set(cacheKey, ...)` registration below -- has completed. So the
-	// entry is always present in the map before `finally` can delete it; the registration
-	// can never be lost to a microtask race even if the fetch resolves immediately.
+	// Shares the same underlying fetch getModels() uses (see dedupedFetch) so a refreshModels()
+	// call racing a getModels() cache-miss for the same key converges on one provider fetch --
+	// but each function still applies its own success/failure contract on the result below
+	// rather than sharing that promise's resolution/rejection wholesale.
+	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+
 	const refreshPromise = (async (): Promise<ModelRecord> => {
 		try {
 			// Force fresh API fetch - skip getModelsFromCache() check
-			const models = await fetchModelsFromProvider(options)
+			const models = await sharedFetch
 			const modelCount = Object.keys(models).length
 
 			// Get existing cached data for comparison
@@ -443,18 +442,8 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 				return {}
 			}
 			return getModelsFromCache(options) || {}
-		} finally {
-			// Always clean up the in-flight tracking
-			if (!shouldSkipCache) {
-				inFlightRefresh.delete(cacheKey)
-			}
 		}
 	})()
-
-	// Track the in-flight request (auth-scoped providers are excluded; see above).
-	if (!shouldSkipCache) {
-		inFlightRefresh.set(cacheKey, refreshPromise)
-	}
 
 	return refreshPromise
 }

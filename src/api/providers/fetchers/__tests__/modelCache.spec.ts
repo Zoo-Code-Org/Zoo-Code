@@ -463,6 +463,37 @@ describe("empty cache protection", () => {
 			expect(refreshResult).toEqual(mockModels)
 		})
 
+		it("preserves each entry point's own failure contract when joining a shared in-flight fetch", async () => {
+			// getModels() and refreshModels() share the same underlying provider fetch
+			// (dedupedFetch), but must not share its resolution/rejection wholesale: getModels()
+			// always re-throws on failure, while refreshModels() always degrades to cache/{}.
+			// Whichever call happens to start the shared fetch must not impose its own contract
+			// on the other caller that joined it.
+			const fetchError = new Error("provider unreachable")
+
+			let rejectPromise: (error: Error) => void
+			const delayedRejection = new Promise<never>((_resolve, reject) => {
+				rejectPromise = reject
+			})
+			mockGetOpenRouterModels.mockReturnValue(delayedRejection)
+			mockGet.mockReturnValue(undefined)
+
+			const { refreshModels } = await import("../modelCache")
+
+			// refreshModels() starts (and registers) the shared fetch; getModels() joins it.
+			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter })
+			const getPromise = getModels({ provider: providerIdentifiers.openrouter })
+
+			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+
+			rejectPromise!(fetchError)
+
+			// refreshModels() degrades gracefully (no existing cache -> {}); getModels() still
+			// re-throws the original error instead of silently returning refreshModels()'s {}.
+			await expect(refreshPromise).resolves.toEqual({})
+			await expect(getPromise).rejects.toThrow("provider unreachable")
+		})
+
 		it("does not share an in-flight fetch between different endpoints/keys", async () => {
 			const mockModelsA = {
 				"litellm/model-a": {
