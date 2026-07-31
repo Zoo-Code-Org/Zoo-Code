@@ -43,9 +43,37 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // deduplicate each other's in-flight refreshes.
 const inFlightRefresh = new Map<string, Promise<ModelRecord>>()
 
+// Cache keys (see getCacheKey) for which we've already reported an empty model response this
+// session. A persistently-empty endpoint (e.g. misconfigured server) would otherwise re-fire this
+// event on every cache refresh; gate it to at most once per distinct provider+server+key identity
+// until a non-empty response is seen -- the same identity dimensions the model cache itself uses,
+// so two different endpoints for the same provider can never suppress each other's signal.
+const reportedEmptyModelResponse = new Set<string>()
+
+function captureModelCacheEmptyResponseOnce(
+	provider: RouterName,
+	cacheKey: string,
+	properties: Record<string, unknown>,
+): void {
+	if (reportedEmptyModelResponse.has(cacheKey)) {
+		return
+	}
+
+	if (!TelemetryService.instance.isTelemetryEnabled()) {
+		return
+	}
+
+	reportedEmptyModelResponse.add(cacheKey)
+	TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, { provider, ...properties })
+}
+
 // Providers whose model list is determined by the server URL, not just by the provider name.
 // Each unique baseUrl must be cached independently so that switching endpoints never serves
-// stale results from a previously-cached server.
+// stale results from a previously-cached server. zoo-gateway is included too: although it's
+// auth-scoped and never actually persisted (see shouldSkipCache), getCacheKey() also keys the
+// empty-response throttle (reportedEmptyModelResponse) and the in-flight fetch map, both of
+// which must still discriminate by endpoint (e.g. staging vs. production gateway) even when
+// caching itself is skipped.
 const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.litellm,
 	providerIdentifiers.poe,
@@ -54,16 +82,23 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.ollama,
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.requesty,
+	providerIdentifiers.zooGateway,
 ])
 
 // Providers where the API key itself determines which models are visible (e.g. per-key
 // allowlists). For these the cache key also includes a short hash of
 // the API key so that two different keys on the same server never share a cache entry.
+// zoo-gateway and kimi-code are included so a sign-out/sign-in cycle to a different account
+// (same server, different session token) doesn't collapse into the same throttle/in-flight
+// identity -- see the URL_SCOPED_PROVIDERS comment above for why this matters despite caching
+// being skipped for both.
 const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
 	providerIdentifiers.poe, // Per-account model availability
 	providerIdentifiers.requesty, // Per-account custom model policies
 	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
+	providerIdentifiers.zooGateway, // Per-session-token account identity
+	providerIdentifiers.kimiCode, // Per-session-token account identity
 ])
 
 // Providers whose model lists are scoped to the signed-in user (e.g. per-account
@@ -264,39 +299,70 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 
 	const shouldSkipCache = isAuthScopedProvider(provider)
 
-	let models = shouldSkipCache ? undefined : getModelsFromCache(options)
+	const models = shouldSkipCache ? undefined : getModelsFromCache(options)
 
 	if (models) {
 		return models
 	}
 
-	try {
-		models = await fetchModelsFromProvider(options)
-		const modelCount = Object.keys(models).length
-
-		// Only cache non-empty results so a failed API response doesn't get persisted
-		// as if the provider had no models. Auth-scoped providers skip caching entirely.
-		if (modelCount > 0 && !shouldSkipCache) {
-			memoryCache.set(cacheKey, models)
-
-			await writeModels(cacheKey, models).catch((err) =>
-				console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
-			)
-		} else if (modelCount === 0) {
-			TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, {
-				provider,
-				context: "getModels",
-				hasExistingCache: false,
-			})
+	// Route the cache-miss fetch through the same single-flight coordinator refreshModels()
+	// uses (inFlightRefresh), keyed on the same compound cacheKey. Without this, concurrent
+	// getModels() calls for the same key each independently miss the cache and fire their own
+	// redundant provider fetch, and a getModels() fetch racing a refreshModels() fetch for the
+	// same key has no ordering guarantee -- whichever call's memoryCache.set() lands last wins,
+	// even if it started (and thus reflects) an earlier, staler request. Sharing the map means
+	// every caller for a given key -- get or refresh -- converges on one in-flight fetch.
+	if (!shouldSkipCache) {
+		const existingRequest = inFlightRefresh.get(cacheKey)
+		if (existingRequest) {
+			return existingRequest
 		}
-
-		return models
-	} catch (error) {
-		// Log the error and re-throw it so the caller can handle it (e.g., show a UI message).
-		console.error(`[getModels] Failed to fetch models in modelCache for ${provider}:`, error)
-
-		throw error // Re-throw the original error to be handled by the caller.
 	}
+
+	const fetchPromise = (async (): Promise<ModelRecord> => {
+		try {
+			const fetched = await fetchModelsFromProvider(options)
+			const modelCount = Object.keys(fetched).length
+
+			// Only cache non-empty results so a failed API response doesn't get persisted
+			// as if the provider had no models. Auth-scoped providers skip caching entirely.
+			if (modelCount > 0) {
+				// Clear the empty-response throttle for any non-empty response, including from
+				// auth-scoped providers that skip caching, so a later empty response is reported again.
+				reportedEmptyModelResponse.delete(cacheKey)
+
+				if (!shouldSkipCache) {
+					memoryCache.set(cacheKey, fetched)
+
+					await writeModels(cacheKey, fetched).catch((err) =>
+						console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
+					)
+				}
+			} else {
+				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
+					context: "getModels",
+					hasExistingCache: false,
+				})
+			}
+
+			return fetched
+		} catch (error) {
+			// Log the error and re-throw it so the caller can handle it (e.g., show a UI message).
+			console.error(`[getModels] Failed to fetch models in modelCache for ${provider}:`, error)
+
+			throw error // Re-throw the original error to be handled by the caller.
+		} finally {
+			if (!shouldSkipCache) {
+				inFlightRefresh.delete(cacheKey)
+			}
+		}
+	})()
+
+	if (!shouldSkipCache) {
+		inFlightRefresh.set(cacheKey, fetchPromise)
+	}
+
+	return fetchPromise
 }
 
 /**
@@ -345,8 +411,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 			const existingCount = existingCache ? Object.keys(existingCache).length : 0
 
 			if (modelCount === 0) {
-				TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, {
-					provider,
+				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
 					context: "refreshModels",
 					hasExistingCache: existingCount > 0,
 					existingCacheSize: existingCount,
@@ -357,6 +422,8 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 					return {}
 				}
 			}
+
+			reportedEmptyModelResponse.delete(cacheKey)
 
 			if (!shouldSkipCache) {
 				memoryCache.set(cacheKey, models)
