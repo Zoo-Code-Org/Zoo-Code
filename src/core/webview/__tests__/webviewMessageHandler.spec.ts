@@ -1130,7 +1130,7 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-			"common:errors.destructive_command_guard_enable_failed",
+			"common:errors.destructiveCommandGuard.enableFailed",
 		)
 	})
 
@@ -1143,12 +1143,9 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 		})
 
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
-		expect(t).toHaveBeenCalledWith("common:errors.destructive_command_guard_enable_failed", {
-			error: "common:errors.destructiveCommandGuard.unavailable",
-		})
-		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-			"common:errors.destructive_command_guard_enable_failed",
-		)
+		expect(t).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.unavailable")
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.unavailable")
+		expect(t).not.toHaveBeenCalledWith("common:errors.destructiveCommandGuard.enableFailed", expect.anything())
 	})
 
 	it("reports non-Error installation failures", async () => {
@@ -1160,7 +1157,7 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 		})
 
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
-		expect(t).toHaveBeenCalledWith("common:errors.destructive_command_guard_enable_failed", {
+		expect(t).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.enableFailed", {
 			error: "download unavailable",
 		})
 	})

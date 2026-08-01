@@ -73,9 +73,9 @@
 		"url_fetch_error_with_url": "Ошибка получения содержимого для {{url}}: {{error}}",
 		"command_timeout": "Время выполнения команды истекло через {{seconds}} секунд",
 		"destructiveCommandGuard": {
-			"unavailable": "Destructive Command Guard включён, но недоступен для этой платформы"
+			"unavailable": "Destructive Command Guard включён, но недоступен для этой платформы",
+			"enableFailed": "Не удалось включить Destructive Command Guard: {{error}}"
 		},
-		"destructive_command_guard_enable_failed": "Не удалось включить Destructive Command Guard: {{error}}",
 		"share_task_failed": "Не удалось поделиться задачей",
 		"share_no_active_task": "Нет активной задачи для совместного использования",
 		"share_auth_required": "Требуется аутентификация. Войдите в систему для совместного доступа к задачам.",

@@ -686,12 +686,13 @@ export const webviewMessageHandler = async (
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
 						const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
 						if (!binaryPath) {
-							throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
+							message.updatedSettings.destructiveCommandGuardEnabled = false
+							vscode.window.showErrorMessage(t("common:errors.destructiveCommandGuard.unavailable"))
 						}
 					} catch (error) {
 						message.updatedSettings.destructiveCommandGuardEnabled = false
 						vscode.window.showErrorMessage(
-							t("common:errors.destructive_command_guard_enable_failed", {
+							t("common:errors.destructiveCommandGuard.enableFailed", {
 								error: error instanceof Error ? error.message : String(error),
 							}),
 						)

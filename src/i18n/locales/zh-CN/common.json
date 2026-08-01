@@ -78,9 +78,9 @@
 		"url_fetch_error_with_url": "获取 {{url}} 内容时出错：{{error}}",
 		"command_timeout": "命令执行超时，{{seconds}} 秒后",
 		"destructiveCommandGuard": {
-			"unavailable": "Destructive Command Guard 已启用，但不适用于此平台"
+			"unavailable": "Destructive Command Guard 已启用，但不适用于此平台",
+			"enableFailed": "无法启用 Destructive Command Guard：{{error}}"
 		},
-		"destructive_command_guard_enable_failed": "无法启用 Destructive Command Guard：{{error}}",
 		"share_task_failed": "分享任务失败。请重试。",
 		"share_no_active_task": "没有活跃任务可分享",
 		"share_auth_required": "需要身份验证。请登录以分享任务。",

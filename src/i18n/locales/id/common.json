@@ -73,9 +73,9 @@
 		"url_fetch_error_with_url": "Error mengambil konten untuk {{url}}: {{error}}",
 		"command_timeout": "Eksekusi perintah waktu habis setelah {{seconds}} detik",
 		"destructiveCommandGuard": {
-			"unavailable": "Destructive Command Guard diaktifkan, tetapi tidak tersedia untuk platform ini"
+			"unavailable": "Destructive Command Guard diaktifkan, tetapi tidak tersedia untuk platform ini",
+			"enableFailed": "Tidak dapat mengaktifkan Destructive Command Guard: {{error}}"
 		},
-		"destructive_command_guard_enable_failed": "Tidak dapat mengaktifkan Destructive Command Guard: {{error}}",
 		"share_task_failed": "Gagal membagikan tugas. Silakan coba lagi.",
 		"share_no_active_task": "Tidak ada tugas aktif untuk dibagikan",
 		"share_auth_required": "Autentikasi diperlukan. Silakan masuk untuk berbagi tugas.",

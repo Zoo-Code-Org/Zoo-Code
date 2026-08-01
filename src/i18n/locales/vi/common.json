@@ -73,9 +73,9 @@
 		"url_fetch_error_with_url": "Lỗi lấy nội dung cho {{url}}: {{error}}",
 		"command_timeout": "Thực thi lệnh đã hết thời gian chờ sau {{seconds}} giây",
 		"destructiveCommandGuard": {
-			"unavailable": "Destructive Command Guard đã được bật nhưng không khả dụng cho nền tảng này"
+			"unavailable": "Destructive Command Guard đã được bật nhưng không khả dụng cho nền tảng này",
+			"enableFailed": "Không thể bật Destructive Command Guard: {{error}}"
 		},
-		"destructive_command_guard_enable_failed": "Không thể bật Destructive Command Guard: {{error}}",
 		"share_task_failed": "Không thể chia sẻ nhiệm vụ",
 		"share_no_active_task": "Không có nhiệm vụ hoạt động để chia sẻ",
 		"share_auth_required": "Cần xác thực. Vui lòng đăng nhập để chia sẻ nhiệm vụ.",
