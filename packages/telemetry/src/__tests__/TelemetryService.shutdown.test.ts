@@ -44,6 +44,46 @@ describe("TelemetryService.shutdown draining", () => {
 		expect(captureOrder).toEqual(["captured", "shutdown"])
 	})
 
+	it("awaits in-flight captureException calls before shutting down clients", async () => {
+		let resolveCapture!: () => void
+		const capturePromise = new Promise<void>((resolve) => {
+			resolveCapture = resolve
+		})
+
+		const captureOrder: string[] = []
+
+		const mockClient: TelemetryClient = {
+			setProvider: vi.fn(),
+			capture: vi.fn(),
+			captureException: vi.fn().mockImplementation(async () => {
+				await capturePromise
+				captureOrder.push("captured")
+			}),
+			updateTelemetryState: vi.fn(),
+			isTelemetryEnabled: vi.fn().mockReturnValue(true),
+			shutdown: vi.fn().mockImplementation(async () => {
+				captureOrder.push("shutdown")
+			}),
+		}
+
+		const service = new TelemetryService([mockClient])
+
+		// Fire a captureException whose underlying client.captureException() promise hasn't
+		// resolved yet -- follows the same trackPendingClientCall path as captureEvent.
+		service.captureException(new Error("boom"))
+
+		const shutdownPromise = service.shutdown()
+
+		// Capture is still pending - shutdown must not have run yet.
+		expect(captureOrder).toEqual([])
+
+		resolveCapture()
+		await shutdownPromise
+
+		// The in-flight capture must complete before the client is shut down.
+		expect(captureOrder).toEqual(["captured", "shutdown"])
+	})
+
 	it("drains a call already queued before shutdown() started, even across multiple drain passes", async () => {
 		// Regression test: shutdown() must not take a single Promise.all snapshot of
 		// pendingClientCalls. A promise added to pendingClientCalls *after* Promise.all(set)
@@ -173,6 +213,29 @@ describe("TelemetryService.shutdown draining", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("calling shutdown() twice shuts down clients twice (no re-entrancy guard)", async () => {
+		// Documents current behavior: shutdown() has no guard against being called more than
+		// once. deactivate() only calls it once, so this isn't a bug to fix here, but a second
+		// call re-running the (now-trivial, since pendingClientCalls is empty) drain loop and
+		// calling client.shutdown() again should be an explicit, intentional outcome rather than
+		// an untested one.
+		const mockClient: TelemetryClient = {
+			setProvider: vi.fn(),
+			capture: vi.fn().mockResolvedValue(undefined),
+			captureException: vi.fn(),
+			updateTelemetryState: vi.fn(),
+			isTelemetryEnabled: vi.fn().mockReturnValue(true),
+			shutdown: vi.fn().mockResolvedValue(undefined),
+		}
+
+		const service = new TelemetryService([mockClient])
+
+		await service.shutdown()
+		await service.shutdown()
+
+		expect(mockClient.shutdown).toHaveBeenCalledTimes(2)
 	})
 
 	it("does not let a rejected capture prevent shutdown from completing", async () => {

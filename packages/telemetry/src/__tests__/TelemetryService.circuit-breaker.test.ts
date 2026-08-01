@@ -35,21 +35,21 @@ describe("TelemetryService circuit breaker", () => {
 		expect(mockClient.capture).toHaveBeenCalledTimes(49)
 	})
 
-	it("trips after 50 CODE_INDEX_ERROR captures within the window and drops further ones", () => {
+	it("trips at the 50th CODE_INDEX_ERROR capture within the window and drops further ones", () => {
 		const service = new TelemetryService([mockClient])
 
-		for (let i = 0; i < 50; i++) {
+		for (let i = 0; i < 49; i++) {
 			service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i })
 		}
-		expect(mockClient.capture).toHaveBeenCalledTimes(50)
+		expect(mockClient.capture).toHaveBeenCalledTimes(49)
 
-		// 51st capture should be dropped - breaker has tripped.
-		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 50 })
-		expect(mockClient.capture).toHaveBeenCalledTimes(50)
+		// 50th capture trips the breaker but is itself dropped.
+		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 49 })
+		expect(mockClient.capture).toHaveBeenCalledTimes(49)
 
 		// Keeps dropping while tripped.
-		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 51 })
-		expect(mockClient.capture).toHaveBeenCalledTimes(50)
+		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 50 })
+		expect(mockClient.capture).toHaveBeenCalledTimes(49)
 	})
 
 	it("re-allows captures after the cooldown window elapses", () => {
@@ -58,18 +58,17 @@ describe("TelemetryService circuit breaker", () => {
 		for (let i = 0; i < 50; i++) {
 			service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i })
 		}
-		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 50 })
-		expect(mockClient.capture).toHaveBeenCalledTimes(50)
+		expect(mockClient.capture).toHaveBeenCalledTimes(49)
 
 		// Just under 10 minutes - still tripped.
 		vi.setSystemTime(10 * 60 * 1000 - 1)
-		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 51 })
-		expect(mockClient.capture).toHaveBeenCalledTimes(50)
+		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 50 })
+		expect(mockClient.capture).toHaveBeenCalledTimes(49)
 
 		// Cooldown elapsed - one more error gets through.
 		vi.setSystemTime(10 * 60 * 1000)
-		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 52 })
-		expect(mockClient.capture).toHaveBeenCalledTimes(51)
+		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 51 })
+		expect(mockClient.capture).toHaveBeenCalledTimes(50)
 	})
 
 	it("does not reset the guarded count when unrelated events are interleaved", () => {
@@ -85,17 +84,23 @@ describe("TelemetryService circuit breaker", () => {
 		// 25 CODE_INDEX_ERROR so far - still under the threshold of 50.
 		expect(mockClient.capture).toHaveBeenCalledTimes(25 + 25)
 
-		for (let i = 25; i < 50; i++) {
+		for (let i = 25; i < 49; i++) {
 			service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i })
 			service.captureEvent(TelemetryEventName.TASK_CREATED, { taskId: `task-${i}` })
 		}
-		// 50th CODE_INDEX_ERROR trips the breaker; TASK_CREATED events are never guarded.
-		expect(mockClient.capture).toHaveBeenCalledTimes(50 + 50)
+		// 49 CODE_INDEX_ERROR so far - still under the threshold of 50.
+		expect(mockClient.capture).toHaveBeenCalledTimes(49 + 49)
+
+		// 50th CODE_INDEX_ERROR trips the breaker (and is itself dropped); TASK_CREATED
+		// events are never guarded.
+		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 49 })
+		service.captureEvent(TelemetryEventName.TASK_CREATED, { taskId: "task-49" })
+		expect(mockClient.capture).toHaveBeenCalledTimes(49 + 50)
 
 		// Further CODE_INDEX_ERROR captures are dropped even though unrelated events keep flowing.
 		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 50 })
 		service.captureEvent(TelemetryEventName.TASK_CREATED, { taskId: "task-50" })
-		expect(mockClient.capture).toHaveBeenCalledTimes(50 + 51)
+		expect(mockClient.capture).toHaveBeenCalledTimes(49 + 51)
 	})
 
 	it("expires old occurrences outside the counting window instead of trapping the breaker open forever", () => {
@@ -120,5 +125,17 @@ describe("TelemetryService circuit breaker", () => {
 		}
 
 		expect(mockClient.capture).toHaveBeenCalledTimes(200)
+	})
+
+	it("returns early on the not-ready (zero-client) branch without touching circuit breaker state", () => {
+		// captureEvent's !this.isReady check runs before shouldDropForCircuitBreaker, so with
+		// no clients registered, guarded-event bookkeeping should never be reached.
+		const service = new TelemetryService([])
+
+		for (let i = 0; i < 50; i++) {
+			service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i })
+		}
+
+		expect(mockClient.capture).not.toHaveBeenCalled()
 	})
 })

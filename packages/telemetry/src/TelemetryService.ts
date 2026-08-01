@@ -129,7 +129,7 @@ export class TelemetryService {
 		occurrences.push(now)
 		this.guardedEventOccurrences.set(eventName, occurrences)
 
-		if (occurrences.length > CIRCUIT_BREAKER_MAX_IN_WINDOW) {
+		if (occurrences.length >= CIRCUIT_BREAKER_MAX_IN_WINDOW) {
 			this.trippedUntil.set(eventName, now + CIRCUIT_BREAKER_COOLDOWN_MS)
 			this.guardedEventOccurrences.delete(eventName)
 			return true
@@ -375,7 +375,8 @@ export class TelemetryService {
 			])
 		}
 
-		await Promise.all(this.clients.map((client) => client.shutdown()))
+		// allSettled, not all: one client rejecting must not stop us from awaiting the others.
+		await Promise.allSettled(this.clients.map((client) => client.shutdown()))
 	}
 
 	private static _instance: TelemetryService | null = null
