@@ -197,10 +197,36 @@ export class ClineProvider
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
+	private providerProfileMutationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		this.delegationTransitionLocks ??= new Map()
 		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, fn)
+	}
+
+	private enqueueProviderProfileMutation<T>(fn: () => Promise<T>): Promise<T> {
+		const run = this.providerProfileMutationQueue.then(fn, fn)
+		const callerResult = this.withProviderProfileMutationTimeout(run)
+		this.providerProfileMutationQueue = run.then(
+			() => undefined,
+			() => undefined,
+		)
+		return callerResult
+	}
+
+	private withProviderProfileMutationTimeout<T>(operation: Promise<T>): Promise<T> {
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		const timeout = new Promise<never>((_, reject) => {
+			timeoutId = setTimeout(() => {
+				reject(new Error("Provider profile mutation timed out"))
+			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+		})
+
+		return Promise.race([operation, timeout]).finally(() => {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
+		})
 	}
 	private readonly pendingEditOperations: PendingEditOperationStore
 
@@ -1507,9 +1533,15 @@ export class ClineProvider
 	/**
 	 * Handle switching to a new mode, including updating the associated API configuration
 	 * @param newMode The mode to switch to
+	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
+	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
-	public async handleModeSwitch(newMode: Mode) {
-		const task = this.getCurrentTask()
+	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+		return this.enqueueProviderProfileMutation(() => this.handleModeSwitchUnlocked(newMode, targetTask))
+	}
+
+	private async handleModeSwitchUnlocked(newMode: Mode, targetTask: Task | null | undefined): Promise<void> {
+		const task = targetTask
 
 		if (task) {
 			TelemetryService.instance.captureModeSwitch(task.taskId, newMode)
@@ -1546,7 +1578,9 @@ export class ClineProvider
 		// If workspace lock is on, keep the current API config — don't load mode-specific config
 		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		if (lockApiConfigAcrossModes) {
-			await this.postStateToWebview()
+			if (targetTask !== null) {
+				await this.postStateToWebview()
+			}
 			return
 		}
 
@@ -1572,7 +1606,10 @@ export class ClineProvider
 				const hasActualSettings = !!fullProfile.apiProvider
 
 				if (hasActualSettings) {
-					await this.activateProviderProfile({ name: profile.name })
+					await this.activateProviderProfileUnlocked(
+						{ name: profile.name },
+						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+					)
 				} else {
 					// The task will continue with the current/default configuration.
 				}
@@ -1592,7 +1629,9 @@ export class ClineProvider
 			}
 		}
 
-		await this.postStateToWebview()
+		if (targetTask !== null) {
+			await this.postStateToWebview()
+		}
 	}
 
 	// Provider Profile Management
@@ -1608,8 +1647,9 @@ export class ClineProvider
 	 */
 	private updateTaskApiHandlerIfNeeded(
 		providerSettings: ProviderSettings,
-		options: { forceRebuild?: boolean } = {},
+		options: { forceRebuild?: boolean; skipCurrentTaskRebuild?: boolean } = {},
 	): void {
+		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
 		if (!task) return
 
@@ -1725,7 +1765,11 @@ export class ClineProvider
 		await this.postStateToWebview()
 	}
 
-	private async persistStickyProviderProfileToCurrentTask(apiConfigName: string): Promise<void> {
+	private async persistStickyProviderProfileToCurrentTask(
+		apiConfigName: string,
+		options: { skipCurrentTaskRebuild?: boolean } = {},
+	): Promise<void> {
+		if (options.skipCurrentTaskRebuild) return
 		const task = this.getCurrentTask()
 		if (!task) {
 			return
@@ -1755,12 +1799,28 @@ export class ClineProvider
 
 	async activateProviderProfile(
 		args: { name: string } | { id: string },
-		options?: { persistModeConfig?: boolean; persistTaskHistory?: boolean },
+		options?: {
+			persistModeConfig?: boolean
+			persistTaskHistory?: boolean
+			skipCurrentTaskRebuild?: boolean
+		},
 	) {
+		return this.enqueueProviderProfileMutation(() => this.activateProviderProfileUnlocked(args, options))
+	}
+
+	private async activateProviderProfileUnlocked(
+		args: { name: string } | { id: string },
+		options?: {
+			persistModeConfig?: boolean
+			persistTaskHistory?: boolean
+			skipCurrentTaskRebuild?: boolean
+		},
+	): Promise<void> {
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
+		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
 		// See `upsertProviderProfile` for a description of what this is doing.
 		await Promise.all([
@@ -1776,17 +1836,19 @@ export class ClineProvider
 		}
 
 		// Change the provider for the current task.
-		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+		this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true, skipCurrentTaskRebuild })
 
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
-			await this.persistStickyProviderProfileToCurrentTask(name)
+			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
 		}
 
-		await this.postStateToWebview()
+		if (!skipCurrentTaskRebuild) {
+			await this.postStateToWebview()
+		}
 
-		if (providerSettings.apiProvider) {
+		if (providerSettings.apiProvider && !skipCurrentTaskRebuild) {
 			this.emit(RooCodeEventName.ProviderProfileChanged, { name, provider: providerSettings.apiProvider })
 		}
 	}
