@@ -943,9 +943,11 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 	})
 
 	it("never shares results across different zoo-gateway credentials (auth isolation)", async () => {
-		// The in-flight fetch map must key on the full compound identity for auth-scoped
-		// providers too, so a slow fetch for one account's session token can never resolve
-		// into a concurrent call carrying a different account's token.
+		// Auth-scoped providers (see AUTH_SCOPED_PROVIDERS) bypass dedupedFetch entirely --
+		// shouldSkipCache is true for zoo-gateway, so every call fires its own provider fetch
+		// and none are deduplicated. That means two concurrent calls can never resolve into
+		// each other's result regardless of token, which this test confirms for two different
+		// account tokens; the companion case below confirms the same holds for one token too.
 		const accountAModels = {
 			"zoo-gateway/account-a-model": {
 				maxTokens: 4096,
@@ -990,6 +992,20 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		const [resultA, resultB] = await Promise.all([promiseA, promiseB])
 		expect(resultA).toEqual(accountAModels)
 		expect(resultB).toEqual(accountBModels)
+	})
+
+	it("never deduplicates concurrent zoo-gateway fetches, even for the same token", async () => {
+		// Auth-scoped providers skip dedupedFetch unconditionally, so even two calls carrying
+		// an identical token each fire their own provider fetch -- there is no in-flight sharing
+		// to key correctly or incorrectly for these providers.
+		freshMockGetZooGatewayModels.mockResolvedValue({})
+
+		await Promise.all([
+			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+		])
+
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 })
 
