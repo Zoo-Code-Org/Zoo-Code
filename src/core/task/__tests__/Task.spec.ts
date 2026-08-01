@@ -3252,6 +3252,40 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 
 			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
 		})
+
+		it("does not re-flush when lastMessageTs is recent even after a prior flush", () => {
+			// Regression guard for the Math.max(lastMessageTs, lastTelemetryFlushAt) fix.
+			// Without it, once lastMessageTs is set it never advances after a flush, so
+			// the idle check would fire on every 5-minute tick for the rest of the task's
+			// life even with no new activity.
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+
+			// First idle flush fires after 31 min.
+			vi.advanceTimersByTime(31 * 60 * 1000)
+			expect(captureTaskCompletedSpy).toHaveBeenCalledTimes(1)
+			captureTaskCompletedSpy.mockClear()
+
+			// New activity arrives 1 min after the flush.
+			vi.advanceTimersByTime(1 * 60 * 1000)
+			task.lastMessageTs = Date.now()
+			task.recordToolUsage("write_to_file")
+
+			// Only 10 min since the new activity — should not flush again yet.
+			vi.advanceTimersByTime(10 * 60 * 1000)
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+
+			// 35 min since the new activity (past the 30-min threshold and the next
+			// 5-min interval tick) — should flush the new delta now.
+			vi.advanceTimersByTime(25 * 60 * 1000)
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ write_to_file: { attempts: 1, failures: 0 } },
+				{ user: 0, assistant: 0 },
+				"idle",
+			)
+		})
 	})
 
 	describe("dispose", () => {

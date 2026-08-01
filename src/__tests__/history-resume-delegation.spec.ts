@@ -26,7 +26,7 @@ vi.mock("vscode", () => {
 	return { window, workspace, env, Uri, commands, ExtensionMode, version }
 })
 
-// Mock TelemetryService (needed by attemptCompletionTool's emitTaskCompleted)
+// Mock TelemetryService (needed by attemptCompletionTool's emitPublicTaskCompleted)
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {

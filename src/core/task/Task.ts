@@ -4767,12 +4767,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 
-		this.emitFinalTokenUsageUpdate()
-		TelemetryService.instance.captureTaskCompleted(this.taskId, toolUsageDelta, messageCountDelta, reason)
-
+		// Advance the baseline before emitting so a synchronous throw from an
+		// EventEmitter listener or TelemetryService client cannot leave the baseline
+		// behind the running totals, which would cause the same delta to re-appear
+		// on the next flush. The delta values are already captured in locals above.
 		this.telemetryToolUsageBaseline = JSON.parse(JSON.stringify(this.toolUsage))
 		this.telemetryMessageCountsBaseline = { ...this.messageCounts }
 		this.lastTelemetryFlushAt = Date.now()
+
+		this.emitFinalTokenUsageUpdate()
+		TelemetryService.instance.captureTaskCompleted(this.taskId, toolUsageDelta, messageCountDelta, reason)
 	}
 
 	startIdleTelemetryCheck(): void {

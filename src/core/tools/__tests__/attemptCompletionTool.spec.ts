@@ -591,7 +591,12 @@ describe("attemptCompletionTool", () => {
 				expect(mockPushToolResult).not.toHaveBeenCalledWith("")
 				// Emission now happens once per validated attempt_completion call, before
 				// delegation is attempted -- independent of whether delegation succeeds.
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledTimes(1)
+				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
+					mockTask.taskId,
+					mockTask.toolUsage,
+					mockTask.messageCounts,
+					"attempt_completion",
+				)
 			})
 
 			it("does not resume the parent when the parent is no longer awaiting this child", async () => {
