@@ -68,7 +68,7 @@ describe("Destructive Command Guard manager", () => {
 
 	it("rejects untrusted download URLs before opening a destination", async () => {
 		await expect(downloadFile("https://example.com/dcg", path.join(tempDir, "archive"))).rejects.toThrow(
-			"DCG download redirected to an untrusted host",
+			"DCG download URL is not a trusted HTTPS host",
 		)
 	})
 
@@ -81,7 +81,7 @@ describe("Destructive Command Guard manager", () => {
 			"Too many DCG download redirects",
 		)
 		expect(() => resolveTrustedRedirect("https://github.com/release", undefined, 5)).toThrow(
-			"Too many DCG download redirects",
+			"DCG download redirect is missing a Location header",
 		)
 	})
 
@@ -113,7 +113,14 @@ describe("Destructive Command Guard manager", () => {
 		const expectedExecutable = process.platform === "win32" ? "powershell" : "unzip"
 		const expectedArgs =
 			process.platform === "win32"
-				? ["-NoProfile", "-Command", "Expand-Archive -Path 'C:\\dcg.zip' -DestinationPath 'C:\\staging' -Force"]
+				? [
+						"-NoProfile",
+						"-NonInteractive",
+						"-Command",
+						"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
+						"C:\\dcg.zip",
+						"C:\\staging",
+					]
 				: ["-o", "C:\\dcg.zip", "-d", "C:\\staging"]
 
 		expect(mockSpawn).toHaveBeenCalledWith(expectedExecutable, expectedArgs, {
@@ -136,11 +143,9 @@ describe("Destructive Command Guard manager", () => {
 
 		await expect(extraction).resolves.toBeUndefined()
 		expect(mockSpawn).toHaveBeenCalledTimes(1)
-		expect(mockSpawn).toHaveBeenCalledWith(
-			"tar",
-			expect.arrayContaining(["-xJf", "/tmp/dcg.tar.xz", "-C", tempDir, "--no-same-owner"]),
-			expect.objectContaining({ shell: false }),
-		)
+		const expectedArgs = ["-xJf", "/tmp/dcg.tar.xz", "-C", tempDir, "--no-same-owner"]
+		if (process.platform === "linux") expectedArgs.push("--no-overwrite-dir")
+		expect(mockSpawn).toHaveBeenCalledWith("tar", expectedArgs, { shell: false, stdio: ["ignore", "pipe", "pipe"] })
 	})
 
 	it("surfaces process failures during extraction", async () => {

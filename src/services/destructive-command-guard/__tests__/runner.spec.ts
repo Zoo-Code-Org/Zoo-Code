@@ -62,6 +62,11 @@ describe("runDcg", () => {
 		emitResult(child, payload, code)
 
 		await expect(result).resolves.toEqual(expected)
+		expect(mockSpawn).toHaveBeenCalledWith(
+			"/dcg",
+			expect.any(Array),
+			expect.objectContaining({ cwd: "/workspace" }),
+		)
 	})
 
 	it.each([
