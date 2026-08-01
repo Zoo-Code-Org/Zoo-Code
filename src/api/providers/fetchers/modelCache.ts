@@ -399,53 +399,45 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 	// rather than sharing that promise's resolution/rejection wholesale.
 	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
 
-	const refreshPromise = (async (): Promise<ModelRecord> => {
-		try {
-			// Force fresh API fetch - skip getModelsFromCache() check
-			const models = await sharedFetch
-			const modelCount = Object.keys(models).length
+	try {
+		// Force fresh API fetch - skip getModelsFromCache() check
+		const models = await sharedFetch
+		const modelCount = Object.keys(models).length
 
-			// Get existing cached data for comparison
-			const existingCache = shouldSkipCache ? undefined : getModelsFromCache(options)
-			const existingCount = existingCache ? Object.keys(existingCache).length : 0
+		// Get existing cached data for comparison
+		const existingCache = shouldSkipCache ? undefined : getModelsFromCache(options)
+		const existingCount = existingCache ? Object.keys(existingCache).length : 0
 
-			if (modelCount === 0) {
-				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
-					context: "refreshModels",
-					hasExistingCache: existingCount > 0,
-					existingCacheSize: existingCount,
-				})
-				if (existingCount > 0) {
-					return existingCache!
-				} else {
-					return {}
-				}
-			}
-
-			reportedEmptyModelResponse.delete(cacheKey)
-
-			if (!shouldSkipCache) {
-				memoryCache.set(cacheKey, models)
-
-				await writeModels(cacheKey, models).catch((err) =>
-					console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
-				)
-			}
-
-			return models
-		} catch (error) {
-			// Log the error for debugging, then return existing cache if available (graceful degradation).
-			// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
-			// session, since they could belong to a different user -- return empty instead.
-			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
-			if (shouldSkipCache) {
-				return {}
-			}
-			return getModelsFromCache(options) || {}
+		if (modelCount === 0) {
+			captureModelCacheEmptyResponseOnce(provider, cacheKey, {
+				context: "refreshModels",
+				hasExistingCache: existingCount > 0,
+				existingCacheSize: existingCount,
+			})
+			return existingCount > 0 ? existingCache! : {}
 		}
-	})()
 
-	return refreshPromise
+		reportedEmptyModelResponse.delete(cacheKey)
+
+		if (!shouldSkipCache) {
+			memoryCache.set(cacheKey, models)
+
+			await writeModels(cacheKey, models).catch((err) =>
+				console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
+			)
+		}
+
+		return models
+	} catch (error) {
+		// Log the error for debugging, then return existing cache if available (graceful degradation).
+		// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
+		// session, since they could belong to a different user -- return empty instead.
+		console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
+		if (shouldSkipCache) {
+			return {}
+		}
+		return getModelsFromCache(options) || {}
+	}
 }
 
 /**
