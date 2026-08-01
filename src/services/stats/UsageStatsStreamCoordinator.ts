@@ -1,4 +1,4 @@
-﻿// src/services/stats/UsageStatsStreamCoordinator.ts
+// src/services/stats/UsageStatsStreamCoordinator.ts
 //
 // Sub-task 4: Demand-driven host stream coordinator.
 //
@@ -133,6 +133,9 @@ export class UsageStatsStreamCoordinator {
 
 	/** Whether rollups have already been auto-rebuilt (one-time check). */
 	private rollupsRebuilt = false
+
+	/** Whether an async rebuild is currently in flight (prevents concurrent rebuilds). */
+	private rebuildInFlight = false
 
 	/** The database to read from (may be null if not initialized). */
 	private readonly database: UsageStatsDatabase | null
@@ -438,6 +441,13 @@ export class UsageStatsStreamCoordinator {
 	/**
 	 * Sends a full snapshot to a subscriber.
 	 * Assembles rollup snapshot, session page, and heatmap from the database.
+	 *
+	 * Non-blocking flow:
+	 * 1. Assemble snapshot from whatever data exists (may be empty/stale)
+	 * 2. Send snapshot immediately (frontend gets data or empty state quickly)
+	 * 3. Check if rebuild is needed (using rollup count, NOT heatmap all-zero)
+	 * 4. If rebuild needed, do it asynchronously via setImmediate
+	 * 5. After async rebuild completes, re-assemble and send updated snapshot
 	 */
 	private sendSnapshot(state: SubscriptionState): void {
 		if (!this.database) {
@@ -449,68 +459,17 @@ export class UsageStatsStreamCoordinator {
 			const query: StatsQuery = state.subscription.range
 			const recordingPaused = this.recordingPausedProvider?.() ?? false
 
-			// Assemble the rollup snapshot (stats)
-			let stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
-
-			// Compute session page
-			let sessions = computeSessionPage(
+			// 1. Assemble the snapshot from whatever data currently exists
+			const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+			const sessions = computeSessionPage(
 				this.database,
 				state.subscription.requestId,
 				undefined,
 				state.subscription.sessionPageSize,
 			)
+			const heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
 
-			// Compute heatmap
-			let heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
-
-			// Auto-detect rollup staleness: if raw usage_events has data but the
-			// derived tables (stats_rollup, session_metadata) are empty, they are
-			// stale or missing. Trigger a one-time rebuild from usage_events.
-			// NOTE: we must NOT use stats.totals.events here — it is derived from
-			// stats_rollup itself, so empty rollups would make events === 0 and
-			// the rebuild would never fire. Query coverage stats (raw
-			// usage_events) instead to detect whether raw data exists.
-			if (!this.rollupsRebuilt) {
-				const { from, to } = resolveTimeRange(query)
-				const fromEpochMs = from ? from.getTime() : 0
-				const toEpochMs = to ? to.getTime() : Number.MAX_SAFE_INTEGER
-				const coverage = this.database.queryCoverageStats(fromEpochMs, toEpochMs)
-				const hasRawEvents = coverage.firstEventAt !== undefined
-
-				if (hasRawEvents) {
-					const hasEmptyDerivedTables =
-						sessions.sessions.length === 0 || heatmap.values.every((v) => v === 0)
-
-					if (hasEmptyDerivedTables) {
-						try {
-							this.database.rebuildRollupsFromEvents()
-							this.rollupsRebuilt = true
-							// Re-assemble after rebuild
-							stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
-							sessions = computeSessionPage(
-								this.database,
-								state.subscription.requestId,
-								undefined,
-								state.subscription.sessionPageSize,
-							)
-							heatmap = computeHeatmapSnapshot(
-								this.database,
-								state.subscription.heatmapRangeDays,
-								query.timezone,
-							)
-						} catch (err) {
-							console.error("[UsageStatsStreamCoordinator] Auto-rebuild failed:", err)
-							// Do NOT latch rollupsRebuilt on failure — allow retry on
-							// the next snapshot so transient errors don't permanently
-							// disable the rebuild guard.
-						}
-					} else {
-						this.rollupsRebuilt = true
-					}
-				}
-			}
-
-			// Get current generation and sequence
+			// 2. Get current generation and sequence
 			const generation = this.database.getGeneration()
 			const sequence = this.database.getLastSequence()
 
@@ -528,10 +487,34 @@ export class UsageStatsStreamCoordinator {
 			state.lastSequence = sequence
 			state.snapshotSent = true
 
+			// 3. Send snapshot immediately — frontend gets data or empty state quickly
 			this.postMessage(state, {
 				type: "dashboardStatsStreamSnapshot",
 				dashboardStatsStreamSnapshot: snapshot,
 			})
+
+			// 4. Check if async rebuild is needed
+			// Use explicit rollup count instead of heatmap all-zero detection,
+			// because an inactive user's heatmap is legitimately all-zero.
+			if (!this.rollupsRebuilt && !this.rebuildInFlight) {
+				const { from, to } = resolveTimeRange(query)
+				const fromEpochMs = from ? from.getTime() : 0
+				const toEpochMs = to ? to.getTime() : Number.MAX_SAFE_INTEGER
+				const coverage = this.database.queryCoverageStats(fromEpochMs, toEpochMs)
+				const hasRawEvents = coverage.firstEventAt !== undefined
+
+				if (hasRawEvents) {
+					const rollupCount = this.database.getRollupCount()
+					const hasEmptyDerivedTables = rollupCount === 0
+
+					if (hasEmptyDerivedTables) {
+						// 5. Do the rebuild asynchronously to avoid blocking the event loop
+						this.scheduleAsyncRebuild(state)
+					} else {
+						this.rollupsRebuilt = true
+					}
+				}
+			}
 		} catch (err) {
 			this.sendError(
 				state,
@@ -539,6 +522,86 @@ export class UsageStatsStreamCoordinator {
 				`Failed to assemble snapshot: ${err instanceof Error ? err.message : String(err)}`,
 			)
 		}
+	}
+
+	/**
+	 * Schedules an asynchronous rollup rebuild that does not block the event loop.
+	 * After the rebuild completes, re-assembles and sends an updated snapshot
+	 * to all active subscribers.
+	 *
+	 * Uses setImmediate to yield the event loop before the rebuild starts,
+	 * allowing pending I/O (including the snapshot postMessage) to flush.
+	 */
+	private scheduleAsyncRebuild(triggerState: SubscriptionState): void {
+		this.rebuildInFlight = true
+
+		setImmediate(() => {
+			try {
+				if (this.disposed || !this.database) {
+					this.rebuildInFlight = false
+					return
+				}
+
+				this.database.rebuildRollupsFromEvents()
+				this.rollupsRebuilt = true
+
+				// Re-assemble and send updated snapshots to all active subscribers
+				for (const state of this.subscriptions.values()) {
+					if (state.paused || !state.snapshotSent) continue
+
+					try {
+						const query: StatsQuery = state.subscription.range
+						const recordingPaused = this.recordingPausedProvider?.() ?? false
+
+						const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+						const sessions = computeSessionPage(
+							this.database,
+							state.subscription.requestId,
+							undefined,
+							state.subscription.sessionPageSize,
+						)
+						const heatmap = computeHeatmapSnapshot(
+							this.database,
+							state.subscription.heatmapRangeDays,
+							query.timezone,
+						)
+
+						const generation = this.database.getGeneration()
+						const sequence = this.database.getLastSequence()
+
+						const updatedSnapshot: DashboardStatsSnapshot = {
+							requestId: state.subscription.requestId,
+							generation,
+							sequence,
+							stats,
+							sessions,
+							cursor: sessions.cursor,
+							heatmap,
+						}
+
+						state.generation = generation
+						state.lastSequence = sequence
+
+						this.postMessage(state, {
+							type: "dashboardStatsStreamSnapshot",
+							dashboardStatsStreamSnapshot: updatedSnapshot,
+						})
+					} catch (err) {
+						console.warn(
+							"[UsageStatsStreamCoordinator] Failed to send post-rebuild snapshot:",
+							err,
+						)
+					}
+				}
+			} catch (err) {
+				console.error("[UsageStatsStreamCoordinator] Async rebuild failed:", err)
+				// Do NOT latch rollupsRebuilt on failure — allow retry on
+				// the next snapshot so transient errors don't permanently
+				// disable the rebuild guard.
+			} finally {
+				this.rebuildInFlight = false
+			}
+		})
 	}
 
 	// ── Internal: Delta Delivery ────────────────────────────────────────────

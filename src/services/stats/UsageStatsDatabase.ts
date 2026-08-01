@@ -1253,6 +1253,22 @@ export class UsageStatsDatabase {
 		}
 	}
 
+	/**
+	 * Returns the total number of rows in stats_rollup.
+	 * Used by the stream coordinator to detect whether derived tables
+	 * are empty (migration gap) without relying on heatmap all-zero
+	 * detection (which is a legitimate state for inactive users).
+	 */
+	getRollupCount(): number {
+		const db = this.getDb()
+		try {
+			const row = db.prepare("SELECT COUNT(*) as c FROM stats_rollup").get() as { c: number }
+			return row.c
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query rollup count", err)
+		}
+	}
+
 	// ── Public API: Append ─────────────────────────────────────────────────
 
 	/**
