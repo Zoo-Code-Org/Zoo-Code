@@ -271,7 +271,7 @@
 	},
 	"api/providers/__tests__/unbound.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 5
 		}
 	},
 	"api/providers/__tests__/vercel-ai-gateway.spec.ts": {
