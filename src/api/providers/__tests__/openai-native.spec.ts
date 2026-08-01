@@ -18,6 +18,7 @@ import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } f
 import { OpenAiNativeHandler } from "../openai-native"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 // Mock OpenAI client - now everything uses Responses API
 const mockResponsesCreate = vitest.fn()
@@ -141,18 +142,14 @@ describe("OpenAiNativeHandler", () => {
 
 	describe("createMessage", () => {
 		it.each(serviceTiers)("should include the selected %s service tier", async (serviceTier) => {
-			mockResponsesCreate.mockResolvedValue({
-				async *[Symbol.asyncIterator]() {},
-			})
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
 			handler = new OpenAiNativeHandler({
 				...mockOptions,
 				apiModelId: "gpt-5.6-sol",
 				openAiNativeServiceTier: serviceTier,
 			})
 
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				void chunk
-			}
+			await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(mockResponsesCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ [SERVICE_TIER_KEY]: serviceTier }),
@@ -163,27 +160,24 @@ describe("OpenAiNativeHandler", () => {
 		it.each(serviceTierPricingCases)(
 			"prices SDK stream usage using resolved $resolvedTier tier instead of requested $requestedTier tier",
 			async ({ requestedTier, resolvedTier, expectedCost }) => {
-				mockResponsesCreate.mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				mockResponsesCreate.mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.done",
 							response: {
 								[SERVICE_TIER_KEY]: resolvedTier,
 								usage: { input_tokens: 100, output_tokens: 20 },
 							},
-						}
-					},
-				})
+						},
+					]),
+				)
 				handler = new OpenAiNativeHandler({
 					...mockOptions,
 					apiModelId: "gpt-5.6-sol",
 					openAiNativeServiceTier: requestedTier,
 				})
 
-				const chunks = []
-				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 				expect(chunks).toContainEqual(
 					expect.objectContaining({
@@ -219,9 +213,9 @@ describe("OpenAiNativeHandler", () => {
 				expectedCost: 0.088,
 			},
 		])("retains standard pricing for $name", async ({ modelId, requestedTier, resolvedTier, expectedCost }) => {
-			mockResponsesCreate.mockResolvedValue({
-				async *[Symbol.asyncIterator]() {
-					yield {
+			mockResponsesCreate.mockResolvedValue(
+				asyncStreamFrom([
+					{
 						type: "response.done",
 						response: {
 							...(resolvedTier ? { [SERVICE_TIER_KEY]: resolvedTier } : {}),
@@ -231,19 +225,16 @@ describe("OpenAiNativeHandler", () => {
 								cache_read_input_tokens: 20_000,
 							},
 						},
-					}
-				},
-			})
+					},
+				]),
+			)
 			handler = new OpenAiNativeHandler({
 				...mockOptions,
 				apiModelId: modelId,
 				openAiNativeServiceTier: requestedTier,
 			})
 
-			const chunks = []
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const usageChunk = chunks.find((chunk) => chunk.type === "usage")
 			expect(usageChunk).toBeDefined()
@@ -281,10 +272,7 @@ describe("OpenAiNativeHandler", () => {
 					openAiNativeServiceTier: requestedTier,
 				})
 
-				const chunks = []
-				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 				const [, request] = mockFetch.mock.calls[0]
 				expect(JSON.parse(request.body)).toMatchObject({ [SERVICE_TIER_KEY]: requestedTier })
@@ -328,10 +316,7 @@ describe("OpenAiNativeHandler", () => {
 					openAiNativeServiceTier: requestedTier,
 				})
 
-				const chunks = []
-				for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 				expect(chunks).toContainEqual(
 					expect.objectContaining({
@@ -371,11 +356,7 @@ describe("OpenAiNativeHandler", () => {
 			// Mock SDK to fail so it falls back to fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
-			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -2023,10 +2004,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 			// Should throw an error when encountering error event
 			await expect(async () => {
-				const chunks = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Responses API error: Model overloaded")
 		})
 

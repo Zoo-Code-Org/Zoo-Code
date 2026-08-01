@@ -226,7 +226,7 @@
 	},
 	"api/providers/__tests__/openai-native.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 79
+			"count": 78
 		}
 	},
 	"api/providers/__tests__/openai-timeout.spec.ts": {
