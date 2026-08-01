@@ -39,7 +39,11 @@ go—and, importantly, where they don't.
   some jurisdictions; we use it only for product analytics and error grouping.
   We retain telemetry only as long as needed for product analytics and
   debugging. This PostHog-based telemetry does **not** collect your code or AI
-  prompts, and you can opt out at any time through the settings.
+  prompts. Telemetry is on by default. To turn it off, choose "Disabled" in
+  the settings or in the notice shown on first use; closing that notice
+  without a choice leaves telemetry on. Telemetry also follows VS Code's own
+  global telemetry setting: if you turn that off, Zoo Code stops sending
+  telemetry right away, even if the Zoo Code setting says "Enabled."
 - **Marketplace Requests**: When you browse or search the Marketplace for Model
   Configuration Profiles (MCPs) or Custom Modes, Zoo Code makes a secure API
   call to Zoo Code's backend servers to retrieve listing information. These

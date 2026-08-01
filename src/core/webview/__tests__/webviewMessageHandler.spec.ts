@@ -2059,6 +2059,37 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		expect(calls.at(-1)).toEqual([false])
 	})
 
+	// Review finding: webviewDidLaunch's queued telemetry update wasn't awaited by the
+	// "webviewDidLaunch" case, so a thrown error inside it was only ever caught by a later,
+	// unrelated queue link's leading .catch(() => undefined) -- silently swallowed rather than
+	// logged. Now awaited with its own .catch that logs via provider.log.
+	it("logs an error via provider.log if the queued telemetry init throws on launch", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) => {
+			if (key === "telemetrySetting") {
+				throw new Error("contextProxy read failed")
+			}
+			return undefined
+		})
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		const providerForLaunch = mockClineProvider as unknown as {
+			getMcpHub: ReturnType<typeof vi.fn>
+			providerSettingsManager: { listConfig: ReturnType<typeof vi.fn> }
+			getStateToPostToWebview: ReturnType<typeof vi.fn>
+		}
+		providerForLaunch.getMcpHub = vi.fn().mockReturnValue(undefined)
+		providerForLaunch.providerSettingsManager = { listConfig: vi.fn().mockResolvedValue(undefined) }
+		providerForLaunch.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "unset" })
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Error initializing telemetry state on launch"),
+		)
+	})
+
 	// CodeRabbit finding: webviewDidLaunch's queued telemetry update called
 	// TelemetryService.instance directly, unlike the "telemetrySetting" case a few lines
 	// below which checks hasInstance() first. If webviewDidLaunch fires before the service

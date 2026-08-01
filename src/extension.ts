@@ -413,12 +413,14 @@ export async function deactivate() {
 
 	await McpServerManager.cleanup(extensionContext)
 
-	try {
-		await TelemetryService.instance.shutdown()
-	} catch (error) {
-		outputChannel.appendLine(
-			`Failed to shut down telemetry service: ${error instanceof Error ? error.message : String(error)}`,
-		)
+	if (TelemetryService.hasInstance()) {
+		try {
+			await TelemetryService.instance.shutdown()
+		} catch (error) {
+			outputChannel.appendLine(
+				`Failed to shut down telemetry service: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 	}
 
 	Terminal.setTerminalProfile(undefined)

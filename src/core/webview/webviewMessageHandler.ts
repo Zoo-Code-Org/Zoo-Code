@@ -674,6 +674,12 @@ export const webviewMessageHandler = async (
 					)
 				})
 
+			await telemetrySettingQueue.catch((error) =>
+				provider.log(
+					`Error initializing telemetry state on launch: ${error instanceof Error ? error.message : String(error)}`,
+				),
+			)
+
 			provider.isViewLaunched = true
 			break
 		case "newTask":

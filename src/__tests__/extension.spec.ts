@@ -84,6 +84,7 @@ const mockTelemetryServiceInstance = {
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		createInstance: vi.fn().mockReturnValue(mockTelemetryServiceInstance),
+		hasInstance: vi.fn().mockReturnValue(true),
 		get instance() {
 			return mockTelemetryServiceInstance
 		},
@@ -458,6 +459,43 @@ describe("extension.ts", () => {
 
 			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
 			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+
+			setTerminalProfileSpy.mockRestore()
+		})
+
+		// Review finding: every other TelemetryService call site touched by this PR checks
+		// hasInstance() first; deactivate()'s shutdown call didn't. Not a crash today (the mock
+		// always resolves), but TelemetryService.instance throws for real if no instance exists,
+		// so the guard keeps this call site consistent with the rest of the file.
+		test("does not touch TelemetryService.instance when no instance exists", async () => {
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const { Terminal } = await import("../integrations/terminal/Terminal")
+			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+
+			const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile")
+
+			const { activate, deactivate } = await import("../extension")
+			await activate(mockContext)
+
+			// Flip to false only after activate() completes, so this only exercises
+			// deactivate()'s own guard rather than any hasInstance() check during activation.
+			vi.mocked(TelemetryService.hasInstance).mockReturnValue(false)
+
+			// Model the real singleton failure mode: TelemetryService.instance throws when no
+			// instance exists. If deactivate()'s hasInstance() guard were ever removed, this
+			// throw would surface instead of the assertion below silently passing regardless.
+			const instanceGetterSpy = vi.spyOn(TelemetryService, "instance", "get").mockImplementation(() => {
+				throw new Error("TelemetryService not initialized")
+			})
+
+			await expect(deactivate()).resolves.toBeUndefined()
+
+			expect(instanceGetterSpy).not.toHaveBeenCalled()
+			expect(mockTelemetryServiceInstance.shutdown).not.toHaveBeenCalled()
+			expect(setTerminalProfileSpy).toHaveBeenCalledWith(undefined)
+			expect(TerminalRegistry.cleanup).toHaveBeenCalledTimes(1)
+
+			instanceGetterSpy.mockRestore()
 
 			setTerminalProfileSpy.mockRestore()
 		})
