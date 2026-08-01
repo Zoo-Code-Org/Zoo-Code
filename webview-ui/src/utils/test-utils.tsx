@@ -9,15 +9,17 @@ interface AllTheProvidersProps {
 	children: React.ReactNode
 }
 
-const AllTheProviders = ({ children }: AllTheProvidersProps) => {
-	// Create a new QueryClient for each test to avoid state leakage
-	const queryClient = new QueryClient({
+export const createTestQueryClient = () =>
+	new QueryClient({
 		defaultOptions: {
 			queries: {
-				retry: false, // Disable retries in tests
+				retry: false,
 			},
 		},
 	})
+
+const AllTheProviders = ({ children }: AllTheProvidersProps) => {
+	const queryClient = createTestQueryClient()
 
 	return (
 		<QueryClientProvider client={queryClient}>
