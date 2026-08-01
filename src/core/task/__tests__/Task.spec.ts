@@ -549,7 +549,10 @@ describe("Cline", () => {
 				...mockApiConfig,
 				todoListEnabled: true,
 			}
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "architect", mcpEnabled: false })
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				mode: "architect",
+				mcpEnabled: false,
+			} as unknown as ProviderState)
 
 			const task = new Task({
 				provider: mockProvider,
@@ -563,7 +566,7 @@ describe("Cline", () => {
 				mode: "code",
 				mcpEnabled: false,
 				apiConfiguration: { ...mockApiConfig, todoListEnabled: false },
-			})
+			} as unknown as ProviderState)
 			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
 
 			await getTaskTestAccess(task).getSystemPrompt()
@@ -575,7 +578,10 @@ describe("Cline", () => {
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "architect", mcpEnabled: false })
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				mode: "architect",
+				mcpEnabled: false,
+			} as unknown as ProviderState)
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -583,7 +589,10 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			await task.getTaskMode()
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "code", mcpEnabled: false })
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				mode: "code",
+				mcpEnabled: false,
+			} as unknown as ProviderState)
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 
 			await task.condenseContext()
@@ -598,7 +607,7 @@ describe("Cline", () => {
 				mcpEnabled: false,
 				autoApprovalEnabled: true,
 				requestDelaySeconds: 0,
-			})
+			} as unknown as ProviderState)
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -613,7 +622,7 @@ describe("Cline", () => {
 				mcpEnabled: false,
 				autoApprovalEnabled: true,
 				requestDelaySeconds: 0,
-			})
+			} as unknown as ProviderState)
 			const stream = (async function* () {
 				yield { type: "text", text: "response" } as ApiStreamChunk
 			})()
@@ -1765,7 +1774,10 @@ describe("Cline", () => {
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
-				vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "ask", mcpEnabled: false })
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					mode: "ask",
+					mcpEnabled: false,
+				} as unknown as ProviderState)
 				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
 				const task = new Task({
 					provider: mockProvider,
@@ -1789,6 +1801,30 @@ describe("Cline", () => {
 
 				expect(mockProvider.setMode).toHaveBeenCalledWith("code")
 				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
+			})
+
+			it("stores a provider profile selected through submitUserMessage", async () => {
+				const selectedConfiguration: ProviderSettings = {
+					...mockApiConfig,
+					apiModelId: "selected-model",
+				}
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				task.setTaskApiConfigName("previous-profile")
+				vi.spyOn(mockProvider, "setProviderProfile").mockResolvedValue(undefined)
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					currentApiConfigName: "selected-profile",
+					apiConfiguration: selectedConfiguration,
+				} as unknown as ProviderState)
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				await task.submitUserMessage("switch profiles", undefined, undefined, "selected-profile")
+
+				expect(task.taskApiConfigName).toBe("selected-profile")
 			})
 
 			it("should handle empty messages gracefully", async () => {
@@ -2628,7 +2664,10 @@ describe("Cline", () => {
 			})
 
 			it("should propagate AbortController signal through attemptApiRequest context-window retry path", async () => {
-				vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "architect", mcpEnabled: false })
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					mode: "architect",
+					mcpEnabled: false,
+				} as unknown as ProviderState)
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,

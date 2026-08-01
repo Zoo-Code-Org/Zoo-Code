@@ -1540,6 +1540,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Update this task's API configuration to match the new profile
 					// This ensures the parser state is synchronized with the selected model
 					const newState = await provider.getState()
+					this.setTaskApiConfigName(newState?.currentApiConfigName ?? providerProfile)
 					if (newState?.apiConfiguration) {
 						this.updateApiConfiguration(newState.apiConfiguration)
 					}
