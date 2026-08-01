@@ -59,10 +59,6 @@ function captureModelCacheEmptyResponseOnce(
 		return
 	}
 
-	if (!TelemetryService.instance.isTelemetryEnabled()) {
-		return
-	}
-
 	reportedEmptyModelResponse.add(cacheKey)
 	TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, { provider, ...properties })
 }
@@ -369,6 +365,10 @@ function dedupedFetch(cacheKey: string, options: GetModelsOptions): Promise<Mode
 		inFlightRefresh.delete(cacheKey)
 	})
 
+	// The finally cleanup above can only run after this function's current synchronous run --
+	// including the set() below -- completes, since that's the earliest a promise reaction can
+	// fire. So the entry is always registered before finally can delete it, even if
+	// fetchModelsFromProvider() resolves immediately.
 	inFlightRefresh.set(cacheKey, fetchPromise)
 
 	return fetchPromise

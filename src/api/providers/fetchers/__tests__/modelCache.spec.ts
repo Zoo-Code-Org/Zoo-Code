@@ -430,6 +430,37 @@ describe("empty cache protection", () => {
 			expect(result2).toEqual(mockModels)
 		})
 
+		it("removes the in-flight entry after settlement so a later call starts a fresh fetch", async () => {
+			// Proves the dedupedFetch() finally() cleanup actually runs: if the in-flight map
+			// entry were never removed, this second, later call would resolve to the first
+			// call's stale result instead of invoking the fetcher again.
+			const firstModels = {
+				"openrouter/first": {
+					maxTokens: 8192,
+					contextWindow: 128000,
+					supportsPromptCache: false,
+					description: "First response",
+				},
+			}
+			const secondModels = {
+				"openrouter/second": {
+					maxTokens: 4096,
+					contextWindow: 64000,
+					supportsPromptCache: false,
+					description: "Second response",
+				},
+			}
+			mockGetOpenRouterModels.mockResolvedValueOnce(firstModels).mockResolvedValueOnce(secondModels)
+			mockGet.mockReturnValue(undefined)
+
+			const result1 = await getModels({ provider: providerIdentifiers.openrouter })
+			const result2 = await getModels({ provider: providerIdentifiers.openrouter })
+
+			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+			expect(result1).toEqual(firstModels)
+			expect(result2).toEqual(secondModels)
+		})
+
 		it("shares a single in-flight fetch between getModels() and refreshModels() for the same key", async () => {
 			// Both entry points converge on the same coordinator so a getModels() cache miss
 			// racing a concurrent refreshModels() call can't produce two unordered cache writes.
