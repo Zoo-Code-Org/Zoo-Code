@@ -9,6 +9,7 @@ import type { Mock } from "vitest"
 
 import {
 	providerIdentifiers,
+	RooCodeEventName,
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
@@ -607,6 +608,48 @@ describe("Cline", () => {
 
 			const metadata = requireDefined(createMessage.mock.calls[0])[2]
 			expect(metadata?.mode).toBe("ask")
+		})
+
+		it("only applies profile changes to the focused task", async () => {
+			const parentConfiguration: ProviderSettings = {
+				...mockApiConfig,
+				apiModelId: "parent-model",
+				rateLimitSeconds: 4,
+			}
+			const childConfiguration: ProviderSettings = {
+				...mockApiConfig,
+				apiModelId: "child-model",
+				rateLimitSeconds: 8,
+			}
+			const activeConfiguration: ProviderSettings = {
+				...mockApiConfig,
+				apiModelId: "active-model",
+				rateLimitSeconds: 12,
+			}
+			const parent = new Task({
+				provider: mockProvider,
+				apiConfiguration: parentConfiguration,
+				taskId: "parent-task",
+				task: "parent task",
+				startTask: false,
+			})
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: childConfiguration,
+				taskId: "child-task",
+				task: "child task",
+				startTask: false,
+			})
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(child)
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ apiConfiguration: activeConfiguration })
+
+			mockProvider.emit(RooCodeEventName.ProviderProfileChanged, {
+				name: "active-profile",
+				provider: activeConfiguration.apiProvider,
+			})
+
+			await vi.waitFor(() => expect(child.apiConfiguration).toEqual(activeConfiguration))
+			expect(parent.apiConfiguration).toEqual(parentConfiguration)
 		})
 	})
 
@@ -1736,6 +1779,33 @@ describe("Cline", () => {
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
 				// Should NOT route through webview anymore
 				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+			})
+
+			it("uses a mode selected through submitUserMessage in the next API request", async () => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "ask", mcpEnabled: false })
+				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+
+				await task.submitUserMessage("switch modes", undefined, "code")
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				const stream = (async function* () {
+					yield { type: "text", text: "response" } as ApiStreamChunk
+				})()
+				const createMessage = vi.spyOn(task.api, "createMessage").mockReturnValue(stream)
+				task.apiConversationHistory = [
+					{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+				]
+
+				await task.attemptApiRequest().next()
+
+				expect(mockProvider.setMode).toHaveBeenCalledWith("code")
+				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
 			})
 
 			it("should handle empty messages gracefully", async () => {
