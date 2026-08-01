@@ -17,6 +17,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../Task"
+import { SYSTEM_PROMPT } from "../../prompts/system"
 import { createRateLimitClock } from "../RateLimitClock"
 import { summarizeConversation } from "../../condense"
 import { ClineProvider } from "../../webview/ClineProvider"
@@ -235,6 +236,15 @@ vi.mock("../../condense", async (importOriginal) => {
 		}),
 	}
 })
+
+vi.mock("../../prompts/system", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../prompts/system")>()
+	return {
+		...actual,
+		SYSTEM_PROMPT: vi.fn(actual.SYSTEM_PROMPT),
+	}
+})
+
 // Mock storagePathManager to prevent dynamic import issues.
 vi.mock("../../../utils/storage", () => ({
 	getTaskDirectoryPath: vi
@@ -530,6 +540,73 @@ describe("Cline", () => {
 			expect(() => {
 				new Task({ provider: mockProvider, apiConfiguration: mockApiConfig })
 			}).toThrow("Either historyItem or task/images must be provided")
+		})
+	})
+
+	describe("task-local configuration isolation", () => {
+		it("uses the task mode and API configuration when focused provider state differs", async () => {
+			const taskApiConfiguration: ProviderSettings = {
+				...mockApiConfig,
+				todoListEnabled: true,
+			}
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "architect", mcpEnabled: false })
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: taskApiConfiguration,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				mode: "code",
+				mcpEnabled: false,
+				apiConfiguration: { ...mockApiConfig, todoListEnabled: false },
+			})
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await getTaskTestAccess(task).getSystemPrompt()
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			expect(systemPromptCall[5]).toBe("architect")
+			expect(systemPromptCall[12]).toMatchObject({ todoListEnabled: true })
+		})
+
+		it("uses the task mode in request metadata when focused provider state differs", async () => {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				mode: "ask",
+				mcpEnabled: false,
+				autoApprovalEnabled: true,
+				requestDelaySeconds: 0,
+			})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				mode: "code",
+				mcpEnabled: false,
+				autoApprovalEnabled: true,
+				requestDelaySeconds: 0,
+			})
+			const stream = (async function* () {
+				yield { type: "text", text: "response" } as ApiStreamChunk
+			})()
+			const createMessage = vi.spyOn(task.api, "createMessage").mockReturnValue(stream)
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+
+			await task.attemptApiRequest().next()
+
+			const metadata = requireDefined(createMessage.mock.calls[0])[2]
+			expect(metadata?.mode).toBe("ask")
 		})
 	})
 
@@ -832,7 +909,7 @@ describe("Cline", () => {
 				expect(mockDelay).toHaveBeenCalledWith(1000)
 			})
 
-			it("should respect rate limit window in retry backoff", async () => {
+			it("uses the task rate limit in retry backoff when focused provider state differs", async () => {
 				const clock = createRateLimitClock()
 				const rateLimitConfig = {
 					...mockApiConfig,
@@ -897,7 +974,10 @@ describe("Cline", () => {
 				const providerState = await mockProvider.getState()
 				vi.spyOn(mockProvider, "getState").mockResolvedValue({
 					...providerState,
-					apiConfiguration: rateLimitConfig,
+					apiConfiguration: {
+						...mockApiConfig,
+						rateLimitSeconds: 1,
+					},
 					autoApprovalEnabled: true,
 					requestDelaySeconds: 3,
 				})
@@ -905,7 +985,8 @@ describe("Cline", () => {
 				const iterator = cline.attemptApiRequest(0)
 				await iterator.next()
 
-				// rateLimitSeconds=10 > exponentialDelay=ceil(3*2^0)=3, so
+				// The task rateLimitSeconds=10 (rather than the focused provider's 1)
+				// exceeds exponentialDelay=ceil(3*2^0)=3, so
 				// finalDelay=10 and the countdown loop fires delay(1000) ten times.
 				expect(mockDelay).toHaveBeenCalledWith(1000)
 				expect(mockDelay).toHaveBeenCalledTimes(10)

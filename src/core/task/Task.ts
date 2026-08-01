@@ -1618,7 +1618,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Get condensing configuration
 		const state = await this.providerRef.deref()?.getState()
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
-		const { mode, apiConfiguration } = state ?? {}
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens: prevContextTokens } = this.getTokenUsage()
 
@@ -3836,16 +3837,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const state = await this.providerRef.deref()?.getState()
 
-		const {
-			mode,
-			customModes,
-			customModePrompts,
-			customInstructions,
-			experiments,
-			language,
-			apiConfiguration,
-			enableSubfolderRules,
-		} = state ?? {}
+		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
+			state ?? {}
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		return await (async () => {
 			const provider = this.providerRef.deref()
@@ -3911,7 +3906,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
-		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
+		const { profileThresholds = {} } = state ?? {}
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
 		await this.safeEnsureModelFetched()
@@ -4051,9 +4048,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * the `api_req_rate_limit_wait` say type (not an error).
 	 */
 	private async maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void> {
-		const state = await this.providerRef.deref()?.getState()
-		const rateLimitSeconds =
-			state?.apiConfiguration?.rateLimitSeconds ?? this.apiConfiguration?.rateLimitSeconds ?? 0
+		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
 
 		const lastRequestTime = this.rateLimitClock.getLastRequestTime()
 		if (rateLimitSeconds <= 0 || !lastRequestTime) {
@@ -4086,14 +4081,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const state = await this.providerRef.deref()?.getState()
 
 		const {
-			apiConfiguration,
 			autoApprovalEnabled,
 			requestDelaySeconds,
-			mode,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},
 		} = state ?? {}
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		// Get condensing configuration for automatic triggers.
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
@@ -4506,7 +4501,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Respect provider rate limit window
 			let rateLimitDelay = 0
-			const rateLimit = (state?.apiConfiguration ?? this.apiConfiguration)?.rateLimitSeconds || 0
+			const rateLimit = this.apiConfiguration?.rateLimitSeconds || 0
 			const lastRequestTime = this.rateLimitClock.getLastRequestTime()
 			if (lastRequestTime && rateLimit > 0) {
 				const elapsed = performance.now() - lastRequestTime
