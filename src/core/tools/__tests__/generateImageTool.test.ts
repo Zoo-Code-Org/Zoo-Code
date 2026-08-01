@@ -163,6 +163,9 @@ describe("generateImageTool", () => {
 			expect(mockAskApproval).toHaveBeenCalled()
 			expect(mockGenerateImage).toHaveBeenCalled()
 			expect(mockPushToolResult).toHaveBeenCalled()
+			// Usage is recorded once at the central presentAssistantMessage
+			// attribution point, not locally by the handler.
+			expect(mockCline.recordToolUsage).not.toHaveBeenCalled()
 		})
 
 		it("should add cache-busting parameter to image URI", async () => {

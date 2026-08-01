@@ -15,14 +15,17 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 		getModeBySlug: vi.fn(actual.getModeBySlug),
 	}
 })
-vi.mock("../../tools/validateToolUse", () => ({
-	validateToolUse: vi.fn(),
-	isValidToolName: vi.fn((toolName: string) =>
-		["read_file", "write_to_file", "ask_followup_question", "attempt_completion", "use_mcp_tool"].includes(
-			toolName,
-		),
-	),
-}))
+// isValidToolName is left as the real implementation (only validateToolUse is
+// mocked): it has its own independent mcp_ prefix carve-out, and a hand-rolled
+// mock allowlist here would mask a regression in toTelemetryToolName's
+// ordering relative to isValidToolName.
+vi.mock("../../tools/validateToolUse", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../tools/validateToolUse")>()
+	return {
+		...actual,
+		validateToolUse: vi.fn(),
+	}
+})
 
 vi.mock("@roo-code/core", () => ({
 	customToolRegistry: {

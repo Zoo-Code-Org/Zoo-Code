@@ -2,14 +2,18 @@
 
 import { describe, it, expect, vi } from "vitest"
 
-vi.mock("../../tools/validateToolUse", () => ({
-	validateToolUse: vi.fn(),
-	isValidToolName: vi.fn((toolName: string) =>
-		["read_file", "write_to_file", "ask_followup_question", "attempt_completion", "use_mcp_tool"].includes(
-			toolName,
-		),
-	),
-}))
+// Only validateToolUse itself needs mocking (unused by toTelemetryToolName,
+// but imported by the same module). isValidToolName is left as the real
+// implementation: it has its own independent mcp_ prefix carve-out, and a
+// hand-rolled mock allowlist here would mask a regression where
+// toTelemetryToolName's ordering relative to isValidToolName changes.
+vi.mock("../../tools/validateToolUse", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../tools/validateToolUse")>()
+	return {
+		...actual,
+		validateToolUse: vi.fn(),
+	}
+})
 
 import { toTelemetryToolName } from "../presentAssistantMessage"
 
@@ -39,5 +43,12 @@ describe("toTelemetryToolName", () => {
 		const result = toTelemetryToolName(raw, false, undefined)
 		expect(result).not.toBe(raw)
 		expect(result).toBe("invalid_tool_call")
+	})
+
+	it("maps mcp_ names to use_mcp_tool against the real isValidToolName, not a mock allowlist", () => {
+		// isValidToolName is unmocked in this file (see the vi.mock factory above),
+		// so this exercises the real mcp_ prefix carve-out ordering rather than one
+		// a hand-rolled mock could silently keep agreeing with after a regression.
+		expect(toTelemetryToolName("mcp_my_server_do_thing", false, undefined)).toBe("use_mcp_tool")
 	})
 })
