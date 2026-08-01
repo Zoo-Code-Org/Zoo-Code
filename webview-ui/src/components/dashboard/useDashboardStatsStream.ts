@@ -112,28 +112,42 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 				case "dashboardStatsStreamSnapshot": {
 					const snapshot: DashboardStatsSnapshot | undefined = message.dashboardStatsStreamSnapshot
 					if (snapshot) {
-						dispatch({ type: "SNAPSHOT", snapshot })
+						// Stale-epoch check using ref (synchronous) to avoid race condition
+						// where snapshot arrives before React processes REPLACE_SUBSCRIPTION dispatch.
+						// The reducer also has this check but uses state.subscriptionId which is async.
+						if (snapshot.requestId === subscriptionIdRef.current) {
+							dispatch({ type: "SNAPSHOT", snapshot })
+						}
 					}
 					break
 				}
 				case "dashboardStatsStreamDelta": {
 					const delta: DashboardStatsDelta | undefined = message.dashboardStatsStreamDelta
 					if (delta) {
-						dispatch({ type: "DELTA", delta })
+						// Same stale-epoch check for deltas
+						if (delta.requestId === subscriptionIdRef.current) {
+							dispatch({ type: "DELTA", delta })
+						}
 					}
 					break
 				}
 				case "dashboardStatsStreamError": {
 					const error: DashboardStatsError | undefined = message.dashboardStatsStreamError
 					if (error) {
-						dispatch({ type: "ERROR", error })
+						// Only process errors for the current subscription epoch
+						if (error.requestId === subscriptionIdRef.current) {
+							dispatch({ type: "ERROR", error })
+						}
 					}
 					break
 				}
 				case "dashboardSessionPageResponse": {
 					const page: DashboardSessionPage | undefined = message.dashboardSessionPage
 					if (page) {
-						dispatch({ type: "SESSION_PAGE", page })
+						// Only process session pages for the current subscription epoch
+						if (page.requestId === subscriptionIdRef.current) {
+							dispatch({ type: "SESSION_PAGE", page })
+						}
 					}
 					break
 				}
