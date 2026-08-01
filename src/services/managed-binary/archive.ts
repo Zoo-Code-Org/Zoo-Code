@@ -32,10 +32,6 @@ export function runProcess(executable: string, args: string[], timeoutMs = 30_00
 	})
 }
 
-export function escapePowerShellLiteral(value: string): string {
-	return value.replace(/'/g, "''")
-}
-
 export async function extractTarGzArchive(archivePath: string, destination: string): Promise<void> {
 	const args = ["-xzf", archivePath, "-C", destination, "--no-same-owner"]
 	if (process.platform === "linux") {
@@ -56,8 +52,11 @@ export async function extractZipArchive(archivePath: string, destination: string
 	if (process.platform === "win32") {
 		await runProcess("powershell", [
 			"-NoProfile",
+			"-NonInteractive",
 			"-Command",
-			`Expand-Archive -Path '${escapePowerShellLiteral(archivePath)}' -DestinationPath '${escapePowerShellLiteral(destination)}' -Force`,
+			"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
+			archivePath,
+			destination,
 		])
 		return
 	}
@@ -71,19 +70,31 @@ export async function extractSingleFileZipArchive(
 	expectedFile: string,
 	archiveName: string,
 ): Promise<void> {
-	const outputPath = path.join(destination, expectedFile)
 	const script = [
 		"$ErrorActionPreference = 'Stop'",
+		"$archivePath = $args[0]",
+		"$outputPath = $args[1]",
+		"$expectedFile = $args[2]",
+		"$archiveName = $args[3]",
 		"Add-Type -AssemblyName System.IO.Compression.FileSystem",
-		`$archive = [System.IO.Compression.ZipFile]::OpenRead('${escapePowerShellLiteral(archivePath)}')`,
+		"$archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)",
 		"try {",
 		"  $entries = @($archive.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) })",
-		`  if ($entries.Count -ne 1 -or $entries[0].FullName -ne '${escapePowerShellLiteral(expectedFile)}') { throw '${escapePowerShellLiteral(archiveName)} archive has an unexpected layout' }`,
-		`  [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], '${escapePowerShellLiteral(outputPath)}', $false)`,
+		'  if ($entries.Count -ne 1 -or $entries[0].FullName -ne $expectedFile) { throw "$archiveName archive has an unexpected layout" }',
+		"  [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entries[0], $outputPath, $false)",
 		"} finally { $archive.Dispose() }",
 	].join("; ")
 
-	await runProcess("powershell", ["-NoProfile", "-NonInteractive", "-Command", script])
+	await runProcess("powershell", [
+		"-NoProfile",
+		"-NonInteractive",
+		"-Command",
+		script,
+		archivePath,
+		path.join(destination, expectedFile),
+		expectedFile,
+		archiveName,
+	])
 }
 
 export async function extractSingleFileTarXzArchive(
@@ -95,11 +106,12 @@ export async function extractSingleFileTarXzArchive(
 	const listing = await runProcess("tar", ["-tJf", archivePath])
 	const entries = listing.stdout
 		.split(/\r?\n/)
-		.map((entry) => entry.trim().replace(/^\.\//, ""))
+		.map((entry) => entry.trim())
 		.filter(Boolean)
-	if (entries.length !== 1 || entries[0] !== expectedFile) {
+	const archiveEntry = entries[0]
+	if (entries.length !== 1 || archiveEntry.replace(/^\.\//, "") !== expectedFile) {
 		throw new Error(`${archiveName} archive has an unexpected layout`)
 	}
 
-	await runProcess("tar", ["-xJf", archivePath, "-C", destination, expectedFile])
+	await runProcess("tar", ["-xJf", archivePath, "-C", destination, archiveEntry])
 }

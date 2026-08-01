@@ -1,5 +1,6 @@
 import * as fs from "fs/promises"
 import * as path from "path"
+import * as lockfile from "proper-lockfile"
 
 const installationPromises = new Map<string, Promise<string>>()
 
@@ -14,7 +15,7 @@ export interface ManagedBinaryInstallOptions {
 	verifyArchive: (archivePath: string) => Promise<void>
 	extractArchive: (archivePath: string, stagingDir: string) => Promise<void>
 	validateBinary?: (stagedBinaryPath: string) => Promise<void>
-	errorPrefix?: string
+	errorPrefix: string
 }
 
 export interface ManagedBinaryPaths {
@@ -107,14 +108,27 @@ async function installManagedBinary(options: ManagedBinaryInstallOptions): Promi
 		await cleanupStaleArchives(options, paths.archivePath)
 		return paths.binaryPath
 	} catch (error) {
-		if (!options.errorPrefix) {
-			throw error
-		}
 		const message = error instanceof Error ? error.message : String(error)
-		throw new Error(`${options.errorPrefix}: ${message}`)
+		throw new Error(`${options.errorPrefix}: ${message}`, { cause: error })
 	} finally {
 		await fs.rm(paths.archivePath, { force: true }).catch(() => {})
 		await fs.rm(paths.stagingDir, { recursive: true, force: true }).catch(() => {})
+	}
+}
+
+async function installManagedBinaryWithLock(options: ManagedBinaryInstallOptions): Promise<string> {
+	await fs.mkdir(options.storageDir, { recursive: true })
+	const lockTarget = path.join(options.storageDir, `.${options.id}.install`)
+	const release = await lockfile.lock(lockTarget, {
+		realpath: false,
+		stale: 5 * 60_000,
+		update: 30_000,
+		retries: { retries: 10, factor: 1.5, minTimeout: 100, maxTimeout: 1_000 },
+	})
+	try {
+		return await installManagedBinary(options)
+	} finally {
+		await release()
 	}
 }
 
@@ -125,7 +139,7 @@ export function ensureManagedBinaryInstalled(options: ManagedBinaryInstallOption
 		return existing
 	}
 
-	const installation = installManagedBinary(options).finally(() => installationPromises.delete(key))
+	const installation = installManagedBinaryWithLock(options).finally(() => installationPromises.delete(key))
 	installationPromises.set(key, installation)
 	return installation
 }

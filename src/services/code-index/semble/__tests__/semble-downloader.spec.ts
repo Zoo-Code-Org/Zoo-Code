@@ -32,6 +32,10 @@ vi.mock("fs/promises", () => ({
 	readdir: vi.fn().mockResolvedValue([]),
 }))
 
+vi.mock("proper-lockfile", () => ({
+	lock: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)),
+}))
+
 // Mock fs (createWriteStream and createReadStream for checksum verification)
 const mockWriteStream = {
 	on: vi.fn(),
@@ -717,7 +721,7 @@ describe("semble-downloader", () => {
 					force: true,
 				})
 				// Unrelated files in the storage dir must not be touched.
-				expect(fs.unlink).not.toHaveBeenCalledWith(path.join("/storage", "unrelated-file.txt"))
+				expect(fs.rm).not.toHaveBeenCalledWith(path.join("/storage", "unrelated-file.txt"), expect.anything())
 				// The new version file is recorded
 				expect(fs.writeFile).toHaveBeenCalledWith(
 					path.join("/storage", "semble.new", ".semble-version"),

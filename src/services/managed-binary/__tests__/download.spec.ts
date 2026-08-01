@@ -40,6 +40,7 @@ function createResponse(statusCode: number, headers: Record<string, string> = {}
 		headers,
 		destroy: vi.fn(),
 		pipe: vi.fn(),
+		unpipe: vi.fn(),
 	})
 }
 
@@ -67,6 +68,20 @@ describe("managed binary downloads", () => {
 		expect(() => resolveTrustedRedirect("https://github.com/release", "/asset", 0, options)).toThrow(
 			"Too many Example download redirects",
 		)
+		expect(() => resolveTrustedRedirect("https://github.com/release", undefined, 5, options)).toThrow(
+			"Example download redirect is missing a Location header",
+		)
+	})
+
+	it("distinguishes an untrusted initial URL from an unsafe redirect", async () => {
+		await expect(
+			downloadBinaryFile("http://github.com/release", "/tmp/archive", {
+				name: "Example",
+				trustedDomains,
+				timeoutMs: 1_000,
+			}),
+		).rejects.toThrow("Example download URL is not a trusted HTTPS host")
+		expect(mockGet).not.toHaveBeenCalled()
 	})
 
 	it("enforces configurable archive size limits", () => {
@@ -157,5 +172,32 @@ describe("managed binary downloads", () => {
 			}),
 		).rejects.toThrow("Example archive exceeds the download size limit")
 		expect(mockCreateWriteStream).not.toHaveBeenCalled()
+	})
+
+	it("unpipes and destroys the destination when streamed bytes exceed the limit", async () => {
+		const request = createRequest()
+		const response = createResponse(200)
+		const output = Object.assign(new EventEmitter(), { close: vi.fn(), destroy: vi.fn() })
+		mockCreateWriteStream.mockReturnValue(output as unknown as ReturnType<typeof createWriteStream>)
+		mockGet.mockImplementation((_url, optionsOrCallback, optionalCallback) => {
+			const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : optionalCallback
+			setImmediate(() => callback?.(response as unknown as IncomingMessage))
+			return request as unknown as ReturnType<typeof get>
+		})
+
+		const download = downloadBinaryFile("https://github.com/release", "/tmp/archive", {
+			name: "Example",
+			trustedDomains,
+			timeoutMs: 1_000,
+			maxBytes: 10,
+		})
+		await new Promise<void>((resolve) => setImmediate(resolve))
+		response.emit("data", Buffer.alloc(11))
+
+		await expect(download).rejects.toThrow("Example archive exceeds the download size limit")
+		expect(response.unpipe).toHaveBeenCalledWith(output)
+		expect(output.destroy).toHaveBeenCalledOnce()
+		expect(response.destroy).toHaveBeenCalledOnce()
+		expect(request.destroy).toHaveBeenCalledOnce()
 	})
 })

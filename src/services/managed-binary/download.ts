@@ -29,8 +29,11 @@ export function resolveTrustedRedirect(
 	redirectsRemaining: number,
 	options: Pick<BinaryDownloadOptions, "name" | "trustedDomains">,
 ): string {
-	if (redirectsRemaining <= 0 || !location) {
+	if (redirectsRemaining <= 0) {
 		throw new Error(`Too many ${options.name} download redirects`)
+	}
+	if (!location) {
+		throw new Error(`${options.name} download redirect is missing a Location header`)
 	}
 
 	const nextUrl = new URL(location, url).toString()
@@ -78,7 +81,7 @@ function downloadBinaryFileWithRedirects(
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		if (!isTrustedHttpsUrl(url, options.trustedDomains)) {
-			reject(new Error(`${options.name} download redirected to an untrusted host (untrusted domain)`))
+			reject(new Error(`${options.name} download URL is not a trusted HTTPS host (untrusted domain)`))
 			return
 		}
 
@@ -128,8 +131,10 @@ function downloadBinaryFileWithRedirects(
 					try {
 						assertSizeWithinLimit(received, options.maxBytes, options.name)
 					} catch (error) {
+						response.unpipe(output)
+						output.destroy()
 						response.destroy()
-						request.destroy(error as Error)
+						request.destroy()
 						reject(error)
 					}
 				}

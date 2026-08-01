@@ -1,13 +1,15 @@
 import { EventEmitter } from "events"
+import * as path from "path"
 import { PassThrough } from "stream"
 
 import { spawn } from "child_process"
 
 import {
-	escapePowerShellLiteral,
 	extractSingleFileTarXzArchive,
 	extractSingleFileZipArchive,
 	extractTarGzArchive,
+	extractTarXzArchive,
+	extractZipArchive,
 	runProcess,
 } from "../archive"
 
@@ -40,8 +42,17 @@ describe("managed binary archive utilities", () => {
 		})
 	})
 
-	it("escapes PowerShell single-quoted literals", () => {
-		expect(escapePowerShellLiteral("C:\\it's\\archive.zip")).toBe("C:\\it''s\\archive.zip")
+	it("kills a process that exceeds its timeout", async () => {
+		vi.useFakeTimers()
+		const child = createChild()
+		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
+		const processResult = runProcess("tool", [], 100)
+		const assertion = expect(processResult).rejects.toThrow("tool timed out")
+
+		await vi.advanceTimersByTimeAsync(100)
+		await assertion
+		expect(child.kill).toHaveBeenCalledWith("SIGKILL")
+		vi.useRealTimers()
 	})
 
 	it("extracts tar.gz archives with hardened flags", async () => {
@@ -56,6 +67,43 @@ describe("managed binary archive utilities", () => {
 			expect.arrayContaining(["-xzf", "/tmp/archive.tar.gz", "-C", "/tmp/output", "--no-same-owner"]),
 			expect.objectContaining({ shell: false }),
 		)
+	})
+
+	it("extracts tar.xz archives with hardened flags", async () => {
+		const child = createChild()
+		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
+		const extraction = extractTarXzArchive("/tmp/archive.tar.xz", "/tmp/output")
+		child.emit("close", 0)
+		await extraction
+
+		const expectedArgs = ["-xJf", "/tmp/archive.tar.xz", "-C", "/tmp/output", "--no-same-owner"]
+		if (process.platform === "linux") expectedArgs.push("--no-overwrite-dir")
+		expect(mockSpawn).toHaveBeenCalledWith("tar", expectedArgs, {
+			shell: false,
+			stdio: ["ignore", "pipe", "pipe"],
+		})
+	})
+
+	it("extracts ZIP archives with platform-safe process arguments", async () => {
+		const child = createChild()
+		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
+		const extraction = extractZipArchive("/tmp/archive.zip", "/tmp/output")
+		child.emit("close", 0)
+		await extraction
+
+		if (process.platform === "win32") {
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"powershell",
+				["-NoProfile", "-NonInteractive", "-Command", expect.any(String), "/tmp/archive.zip", "/tmp/output"],
+				expect.objectContaining({ shell: false }),
+			)
+		} else {
+			expect(mockSpawn).toHaveBeenCalledWith(
+				"unzip",
+				["-o", "/tmp/archive.zip", "-d", "/tmp/output"],
+				expect.objectContaining({ shell: false }),
+			)
+		}
 	})
 
 	it("validates a single-file tar.xz layout before extraction", async () => {
@@ -73,7 +121,7 @@ describe("managed binary archive utilities", () => {
 		expect(mockSpawn).toHaveBeenNthCalledWith(
 			2,
 			"tar",
-			["-xJf", "/tmp/archive.tar.xz", "-C", "/tmp/output", "binary"],
+			["-xJf", "/tmp/archive.tar.xz", "-C", "/tmp/output", "./binary"],
 			expect.any(Object),
 		)
 	})
@@ -85,9 +133,10 @@ describe("managed binary archive utilities", () => {
 		child.emit("close", 0)
 		await extraction
 
-		const script = mockSpawn.mock.calls[0][1][3]
+		const args = mockSpawn.mock.calls[0][1]
+		const script = args[3]
 		expect(script).toContain("$entries.Count -ne 1")
-		expect(script).toContain("binary.exe")
-		expect(script).toContain("Tool archive has an unexpected layout")
+		expect(script).not.toContain("C:\\archive.zip")
+		expect(args.slice(4)).toEqual(["C:\\archive.zip", path.join("C:\\output", "binary.exe"), "binary.exe", "Tool"])
 	})
 })

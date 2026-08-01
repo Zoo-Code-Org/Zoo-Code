@@ -3,7 +3,7 @@ import * as path from "path"
 
 import { extractTarGzArchive, extractZipArchive } from "../../managed-binary/archive"
 import { downloadBinaryFile, verifySha256Checksum } from "../../managed-binary/download"
-import { ensureManagedBinaryInstalled, getManagedBinaryPaths } from "../../managed-binary/install"
+import { ensureManagedBinaryInstalled } from "../../managed-binary/install"
 
 /**
  * Supported platform/arch combinations for the semble standalone executable.
@@ -101,14 +101,6 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 	}
 
 	const url = `${DOWNLOAD_BASE_URL}/${info.archive}`
-	const paths = getManagedBinaryPaths({
-		storageDir,
-		id: "semble",
-		version: SEMBLE_VERSION,
-		versionFile: VERSION_FILE,
-		archiveName: info.archive,
-		binaryName: info.binary,
-	})
 	console.log(`[SembleDownloader] Downloading semble ${SEMBLE_VERSION} from ${url}`)
 
 	const platformKey = `${process.platform}-${process.arch}`
@@ -140,7 +132,7 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 		},
 	})
 
-	console.log(`[SembleDownloader] Successfully installed semble ${SEMBLE_VERSION} to ${paths.binaryPath}`)
+	console.log(`[SembleDownloader] Successfully installed semble ${SEMBLE_VERSION} to ${result}`)
 	return result
 }
 
