@@ -264,11 +264,6 @@
 			"count": 5
 		}
 	},
-	"api/providers/__tests__/requesty.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/sambanova.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
