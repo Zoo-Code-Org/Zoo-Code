@@ -525,8 +525,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			await profileSwitch
 			await modeSwitch
 
-			expect((firstTask as unknown as { _taskMode?: Mode })._taskMode).not.toBe("ask")
-			expect((secondTask as unknown as { _taskMode?: Mode })._taskMode).toBe("ask")
+			expect(firstTask["_taskMode"]).not.toBe("ask")
+			expect(secondTask["_taskMode"]).toBe("ask")
 		})
 
 		test("fan-out preparation leaves the focused task untouched", async () => {
