@@ -1052,12 +1052,13 @@ describe("LiteLLMHandler", () => {
 	})
 
 	describe("preserveReasoning message conversion", () => {
-		const mockStream = asyncStreamFrom([
-			{
-				choices: [{ delta: { content: "ok" } }],
-				usage: { prompt_tokens: 1, completion_tokens: 1 },
-			},
-		])
+		const makeMockStream = () =>
+			asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "ok" } }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				},
+			])
 
 		it("uses convertToR1Format (merging tool-result text) when the model info sets preserveReasoning", async () => {
 			const optionsWithReasoning: ApiHandlerOptions = {
@@ -1093,7 +1094,7 @@ describe("LiteLLMHandler", () => {
 			]
 
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
@@ -1153,7 +1154,7 @@ describe("LiteLLMHandler", () => {
 			]
 
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage(systemPrompt, messages)
@@ -1185,16 +1186,17 @@ describe("LiteLLMHandler", () => {
 	})
 
 	describe("session ID header", () => {
-		const mockStream = asyncStreamFrom([
-			{
-				choices: [{ delta: { content: "ok" } }],
-				usage: { prompt_tokens: 1, completion_tokens: 1 },
-			},
-		])
+		const makeMockStream = () =>
+			asyncStreamFrom([
+				{
+					choices: [{ delta: { content: "ok" } }],
+					usage: { prompt_tokens: 1, completion_tokens: 1 },
+				},
+			])
 
 		it("should send the X-Zoo-Session-ID header when a taskId is provided", async () => {
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {
@@ -1208,7 +1210,7 @@ describe("LiteLLMHandler", () => {
 
 		it("should not send the X-Zoo-Session-ID header when no taskId is provided", async () => {
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }])
@@ -1220,7 +1222,7 @@ describe("LiteLLMHandler", () => {
 
 		it("should not send the X-Zoo-Session-ID header when taskId is an empty string", async () => {
 			mockCreate.mockReturnValue({
-				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+				withResponse: vi.fn().mockResolvedValue({ data: makeMockStream() }),
 			})
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "hi" }], {

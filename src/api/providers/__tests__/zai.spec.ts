@@ -14,7 +14,7 @@ import {
 } from "@roo-code/types"
 
 import { ZAiHandler } from "../zai"
-import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
