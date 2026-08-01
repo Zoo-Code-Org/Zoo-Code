@@ -332,12 +332,6 @@ export class UsageStatsDatabase {
 				PRIMARY KEY (period_type, period_key, root_task_id, axis, axis_value)
 			);
 
-			try {
-				db.exec("ALTER TABLE stats_rollup ADD COLUMN uncached_input_tokens INTEGER NOT NULL DEFAULT 0")
-			} catch {
-				// Column already exists
-			}
-
 			CREATE TABLE IF NOT EXISTS session_metadata (
 				root_task_id TEXT PRIMARY KEY,
 				title TEXT NOT NULL DEFAULT '',
@@ -373,6 +367,13 @@ export class UsageStatsDatabase {
 				updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 			);
 		`)
+
+		// Migration: add uncached_input_tokens column to stats_rollup if it doesn't exist
+		try {
+			db.exec("ALTER TABLE stats_rollup ADD COLUMN uncached_input_tokens INTEGER NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
 
 		// Initialize singleton meta if absent
 		const existing = db.prepare("SELECT value FROM stats_meta WHERE key = ?").get(META_KEY) as

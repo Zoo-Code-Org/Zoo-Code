@@ -33,6 +33,7 @@ import {
 	computeHeatmapSnapshot,
 	applyEventToProjection,
 } from "./UsageStatsProjection"
+import { resolveTimeRange } from "./UsageAggregator"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -462,35 +463,50 @@ export class UsageStatsStreamCoordinator {
 			// Compute heatmap
 			let heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
 
-			// Auto-detect rollup staleness: if stats has data but sessions/heatmap
-			// are empty, the derived tables (stats_rollup, session_metadata) are
+			// Auto-detect rollup staleness: if raw usage_events has data but the
+			// derived tables (stats_rollup, session_metadata) are empty, they are
 			// stale or missing. Trigger a one-time rebuild from usage_events.
-			if (!this.rollupsRebuilt && stats.totals.events > 0) {
-				const hasEmptyDerivedTables = sessions.sessions.length === 0 && heatmap.values.every((v) => v === 0)
+			// NOTE: we must NOT use stats.totals.events here — it is derived from
+			// stats_rollup itself, so empty rollups would make events === 0 and
+			// the rebuild would never fire. Query coverage stats (raw
+			// usage_events) instead to detect whether raw data exists.
+			if (!this.rollupsRebuilt) {
+				const { from, to } = resolveTimeRange(query)
+				const fromEpochMs = from ? from.getTime() : 0
+				const toEpochMs = to ? to.getTime() : Number.MAX_SAFE_INTEGER
+				const coverage = this.database.queryCoverageStats(fromEpochMs, toEpochMs)
+				const hasRawEvents = coverage.firstEventAt !== undefined
 
-				if (hasEmptyDerivedTables) {
-					try {
-						this.database.rebuildRollupsFromEvents()
-						this.rollupsRebuilt = true
-						// Re-assemble after rebuild
-						stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
-						sessions = computeSessionPage(
-							this.database,
-							state.subscription.requestId,
-							undefined,
-							state.subscription.sessionPageSize,
-						)
-						heatmap = computeHeatmapSnapshot(
-							this.database,
-							state.subscription.heatmapRangeDays,
-							query.timezone,
-						)
-					} catch (err) {
-						console.error("[UsageStatsStreamCoordinator] Auto-rebuild failed:", err)
+				if (hasRawEvents) {
+					const hasEmptyDerivedTables =
+						sessions.sessions.length === 0 || heatmap.values.every((v) => v === 0)
+
+					if (hasEmptyDerivedTables) {
+						try {
+							this.database.rebuildRollupsFromEvents()
+							this.rollupsRebuilt = true
+							// Re-assemble after rebuild
+							stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+							sessions = computeSessionPage(
+								this.database,
+								state.subscription.requestId,
+								undefined,
+								state.subscription.sessionPageSize,
+							)
+							heatmap = computeHeatmapSnapshot(
+								this.database,
+								state.subscription.heatmapRangeDays,
+								query.timezone,
+							)
+						} catch (err) {
+							console.error("[UsageStatsStreamCoordinator] Auto-rebuild failed:", err)
+							// Do NOT latch rollupsRebuilt on failure — allow retry on
+							// the next snapshot so transient errors don't permanently
+							// disable the rebuild guard.
+						}
+					} else {
 						this.rollupsRebuilt = true
 					}
-				} else {
-					this.rollupsRebuilt = true
 				}
 			}
 
