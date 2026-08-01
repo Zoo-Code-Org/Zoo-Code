@@ -412,6 +412,58 @@ export class UsageStatsDatabase {
 		if (metaAfterV2.schemaVersion < 3) {
 			this.migrateToV3(db)
 		}
+
+		// Re-read meta after v3 migration (it updates schemaVersion)
+		const metaAfterV3 = this.readMetaInternal(db)
+		if (metaAfterV3.schemaVersion < 4) {
+			this.migrateToV4(db)
+		}
+	}
+
+	/**
+		* Migration v3 → v4: Fix inverted timezone_offset_minutes sign.
+		*
+		* In v3, `getTimezoneOffset()` (minutes WEST of UTC, negative for UTC+9)
+		* was stored directly. `computeLocalDayBucket` expects minutes EAST of UTC
+		* (positive for UTC+9), causing all day buckets to be shifted backward.
+		*
+		* This migration:
+		* 1. Flips the sign of timezone_offset_minutes for all events
+		* 2. Deletes all derived tables (rollups, session_activity, session_metadata)
+		* 3. Rebuilds everything from the corrected events
+		*
+		* Idempotent: running twice produces the same result.
+		*/
+	private migrateToV4(db: DatabaseSync): void {
+		try {
+			db.exec("BEGIN")
+
+			// 1. Flip sign of timezone_offset_minutes for all events
+			db.exec("UPDATE usage_events SET timezone_offset_minutes = -timezone_offset_minutes")
+
+			// 2. Delete all derived data
+			db.exec("DELETE FROM stats_rollup")
+			db.exec("DELETE FROM session_metadata")
+			db.exec("DELETE FROM session_activity")
+
+			// 3. Update schema version
+			const meta = this.readMetaInternal(db)
+			meta.schemaVersion = 4
+			this.updateMeta(db, meta)
+
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/002",
+				"Failed to migrate to schema v4 (timezone offset sign fix)",
+				err,
+			)
+		}
 	}
 
 	/**

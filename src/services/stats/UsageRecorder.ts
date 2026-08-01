@@ -114,7 +114,10 @@ export class UsageRecorder {
 			eventId: crypto.randomUUID(),
 			idempotencyKey,
 			occurredAt: new Date().toISOString(),
-			timezoneOffsetMinutes: new Date().getTimezoneOffset(),
+			// getTimezoneOffset() returns minutes WEST of UTC (negative for UTC+9).
+			// computeLocalDayBucket expects minutes EAST of UTC (positive for UTC+9).
+			// Flip the sign so day buckets are computed correctly.
+			timezoneOffsetMinutes: -new Date().getTimezoneOffset(),
 			status,
 			attempt: ctx.attempt,
 			taskId: ctx.taskId,
