@@ -6,8 +6,6 @@ import { GoogleAuth } from "google-auth-library"
 
 import { VERTEX_1M_CONTEXT_MODEL_IDS } from "@roo-code/types"
 
-import { ApiStreamChunk } from "../../transform/stream"
-
 import { AnthropicVertexHandler } from "../anthropic-vertex"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
