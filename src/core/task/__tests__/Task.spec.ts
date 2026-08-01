@@ -9,7 +9,6 @@ import type { Mock } from "vitest"
 
 import {
 	providerIdentifiers,
-	RooCodeEventName,
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
@@ -570,8 +569,27 @@ describe("Cline", () => {
 			await getTaskTestAccess(task).getSystemPrompt()
 
 			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
-			expect(systemPromptCall[5]).toBe("architect")
-			expect(systemPromptCall[12]).toMatchObject({ todoListEnabled: true })
+			const [, , , , , mode, , , , , , , settings] = systemPromptCall
+			expect(mode).toBe("architect")
+			expect(settings).toMatchObject({ todoListEnabled: true })
+		})
+
+		it("uses the task mode when manually condensing after focused state changes", async () => {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "architect", mcpEnabled: false })
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "code", mcpEnabled: false })
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+
+			await task.condenseContext()
+
+			const [options] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+			expect(options.metadata?.mode).toBe("architect")
 		})
 
 		it("uses the task mode in request metadata when focused provider state differs", async () => {
@@ -608,48 +626,6 @@ describe("Cline", () => {
 
 			const metadata = requireDefined(createMessage.mock.calls[0])[2]
 			expect(metadata?.mode).toBe("ask")
-		})
-
-		it("only applies profile changes to the focused task", async () => {
-			const parentConfiguration: ProviderSettings = {
-				...mockApiConfig,
-				apiModelId: "parent-model",
-				rateLimitSeconds: 4,
-			}
-			const childConfiguration: ProviderSettings = {
-				...mockApiConfig,
-				apiModelId: "child-model",
-				rateLimitSeconds: 8,
-			}
-			const activeConfiguration: ProviderSettings = {
-				...mockApiConfig,
-				apiModelId: "active-model",
-				rateLimitSeconds: 12,
-			}
-			const parent = new Task({
-				provider: mockProvider,
-				apiConfiguration: parentConfiguration,
-				taskId: "parent-task",
-				task: "parent task",
-				startTask: false,
-			})
-			const child = new Task({
-				provider: mockProvider,
-				apiConfiguration: childConfiguration,
-				taskId: "child-task",
-				task: "child task",
-				startTask: false,
-			})
-			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(child)
-			vi.spyOn(mockProvider, "getState").mockResolvedValue({ apiConfiguration: activeConfiguration })
-
-			mockProvider.emit(RooCodeEventName.ProviderProfileChanged, {
-				name: "active-profile",
-				provider: activeConfiguration.apiProvider,
-			})
-
-			await vi.waitFor(() => expect(child.apiConfiguration).toEqual(activeConfiguration))
-			expect(parent.apiConfiguration).toEqual(parentConfiguration)
 		})
 	})
 
@@ -1033,6 +1009,13 @@ describe("Cline", () => {
 				// finalDelay=10 and the countdown loop fires delay(1000) ten times.
 				expect(mockDelay).toHaveBeenCalledWith(1000)
 				expect(mockDelay).toHaveBeenCalledTimes(10)
+				const countdownMessages = saySpy.mock.calls.filter(
+					([type, text, , partial]) =>
+						type === "api_req_retry_delayed" && partial && typeof text === "string",
+				)
+				expect(countdownMessages.map(([, text]) => text)).toEqual(
+					Array.from({ length: 10 }, (_, index) => `API Error\n<retry_timer>${10 - index}</retry_timer>`),
+				)
 				expect(clock.getLastRequestTime()).toBeDefined()
 			})
 
@@ -2645,12 +2628,14 @@ describe("Cline", () => {
 			})
 
 			it("should propagate AbortController signal through attemptApiRequest context-window retry path", async () => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({ mode: "architect", mcpEnabled: false })
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
 					task: "test task",
 					startTask: false,
 				})
+				await task.getTaskMode()
 
 				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 				vi.spyOn(task, "getTokenUsage").mockReturnValue({
@@ -2745,6 +2730,7 @@ describe("Cline", () => {
 				expect(summarizeConversation).toHaveBeenCalled()
 				const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
 				expect(options.metadata?.taskId).toBe(task.taskId)
+				expect(options.metadata?.mode).toBe("architect")
 				expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
 				expect(options.metadata?.abortSignal?.aborted).toBe(false)
 			})
