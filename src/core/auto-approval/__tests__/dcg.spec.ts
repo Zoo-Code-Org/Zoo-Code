@@ -25,6 +25,12 @@ describe("Destructive Command Guard auto-approval precedence", () => {
 		})
 	})
 
+	it("does not auto-approve through DCG when global auto-approval is disabled", async () => {
+		const state = { ...baseState, autoApprovalEnabled: false }
+
+		expect(await checkAutoApproval({ state, ask: "command", text: "rm file" })).toEqual({ decision: "ask" })
+	})
+
 	it("requires explicit approval for a DCG-protected command", async () => {
 		expect(
 			await checkAutoApproval({ state: baseState, ask: "command", text: "echo safe", isProtected: true }),
