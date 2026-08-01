@@ -26,13 +26,16 @@ const CIRCUIT_BREAKER_WINDOW_MS = 10 * 60 * 1000
 const CIRCUIT_BREAKER_COOLDOWN_MS = 10 * 60 * 1000
 
 /**
- * Upper bound on how long shutdown() will wait for in-flight capture calls to drain.
- * deactivate() awaits shutdown() before terminal cleanup, so an unbounded wait here
- * (e.g. a capture stuck on network I/O that never resolves/rejects) would block the
- * extension host from ever finishing deactivation. Losing an in-flight capture on
- * timeout is an acceptable tradeoff against blocking shutdown indefinitely.
+ * Upper bound applied separately to each phase of shutdown(): draining in-flight capture
+ * calls, then awaiting client.shutdown(). deactivate() awaits shutdown() before terminal
+ * cleanup, so an unbounded wait in either phase (e.g. a capture stuck on network I/O, or
+ * a client's own shutdown() -- posthog-node defaults to a 30s internal timeout -- never
+ * settling) would block the extension host from ever finishing deactivation. Losing an
+ * in-flight capture, or a client's graceful flush, on timeout is an acceptable tradeoff
+ * against blocking shutdown indefinitely. Worst case, shutdown() takes up to roughly
+ * 2 * SHUTDOWN_PHASE_TIMEOUT_MS.
  */
-const SHUTDOWN_DRAIN_TIMEOUT_MS = 3000
+const SHUTDOWN_PHASE_TIMEOUT_MS = 3000
 
 /**
  * TelemetryService wrapper class that defers initialization.
@@ -368,15 +371,23 @@ export class TelemetryService {
 		// stuck on network I/O that never resolves/rejects can't block deactivate() forever --
 		// losing that one capture is an acceptable tradeoff against hanging terminal cleanup.
 		const drainStart = Date.now()
-		while (this.pendingClientCalls.size > 0 && Date.now() - drainStart < SHUTDOWN_DRAIN_TIMEOUT_MS) {
+		while (this.pendingClientCalls.size > 0 && Date.now() - drainStart < SHUTDOWN_PHASE_TIMEOUT_MS) {
 			await Promise.race([
 				Promise.all(this.pendingClientCalls),
-				new Promise((resolve) => setTimeout(resolve, SHUTDOWN_DRAIN_TIMEOUT_MS - (Date.now() - drainStart))),
+				new Promise((resolve) => setTimeout(resolve, SHUTDOWN_PHASE_TIMEOUT_MS - (Date.now() - drainStart))),
 			])
 		}
 
+		// Bound client shutdown the same way as the drain above: posthog-node's own shutdown()
+		// defaults to a 30s internal timeout when called with no argument (as PostHogTelemetryClient
+		// does), and TelemetryClient#shutdown() takes no timeout parameter to pass one through. Racing
+		// against our own timer here, instead of just awaiting client.shutdown() directly, keeps
+		// deactivate() from blocking for up to 30s on a client that never settles.
 		// allSettled, not all: one client rejecting must not stop us from awaiting the others.
-		await Promise.allSettled(this.clients.map((client) => client.shutdown()))
+		await Promise.race([
+			Promise.allSettled(this.clients.map((client) => client.shutdown())),
+			new Promise((resolve) => setTimeout(resolve, SHUTDOWN_PHASE_TIMEOUT_MS)),
+		])
 	}
 
 	private static _instance: TelemetryService | null = null

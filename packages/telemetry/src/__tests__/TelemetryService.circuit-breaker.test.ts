@@ -137,5 +137,12 @@ describe("TelemetryService circuit breaker", () => {
 		}
 
 		expect(mockClient.capture).not.toHaveBeenCalled()
+
+		// Prove the 50 zero-client calls didn't count towards the breaker: once a client is
+		// registered, the very next capture must still go through instead of being dropped.
+		service.register(mockClient)
+		service.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, { i: 50 })
+
+		expect(mockClient.capture).toHaveBeenCalledTimes(1)
 	})
 })

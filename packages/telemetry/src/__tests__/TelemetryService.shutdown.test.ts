@@ -215,6 +215,43 @@ describe("TelemetryService.shutdown draining", () => {
 		}
 	})
 
+	it("does not hang forever when client.shutdown() itself never settles", async () => {
+		// A capture-drain timeout alone isn't enough: posthog-node's shutdown() defaults to a
+		// 30s internal timeout when called with no argument, and TelemetryClient#shutdown() has
+		// no way to pass a shorter one through. TelemetryService.shutdown() must apply its own
+		// bound to this phase too, or deactivate() could block for up to 30s on a client whose
+		// own shutdown() never settles.
+		vi.useFakeTimers()
+		try {
+			const mockClient: TelemetryClient = {
+				setProvider: vi.fn(),
+				capture: vi.fn().mockResolvedValue(undefined),
+				captureException: vi.fn(),
+				updateTelemetryState: vi.fn(),
+				isTelemetryEnabled: vi.fn().mockReturnValue(true),
+				// Never resolves -- simulates posthog-node's shutdown() stuck past its own timeout.
+				shutdown: vi.fn().mockImplementation(() => new Promise(() => {})),
+			}
+
+			const service = new TelemetryService([mockClient])
+
+			const shutdownPromise = service.shutdown()
+			let settled = false
+			void shutdownPromise.then(() => {
+				settled = true
+			})
+
+			// No pending captures, so the drain phase resolves immediately; only the
+			// client-shutdown phase's own timeout should be needed here.
+			await vi.advanceTimersByTimeAsync(3000)
+
+			expect(settled).toBe(true)
+			expect(mockClient.shutdown).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
 	it("calling shutdown() twice shuts down clients twice (no re-entrancy guard)", async () => {
 		// Documents current behavior: shutdown() has no guard against being called more than
 		// once. deactivate() only calls it once, so this isn't a bug to fix here, but a second
