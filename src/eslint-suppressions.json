@@ -241,7 +241,7 @@
 	},
 	"api/providers/__tests__/openai.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 4
 		}
 	},
 	"api/providers/__tests__/opencode-go.spec.ts": {
