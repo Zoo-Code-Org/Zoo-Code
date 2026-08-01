@@ -196,7 +196,7 @@ export class ClineProvider
 	private taskHistoryStoreInitialized = false
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
-	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
+	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
@@ -205,11 +205,12 @@ export class ClineProvider
 	}
 
 	private enqueueProviderProfileMutation<T>(fn: () => Promise<T>): Promise<T> {
+		// Run after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(fn, fn)
 		let timedOut = false
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			timedOut = true
-			this.log("Provider profile mutation timed out; releasing the mutation queue")
+			this.log("Provider profile mutation timed out; waiting for the in-flight mutation to settle")
 		})
 
 		void run.then(
@@ -229,9 +230,9 @@ export class ClineProvider
 			},
 		)
 
-		// Advance from the timeout-bounded caller result, rather than the raw operation. A
-		// provider call that never settles must not block all subsequent profile changes.
-		this.providerProfileMutationQueue = callerResult.then(
+		// Keep the raw operation as the queue boundary. Releasing the queue on timeout
+		// would allow its later state writes to overwrite a subsequent mutation.
+		this.providerProfileMutationQueue = run.then(
 			() => undefined,
 			() => undefined,
 		)
@@ -253,6 +254,7 @@ export class ClineProvider
 			}
 		})
 	}
+
 	private readonly pendingEditOperations: PendingEditOperationStore
 
 	private cloudOrganizationsCache: CloudOrganizationMembership[] | null = null
@@ -1561,10 +1563,8 @@ export class ClineProvider
 	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
-	public async handleModeSwitch(newMode: Mode, targetTask?: Task | null) {
-		return this.enqueueProviderProfileMutation(() =>
-			this.handleModeSwitchUnlocked(newMode, targetTask === undefined ? this.getCurrentTask() : targetTask),
-		)
+	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+		return this.enqueueProviderProfileMutation(() => this.handleModeSwitchUnlocked(newMode, targetTask))
 	}
 
 	private async handleModeSwitchUnlocked(newMode: Mode, targetTask: Task | null | undefined): Promise<void> {

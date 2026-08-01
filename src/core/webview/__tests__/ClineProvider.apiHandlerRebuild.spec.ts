@@ -457,6 +457,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 		test("provider profile mutation rejection does not poison later queued mutations", async () => {
 			const firstError = new Error("first profile failed")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
 
 			provider["providerSettingsManager"].activateProfile = vi
 				.fn()
@@ -470,14 +471,27 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			await expect(provider.activateProviderProfile({ name: "first-profile" })).rejects.toThrow(firstError)
 			await expect(provider.activateProviderProfile({ name: "second-profile" })).resolves.toBeUndefined()
+			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("provider profile mutation timeout releases later queued mutations", async () => {
+		test("timed-out provider profile mutations retain the queue boundary until they settle", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
+			let resolveFirst!: () => void
+			const firstActivation = new Promise<void>((resolve) => {
+				resolveFirst = resolve
+			})
 			provider["providerSettingsManager"].activateProfile = vi
 				.fn()
-				.mockImplementationOnce(() => new Promise<never>(() => {}))
+				.mockImplementationOnce(async () => {
+					await firstActivation
+					return {
+						name: "first-profile",
+						id: "first-id",
+						apiProvider: "openrouter",
+						openRouterModelId: "openai/gpt-4",
+					}
+				})
 				.mockResolvedValueOnce({
 					name: "second-profile",
 					id: "second-id",
@@ -488,17 +502,24 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			try {
 				const first = provider.activateProviderProfile({ name: "first-profile" })
 				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
-				await vi.advanceTimersByTimeAsync(30_000)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				await expect(provider.activateProviderProfile({ name: "second-profile" })).resolves.toBeUndefined()
-				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; releasing the mutation queue")
+				const second = provider.activateProviderProfile({ name: "second-profile" })
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+
+				resolveFirst()
+				await expect(second).resolves.toBeUndefined()
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
+				expect(logSpy).toHaveBeenCalledWith(
+					"Provider profile mutation timed out; waiting for the in-flight mutation to settle",
+				)
 			} finally {
 				vi.useRealTimers()
 			}
 		})
 
-		test("mode switch resolves its default task when its queued mutation starts", async () => {
+		test("mode switch preserves its default task when queued behind a profile mutation", async () => {
 			let releaseProfileActivation!: () => void
 			const profileActivation = new Promise<void>((resolve) => {
 				releaseProfileActivation = resolve
@@ -515,6 +536,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			const firstTask = new Task(defaultTaskOptions)
 			const secondTask = new Task(defaultTaskOptions)
+			Object.defineProperty(firstTask, "taskId", { value: "first-task-id" })
+			Object.defineProperty(secondTask, "taskId", { value: "second-task-id" })
+			firstTask["_taskMode"] = "code" as Mode
+			secondTask["_taskMode"] = "code" as Mode
 			await provider.addClineToStack(firstTask)
 
 			const profileSwitch = provider.activateProviderProfile({ name: "first-profile" })
@@ -525,8 +550,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			await profileSwitch
 			await modeSwitch
 
-			expect(firstTask["_taskMode"]).not.toBe("ask")
-			expect(secondTask["_taskMode"]).toBe("ask")
+			expect(firstTask["_taskMode"]).toBe("ask")
+			expect(secondTask["_taskMode"]).toBe("code")
 		})
 
 		test("fan-out preparation leaves the focused task untouched", async () => {
@@ -570,6 +595,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(postStateSpy).not.toHaveBeenCalled()
 			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
 			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
+			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
