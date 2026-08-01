@@ -234,11 +234,6 @@
 			"count": 5
 		}
 	},
-	"api/providers/__tests__/openai-usage-tracking.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/openai.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 25
