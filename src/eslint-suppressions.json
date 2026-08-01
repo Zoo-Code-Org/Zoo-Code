@@ -206,7 +206,7 @@
 	},
 	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 30
+			"count": 23
 		}
 	},
 	"api/providers/__tests__/openai-codex.spec.ts": {
@@ -216,7 +216,7 @@
 	},
 	"api/providers/__tests__/openai-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 14
 		}
 	},
 	"api/providers/__tests__/openai-native-usage.spec.ts": {

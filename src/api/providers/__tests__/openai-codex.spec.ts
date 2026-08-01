@@ -12,27 +12,20 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
 import { OpenAiCodexHandler, transformLunaResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 function createCompletedStream() {
-	return {
-		async *[Symbol.asyncIterator]() {
-			yield {
-				type: "response.completed",
-				response: {
-					id: "response-1",
-					status: "completed",
-					output: [],
-					usage: { input_tokens: 1, output_tokens: 1 },
-				},
-			}
+	return asyncStreamFrom([
+		{
+			type: "response.completed",
+			response: {
+				id: "response-1",
+				status: "completed",
+				output: [],
+				usage: { input_tokens: 1, output_tokens: 1 },
+			},
 		},
-	}
-}
-
-async function drainStream(stream: AsyncIterable<unknown>) {
-	for await (const _chunk of stream) {
-		// Drain the response stream.
-	}
+	])
 }
 
 describe("OpenAiCodexHandler.getModel", () => {
@@ -92,7 +85,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
 		Reflect.set(handler, "client", { responses: { create: mockCreate } })
 
-		await drainStream(handler.createMessage("System prompt", []))
+		await collectStream(handler.createMessage("System prompt", []))
 
 		const [body] = mockCreate.mock.calls[0]
 		expect(body).toMatchObject({
@@ -117,7 +110,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
 		Reflect.set(handler, "client", { responses: { create: mockCreate } })
 
-		await drainStream(handler.createMessage("System prompt", []))
+		await collectStream(handler.createMessage("System prompt", []))
 
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty(SERVICE_TIER_KEY)
 	})
@@ -147,7 +140,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 		})
 		vitest.stubGlobal("fetch", mockFetch)
 
-		await drainStream(handler.createMessage("System prompt", []))
+		await collectStream(handler.createMessage("System prompt", []))
 
 		expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
 			stream: true,
@@ -166,19 +159,17 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			responses: {
 				create: vitest.fn().mockImplementation(async (body: any) => {
 					capturedInput.push(...(body.input ?? []))
-					return {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								type: "response.completed",
-								response: {
-									id: "r1",
-									status: "completed",
-									output: [],
-									usage: { input_tokens: 1, output_tokens: 1 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.completed",
+							response: {
+								id: "r1",
+								status: "completed",
+								output: [],
+								usage: { input_tokens: 1, output_tokens: 1 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -193,10 +184,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			},
 		]
 
-		const stream = handler.createMessage("system", messages)
-		for await (const _ of stream) {
-			// consume
-		}
+		await collectStream(handler.createMessage("system", messages))
 
 		// URL image is skipped; only the text input_text block should be present
 		const userMsg = capturedInput.find((item: any) => item.role === "user")
@@ -215,19 +203,17 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			responses: {
 				create: vitest.fn().mockImplementation(async (body: any) => {
 					capturedInput.push(...(body.input ?? []))
-					return {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								type: "response.completed",
-								response: {
-									id: "r1",
-									status: "completed",
-									output: [],
-									usage: { input_tokens: 1, output_tokens: 1 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.completed",
+							response: {
+								id: "r1",
+								status: "completed",
+								output: [],
+								usage: { input_tokens: 1, output_tokens: 1 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -242,10 +228,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			},
 		]
 
-		const stream = handler.createMessage("system", messages)
-		for await (const _ of stream) {
-			// consume
-		}
+		await collectStream(handler.createMessage("system", messages))
 
 		const userMsg = capturedInput.find((item: any) => item.role === "user")
 		expect(userMsg?.content).toContainEqual({
@@ -423,7 +406,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
 		;(handler as any).client = { responses: { create: mockCreate } }
 
-		await drainStream(
+		await collectStream(
 			handler.createMessage("Luna instructions", [{ role: "user", content: "Hello" }], {
 				taskId: "task-luna",
 				tools: [
@@ -498,7 +481,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		})
 		vitest.stubGlobal("fetch", mockFetch)
 
-		await drainStream(
+		await collectStream(
 			handler.createMessage("Instructions", [{ role: "user", content: "Fallback" }], {
 				taskId: "task-fallback",
 				tools: [],
@@ -549,7 +532,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 			})
 		vitest.stubGlobal("fetch", mockFetch)
 
-		await drainStream(
+		await collectStream(
 			handler.createMessage("Instructions", [{ role: "user", content: "Retry" }], {
 				taskId: "task-retry",
 				tools: [],
@@ -591,7 +574,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 			const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
 			;(handler as any).client = { responses: { create: mockCreate } }
 
-			await drainStream(
+			await collectStream(
 				handler.createMessage("Normal instructions", [{ role: "user", content: "Hello" }], {
 					taskId: "task-normal",
 					tools: [],
