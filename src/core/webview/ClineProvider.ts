@@ -206,18 +206,43 @@ export class ClineProvider
 
 	private enqueueProviderProfileMutation<T>(fn: () => Promise<T>): Promise<T> {
 		const run = this.providerProfileMutationQueue.then(fn, fn)
-		const callerResult = this.withProviderProfileMutationTimeout(run)
-		this.providerProfileMutationQueue = run.then(
+		let timedOut = false
+		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
+			timedOut = true
+			this.log("Provider profile mutation timed out; releasing the mutation queue")
+		})
+
+		void run.then(
+			() => {
+				if (timedOut) {
+					this.log("Provider profile mutation completed after timing out")
+				}
+			},
+			(error) => {
+				if (timedOut) {
+					this.log(
+						`Provider profile mutation failed after timing out: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+			},
+		)
+
+		// Advance from the timeout-bounded caller result, rather than the raw operation. A
+		// provider call that never settles must not block all subsequent profile changes.
+		this.providerProfileMutationQueue = callerResult.then(
 			() => undefined,
 			() => undefined,
 		)
 		return callerResult
 	}
 
-	private withProviderProfileMutationTimeout<T>(operation: Promise<T>): Promise<T> {
+	private withProviderProfileMutationTimeout<T>(operation: Promise<T>, onTimeout: () => void): Promise<T> {
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		const timeout = new Promise<never>((_, reject) => {
 			timeoutId = setTimeout(() => {
+				onTimeout()
 				reject(new Error("Provider profile mutation timed out"))
 			}, ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 		})
@@ -1536,8 +1561,10 @@ export class ClineProvider
 	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
-	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
-		return this.enqueueProviderProfileMutation(() => this.handleModeSwitchUnlocked(newMode, targetTask))
+	public async handleModeSwitch(newMode: Mode, targetTask?: Task | null) {
+		return this.enqueueProviderProfileMutation(() =>
+			this.handleModeSwitchUnlocked(newMode, targetTask === undefined ? this.getCurrentTask() : targetTask),
+		)
 	}
 
 	private async handleModeSwitchUnlocked(newMode: Mode, targetTask: Task | null | undefined): Promise<void> {
@@ -1822,12 +1849,14 @@ export class ClineProvider
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
-		// See `upsertProviderProfile` for a description of what this is doing.
-		await Promise.all([
-			this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
-			this.contextProxy.setValue("currentApiConfigName", name),
-			this.contextProxy.setProviderSettings(providerSettings),
-		])
+		if (!skipCurrentTaskRebuild) {
+			// See `upsertProviderProfile` for a description of what this is doing.
+			await Promise.all([
+				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
+				this.contextProxy.setValue("currentApiConfigName", name),
+				this.contextProxy.setProviderSettings(providerSettings),
+			])
+		}
 
 		const { mode } = await this.getState()
 

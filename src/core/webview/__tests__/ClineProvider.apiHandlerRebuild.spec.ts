@@ -472,6 +472,63 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			await expect(provider.activateProviderProfile({ name: "second-profile" })).resolves.toBeUndefined()
 		})
 
+		test("provider profile mutation timeout releases later queued mutations", async () => {
+			vi.useFakeTimers()
+			const logSpy = vi.spyOn(provider, "log")
+			provider["providerSettingsManager"].activateProfile = vi
+				.fn()
+				.mockImplementationOnce(() => new Promise<never>(() => {}))
+				.mockResolvedValueOnce({
+					name: "second-profile",
+					id: "second-id",
+					apiProvider: "openrouter",
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+
+			try {
+				const first = provider.activateProviderProfile({ name: "first-profile" })
+				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(30_000)
+				await firstResult
+
+				await expect(provider.activateProviderProfile({ name: "second-profile" })).resolves.toBeUndefined()
+				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; releasing the mutation queue")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("mode switch resolves its default task when its queued mutation starts", async () => {
+			let releaseProfileActivation!: () => void
+			const profileActivation = new Promise<void>((resolve) => {
+				releaseProfileActivation = resolve
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockImplementationOnce(async () => {
+				await profileActivation
+				return {
+					name: "first-profile",
+					id: "first-id",
+					apiProvider: "openrouter",
+					openRouterModelId: "openai/gpt-4",
+				}
+			})
+
+			const firstTask = new Task(defaultTaskOptions)
+			const secondTask = new Task(defaultTaskOptions)
+			await provider.addClineToStack(firstTask)
+
+			const profileSwitch = provider.activateProviderProfile({ name: "first-profile" })
+			const modeSwitch = provider.handleModeSwitch("ask" as Mode)
+			await provider.addClineToStack(secondTask)
+
+			releaseProfileActivation()
+			await profileSwitch
+			await modeSwitch
+
+			expect((firstTask as unknown as { _taskMode?: Mode })._taskMode).not.toBe("ask")
+			expect((secondTask as unknown as { _taskMode?: Mode })._taskMode).toBe("ask")
+		})
+
 		test("fan-out preparation leaves the focused task untouched", async () => {
 			const mockTask = new Task({
 				...defaultTaskOptions,
@@ -499,6 +556,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			const emitSpy = vi.spyOn(provider, "emit")
 			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 
 			await provider.handleModeSwitch("ask" as Mode, null)
 
@@ -509,6 +568,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				expect.objectContaining({ name: "ask-profile" }),
 			)
 			expect(postStateSpy).not.toHaveBeenCalled()
+			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
+			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
