@@ -63,12 +63,68 @@ describe("Destructive Command Guard manager", () => {
 		expect(isTrustedDownloadUrl("https://cdn.objects.githubusercontent.com/release")).toBe(true)
 		expect(isTrustedDownloadUrl("http://github.com/release")).toBe(false)
 		expect(isTrustedDownloadUrl("https://evilgithub.com/release")).toBe(false)
+		expect(isTrustedDownloadUrl("https://github.com.evil.com/release")).toBe(false)
 		expect(isTrustedDownloadUrl("not a URL")).toBe(false)
 	})
 
 	it("rejects untrusted download URLs before opening a destination", async () => {
 		await expect(downloadFile("https://example.com/dcg", path.join(tempDir, "archive"))).rejects.toThrow(
 			"DCG download URL is not a trusted HTTPS host",
+		)
+	})
+
+	it("rejects non-successful HTTP responses", async () => {
+		const response = Object.assign(new PassThrough(), { statusCode: 503, headers: {}, destroy: vi.fn() })
+		const request = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() })
+		mockGet.mockImplementation((_url, optionsOrCallback, optionalCallback) => {
+			const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : optionalCallback
+			setImmediate(() => callback?.(response as unknown as IncomingMessage))
+			return request as unknown as ReturnType<typeof get>
+		})
+
+		await expect(downloadFile("https://github.com/release", path.join(tempDir, "archive"))).rejects.toThrow(
+			"DCG download failed with HTTP 503",
+		)
+	})
+
+	it("rejects request errors", async () => {
+		const request = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() })
+		mockGet.mockReturnValue(request as unknown as ReturnType<typeof get>)
+
+		const download = downloadFile("https://github.com/release", path.join(tempDir, "archive"))
+		request.emit("error", new Error("socket failed"))
+
+		await expect(download).rejects.toThrow("socket failed")
+	})
+
+	it("times out stalled requests", async () => {
+		const request = Object.assign(new EventEmitter(), {
+			setTimeout: vi.fn((_timeout: number, callback: () => void) => setImmediate(callback)),
+			destroy: vi.fn((error: Error) => request.emit("error", error)),
+		})
+		mockGet.mockReturnValue(request as unknown as ReturnType<typeof get>)
+
+		await expect(downloadFile("https://github.com/release", path.join(tempDir, "archive"))).rejects.toThrow(
+			"DCG download timed out",
+		)
+		expect(request.setTimeout).toHaveBeenCalledWith(120_000, expect.any(Function))
+	})
+
+	it("rejects archives larger than 50 MiB", async () => {
+		const response = Object.assign(new PassThrough(), {
+			statusCode: 200,
+			headers: { "content-length": String(50 * 1024 * 1024 + 1) },
+			destroy: vi.fn(),
+		})
+		const request = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() })
+		mockGet.mockImplementation((_url, optionsOrCallback, optionalCallback) => {
+			const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : optionalCallback
+			setImmediate(() => callback?.(response as unknown as IncomingMessage))
+			return request as unknown as ReturnType<typeof get>
+		})
+
+		await expect(downloadFile("https://github.com/release", path.join(tempDir, "archive"))).rejects.toThrow(
+			"DCG archive exceeds the download size limit",
 		)
 	})
 
@@ -92,9 +148,7 @@ describe("Destructive Command Guard manager", () => {
 		const checksum = createHash("sha256").update(contents).digest("hex")
 
 		await expect(verifyChecksum(filePath, checksum)).resolves.toBeUndefined()
-		await expect(verifyChecksum(filePath, "0".repeat(64))).rejects.toThrow(
-			"DCG archive checksum verification failed",
-		)
+		await expect(verifyChecksum(filePath, "0".repeat(64))).rejects.toThrow(`got ${checksum}`)
 	})
 
 	it("uses the platform ZIP extractor", async () => {
@@ -180,6 +234,22 @@ describe("Destructive Command Guard manager", () => {
 		}
 	})
 
+	it("warns when the current platform is unsupported", async () => {
+		const platformKey = `${process.platform}-${process.arch}`
+		const info = DCG_ARCHIVES[platformKey]
+		if (!info) return
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		Reflect.deleteProperty(DCG_ARCHIVES, platformKey)
+
+		try {
+			await expect(ensureDcgInstalled(tempDir)).resolves.toBeUndefined()
+			expect(warnSpy).toHaveBeenCalledWith(`[DCG] Unsupported platform: ${platformKey}`)
+		} finally {
+			Reflect.set(DCG_ARCHIVES, platformKey, info)
+			warnSpy.mockRestore()
+		}
+	})
+
 	it("downloads, verifies, extracts, and deduplicates a new installation", async () => {
 		const info = getDcgArchiveInfo()
 		expect(info).toBeDefined()
@@ -247,6 +317,59 @@ describe("Destructive Command Guard manager", () => {
 			expect(await readFile(path.join(tempDir, "destructive-command-guard", ".dcg-version"), "utf8")).toBe(
 				DCG_VERSION,
 			)
+		} finally {
+			Object.defineProperty(info, "sha256", { value: originalChecksum, configurable: true })
+		}
+	})
+
+	it("downloads, verifies, extracts, and installs a ZIP archive", async () => {
+		const info = getDcgArchiveInfo()
+		if (!info?.archive.endsWith(".zip")) return
+
+		const archive = Buffer.from("test ZIP archive")
+		const originalChecksum = info.sha256
+		Object.defineProperty(info, "sha256", {
+			value: createHash("sha256").update(archive).digest("hex"),
+			configurable: true,
+		})
+		const response = Object.assign(new PassThrough(), {
+			statusCode: 200,
+			headers: { "content-length": String(archive.length) },
+		})
+		const request = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() })
+		mockGet.mockImplementation((_url, optionsOrCallback, optionalCallback) => {
+			const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : optionalCallback
+			setImmediate(() => {
+				callback?.(response as unknown as IncomingMessage)
+				response.end(archive)
+			})
+			return request as unknown as ReturnType<typeof get>
+		})
+		mockSpawn.mockImplementation((_executable, args) => {
+			const child = Object.assign(new EventEmitter(), {
+				stdout: new PassThrough(),
+				stderr: new PassThrough(),
+				kill: vi.fn(),
+			})
+			setImmediate(async () => {
+				const destinationIndex = args.indexOf(
+					"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
+				)
+				const stagingDir = args[destinationIndex + 2]
+				await writeFile(path.join(stagingDir, info.binary), "ZIP executable")
+				child.emit("close", 0)
+			})
+			return child as unknown as ReturnType<typeof spawn>
+		})
+
+		try {
+			const binaryPath = await ensureDcgInstalled(tempDir)
+			if (!binaryPath) throw new Error("Expected DCG to be supported in this test")
+			expect(await readFile(binaryPath, "utf8")).toBe("ZIP executable")
+			expect(await readFile(path.join(tempDir, "destructive-command-guard", ".dcg-version"), "utf8")).toBe(
+				DCG_VERSION,
+			)
+			await expect(access(path.join(tempDir, `${DCG_VERSION}-${info.archive}`))).rejects.toThrow()
 		} finally {
 			Object.defineProperty(info, "sha256", { value: originalChecksum, configurable: true })
 		}

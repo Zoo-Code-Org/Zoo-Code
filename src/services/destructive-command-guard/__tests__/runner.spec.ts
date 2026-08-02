@@ -35,12 +35,18 @@ function emitResult(child: MockChild, payload: unknown, code: number): void {
 }
 
 describe("runDcg", () => {
+	let warnSpy: ReturnType<typeof vi.spyOn>
+
 	beforeEach(() => {
 		vi.useRealTimers()
 		mockSpawn.mockReset()
+		warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 	})
 
-	afterEach(() => vi.useRealTimers())
+	afterEach(() => {
+		vi.useRealTimers()
+		warnSpy.mockRestore()
+	})
 
 	it.each([
 		[{ schema_version: 1, decision: "allow" }, 0, { decision: "allow" }],
@@ -67,6 +73,30 @@ describe("runDcg", () => {
 			expect.any(Array),
 			expect.objectContaining({ cwd: "/workspace" }),
 		)
+		if (expected.decision === "deny") {
+			const reason = "reason" in expected ? expected.reason : undefined
+			expect(warnSpy).toHaveBeenCalledWith("[DCG] Command denied", reason ?? "No reason provided")
+		}
+	})
+
+	it("passes only the environment variables DCG requires", async () => {
+		const child = createChild()
+		useChild(child)
+		const originalToken = process.env.GITHUB_TOKEN
+		process.env.GITHUB_TOKEN = "secret"
+
+		try {
+			const result = runDcg("/dcg", "echo test", "/workspace")
+			emitResult(child, { schema_version: 1, decision: "allow" }, 0)
+			await result
+
+			const options = mockSpawn.mock.calls[0][2]
+			expect(options?.env).toMatchObject({ NO_COLOR: "1" })
+			expect(options?.env).not.toHaveProperty("GITHUB_TOKEN")
+		} finally {
+			if (originalToken === undefined) delete process.env.GITHUB_TOKEN
+			else process.env.GITHUB_TOKEN = originalToken
+		}
 	})
 
 	it.each([
@@ -82,6 +112,7 @@ describe("runDcg", () => {
 		child.emit("close", code, null)
 
 		await expect(result).rejects.toThrow(message)
+		expect(warnSpy).toHaveBeenCalledWith("[DCG]", message)
 	})
 
 	it("rejects non-DCG exit statuses with stderr", async () => {
@@ -93,6 +124,7 @@ describe("runDcg", () => {
 		child.emit("close", 2, null)
 
 		await expect(result).rejects.toThrow("DCG evaluation failed: failure details")
+		expect(warnSpy).toHaveBeenCalledWith("[DCG]", "DCG evaluation failed: failure details")
 	})
 
 	it("rejects process startup errors", async () => {
@@ -103,6 +135,7 @@ describe("runDcg", () => {
 		child.emit("error", new Error("ENOENT"))
 
 		await expect(result).rejects.toThrow("Unable to start DCG: ENOENT")
+		expect(warnSpy).toHaveBeenCalledWith("[DCG]", "Unable to start DCG: ENOENT")
 	})
 
 	it("rejects excessive output and kills the process", async () => {
