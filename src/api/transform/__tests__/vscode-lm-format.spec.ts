@@ -186,7 +186,8 @@ describe("convertToVsCodeLmMessages", () => {
 				content: [
 					{
 						type: "image",
-						source: { type: "url", url: "https://example.com/img.png" } as unknown,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+						source: { type: "url", url: "https://example.com/img.png" } as any,
 					},
 				],
 			},
@@ -208,7 +209,8 @@ describe("convertToVsCodeLmMessages", () => {
 						content: [
 							{
 								type: "image",
-								source: { type: "url", url: "https://example.com/img.png" } as unknown,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+								source: { type: "url", url: "https://example.com/img.png" } as any,
 							},
 						],
 					},
@@ -217,7 +219,8 @@ describe("convertToVsCodeLmMessages", () => {
 		]
 
 		const result = convertToVsCodeLmMessages(messages)
-		const toolResult = result[0].content[0] as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const toolResult = result[0].content[0] as any
 		expect(toolResult.content[0].value).toContain("[Image (url): not supported by VSCode LM API]")
 	})
 
@@ -241,7 +244,8 @@ describe("convertToVsCodeLmMessages", () => {
 		]
 
 		const result = convertToVsCodeLmMessages(messages)
-		const toolResult = result[0].content[0] as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const toolResult = result[0].content[0] as any
 		expect(toolResult.content[0].value).toBe("[Image (base64): image/jpeg not supported by VSCode LM API]")
 	})
 
@@ -253,31 +257,36 @@ describe("convertToVsCodeLmMessages", () => {
 					{
 						type: "tool_result",
 						tool_use_id: "tool-1",
-						content: [{ type: "document" } as unknown],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+						content: [{ type: "document" } as any],
 					},
 				],
 			},
 		]
 
 		const result = convertToVsCodeLmMessages(messages)
-		const toolResult = result[0].content[0] as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const toolResult = result[0].content[0] as any
 		expect(toolResult.content[0].value).toBe("")
 	})
 })
 
 describe("convertToAnthropicRole", () => {
 	it("should convert assistant role correctly", () => {
-		const result = convertToAnthropicRole("assistant" as unknown)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const result = convertToAnthropicRole("assistant" as any)
 		expect(result).toBe("assistant")
 	})
 
 	it("should convert user role correctly", () => {
-		const result = convertToAnthropicRole("user" as unknown)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const result = convertToAnthropicRole("user" as any)
 		expect(result).toBe("user")
 	})
 
 	it("should return null for unknown roles", () => {
-		const result = convertToAnthropicRole("unknown" as unknown)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const result = convertToAnthropicRole("unknown" as any)
 		expect(result).toBeNull()
 	})
 })
@@ -287,7 +296,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: "Hello world",
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("Hello world")
@@ -298,7 +308,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockTextPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("Text content")
@@ -310,7 +321,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockTextPart1, mockTextPart2],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("First partSecond part")
@@ -324,7 +336,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockToolResultPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("tool-result-idTool result content")
@@ -335,7 +348,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockToolCallPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("tool-namecall-id")
@@ -351,7 +365,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockToolCallPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe(`calculatorcall-id${JSON.stringify(mockInput)}`)
@@ -362,7 +377,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockToolCallPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("tool-namecall-id")
@@ -380,7 +396,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "assistant",
 			content: [mockTextPart, mockToolResultPart, mockToolCallPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe(`Text contentresult-idTool resulttoolcall-id${JSON.stringify(mockInput)}`)
@@ -390,7 +407,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("")
@@ -400,7 +418,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: undefined,
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("")
@@ -417,7 +436,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockToolResultPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("result-idPart 1Part 2")
@@ -429,7 +449,8 @@ describe("extractTextCountFromMessage", () => {
 		const message = {
 			role: "user",
 			content: [mockToolResultPart],
-		} as unknown
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+		} as any
 
 		const result = extractTextCountFromMessage(message)
 		expect(result).toBe("result-id")

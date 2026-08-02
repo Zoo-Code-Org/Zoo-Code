@@ -80,7 +80,7 @@ describe("MoonshotHandler", () => {
 			expect(model.info.inputPrice).toBeUndefined()
 			expect(model.info.outputPrice).toBeUndefined()
 			expect(model.info.cacheReadsPrice).toBeUndefined()
-			expect(model.info.cacheWritesPrice).toBeUndefined()
+			expect((model.info as Record<string, unknown>)["cacheWritesPrice"]).toBeUndefined()
 		})
 
 		it("should return default model if no model ID is provided", () => {
@@ -327,7 +327,7 @@ describe("MoonshotHandler", () => {
 		it("should use max_tokens (not max_completion_tokens) for Moonshot", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
 				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
-					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+					return (this as unknown as Record<string, (...args: unknown[]) => void>)["addMaxTokensIfNeeded"](requestOptions, modelInfo)
 				}
 			}
 
@@ -342,7 +342,7 @@ describe("MoonshotHandler", () => {
 		it("should use modelMaxTokens override when provided", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
 				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
-					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+					return (this as unknown as Record<string, (...args: unknown[]) => void>)["addMaxTokensIfNeeded"](requestOptions, modelInfo)
 				}
 			}
 
@@ -360,7 +360,7 @@ describe("MoonshotHandler", () => {
 		it("should not send maxTokens for unknown model IDs", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
 				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
-					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
+					return (this as unknown as Record<string, (...args: unknown[]) => void>)["addMaxTokensIfNeeded"](requestOptions, modelInfo)
 				}
 			}
 
