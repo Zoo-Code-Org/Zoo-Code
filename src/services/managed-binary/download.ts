@@ -144,10 +144,8 @@ function downloadBinaryFileWithRedirects(
 			})
 			response.on("error", abort)
 			response.pipe(output)
-			output.on("finish", () => {
-				output.close()
-				resolve()
-			})
+			output.on("finish", () => output.close())
+			output.on("close", resolve)
 			output.on("error", abort)
 		})
 
