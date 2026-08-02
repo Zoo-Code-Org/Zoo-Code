@@ -65,9 +65,14 @@ describe("DraggableTaskEntry", () => {
 		)
 
 		const wrapper = screen.getByTestId("draggable-entry-task-1")
-		// dnd-kit draggable attributes: role="button", tabIndex, aria-pressed, etc.
-		expect(wrapper).toHaveAttribute("role", "button")
+		// role is deliberately stripped from dnd-kit attributes so the wrapper
+		// is not matched by interactive selectors (see DraggableTaskEntry.tsx).
+		// dnd-kit only emits aria-pressed alongside role="button", so it is
+		// absent here as well.
+		expect(wrapper).not.toHaveAttribute("role")
+		expect(wrapper).not.toHaveAttribute("aria-pressed")
 		expect(wrapper).toHaveAttribute("tabindex", "0")
+		expect(wrapper).toHaveAttribute("aria-roledescription", "draggable")
 		expect(wrapper).toHaveAttribute("data-droppable-id", "drop-task-1")
 		expect(wrapper).toHaveAttribute("data-dragging", "false")
 	})
@@ -132,7 +137,12 @@ describe("DraggableTaskEntry", () => {
 		)
 
 		// Wrapper has draggable attributes → not disabled
-		expect(screen.getByTestId("draggable-entry-task-1")).toHaveAttribute("role", "button")
+		// (role/aria-pressed are stripped by design; tabindex="0" and
+		// aria-roledescription prove draggability)
+		const wrapper = screen.getByTestId("draggable-entry-task-1")
+		expect(wrapper).not.toHaveAttribute("role")
+		expect(wrapper).toHaveAttribute("tabindex", "0")
+		expect(wrapper).toHaveAttribute("aria-roledescription", "draggable")
 	})
 
 	// ── Metadata variants ────────────────────────────────────────────────
