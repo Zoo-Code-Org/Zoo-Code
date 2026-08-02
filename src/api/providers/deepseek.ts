@@ -42,7 +42,7 @@ const isDeepSeekThinkingEnabled = (modelId: string, options: ApiHandlerOptions) 
 }
 
 // https://api-docs.deepseek.com/guides/thinking_mode/
-const normalizeDeepSeekReasoningEffort = (
+export const normalizeDeepSeekReasoningEffort = (
 	modelId: DeepSeekModelId,
 	reasoningEffort?: string,
 ): "low" | "high" | "max" | undefined => {

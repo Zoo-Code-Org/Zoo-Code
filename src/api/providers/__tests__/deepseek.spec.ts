@@ -124,11 +124,11 @@ vi.mock("openai", () => {
 import OpenAI from "openai"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
-import { deepSeekDefaultModelId, DEEP_SEEK_DEFAULT_TEMPERATURE, type ModelInfo } from "@roo-code/types"
+import { deepSeekDefaultModelId, DEEP_SEEK_DEFAULT_TEMPERATURE, type ModelInfo, DeepSeekModelId } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
 
-import { DeepSeekHandler } from "../deepseek"
+import { DeepSeekHandler, normalizeDeepSeekReasoningEffort } from "../deepseek"
 
 describe("DeepSeekHandler", () => {
 	let handler: DeepSeekHandler
@@ -645,6 +645,73 @@ describe("DeepSeekHandler", () => {
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
 			expect(toolCallChunks.length).toBeGreaterThan(0)
 			expect(toolCallChunks[0].name).toBe("get_weather")
+		})
+	})
+
+	describe("normalizeDeepSeekReasoningEffort", () => {
+		// https://api-docs.deepseek.com/guides/thinking_mode/
+		it("should map acceptable reasoning efforts the same way as stated by the official documentation", async () => {
+			const mappings: {
+				modelId: DeepSeekModelId
+				rawReasoningEffort: string
+				mappedReasoningEffort: string | undefined
+			}[] = [
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
+				},
+			]
+
+			for (const { modelId, rawReasoningEffort, mappedReasoningEffort } of mappings) {
+				const result = normalizeDeepSeekReasoningEffort(modelId, rawReasoningEffort)
+				expect(result).toBe(mappedReasoningEffort)
+			}
 		})
 	})
 })
