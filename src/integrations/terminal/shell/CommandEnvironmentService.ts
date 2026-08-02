@@ -139,11 +139,15 @@ export class CommandEnvironmentService {
 		}
 
 		// Create the primary invocation plan.
+		// Provider selection mirrors the legacy getTerminalProviderForExecution
+		// logic: use "vscode" for the integrated terminal when the shell family
+		// is not cmd.exe (which requires execa for reliable fallback).
+		const primaryProvider = primaryShell.family === "cmd" ? "execa" : "vscode"
 		const primaryPlan = ShellInvocationAdapter.createPlan(
 			primaryShell,
 			"", // Command is filled at execution time by ExecaTerminalProcess.
 			cwd,
-			"execa",
+			primaryProvider,
 		)
 
 		// Create same-family fallback plan (provider="execa").
