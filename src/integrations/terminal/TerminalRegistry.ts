@@ -323,7 +323,13 @@ export class TerminalRegistry {
 				// Reused VS Code terminals are promoted from idle to integration-ready.
 				// New terminals are already in `creating` from the constructor and must
 				// progress through process-started/integration-pending before running.
-				if (!createdNewTerminal) {
+				//
+				// A reused terminal may still be in `integration-ready` when a command
+				// completes without driving the state through `running`/`idle` (e.g. the
+				// shell-race paths that re-reserve the terminal on the next execute_command
+				// before the previous execution idles). `integration-ready → integration-ready`
+				// is not a legal self-transition, so skip the promotion when already ready.
+				if (!createdNewTerminal && terminal.lifecycle.state !== "integration-ready") {
 					terminal.lifecycle.transition("integration-ready", executionId)
 				}
 			} else {
@@ -697,7 +703,7 @@ export class TerminalRegistry {
 		// belonging to a different execution is the evidence that triggered this
 		// recovery, so it must be terminated to free the terminal.
 		const process = terminal.process
-		if (process && "executionId" in process && (process as any).executionId !== undefined) {
+		if (process && "executionId" in process && process.executionId !== undefined) {
 			try {
 				process.abort()
 			} catch (error) {
@@ -814,7 +820,10 @@ export class TerminalRegistry {
 		if (process) {
 			process.removeAllListeners()
 			if ("cleanupScriptFile" in process) {
-				;(process as any).cleanupScriptFile?.()
+				// cleanupScriptFile is a private method on TerminalProcess (not on the
+				// RooTerminalProcess interface). Access it via a minimal structural type
+				// instead of `as any` to satisfy @typescript-eslint/no-explicit-any.
+				;(process as { cleanupScriptFile?: () => void }).cleanupScriptFile?.()
 			}
 		}
 
