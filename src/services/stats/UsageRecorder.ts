@@ -1,4 +1,4 @@
-﻿// src/services/stats/UsageRecorder.ts
+// src/services/stats/UsageRecorder.ts
 //
 // Commit 3: Final usage measurement for API attempts.
 // No per-chunk recording; records only at terminal finalize.

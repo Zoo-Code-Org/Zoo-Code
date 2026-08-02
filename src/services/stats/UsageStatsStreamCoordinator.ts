@@ -184,14 +184,20 @@ export class UsageStatsStreamCoordinator {
 	}
 
 	/**
-	 * Replaces the subscription for an existing sink.
+	 * Replaces the active dashboard subscription with a new one.
 	 * Starts a new epoch: sends a fresh snapshot for the new query.
+	 *
+	 * The dashboard stream models a single active subscription. Because callers
+	 * (e.g. replaceDashboardStatsSubscription) may pass a NEW sink instance rather
+	 * than the previously-subscribed sink, we cannot key removal off sink identity.
+	 * Doing so would orphan the prior subscription (leak + duplicate deltas).
+	 * Therefore we clear ALL existing subscriptions before subscribing the new sink.
 	 */
 	replaceSubscription(sink: StatsStreamSink, newSubscription: DashboardStatsSubscription): void {
 		if (this.disposed) return
 
-		// Remove old subscription if exists
-		this.subscriptions.delete(sink)
+		// Remove any existing subscription(s) regardless of sink identity.
+		this.subscriptions.clear()
 
 		// Re-subscribe with new query
 		this.subscribe(sink, newSubscription)
@@ -587,10 +593,7 @@ export class UsageStatsStreamCoordinator {
 							dashboardStatsStreamSnapshot: updatedSnapshot,
 						})
 					} catch (err) {
-						console.warn(
-							"[UsageStatsStreamCoordinator] Failed to send post-rebuild snapshot:",
-							err,
-						)
+						console.warn("[UsageStatsStreamCoordinator] Failed to send post-rebuild snapshot:", err)
 					}
 				}
 			} catch (err) {

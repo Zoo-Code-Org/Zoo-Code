@@ -1,4 +1,4 @@
-﻿import React, { memo, useCallback, useRef } from "react"
+import React, { memo, useCallback, useRef } from "react"
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import i18next from "i18next"

@@ -25,7 +25,8 @@
 		"refresh": "새로 고침",
 		"exportJson": "JSON 내보내기",
 		"exportCsv": "CSV 내보내기",
-		"clear": "통계 삭제"
+		"clear": "통계 삭제",
+		"rebuild": "통계 다시 빌드"
 	},
 	"breakdown": {
 		"title": "세부 내역",

@@ -1,4 +1,4 @@
-﻿import {
+import {
 	DashboardStatsSubscription,
 	DashboardStatsSnapshot,
 	DashboardStatsDelta,

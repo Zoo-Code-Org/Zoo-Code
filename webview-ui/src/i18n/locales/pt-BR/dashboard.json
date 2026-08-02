@@ -25,7 +25,8 @@
 		"refresh": "Atualizar",
 		"exportJson": "Exportar JSON",
 		"exportCsv": "Exportar CSV",
-		"clear": "Limpar estatísticas"
+		"clear": "Limpar estatísticas",
+		"rebuild": "Reconstruir estatísticas"
 	},
 	"breakdown": {
 		"title": "Detalhamento",

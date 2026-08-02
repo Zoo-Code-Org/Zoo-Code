@@ -25,7 +25,8 @@
 		"refresh": "ताज़ा करें",
 		"exportJson": "JSON निर्यात करें",
 		"exportCsv": "CSV निर्यात करें",
-		"clear": "आँकड़े साफ़ करें"
+		"clear": "आँकड़े साफ़ करें",
+		"rebuild": "आंकड़े पुनः बनाएं"
 	},
 	"breakdown": {
 		"title": "विवरण",

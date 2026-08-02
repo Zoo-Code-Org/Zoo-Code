@@ -25,7 +25,8 @@
 		"refresh": "重新整理",
 		"exportJson": "匯出 JSON",
 		"exportCsv": "匯出 CSV",
-		"clear": "清除統計"
+		"clear": "清除統計",
+		"rebuild": "重新建構統計"
 	},
 	"breakdown": {
 		"title": "明細",

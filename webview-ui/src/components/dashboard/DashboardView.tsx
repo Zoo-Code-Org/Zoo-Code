@@ -1,4 +1,4 @@
-﻿import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw, Database } from "lucide-react"
 
 import type { ExtensionMessage, StatsQuery, StatsBucket, SessionDetail, DashboardSessionSummary } from "@roo-code/types"

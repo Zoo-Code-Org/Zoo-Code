@@ -1,4 +1,4 @@
-﻿// npx vitest run src/components/dashboard/__tests__/AnimatedNumber.spec.tsx
+// npx vitest run src/components/dashboard/__tests__/AnimatedNumber.spec.tsx
 
 import React from "react"
 import { render, act } from "@/utils/test-utils"

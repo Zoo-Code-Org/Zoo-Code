@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises */
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Routing integration tests for usage-stat message handlers.
  *
@@ -135,7 +135,17 @@ const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider
 
 	const legacyService = service ?? {}
 	if (!legacyService.getFilteredEvents && legacyService.exportStats) {
-		legacyService.getFilteredEvents = vi.fn(async () => (mockJsonExport.events ?? []))
+		legacyService.getFilteredEvents = vi.fn(async () => mockJsonExport.events ?? [])
+	}
+	// The dashboard stream handlers call service.ensureInitialized() before
+	// getCoordinator(). Provide a resolved no-op default when the test supplies a
+	// partial service without it, so routing tests exercise the handler logic.
+	// Only add this when a service was actually provided; passing `undefined`
+	// must keep mockService undefined so "service unavailable" paths still run.
+	if (service !== undefined && !legacyService.ensureInitialized) {
+		legacyService.ensureInitialized = vi.fn(
+			async () => undefined,
+		) as unknown as UsageStatsService["ensureInitialized"]
 	}
 
 	let mockService: UsageStatsService | undefined = legacyService as UsageStatsService | undefined
@@ -252,9 +262,9 @@ describe("usageStatsMessageRouting", () => {
 
 			await webviewMessageHandler(provider, message)
 
-			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
-				(c) => c[0]?.type === "dashboardSessionDetailResponse",
-			)
+			const response = vi
+				.mocked(provider.postMessageToWebview)
+				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 			expect(response).toBeDefined()
 		})
 	})

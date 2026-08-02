@@ -1,4 +1,4 @@
-﻿import * as path from "path"
+import * as path from "path"
 import * as fs from "fs/promises"
 import * as os from "os"
 
@@ -694,37 +694,37 @@ describe("UsageStatsStreamCoordinator", () => {
 				// Append an event (populates all tables), then clear derived tables
 				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
 				clearDerivedTables()
-	
+
 				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
-	
+
 				const coordinator = new UsageStatsStreamCoordinator(db)
 				const sink = new MockSink()
 				coordinator.subscribe(sink, makeSubscription())
-	
+
 				// First snapshot is sent immediately with empty/stale data (non-blocking)
 				const snapshotsBeforeFlush = sink.messagesOfType("dashboardStatsStreamSnapshot")
 				expect(snapshotsBeforeFlush).toHaveLength(1)
 				expect(rebuildSpy).not.toHaveBeenCalled()
-	
+
 				// Flush the setImmediate to run the async rebuild
 				// Use runOnlyPendingTimers to avoid infinite loop from rollover setInterval
 				vi.runOnlyPendingTimers()
-	
+
 				// Rebuild should have been triggered
 				expect(rebuildSpy).toHaveBeenCalledTimes(1)
-	
+
 				// A second snapshot should have been sent with rebuilt data
 				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
 				expect(snapshots).toHaveLength(2)
 				const rebuiltSnapshot = snapshots[1].dashboardStatsStreamSnapshot
 				expect(rebuiltSnapshot).toBeDefined()
-	
+
 				// After rebuild, sessions should be populated
 				expect(rebuiltSnapshot!.sessions.sessions.length).toBeGreaterThan(0)
-	
+
 				// After rebuild, heatmap should have at least one non-zero value
 				expect(rebuiltSnapshot!.heatmap.values.some((v) => v > 0)).toBe(true)
-	
+
 				coordinator.dispose()
 				rebuildSpy.mockRestore()
 			})
@@ -732,25 +732,25 @@ describe("UsageStatsStreamCoordinator", () => {
 			it("should NOT rebuild when derived tables are already consistent", () => {
 				// Append an event normally — all derived tables are populated
 				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
-	
+
 				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
-	
+
 				const coordinator = new UsageStatsStreamCoordinator(db)
 				const sink = new MockSink()
 				coordinator.subscribe(sink, makeSubscription())
-	
+
 				// Flush any pending timers (should be none since rebuild is not needed)
 				vi.runOnlyPendingTimers()
-	
+
 				// Rebuild should NOT have been called
 				expect(rebuildSpy).not.toHaveBeenCalled()
-	
+
 				// Snapshot should still be sent with data
 				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
 				expect(snapshots).toHaveLength(1)
 				const snapshot = snapshots[0].dashboardStatsStreamSnapshot
 				expect(snapshot!.sessions.sessions.length).toBeGreaterThan(0)
-	
+
 				coordinator.dispose()
 				rebuildSpy.mockRestore()
 			})
@@ -759,44 +759,44 @@ describe("UsageStatsStreamCoordinator", () => {
 				// Append an event, then clear derived tables
 				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
 				clearDerivedTables()
-	
+
 				// Mock rebuild to throw
 				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents").mockImplementation(() => {
 					throw new Error("rebuild failed")
 				})
-	
+
 				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-	
+
 				const coordinator = new UsageStatsStreamCoordinator(db)
 				const sink = new MockSink()
-	
+
 				// Should not throw — snapshot is sent synchronously, rebuild is async
 				expect(() => coordinator.subscribe(sink, makeSubscription())).not.toThrow()
-	
+
 				// First snapshot is sent immediately (with stale/empty derived data)
 				const snapshotsBeforeFlush = sink.messagesOfType("dashboardStatsStreamSnapshot")
 				expect(snapshotsBeforeFlush).toHaveLength(1)
-	
+
 				// Flush the setImmediate to run the async rebuild (which will throw)
 				vi.runOnlyPendingTimers()
-	
+
 				// Rebuild was attempted
 				expect(rebuildSpy).toHaveBeenCalledTimes(1)
-	
+
 				// Error was logged
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					expect.stringContaining("Async rebuild failed"),
 					expect.any(Error),
 				)
-	
+
 				// Snapshot should still be sent (with stale/empty derived data)
 				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
 				expect(snapshots).toHaveLength(1)
-	
+
 				// No error message should be sent (the catch handles it gracefully)
 				const errors = sink.messagesOfType("dashboardStatsStreamError")
 				expect(errors).toHaveLength(0)
-	
+
 				coordinator.dispose()
 				rebuildSpy.mockRestore()
 				consoleErrorSpy.mockRestore()
@@ -806,28 +806,28 @@ describe("UsageStatsStreamCoordinator", () => {
 				// Append an event, then clear derived tables
 				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
 				clearDerivedTables()
-	
+
 				const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
-	
+
 				const coordinator = new UsageStatsStreamCoordinator(db)
 				const sink = new MockSink()
-	
+
 				// First subscribe — schedules async rebuild
 				coordinator.subscribe(sink, makeSubscription({ requestId: "req-1" }))
-	
+
 				// Flush the setImmediate to run the async rebuild
 				vi.runOnlyPendingTimers()
 				expect(rebuildSpy).toHaveBeenCalledTimes(1)
-	
+
 				// Replace subscription — triggers sendSnapshot again
 				coordinator.replaceSubscription(sink, makeSubscription({ requestId: "req-2" }))
-	
+
 				// Flush any pending timers
 				vi.runOnlyPendingTimers()
-	
+
 				// Rebuild should NOT have been called again (rollupsRebuilt flag is true)
 				expect(rebuildSpy).toHaveBeenCalledTimes(1)
-	
+
 				// Snapshots should have been sent:
 				// 1. req-1 initial (empty data)
 				// 2. req-1 post-rebuild (with data)
@@ -836,7 +836,7 @@ describe("UsageStatsStreamCoordinator", () => {
 				expect(snapshots.length).toBeGreaterThanOrEqual(2)
 				expect(snapshots[0].dashboardStatsStreamSnapshot?.requestId).toBe("req-1")
 				expect(snapshots[snapshots.length - 1].dashboardStatsStreamSnapshot?.requestId).toBe("req-2")
-	
+
 				coordinator.dispose()
 				rebuildSpy.mockRestore()
 			})

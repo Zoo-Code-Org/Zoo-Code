@@ -832,6 +832,14 @@ export class TaskOrganizationStore {
 			return
 		}
 
+		// Skip filesystem watching in the test environment. This matches the
+		// established pattern in CustomModesManager/McpHub/SkillsManager: an active
+		// fs.watch handle keeps the event loop alive and makes vitest fake-timer
+		// runAllTimersAsync() spin into its infinite-loop guard in unrelated suites.
+		if (process.env.NODE_ENV === "test" || process.env.VITEST) {
+			return
+		}
+
 		this.getTasksDir()
 			.then((tasksDir) => {
 				if (this.disposed) {
@@ -859,6 +867,12 @@ export class TaskOrganizationStore {
 					this.fsWatcher.on("error", (err) => {
 						console.error("[TaskOrganizationStore] fs.watch error:", err)
 					})
+
+					// Do not keep the Node.js event loop alive solely for this watcher.
+					// Background file watching must not block process/test teardown, and an
+					// active handle here causes vitest fake-timer runAllTimersAsync() to
+					// spin into its infinite-loop guard (10000 timers) in unrelated suites.
+					this.fsWatcher.unref()
 				} catch (err) {
 					console.error("[TaskOrganizationStore] Failed to start fs.watch:", err)
 				}

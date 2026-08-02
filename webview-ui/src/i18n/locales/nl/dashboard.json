@@ -25,7 +25,8 @@
 		"refresh": "Vernieuwen",
 		"exportJson": "JSON exporteren",
 		"exportCsv": "CSV exporteren",
-		"clear": "Statistieken wissen"
+		"clear": "Statistieken wissen",
+		"rebuild": "Statistieken opnieuw opbouwen"
 	},
 	"breakdown": {
 		"title": "Uitsplitsing",

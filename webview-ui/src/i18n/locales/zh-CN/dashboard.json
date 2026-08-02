@@ -25,7 +25,8 @@
 		"refresh": "刷新",
 		"exportJson": "导出 JSON",
 		"exportCsv": "导出 CSV",
-		"clear": "清除统计"
+		"clear": "清除统计",
+		"rebuild": "重新构建统计"
 	},
 	"breakdown": {
 		"title": "明细",

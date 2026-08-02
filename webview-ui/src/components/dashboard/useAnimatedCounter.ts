@@ -1,4 +1,4 @@
-﻿// Animated counter hook for smooth numeric transitions.
+// Animated counter hook for smooth numeric transitions.
 // See docs/260729_0001_session_branch-recovery/dashboard-streaming-architecture.md
 // (Sub-task 7: animate numeric values, reduced-motion disables animation).
 

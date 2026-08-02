@@ -25,7 +25,8 @@
 		"refresh": "Segarkan",
 		"exportJson": "Ekspor JSON",
 		"exportCsv": "Ekspor CSV",
-		"clear": "Hapus Statistik"
+		"clear": "Hapus Statistik",
+		"rebuild": "Bangun Ulang Statistik"
 	},
 	"breakdown": {
 		"title": "Rincian",

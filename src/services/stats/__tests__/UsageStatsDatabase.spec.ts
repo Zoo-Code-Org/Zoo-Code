@@ -453,7 +453,12 @@ describe("UsageStatsDatabase", () => {
 						taskId: e.rootTaskId,
 						rootTaskId: e.rootTaskId,
 						occurredAt: e.occurredAt,
-						timezoneOffsetMinutes: e.tzOffset,
+						// A genuine pre-v4 (v1) database stored timezone_offset_minutes with the
+						// OLD inverted (minutes-WEST) sign. The v4 migration flips the sign back
+						// to minutes-EAST. To faithfully simulate a v1 DB we must persist the
+						// inverted sign here, so that after the v1->v4 migration chain the value
+						// becomes +tzOffset and the local day bucket resolves correctly.
+						timezoneOffsetMinutes: -e.tzOffset,
 						usage: {
 							inputTokens: { value: 1000, source: "provider" },
 							costUsd: { value: e.cost, source: "provider" },

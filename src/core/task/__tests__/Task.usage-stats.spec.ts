@@ -503,8 +503,9 @@ describe("Usage Stats Recording", () => {
 
 			const recorder = (task as unknown as Record<string, unknown>).usageRecorder as UsageRecorder
 			expect(recorder).toBeInstanceOf(UsageRecorder)
-			// The recorder should have a store that was constructed with the globalStoragePath
-			expect((recorder as unknown as Record<string, unknown>)["store"]).toBeDefined()
+			// The recorder should have a sink (the event store, renamed from `store` in the
+			// usage-capture refactor) that was constructed with the globalStoragePath
+			expect((recorder as unknown as Record<string, unknown>)["sink"]).toBeDefined()
 		})
 	})
 

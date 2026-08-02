@@ -306,7 +306,10 @@ describe("Task persistence", () => {
 			})
 
 			const promise = task.retrySaveApiConversationHistory()
-			await vi.runAllTimersAsync()
+			// Advance only the bounded retry backoff window (100+500+1500ms) rather than
+			// runAllTimersAsync: an unrelated long-lived setInterval elsewhere in the
+			// ClineProvider graph (stats stream rollover) would otherwise loop forever.
+			await vi.advanceTimersByTimeAsync(2500)
 			const result = await promise
 
 			expect(result).toBe(false)
@@ -328,7 +331,8 @@ describe("Task persistence", () => {
 			})
 
 			const promise = task.retrySaveApiConversationHistory()
-			await vi.runAllTimersAsync()
+			// See note above: advance the bounded backoff window, not all timers.
+			await vi.advanceTimersByTimeAsync(2500)
 			const result = await promise
 
 			expect(result).toBe(true)

@@ -25,7 +25,8 @@
 		"refresh": "Yenile",
 		"exportJson": "JSON Dışa Aktar",
 		"exportCsv": "CSV Dışa Aktar",
-		"clear": "İstatistikleri Temizle"
+		"clear": "İstatistikleri Temizle",
+		"rebuild": "İstatistikleri yeniden oluştur"
 	},
 	"breakdown": {
 		"title": "Döküm",

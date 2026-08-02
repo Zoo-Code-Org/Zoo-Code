@@ -1,10 +1,38 @@
-import { DatabaseSync } from "node:sqlite"
+// Type-only import: erased at compile time, so it does NOT trigger a runtime
+// `require("node:sqlite")` at module load. `node:sqlite` is only available in
+// Node.js >= 22.5; the VS Code extension host for the e2e-mock suite runs an
+// older Electron/Node that lacks it. A static value import would crash the
+// entire extension module graph on load ("No such built-in module: node:sqlite").
+import type { DatabaseSync } from "node:sqlite"
+import { createRequire } from "node:module"
 import * as fs from "fs"
 import * as path from "path"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
 import { getEffectiveCost } from "./costRecalculation"
+
+// ── Lazy node:sqlite loader ──────────────────────────────────────────────────
+
+/**
+ * Lazily resolves the `DatabaseSync` constructor from the built-in `node:sqlite`
+ * module. The require is deferred until `initialize()` actually runs, so the
+ * module graph loads cleanly on runtimes without `node:sqlite` (e.g. the older
+ * Electron/Node used by the e2e-mock VS Code host). When unavailable, this
+ * throws, and `initialize()` surfaces a StatsDbError which callers already
+ * handle by degrading to a no-database state.
+ */
+let cachedDatabaseSync: typeof DatabaseSync | null = null
+function loadDatabaseSync(): typeof DatabaseSync {
+	if (cachedDatabaseSync) {
+		return cachedDatabaseSync
+	}
+	// createRequire so this works regardless of ESM/CJS bundling of the extension.
+	const require = createRequire(__filename)
+	const mod = require("node:sqlite") as { DatabaseSync: typeof DatabaseSync }
+	cachedDatabaseSync = mod.DatabaseSync
+	return cachedDatabaseSync
+}
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -237,8 +265,19 @@ export class UsageStatsDatabase {
 			throw new StatsDbError("STATS_DB/open/001", `Failed to create database directory: ${dir}`, err)
 		}
 
+		let DatabaseSyncCtor: typeof DatabaseSync
 		try {
-			this.db = new DatabaseSync(this.dbPath)
+			DatabaseSyncCtor = loadDatabaseSync()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/open/001",
+				"node:sqlite is unavailable in this runtime (requires Node.js >= 22.5); usage stats database disabled",
+				err,
+			)
+		}
+
+		try {
+			this.db = new DatabaseSyncCtor(this.dbPath)
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/open/001", `Failed to open database: ${this.dbPath}`, err)
 		}
@@ -422,19 +461,19 @@ export class UsageStatsDatabase {
 	}
 
 	/**
-		* Migration v3 → v4: Fix inverted timezone_offset_minutes sign.
-		*
-		* In v3, `getTimezoneOffset()` (minutes WEST of UTC, negative for UTC+9)
-		* was stored directly. `computeLocalDayBucket` expects minutes EAST of UTC
-		* (positive for UTC+9), causing all day buckets to be shifted backward.
-		*
-		* This migration:
-		* 1. Flips the sign of timezone_offset_minutes for all events
-		* 2. Deletes all derived tables (rollups, session_activity, session_metadata)
-		* 3. Rebuilds everything from the corrected events
-		*
-		* Idempotent: running twice produces the same result.
-		*/
+	 * Migration v3 → v4: Fix inverted timezone_offset_minutes sign.
+	 *
+	 * In v3, `getTimezoneOffset()` (minutes WEST of UTC, negative for UTC+9)
+	 * was stored directly. `computeLocalDayBucket` expects minutes EAST of UTC
+	 * (positive for UTC+9), causing all day buckets to be shifted backward.
+	 *
+	 * This migration:
+	 * 1. Flips the sign of timezone_offset_minutes for all events
+	 * 2. Deletes all derived tables (rollups, session_activity, session_metadata)
+	 * 3. Rebuilds everything from the corrected events
+	 *
+	 * Idempotent: running twice produces the same result.
+	 */
 	private migrateToV4(db: DatabaseSync): void {
 		try {
 			db.exec("BEGIN")
@@ -442,12 +481,7 @@ export class UsageStatsDatabase {
 			// 1. Flip sign of timezone_offset_minutes for all events
 			db.exec("UPDATE usage_events SET timezone_offset_minutes = -timezone_offset_minutes")
 
-			// 2. Delete all derived data
-			db.exec("DELETE FROM stats_rollup")
-			db.exec("DELETE FROM session_metadata")
-			db.exec("DELETE FROM session_activity")
-
-			// 3. Update schema version
+			// 2. Update schema version
 			const meta = this.readMetaInternal(db)
 			meta.schemaVersion = 4
 			this.updateMeta(db, meta)
@@ -462,6 +496,23 @@ export class UsageStatsDatabase {
 			throw new StatsDbError(
 				"STATS_DB/migrate/002",
 				"Failed to migrate to schema v4 (timezone offset sign fix)",
+				err,
+			)
+		}
+
+		// 3. Rebuild all derived data (rollups, session_metadata, session_activity)
+		//    from the sign-corrected events. The previous implementation deleted the
+		//    derived data without rebuilding it, leaving stats_rollup/session_activity
+		//    empty after a v1->v4 (or v3->v4) migration and breaking every dashboard
+		//    query. rebuildRollupsFromEvents() manages its own transaction and deletes
+		//    the derived tables before rebuilding, so we call it after committing the
+		//    sign flip above (cannot nest transactions).
+		try {
+			this.rebuildRollupsFromEvents()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/migrate/002",
+				"Failed to rebuild derived data after schema v4 migration (timezone offset sign fix)",
 				err,
 			)
 		}

@@ -1,4 +1,4 @@
-﻿import React, { memo, useCallback, useMemo } from "react"
+import React, { memo, useCallback, useMemo } from "react"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 

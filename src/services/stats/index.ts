@@ -1,4 +1,4 @@
-﻿// ── Stats Service Barrel Export ─────────────────────────────────────────────
+// ── Stats Service Barrel Export ─────────────────────────────────────────────
 //
 // Re-exports the public APIs of UsageEventStore, UsageStatsDatabase,
 // UsageStatsMigration, UsageAggregator, UsageStatsService, and UsageRecorder.

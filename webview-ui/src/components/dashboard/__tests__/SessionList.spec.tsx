@@ -1,4 +1,4 @@
-﻿// npx vitest run src/components/dashboard/__tests__/SessionList.spec.tsx
+// npx vitest run src/components/dashboard/__tests__/SessionList.spec.tsx
 
 import React from "react"
 import { render, fireEvent } from "@/utils/test-utils"

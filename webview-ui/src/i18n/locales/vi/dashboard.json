@@ -25,7 +25,8 @@
 		"refresh": "Làm mới",
 		"exportJson": "Xuất JSON",
 		"exportCsv": "Xuất CSV",
-		"clear": "Xóa thống kê"
+		"clear": "Xóa thống kê",
+		"rebuild": "Xây dựng lại thống kê"
 	},
 	"breakdown": {
 		"title": "Phân tích",

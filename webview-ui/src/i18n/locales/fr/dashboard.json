@@ -25,7 +25,8 @@
 		"refresh": "Actualiser",
 		"exportJson": "Exporter JSON",
 		"exportCsv": "Exporter CSV",
-		"clear": "Effacer les statistiques"
+		"clear": "Effacer les statistiques",
+		"rebuild": "Reconstruire les statistiques"
 	},
 	"breakdown": {
 		"title": "Répartition",

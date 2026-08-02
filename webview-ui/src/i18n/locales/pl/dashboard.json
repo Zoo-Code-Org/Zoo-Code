@@ -25,7 +25,8 @@
 		"refresh": "Odśwież",
 		"exportJson": "Eksportuj JSON",
 		"exportCsv": "Eksportuj CSV",
-		"clear": "Wyczyść statystyki"
+		"clear": "Wyczyść statystyki",
+		"rebuild": "Przebuduj statystyki"
 	},
 	"breakdown": {
 		"title": "Podział",

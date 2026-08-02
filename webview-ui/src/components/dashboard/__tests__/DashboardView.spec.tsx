@@ -1,4 +1,4 @@
-﻿// npx vitest run src/components/dashboard/__tests__/DashboardView.spec.tsx
+// npx vitest run src/components/dashboard/__tests__/DashboardView.spec.tsx
 
 import React from "react"
 import { render, fireEvent, waitFor } from "@/utils/test-utils"

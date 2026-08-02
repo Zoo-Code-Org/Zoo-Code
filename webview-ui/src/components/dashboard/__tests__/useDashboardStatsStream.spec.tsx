@@ -1,4 +1,4 @@
-﻿// npx vitest run src/components/dashboard/__tests__/useDashboardStatsStream.spec.tsx
+// npx vitest run src/components/dashboard/__tests__/useDashboardStatsStream.spec.tsx
 
 import { renderHook, act } from "@/utils/test-utils"
 

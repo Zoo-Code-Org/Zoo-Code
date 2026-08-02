@@ -1,4 +1,4 @@
-﻿import type {
+import type {
 	UsageEventV1,
 	StatsQuery,
 	StatsSnapshot,

@@ -1,4 +1,4 @@
-﻿import * as fs from "fs"
+import * as fs from "fs"
 import * as path from "path"
 
 import type { UsageEventV1 } from "@roo-code/types"

@@ -25,7 +25,8 @@
 		"refresh": "更新",
 		"exportJson": "JSONエクスポート",
 		"exportCsv": "CSVエクスポート",
-		"clear": "統計を削除"
+		"clear": "統計を削除",
+		"rebuild": "統計を再構築"
 	},
 	"breakdown": {
 		"title": "内訳",

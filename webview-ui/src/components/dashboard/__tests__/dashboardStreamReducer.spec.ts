@@ -1,4 +1,4 @@
-﻿// npx vitest run src/components/dashboard/__tests__/dashboardStreamReducer.spec.ts
+// npx vitest run src/components/dashboard/__tests__/dashboardStreamReducer.spec.ts
 
 import type {
 	DashboardStatsSubscription,

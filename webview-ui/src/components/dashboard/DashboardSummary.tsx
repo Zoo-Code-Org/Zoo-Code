@@ -1,4 +1,4 @@
-﻿import React, { memo } from "react"
+import React, { memo } from "react"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import type { StatsBucket } from "@roo-code/types"
