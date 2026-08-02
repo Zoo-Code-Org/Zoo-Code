@@ -112,9 +112,17 @@ export async function extractSingleFileTarXzArchive(
 		.split(/\r?\n/)
 		.map((entry) => entry.trim())
 		.filter(Boolean)
+	if (entries.length !== 1) {
+		throw new Error(`${archiveName} archive has an unexpected layout`)
+	}
 	const archiveEntry = entries[0]
 	const entryName = archiveEntry?.split(/\s+/).at(-1)
-	if (entries.length !== 1 || !archiveEntry.startsWith("-") || entryName?.replace(/^\.\//, "") !== expectedFile) {
+	if (
+		!archiveEntry ||
+		!entryName ||
+		!archiveEntry.startsWith("-") ||
+		entryName.replace(/^\.\//, "") !== expectedFile
+	) {
 		throw new Error(`${archiveName} archive has an unexpected layout`)
 	}
 
