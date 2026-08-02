@@ -13,7 +13,7 @@ type DcgJsonOutput = {
 	pack_id?: string
 }
 
-const DCG_ENV_KEYS = ["HOME", "PATH", "TEMP", "TMP", "USERPROFILE", "SystemRoot", "WINDIR"] as const
+const DCG_ENV_KEYS = ["HOME", "PATH", "TEMP", "TMPDIR", "TMP", "USERPROFILE", "SystemRoot", "WINDIR"] as const
 
 function getDcgEnvironment(): NodeJS.ProcessEnv {
 	const env: NodeJS.ProcessEnv = { NO_COLOR: "1" }

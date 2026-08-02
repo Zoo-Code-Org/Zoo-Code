@@ -83,7 +83,9 @@ describe("runDcg", () => {
 		const child = createChild()
 		useChild(child)
 		const originalToken = process.env.GITHUB_TOKEN
+		const originalTmpdir = process.env.TMPDIR
 		process.env.GITHUB_TOKEN = "secret"
+		process.env.TMPDIR = "/sandbox/tmp"
 
 		try {
 			const result = runDcg("/dcg", "echo test", "/workspace")
@@ -91,11 +93,13 @@ describe("runDcg", () => {
 			await result
 
 			const options = mockSpawn.mock.calls[0][2]
-			expect(options?.env).toMatchObject({ NO_COLOR: "1" })
+			expect(options?.env).toMatchObject({ NO_COLOR: "1", TMPDIR: "/sandbox/tmp" })
 			expect(options?.env).not.toHaveProperty("GITHUB_TOKEN")
 		} finally {
 			if (originalToken === undefined) delete process.env.GITHUB_TOKEN
 			else process.env.GITHUB_TOKEN = originalToken
+			if (originalTmpdir === undefined) delete process.env.TMPDIR
+			else process.env.TMPDIR = originalTmpdir
 		}
 	})
 

@@ -130,6 +130,13 @@ describe("Destructive Command Guard manager", () => {
 
 	it("allows trusted relative redirects and rejects unsafe or exhausted redirects", () => {
 		expect(resolveTrustedRedirect("https://github.com/release", "/asset", 5)).toBe("https://github.com/asset")
+		expect(
+			resolveTrustedRedirect(
+				"https://github.com/release",
+				"https://release-assets.githubusercontent.com/asset",
+				5,
+			),
+		).toBe("https://release-assets.githubusercontent.com/asset")
 		expect(() => resolveTrustedRedirect("https://github.com/release", "https://example.com/asset", 5)).toThrow(
 			"DCG download redirected to an untrusted host",
 		)
@@ -322,56 +329,59 @@ describe("Destructive Command Guard manager", () => {
 		}
 	})
 
-	it("downloads, verifies, extracts, and installs a ZIP archive", async () => {
-		const info = getDcgArchiveInfo()
-		if (!info?.archive.endsWith(".zip")) return
+	it.skipIf(!getDcgArchiveInfo()?.archive.endsWith(".zip"))(
+		"downloads, verifies, extracts, and installs a ZIP archive",
+		async () => {
+			const info = getDcgArchiveInfo()
+			if (!info) throw new Error("Expected a ZIP archive in this test")
 
-		const archive = Buffer.from("test ZIP archive")
-		const originalChecksum = info.sha256
-		Object.defineProperty(info, "sha256", {
-			value: createHash("sha256").update(archive).digest("hex"),
-			configurable: true,
-		})
-		const response = Object.assign(new PassThrough(), {
-			statusCode: 200,
-			headers: { "content-length": String(archive.length) },
-		})
-		const request = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() })
-		mockGet.mockImplementation((_url, optionsOrCallback, optionalCallback) => {
-			const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : optionalCallback
-			setImmediate(() => {
-				callback?.(response as unknown as IncomingMessage)
-				response.end(archive)
+			const archive = Buffer.from("test ZIP archive")
+			const originalChecksum = info.sha256
+			Object.defineProperty(info, "sha256", {
+				value: createHash("sha256").update(archive).digest("hex"),
+				configurable: true,
 			})
-			return request as unknown as ReturnType<typeof get>
-		})
-		mockSpawn.mockImplementation((_executable, args) => {
-			const child = Object.assign(new EventEmitter(), {
-				stdout: new PassThrough(),
-				stderr: new PassThrough(),
-				kill: vi.fn(),
+			const response = Object.assign(new PassThrough(), {
+				statusCode: 200,
+				headers: { "content-length": String(archive.length) },
 			})
-			setImmediate(async () => {
-				const destinationIndex = args.indexOf(
-					"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
+			const request = Object.assign(new EventEmitter(), { setTimeout: vi.fn(), destroy: vi.fn() })
+			mockGet.mockImplementation((_url, optionsOrCallback, optionalCallback) => {
+				const callback = typeof optionsOrCallback === "function" ? optionsOrCallback : optionalCallback
+				setImmediate(() => {
+					callback?.(response as unknown as IncomingMessage)
+					response.end(archive)
+				})
+				return request as unknown as ReturnType<typeof get>
+			})
+			mockSpawn.mockImplementation((_executable, args) => {
+				const child = Object.assign(new EventEmitter(), {
+					stdout: new PassThrough(),
+					stderr: new PassThrough(),
+					kill: vi.fn(),
+				})
+				setImmediate(async () => {
+					const destinationIndex = args.indexOf(
+						"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
+					)
+					const stagingDir = args[destinationIndex + 2]
+					await writeFile(path.join(stagingDir, info.binary), "ZIP executable")
+					child.emit("close", 0)
+				})
+				return child as unknown as ReturnType<typeof spawn>
+			})
+
+			try {
+				const binaryPath = await ensureDcgInstalled(tempDir)
+				if (!binaryPath) throw new Error("Expected DCG to be supported in this test")
+				expect(await readFile(binaryPath, "utf8")).toBe("ZIP executable")
+				expect(await readFile(path.join(tempDir, "destructive-command-guard", ".dcg-version"), "utf8")).toBe(
+					DCG_VERSION,
 				)
-				const stagingDir = args[destinationIndex + 2]
-				await writeFile(path.join(stagingDir, info.binary), "ZIP executable")
-				child.emit("close", 0)
-			})
-			return child as unknown as ReturnType<typeof spawn>
-		})
-
-		try {
-			const binaryPath = await ensureDcgInstalled(tempDir)
-			if (!binaryPath) throw new Error("Expected DCG to be supported in this test")
-			expect(await readFile(binaryPath, "utf8")).toBe("ZIP executable")
-			expect(await readFile(path.join(tempDir, "destructive-command-guard", ".dcg-version"), "utf8")).toBe(
-				DCG_VERSION,
-			)
-			await expect(access(path.join(tempDir, `${DCG_VERSION}-${info.archive}`))).rejects.toThrow()
-		} finally {
-			Object.defineProperty(info, "sha256", { value: originalChecksum, configurable: true })
-		}
-	})
+				await expect(access(path.join(tempDir, `${DCG_VERSION}-${info.archive}`))).rejects.toThrow()
+			} finally {
+				Object.defineProperty(info, "sha256", { value: originalChecksum, configurable: true })
+			}
+		},
+	)
 })
