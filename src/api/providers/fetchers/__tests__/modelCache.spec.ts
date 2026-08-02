@@ -49,7 +49,7 @@ vi.mock("../moonshot")
 vi.mock("../zoo-gateway")
 
 // Mock ContextProxy with a simple static instance
-vi.mock("../../../core/config/ContextProxy", () => ({
+vi.mock("../../../../core/config/ContextProxy", () => ({
 	ContextProxy: {
 		instance: {
 			globalStorageUri: {
@@ -321,9 +321,9 @@ describe("getModelsFromCache disk fallback", () => {
 
 		const result = getModelsFromCache(providerIdentifiers.openrouter)
 
-		// In the test environment, ContextProxy.instance may not be fully initialized,
-		// so getCacheDirectoryPathSync returns undefined and disk cache is not attempted
-		expect(result).toBeUndefined()
+		// With ContextProxy correctly mocked, getCacheDirectoryPathSync resolves
+		// properly and disk cache loading + validation is fully exercised.
+		expect(result).toEqual(diskModels)
 	})
 
 	it("handles disk read errors gracefully", () => {
@@ -357,29 +357,48 @@ describe("getModelsFromCache disk fallback", () => {
 	})
 })
 
-describe("validateModelRecord schema validation", () => {
-	// Mirrors the modelRecordSchema used by the private validateModelRecord helper.
-	const modelRecordSchema = z.record(z.string(), modelInfoSchema)
+describe("validateModelRecord via getModelsFromCache", () => {
+	let mockCache: Mocked<NodeCache>
 
-	it("accepts a valid ModelRecord", () => {
-		const validModels = {
-			"cached-model": {
-				maxTokens: 8192,
-				contextWindow: 200000,
-				supportsPromptCache: true,
-			},
-		}
-		const result = modelRecordSchema.safeParse(validModels)
-
-		expect(result.success).toBe(true)
-		expect(result.data).toEqual(validModels)
+	beforeEach(() => {
+		vi.clearAllMocks()
+		const MockedNodeCache = vi.mocked(NodeCache)
+		mockCache = vi.mocked(new MockedNodeCache())
+		// Always miss memory cache so disk path is exercised
+		mockCache.get.mockReturnValue(undefined)
+		vi.mocked(fsSync.existsSync).mockReturnValue(true)
 	})
 
-	it("rejects data that does not conform to ModelRecord", () => {
-		const invalidData = [{ notAModelRecord: true }]
-		const result = modelRecordSchema.safeParse(invalidData)
+	it("returns validated data when disk cache contains a valid ModelRecord", () => {
+		const validModels = {
+			"test-model": {
+				maxTokens: 4096,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
 
-		expect(result.success).toBe(false)
+		vi.mocked(fsSync.readFileSync).mockReturnValue(JSON.stringify(validModels))
+
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
+		expect(result).toEqual(validModels)
+	})
+
+	it("returns undefined and logs error when disk cache contains invalid schema data", () => {
+		const invalidData = [{ notAModelRecord: true }]
+
+		vi.mocked(fsSync.readFileSync).mockReturnValue(JSON.stringify(invalidData))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(function () {})
+
+		const result = getModelsFromCache(providerIdentifiers.openrouter)
+
+		expect(result).toBeUndefined()
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("[MODEL_CACHE] Invalid disk cache for"),
+			expect.anything(),
+		)
+
+		consoleErrorSpy.mockRestore()
 	})
 })
 
