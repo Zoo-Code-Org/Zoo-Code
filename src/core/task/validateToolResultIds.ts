@@ -165,7 +165,23 @@ export function validateAndFixToolResultIds(
 		)
 	}
 
-	// Match tool_results to tool_uses by position and fix incorrect IDs
+	// Log the mismatched IDs instead of silently falling back to positional matching.
+	// Positional matching caused cross-wiring of tool results when the ordering of
+	// tool_results did not match the ordering of tool_use blocks (e.g., parallel tool
+	// calls where results arrive in a different order than the calls were made).
+	// The correct behavior is to surface the mismatch so it can be diagnosed and fixed
+	// at the source, not silently remapped.
+	console.warn(
+		"[validateAndFixToolResultIds] Tool result ID mismatch detected — removing positional fallback. " +
+			`tool_result IDs: [${toolResultIdList.join(", ")}], ` +
+			`tool_use IDs: [${toolUseIdList.join(", ")}]. ` +
+			"Mismatched tool_result blocks will be dropped to prevent cross-wiring.",
+	)
+
+	// Filter out tool_results with invalid or duplicate IDs instead of remapping them.
+	// This is safer than positional fallback: dropping a misattributed result is
+	// preferable to wiring it to the wrong tool_use, which would cause subtle
+	// correctness bugs in the LLM's understanding of tool outputs.
 	const usedToolUseIds = new Set<string>()
 	const contentArray = userMessage.content as Anthropic.Messages.ContentBlockParam[]
 
@@ -175,31 +191,18 @@ export function validateAndFixToolResultIds(
 				return block
 			}
 
-			// If the ID is already valid and not yet used, keep it
+			// If the ID is valid and not yet used, keep it
 			if (validToolUseIds.has(block.tool_use_id) && !usedToolUseIds.has(block.tool_use_id)) {
 				usedToolUseIds.add(block.tool_use_id)
 				return block
 			}
 
-			// Find which tool_result index this block is by comparing references.
-			// This correctly handles duplicate tool_use_ids - we find the actual block's
-			// position among all tool_results, not the first block with a matching ID.
-			const toolResultIndex = toolResults.indexOf(block as Anthropic.ToolResultBlockParam)
-
-			// Try to match by position - only fix if there's a corresponding tool_use
-			if (toolResultIndex !== -1 && toolResultIndex < toolUseBlocks.length) {
-				const correctId = toolUseBlocks[toolResultIndex].id
-				// Only use this ID if it hasn't been used yet
-				if (!usedToolUseIds.has(correctId)) {
-					usedToolUseIds.add(correctId)
-					return {
-						...block,
-						tool_use_id: correctId,
-					}
-				}
-			}
-
-			// No corresponding tool_use for this tool_result, or the ID is already used
+			// Invalid or duplicate tool_result ID — drop it instead of remapping
+			console.warn(
+				`[validateAndFixToolResultIds] Dropping tool_result with tool_use_id "${block.tool_use_id}": ` +
+					`${validToolUseIds.has(block.tool_use_id) ? "duplicate ID" : "ID not found in tool_use blocks"}. ` +
+					"This prevents cross-wiring of tool results.",
+			)
 			return null
 		})
 		.filter((block): block is NonNullable<typeof block> => block !== null)

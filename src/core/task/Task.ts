@@ -141,6 +141,13 @@ const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
+/**
+ * Maximum number of consecutive retries allowed for the same tool within a single turn.
+ * After this limit, further retries are blocked until the user provides new input.
+ * This prevents retry storms where the model repeatedly tries the same failing tool.
+ */
+const MAX_TOOL_RETRY_BUDGET = 3
+
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
 	apiConfiguration: ProviderSettings
@@ -321,6 +328,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	consecutiveNoToolUseCount: number = 0
 	consecutiveNoAssistantMessagesCount: number = 0
 	toolUsage: ToolUsage = {}
+
+	/**
+	 * Retry budget: tracks how many times the same tool has been retried
+	 * consecutively within the current turn. Keyed by tool name (e.g., "execute_command").
+	 * After MAX_TOOL_RETRY_BUDGET (3) retries of the same tool in a row,
+	 * further retries are blocked until the user provides new input.
+	 * The counter resets when user feedback arrives (handleWebviewAskResponse with messageResponse)
+	 * or at the start of each new API request.
+	 */
+	toolRetryBudget: Map<string, number> = new Map()
+
+	/**
+	 * When true, the retry budget for the current tool has been exceeded and
+	 * no further retries of that tool are allowed until user feedback arrives.
+	 */
+	toolRetryBudgetExceeded: boolean = false
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -1439,6 +1462,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+
+		// Reset retry budget when user provides new input (messageResponse).
+		// This allows the model to retry tools after the user has had a chance to
+		// provide guidance. The budget is NOT reset on yesButtonClicked (tool approval)
+		// since that's the model continuing its own turn, not user feedback.
+		if (askResponse === "messageResponse") {
+			this.toolRetryBudget.clear()
+			this.toolRetryBudgetExceeded = false
+		}
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2754,6 +2786,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didToolFailInCurrentTurn = false
 				this.presentAssistantMessageLocked = false
 				this.presentAssistantMessageHasPendingUpdates = false
+				// Reset retry budget for each new API request (new assistant turn).
+				// This gives the model a fresh budget of 3 retries per tool per turn.
+				this.toolRetryBudget.clear()
+				this.toolRetryBudgetExceeded = false
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
 				// Clear any leftover streaming tool call state from previous interrupted streams
@@ -4791,5 +4827,52 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (e) {
 			console.error(`[Task] Queue processing error:`, e)
 		}
+	}
+
+	/**
+		* Checks if the retry budget for a given tool has been exceeded.
+		* Each tool gets MAX_TOOL_RETRY_BUDGET (3) consecutive retries per turn.
+		* After that, further retries are blocked until user feedback arrives.
+		*
+		* @param toolName - The name of the tool being retried
+		* @returns true if the retry budget is still available, false if blocked
+		*/
+	public checkToolRetryBudget(toolName: string): boolean {
+		if (this.toolRetryBudgetExceeded) {
+			console.warn(
+				`[Task#${this.taskId}] Tool retry budget globally exceeded. Blocking further retries for "${toolName}".`,
+			)
+			return false
+		}
+
+		const currentRetries = this.toolRetryBudget.get(toolName) ?? 0
+
+		if (currentRetries >= MAX_TOOL_RETRY_BUDGET) {
+			this.toolRetryBudgetExceeded = true
+			console.warn(
+				`[Task#${this.taskId}] Tool retry budget exceeded for "${toolName}": ` +
+					`${currentRetries} retries >= ${MAX_TOOL_RETRY_BUDGET} max. ` +
+					"Blocking further retries until user provides new input.",
+			)
+			return false
+		}
+
+		// Increment the retry counter for this tool
+		this.toolRetryBudget.set(toolName, currentRetries + 1)
+		return true
+	}
+
+	/**
+		* Records a tool use as successful, which resets the retry budget for that tool.
+		* This is called when a tool completes successfully, allowing the model to use
+		* the tool again (the budget is per-retry, not per-use).
+		*
+		* @param toolName - The name of the tool that succeeded
+		*/
+	public recordSuccessfulToolUse(toolName: string): void {
+		// Only reset the retry budget for this specific tool, not all tools.
+		// This allows the model to switch to a different tool after exhausting
+		// the budget on one tool.
+		this.toolRetryBudget.delete(toolName)
 	}
 }
