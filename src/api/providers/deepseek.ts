@@ -7,6 +7,7 @@ import {
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
 	type ModelInfo,
+	DeepSeekModelId,
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -23,7 +24,7 @@ import { handleOpenAIError } from "./utils/error-handler"
 // Custom interface for DeepSeek params to support thinking mode
 type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
 	thinking?: { type: "enabled" | "disabled" }
-	reasoning_effort?: "high" | "max"
+	reasoning_effort?: "low" | "high" | "max"
 }
 
 const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro"])
@@ -40,13 +41,46 @@ const isDeepSeekThinkingEnabled = (modelId: string, options: ApiHandlerOptions) 
 	return supportsDeepSeekThinkingToggle(modelId)
 }
 
-const normalizeDeepSeekReasoningEffort = (reasoningEffort?: string): "high" | "max" | undefined => {
-	if (!reasoningEffort || reasoningEffort === "disable") {
-		return undefined
+// https://api-docs.deepseek.com/guides/thinking_mode/
+const normalizeDeepSeekReasoningEffort = (
+	modelId: DeepSeekModelId,
+	reasoningEffort?: string,
+): "low" | "high" | "max" | undefined => {
+	switch (modelId) {
+		case "deepseek-v4-flash":
+			switch (reasoningEffort) {
+				case "low":
+					return "low"
+
+				case "high":
+					return "high"
+
+				case "xhigh":
+					return "high"
+
+				case "max":
+					return "max"
+			}
+			break
+
+		case "deepseek-v4-pro":
+			switch (reasoningEffort) {
+				case "low":
+					return "high"
+
+				case "high":
+					return "high"
+
+				case "xhigh":
+					return "max"
+
+				case "max":
+					return "max"
+			}
+			break
 	}
 
-	// DeepSeek currently maps low/medium to high and xhigh to max in thinking mode.
-	return reasoningEffort === "xhigh" ? "max" : "high"
+	return undefined
 }
 
 // Use the computed maxTokens from getModelParams rather than raw model metadata.
@@ -92,7 +126,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const modelId = this.options.apiModelId ?? deepSeekDefaultModelId
+		const modelId = (this.options.apiModelId as DeepSeekModelId) ?? deepSeekDefaultModelId
 		const { info: modelInfo, temperature, reasoningEffort, maxTokens } = this.getModel()
 
 		const isThinkingModel = isDeepSeekThinkingEnabled(modelId, this.options)
@@ -101,7 +135,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 			: isThinkingModel
 				? ({ type: "enabled" } as const)
 				: undefined
-		const deepSeekReasoningEffort = isThinkingModel ? normalizeDeepSeekReasoningEffort(reasoningEffort) : undefined
+		const deepSeekReasoningEffort = normalizeDeepSeekReasoningEffort(modelId, reasoningEffort)
 
 		// Convert messages to R1 format (merges consecutive same-role messages)
 		// This is required for DeepSeek which does not support successive messages with the same role
