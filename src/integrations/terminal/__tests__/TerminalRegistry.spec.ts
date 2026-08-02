@@ -6,6 +6,9 @@ import { ShellIntegrationManager } from "../ShellIntegrationManager"
 import { Terminal } from "../Terminal"
 import { TerminalProcess } from "../TerminalProcess"
 import { TerminalRegistry } from "../TerminalRegistry"
+import { CommandScheduler } from "../CommandScheduler"
+import type { ResolvedCommandEnvironment } from "../shell/types"
+import type { ShellInvocationPlan } from "../shell/types"
 
 const PAGER = process.platform === "win32" ? "" : "cat"
 
@@ -15,9 +18,19 @@ vi.mock("execa", () => ({
 
 describe("TerminalRegistry", () => {
 	let mockCreateTerminal: any
+	let executionCounter = 0
+
+	function nextExecutionId(): string {
+		return `exec-${++executionCounter}`
+	}
 
 	beforeEach(() => {
+		executionCounter = 0
 		TerminalRegistry["terminals"] = []
+		TerminalRegistry["nextTerminalId"] = 1
+		TerminalRegistry["isInitialized"] = false
+		CommandScheduler.cleanup()
+		CommandScheduler.initialize()
 		Terminal.setTerminalProfile(undefined)
 		mockCreateTerminal = vi.spyOn(vscode.window, "createTerminal").mockImplementation(
 			(...args: any[]) =>
@@ -42,7 +55,11 @@ describe("TerminalRegistry", () => {
 	})
 
 	afterEach(() => {
+		TerminalRegistry.cleanup()
+		CommandScheduler.cleanup()
 		TerminalRegistry["terminals"] = []
+		TerminalRegistry["nextTerminalId"] = 1
+		TerminalRegistry["isInitialized"] = false
 		Terminal.setTerminalProfile(undefined)
 		vi.restoreAllMocks()
 	})
@@ -137,8 +154,13 @@ describe("TerminalRegistry", () => {
 
 	describe("getOrCreateTerminal", () => {
 		it("reuses an idle VS Code terminal when the selected profile is unchanged", async () => {
-			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
-			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+			first.lifecycle.markHealthy()
+			;((first as Terminal).terminal as any).shellIntegration = { executeCommand: vi.fn() }
+
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
 
 			expect(second).toBe(first)
 			expect(mockCreateTerminal).toHaveBeenCalledTimes(1)
@@ -146,10 +168,13 @@ describe("TerminalRegistry", () => {
 
 		it("creates a new VS Code terminal after changing from default to an override", async () => {
 			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
-			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+			first.lifecycle.markHealthy()
 
 			Terminal.setTerminalProfile("Git Bash")
-			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
 
 			expect(second).not.toBe(first)
 			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
@@ -158,10 +183,13 @@ describe("TerminalRegistry", () => {
 		it("creates a new VS Code terminal after changing from an override to default", async () => {
 			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
 			Terminal.setTerminalProfile("Git Bash")
-			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+			first.lifecycle.markHealthy()
 
 			Terminal.setTerminalProfile(undefined)
-			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
 
 			expect(second).not.toBe(first)
 			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
@@ -170,20 +198,93 @@ describe("TerminalRegistry", () => {
 		it("creates a new VS Code terminal after changing between named profiles", async () => {
 			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
 			Terminal.setTerminalProfile("Git Bash")
-			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+			first.lifecycle.markHealthy()
 
 			Terminal.setTerminalProfile("zsh")
-			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "vscode")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
 
 			expect(second).not.toBe(first)
 			expect(mockCreateTerminal).toHaveBeenCalledTimes(2)
 		})
 
 		it("continues to reuse Execa terminals when the VS Code profile changes", async () => {
-			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "execa")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
 
 			Terminal.setTerminalProfile("Git Bash")
-			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", "execa")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+
+			expect(second).toBe(first)
+		})
+	})
+
+	describe("atomic acquisition", () => {
+		it("reserves a terminal before returning so it is not reused by a concurrent acquisition", async () => {
+			const t1 = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+
+			// t1 is still reserved; a second acquisition must create a new terminal.
+			const t2 = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+
+			expect(t1).not.toBe(t2)
+			expect(t1.lifecycle.ownerExecutionId).not.toBeUndefined()
+			expect(t2.lifecycle.ownerExecutionId).not.toBeUndefined()
+			expect(t1.lifecycle.ownerExecutionId).not.toBe(t2.lifecycle.ownerExecutionId)
+		})
+
+		it("serializes creation so only one terminal is created at a time", async () => {
+			let concurrentCreations = 0
+			let maxConcurrentCreations = 0
+
+			const originalCreateTerminal = TerminalRegistry.createTerminal
+			vi.spyOn(TerminalRegistry, "createTerminal").mockImplementation((cwd, provider, resolvedEnv) => {
+				concurrentCreations++
+				maxConcurrentCreations = Math.max(maxConcurrentCreations, concurrentCreations)
+				const terminal = originalCreateTerminal.call(TerminalRegistry, cwd, provider, resolvedEnv)
+				concurrentCreations--
+				return terminal
+			})
+
+			await Promise.all([
+				TerminalRegistry.getOrCreateTerminal("/a", "task", nextExecutionId(), "vscode"),
+				TerminalRegistry.getOrCreateTerminal("/b", "task", nextExecutionId(), "vscode"),
+				TerminalRegistry.getOrCreateTerminal("/c", "task", nextExecutionId(), "vscode"),
+			])
+
+			expect(maxConcurrentCreations).toBe(1)
+		})
+	})
+
+	describe("health validation (REQ-005)", () => {
+		it("does not reuse a VS Code terminal whose shell integration is absent", async () => {
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+			first.lifecycle.markHealthy()
+			;((first as Terminal).terminal as any).shellIntegration = undefined
+
+			const disposeSpy = vi.spyOn((first as Terminal).terminal, "dispose")
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+
+			expect(second).not.toBe(first)
+			expect(first.lifecycle.health).toBe("broken")
+			expect(disposeSpy).toHaveBeenCalled()
+			expect(cleanupSpy).toHaveBeenCalledWith(first.id)
+		})
+
+		it("reuses a healthy VS Code terminal with shell integration present", async () => {
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+			first.lifecycle.markHealthy()
+			;((first as Terminal).terminal as any).shellIntegration = { executeCommand: vi.fn() }
+
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "vscode")
 
 			expect(second).toBe(first)
 		})
@@ -194,6 +295,7 @@ describe("TerminalRegistry", () => {
 			const idle = TerminalRegistry.createTerminal("/idle", "vscode") as Terminal
 			const busy = TerminalRegistry.createTerminal("/busy", "vscode") as Terminal
 			const execa = TerminalRegistry.createTerminal("/inline", "execa") as ExecaTerminal
+			idle.lifecycle.resetToIdle()
 			busy.busy = true
 			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
 
@@ -374,6 +476,7 @@ describe("TerminalRegistry", () => {
 			const execution = { commandLine: { value: "echo hi" }, read: vi.fn().mockReturnValue(mockStream) } as any
 			process.ownExecution = execution
 			terminal.process = process
+			terminal.lifecycle._setStateForTest("integration-ready", "exec-1")
 			const setStreamSpy = vi.spyOn(terminal, "setActiveStream")
 
 			await startHandler({
@@ -384,6 +487,194 @@ describe("TerminalRegistry", () => {
 			expect(execution.read).toHaveBeenCalledTimes(1)
 			expect(setStreamSpy).toHaveBeenCalledWith(mockStream)
 			expect(terminal.busy).toBe(true)
+		})
+	})
+
+	describe("watchdog (REQ-009)", () => {
+		beforeEach(() => {
+			TerminalRegistry["isInitialized"] = false
+			;(vscode.window as any).onDidStartTerminalShellExecution ??= () => ({ dispose: () => {} })
+			;(vscode.window as any).onDidEndTerminalShellExecution ??= () => ({ dispose: () => {} })
+			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution" as any).mockReturnValue({ dispose: vi.fn() })
+			vi.spyOn(vscode.window, "onDidEndTerminalShellExecution" as any).mockReturnValue({ dispose: vi.fn() })
+			TerminalRegistry.initialize()
+		})
+
+		afterEach(() => {
+			TerminalRegistry["isInitialized"] = false
+		})
+
+		it("recovers a terminal that is owned but closed", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("creating", "exec-1")
+			;(terminal.terminal as any).exitStatus = { code: 0 }
+
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			TerminalRegistry["runWatchdog"]()
+
+			expect(terminal.lifecycle.state).toBe("disposed")
+			expect(cleanupSpy).toHaveBeenCalledWith(terminal.id)
+			expect(TerminalRegistry["terminals"]).not.toContain(terminal)
+		})
+
+		it("recovers a terminal whose process belongs to a different execution", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("running", "exec-1")
+			const mockProcess = { abort: vi.fn(), executionId: "exec-2" } as any
+			terminal.process = mockProcess
+
+			TerminalRegistry["runWatchdog"]()
+
+			expect(terminal.lifecycle.state).toBe("disposed")
+			expect(mockProcess.abort).toHaveBeenCalled()
+		})
+
+		it("recovers a pre-submission terminal that exceeded the deadline", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("creating", "exec-1")
+			terminal.lifecycle._setStateChangedAtForTest(Date.now() - Terminal.getShellIntegrationTimeout() - 2_000)
+
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			TerminalRegistry["runWatchdog"]()
+
+			expect(terminal.lifecycle.state).toBe("disposed")
+			expect(cleanupSpy).toHaveBeenCalledWith(terminal.id)
+		})
+
+		it("recovers a ready reservation that never reached submission", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("integration-ready", "exec-1")
+			terminal.lifecycle._setStateChangedAtForTest(Date.now() - 11_000)
+
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			TerminalRegistry["runWatchdog"]()
+
+			expect(terminal.lifecycle.state).toBe("disposed")
+			expect(cleanupSpy).toHaveBeenCalledWith(terminal.id)
+		})
+
+		it("does not recover a running terminal with a matching process", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("running", "exec-1")
+			terminal.lifecycle._setStateChangedAtForTest(Date.now() - 60_000)
+			terminal.process = { abort: vi.fn(), executionId: "exec-1" } as any
+
+			TerminalRegistry["runWatchdog"]()
+
+			expect(terminal.lifecycle.state).toBe("running")
+			expect(terminal.process!.abort).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("provider-switch cleanup (REQ-008)", () => {
+		it("removes and disposes the source VS Code terminal before acquiring the Execa fallback", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("creating", "exec-1")
+			terminal.taskId = "task-1"
+
+			const disposeSpy = vi.spyOn(terminal.terminal, "dispose")
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			const fallbackPlan: ShellInvocationPlan = {
+				executable: "/bin/bash",
+				args: ["-c", ""],
+				family: "posix",
+				provider: "execa",
+				env: {},
+			}
+			const resolvedEnv: ResolvedCommandEnvironment = {
+				version: 1,
+				primaryPlan: fallbackPlan,
+				fallbackPlan,
+				chainOperator: ";",
+				promptDescriptor: {
+					providerLabel: "Inline Terminal",
+					shellFamilyLabel: "Bash",
+					shellExecutableName: "bash",
+					sourceLabel: "Test",
+					isNonInteractive: true,
+					supportsFishSyntax: false,
+					supportsPosixSyntax: true,
+				},
+				warnings: [],
+			}
+
+			const result = await TerminalRegistry.prepareProviderSwitch({
+				terminalId: terminal.id,
+				executionId: "exec-1",
+				fromProvider: "vscode",
+				toProvider: "execa",
+				reasonCode: "SI_NEVER_AVAILABLE",
+				commandSubmitted: false,
+				resolvedEnv,
+			})
+
+			// Source must be disposed before the fallback is acquired.
+			expect(terminal.lifecycle.state).toBe("disposed")
+			expect(disposeSpy).toHaveBeenCalled()
+			expect(cleanupSpy).toHaveBeenCalledWith(terminal.id)
+			expect(TerminalRegistry["terminals"]).not.toContain(terminal)
+
+			// Fallback is an Execa terminal with the plan applied.
+			expect(result.provider).toBe("execa")
+			expect(result.terminal.provider).toBe("execa")
+			expect(result.terminal.lifecycle.ownerExecutionId).toBe("exec-1")
+			expect((result.terminal as ExecaTerminal).getShellInvocationPlan()).toBe(fallbackPlan)
+		})
+
+		it("refuses to switch when commandSubmitted is true", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("running", "exec-1")
+			terminal.lifecycle.markCommandSubmitted("exec-1")
+			terminal.taskId = "task-1"
+			terminal.process = { abort: vi.fn(), executionId: "exec-1" } as any
+
+			const fallbackPlan: ShellInvocationPlan = {
+				executable: "/bin/bash",
+				args: ["-c", ""],
+				family: "posix",
+				provider: "execa",
+				env: {},
+			}
+			const resolvedEnv: ResolvedCommandEnvironment = {
+				version: 1,
+				primaryPlan: fallbackPlan,
+				fallbackPlan,
+				chainOperator: ";",
+				promptDescriptor: {
+					providerLabel: "Inline Terminal",
+					shellFamilyLabel: "Bash",
+					shellExecutableName: "bash",
+					sourceLabel: "Test",
+					isNonInteractive: true,
+					supportsFishSyntax: false,
+					supportsPosixSyntax: true,
+				},
+				warnings: [],
+			}
+
+			const result = await TerminalRegistry.prepareProviderSwitch({
+				terminalId: terminal.id,
+				executionId: "exec-1",
+				fromProvider: "vscode",
+				toProvider: "execa",
+				reasonCode: "POST_SUBMIT_REFUSED",
+				commandSubmitted: true,
+				resolvedEnv,
+			})
+
+			expect(result.provider).toBe("vscode")
+			expect(result.terminal).toBe(terminal)
 		})
 	})
 

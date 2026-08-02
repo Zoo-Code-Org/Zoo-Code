@@ -1,15 +1,27 @@
 import type { SystemPromptSettings } from "../types"
 
 import { getShell } from "../../../utils/shell"
+import type { ResolvedCommandEnvironment } from "../../../integrations/terminal/shell/types"
 
 /**
- * Returns the appropriate command chaining operator based on the user's shell.
- * - Unix shells (bash, zsh, etc.): `&&` (run next command only if previous succeeds)
- * - PowerShell: `;` (semicolon for command separation)
- * - cmd.exe: `&&` (conditional execution, same as Unix)
+ * Returns the appropriate command chaining operator based on the resolved
+ * command environment.
+ *
+ * When a {@link ResolvedCommandEnvironment} is provided, the operator is
+ * derived from `env.chainOperator` — the same value used by runtime execution.
+ * PowerShell uses `;` for compatibility with both PS 5.1 and PS 7.
+ * All other families use `&&`.
+ *
+ * When no environment is provided (legacy callers), falls back to `getShell()`.
+ *
  * @internal Exported for testing purposes
  */
-export function getCommandChainOperator(): string {
+export function getCommandChainOperator(env?: ResolvedCommandEnvironment): string {
+	if (env) {
+		return env.chainOperator
+	}
+
+	// Legacy fallback: detect from getShell()
 	const shell = getShell().toLowerCase()
 
 	// Check for PowerShell (both Windows PowerShell and PowerShell Core)
@@ -29,8 +41,27 @@ export function getCommandChainOperator(): string {
 
 /**
  * Returns a shell-specific note about command chaining syntax and platform-specific utilities.
+ * When a resolved environment is provided, guidance is derived from the shell family.
  */
-function getCommandChainNote(): string {
+function getCommandChainNote(env?: ResolvedCommandEnvironment): string {
+	if (env) {
+		const family = env.primaryPlan.family
+
+		// PowerShell-specific guidance
+		if (family === "powershell") {
+			return "Note: Using `;` for PowerShell command chaining. For bash/zsh use `&&`, for cmd.exe use `&&`. IMPORTANT: When using PowerShell, avoid Unix-specific utilities like `sed`, `grep`, `awk`, `cat`, `rm`, `cp`, `mv`. Instead use PowerShell equivalents: `Select-String` for grep, `Get-Content` for cat, `Remove-Item` for rm, `Copy-Item` for cp, `Move-Item` for mv, and PowerShell's `-replace` operator or `[regex]` for sed."
+		}
+
+		// cmd.exe-specific guidance
+		if (family === "cmd") {
+			return "Note: Using `&&` for cmd.exe command chaining (conditional execution). For bash/zsh use `&&`, for PowerShell use `;`. IMPORTANT: When using cmd.exe, avoid Unix-specific utilities like `sed`, `grep`, `awk`, `cat`, `rm`, `cp`, `mv`. Use built-in commands like `type` for cat, `del` for rm, `copy` for cp, `move` for mv, `find`/`findstr` for grep, or consider using PowerShell commands instead."
+		}
+
+		// POSIX/WSL/fish — no extra guidance needed for Unix-native shells
+		return ""
+	}
+
+	// Legacy fallback: detect from getShell()
 	const shell = getShell().toLowerCase()
 
 	// Check for PowerShell
@@ -62,10 +93,25 @@ When asked about your creator, vendor, or company, respond with:
 - "I don't have information about specific vendors"`
 }
 
-export function getRulesSection(cwd: string, settings?: SystemPromptSettings): string {
-	// Get shell-appropriate command chaining operator
-	const chainOp = getCommandChainOperator()
-	const chainNote = getCommandChainNote()
+/**
+ * Renders the RULES section of the system prompt.
+ *
+ * When a {@link ResolvedCommandEnvironment} is provided, the chain operator
+ * and shell-specific guidance are derived from the resolved environment —
+ * the same snapshot used by runtime execution (ARCH-TERMINAL-001, issue #634).
+ *
+ * @param cwd The current workspace directory.
+ * @param settings Optional system prompt settings.
+ * @param env Optional resolved command environment snapshot.
+ */
+export function getRulesSection(
+	cwd: string,
+	settings?: SystemPromptSettings,
+	env?: ResolvedCommandEnvironment,
+): string {
+	// Get shell-appropriate command chaining operator from the resolved environment
+	const chainOp = getCommandChainOperator(env)
+	const chainNote = getCommandChainNote(env)
 
 	return `====
 
@@ -81,14 +127,14 @@ RULES
   * For example, in architect mode trying to edit app.js would be rejected because architect mode can only edit files matching "\\.md$"
 - When making changes to code, always consider the context in which the code is being used. Ensure that your changes are compatible with the existing codebase and that they follow the project's coding standards and best practices.
 - Do not ask for more information than necessary. Use the tools provided to accomplish the user's request efficiently and effectively. When you've completed your task, you must use the attempt_completion tool to present the result to the user. The user may provide feedback, which you can use to make improvements and try again.
-- You are only allowed to ask the user questions using the ask_followup_question tool. Use this tool only when you need additional details to complete a task, and be sure to use a clear and concise question that will help you move forward with the task. When you ask a question, provide the user with 2-4 suggested answers based on your question so they don't need to do so much typing. The suggestions should be specific, actionable, and directly related to the completed task. They should be ordered by priority or logical sequence. However if you can use the available tools to avoid having to ask the user questions, you should do so. For example, if the user mentions a file that may be in an outside directory like the Desktop, you should use the list_files tool to list the files in the Desktop and check if the file they are talking about is there, rather than asking the user to provide the file path themselves.
+- You are only allowed to ask the user questions using the ask_followup_question tool. Use this tool only when you need additional details to complete a task, and be sure to provide a clear and concise question that will help you move forward with the task. When you ask a question, provide the user with 2-4 suggested answers based on your question so they don't need to do so much typing. The suggestions should be specific, actionable, and directly related to the completed task. They should be ordered by priority or logical sequence. However if you can use the available tools to avoid having to ask the user questions, you should do so. For example, if the user mentions a file that may be in an outside directory like the Desktop, you should use the list_files tool to list the files in the Desktop and check if the file they are talking about is there, rather than asking the user to provide the file path themselves.
 - When executing commands, if you don't see the expected output, assume the terminal executed the command successfully and proceed with the task. The user's terminal may be unable to stream the output back properly. If you absolutely need to see the actual terminal output, use the ask_followup_question tool to request the user to copy and paste it back to you.
 - The user may provide a file's contents directly in their message, in which case you shouldn't use the read_file tool to get the file contents again since you already have it.
 - Your goal is to try to accomplish the user's task, NOT engage in a back and forth conversation.
 - NEVER end attempt_completion result with a question or request to engage in further conversation! Formulate the end of your result in a way that is final and does not require further input from the user.
 - You are STRICTLY FORBIDDEN from starting your messages with "Great", "Certainly", "Okay", "Sure". You should NOT be conversational in your responses, but rather direct and to the point. For example you should NOT say "Great, I've updated the CSS" but instead something like "I've updated the CSS". It is important you be clear and technical in your messages.
-- When presented with images, utilize your vision capabilities to thoroughly examine them and extract meaningful information. Incorporate these insights into your thought process as you accomplish the user's task.
-- At the end of each user message, you will automatically receive environment_details. This information is not written by the user themselves, but is auto-generated to provide potentially relevant context about the project structure and environment. While this information can be valuable for understanding the project context, do not treat it as a direct part of the user's request or response. Use it to inform your actions and decisions, but don't assume the user is explicitly asking about or referring to this information unless they clearly do so in their message. When using environment_details, explain your actions clearly to ensure the user understands, as they may not be aware of these details.
+- When presented with images, utilize your vision capabilities to thoroughly examine them and extract meaningful information. Incorporate these insights into your thought process as you accomplish your user's task.
+- At the end of each user message, you will automatically receive environment_details. This information is not written by the user themselves, but is auto-generated to provide potentially relevant context about the project structure and environment. While this information can be valuable for understanding the project context, do not treat it as a direct part of the user's request or response. Use it to inform your actions and decisions, but don't assume the user is explicitly asking about or referring to this information unless they clearly do so in their message. When using environment_details, explain your actions clearly to ensure the user understands they may not be aware of these details.
 - Before executing commands, check the "Actively Running Terminals" section in environment_details. If present, consider how these active processes might impact your task. For example, if a local development server is already running, you wouldn't need to start it again. If no active terminals are listed, proceed with command execution as normal.
 - MCP operations should be used one at a time, similar to other tool usage. Wait for confirmation of success before proceeding with additional operations.
 - It is critical you wait for the user's response after each tool use, in order to confirm the success of the tool use. For example, if asked to make a todo app, you would create a file, wait for the user's response it was created successfully, then create another file if needed, wait for the user's response it was created successfully, etc.${settings?.isStealthModel ? getVendorConfidentialitySection() : ""}`

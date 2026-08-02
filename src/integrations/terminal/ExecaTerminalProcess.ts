@@ -5,6 +5,7 @@ import process from "process"
 import type { RooTerminal } from "./types"
 import { BaseTerminal } from "./BaseTerminal"
 import { BaseTerminalProcess } from "./BaseTerminalProcess"
+import type { ShellInvocationPlan } from "./shell/types"
 
 export class ExecaTerminalProcess extends BaseTerminalProcess {
 	private terminalRef: WeakRef<RooTerminal>
@@ -12,6 +13,7 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 	private pid?: number
 	private subprocess?: ReturnType<typeof execa>
 	private pidUpdatePromise?: Promise<void>
+	public executionId?: string
 
 	constructor(terminal: RooTerminal) {
 		super()
@@ -19,7 +21,9 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 		this.terminalRef = new WeakRef(terminal)
 
 		this.once("completed", () => {
-			this.terminal.busy = false
+			// Lifecycle: transition to idle on completion.
+			// (architect report Section 1.4: ExecaTerminalProcess completion → idle)
+			this.terminal.lifecycle.resetToIdle()
 		})
 	}
 
@@ -33,25 +37,63 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 		return terminal
 	}
 
-	public override async run(command: string) {
+	/**
+	 * Runs a command using the provided shell invocation plan.
+	 *
+	 * If no plan is provided, falls back to the legacy `shell: true` behavior
+	 * via {@link BaseTerminal.getExecaShellPath}. This fallback is deprecated
+	 * and will be removed once all callers pass an explicit plan.
+	 *
+	 * @param command The command string to execute.
+	 * @param plan Optional shell invocation plan with explicit executable and args.
+	 */
+	public override async run(command: string, plan?: ShellInvocationPlan) {
 		this.command = command
 
 		try {
 			this.isHot = true
 
-			this.subprocess = execa({
-				shell: BaseTerminal.getExecaShellPath() || true,
-				cwd: this.terminal.getCurrentWorkingDirectory(),
-				all: true,
-				// Ignore stdin to ensure non-interactive mode and prevent hanging
-				stdin: "ignore",
-				env: {
-					...process.env,
-					// Ensure UTF-8 encoding for Ruby, CocoaPods, etc.
-					LANG: "en_US.UTF-8",
-					LC_ALL: "en_US.UTF-8",
-				},
-			})`${command}`
+			if (plan) {
+				// Build the final args: the plan's controlled args, but with
+				// the actual command as the last element (replacing the empty
+				// placeholder from ShellInvocationAdapter.createPlan).
+				const args = [...plan.args]
+				// The last element of plan.args is the command placeholder.
+				// Replace it with the actual command.
+				if (args.length > 0) {
+					args[args.length - 1] = command
+				} else {
+					args.push(command)
+				}
+
+				this.subprocess = execa(plan.executable, args, {
+					cwd: this.terminal.getCurrentWorkingDirectory(),
+					all: true,
+					// Ignore stdin to ensure non-interactive mode and prevent hanging
+					stdin: "ignore",
+					env: {
+						...process.env,
+						...plan.env,
+						// Ensure UTF-8 encoding for Ruby, CocoaPods, etc.
+						LANG: "en_US.UTF-8",
+						LC_ALL: "en_US.UTF-8",
+					},
+				})
+			} else {
+				// Legacy fallback: shell: true path (deprecated).
+				// New code should always pass a ShellInvocationPlan.
+				this.subprocess = execa({
+					shell: BaseTerminal.getExecaShellPath() || true,
+					cwd: this.terminal.getCurrentWorkingDirectory(),
+					all: true,
+					stdin: "ignore",
+					env: {
+						...process.env,
+						LANG: "en_US.UTF-8",
+						LC_ALL: "en_US.UTF-8",
+					},
+				})`${command}`
+			}
 
 			this.pid = this.subprocess.pid
 
@@ -111,7 +153,12 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 					timeoutId = setTimeout(() => {
 						try {
 							this.subprocess?.kill("SIGKILL")
-						} catch (e) {}
+						} catch (killErr) {
+							console.warn(
+								"[Terminal] SIGKILL timeout cleanup failed:",
+								killErr instanceof Error ? killErr.message : killErr,
+							)
+						}
 
 						resolve()
 					}, 5_000)

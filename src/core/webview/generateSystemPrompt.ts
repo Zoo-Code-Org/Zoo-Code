@@ -18,6 +18,9 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		experiments,
 		language,
 		enableSubfolderRules,
+		terminalShellSelection,
+		execaShellPath,
+		terminalProfile,
 	} = await provider.getState()
 
 	const diffStrategy = new MultiSearchReplaceDiffStrategy()
@@ -37,6 +40,26 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		modelInfo = tempApiHandler.getModel().info
 	} catch (error) {
 		console.error("Error fetching model info for system prompt preview:", error)
+	}
+
+	// Resolve the command environment so the preview matches what a real
+	// request would show. This ensures prompt preview and runtime prompt
+	// use the same shell info (ARCH-TERMINAL-001, issue #634).
+	let resolvedEnv
+	try {
+		const service = provider.getCommandEnvironmentService?.()
+		if (service) {
+			resolvedEnv = service.getEnvironment(
+				{
+					terminalShellSelection,
+					execaShellPath,
+					terminalProfile,
+				},
+				cwd,
+			)
+		}
+	} catch (error) {
+		console.error("Error resolving command environment for system prompt preview:", error)
 	}
 
 	const systemPrompt = await SYSTEM_PROMPT(
@@ -64,6 +87,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		undefined, // todoList
 		undefined, // modelId
 		provider.getSkillsManager(),
+		resolvedEnv,
 	)
 
 	return systemPrompt
