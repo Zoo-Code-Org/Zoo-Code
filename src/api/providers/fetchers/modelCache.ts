@@ -204,12 +204,28 @@ async function writeModels(cacheKey: string, data: ModelRecord) {
 	await safeWriteJson(path.join(cacheDir, filename), data)
 }
 
+/**
+ * Validate parsed JSON data against the ModelRecord Zod schema.
+ * Returns the validated data on success, or undefined (with an error log) on failure.
+ */
+function validateModelRecord(data: unknown, cacheKey: string): ModelRecord | undefined {
+	const validation = modelRecordSchema.safeParse(data)
+	if (!validation.success) {
+		console.error(`[MODEL_CACHE] Invalid disk cache for ${cacheKey}:`, validation.error.format())
+		return undefined
+	}
+	return validation.data
+}
+
 async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
 	const filename = `${cacheKeyToFilename(cacheKey)}_models.json`
 	const cacheDir = await getCacheDirectoryPath(ContextProxy.instance.globalStorageUri.fsPath)
 	const filePath = path.join(cacheDir, filename)
 	const exists = await fileExistsAtPath(filePath)
-	return exists ? JSON.parse(await fs.readFile(filePath, "utf8")) : undefined
+	if (!exists) return undefined
+
+	const data = JSON.parse(await fs.readFile(filePath, "utf8"))
+	return validateModelRecord(data, cacheKey)
 }
 
 /**
@@ -533,21 +549,15 @@ export function getModelsFromCache(options: GetModelsOptions | ProviderName): Mo
 			const data = fsSync.readFileSync(filePath, "utf8")
 			const models = JSON.parse(data)
 
-			// Validate the disk cache data structure using Zod schema
-			// This ensures the data conforms to ModelRecord = Record<string, ModelInfo>
-			const validation = modelRecordSchema.safeParse(models)
-			if (!validation.success) {
-				console.error(
-					`[MODEL_CACHE] Invalid disk cache data structure for ${cacheKey}:`,
-					validation.error.format(),
-				)
+			const validated = validateModelRecord(models, cacheKey)
+			if (!validated) {
 				return undefined
 			}
 
 			// Populate memory cache for future fast access
-			memoryCache.set(cacheKey, validation.data)
+			memoryCache.set(cacheKey, validated)
 
-			return validation.data
+			return validated
 		}
 	} catch (error) {
 		console.error(`[MODEL_CACHE] Error loading ${cacheKey} models from disk:`, error)

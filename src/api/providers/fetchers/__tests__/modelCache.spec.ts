@@ -61,7 +61,8 @@ vi.mock("../../../core/config/ContextProxy", () => ({
 
 // Then imports
 import type { Mock, Mocked } from "vitest"
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, modelInfoSchema } from "@roo-code/types"
+import { z } from "zod"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -353,6 +354,32 @@ describe("getModelsFromCache disk fallback", () => {
 		expect(consoleErrorSpy).toHaveBeenCalled()
 
 		consoleErrorSpy.mockRestore()
+	})
+})
+
+describe("validateModelRecord schema validation", () => {
+	// Mirrors the modelRecordSchema used by the private validateModelRecord helper.
+	const modelRecordSchema = z.record(z.string(), modelInfoSchema)
+
+	it("accepts a valid ModelRecord", () => {
+		const validModels = {
+			"cached-model": {
+				maxTokens: 8192,
+				contextWindow: 200000,
+				supportsPromptCache: true,
+			},
+		}
+		const result = modelRecordSchema.safeParse(validModels)
+
+		expect(result.success).toBe(true)
+		expect(result.data).toEqual(validModels)
+	})
+
+	it("rejects data that does not conform to ModelRecord", () => {
+		const invalidData = [{ notAModelRecord: true }]
+		const result = modelRecordSchema.safeParse(invalidData)
+
+		expect(result.success).toBe(false)
 	})
 })
 
