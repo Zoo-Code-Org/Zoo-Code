@@ -85,6 +85,7 @@ import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
 import { findToolName } from "../../integrations/misc/export-markdown"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
+import { Terminal } from "../../integrations/terminal/Terminal"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
 
 // utils
@@ -3837,7 +3838,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			const state = await provider.getState()
-			const { terminalShellSelection, execaShellPath, terminalProfile } = state ?? {}
+			const { terminalShellSelection, execaShellPath } = state ?? {}
+			// Fall back to the static Terminal.getTerminalProfile() when the persisted
+			// state does not carry a profile override. This ensures that programmatic
+			// overrides set via api.setTerminalProfile() (which only updates the static
+			// Terminal state, not the persisted ContextProxy state) are respected
+			// during command environment resolution.
+			const terminalProfile = state?.terminalProfile ?? Terminal.getTerminalProfile()
 
 			// Get or create the CommandEnvironmentService from the provider.
 			// The service is request-scoped and cached by settings version.
