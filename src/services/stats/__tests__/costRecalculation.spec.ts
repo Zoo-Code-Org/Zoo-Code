@@ -1,4 +1,4 @@
-﻿// src/services/stats/__tests__/costRecalculation.spec.ts
+// src/services/stats/__tests__/costRecalculation.spec.ts
 //
 // Tests for Feature 1: Recalculate cost for old usage events at query time.
 
