@@ -1,4 +1,5 @@
 const mockCreate = vi.fn()
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -6,25 +7,23 @@ vi.mock("openai", () => {
 			return {
 				chat: {
 					completions: {
-						create: mockCreate.mockImplementation(async (options) => {
-							return {
-								[Symbol.asyncIterator]: async function* () {
-									yield {
-										choices: [{ delta: { content: "Test response" }, index: 0 }],
-										usage: null,
-									}
-									yield {
-										choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
-										usage: {
-											prompt_tokens: 10,
-											completion_tokens: 5,
-											total_tokens: 15,
-											prompt_tokens_details: { cached_tokens: 2 },
-										},
-									}
+						create: mockCreate.mockImplementation(async (options) =>
+							asyncStreamFrom([
+								{
+									choices: [{ delta: { content: "Test response" }, index: 0 }],
+									usage: null,
 								},
-							}
-						}),
+								{
+									choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
+										prompt_tokens_details: { cached_tokens: 2 },
+									},
+								},
+							]),
+						),
 					},
 				},
 			}
@@ -368,9 +367,7 @@ describe("MimoHandler", () => {
 
 			const stream = handler.createMessage("System prompt", messages)
 			// Consume the stream
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -385,9 +382,7 @@ describe("MimoHandler", () => {
 			]
 
 			const stream = handler.createMessage("System prompt", messages)
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.parallel_tool_calls).toBeUndefined()
@@ -400,9 +395,7 @@ describe("MimoHandler", () => {
 			]
 
 			const stream = handler.createMessage("System prompt", messages)
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.stream_options).toEqual({ include_usage: true })
@@ -428,9 +421,7 @@ describe("MimoHandler", () => {
 			]
 
 			const stream = handler.createMessage("System prompt", messages, { tools } as any)
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.tools).toHaveLength(1)
@@ -442,11 +433,7 @@ describe("MimoHandler", () => {
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System prompt", messages)
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			const textChunks = chunks.filter((c) => c.type === "text")
 			expect(textChunks.length).toBeGreaterThan(0)
@@ -458,11 +445,7 @@ describe("MimoHandler", () => {
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System prompt", messages)
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			const usageChunks = chunks.filter((c) => c.type === "usage")
 			expect(usageChunks).toHaveLength(1)
@@ -471,56 +454,50 @@ describe("MimoHandler", () => {
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
-					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("System prompt", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("System prompt", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -530,31 +507,28 @@ describe("MimoHandler", () => {
 								index: 0,
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("System prompt", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
 
 		it("should yield tool_call_partial chunks from stream", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -570,8 +544,8 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -586,23 +560,19 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0, finish_reason: "tool_calls" }],
 						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Read test.ts" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System prompt", messages)
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			expect(toolChunks).toHaveLength(2)
@@ -613,13 +583,13 @@ describe("MimoHandler", () => {
 		})
 
 		it("should yield usage with cache tokens", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "Hi" }, index: 0 }],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
 						usage: {
 							prompt_tokens: 100,
@@ -630,19 +600,15 @@ describe("MimoHandler", () => {
 								cached_tokens: 30,
 							},
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System prompt", messages)
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			const usageChunks = chunks.filter((c) => c.type === "usage")
 			expect(usageChunks).toHaveLength(1)
@@ -661,10 +627,7 @@ describe("MimoHandler", () => {
 			]
 
 			await expect(async () => {
-				const stream = handler.createMessage("System prompt", messages)
-				for await (const _chunk of stream) {
-					// drain
-				}
+				await collectStream(handler.createMessage("System prompt", messages))
 			}).rejects.toThrow()
 		})
 
@@ -699,9 +662,7 @@ describe("MimoHandler", () => {
 			]
 
 			const stream = handler.createMessage("System prompt", messages)
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.messages).toHaveLength(4) // system + user + assistant + tool
@@ -721,44 +682,38 @@ describe("MimoHandler", () => {
 			]
 
 			const stream = handler.createMessage("System prompt", messages)
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.tools).toBeUndefined()
 		})
 
 		it("should handle empty delta chunks without errors", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{}], usage: null }
-					yield { choices: [{ delta: {} }], usage: null }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{}], usage: null },
+					{ choices: [{ delta: {} }], usage: null },
+					{
 						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System prompt", messages)
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System prompt", messages))
 
 			const textChunks = chunks.filter((c) => c.type === "text")
 			expect(textChunks).toHaveLength(0)
 		})
 
 		it("should handle multiple tool calls in single response", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -779,8 +734,8 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -793,13 +748,13 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
 						usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const tools: any[] = [
 				{
@@ -816,11 +771,7 @@ describe("MimoHandler", () => {
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System", messages, { taskId: "test", tools })
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System", messages, { taskId: "test", tools }))
 
 			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			const readChunks = toolChunks.filter((c) => c.name === "read_file")
@@ -830,25 +781,20 @@ describe("MimoHandler", () => {
 		})
 
 		it("should handle stream interruption gracefully", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "Partial " }, index: 0 }],
 						usage: null,
-					}
-					// Stream ends without finish_reason (connection dropped)
-				},
-			}))
+					},
+				]),
+			)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System", messages)
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System", messages))
 
 			const textChunks = chunks.filter((c) => c.type === "text")
 			expect(textChunks).toHaveLength(1)
@@ -859,9 +805,9 @@ describe("MimoHandler", () => {
 		})
 
 		it("should sanitize tool call IDs with invalid characters", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -877,13 +823,13 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const tools: any[] = [
 				{
@@ -896,11 +842,7 @@ describe("MimoHandler", () => {
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System", messages, { taskId: "test", tools })
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System", messages, { taskId: "test", tools }))
 
 			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			expect(toolChunks.length).toBeGreaterThan(0)
@@ -914,9 +856,7 @@ describe("MimoHandler", () => {
 			]
 
 			const stream = handler.createMessage("You are a helpful assistant", userMessages)
-			for await (const _chunk of stream) {
-				// drain
-			}
+			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
 			expect(params.messages[0].role).toBe("system")
