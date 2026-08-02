@@ -125,27 +125,30 @@ function downloadBinaryFileWithRedirects(
 				destination,
 				options.exclusiveDestination ? { flags: "wx", mode: 0o600 } : undefined,
 			)
+			const abort = (error: Error) => {
+				response.unpipe(output)
+				output.destroy()
+				response.destroy()
+				request.destroy()
+				reject(error)
+			}
 			response.on("data", (chunk: Buffer) => {
 				received += chunk.length
 				if (options.maxBytes !== undefined) {
 					try {
 						assertSizeWithinLimit(received, options.maxBytes, options.name)
 					} catch (error) {
-						response.unpipe(output)
-						output.destroy()
-						response.destroy()
-						request.destroy()
-						reject(error)
+						abort(error instanceof Error ? error : new Error(String(error)))
 					}
 				}
 			})
-			response.on("error", reject)
+			response.on("error", abort)
 			response.pipe(output)
 			output.on("finish", () => {
 				output.close()
 				resolve()
 			})
-			output.on("error", reject)
+			output.on("error", abort)
 		})
 
 		request.setTimeout(options.timeoutMs, () => request.destroy(new Error(`${options.name} download timed out`)))
