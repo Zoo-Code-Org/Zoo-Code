@@ -530,6 +530,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	didCompleteReadingStream = false
 	private _started = false
 	private _runPromise: Promise<void> | undefined
+	private readonly _isHistoryTask: boolean
 	// No streaming parser is required.
 	assistantMessageParser?: undefined
 
@@ -606,6 +607,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.rootTaskId = historyItem ? historyItem.rootTaskId : rootTask?.taskId
 		this.parentTaskId = historyItem ? historyItem.parentTaskId : parentTask?.taskId
 		this.childTaskId = undefined
+		this._isHistoryTask = !!historyItem && !task && !images
 
 		this.metadata = {
 			task: historyItem ? historyItem.task : task,
@@ -1488,7 +1490,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Wait for askResponse to be set
 		await pWaitFor(
 			() => {
-				if (this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+				if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
 					return true
 				}
 
@@ -1512,6 +1514,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			},
 			{ interval: 100 },
 		)
+
+		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
+		if (this.abort) {
+			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
+		}
 
 		if (this.lastMessageTs !== askTs) {
 			// Could happen if we send multiple asks in a row i.e. with
@@ -1932,9 +1939,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	async sayAndCreateMissingParamError(toolName: ToolName, paramName: string, relPath?: string) {
 		await this.say(
 			"error",
-			`Roo tried to use ${toolName}${
-				relPath ? ` for '${relPath.toPosix()}'` : ""
-			} without value for required parameter '${paramName}'. Retrying...`,
+			relPath
+				? t("tools:missingToolParameterWithPath", {
+						toolName,
+						relPath: relPath.toPosix(),
+						paramName,
+					})
+				: t("tools:missingToolParameter", { toolName, paramName }),
 		)
 		return formatResponse.toolError(formatResponse.missingToolParameterError(paramName))
 	}
@@ -2011,7 +2022,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return Promise.resolve()
 		}
 		this._started = true
-		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -2146,7 +2156,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				.find((m) => !(m.ask === "resume_task" || m.ask === "resume_completed_task")) // Could be multiple resume tasks.
 
 			let askType: ClineAsk
-			if (lastClineMessage?.ask === "completion_result") {
+			if (this.initialStatus === "completed" || lastClineMessage?.ask === "completion_result") {
 				askType = "resume_completed_task"
 			} else {
 				askType = "resume_task"
@@ -2867,6 +2877,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				NativeToolCallParser.clearRawChunkState()
 
 				await this.diffViewProvider.reset()
+
+				await this.safeEnsureModelFetched()
 
 				// Cache model info once per API request to avoid repeated calls during streaming
 				// This is especially important for tools and background usage collection
@@ -4033,6 +4045,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 	}
 
+	/**
+	 * Ensures router-provider model metadata is loaded before getModel() is used for
+	 * context management or streaming. Failures fall back to hardcoded defaults rather
+	 * than aborting the task.
+	 */
+	private async safeEnsureModelFetched(): Promise<void> {
+		try {
+			await this.api.ensureModelFetched?.()
+		} catch (error) {
+			console.error(
+				`[Task#${this.taskId}] Failed to fetch model metadata:`,
+				error instanceof Error ? error.message : error,
+			)
+		}
+	}
+
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
@@ -4041,6 +4069,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
+		await this.safeEnsureModelFetched()
 		const modelInfo = this.api.getModel().info
 
 		const maxTokens = getModelMaxOutputTokens({
@@ -4240,6 +4269,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
+			await this.safeEnsureModelFetched()
 			const modelInfo = this.api.getModel().info
 
 			const maxTokens = getModelMaxOutputTokens({
