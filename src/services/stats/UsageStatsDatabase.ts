@@ -39,6 +39,7 @@ const BREAKDOWN_AXES = ["model", "provider", "mode"] as const
 export type StatsDbErrorCode =
 	| "STATS_DB/open/001" // Database open failed
 	| "STATS_DB/migrate/001" // Schema migration failed
+	| "STATS_DB/migrate/002" // Schema v4 migration failed (timezone offset fix)
 	| "STATS_DB/append/001" // Transaction failed
 	| "STATS_DB/read/001" // Query failed
 	| "STATS_DB/clear/001" // Clear failed

@@ -112,6 +112,7 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
+	TaskOrganizationStore,
 	assertValidTransition,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
@@ -158,7 +159,7 @@ function runDelegationTransition<T>(
 
 function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): void {
 	void scheduler
-		.schedule(task, () => task.run())
+		.schedule(task, () => Promise.resolve(task.start()))
 		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 }
 
@@ -196,6 +197,8 @@ export class ClineProvider
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
+	public readonly taskOrganizationStore: TaskOrganizationStore
+	private taskOrganizationStoreInitialized = false
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
@@ -308,6 +311,18 @@ export class ClineProvider
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
+
+		this.taskOrganizationStore = new TaskOrganizationStore(this.contextProxy.globalStorageUri.fsPath, {
+			taskHistory: this.taskHistoryStore,
+		})
+		this.taskOrganizationStore
+			.initialize()
+			.then(() => {
+				this.taskOrganizationStoreInitialized = true
+			})
+			.catch((error) => {
+				this.log(`Failed to initialize TaskOrganizationStore: ${error}`)
+			})
 
 		// Start configuration loading (which might trigger indexing) in the background.
 		// Don't await, allowing activation to continue immediately.
@@ -3119,6 +3134,13 @@ export class ClineProvider
 	 */
 	public getUsageStatsService(): UsageStatsService | undefined {
 		return this.usageStatsService
+	}
+
+	/**
+	 * Returns the TaskOrganizationStore instance for use by message handlers.
+	 */
+	public getTaskOrganizationStore(): TaskOrganizationStore {
+		return this.taskOrganizationStore
 	}
 
 	/**

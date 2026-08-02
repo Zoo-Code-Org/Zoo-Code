@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
@@ -171,8 +172,8 @@ export class TaskOrganizationStore {
 	): Promise<TaskOrganizationMutationResultV1> {
 		return this.withLock(async () => {
 			const requestId =
-				"requestId" in mutation && typeof (mutation as Record<string, unknown>).requestId === "string"
-					? (mutation as Record<string, unknown>).requestId
+				"requestId" in mutation && typeof (mutation as any).requestId === "string"
+					? (mutation as any).requestId
 					: ""
 
 			try {
@@ -258,8 +259,8 @@ export class TaskOrganizationStore {
 
 		try {
 			raw = await fs.readFile(filePath, "utf8")
-		} catch (err: unknown) {
-			if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") {
+		} catch (err: any) {
+			if (err.code === "ENOENT") {
 				this.state = createEmptyTaskOrganizationState(this.now())
 				return
 			}
@@ -281,8 +282,8 @@ export class TaskOrganizationStore {
 		if (
 			typeof parsed === "object" &&
 			parsed !== null &&
-			typeof (parsed as Record<string, unknown>).schemaVersion === "number" &&
-			((parsed as Record<string, unknown>).schemaVersion as number) > 1
+			typeof (parsed as any).schemaVersion === "number" &&
+			(parsed as any).schemaVersion > 1
 		) {
 			console.warn("[TaskOrganizationStore] Organization file has a future schema version.")
 			this.state = parsed as unknown as TaskOrganizationStateV1
@@ -750,11 +751,11 @@ export class TaskOrganizationStore {
 		if (a.kind !== b.kind) return false
 		switch (a.kind) {
 			case "task":
-				return a.taskId === (b as Record<string, unknown>).taskId
+				return a.taskId === (b as any).taskId
 			case "autoGroup":
-				return a.rootTaskId === (b as Record<string, unknown>).rootTaskId
+				return a.rootTaskId === (b as any).rootTaskId
 			case "folder":
-				return a.folderId === (b as Record<string, unknown>).folderId
+				return a.folderId === (b as any).folderId
 			default:
 				return false
 		}
@@ -783,7 +784,7 @@ export class TaskOrganizationStore {
 		if (this.isTaskOrganizationError(err)) {
 			return err
 		}
-		if (err instanceof Error && (err as NodeJS.ErrnoException).code === "ENOENT") {
+		if (err instanceof Error && (err as any).code === "ENOENT") {
 			return { code: "TASK_ORG/PERSISTENCE/005", message: "Organization data could not be read." }
 		}
 		return { code: "TASK_ORG/PERSISTENCE/005", message: "Organization data could not be saved." }
@@ -795,8 +796,8 @@ export class TaskOrganizationStore {
 			err !== null &&
 			"code" in err &&
 			"message" in err &&
-			typeof (err as Record<string, unknown>).code === "string" &&
-			typeof (err as Record<string, unknown>).message === "string"
+			typeof (err as any).code === "string" &&
+			typeof (err as any).message === "string"
 		)
 	}
 

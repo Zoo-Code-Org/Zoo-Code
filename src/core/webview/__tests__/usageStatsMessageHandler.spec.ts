@@ -1,4 +1,5 @@
-﻿import type { WebviewMessage, StatsQuery, StatsSnapshot, UsageEventV1 } from "@roo-code/types"
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises */
+import type { WebviewMessage, StatsQuery, StatsSnapshot, UsageEventV1 } from "@roo-code/types"
 import type { ClineProvider } from "../ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../../services/stats"
 import { StatsServiceError } from "../../../services/stats"
@@ -1298,12 +1299,12 @@ describe("usageStatsMessageHandler", () => {
 
 		it("calls coordinator.subscribe with validated subscription", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "subscribeDashboardStats",
 				requestId: "sub-1",
-				dashboardStatsSubscription: validSubscription as unknown,
+				dashboardStatsSubscription: validSubscription as any,
 			}
 
 			await handleSubscribeDashboardStats(provider, message)
@@ -1321,10 +1322,10 @@ describe("usageStatsMessageHandler", () => {
 			const message: WebviewMessage = {
 				type: "subscribeDashboardStats",
 				requestId: "sub-2",
-				dashboardStatsSubscription: validSubscription as unknown,
+				dashboardStatsSubscription: validSubscription as any,
 			}
 
-			void handleSubscribeDashboardStats(provider, message)
+			handleSubscribeDashboardStats(provider, message)
 
 			// Wait for async postMessageToWebview
 			await vi.waitFor(() => {
@@ -1340,15 +1341,15 @@ describe("usageStatsMessageHandler", () => {
 		})
 
 		it("posts stream error when coordinator is unavailable", async () => {
-			const provider = createMockProvider({ getCoordinator: () => null } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => null } as any)
 
 			const message: WebviewMessage = {
 				type: "subscribeDashboardStats",
 				requestId: "sub-3",
-				dashboardStatsSubscription: validSubscription as unknown,
+				dashboardStatsSubscription: validSubscription as any,
 			}
 
-			void handleSubscribeDashboardStats(provider, message)
+			handleSubscribeDashboardStats(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1364,15 +1365,15 @@ describe("usageStatsMessageHandler", () => {
 
 		it("posts stream error for invalid subscription payload", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "subscribeDashboardStats",
 				requestId: "sub-4",
-				dashboardStatsSubscription: { requestId: "sub-4" } as unknown, // missing range, sessionPageSize, heatmapRangeDays
+				dashboardStatsSubscription: { requestId: "sub-4" } as any, // missing range, sessionPageSize, heatmapRangeDays
 			}
 
-			void handleSubscribeDashboardStats(provider, message)
+			handleSubscribeDashboardStats(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1393,7 +1394,7 @@ describe("usageStatsMessageHandler", () => {
 	describe("handleUnsubscribeDashboardStats", () => {
 		it("calls coordinator.unsubscribe", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "unsubscribeDashboardStats",
@@ -1408,7 +1409,7 @@ describe("usageStatsMessageHandler", () => {
 		it("does nothing when service is unavailable", () => {
 			const provider = createMockProvider(undefined)
 
-			void handleUnsubscribeDashboardStats(provider, { type: "unsubscribeDashboardStats" } as WebviewMessage)
+			handleUnsubscribeDashboardStats(provider, { type: "unsubscribeDashboardStats" } as WebviewMessage)
 
 			// No error posted for unsubscribe (fire-and-forget)
 			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
@@ -1427,12 +1428,12 @@ describe("usageStatsMessageHandler", () => {
 
 		it("calls coordinator.replaceSubscription", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "replaceDashboardStatsSubscription",
 				requestId: "replace-1",
-				dashboardStatsSubscription: validSubscription as unknown,
+				dashboardStatsSubscription: validSubscription as any,
 			}
 
 			await handleReplaceDashboardStatsSubscription(provider, message)
@@ -1446,15 +1447,15 @@ describe("usageStatsMessageHandler", () => {
 
 		it("posts error for invalid payload", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "replaceDashboardStatsSubscription",
 				requestId: "replace-2",
-				dashboardStatsSubscription: {} as unknown,
+				dashboardStatsSubscription: {} as any,
 			}
 
-			void handleReplaceDashboardStatsSubscription(provider, message)
+			handleReplaceDashboardStatsSubscription(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1475,7 +1476,7 @@ describe("usageStatsMessageHandler", () => {
 	describe("handlePauseDashboardStats", () => {
 		it("calls coordinator.pause", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			await handlePauseDashboardStats(provider, { type: "pauseDashboardStats" } as WebviewMessage)
 
@@ -1488,7 +1489,7 @@ describe("usageStatsMessageHandler", () => {
 	describe("handleResumeDashboardStats", () => {
 		it("calls coordinator.resume with lastSequence from message.value", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "resumeDashboardStats",
@@ -1503,7 +1504,7 @@ describe("usageStatsMessageHandler", () => {
 
 		it("defaults to 0 when value is missing", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			await handleResumeDashboardStats(provider, { type: "resumeDashboardStats" } as WebviewMessage)
 
@@ -1523,12 +1524,12 @@ describe("usageStatsMessageHandler", () => {
 
 		it("calls coordinator.replaceSubscription for resync", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "resyncDashboardStats",
 				requestId: "resync-1",
-				dashboardStatsSubscription: validSubscription as unknown,
+				dashboardStatsSubscription: validSubscription as any,
 			}
 
 			await handleResyncDashboardStats(provider, message)
@@ -1538,15 +1539,15 @@ describe("usageStatsMessageHandler", () => {
 
 		it("posts error for invalid payload", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "resyncDashboardStats",
 				requestId: "resync-2",
-				dashboardStatsSubscription: {} as unknown,
+				dashboardStatsSubscription: {} as any,
 			}
 
-			void handleResyncDashboardStats(provider, message)
+			handleResyncDashboardStats(provider, message)
 
 			await vi.waitFor(() => {
 				expect(provider.postMessageToWebview).toHaveBeenCalledWith(
@@ -1569,7 +1570,7 @@ describe("usageStatsMessageHandler", () => {
 			const provider = createMockProvider({
 				getCoordinator: () => null,
 				getDatabase: () => mockDb,
-			} as unknown)
+			} as any)
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessionPage",
@@ -1612,7 +1613,7 @@ describe("usageStatsMessageHandler", () => {
 			const provider = createMockProvider({
 				getCoordinator: () => null,
 				getDatabase: () => null,
-			} as unknown)
+			} as any)
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessionPage",
@@ -1637,7 +1638,7 @@ describe("usageStatsMessageHandler", () => {
 			const provider = createMockProvider({
 				getCoordinator: () => null,
 				getDatabase: () => mockDb,
-			} as unknown)
+			} as any)
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessionPage",
@@ -1662,7 +1663,7 @@ describe("usageStatsMessageHandler", () => {
 			const provider = createMockProvider({
 				getCoordinator: () => null,
 				getDatabase: () => mockDb,
-			} as unknown)
+			} as any)
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessionPage",

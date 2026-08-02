@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 // pnpm --filter roo-cline test core/task-persistence/__tests__/TaskOrganizationStore.spec.ts
 
 import * as fs from "fs/promises"
@@ -17,13 +18,13 @@ vi.mock("../../../utils/storage", () => ({
 }))
 
 vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: unknown) => {
+	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
 		await fs.mkdir(path.dirname(filePath), { recursive: true })
 		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
 	}),
-	safeUpdateJson: vi.fn().mockImplementation(async (filePath: string, updater: (current: unknown) => unknown) => {
+	safeUpdateJson: vi.fn().mockImplementation(async (filePath: string, updater: (current: any) => any) => {
 		await fs.mkdir(path.dirname(filePath), { recursive: true })
-		let current: unknown
+		let current: any
 		try {
 			current = JSON.parse(await fs.readFile(filePath, "utf8"))
 		} catch {

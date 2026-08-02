@@ -1,4 +1,5 @@
-﻿/**
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises */
+/**
  * Routing integration tests for usage-stat message handlers.
  *
  * These tests send actual WebviewMessage values through the
@@ -134,7 +135,7 @@ const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider
 
 	const legacyService = service ?? {}
 	if (!legacyService.getFilteredEvents && legacyService.exportStats) {
-		legacyService.getFilteredEvents = vi.fn(async () => mockJsonExport.events ?? [])
+		legacyService.getFilteredEvents = vi.fn(async () => (mockJsonExport.events ?? []))
 	}
 
 	let mockService: UsageStatsService | undefined = legacyService as UsageStatsService | undefined
@@ -251,9 +252,9 @@ describe("usageStatsMessageRouting", () => {
 
 			await webviewMessageHandler(provider, message)
 
-			const response = vi
-				.mocked(provider.postMessageToWebview)
-				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
+			const response = vi.mocked(provider.postMessageToWebview).mock.calls.find(
+				(c) => c[0]?.type === "dashboardSessionDetailResponse",
+			)
 			expect(response).toBeDefined()
 		})
 	})
@@ -270,12 +271,12 @@ describe("usageStatsMessageRouting", () => {
 
 		it("routes subscribeDashboardStats to handleSubscribeDashboardStats", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "subscribeDashboardStats",
 				requestId: "sub-route-1",
-				dashboardStatsSubscription: validSubscription as unknown,
+				dashboardStatsSubscription: validSubscription as any,
 			}
 
 			await webviewMessageHandler(provider, message)
@@ -285,7 +286,7 @@ describe("usageStatsMessageRouting", () => {
 
 		it("routes unsubscribeDashboardStats to handleUnsubscribeDashboardStats", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "unsubscribeDashboardStats",
@@ -299,12 +300,12 @@ describe("usageStatsMessageRouting", () => {
 
 		it("routes replaceDashboardStatsSubscription to handleReplaceDashboardStatsSubscription", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "replaceDashboardStatsSubscription",
 				requestId: "replace-route-1",
-				dashboardStatsSubscription: { ...validSubscription, requestId: "replace-route-1" } as unknown,
+				dashboardStatsSubscription: { ...validSubscription, requestId: "replace-route-1" } as any,
 			}
 
 			await webviewMessageHandler(provider, message)
@@ -314,7 +315,7 @@ describe("usageStatsMessageRouting", () => {
 
 		it("routes pauseDashboardStats to handlePauseDashboardStats", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "pauseDashboardStats",
@@ -328,7 +329,7 @@ describe("usageStatsMessageRouting", () => {
 
 		it("routes resumeDashboardStats to handleResumeDashboardStats", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "resumeDashboardStats",
@@ -343,12 +344,12 @@ describe("usageStatsMessageRouting", () => {
 
 		it("routes resyncDashboardStats to handleResyncDashboardStats", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "resyncDashboardStats",
 				requestId: "resync-route-1",
-				dashboardStatsSubscription: { ...validSubscription, requestId: "resync-route-1" } as unknown,
+				dashboardStatsSubscription: { ...validSubscription, requestId: "resync-route-1" } as any,
 			}
 
 			await webviewMessageHandler(provider, message)
@@ -361,7 +362,7 @@ describe("usageStatsMessageRouting", () => {
 			const provider = createMockProvider({
 				getCoordinator: () => null,
 				getDatabase: () => mockDb,
-			} as unknown)
+			} as any)
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessionPage",
@@ -426,12 +427,12 @@ describe("usageStatsMessageRouting", () => {
 	describe("request validation and response correlation", () => {
 		it("subscribeDashboardStats with invalid payload posts stream error with matching requestId", async () => {
 			const coordinator = createMockCoordinator()
-			const provider = createMockProvider({ getCoordinator: () => coordinator } as unknown)
+			const provider = createMockProvider({ getCoordinator: () => coordinator } as any)
 
 			const message: WebviewMessage = {
 				type: "subscribeDashboardStats",
 				requestId: "validation-1",
-				dashboardStatsSubscription: { requestId: "validation-1" } as unknown, // missing required fields
+				dashboardStatsSubscription: { requestId: "validation-1" } as any, // missing required fields
 			}
 
 			await webviewMessageHandler(provider, message)
@@ -455,7 +456,7 @@ describe("usageStatsMessageRouting", () => {
 			const provider = createMockProvider({
 				getCoordinator: () => null,
 				getDatabase: () => mockDb,
-			} as unknown)
+			} as any)
 
 			const message: WebviewMessage = {
 				type: "getDashboardSessionPage",
@@ -487,7 +488,7 @@ describe("usageStatsMessageRouting", () => {
 					range: validQuery,
 					sessionPageSize: 50,
 					heatmapRangeDays: 30,
-				} as unknown,
+				} as any,
 			}
 
 			await webviewMessageHandler(provider, message)
