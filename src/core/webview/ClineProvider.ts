@@ -159,7 +159,7 @@ function runDelegationTransition<T>(
 
 function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): void {
 	void scheduler
-		.schedule(task, () => Promise.resolve(task.start()))
+		.schedule(task, () => task.run())
 		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 }
 
