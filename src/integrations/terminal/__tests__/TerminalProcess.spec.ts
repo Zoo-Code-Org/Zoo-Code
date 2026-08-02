@@ -334,11 +334,11 @@ describe("TerminalProcess", () => {
 		})
 
 		it.each([
-			["PowerShell", true, false, ". {\necho one\necho two\n}"],
-			["fish", false, true, "begin\necho one\necho two\nend"],
-		])("uses the %s multiline wrapper", async (_profile, isPowerShell, isFish, expectedCommand) => {
-			const psSpy = vi.spyOn(Terminal, "isActiveShellPowerShell").mockReturnValue(isPowerShell)
-			const fishSpy = vi.spyOn(Terminal, "isActiveShellFish").mockReturnValue(isFish)
+			["PowerShell", "powershell" as const, ". {\necho one\necho two\n}"],
+			["fish", "fish" as const, "begin\necho one\necho two\nend"],
+		])("uses the %s multiline wrapper", async (_profile, shellFamily, expectedCommand) => {
+			const originalFamily = mockTerminalInfo.resolvedShellFamily
+			mockTerminalInfo.resolvedShellFamily = shellFamily
 
 			try {
 				mockStream = (async function* () {
@@ -358,8 +358,7 @@ describe("TerminalProcess", () => {
 
 				expect(mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith(expectedCommand)
 			} finally {
-				psSpy.mockRestore()
-				fishSpy.mockRestore()
+				mockTerminalInfo.resolvedShellFamily = originalFamily
 			}
 		})
 
@@ -404,9 +403,14 @@ describe("TerminalProcess", () => {
 			await noShellProcess.run("test command")
 			await eventPromises
 
-			// Verify sendText was called with the command
-			expect(noShellTerminal.sendText).toHaveBeenCalledWith("test command", true)
-			expect(commandSubmitted).toBe(true)
+			// REQ-011: sendText fallback is removed. When shell integration is
+			// absent, SI_NEVER_AVAILABLE is emitted with commandSubmitted=false.
+			expect(noShellTerminal.sendText).not.toHaveBeenCalled()
+			expect(commandSubmitted).toBe(false)
+			// Lifecycle state assertion: terminal should be in failed state
+			// with SI_NEVER_AVAILABLE error code after no shell integration.
+			expect(noShellTerminalInfo.lifecycle.state).toBe("failed")
+			expect(noShellTerminalInfo.lifecycle.lastErrorCode).toBe("SI_NEVER_AVAILABLE")
 
 			// Restore the original console.warn
 			consoleWarnSpy.mockRestore()
@@ -696,8 +700,6 @@ describe("TerminalProcess", () => {
 
 		it("uses PS dot-source wrapping when the default profile resolves to PowerShell (not a .sh temp-script)", async () => {
 			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
-			vi.spyOn(Terminal, "isActiveShellPowerShell").mockReturnValue(false) // detection missed it
-			vi.spyOn(Terminal, "isActiveShellFish").mockReturnValue(false)
 			vi.spyOn(Terminal, "getConfiguredDefaultProfileName").mockReturnValue("Windows PowerShell")
 			vi.spyOn(Terminal, "getConfiguredProfiles").mockReturnValue({
 				"Windows PowerShell": { path: "C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
@@ -740,6 +742,8 @@ describe("TerminalProcess", () => {
 			expect(terminalProcess.isHot).toBe(false)
 			expect(mockTerminalInfo.busy).toBe(false)
 			expect(mockTerminalInfo.activeShellExecution).toBeUndefined()
+			// Lifecycle state assertion: terminal should be idle after completion.
+			expect(mockTerminalInfo.lifecycle.state).toBe("idle")
 		})
 
 		it("does not leave terminal busy when onDidStartTerminalShellExecution fires after early completion", async () => {
@@ -758,13 +762,15 @@ describe("TerminalProcess", () => {
 			// terminal.process was cleared by shellExecutionComplete().
 			expect(mockTerminalInfo.process).toBeUndefined()
 			expect(mockTerminalInfo.busy).toBe(false)
+			// Lifecycle state assertion: terminal should be idle after shellExecutionComplete.
+			expect(mockTerminalInfo.lifecycle.state).toBe("idle")
 
 			// Step 2: late start event arrives — setActiveStream returns early (no process).
 			// Replicate the TerminalRegistry guard: only set busy when process exists.
 			const lateStream = (async function* () {})()
 			mockTerminalInfo.setActiveStream(lateStream)
 			if (mockTerminalInfo.process) {
-				mockTerminalInfo.busy = true
+				mockTerminalInfo.lifecycle._setStateForTest("running", "test-owner")
 			}
 
 			expect(mockTerminalInfo.busy).toBe(false)
@@ -805,7 +811,7 @@ describe("TerminalProcess", () => {
 
 		it("sends a single Ctrl+C immediately and nothing else when the process exits (#266)", async () => {
 			// Process exits right away: terminal is no longer busy.
-			mockTerminalInfo.busy = false
+			mockTerminalInfo.lifecycle._setStateForTest("idle")
 
 			terminalProcess.abort()
 
@@ -820,7 +826,7 @@ describe("TerminalProcess", () => {
 
 		it("re-sends Ctrl+C up to the bounded maximum while the process stays busy (#266)", async () => {
 			// Process keeps ignoring SIGINT: terminal stays busy throughout.
-			mockTerminalInfo.busy = true
+			mockTerminalInfo.lifecycle._setStateForTest("running", "test-owner")
 
 			terminalProcess.abort()
 			expect(mockTerminal.sendText).toHaveBeenCalledTimes(1)
@@ -833,7 +839,7 @@ describe("TerminalProcess", () => {
 		})
 
 		it("stops re-sending Ctrl+C once the process exits mid-retry (#266)", async () => {
-			mockTerminalInfo.busy = true
+			mockTerminalInfo.lifecycle._setStateForTest("running", "test-owner")
 
 			terminalProcess.abort()
 			expect(mockTerminal.sendText).toHaveBeenCalledTimes(1)
@@ -852,7 +858,7 @@ describe("TerminalProcess", () => {
 		})
 
 		it("stops re-sending Ctrl+C if the terminal is reused for a different process (#266)", async () => {
-			mockTerminalInfo.busy = true
+			mockTerminalInfo.lifecycle._setStateForTest("running", "test-owner")
 
 			terminalProcess.abort()
 			expect(mockTerminal.sendText).toHaveBeenCalledTimes(1)
@@ -880,7 +886,7 @@ describe("TerminalProcess", () => {
 		})
 
 		it("does not start overlapping retry loops when abort() is called repeatedly (#266)", async () => {
-			mockTerminalInfo.busy = true
+			mockTerminalInfo.lifecycle._setStateForTest("running", "test-owner")
 
 			terminalProcess.abort()
 			terminalProcess.abort()

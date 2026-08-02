@@ -30,6 +30,7 @@ export class TerminalProcess extends BaseTerminalProcess {
 	// whatever command is currently running on the same reused terminal -- see the
 	// self-finalize grace period in run()'s finalize().
 	public ownExecution?: vscode.TerminalShellExecution
+	public executionId?: string
 
 	constructor(terminal: Terminal) {
 		super()
@@ -66,21 +67,31 @@ export class TerminalProcess extends BaseTerminalProcess {
 		const isShellIntegrationAvailable = terminal.shellIntegration && terminal.shellIntegration.executeCommand
 
 		if (!isShellIntegrationAvailable) {
-			terminal.sendText(command, true)
-
 			console.warn(
-				"[TerminalProcess] Shell integration not available. Command sent without knowledge of response.",
+				"[TerminalProcess] Shell integration not available. Command will not be submitted via sendText.",
 			)
+
+			// Transition lifecycle to failed with SI_NEVER_AVAILABLE
+			if (this.terminal.lifecycle.state !== "failed") {
+				try {
+					this.terminal.lifecycle.transition("failed")
+				} catch {
+					// Ignore transition errors for edge-case states
+				}
+			}
+			this.terminal.lifecycle.setLastError("SI_NEVER_AVAILABLE")
 
 			this.emit("no_shell_integration", {
-				message: "Command was submitted; output is not available, as shell integration is inactive.",
-				commandSubmitted: true,
+				message: "Shell integration is not available at the submission gate; command was not submitted.",
+				commandSubmitted: false,
+				code: "SI_NEVER_AVAILABLE",
+				phase: "submit",
+				provider: "vscode",
+				outcome: "not-started",
+				retryDisposition: "fallback-safe",
 			})
 
-			this.emit(
-				"completed",
-				"<shell integration is not available, so terminal output and command execution status is unknown>",
-			)
+			this.emit("completed", "<shell integration is not available, so command was not submitted>")
 
 			this.emit("continue")
 			return
@@ -99,6 +110,11 @@ export class TerminalProcess extends BaseTerminalProcess {
 				this.emit("no_shell_integration", {
 					message: `VSCE shell integration stream did not start within ${Terminal.getShellIntegrationTimeout() / 1000} seconds. Terminal problem?`,
 					commandSubmitted: true,
+					code: "EXEC_START_TIMEOUT",
+					phase: "start",
+					provider: "vscode",
+					outcome: "unknown",
+					retryDisposition: "never",
 				})
 
 				// Reject with descriptive error
@@ -146,14 +162,12 @@ export class TerminalProcess extends BaseTerminalProcess {
 		})
 
 		// Execute command.
-		// Determine whether the active shell is PowerShell so we can apply the
-		// PS-specific counter/sleep workarounds.  Prefer the Zoo Code profile
-		// override (if set) over the VS Code default profile.  Fix for the wrong
-		// config API: must be getConfiguration("terminal.integrated").get(
-		// "defaultProfile.windows"), not the reversed form that always returns null.
+		// Use the request-scoped shell family cached at terminal construction
+		// time instead of re-reading VS Code settings, which can diverge from
+		// the actual shell that was launched.
 		const shellKind = {
-			isPowerShell: Terminal.isActiveShellPowerShell(),
-			isFish: Terminal.isActiveShellFish(),
+			isPowerShell: this.terminal.resolvedShellFamily === "powershell",
+			isFish: this.terminal.resolvedShellFamily === "fish",
 		}
 		let commandToExecute = command
 
@@ -176,6 +190,12 @@ export class TerminalProcess extends BaseTerminalProcess {
 
 			this.ownExecution = execution
 			this.terminal.activeShellExecution = execution
+			// The command is now submitted through the VS Code shell integration
+			// channel. Record the submission on the lifecycle so the watchdog and
+			// recovery policies can make correct decisions.
+			if (this.executionId) {
+				this.terminal.lifecycle.markCommandSubmitted(this.executionId)
+			}
 			// Do NOT call execution.read() here. Reading must happen inside
 			// onDidStartTerminalShellExecution (TerminalRegistry), which fires when
 			// VSCode's shell integration confirms the command has actually started

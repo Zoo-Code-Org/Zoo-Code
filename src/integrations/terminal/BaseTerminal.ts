@@ -8,6 +8,7 @@ import type {
 	RooTerminalProcessResultPromise,
 	ExitCodeDetails,
 } from "./types"
+import { TerminalLifecycle, type TerminalReuseExternalChecks } from "./TerminalLifecycle"
 
 export abstract class BaseTerminal implements RooTerminal {
 	public readonly provider: RooTerminalProvider
@@ -15,22 +16,62 @@ export abstract class BaseTerminal implements RooTerminal {
 	public readonly initialCwd: string
 	public readonly reuseKey: string
 
-	public busy: boolean
-	public running: boolean
-	protected streamClosed: boolean
+	/**
+	 * Authoritative lifecycle state. The legacy `busy` and `running` flags are
+	 * derived from this state for backward compatibility.
+	 */
+	public readonly lifecycle: TerminalLifecycle
 
 	public taskId?: string
 	public process?: RooTerminalProcess
 	public completedProcesses: RooTerminalProcess[] = []
+
+	protected streamClosed: boolean
 
 	constructor(provider: RooTerminalProvider, id: number, cwd: string, reuseKey: string = provider) {
 		this.provider = provider
 		this.id = id
 		this.initialCwd = cwd
 		this.reuseKey = reuseKey
-		this.busy = false
-		this.running = false
+		this.lifecycle = new TerminalLifecycle(provider)
 		this.streamClosed = false
+	}
+
+	/** @deprecated Use {@link lifecycle} state instead. */
+	public get busy(): boolean {
+		return this.lifecycle.busy
+	}
+
+	/** @deprecated Use {@link lifecycle} state instead. */
+	public set busy(value: boolean) {
+		// The lifecycle state machine is the source of truth. This legacy setter
+		// is preserved for compatibility but must not manipulate the lifecycle
+		// state directly: setting busy=true without an owner could create an
+		// ownerless, non-idle terminal that the watchdog cannot reap and that
+		// canReuse rejects, permanently stranding it.
+		if (value) {
+			if (process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test") {
+				console.warn(
+					`[BaseTerminal ${this.provider}/${this.id}] busy=true is deprecated and ignored; use the lifecycle API instead.`,
+				)
+			}
+		} else {
+			this.lifecycle.resetToIdle()
+		}
+	}
+
+	/** @deprecated Use {@link lifecycle} state instead. */
+	public get running(): boolean {
+		return this.lifecycle.running
+	}
+
+	/** @deprecated Use {@link lifecycle} state instead. */
+	public set running(value: boolean) {
+		if (value) {
+			this.lifecycle.forceState("running")
+		} else if (this.lifecycle.state === "running") {
+			this.lifecycle.resetToIdle()
+		}
 	}
 
 	public getCurrentWorkingDirectory(): string {
@@ -40,6 +81,18 @@ export abstract class BaseTerminal implements RooTerminal {
 	abstract isClosed(): boolean
 
 	abstract runCommand(command: string, callbacks: RooTerminalCallbacks): RooTerminalProcessResultPromise
+
+	/**
+	 * Provider-specific reuse check. Implementers must supply the external
+	 * conditions (isClosed, hasProcess, etc.) and delegate to the lifecycle.
+	 */
+	abstract canReuse(options: {
+		cwd: string
+		reuseKey: string
+		hasProcess: boolean
+		shellIntegrationDefined?: boolean
+		hasStaleActiveShellExecution?: boolean
+	}): boolean
 
 	/**
 	 * Sets the active stream for this terminal and notifies the process
@@ -58,7 +111,13 @@ export abstract class BaseTerminal implements RooTerminal {
 				return
 			}
 
-			this.running = true
+			// Idempotent transition: only transition if not already in "running" state.
+			// This prevents IllegalTransitionError when setActiveStream is called multiple
+			// times (e.g., by both TerminalProcess.run and the startTerminalShellExecution
+			// event handler).
+			if (this.lifecycle.state !== "running") {
+				this.lifecycle.transition("running")
+			}
 			this.streamClosed = false
 			this.process.emit("shell_execution_started", pid)
 			this.process.emit("stream_available", stream)
@@ -71,9 +130,30 @@ export abstract class BaseTerminal implements RooTerminal {
 	 * Handles shell execution completion for this terminal.
 	 * @param exitDetails The exit details of the shell execution
 	 */
-	public shellExecutionComplete(exitDetails: ExitCodeDetails) {
-		this.busy = false
-		this.running = false
+	public shellExecutionComplete(
+		exitDetails: ExitCodeDetails,
+		options?: { executionId?: string; acceptNoOwner?: boolean },
+	) {
+		// Guard against a stale end event for a superseded execution. If an
+		// execution ID is provided, only reset the terminal when the current
+		// owner matches (or the terminal is unowned and acceptNoOwner is true).
+		// This prevents a late event from a previous command from wiping the
+		// state of a newly acquired owner mid-command.
+		const owner = this.lifecycle.ownerExecutionId
+		if (options?.executionId && owner !== undefined && owner !== options.executionId) {
+			console.info(
+				`[BaseTerminal ${this.provider}/${this.id}] shellExecutionComplete ignored: owned by ${owner}, event was for ${options.executionId}`,
+			)
+			return
+		}
+		if (options?.executionId && owner === undefined && !options.acceptNoOwner) {
+			console.info(
+				`[BaseTerminal ${this.provider}/${this.id}] shellExecutionComplete ignored: terminal is unowned`,
+			)
+			return
+		}
+
+		this.lifecycle.resetToIdle()
 
 		if (this.process) {
 			// Add to the front of the queue (most recent first).
@@ -318,11 +398,50 @@ export abstract class BaseTerminal implements RooTerminal {
 		return BaseTerminal.terminalProfile
 	}
 
+	/**
+	 * @deprecated Use {@link ShellInvocationAdapter} and
+	 * {@link CommandEnvironmentService} instead. This method is retained
+	 * for backward compatibility with the CLI host and legacy settings
+	 * hydration. New code must not call this method.
+	 *
+	 * Sets the shell path used by the legacy `shell: true` Execa fallback.
+	 * @param shellPath The shell executable path, or undefined for default
+	 */
 	public static setExecaShellPath(shellPath: string | undefined): void {
 		BaseTerminal.execaShellPath = shellPath
 	}
 
+	/**
+	 * @deprecated Use {@link ShellInvocationAdapter} and
+	 * {@link CommandEnvironmentService} instead. This method is retained
+	 * for backward compatibility. New code must not call this method.
+	 *
+	 * Gets the shell path used by the legacy `shell: true` Execa fallback.
+	 * @returns The shell executable path, or undefined when not set
+	 */
 	public static getExecaShellPath(): string | undefined {
 		return BaseTerminal.execaShellPath
+	}
+}
+
+/** Reusable external-check builder used by both provider subclasses. */
+export function buildReuseExternalChecks(
+	terminal: BaseTerminal,
+	options: {
+		cwd: string
+		reuseKey: string
+		hasProcess: boolean
+		isClosed: boolean
+		shellIntegrationDefined?: boolean
+		hasStaleActiveShellExecution?: boolean
+	},
+): TerminalReuseExternalChecks & { cwdMatches: boolean; reuseKeyMatches: boolean } {
+	return {
+		isClosed: options.isClosed,
+		hasProcess: options.hasProcess,
+		reuseKeyMatches: options.reuseKey === terminal.reuseKey,
+		cwdMatches: terminal.getCurrentWorkingDirectory() === options.cwd,
+		shellIntegrationDefined: options.shellIntegrationDefined,
+		hasStaleActiveShellExecution: options.hasStaleActiveShellExecution,
 	}
 }

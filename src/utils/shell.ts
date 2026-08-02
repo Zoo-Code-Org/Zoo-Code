@@ -3,8 +3,10 @@ import { existsSync } from "fs"
 import { userInfo } from "os"
 import * as path from "path"
 
+import type { ShellFamily } from "../integrations/terminal/shell/types"
+
 // Security: Allowlist of approved shell executables to prevent arbitrary command execution
-const SHELL_ALLOWLIST = new Set<string>([
+export const SHELL_ALLOWLIST = new Set<string>([
 	// Windows PowerShell variants
 	"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
 	"C:\\Program Files\\PowerShell\\7\\pwsh.exe",
@@ -295,29 +297,116 @@ function getShellFromEnv(): string | null {
 // -----------------------------------------------------
 
 /**
- * Validates if a shell path is in the allowlist to prevent arbitrary command execution
+ * Validates if a shell path is in the allowlist to prevent arbitrary command execution.
+ *
+ * This is the exported trust check used by {@link ShellResolver} and
+ * {@link TerminalProfileResolver}. It performs case-insensitive comparison
+ * on Windows and case-sensitive comparison on Unix.
+ *
+ * @param shellPath The shell executable path to validate.
+ * @returns `true` if the path is in the trusted allowlist.
  */
-function isShellAllowed(shellPath: string): boolean {
+export function isShellPathAllowed(shellPath: string): boolean {
 	if (!shellPath) return false
 
+	// Try both platform normalizations for cross-platform compatibility.
+	// On Windows, path.normalize("/bin/bash") produces "\bin\bash" which
+	// wouldn't match the Unix-style allowlist entries. Trying both
+	// path.normalize and path.posix.normalize covers both cases.
 	const normalizedPath = path.normalize(shellPath)
+	const posixNormalizedPath = path.posix.normalize(shellPath)
 
-	// Direct lookup first
-	if (SHELL_ALLOWLIST.has(normalizedPath)) {
+	// Direct lookup first (try both normalizations)
+	if (SHELL_ALLOWLIST.has(normalizedPath) || SHELL_ALLOWLIST.has(posixNormalizedPath)) {
 		return true
 	}
 
 	// On Windows, try case-insensitive comparison
 	if (process.platform === "win32") {
 		const lowerPath = normalizedPath.toLowerCase()
+		const posixLowerPath = posixNormalizedPath.toLowerCase()
 		for (const allowedPath of SHELL_ALLOWLIST) {
-			if (allowedPath.toLowerCase() === lowerPath) {
+			const allowedLower = allowedPath.toLowerCase()
+			if (allowedLower === lowerPath || allowedLower === posixLowerPath) {
 				return true
 			}
 		}
 	}
 
 	return false
+}
+
+/**
+ * Internal alias for backward compatibility within this module.
+ * @deprecated Use {@link isShellPathAllowed} instead.
+ */
+function isShellAllowed(shellPath: string): boolean {
+	return isShellPathAllowed(shellPath)
+}
+
+/**
+ * Classifies a shell executable path into a {@link ShellFamily}.
+ *
+ * Used by {@link ShellResolver} and {@link TerminalProfileResolver} to
+ * determine the invocation adapter, chaining operator, and prompt text.
+ *
+ * @param shellPath The shell executable path (canonical or bare name).
+ * @returns The shell family, or `undefined` if the path doesn't match
+ *   any supported shell family.
+ */
+export function classifyShellFamily(shellPath: string): ShellFamily | undefined {
+	if (!shellPath) return undefined
+
+	const lower = shellPath.toLowerCase()
+
+	// PowerShell: pwsh.exe, powershell.exe, pwsh, powershell
+	if (/(?:^|[\\/])(?:pwsh|powershell)(?:\.exe)?$/i.test(shellPath)) {
+		return "powershell"
+	}
+
+	// Command Prompt: cmd.exe, cmd
+	if (/(?:^|[\\/])cmd(?:\.exe)?$/i.test(shellPath)) {
+		return "cmd"
+	}
+
+	// WSL: wsl.exe, wsl
+	if (/(?:^|[\\/])wsl(?:\.exe)?$/i.test(shellPath)) {
+		return "wsl"
+	}
+
+	// Fish: fish, fish.exe
+	if (/(?:^|[\\/])fish(?:\.exe)?$/i.test(shellPath)) {
+		return "fish"
+	}
+
+	// POSIX shells: bash, zsh, sh, dash, ksh, ash, csh, tcsh, busybox, etc.
+	// Match by basename to cover all Bourne-compatible and C-shell variants.
+	const basename = path.basename(lower).replace(/\.exe$/, "")
+	const posixShells = new Set([
+		"bash",
+		"zsh",
+		"sh",
+		"dash",
+		"ksh",
+		"ksh93",
+		"mksh",
+		"pdksh",
+		"ash",
+		"csh",
+		"tcsh",
+		"busybox",
+		"elvish",
+		"xonsh",
+		"nu",
+		"nushell",
+		"ion",
+	])
+
+	if (posixShells.has(basename)) {
+		return "posix"
+	}
+
+	return undefined
 }
 
 /**
@@ -337,7 +426,44 @@ function getSafeFallbackShell(): string {
 // 5) Publicly Exposed Shell Getter
 // -----------------------------------------------------
 
+/**
+ * Returns the effective shell executable path for the current platform.
+ *
+ * This is a backward-compatibility wrapper. New code should use
+ * {@link ShellResolver} directly to get a full {@link ResolvedShell} with
+ * family, source, and trust metadata.
+ *
+ * The resolver chain (ARCH-TERMINAL-001 section 1.6) is:
+ * 1. CLI override
+ * 2. User path override (terminalShellSelection)
+ * 3. User profile override (terminalShellSelection)
+ * 4. Legacy execaShellPath
+ * 5. Zoo Code terminalProfile
+ * 6. VS Code default profile
+ * 7. OS default
+ * 8. Safe platform fallback
+ *
+ * When the ShellResolver is unavailable (e.g., during early init or tests
+ * without VS Code configuration), falls back to the legacy detection logic.
+ */
 export function getShell(): string {
+	// Try the unified ShellResolver first. This delegates to
+	// TerminalProfileResolver -> ShellResolver, which reads trusted VS Code
+	// profile scopes and classifies shells into families.
+	try {
+		const { TerminalProfileResolver } = require("../integrations/terminal/shell/TerminalProfileResolver")
+		const { ShellResolver } = require("../integrations/terminal/shell/ShellResolver")
+
+		const profileResolver = TerminalProfileResolver.forRuntime()
+		const resolver = ShellResolver.forRuntime(profileResolver)
+
+		return resolver.resolveExecutable({})
+	} catch {
+		// Fall through to legacy detection if the resolver modules are not
+		// available (e.g., circular dependency during early module load).
+	}
+
+	// Legacy detection (preserved for backward compatibility).
 	let shell: string | null = null
 
 	// 1. Check VS Code config first.
@@ -368,7 +494,7 @@ export function getShell(): string {
 	}
 
 	// 5. Validate the shell against allowlist
-	if (!isShellAllowed(shell)) {
+	if (!isShellPathAllowed(shell)) {
 		shell = getSafeFallbackShell()
 	}
 

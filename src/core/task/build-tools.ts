@@ -8,6 +8,7 @@ import { customToolRegistry, formatNative } from "@roo-code/core"
 import type { ClineProvider } from "../webview/ClineProvider"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
+import type { ResolvedCommandEnvironment } from "../../integrations/terminal/shell/types"
 
 import { getNativeTools, getMcpServerTools } from "../prompts/tools/native-tools"
 import {
@@ -32,6 +33,8 @@ interface BuildToolsOptions {
 	 * to pass all tool definitions while restricting callable tools.
 	 */
 	includeAllToolsWithRestrictions?: boolean
+	/** Resolved command environment for shell-aware tool descriptions. */
+	resolvedEnv?: ResolvedCommandEnvironment
 }
 
 interface BuildToolsResult {
@@ -91,6 +94,7 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		disabledTools,
 		modelInfo,
 		includeAllToolsWithRestrictions,
+		resolvedEnv,
 	} = options
 
 	const mcpHub = provider.getMcpHub()
@@ -110,8 +114,11 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	const supportsImages = modelInfo?.supportsImages ?? false
 
 	// Build native tools with dynamic read_file tool based on settings.
+	// Pass resolvedEnv so the execute_command tool description includes
+	// shell-specific guidance from the same environment snapshot.
 	const nativeTools = getNativeTools({
 		supportsImages,
+		resolvedEnv,
 	})
 
 	// Resolve mode config to get allowedMcpServers for MCP server filtering.

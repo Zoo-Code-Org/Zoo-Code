@@ -1,4 +1,4 @@
-import * as path from "path"
+﻿import * as path from "path"
 import * as vscode from "vscode"
 import os from "os"
 import crypto from "crypto"
@@ -97,6 +97,8 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
+import { CommandEnvironmentService } from "../../integrations/terminal/shell/CommandEnvironmentService"
+import type { ResolvedCommandEnvironment } from "../../integrations/terminal/shell/types"
 
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
@@ -271,6 +273,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
+	private resolvedCommandEnvironment?: ResolvedCommandEnvironment
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
@@ -1637,6 +1640,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				disabledTools: state?.disabledTools,
 				modelInfo,
 				includeAllToolsWithRestrictions: false,
+				resolvedEnv: this.resolvedCommandEnvironment,
 			})
 			allTools = toolsResult.tools
 		}
@@ -3809,7 +3813,54 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return false
 	}
 
+	/**
+	 * Resolves the command environment for this request using
+	 * {@link CommandEnvironmentService}. The resolved snapshot is cached for
+	 * the lifetime of this request and shared by the system prompt, tool
+	 * descriptions, and runtime execution.
+	 *
+	 * @returns The resolved command environment, or undefined if unavailable.
+	 */
+	public getResolvedCommandEnvironment(): ResolvedCommandEnvironment | undefined {
+		return this.resolvedCommandEnvironment
+	}
+
+	/**
+	 * Resolves and caches the command environment for this request.
+	 * Called during API request preparation.
+	 */
+	private async resolveCommandEnvironment(): Promise<void> {
+		try {
+			const provider = this.providerRef.deref()
+			if (!provider) {
+				return
+			}
+
+			const state = await provider.getState()
+			const { terminalShellSelection, execaShellPath, terminalProfile } = state ?? {}
+
+			// Get or create the CommandEnvironmentService from the provider.
+			// The service is request-scoped and cached by settings version.
+			const service = provider.getCommandEnvironmentService?.()
+			if (service) {
+				this.resolvedCommandEnvironment = service.getEnvironment(
+					{
+						terminalShellSelection,
+						execaShellPath,
+						terminalProfile,
+					},
+					this.cwd,
+				)
+			}
+		} catch (error) {
+			console.error("[Task] Failed to resolve command environment:", error)
+		}
+	}
+
 	private async getSystemPrompt(): Promise<string> {
+		// Resolve the command environment for this request so the system prompt
+		// uses the same shell info that runtime execution will use.
+		await this.resolveCommandEnvironment()
 		const { mcpEnabled } = (await this.providerRef.deref()?.getState()) ?? {}
 		let mcpHub: McpHub | undefined
 		if (mcpEnabled ?? true) {
@@ -3954,6 +4005,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				disabledTools: state?.disabledTools,
 				modelInfo,
 				includeAllToolsWithRestrictions: false,
+				resolvedEnv: this.resolvedCommandEnvironment,
 			})
 			allTools = toolsResult.tools
 		}
@@ -4180,6 +4232,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						disabledTools: state?.disabledTools,
 						modelInfo,
 						includeAllToolsWithRestrictions: false,
+						resolvedEnv: this.resolvedCommandEnvironment,
 					})
 					contextMgmtTools = toolsResult.tools
 				}
@@ -4350,6 +4403,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				disabledTools: state?.disabledTools,
 				modelInfo,
 				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
+				resolvedEnv: this.resolvedCommandEnvironment,
 			})
 			allTools = toolsResult.tools
 			allowedFunctionNames = toolsResult.allowedFunctionNames

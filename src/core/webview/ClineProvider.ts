@@ -72,6 +72,7 @@ import { EMBEDDING_MODEL_PROFILES } from "../../shared/embeddingModels"
 import { ProfileValidator } from "../../shared/ProfileValidator"
 
 import { Terminal } from "../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
 import { downloadTask, getTaskFileName } from "../../integrations/misc/export-markdown"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getTheme } from "../../integrations/theme/getTheme"
@@ -85,6 +86,9 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import { CommandEnvironmentService } from "../../integrations/terminal/shell/CommandEnvironmentService"
+import { ShellResolver } from "../../integrations/terminal/shell/ShellResolver"
+import { TerminalProfileResolver } from "../../integrations/terminal/shell/TerminalProfileResolver"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -105,7 +109,7 @@ import { CustomModesManager } from "../config/CustomModesManager"
 import { Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
-import type { ClineMessage, TodoItem } from "@roo-code/types"
+import type { ClineMessage, TodoItem, TerminalShellSelection, TerminalShellOption } from "@roo-code/types"
 import {
 	readApiMessages,
 	saveApiMessages,
@@ -183,6 +187,7 @@ export class ClineProvider
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
+	private commandEnvironmentService?: CommandEnvironmentService
 	private marketplaceManager: MarketplaceManager
 	private mdmService?: MdmService
 	private taskCreationCallback: (task: Task) => void
@@ -904,6 +909,8 @@ export class ClineProvider
 				terminalPowershellCounter = false,
 				terminalZdotdir = false,
 				terminalProfile,
+				terminalShellSelection,
+				execaShellPath,
 				ttsEnabled,
 				ttsSpeed,
 			}) => {
@@ -916,6 +923,25 @@ export class ClineProvider
 				Terminal.setPowershellCounter(terminalPowershellCounter)
 				Terminal.setTerminalZdotdir(terminalZdotdir)
 				Terminal.setTerminalProfile(terminalProfile)
+
+				// Hydrate the CommandEnvironmentService with persisted shell
+				// settings so the first API request uses the correct shell
+				// without waiting for a webview message. See ARCH-TERMINAL-001
+				// section 1.9 (Request-scoped data flow).
+				const service = this.getCommandEnvironmentService()
+				if (service) {
+					service.invalidate()
+					// Eagerly resolve the environment to populate the cache.
+					try {
+						service.getEnvironment({
+							terminalShellSelection,
+							execaShellPath,
+							terminalProfile,
+						})
+					} catch (error) {
+						console.error("[ClineProvider] Failed to hydrate CommandEnvironmentService on startup:", error)
+					}
+				}
 				setTtsEnabled(ttsEnabled ?? false)
 				setTtsSpeed(ttsSpeed ?? 1)
 			},
@@ -2727,6 +2753,8 @@ export class ClineProvider
 			terminalZshP10k: stateValues.terminalZshP10k ?? false,
 			terminalZdotdir: stateValues.terminalZdotdir ?? false,
 			terminalProfile: stateValues.terminalProfile,
+			terminalShellSelection: stateValues.terminalShellSelection,
+			execaShellPath: stateValues.execaShellPath,
 			mode: stateValues.mode ?? defaultModeSlug,
 			language: stateValues.language ?? formatLanguage(vscode.env.language),
 			mcpEnabled: stateValues.mcpEnabled ?? true,
@@ -2971,6 +2999,235 @@ export class ClineProvider
 
 	public getSkillsManager(): SkillsManager | undefined {
 		return this.skillsManager
+	}
+
+	/**
+	 * Returns the CommandEnvironmentService instance, lazily initializing it
+	 * on first access. The service resolves the shell environment for each
+	 * API request and provides the same snapshot to the system prompt, tool
+	 * descriptions, and runtime execution.
+	 */
+	public getCommandEnvironmentService(): CommandEnvironmentService | undefined {
+		if (!this.commandEnvironmentService) {
+			try {
+				const profileResolver = TerminalProfileResolver.forRuntime()
+				const resolver = ShellResolver.forRuntime(profileResolver)
+				this.commandEnvironmentService = new CommandEnvironmentService(resolver)
+			} catch (error) {
+				console.error("[ClineProvider] Failed to create CommandEnvironmentService:", error)
+				return undefined
+			}
+		}
+		return this.commandEnvironmentService
+	}
+
+	/**
+	 * Handles the `requestTerminalShellOptions` webview message.
+	 *
+	 * Asks TerminalProfileResolver for sanitized trusted options and
+	 * ShellResolver for the current effective shell, then returns a
+	 * `terminalShellOptions` response to the webview.
+	 *
+	 * See ARCH-TERMINAL-001 section 1.9 (Frontend to extension-host settings flow).
+	 */
+	public async handleRequestTerminalShellOptions(): Promise<void> {
+		try {
+			const service = this.getCommandEnvironmentService()
+			if (!service) {
+				await this.postMessageToWebview({
+					type: "terminalShellOptions",
+					terminalShellOptions: {
+						options: [],
+						error: "SHELL/handleRequestTerminalShellOptions/001: CommandEnvironmentService unavailable",
+					},
+				})
+				return
+			}
+
+			// Build sanitized trusted options from the profile resolver.
+			const profileResolver = TerminalProfileResolver.forRuntime()
+			const options = this.buildTerminalShellOptions(profileResolver)
+
+			// Resolve the current effective shell from current settings.
+			const state = await this.getState()
+			const env = service.getEnvironment({
+				terminalShellSelection: state.terminalShellSelection,
+				execaShellPath: state.execaShellPath,
+				terminalProfile: state.terminalProfile,
+			})
+
+			const effectiveShell = {
+				label: env.promptDescriptor.shellExecutableName,
+				family: env.primaryPlan.family as "powershell" | "cmd" | "posix" | "fish" | "wsl",
+				source: env.promptDescriptor.sourceLabel,
+			}
+
+			await this.postMessageToWebview({
+				type: "terminalShellOptions",
+				terminalShellOptions: {
+					options,
+					effectiveShell,
+				},
+			})
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			console.error(`[ClineProvider] SHELL/handleRequestTerminalShellOptions/002: ${message}`)
+			await this.postMessageToWebview({
+				type: "terminalShellOptions",
+				terminalShellOptions: {
+					options: [],
+					error: `SHELL/handleRequestTerminalShellOptions/002: Failed to resolve shell options`,
+				},
+			})
+		}
+	}
+
+	/**
+	 * Handles the `setTerminalShellSelection` webview message.
+	 *
+	 * Validates the selection via ShellResolver, persists
+	 * `terminalShellSelection`, invalidates the environment cache, closes
+	 * idle terminals via TerminalRegistry.closeIdleTerminals(), and
+	 * responds with the resolved effective shell.
+	 *
+	 * On validation failure: returns a typed error, keeps the previous
+	 * setting, and shows a non-destructive error.
+	 *
+	 * See ARCH-TERMINAL-001 section 1.9 (Frontend to extension-host settings flow).
+	 */
+	public async handleSetTerminalShellSelection(selection: TerminalShellSelection): Promise<void> {
+		try {
+			const service = this.getCommandEnvironmentService()
+			if (!service) {
+				await this.postMessageToWebview({
+					type: "terminalShellOptions",
+					terminalShellOptions: {
+						options: [],
+						error: "SHELL/handleSetTerminalShellSelection/001: CommandEnvironmentService unavailable",
+					},
+				})
+				return
+			}
+
+			// Validate the selection by resolving with the new selection
+			// applied. We use the ShellResolver directly to check validity
+			// before persisting.
+			const state = await this.getState()
+			const profileResolver = TerminalProfileResolver.forRuntime()
+			const resolver = ShellResolver.forRuntime(profileResolver)
+
+			const result = resolver.resolve({
+				terminalShellSelection: selection,
+				execaShellPath: state.execaShellPath,
+				terminalProfile: state.terminalProfile,
+			})
+
+			if (!result.ok && result.rejectable) {
+				// Validation failure: return typed error, keep previous setting.
+				await this.postMessageToWebview({
+					type: "terminalShellOptions",
+					terminalShellOptions: {
+						options: [],
+						error: `SHELL/handleSetTerminalShellSelection/003: ${result.error.message}`,
+					},
+				})
+				return
+			}
+
+			// Persist the new selection.
+			await this.contextProxy.setValue("terminalShellSelection", selection)
+
+			// Invalidate the environment cache so the next request resolves fresh.
+			service.invalidate()
+
+			// Close idle terminals so they are not reused with the old shell.
+			TerminalRegistry.closeIdleTerminals()
+
+			// Resolve the effective shell with the new selection and respond.
+			const env = service.getEnvironment({
+				terminalShellSelection: selection,
+				execaShellPath: state.execaShellPath,
+				terminalProfile: state.terminalProfile,
+			})
+
+			const options = this.buildTerminalShellOptions(profileResolver)
+			const effectiveShell = {
+				label: env.promptDescriptor.shellExecutableName,
+				family: env.primaryPlan.family as "powershell" | "cmd" | "posix" | "fish" | "wsl",
+				source: env.promptDescriptor.sourceLabel,
+			}
+
+			await this.postMessageToWebview({
+				type: "terminalShellOptions",
+				terminalShellOptions: {
+					options,
+					effectiveShell,
+				},
+			})
+
+			// Sync the updated terminalShellSelection to the webview state
+			// so the dropdown reflects the persisted selection. Without this,
+			// the webview's terminalShellSelection prop stays stale and the
+			// useEffect that resets pendingShellSelection reverts the dropdown
+			// to the old value (e.g., Auto).
+			await this.postStateToWebview()
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			console.error(`[ClineProvider] SHELL/handleSetTerminalShellSelection/002: ${message}`)
+			await this.postMessageToWebview({
+				type: "terminalShellOptions",
+				terminalShellOptions: {
+					options: [],
+					error: `SHELL/handleSetTerminalShellSelection/002: Failed to set shell selection`,
+				},
+			})
+		}
+	}
+
+	/**
+	 * Builds the sanitized TerminalShellOption[] list from trusted profiles
+	 * and known OS defaults. Workspace-controlled profiles are never included.
+	 */
+	private buildTerminalShellOptions(profileResolver: TerminalProfileResolver): TerminalShellOption[] {
+		const options: TerminalShellOption[] = []
+
+		// Auto option — follows trusted VS Code default/global profile.
+		options.push({
+			id: "auto",
+			label: "Auto (follows trusted terminal profile)",
+			family: "powershell", // Placeholder; actual family is resolved at runtime.
+			source: "auto",
+			available: true,
+		})
+
+		// Trusted profile options grouped by shell family.
+		try {
+			const profiles = profileResolver.getAvailableProfiles()
+			for (const profile of profiles) {
+				options.push({
+					id: `profile:${profile.name}`,
+					label: profile.name,
+					family: profile.shell.family,
+					source: "vscode-profile",
+					available: true,
+				})
+			}
+		} catch {
+			// Profile discovery is non-fatal; the Auto option remains available.
+		}
+
+		// On Windows, always ensure cmd.exe is available as a fallback option.
+		if (process.platform === "win32" && !options.some((o) => o.family === "cmd")) {
+			options.push({
+				id: "cmd",
+				label: "Command Prompt (cmd.exe)",
+				family: "cmd",
+				source: "system",
+				available: true,
+			})
+		}
+
+		return options
 	}
 
 	/**
