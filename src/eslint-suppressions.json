@@ -859,11 +859,6 @@
 			"count": 24
 		}
 	},
-	"core/task/__tests__/Task.usage-stats.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 26
-		}
-	},
 	"core/task/__tests__/apiConversationHistory.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 23
