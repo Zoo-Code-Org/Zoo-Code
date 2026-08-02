@@ -104,6 +104,16 @@ describe("managed binary downloads", () => {
 		await expect(verification).rejects.toThrow("checksum mismatch: actual-checksum")
 	})
 
+	it("accepts a matching SHA-256 checksum", async () => {
+		const input = new EventEmitter()
+		mockCreateReadStream.mockReturnValue(input as ReturnType<typeof createReadStream>)
+		const verification = verifySha256Checksum("/tmp/archive", "actual-checksum", () => new Error("should not fail"))
+		input.emit("data", Buffer.from("archive"))
+		input.emit("end")
+
+		await expect(verification).resolves.toBeUndefined()
+	})
+
 	it("follows a trusted redirect and applies destination security options", async () => {
 		const requestOne = createRequest()
 		const requestTwo = createRequest()

@@ -70,6 +70,7 @@ export async function extractSingleFileZipArchive(
 	expectedFile: string,
 	archiveName: string,
 ): Promise<void> {
+	// This deliberately uses PowerShell because it is only called for Windows release archives.
 	const script = [
 		"$ErrorActionPreference = 'Stop'",
 		"$archivePath = $args[0]",
@@ -103,15 +104,21 @@ export async function extractSingleFileTarXzArchive(
 	expectedFile: string,
 	archiveName: string,
 ): Promise<void> {
-	const listing = await runProcess("tar", ["-tJf", archivePath])
+	const listing = await runProcess("tar", ["-tvJf", archivePath])
 	const entries = listing.stdout
 		.split(/\r?\n/)
 		.map((entry) => entry.trim())
 		.filter(Boolean)
 	const archiveEntry = entries[0]
-	if (entries.length !== 1 || archiveEntry.replace(/^\.\//, "") !== expectedFile) {
+	const entryName = archiveEntry?.split(/\s+/).at(-1)
+	if (entries.length !== 1 || !archiveEntry.startsWith("-") || entryName?.replace(/^\.\//, "") !== expectedFile) {
 		throw new Error(`${archiveName} archive has an unexpected layout`)
 	}
 
-	await runProcess("tar", ["-xJf", archivePath, "-C", destination, archiveEntry])
+	const args = ["-xJf", archivePath, "-C", destination, "--no-same-owner"]
+	if (process.platform === "linux") {
+		args.push("--no-overwrite-dir")
+	}
+	args.push(entryName)
+	await runProcess("tar", args)
 }
