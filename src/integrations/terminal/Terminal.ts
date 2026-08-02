@@ -59,7 +59,7 @@ export class Terminal extends BaseTerminal {
 
 				// When the resolved shell came from a VS Code terminal profile,
 				// also pass the profile's shellArgs so the integrated terminal
-				// uses the same arguments (e.g. --noprofile --norc for bash).
+				// uses the same arguments (e.g. --login for bash).
 				const profileShell = Terminal.getProfileShell()
 
 				if (profileShell?.shellArgs) {

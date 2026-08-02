@@ -66,7 +66,7 @@ suite("Terminal Profile", function () {
 			"linux",
 			{
 				...originalProfiles,
-				[PROFILE_NAME]: { path: "/bin/bash", args: ["--noprofile"] },
+				[PROFILE_NAME]: { path: "/bin/bash", args: ["--login"] },
 			},
 			vscode.ConfigurationTarget.Global,
 		)
@@ -172,7 +172,7 @@ suite("Terminal Profile", function () {
 					options.name === "Zoo Code" &&
 					options.shellPath === "/bin/bash" &&
 					Array.isArray(options.shellArgs) &&
-					options.shellArgs.includes("--noprofile")
+					options.shellArgs.includes("--login")
 				)
 			})
 			assert.ok(profileTerminal, "Expected a Zoo Code terminal created with the configured Bash profile")
