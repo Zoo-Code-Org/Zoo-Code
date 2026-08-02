@@ -75,6 +75,15 @@ suite("Terminal Profile", function () {
 		// does not call Terminal.setTerminalProfile(), so this dedicated method is
 		// required to wire up the static in the running extension host.
 		globalThis.api.setTerminalProfile(PROFILE_NAME)
+
+		// Widen the shell-integration activation window for this suite. A custom
+		// --noprofile/--norc bash profile can take well over the default 5s to
+		// emit OSC 633;A on a loaded CI runner. The per-task
+		// `terminalShellIntegrationTimeout` settings key is NOT applied through
+		// the extension-host API path (setConfiguration -> contextProxy only), so
+		// this dedicated runtime method is required to actually update the
+		// Terminal static in the running extension host.
+		globalThis.api.setShellIntegrationTimeout(30_000)
 	})
 
 	suiteTeardown(async () => {
@@ -87,6 +96,7 @@ suite("Terminal Profile", function () {
 		// Always restore — order matters: clear profile first so any subsequent
 		// terminal creation uses the default, then restore VS Code settings.
 		globalThis.api.setTerminalProfile(undefined)
+		globalThis.api.setShellIntegrationTimeout(5_000)
 
 		await vscode.workspace
 			.getConfiguration("terminal.integrated.profiles")
@@ -146,10 +156,6 @@ suite("Terminal Profile", function () {
 							alwaysAllowExecute: true,
 							allowedCommands: ["*"],
 							terminalShellIntegrationDisabled: false,
-							// A custom --noprofile/--norc bash profile can take well over the
-							// default 5s to emit OSC 633;A on a loaded CI box. Raise the
-							// activation window so the wait doesn't abort as SI_ACTIVATION_TIMEOUT.
-							terminalShellIntegrationTimeout: 30_000,
 						},
 						text: "TERMINAL_PROFILE_E2E_OVERRIDE",
 					}),
@@ -211,9 +217,6 @@ suite("Terminal Profile", function () {
 							alwaysAllowExecute: true,
 							allowedCommands: ["*"],
 							terminalShellIntegrationDisabled: false,
-							// Match the override test: give shell integration enough time to
-							// activate on a loaded CI box before declaring it unavailable.
-							terminalShellIntegrationTimeout: 30_000,
 						},
 						text: "TERMINAL_PROFILE_E2E_DEFAULT",
 					}),
