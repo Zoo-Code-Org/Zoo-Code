@@ -31,6 +31,7 @@ import { ClineProvider } from "./core/webview/ClineProvider"
 import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
 import { Terminal } from "./integrations/terminal/Terminal"
 import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
+import { CommandScheduler } from "./integrations/terminal/CommandScheduler"
 import { openAiCodexOAuthManager } from "./integrations/openai-codex/oauth"
 import { kimiCodeOAuthManager } from "./integrations/kimi-code/oauth"
 import { McpServerManager } from "./services/mcp/McpServerManager"
@@ -152,6 +153,9 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize i18n for internationalization support.
 	initializeI18n(context.globalState.get("language") ?? formatLanguage(vscode.env.language))
+
+	// Initialize the command scheduler (must happen before TerminalRegistry).
+	CommandScheduler.initialize()
 
 	// Initialize terminal shell execution handlers.
 	TerminalRegistry.initialize()
@@ -399,4 +403,5 @@ export async function deactivate() {
 
 	Terminal.setTerminalProfile(undefined)
 	TerminalRegistry.cleanup()
+	CommandScheduler.cleanup()
 }

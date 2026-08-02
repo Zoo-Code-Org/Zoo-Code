@@ -1,13 +1,12 @@
-import { existsSync } from "fs"
-import * as path from "path"
-
 import * as vscode from "vscode"
 
 import type { RooTerminalCallbacks, RooTerminalProcessResultPromise } from "./types"
-import { BaseTerminal } from "./BaseTerminal"
+import { BaseTerminal, buildReuseExternalChecks } from "./BaseTerminal"
 import { TerminalProcess } from "./TerminalProcess"
 import { ShellIntegrationManager } from "./ShellIntegrationManager"
 import { mergePromise } from "./mergePromise"
+import { TerminalProfileResolver } from "./shell/TerminalProfileResolver"
+import type { ResolvedCommandEnvironment, ShellFamily } from "./shell/types"
 
 export class Terminal extends BaseTerminal {
 	public terminal: vscode.Terminal
@@ -16,7 +15,32 @@ export class Terminal extends BaseTerminal {
 
 	public activeShellExecution?: vscode.TerminalShellExecution
 
-	constructor(id: number, terminal: vscode.Terminal | undefined, cwd: string) {
+	/**
+	 * Request-scoped shell family cached at construction time.  Downstream
+	 * code (TerminalProcess) uses this instead of re-reading VS Code
+	 * settings to avoid detection mismatches between terminal creation
+	 * and command execution.
+	 *
+	 * @see Terminal.resolveShellFamily
+	 */
+	public resolvedShellFamily: ShellFamily = "posix"
+
+	private shellIntegrationAbortController?: AbortController
+
+	/**
+	 * @param id Terminal ID.
+	 * @param terminal Existing VS Code terminal to wrap, or undefined to create new.
+	 * @param cwd Working directory.
+	 * @param resolvedEnv Optional resolved command environment. When provided,
+	 *   the integrated terminal is created with the shell executable from
+	 *   `primaryPlan` so it matches the shell reported in the system prompt.
+	 */
+	constructor(
+		id: number,
+		terminal: vscode.Terminal | undefined,
+		cwd: string,
+		resolvedEnv?: ResolvedCommandEnvironment,
+	) {
 		super("vscode", id, cwd, Terminal.getReuseKey())
 
 		const env = Terminal.getEnv()
@@ -27,37 +51,99 @@ export class Terminal extends BaseTerminal {
 		} else {
 			const options: vscode.TerminalOptions = { cwd, name: "Zoo Code", iconPath, env }
 
-			// When the user has chosen a VS Code terminal profile, resolve it to a
-			// shell path/args/env so the integrated terminal uses that shell. When
-			// unset, shellPath/shellArgs are left undefined so VS Code's default
-			// terminal behavior is preserved.
-			const profileShell = Terminal.getProfileShell()
+			// When a resolved command environment is available, use its primary
+			// plan executable so the integrated terminal matches the shell family
+			// reported to the model. This is the single source of truth.
+			if (resolvedEnv?.primaryPlan?.executable) {
+				options.shellPath = resolvedEnv.primaryPlan.executable
 
-			if (profileShell?.shellPath) {
-				options.shellPath = profileShell.shellPath
-
-				if (profileShell.shellArgs) {
-					options.shellArgs = profileShell.shellArgs
+				// Preserve environment overrides from the resolved shell.
+				if (resolvedEnv.primaryPlan.env) {
+					options.env = { ...resolvedEnv.primaryPlan.env, ...env }
 				}
 
 				console.info(
-					`[Terminal] Creating terminal with profile "${Terminal.getTerminalProfile()}" -> ${profileShell.shellPath}`,
+					`[Terminal] Creating terminal with resolved shell: ${resolvedEnv.primaryPlan.executable} (family: ${resolvedEnv.primaryPlan.family})`,
 				)
+			} else {
+				// When the user has chosen a VS Code terminal profile, resolve it to a
+				// shell path/args so the integrated terminal uses that shell. When
+				// unset, shellPath/shellArgs are left undefined so VS Code's default
+				// terminal behavior is preserved.
+				const profileShell = Terminal.getProfileShell()
 
-				// Preserve profile-specific variables (e.g. locale/PATH), but keep
-				// Zoo Code's shell-integration controls authoritative.
-				if (profileShell.env) {
-					options.env = { ...profileShell.env, ...env }
+				if (profileShell?.shellPath) {
+					options.shellPath = profileShell.shellPath
+
+					if (profileShell.shellArgs) {
+						options.shellArgs = profileShell.shellArgs
+					}
+
+					console.info(
+						`[Terminal] Creating terminal with profile "${Terminal.getTerminalProfile()}" -> ${profileShell.shellPath}`,
+					)
+
+					// Preserve profile-specific variables (e.g. locale/PATH), but keep
+					// Zoo Code's shell-integration controls authoritative.
+					if (profileShell.env) {
+						options.env = { ...profileShell.env, ...env }
+					}
 				}
 			}
 
 			this.terminal = vscode.window.createTerminal(options)
 		}
 
+		// Cache the resolved shell family at construction time so downstream
+		// code (TerminalProcess) can use it without re-reading VS Code settings.
+		this.resolvedShellFamily = Terminal.resolveShellFamily(
+			resolvedEnv?.primaryPlan?.executable,
+			resolvedEnv?.primaryPlan?.family,
+			!terminal ? Terminal.getProfileShell()?.shellPath : undefined,
+		)
+
 		// Only register ZDOTDIR cleanup when we actually set it (i.e. no profile
 		// override is active — see getEnv() for the same guard).
 		if (Terminal.getTerminalZdotdir() && !Terminal.getTerminalProfile()) {
 			ShellIntegrationManager.terminalTmpDirs.set(id, env.ZDOTDIR)
+		}
+	}
+
+	/**
+	 * VS Code reuse predicate. A VS Code terminal is reusable only when it is
+	 * idle, unowned, not closed, has matching CWD/reuse key, is healthy, and
+	 * currently has a shell integration object.
+	 */
+	public override canReuse(options: {
+		cwd: string
+		reuseKey: string
+		hasProcess: boolean
+		shellIntegrationDefined?: boolean
+		hasStaleActiveShellExecution?: boolean
+	}): boolean {
+		return this.lifecycle.canReuse(
+			buildReuseExternalChecks(this, {
+				cwd: options.cwd,
+				reuseKey: options.reuseKey,
+				hasProcess: options.hasProcess,
+				isClosed: this.isClosed(),
+				shellIntegrationDefined:
+					options.shellIntegrationDefined ?? this.terminal.shellIntegration !== undefined,
+				hasStaleActiveShellExecution:
+					options.hasStaleActiveShellExecution ?? this.activeShellExecution !== undefined,
+			}),
+		)
+	}
+
+	/**
+	 * Cancels a pending shell-integration wait. Called by the registry during
+	 * provider-switch cleanup so the source terminal does not race the fallback
+	 * acquisition.
+	 */
+	public cancelShellIntegrationWait(): void {
+		if (this.shellIntegrationAbortController) {
+			this.shellIntegrationAbortController.abort()
+			this.shellIntegrationAbortController = undefined
 		}
 	}
 
@@ -77,14 +163,28 @@ export class Terminal extends BaseTerminal {
 		return this.terminal.exitStatus !== undefined
 	}
 
-	public override runCommand(command: string, callbacks: RooTerminalCallbacks): RooTerminalProcessResultPromise {
-		// We set busy before the command is running because the terminal may be
-		// waiting on terminal integration, and we must prevent another instance
-		// from selecting the terminal for use during that time.
-		this.busy = true
+	public override runCommand(
+		command: string,
+		callbacks: RooTerminalCallbacks,
+		executionId?: string,
+	): RooTerminalProcessResultPromise {
+		const effectiveExecutionId = executionId ?? `legacy-${this.id}-${Date.now()}`
+
+		if (this.lifecycle.ownerExecutionId === undefined) {
+			this.lifecycle.acquireOwner(effectiveExecutionId)
+		}
+
+		// Ensure the lifecycle is in a non-idle state for legacy callers that
+		// invoke runCommand directly without going through the registry. For
+		// VS Code terminals the correct path is idle → integration-ready, matching
+		// the architect's reused-terminal sequence.
+		if (this.lifecycle.state === "idle" && this.provider === "vscode") {
+			this.lifecycle.transition("integration-ready", effectiveExecutionId)
+		}
 
 		const process = new TerminalProcess(this)
 		process.command = command
+		process.executionId = effectiveExecutionId
 		this.process = process
 
 		// Set up event handlers from callbacks before starting process.
@@ -105,42 +205,59 @@ export class Terminal extends BaseTerminal {
 			})
 
 			if (Terminal.isActiveShellCmdExe()) {
-				// Keep this defensive fallback for callers that invoke Terminal.runCommand()
-				// directly instead of routing through executeCommandInTerminal().
-				// cmd.exe cannot emit OSC 633;A — skip the timeout entirely and go
-				// straight to the execa fallback (VS Code issue #164646).
+				// cmd.exe cannot emit OSC 633;A — route to fallback immediately.
+				this.lifecycle.markUnsupported()
 				ShellIntegrationManager.zshCleanupTmpDir(this.id)
 				process.emit("no_shell_integration", {
 					message:
 						"cmd.exe does not support shell integration (VS Code issue #164646). Command will run via fallback.",
 					commandSubmitted: false,
+					code: "SI_NEVER_AVAILABLE",
+					phase: "prepare",
+					provider: "vscode",
+					outcome: "not-started",
+					retryDisposition: "fallback-safe",
 				})
-			} else {
-				// Wait for shell integration to activate before executing the command.
-				// Use the onDidChangeTerminalShellIntegration event rather than polling
-				// so we react immediately when the shell is ready. The timeout is kept as
-				// a safety net for shells that never activate integration (e.g. heavily
-				// customised startup that suppresses the OSC 633;A marker).
-				this.waitForShellIntegration(Terminal.getShellIntegrationTimeout())
-					.then(() => {
-						// Clean up temporary directory if shell integration is available, zsh did its job:
-						ShellIntegrationManager.zshCleanupTmpDir(this.id)
-
-						// Run the command in the terminal
-						process.run(command)
-					})
-					.catch(() => {
-						console.log(`[Terminal ${this.id}] Shell integration not available. Command execution aborted.`)
-
-						// Clean up temporary directory if shell integration is not available
-						ShellIntegrationManager.zshCleanupTmpDir(this.id)
-
-						process.emit("no_shell_integration", {
-							message: `Shell integration initialization sequence '\\x1b]633;A' was not received within ${Terminal.getShellIntegrationTimeout() / 1000}s. Shell integration has been disabled for this terminal instance. Increase the timeout in the settings if necessary.`,
-							commandSubmitted: false,
-						})
-					})
+				return
 			}
+
+			// Wait for shell integration to activate before executing the command.
+			// Use the onDidChangeTerminalShellIntegration event rather than polling
+			// so we react immediately when the shell is ready. The timeout is kept as
+			// a safety net for shells that never activate integration (e.g. heavily
+			// customised startup that suppresses the OSC 633;A marker).
+			this.waitForShellIntegration(Terminal.getShellIntegrationTimeout(), effectiveExecutionId)
+				.then(() => {
+					// Clean up temporary directory if shell integration is available, zsh did its job:
+					ShellIntegrationManager.zshCleanupTmpDir(this.id)
+
+					// Run the command in the terminal
+					process.run(command)
+				})
+				.catch((error) => {
+					// If the wait was cancelled by provider-switch cleanup, do not emit
+					// a no_shell_integration event; the caller owns cleanup.
+					if (error instanceof Error && error.name === "AbortError") {
+						console.info(`[Terminal ${this.id}] shell integration wait cancelled`)
+						return
+					}
+
+					console.log(`[Terminal ${this.id}] Shell integration not available. Command execution aborted.`)
+
+					// Clean up temporary directory if shell integration is not available
+					ShellIntegrationManager.zshCleanupTmpDir(this.id)
+
+					this.lifecycle.markSuspect()
+					process.emit("no_shell_integration", {
+						message: `Shell integration initialization sequence '\\x1b]633;A' was not received within ${Terminal.getShellIntegrationTimeout() / 1000}s. Shell integration has been disabled for this terminal instance. Increase the timeout in the settings if necessary.`,
+						commandSubmitted: false,
+						code: "SI_ACTIVATION_TIMEOUT",
+						phase: "prepare",
+						provider: "vscode",
+						outcome: "not-started",
+						retryDisposition: "same-terminal-once",
+					})
+				})
 		})
 
 		return mergePromise(process, promise)
@@ -151,16 +268,45 @@ export class Terminal extends BaseTerminal {
 	 * after timeoutMs if the shell never signals readiness. Uses the
 	 * onDidChangeTerminalShellIntegration event so we react immediately rather
 	 * than polling — important for slow-starting shells (heavy .zshrc, nvm, etc.).
+	 *
+	 * This method is public so the registry can reuse it during recovery and
+	 * provider-switch cleanup. The optional abortSignal allows cancellation.
 	 */
-	private waitForShellIntegration(timeoutMs: number): Promise<void> {
+	public waitForShellIntegration(timeoutMs: number, executionId?: string, abortSignal?: AbortSignal): Promise<void> {
 		if (this.terminal.shellIntegration) {
+			this.lifecycle.transition("integration-ready", executionId)
+			this.lifecycle.markHealthy()
 			return Promise.resolve()
 		}
 
+		this.lifecycle.transition("integration-pending", executionId)
+		this.shellIntegrationAbortController = new AbortController()
+		const abortController = this.shellIntegrationAbortController
+
+		if (abortSignal) {
+			abortSignal.addEventListener("abort", () => abortController.abort(), { once: true })
+		}
+
 		return new Promise<void>((resolve, reject) => {
+			const onAbort = () => {
+				clearTimeout(timer)
+				ref.disposable?.dispose()
+				const err = new Error("Shell integration wait cancelled")
+				err.name = "AbortError"
+				reject(err)
+			}
+
+			if (abortController.signal.aborted) {
+				onAbort()
+				return
+			}
+
+			abortController.signal.addEventListener("abort", onAbort, { once: true })
+
 			const ref = { disposable: null as vscode.Disposable | null }
 			const timer = setTimeout(() => {
 				ref.disposable?.dispose()
+				abortController.signal.removeEventListener("abort", onAbort)
 				reject(new Error(`Shell integration did not activate within ${timeoutMs / 1000}s`))
 			}, timeoutMs)
 
@@ -168,6 +314,9 @@ export class Terminal extends BaseTerminal {
 				if (e.terminal === this.terminal) {
 					clearTimeout(timer)
 					ref.disposable?.dispose()
+					abortController.signal.removeEventListener("abort", onAbort)
+					this.lifecycle.transition("integration-ready", executionId)
+					this.lifecycle.markHealthy()
 					resolve()
 				}
 			})
@@ -292,99 +441,51 @@ export class Terminal extends BaseTerminal {
 	}
 
 	/**
+	 * Lazily-initialized TerminalProfileResolver instance for delegation.
+	 * Created per-call with the current platform/env to avoid stale state.
+	 * Tests that spy on Terminal methods still work because the delegation
+	 * preserves the same logic through the resolver.
+	 */
+	private static getProfileResolver(
+		platform: NodeJS.Platform = process.platform,
+		env: NodeJS.ProcessEnv = process.env,
+	): TerminalProfileResolver {
+		return TerminalProfileResolver.forRuntime(platform, env)
+	}
+
+	/**
 	 * Resolves a profile path to an executable on disk. VS Code's built-in Unix
 	 * profiles commonly use bare command names such as `bash`, so check PATH in
 	 * addition to explicit filesystem paths.
+	 *
+	 * Delegates to {@link TerminalProfileResolver.resolveProfilePath} internally.
 	 */
 	public static resolveProfilePath(
 		profilePath: unknown,
 		platform: NodeJS.Platform = process.platform,
 		env: NodeJS.ProcessEnv = process.env,
 	): string | undefined {
-		const candidates = Array.isArray(profilePath) ? profilePath : [profilePath]
-		const pathValue = env.PATH ?? env.Path ?? env.path
-		const pathEntries = pathValue?.split(platform === "win32" ? ";" : ":") ?? []
-		const platformJoin = platform === "win32" ? path.win32.join : path.posix.join
-
-		for (const value of candidates) {
-			if (typeof value !== "string") {
-				continue
-			}
-
-			const candidate = value.trim()
-
-			if (!candidate) {
-				continue
-			}
-
-			if (/[\\/]/.test(candidate)) {
-				if (existsSync(candidate)) {
-					return candidate
-				}
-
-				continue
-			}
-
-			const extensions =
-				platform === "win32" && path.extname(candidate) === ""
-					? (env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";")
-					: [""]
-
-			for (const entry of pathEntries) {
-				const directory = entry.replace(/^"(.*)"$/, "$1")
-
-				for (const extension of extensions) {
-					const resolved = platformJoin(directory, `${candidate}${extension}`)
-
-					if (existsSync(resolved)) {
-						return resolved
-					}
-				}
-			}
-		}
-
-		return undefined
+		return Terminal.getProfileResolver(platform, env).resolveProfilePath(profilePath)
 	}
 
 	/**
 	 * Reads profiles from trusted settings scopes only. Workspace settings are
 	 * intentionally excluded because opening a repository must not allow its
 	 * `.vscode/settings.json` to select an executable for Zoo Code to launch.
+	 *
+	 * Delegates to {@link TerminalProfileResolver.readProfiles} internally.
 	 */
 	public static getConfiguredProfiles(platform: NodeJS.Platform = process.platform): Record<string, unknown> {
-		const platformKey = Terminal.getPlatformProfileKey(platform)
-		const configuration = vscode.workspace.getConfiguration("terminal.integrated.profiles")
-
-		// Some test doubles and older embedders expose get() without inspect().
-		// Falling back to no profiles preserves the trusted-scope guarantee.
-		if (typeof configuration.inspect !== "function") {
-			return {}
-		}
-
-		const inspected = configuration.inspect<Record<string, unknown>>(platformKey)
-
-		return {
-			...(inspected?.defaultValue ?? {}),
-			...(inspected?.globalValue ?? {}),
-		}
+		return Terminal.getProfileResolver(platform).readProfiles()
 	}
 
 	/**
 	 * Reads the configured default profile from trusted settings scopes only.
+	 *
+	 * Delegates to {@link TerminalProfileResolver.readDefaultProfileName} internally.
 	 */
 	public static getConfiguredDefaultProfileName(platform: NodeJS.Platform = process.platform): string | undefined {
-		const platformKey = Terminal.getPlatformProfileKey(platform)
-		const configuration = vscode.workspace.getConfiguration("terminal.integrated")
-
-		// Some test doubles and older embedders expose get() without inspect().
-		// Falling back to undefined preserves the trusted-scope guarantee.
-		if (typeof configuration.inspect !== "function") {
-			return undefined
-		}
-
-		const inspected = configuration.inspect<string>(`defaultProfile.${platformKey}`)
-
-		return inspected?.globalValue ?? inspected?.defaultValue
+		return Terminal.getProfileResolver(platform).readDefaultProfileName()
 	}
 
 	/**
@@ -402,6 +503,61 @@ export class Terminal extends BaseTerminal {
 
 	public static isFish(shellPath: string): boolean {
 		return /[/\\]fish(?:\.exe)?$/i.test(shellPath)
+	}
+
+	/**
+	 * Classifies a shell executable path (or resolved environment) into a
+	 * {@link ShellFamily}.  Called once per terminal construction so that
+	 * downstream code never has to re-classify.
+	 *
+	 * Priority:
+	 * 1. If `resolvedFamily` is provided (from `resolvedEnv.primaryPlan.family`),
+	 *    use it directly — the environment resolver already determined the family.
+	 * 2. If `profileShellPath` is provided, classify from the path using the
+	 *    existing static helpers.
+	 * 3. Otherwise detect from the VS Code active-profile settings once.
+	 */
+	private static resolveShellFamily(
+		resolvedExecutable: string | undefined,
+		resolvedFamily: ShellFamily | undefined,
+		profileShellPath: string | undefined,
+	): ShellFamily {
+		// 1. Use the family from the resolved command environment if available.
+		if (resolvedFamily) {
+			return resolvedFamily
+		}
+
+		// 2. Classify from the profile shell path.
+		if (profileShellPath) {
+			if (Terminal.isPowerShell(profileShellPath)) {
+				return "powershell"
+			}
+
+			if (Terminal.isCmdExe(profileShellPath)) {
+				return "cmd"
+			}
+
+			if (Terminal.isFish(profileShellPath)) {
+				return "fish"
+			}
+
+			return "posix"
+		}
+
+		// 3. Detect from the VS Code active-profile settings once.
+		if (Terminal.isActiveShellPowerShell()) {
+			return "powershell"
+		}
+
+		if (Terminal.isActiveShellCmdExe()) {
+			return "cmd"
+		}
+
+		if (Terminal.isActiveShellFish()) {
+			return "fish"
+		}
+
+		return "posix"
 	}
 
 	/**
@@ -497,23 +653,14 @@ export class Terminal extends BaseTerminal {
 		return resolved ? Terminal.isFish(resolved) : false
 	}
 
+	/**
+	 * Returns sorted profile names that resolve to trusted, supported shells.
+	 * Excludes cmd.exe profiles (shell integration unsupported).
+	 *
+	 * Delegates to {@link TerminalProfileResolver.getAvailableProfileNames}.
+	 */
 	public static getAvailableProfileNames(platform: NodeJS.Platform = process.platform): string[] {
-		const names: string[] = []
-
-		for (const [name, entry] of Object.entries(Terminal.getConfiguredProfiles(platform))) {
-			if (!entry || typeof entry !== "object") {
-				continue
-			}
-
-			const { path: profilePath } = entry as { path?: unknown }
-			const resolved = Terminal.resolveProfilePath(profilePath, platform)
-
-			if (resolved && !Terminal.isCmdExe(resolved)) {
-				names.push(name)
-			}
-		}
-
-		return names.sort()
+		return Terminal.getProfileResolver(platform).getAvailableProfileNames()
 	}
 
 	/**
@@ -547,72 +694,29 @@ export class Terminal extends BaseTerminal {
 			return undefined
 		}
 
-		const platformKey = Terminal.getPlatformProfileKey(platform)
+		// Delegate to TerminalProfileResolver for path resolution and env
+		// sanitization. The resolver handles source-only profiles, name-based
+		// detection, and blocked env keys. We extract shellArgs from the raw
+		// profile entry here since args are profile-specific.
+		const resolver = Terminal.getProfileResolver(platform)
+		const resolved = resolver.resolveProfile(profileName, "zooProfile")
 
-		const profiles = Terminal.getConfiguredProfiles(platform)
-
-		const profile = profiles?.[profileName] as
-			| {
-					path?: string | string[]
-					args?: string | string[]
-					source?: string
-					env?: Record<string, unknown>
-			  }
-			| null
-			| undefined
-
-		if (!profile) {
-			console.warn(`[Terminal] Configured terminal profile "${profileName}" not found for ${platformKey}.`)
+		if (!resolved) {
 			return undefined
 		}
 
-		const pathValue = Terminal.resolveProfilePath(profile.path, platform)
-
-		if (!pathValue) {
-			// Profiles defined only by `source` (e.g. "PowerShell") can't be mapped to
-			// a shell path here, so we fall back to the default terminal.
-			console.warn(
-				`[Terminal] Terminal profile "${profileName}" has no resolvable "path"; using default terminal.`,
-			)
-			return undefined
-		}
-
-		const shellArgs = Array.isArray(profile.args)
-			? profile.args.filter((arg): arg is string => typeof arg === "string")
-			: typeof profile.args === "string"
-				? [profile.args]
+		// Extract shellArgs from the raw profile entry.
+		const entry = resolved.entry
+		const shellArgs = Array.isArray(entry.args)
+			? entry.args.filter((arg): arg is string => typeof arg === "string")
+			: typeof entry.args === "string"
+				? [entry.args]
 				: undefined
 
-		// VS Code profiles may declare their own `env` (e.g. to set a UTF-8 locale or
-		// a custom PATH). Preserve it so the inline terminal doesn't lose environment
-		// the user configured on the profile. A `null` value unsets that variable.
-		// Values come from user `settings.json`, so sanitize to string/null only.
-		let env: Record<string, string | null> | undefined
-
-		if (profile.env && typeof profile.env === "object") {
-			const sanitized: Record<string, string | null> = {}
-			const blockedKeys = new Set([
-				"ZDOTDIR",
-				"PROMPT_COMMAND",
-				"LD_PRELOAD",
-				"LD_LIBRARY_PATH",
-				"DYLD_INSERT_LIBRARIES",
-				"DYLD_LIBRARY_PATH",
-				"BASH_ENV",
-				"ENV",
-			])
-
-			for (const [key, val] of Object.entries(profile.env)) {
-				if (!blockedKeys.has(key.toUpperCase()) && (typeof val === "string" || val === null)) {
-					sanitized[key] = val
-				}
-			}
-
-			if (Object.keys(sanitized).length > 0) {
-				env = sanitized
-			}
+		return {
+			shellPath: resolved.shell.executable,
+			shellArgs,
+			env: resolved.shell.env,
 		}
-
-		return { shellPath: pathValue, shellArgs, env }
 	}
 }
