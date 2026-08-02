@@ -17,6 +17,15 @@ function asFunctionTool(tool: OpenAI.Chat.ChatCompletionTool): OpenAI.Chat.ChatC
 	return tool as OpenAI.Chat.ChatCompletionFunctionTool
 }
 
+// Mock os-name to avoid spawning an external PowerShell process per test.
+// On Windows CI, osName() shells out to PowerShell which, under coverage
+// instrumentation, exceeds the 20s test timeout. All sibling prompt tests
+// (system-prompt, add-custom-instructions, system-info) mock os-name for the
+// same reason. These tests only assert on shell info, never OS info.
+vi.mock("os-name", () => ({
+	default: () => "Windows 11",
+}))
+
 // Mock getShell for legacy fallback paths
 vi.mock("../../../utils/shell", () => ({
 	getShell: vi.fn().mockReturnValue("/bin/bash"),
