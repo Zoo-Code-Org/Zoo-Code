@@ -37,9 +37,14 @@ vi.mock("proper-lockfile", () => ({
 }))
 
 // Mock fs (createWriteStream and createReadStream for checksum verification)
+let closeHandler: (() => void) | undefined
 const mockWriteStream = {
 	on: vi.fn(),
 	close: vi.fn(),
+}
+const onWriteStreamEvent = (event: string, callback: () => void) => {
+	if (event === "finish") setImmediate(callback)
+	if (event === "close") closeHandler = callback
 }
 vi.mock("fs", () => ({
 	createWriteStream: vi.fn(() => mockWriteStream),
@@ -107,8 +112,9 @@ describe("SEMBLE_SHA256 checksum fixture", () => {
 describe("semble-downloader", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		mockWriteStream.on = vi.fn()
-		mockWriteStream.close = vi.fn()
+		closeHandler = undefined
+		mockWriteStream.on = vi.fn(onWriteStreamEvent)
+		mockWriteStream.close = vi.fn(() => closeHandler?.())
 
 		// Restore the default https.get mock so tests that override it don't leak
 		;(https.get as any).mockImplementation((_url: string, callback: (res: any) => void) => {
@@ -226,13 +232,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 			// No version file exists
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
-
-			// Simulate successful download: pipe is called, then "finish" fires
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
 
 			try {
 				const result = await downloadSemble("/storage")
@@ -382,12 +381,6 @@ describe("semble-downloader", () => {
 			})
 
 			// Simulate successful download on the second response
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -550,12 +543,6 @@ describe("semble-downloader", () => {
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -590,12 +577,6 @@ describe("semble-downloader", () => {
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			// Archive cleanup fails but should not throw (only archive removal after extraction)
 			;(fs.rm as any).mockRejectedValueOnce(new Error("archive cleanup failed"))
 
@@ -625,12 +606,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -681,12 +656,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -781,12 +750,6 @@ describe("semble-downloader", () => {
 			})
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -824,12 +787,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -868,12 +825,6 @@ describe("semble-downloader", () => {
 			// readdir rejects — exercises the catch block in cleanupStaleArchives
 			;(fs.readdir as any).mockRejectedValue(new Error("EACCES"))
 
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -903,12 +854,6 @@ describe("semble-downloader", () => {
 				"semble-linux-x64-fast.tar.gz",
 				"unrelated.txt",
 			])
-
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
 
 			try {
 				await downloadSemble("/storage")
