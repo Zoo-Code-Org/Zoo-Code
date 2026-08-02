@@ -256,7 +256,7 @@
 	},
 	"api/providers/__tests__/qwen-code-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 2
 		}
 	},
 	"api/providers/__tests__/sambanova.spec.ts": {
