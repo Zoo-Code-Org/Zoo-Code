@@ -3021,25 +3021,6 @@ export class ClineProvider
 		return this.skillsManager
 	}
 
-	/**
-	 * Returns the CommandEnvironmentService instance, lazily initializing it
-	 * on first access. The service resolves the shell environment for each
-	 * API request and provides the same snapshot to the system prompt, tool
-	 * descriptions, and runtime execution.
-	 */
-	public getCommandEnvironmentService(): CommandEnvironmentService | undefined {
-		if (!this.commandEnvironmentService) {
-			try {
-				const profileResolver = TerminalProfileResolver.forRuntime()
-				const resolver = ShellResolver.forRuntime(profileResolver)
-				this.commandEnvironmentService = new CommandEnvironmentService(resolver)
-			} catch (error) {
-				console.error("[ClineProvider] Failed to create CommandEnvironmentService:", error)
-				return undefined
-			}
-		}
-		return this.commandEnvironmentService
-	}
 
 	/**
 	 * Handles the `requestTerminalShellOptions` webview message.
