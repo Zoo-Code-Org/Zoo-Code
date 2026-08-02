@@ -381,7 +381,18 @@ export function classifyShellFamily(shellPath: string): ShellFamily | undefined 
 
 	// POSIX shells: bash, zsh, sh, dash, ksh, ash, csh, tcsh, busybox, etc.
 	// Match by basename to cover all Bourne-compatible and C-shell variants.
-	const basename = path.basename(lower).replace(/\.exe$/, "")
+	//
+	// Use a separator-agnostic basename (split on both `/` and `\`) instead of
+	// `path.basename`. On a POSIX host `path.basename` does not treat `\` as a
+	// separator, so a Windows path like `C:\Git\bin\bash.exe` would be returned
+	// whole and fail to classify. The PowerShell/cmd/wsl regexes above already
+	// handle both separators; this keeps the POSIX fallback consistent with them
+	// and makes classification host-platform independent (fixes ubuntu CI where
+	// getProfileShell("win32") returned undefined for Git Bash paths).
+	const basename = lower
+		.split(/[\\/]/)
+		.pop()!
+		.replace(/\.exe$/, "")
 	const posixShells = new Set([
 		"bash",
 		"zsh",

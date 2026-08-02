@@ -67,7 +67,15 @@ export class ExecaTerminal extends BaseTerminal {
 			this.lifecycle.acquireOwner(effectiveExecutionId)
 		}
 
-		if (this.lifecycle.state === "idle") {
+		// Execa terminals have no shell integration, so they execute from the
+		// `fallback-ready` state. A terminal created through TerminalRegistry is
+		// already transitioned to `fallback-ready` at reservation time, making this
+		// a no-op. A terminal constructed directly (as in unit tests) starts in
+		// `creating`; `setActiveStream` later forces a `→ running` transition which
+		// is only legal from `fallback-ready`/`integration-ready`, so we must first
+		// move out of `creating` (or `idle`) here. Both `creating → fallback-ready`
+		// and `idle → fallback-ready` are legal transitions.
+		if (this.lifecycle.state === "creating" || this.lifecycle.state === "idle") {
 			this.lifecycle.transition("fallback-ready", effectiveExecutionId)
 		}
 
