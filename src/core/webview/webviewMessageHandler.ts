@@ -101,6 +101,7 @@ import {
 	handleCreateWorktreeInclude,
 	handleCheckoutBranch,
 } from "./worktree"
+import { handleTaskOrganizationMessage } from "./taskOrganizationMessageHandler"
 
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
@@ -846,6 +847,9 @@ export const webviewMessageHandler = async (
 			}
 
 			vscode.window.showErrorMessage(t("common:errors.share_not_enabled"))
+			break
+		case "taskOrganizationMutation":
+			await handleTaskOrganizationMessage(provider, message)
 			break
 		case "showTaskWithId":
 			await provider.showTaskWithId(message.text!)
