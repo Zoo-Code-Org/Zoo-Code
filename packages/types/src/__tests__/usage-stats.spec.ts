@@ -117,7 +117,7 @@ describe("usage-stats schemas", () => {
 		})
 
 		it("should reject missing semantics", () => {
-			const { semantics, ...withoutSemantics } = validEvent
+			const { semantics: _semantics, ...withoutSemantics } = validEvent
 			expect(() => UsageEventV1.parse(withoutSemantics)).toThrow()
 		})
 
@@ -126,7 +126,7 @@ describe("usage-stats schemas", () => {
 		})
 
 		it("should reject missing required fields (eventId)", () => {
-			const { eventId, ...withoutEventId } = validEvent
+			const { eventId: _eventId, ...withoutEventId } = validEvent
 			expect(() => UsageEventV1.parse(withoutEventId)).toThrow()
 		})
 
@@ -242,7 +242,7 @@ describe("usage-stats schemas", () => {
 		})
 
 		it("should reject missing required numeric field", () => {
-			const { costUsd, ...withoutCost } = validBucket
+			const { costUsd: _costUsd, ...withoutCost } = validBucket
 			expect(() => StatsBucket.parse(withoutCost)).toThrow()
 		})
 
@@ -311,12 +311,12 @@ describe("usage-stats schemas", () => {
 		})
 
 		it("should reject missing coverage", () => {
-			const { coverage, ...withoutCoverage } = validSnapshot
+			const { coverage: _coverage, ...withoutCoverage } = validSnapshot
 			expect(() => StatsSnapshot.parse(withoutCoverage)).toThrow()
 		})
 
 		it("should reject missing totals", () => {
-			const { totals, ...withoutTotals } = validSnapshot
+			const { totals: _totals, ...withoutTotals } = validSnapshot
 			expect(() => StatsSnapshot.parse(withoutTotals)).toThrow()
 		})
 	})
