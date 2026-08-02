@@ -57,6 +57,15 @@ export class Terminal extends BaseTerminal {
 			if (resolvedEnv?.primaryPlan?.executable) {
 				options.shellPath = resolvedEnv.primaryPlan.executable
 
+				// When the resolved shell came from a VS Code terminal profile,
+				// also pass the profile's shellArgs so the integrated terminal
+				// uses the same arguments (e.g. --noprofile --norc for bash).
+				const profileShell = Terminal.getProfileShell()
+
+				if (profileShell?.shellArgs) {
+					options.shellArgs = profileShell.shellArgs
+				}
+
 				// Preserve environment overrides from the resolved shell.
 				if (resolvedEnv.primaryPlan.env) {
 					options.env = { ...resolvedEnv.primaryPlan.env, ...env }
