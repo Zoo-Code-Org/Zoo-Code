@@ -79,7 +79,7 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 import { UsageRecorder } from "../../services/stats"
-import type { UsageRecordingContext } from "../../services/stats"
+import type { UsageRecordingContext, UsageEventStore } from "../../services/stats"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -628,7 +628,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			const service = provider.getUsageStatsService()
 			if (service) {
-				this.usageRecorder = new UsageRecorder(service, () => {
+				this.usageRecorder = new UsageRecorder(service as unknown as UsageEventStore, () => {
 					provider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
 						// View disposed, drop message silently
 					})

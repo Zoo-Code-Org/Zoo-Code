@@ -37,6 +37,7 @@ export interface UsageRecordingContext {
 	// source
 	costSource: UsageValueSource
 	tokenSource: UsageValueSource
+	endpoint?: string
 }
 
 // ── UsageRecorder ────────────────────────────────────────────────────────────
@@ -54,10 +55,12 @@ export interface UsageRecordingContext {
  */
 export class UsageRecorder {
 	private readonly store: UsageEventStore
+	private readonly onChanged?: () => void
 	private readonly finalizedKeys: Set<string> = new Set()
 
-	constructor(store: UsageEventStore) {
+	constructor(store: UsageEventStore, onChanged?: () => void) {
 		this.store = store
+		this.onChanged = onChanged
 	}
 
 	/**
@@ -122,6 +125,7 @@ export class UsageRecorder {
 
 		try {
 			await this.store.append(event)
+			this.onChanged?.()
 		} catch {
 			// store error must not break task
 			// STATS_STORE/append/* 오류는 UsageEventStore 내부에서 분류됨

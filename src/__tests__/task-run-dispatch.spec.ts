@@ -31,7 +31,8 @@ function makeRunnable(overrides: Partial<Runnable> = {}): Runnable & { run(): Pr
 	}
 	// Bind the real run() implementation from Task.prototype to our stand-in.
 	const runnable = obj as Runnable & { run(): Promise<void> }
-	runnable.run = Task.prototype.run.bind(obj)
+	const taskProto = Task.prototype as unknown as Record<string, (...args: unknown[]) => Promise<void>>
+	runnable.run = taskProto["start"].bind(obj)
 	return runnable
 }
 

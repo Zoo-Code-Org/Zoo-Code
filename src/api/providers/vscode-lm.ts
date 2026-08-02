@@ -352,7 +352,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 
 		if (typeof content === "object") {
-			const cleaned: unknown = {}
+			const cleaned: Record<string, unknown> = {}
 			for (const [key, value] of Object.entries(content)) {
 				cleaned[key] = this.cleanMessageContent(value)
 			}
@@ -374,7 +374,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Process messages
 		const cleanedMessages = messages.map((msg) => ({
 			...msg,
-			content: this.cleanMessageContent(msg.content),
+			content: this.cleanMessageContent(msg.content) as typeof msg.content,
 		}))
 
 		// Convert Anthropic messages to VS Code LM messages
