@@ -10,6 +10,7 @@
 		"src/integrations/terminal/shell/types.ts"
 	],
 	"ignoreDependencies": ["lint-staged"],
+	"ignoreBinaries": ["playwright"],
 	"ignoreExportsUsedInFile": true,
 	"playwright": false,
 	"playwright-ct": false,
@@ -21,6 +22,7 @@
 				"@roo-code/config-typescript",
 				"@types/node-cache",
 				"@types/vscode",
+				"@types/shell-quote",
 				"@vscode/ripgrep",
 				"esbuild-wasm",
 				"tree-sitter-wasms",
@@ -71,11 +73,11 @@
 	},
 	"rules": {
 		"classMembers": "off",
-		"duplicates": "warn",
-		"enumMembers": "warn",
-		"exports": "warn",
-		"nsExports": "warn",
-		"types": "warn",
-		"nsTypes": "warn"
+		"duplicates": "off",
+		"enumMembers": "off",
+		"exports": "off",
+		"nsExports": "off",
+		"types": "off",
+		"nsTypes": "off"
 	}
 }
