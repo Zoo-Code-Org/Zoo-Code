@@ -32,15 +32,6 @@ suite("Terminal Profile", function () {
 
 	setDefaultSuiteTimeout(this)
 
-	// The custom --noprofile/--norc bash profile relies on VS Code injecting
-	// shell integration via the shell's startup path. On a heavily-loaded CI
-	// runner that injection can intermittently exceed even a 30s activation
-	// window (SI never fires -> command aborts). Each mocha retry runs the test
-	// against a freshly created terminal, which typically lets SI activate.
-	// Matches the retries already used by apply-diff.test.ts for the same class
-	// of CI-only flakiness.
-	this.retries(3)
-
 	let workspaceDir: string
 	let testDir: string
 	let originalProfiles: Record<string, unknown> | undefined
@@ -75,7 +66,7 @@ suite("Terminal Profile", function () {
 			"linux",
 			{
 				...originalProfiles,
-				[PROFILE_NAME]: { path: "/bin/bash", args: ["--noprofile", "--norc"] },
+				[PROFILE_NAME]: { path: "/bin/bash", args: ["--noprofile"] },
 			},
 			vscode.ConfigurationTarget.Global,
 		)
@@ -84,15 +75,6 @@ suite("Terminal Profile", function () {
 		// does not call Terminal.setTerminalProfile(), so this dedicated method is
 		// required to wire up the static in the running extension host.
 		globalThis.api.setTerminalProfile(PROFILE_NAME)
-
-		// Widen the shell-integration activation window for this suite. A custom
-		// --noprofile/--norc bash profile can take well over the default 5s to
-		// emit OSC 633;A on a loaded CI runner. The per-task
-		// `terminalShellIntegrationTimeout` settings key is NOT applied through
-		// the extension-host API path (setConfiguration -> contextProxy only), so
-		// this dedicated runtime method is required to actually update the
-		// Terminal static in the running extension host.
-		globalThis.api.setShellIntegrationTimeout(30_000)
 	})
 
 	suiteTeardown(async () => {
@@ -105,7 +87,6 @@ suite("Terminal Profile", function () {
 		// Always restore — order matters: clear profile first so any subsequent
 		// terminal creation uses the default, then restore VS Code settings.
 		globalThis.api.setTerminalProfile(undefined)
-		globalThis.api.setShellIntegrationTimeout(5_000)
 
 		await vscode.workspace
 			.getConfiguration("terminal.integrated.profiles")
@@ -191,8 +172,7 @@ suite("Terminal Profile", function () {
 					options.name === "Zoo Code" &&
 					options.shellPath === "/bin/bash" &&
 					Array.isArray(options.shellArgs) &&
-					options.shellArgs.includes("--noprofile") &&
-					options.shellArgs.includes("--norc")
+					options.shellArgs.includes("--noprofile")
 				)
 			})
 			assert.ok(profileTerminal, "Expected a Zoo Code terminal created with the configured Bash profile")
