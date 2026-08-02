@@ -11,7 +11,7 @@ export interface RooTerminal {
 	running: boolean
 	taskId?: string
 	process?: RooTerminalProcess
-	lifecycle?: TerminalLifecycle
+	lifecycle: TerminalLifecycle
 	getCurrentWorkingDirectory(): string
 	isClosed: () => boolean
 	runCommand: (command: string, callbacks: RooTerminalCallbacks) => RooTerminalProcessResultPromise
@@ -24,7 +24,7 @@ export interface RooTerminal {
 	getUnretrievedOutput(): string
 	getLastCommand(): string
 	cleanCompletedProcessQueue(): void
-	canReuse?(options: {
+	canReuse(options: {
 		cwd: string
 		reuseKey: string
 		hasProcess: boolean
