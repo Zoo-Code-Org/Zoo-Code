@@ -149,7 +149,14 @@ describe("managed binary downloads", () => {
 		})
 		await new Promise<void>((resolve) => setImmediate(resolve))
 		await new Promise<void>((resolve) => setImmediate(resolve))
+		let resolved = false
+		void download.then(() => {
+			resolved = true
+		})
 		output.emit("finish")
+		await Promise.resolve()
+		expect(resolved).toBe(false)
+		output.emit("close")
 		await download
 
 		expect(mockGet).toHaveBeenNthCalledWith(2, "https://github.com/asset", expect.any(Function))
