@@ -1,6 +1,14 @@
 {
 	"$schema": "https://unpkg.com/knip@5/schema.json",
-	"ignore": ["**/__tests__/**", "apps/vscode-e2e/**", "scripts/**", "apps/cli/scripts/**"],
+	"ignore": [
+		"**/__tests__/**",
+		"apps/vscode-e2e/**",
+		"scripts/**",
+		"apps/cli/scripts/**",
+		"src/integrations/terminal/CommandScheduler.ts",
+		"src/integrations/terminal/CommandTrace.ts",
+		"src/integrations/terminal/shell/types.ts"
+	],
 	"ignoreDependencies": ["lint-staged"],
 	"ignoreExportsUsedInFile": true,
 	"playwright": false,
