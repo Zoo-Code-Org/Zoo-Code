@@ -67,4 +67,11 @@ describe("ChatRow - denied commands", () => {
 		expect(screen.queryByText("chat:commandExecution.denied")).not.toBeInTheDocument()
 		expect(screen.getByTestId("command-execution")).toHaveAttribute("data-denied", "false")
 	})
+
+	it("does not show a denied status while a command awaits a decision", () => {
+		renderCommand()
+
+		expect(screen.queryByText("chat:commandExecution.denied")).not.toBeInTheDocument()
+		expect(screen.getByTestId("command-execution")).toHaveAttribute("data-denied", "false")
+	})
 })

@@ -89,6 +89,9 @@ describe("executeCommandTool", () => {
 			supersedePendingAsk: vitest.fn(),
 			providerRef: {
 				deref: vitest.fn().mockResolvedValue({
+					contextProxy: {
+						getValue: vitest.fn().mockReturnValue(false),
+					},
 					getState: vitest.fn().mockResolvedValue({
 						terminalOutputLineLimit: 500,
 						terminalOutputCharacterLimit: 100000,
@@ -225,6 +228,7 @@ describe("executeCommandTool", () => {
 		it("shows a DCG block message as an error before requesting explicit approval", async () => {
 			const provider = await mockCline.providerRef.deref()
 			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
 			provider.getState.mockResolvedValue({
 				destructiveCommandGuardEnabled: true,
 				terminalShellIntegrationDisabled: true,
@@ -252,6 +256,7 @@ describe("executeCommandTool", () => {
 		it("requests normal approval when DCG allows the command", async () => {
 			const provider = await mockCline.providerRef.deref()
 			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
 			provider.getState.mockResolvedValue({
 				destructiveCommandGuardEnabled: true,
 				terminalShellIntegrationDisabled: true,
@@ -265,11 +270,13 @@ describe("executeCommandTool", () => {
 			})
 
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
 		it("installs or updates DCG before evaluating an enabled command", async () => {
 			const provider = await mockCline.providerRef.deref()
 			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
 			provider.getState.mockResolvedValue({
 				destructiveCommandGuardEnabled: true,
 				terminalShellIntegrationDisabled: true,
@@ -287,6 +294,7 @@ describe("executeCommandTool", () => {
 		it("fails closed when the DCG install or update fails", async () => {
 			const provider = await mockCline.providerRef.deref()
 			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
 			provider.getState.mockResolvedValue({
 				destructiveCommandGuardEnabled: true,
 				terminalShellIntegrationDisabled: true,
@@ -311,6 +319,7 @@ describe("executeCommandTool", () => {
 		it("fails closed when DCG is unavailable for the current platform", async () => {
 			const provider = await mockCline.providerRef.deref()
 			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
 			provider.getState.mockResolvedValue({
 				destructiveCommandGuardEnabled: true,
 				terminalShellIntegrationDisabled: true,

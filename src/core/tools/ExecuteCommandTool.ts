@@ -132,13 +132,9 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			}
 
 			const provider = await task.providerRef.deref()
-			const providerState = await provider?.getState()
 			let dcgBlocked = false
-			if (providerState?.destructiveCommandGuardEnabled === true) {
+			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
 				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
-				if (!provider) {
-					throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
-				}
 				// Resolve through the managed installer on use so an extension update
 				// automatically installs the newly pinned and verified DCG version.
 				const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
@@ -169,6 +165,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
+			const providerState = await provider?.getState()
 			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
 
 			// Get command execution timeout from VSCode configuration (in seconds)
