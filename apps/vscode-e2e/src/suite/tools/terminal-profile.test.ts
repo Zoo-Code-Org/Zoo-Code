@@ -146,6 +146,10 @@ suite("Terminal Profile", function () {
 							alwaysAllowExecute: true,
 							allowedCommands: ["*"],
 							terminalShellIntegrationDisabled: false,
+							// A custom --noprofile/--norc bash profile can take well over the
+							// default 5s to emit OSC 633;A on a loaded CI box. Raise the
+							// activation window so the wait doesn't abort as SI_ACTIVATION_TIMEOUT.
+							terminalShellIntegrationTimeout: 30_000,
 						},
 						text: "TERMINAL_PROFILE_E2E_OVERRIDE",
 					}),
@@ -207,6 +211,9 @@ suite("Terminal Profile", function () {
 							alwaysAllowExecute: true,
 							allowedCommands: ["*"],
 							terminalShellIntegrationDisabled: false,
+							// Match the override test: give shell integration enough time to
+							// activate on a loaded CI box before declaring it unavailable.
+							terminalShellIntegrationTimeout: 30_000,
 						},
 						text: "TERMINAL_PROFILE_E2E_DEFAULT",
 					}),
