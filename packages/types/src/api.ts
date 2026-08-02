@@ -167,6 +167,15 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+	/**
+	 * Sets the shell-integration activation timeout (milliseconds) applied to
+	 * VS Code terminals. Unlike the `terminalShellIntegrationTimeout` settings
+	 * key (which is only applied through the webview config-applier), this
+	 * updates the running Terminal static immediately, so it is reliable for
+	 * extension-host integrations and e2e tests that need a wider activation
+	 * window on heavily-loaded CI runners.
+	 */
+	setShellIntegrationTimeout(timeoutMs: number): void
 }
 
 export interface RooCodeIpcServer extends EventEmitter<IpcServerEvents> {
