@@ -1,4 +1,4 @@
-﻿import * as path from "path"
+import * as path from "path"
 import * as vscode from "vscode"
 import os from "os"
 import crypto from "crypto"
