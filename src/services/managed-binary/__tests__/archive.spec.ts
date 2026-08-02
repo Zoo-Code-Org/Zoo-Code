@@ -44,15 +44,18 @@ describe("managed binary archive utilities", () => {
 
 	it("kills a process that exceeds its timeout", async () => {
 		vi.useFakeTimers()
-		const child = createChild()
-		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
-		const processResult = runProcess("tool", [], 100)
-		const assertion = expect(processResult).rejects.toThrow("tool timed out")
+		try {
+			const child = createChild()
+			mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
+			const processResult = runProcess("tool", [], 100)
+			const assertion = expect(processResult).rejects.toThrow("tool timed out")
 
-		await vi.advanceTimersByTimeAsync(100)
-		await assertion
-		expect(child.kill).toHaveBeenCalledWith("SIGKILL")
-		vi.useRealTimers()
+			await vi.advanceTimersByTimeAsync(100)
+			await assertion
+			expect(child.kill).toHaveBeenCalledWith("SIGKILL")
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("extracts tar.gz archives with hardened flags", async () => {
@@ -112,7 +115,7 @@ describe("managed binary archive utilities", () => {
 		mockSpawn.mockReturnValueOnce(listing as unknown as ReturnType<typeof spawn>)
 		mockSpawn.mockReturnValueOnce(extraction as unknown as ReturnType<typeof spawn>)
 		const result = extractSingleFileTarXzArchive("/tmp/archive.tar.xz", "/tmp/output", "binary", "Tool")
-		listing.stdout.write("./binary\n")
+		listing.stdout.write("-rwxr-xr-x user/group 1 2026-01-01 00:00 ./binary\n")
 		listing.emit("close", 0)
 		await new Promise<void>((resolve) => setImmediate(resolve))
 		extraction.emit("close", 0)
@@ -121,22 +124,58 @@ describe("managed binary archive utilities", () => {
 		expect(mockSpawn).toHaveBeenNthCalledWith(
 			2,
 			"tar",
-			["-xJf", "/tmp/archive.tar.xz", "-C", "/tmp/output", "./binary"],
+			[
+				"-xJf",
+				"/tmp/archive.tar.xz",
+				"-C",
+				"/tmp/output",
+				"--no-same-owner",
+				...(process.platform === "linux" ? ["--no-overwrite-dir"] : []),
+				"./binary",
+			],
 			expect.any(Object),
 		)
+	})
+
+	it.each([
+		["-rwxr-xr-x user/group 1 2026-01-01 00:00 ./other\n", "an unexpected filename"],
+		[
+			"-rwxr-xr-x user/group 1 2026-01-01 00:00 ./binary\n-rwxr-xr-x user/group 1 2026-01-01 00:00 ./other\n",
+			"multiple entries",
+		],
+		["lrwxrwxrwx user/group 0 2026-01-01 00:00 ./binary\n", "a non-regular entry"],
+	])("rejects a tar.xz archive with %s", async (listingOutput) => {
+		const listing = createChild()
+		mockSpawn.mockReturnValue(listing as unknown as ReturnType<typeof spawn>)
+		const result = extractSingleFileTarXzArchive("/tmp/archive.tar.xz", "/tmp/output", "binary", "Tool")
+		listing.stdout.write(listingOutput)
+		listing.emit("close", 0)
+
+		await expect(result).rejects.toThrow("Tool archive has an unexpected layout")
 	})
 
 	it("builds a single-entry-validated PowerShell ZIP extraction", async () => {
 		const child = createChild()
 		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
-		const extraction = extractSingleFileZipArchive("C:\\archive.zip", "C:\\output", "binary.exe", "Tool")
-		child.emit("close", 0)
-		await extraction
+		const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+		Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+		try {
+			const extraction = extractSingleFileZipArchive("C:\\archive.zip", "C:\\output", "binary.exe", "Tool")
+			child.emit("close", 0)
+			await extraction
 
-		const args = mockSpawn.mock.calls[0][1]
-		const script = args[3]
-		expect(script).toContain("$entries.Count -ne 1")
-		expect(script).not.toContain("C:\\archive.zip")
-		expect(args.slice(4)).toEqual(["C:\\archive.zip", path.join("C:\\output", "binary.exe"), "binary.exe", "Tool"])
+			const args = mockSpawn.mock.calls[0][1]
+			const script = args[3]
+			expect(script).toContain("$entries.Count -ne 1")
+			expect(script).not.toContain("C:\\archive.zip")
+			expect(args.slice(4)).toEqual([
+				"C:\\archive.zip",
+				path.join("C:\\output", "binary.exe"),
+				"binary.exe",
+				"Tool",
+			])
+		} finally {
+			if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+		}
 	})
 })
