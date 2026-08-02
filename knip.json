@@ -22,6 +22,9 @@
 		"webview-ui": {
 			"entry": ["src/index.tsx"],
 			"project": ["src/**/*.{ts,tsx}", "../src/shared/*.ts"],
+			"ignore": [
+				"src/components/history/TaskStatusBadge.tsx"
+			],
 			"ignoreDependencies": [
 				"@roo-code/config-typescript",
 				"@types/katex",
@@ -32,7 +35,9 @@
 				"source-map",
 				"tailwindcss",
 				"tailwindcss-animate",
-				"monocart-reporter"
+				"monocart-reporter",
+				"@dnd-kit/sortable",
+				"@dnd-kit/utilities"
 			]
 		},
 		"apps/cli": {
