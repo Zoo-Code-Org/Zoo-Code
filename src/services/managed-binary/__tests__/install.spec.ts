@@ -68,7 +68,10 @@ describe("managed binary installation", () => {
 		expect(first).toBe(second)
 		await vi.waitFor(() => expect(download).toHaveBeenCalledOnce())
 		finishDownload?.()
-		await Promise.all([first, second])
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			getManagedBinaryPaths(options).binaryPath,
+			getManagedBinaryPaths(options).binaryPath,
+		])
 		expect(download).toHaveBeenCalledOnce()
 	})
 

@@ -124,6 +124,9 @@ async function installManagedBinaryWithLock(options: ManagedBinaryInstallOptions
 		stale: 5 * 60_000,
 		update: 30_000,
 		retries: { retries: 10, factor: 1.5, minTimeout: 100, maxTimeout: 1_000 },
+		onCompromised: (error) => {
+			throw error
+		},
 	})
 	try {
 		return await installManagedBinary(options)

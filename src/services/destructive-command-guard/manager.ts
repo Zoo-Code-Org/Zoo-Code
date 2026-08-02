@@ -7,7 +7,7 @@ import {
 	resolveTrustedRedirect as resolveManagedBinaryRedirect,
 	verifySha256Checksum,
 } from "../managed-binary/download"
-import { ensureManagedBinaryInstalled, getManagedBinaryPaths } from "../managed-binary/install"
+import { ensureManagedBinaryInstalled } from "../managed-binary/install"
 
 import {
 	DCG_ARCHIVES,
@@ -18,6 +18,7 @@ import {
 } from "./constants"
 
 const VERSION_FILE = ".dcg-version"
+const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
 
 export function getDcgArchiveInfo(platform = process.platform, arch = process.arch): DcgArchiveInfo | undefined {
 	return DCG_ARCHIVES[`${platform}-${arch}`]
@@ -53,11 +54,16 @@ export function downloadFile(url: string, destination: string, maxRedirects = 5)
 		trustedDomains: DCG_TRUSTED_DOWNLOAD_DOMAINS,
 		timeoutMs: 120_000,
 		maxRedirects,
+		maxBytes: MAX_ARCHIVE_BYTES,
 	})
 }
 
 export async function verifyChecksum(filePath: string, expected: string): Promise<void> {
-	await verifySha256Checksum(filePath, expected, () => new Error("DCG archive checksum verification failed"))
+	await verifySha256Checksum(
+		filePath,
+		expected,
+		(actual) => new Error(`DCG archive checksum verification failed (got ${actual})`),
+	)
 }
 
 export async function extractSingleBinary(
@@ -76,6 +82,7 @@ export async function extractSingleBinary(
 function installDcg(storageDir: string): Promise<string | undefined> {
 	const info = getDcgArchiveInfo()
 	if (!info) {
+		console.warn(`[DCG] Unsupported platform: ${process.platform}-${process.arch}`)
 		return Promise.resolve(undefined)
 	}
 

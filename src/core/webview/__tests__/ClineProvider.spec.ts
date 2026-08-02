@@ -1011,6 +1011,14 @@ describe("ClineProvider", () => {
 		expect(state).toHaveProperty("writeDelayMs")
 	})
 
+	test("getState returns the saved destructive command guard setting", async () => {
+		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
+
+		const state = await provider.getState()
+
+		expect(state.destructiveCommandGuardEnabled).toBe(true)
+	})
+
 	test("getStateToPostToWebview returns the saved destructive command guard setting", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)

@@ -154,4 +154,11 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 		expect(screen.queryByTestId("allowed-commands-heading")).not.toBeInTheDocument()
 		expect(screen.queryByTestId("denied-commands-heading")).not.toBeInTheDocument()
 	})
+
+	it("shows Zoo command list editors while destructive command guard is disabled", () => {
+		renderSettings({ destructiveCommandGuardEnabled: false })
+
+		expect(screen.getByTestId("allowed-commands-heading")).toBeInTheDocument()
+		expect(screen.getByTestId("denied-commands-heading")).toBeInTheDocument()
+	})
 })
