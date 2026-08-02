@@ -964,7 +964,9 @@
 			"freeRequests": "* 1分間あたり{{count}}リクエストまで無料。それ以降は、プロンプトサイズに応じて課金されます。",
 			"pricingDetails": "詳細は価格情報をご覧ください。",
 			"billingEstimate": "* 課金は見積もりです - 正確な費用はプロンプトのサイズによって異なります。"
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting."
 	},
 	"modelPicker": {
 		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。また、「free」で検索すると、現在利用可能な無料オプションを見つけることができます。",

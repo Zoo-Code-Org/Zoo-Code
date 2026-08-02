@@ -964,7 +964,9 @@
 			"freeRequests": "* 每分钟免费 {{count}} 个请求。之后，计费取决于提示大小。",
 			"pricingDetails": "有关更多信息，请参阅定价详情。",
 			"billingEstimate": "* 计费为估计值 - 具体费用取决于提示大小。"
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting."
 	},
 	"modelPicker": {
 		"automaticFetch": "自动获取 <serviceLink>{{serviceName}}</serviceLink> 上可用的最新模型列表。如果您不确定选择哪个模型，Zoo Code 与 <defaultModelLink>{{defaultModelId}}</defaultModelLink> 配合最佳。您还可以搜索\"free\"以查找当前可用的免费选项。",

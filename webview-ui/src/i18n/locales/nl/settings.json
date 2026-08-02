@@ -964,7 +964,9 @@
 			"freeRequests": "* Gratis tot {{count}} verzoeken per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
 			"pricingDetails": "Zie prijsdetails voor meer info.",
 			"billingEstimate": "* Facturering is een schatting - de exacte kosten hangen af van de promptgrootte."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting."
 	},
 	"modelPicker": {
 		"automaticFetch": "De extensie haalt automatisch de nieuwste lijst met modellen op van <serviceLink>{{serviceName}}</serviceLink>. Weet je niet welk model je moet kiezen? Zoo Code werkt het beste met <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Je kunt ook zoeken op 'free' voor gratis opties die nu beschikbaar zijn.",

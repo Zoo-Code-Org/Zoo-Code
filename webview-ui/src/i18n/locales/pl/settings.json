@@ -964,7 +964,9 @@
 			"freeRequests": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
 			"pricingDetails": "Więcej informacji znajdziesz w szczegółach cennika.",
 			"billingEstimate": "* Rozliczenie jest szacunkowe - dokładny koszt zależy od rozmiaru podpowiedzi."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting."
 	},
 	"modelPicker": {
 		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowszą listę modeli dostępnych w <serviceLink>{{serviceName}}</serviceLink>. Jeśli nie jesteś pewien, który model wybrać, Zoo Code działa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Możesz również wyszukać \"free\", aby znaleźć obecnie dostępne opcje bezpłatne.",

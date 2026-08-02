@@ -964,7 +964,9 @@
 			"freeRequests": "* Dakikada {{count}} isteğe kadar ücretsiz. Bundan sonra, ücretlendirme istem boyutuna bağlıdır.",
 			"pricingDetails": "Daha fazla bilgi için fiyatlandırma ayrıntılarına bakın.",
 			"billingEstimate": "* Ücretlendirme bir tahmindir - kesin maliyet istem boyutuna bağlıdır."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting."
 	},
 	"modelPicker": {
 		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",
