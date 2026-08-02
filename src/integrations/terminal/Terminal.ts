@@ -283,12 +283,24 @@ export class Terminal extends BaseTerminal {
 	 */
 	public waitForShellIntegration(timeoutMs: number, executionId?: string, abortSignal?: AbortSignal): Promise<void> {
 		if (this.terminal.shellIntegration) {
-			this.lifecycle.transition("integration-ready", executionId)
+			// A reused terminal may already be in `integration-ready` (promoted by the
+			// registry during reservation) while shellIntegration is still defined.
+			// `integration-ready → integration-ready` is not a legal self-transition,
+			// so only promote when not already ready.
+			if (this.lifecycle.state !== "integration-ready") {
+				this.lifecycle.transition("integration-ready", executionId)
+			}
 			this.lifecycle.markHealthy()
 			return Promise.resolve()
 		}
 
-		this.lifecycle.transition("integration-pending", executionId)
+		// Only move to `integration-pending` from a state where that transition is
+		// legal. From `integration-ready`/`fallback-ready` the forward table does
+		// not allow `→ integration-pending`; in that case leave the state as-is and
+		// rely on the readiness event (or timeout) to drive the next transition.
+		if (this.lifecycle.state !== "integration-ready" && this.lifecycle.state !== "fallback-ready") {
+			this.lifecycle.transition("integration-pending", executionId)
+		}
 		this.shellIntegrationAbortController = new AbortController()
 		const abortController = this.shellIntegrationAbortController
 
@@ -324,7 +336,11 @@ export class Terminal extends BaseTerminal {
 					clearTimeout(timer)
 					ref.disposable?.dispose()
 					abortController.signal.removeEventListener("abort", onAbort)
-					this.lifecycle.transition("integration-ready", executionId)
+					// Guard against illegal self-transition on reused terminals that are
+					// already in `integration-ready` when the readiness event fires again.
+					if (this.lifecycle.state !== "integration-ready") {
+						this.lifecycle.transition("integration-ready", executionId)
+					}
 					this.lifecycle.markHealthy()
 					resolve()
 				}
