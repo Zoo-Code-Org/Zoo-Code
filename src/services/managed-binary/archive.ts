@@ -70,7 +70,10 @@ export async function extractSingleFileZipArchive(
 	expectedFile: string,
 	archiveName: string,
 ): Promise<void> {
-	// This deliberately uses PowerShell because it is only called for Windows release archives.
+	if (process.platform !== "win32") {
+		throw new Error("Single-file ZIP extraction is only supported on Windows")
+	}
+
 	const script = [
 		"$ErrorActionPreference = 'Stop'",
 		"$archivePath = $args[0]",

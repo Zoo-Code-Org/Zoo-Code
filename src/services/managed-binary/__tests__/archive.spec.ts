@@ -157,14 +157,25 @@ describe("managed binary archive utilities", () => {
 	it("builds a single-entry-validated PowerShell ZIP extraction", async () => {
 		const child = createChild()
 		mockSpawn.mockReturnValue(child as unknown as ReturnType<typeof spawn>)
-		const extraction = extractSingleFileZipArchive("C:\\archive.zip", "C:\\output", "binary.exe", "Tool")
-		child.emit("close", 0)
-		await extraction
+		const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform")
+		Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+		try {
+			const extraction = extractSingleFileZipArchive("C:\\archive.zip", "C:\\output", "binary.exe", "Tool")
+			child.emit("close", 0)
+			await extraction
 
-		const args = mockSpawn.mock.calls[0][1]
-		const script = args[3]
-		expect(script).toContain("$entries.Count -ne 1")
-		expect(script).not.toContain("C:\\archive.zip")
-		expect(args.slice(4)).toEqual(["C:\\archive.zip", path.join("C:\\output", "binary.exe"), "binary.exe", "Tool"])
+			const args = mockSpawn.mock.calls[0][1]
+			const script = args[3]
+			expect(script).toContain("$entries.Count -ne 1")
+			expect(script).not.toContain("C:\\archive.zip")
+			expect(args.slice(4)).toEqual([
+				"C:\\archive.zip",
+				path.join("C:\\output", "binary.exe"),
+				"binary.exe",
+				"Tool",
+			])
+		} finally {
+			if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
+		}
 	})
 })

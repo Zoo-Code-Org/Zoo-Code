@@ -925,7 +925,7 @@ describe("semble-downloader", () => {
 				// excluded by the currentArchivePath guard). It is unlinked only by
 				// the pre-download partial-archive cleanup and the post-install
 				// archive cleanup steps. unrelated.txt is never touched.
-				expect(fs.unlink).not.toHaveBeenCalledWith(path.join("/storage", "unrelated.txt"))
+				expect(fs.rm).not.toHaveBeenCalledWith(path.join("/storage", "unrelated.txt"), expect.anything())
 				// Sanity: the current archive path is never passed to the stale sweep.
 				// It is unlinked exactly twice (pre-download cleanup + post-install
 				// archive cleanup), never via cleanupStaleArchives.
