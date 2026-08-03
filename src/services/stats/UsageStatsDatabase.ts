@@ -278,23 +278,27 @@ export class UsageStatsDatabase {
 
 		try {
 			this.db = new DatabaseSyncCtor(this.dbPath)
-		} catch (err) {
-			throw new StatsDbError("STATS_DB/open/001", `Failed to open database: ${this.dbPath}`, err)
-		}
 
-		// Enable WAL mode and busy timeout for concurrent access
-		try {
+			// Enable WAL mode and busy timeout for concurrent access
 			this.db.exec("PRAGMA journal_mode = WAL")
 			this.db.exec("PRAGMA busy_timeout = 5000")
 			this.db.exec("PRAGMA synchronous = NORMAL")
+
+			this.createSchema()
+			this.runMigrations()
+
+			this.initialized = true
 		} catch (err) {
-			throw new StatsDbError("STATS_DB/open/001", "Failed to set pragmas", err)
+			if (this.db) {
+				try {
+					this.db.close()
+				} catch {
+					// Ignore close errors while cleaning up a failed initialization.
+				}
+				this.db = null
+			}
+			throw new StatsDbError("STATS_DB/open/001", `Failed to initialize database: ${this.dbPath}`, err)
 		}
-
-		this.createSchema()
-		this.runMigrations()
-
-		this.initialized = true
 	}
 
 	/**

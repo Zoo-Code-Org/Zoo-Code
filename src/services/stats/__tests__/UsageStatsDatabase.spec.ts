@@ -2,7 +2,7 @@ import * as path from "path"
 import * as fs from "fs"
 import * as os from "os"
 
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
@@ -71,6 +71,25 @@ describe("UsageStatsDatabase", () => {
 
 		it("should be idempotent (calling twice is safe)", () => {
 			expect(() => db.initialize()).not.toThrow()
+		})
+
+		it("should close and clear an opened connection when initialization fails", () => {
+			const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite")
+			const closeSpy = vi.spyOn(DatabaseSync.prototype, "close")
+			const execSpy = vi.spyOn(DatabaseSync.prototype, "exec").mockImplementation(() => {
+				throw new Error("simulated pragma failure")
+			})
+			const failingDb = new UsageStatsDatabase(tempDir)
+
+			try {
+				expect(() => failingDb.initialize()).toThrow(StatsDbError)
+				expect(closeSpy).toHaveBeenCalledTimes(1)
+				expect(() => failingDb["getDb"]()).toThrow("Database not initialized")
+			} finally {
+				execSpy.mockRestore()
+				closeSpy.mockRestore()
+				failingDb.close()
+			}
 		})
 
 		it("should start with generation 1", () => {

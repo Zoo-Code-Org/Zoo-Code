@@ -302,6 +302,24 @@ describe("UsageStatsService", () => {
 			expect(dataRow).toContain("0.03")
 		})
 
+		it("should export rootTaskId and endpoint in their own CSV columns", async () => {
+			await service.backfillFromHistory([
+				makeEvent({
+					eventId: "evt-root-endpoint",
+					rootTaskId: "root-task-123",
+					endpoint: "api.example.test",
+				}),
+			])
+
+			const result = (await service.exportStats(makeQuery({ preset: "all" }), "csv")) as string
+			const [header, dataRow] = result.split("\n")
+			const headerCols = header.split(",")
+			const dataCols = dataRow.split(",")
+
+			expect(dataCols[headerCols.indexOf("rootTaskId")]).toBe("root-task-123")
+			expect(dataCols[headerCols.indexOf("endpoint")]).toBe("api.example.test")
+		})
+
 		it("should output only header when no events exist", async () => {
 			const query = makeQuery({ preset: "all" })
 			const result = await service.exportStats(query, "csv")

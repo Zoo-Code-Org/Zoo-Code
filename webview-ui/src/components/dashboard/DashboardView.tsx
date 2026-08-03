@@ -68,6 +68,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string | null>>({})
 	const [sessionDetailLoading, setSessionDetailLoading] = useState<Set<string>>(new Set())
 	const latestSessionDetailRequestIdRef = useRef<string>("")
+	const latestSessionDetailTaskIdRef = useRef<string | undefined>(undefined)
 
 	// ── Error state (for clear/export errors) ───────────────────────────────
 	const [error, setError] = useState<string | null>(null)
@@ -210,6 +211,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const fetchSessionDetail = useCallback((taskId: string) => {
 		const requestId = `dashboard-session-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 		latestSessionDetailRequestIdRef.current = requestId
+		latestSessionDetailTaskIdRef.current = taskId
 
 		setSessionDetailLoading((prev) => {
 			const next = new Set(prev)
@@ -234,11 +236,11 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		(taskId: string) => {
 			setExpandedTaskId((current) => {
 				if (current === taskId) return undefined
-				if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
-					fetchSessionDetail(taskId)
-				}
 				return taskId
 			})
+			if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
+				fetchSessionDetail(taskId)
+			}
 		},
 		[sessionDetails, sessionDetailLoading, fetchSessionDetail],
 	)
@@ -278,7 +280,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			if (message.type === "dashboardSessionDetailResponse") {
 				if (message.requestId !== latestSessionDetailRequestIdRef.current) return
 
-				const taskId = expandedTaskId
+				const taskId = latestSessionDetailTaskIdRef.current
 				if (!taskId) return
 
 				setSessionDetailLoading((prev) => {
@@ -344,7 +346,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		window.addEventListener("message", handleMessage)
 		return () => window.removeEventListener("message", handleMessage)
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [t, expandedTaskId, preset, groupBy, heatmapRange])
+	}, [t, preset, groupBy, heatmapRange])
 
 	// ── Export ───────────────────────────────────────────────────────────────
 

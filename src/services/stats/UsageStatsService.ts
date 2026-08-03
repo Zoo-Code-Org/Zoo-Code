@@ -53,9 +53,11 @@ const CSV_COLUMNS = [
 	"attempt",
 	"taskId",
 	"parentTaskId",
+	"rootTaskId",
 	"provider",
 	"model",
 	"mode",
+	"endpoint",
 	"inputTokens",
 	"inputTokensSource",
 	"outputTokens",
@@ -563,12 +565,16 @@ export class UsageStatsService {
 				return event.taskId
 			case "parentTaskId":
 				return event.parentTaskId ?? ""
+			case "rootTaskId":
+				return event.rootTaskId ?? ""
 			case "provider":
 				return event.provider
 			case "model":
 				return event.model
 			case "mode":
 				return event.mode
+			case "endpoint":
+				return event.endpoint ?? ""
 			case "inputTokens":
 				return event.usage.inputTokens ? String(event.usage.inputTokens.value) : ""
 			case "inputTokensSource":

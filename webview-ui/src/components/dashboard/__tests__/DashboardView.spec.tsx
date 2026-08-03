@@ -74,7 +74,28 @@ vi.mock("../DashboardSummary", () => ({
 }))
 
 vi.mock("../SessionList", () => ({
-	default: () => <div data-testid="session-list" />,
+	default: ({
+		sessions,
+		sessionDetails,
+		onToggleSession,
+	}: {
+		sessions: Array<{ rootTaskId: string }>
+		sessionDetails: Record<string, { title: string } | null>
+		onToggleSession: (taskId: string) => void
+	}) => (
+		<div data-testid="session-list">
+			{sessions.map((session) => (
+				<button key={session.rootTaskId} onClick={() => onToggleSession(session.rootTaskId)}>
+					{session.rootTaskId}
+				</button>
+			))}
+			{Object.entries(sessionDetails).map(([taskId, detail]) => (
+				<div key={taskId} data-testid={`session-detail-${taskId}`}>
+					{detail?.title}
+				</div>
+			))}
+		</div>
+	),
 }))
 
 vi.mock("../../stats/UsageHeatmap", () => ({
@@ -213,6 +234,45 @@ describe("DashboardView (streaming)", () => {
 		replaceSubscriptionMock.mockClear()
 		requestSessionPageMock.mockClear()
 		resetStreamState()
+	})
+
+	describe("session detail responses", () => {
+		it("stores a synchronous detail response for the task that initiated the request", async () => {
+			setConnectedState({
+				sessions: {
+					"task-race": {
+						rootTaskId: "task-race",
+						title: "Race task",
+						totalCost: 0,
+						totalTokens: 1,
+						model: "model",
+						provider: "provider",
+						lastActivity: 0,
+						eventCount: 1,
+					},
+				},
+				sessionOrder: ["task-race"],
+			})
+			postMessageMock.mockImplementationOnce((message: { type: string; requestId: string }) => {
+				if (message.type !== "getDashboardSessionDetail") return
+				window.dispatchEvent(
+					new MessageEvent("message", {
+						data: {
+							type: "dashboardSessionDetailResponse",
+							requestId: message.requestId,
+							dashboardSessionDetail: { title: "Loaded before render" },
+						},
+					}),
+				)
+			})
+
+			const { getByRole, getByTestId } = render(<DashboardView onDone={() => {}} />)
+			fireEvent.click(getByRole("button", { name: "task-race" }))
+
+			await waitFor(() =>
+				expect(getByTestId("session-detail-task-race").textContent).toBe("Loaded before render"),
+			)
+		})
 	})
 
 	// ── 1. Initial mount ──────────────────────────────────────────────────
