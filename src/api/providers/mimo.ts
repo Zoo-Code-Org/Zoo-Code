@@ -27,10 +27,7 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 		const message = error.message.toLowerCase()
 		const status = (error as { status?: number }).status
 		// OpenAI SDK APIError carries an HTTP status; some endpoints return 400
-		if (
-			message.includes("parallel_tool_calls") ||
-			(status === 400 && message.includes("unrecognized"))
-		) {
+		if (message.includes("parallel_tool_calls") || (status === 400 && message.includes("unrecognized"))) {
 			return true
 		}
 	}
@@ -38,15 +35,15 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 }
 
 /**
-	* Filters a streamed delta so that only the FIRST tool call (index 0) survives.
-	* MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
-	* parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
-	* configured for maxCallsPerTurn === 1; dropping extras here prevents the
-	* "multiple-valid-calls-under-single-policy" rejection path that triggers the
-	* error-interception retry loop.
-	*
-	* Confined to MimoHandler — no other provider is affected.
-	*/
+ * Filters a streamed delta so that only the FIRST tool call (index 0) survives.
+ * MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
+ * parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
+ * configured for maxCallsPerTurn === 1; dropping extras here prevents the
+ * "multiple-valid-calls-under-single-policy" rejection path that triggers the
+ * error-interception retry loop.
+ *
+ * Confined to MimoHandler — no other provider is affected.
+ */
 function filterToFirstToolCall(
 	delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta,
 	state: { firstToolCallId: string | undefined },
@@ -87,7 +84,7 @@ type MiMoCompletionParams = OpenAI.Chat.Completions.ChatCompletionCreateParamsSt
 }
 
 /**
-	* MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
+ * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
  *
  * CRITICAL: Per MiMo's official docs, reasoning_content MUST be passed back
  * in multi-turn conversations with tool calls. Without it, the API returns 400.
@@ -166,7 +163,7 @@ export class MimoHandler extends OpenAiHandler {
 		}
 
 		if (tools && tools.length > 0) {
-			params.tools = this.convertToolsForOpenAI(tools)
+			params.tools = this.convertToolsForOpenAI(tools, this.options.openAiToolStrictMode ?? false)
 		}
 
 		// Honor tool_choice from metadata (OpenAI-compatible passthrough)
@@ -190,9 +187,7 @@ export class MimoHandler extends OpenAiHandler {
 			// support this field and return a 400 Bad Request.
 			if (params.parallel_tool_calls !== undefined && isParallelToolCallsRejected(error)) {
 				const { parallel_tool_calls: _omit, ...paramsWithoutParallel } = params
-				stream = await this.client.chat.completions.create(
-					paramsWithoutParallel as MiMoCompletionParams,
-				)
+				stream = await this.client.chat.completions.create(paramsWithoutParallel as MiMoCompletionParams)
 			} else {
 				throw handleProviderError(error, "MiMo")
 			}
@@ -241,7 +236,8 @@ export class MimoHandler extends OpenAiHandler {
 			const inputTokens = lastUsage?.prompt_tokens || 0
 			const outputTokens = lastUsage?.completion_tokens || 0
 			const cacheWriteTokens =
-				(lastUsage?.prompt_tokens_details as { cache_write_tokens?: number } | undefined)?.cache_write_tokens || 0
+				(lastUsage?.prompt_tokens_details as { cache_write_tokens?: number } | undefined)?.cache_write_tokens ||
+				0
 			const cacheReadTokens = lastUsage?.prompt_tokens_details?.cached_tokens || 0
 
 			const { totalCost } = calculateApiCostOpenAI(
