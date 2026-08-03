@@ -37,13 +37,16 @@ function loadDatabaseSync(): typeof DatabaseSync {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 3
+const SCHEMA_VERSION = 5
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
 
 /** Maximum number of events returned in a single batch read. */
 const MAX_BATCH_SIZE = 100
+
+/** Maximum task IDs per focused SQLite query, safely below SQLite's parameter ceiling. */
+const TASK_ID_QUERY_CHUNK_SIZE = 900
 
 /**
  * Special root_task_id value used for non-cancelled-only rollup rows.
@@ -68,6 +71,7 @@ export type StatsDbErrorCode =
 	| "STATS_DB/open/001" // Database open failed
 	| "STATS_DB/migrate/001" // Schema migration failed
 	| "STATS_DB/migrate/002" // Schema v4 migration failed (timezone offset fix)
+	| "STATS_DB/migrate/003" // Schema v5 migration failed (task usage projection)
 	| "STATS_DB/append/001" // Transaction failed
 	| "STATS_DB/read/001" // Query failed
 	| "STATS_DB/clear/001" // Clear failed
@@ -122,6 +126,17 @@ export interface SessionRow {
 	provider: string
 	lastActivity: number
 	eventCount: number
+}
+
+/** Direct per-task usage summary from the task usage projection. */
+export interface TaskUsageRow {
+	taskId: string
+	totalCost: number
+	totalTokens: number
+	eventCount: number
+	lastActivity: number
+	model: string
+	provider: string
 }
 
 /** A daily rollup row. */
@@ -191,6 +206,18 @@ interface MetaData {
 	generation: number
 	lastSequence: number
 	migrationCheckpoint: MigrationCheckpoint
+}
+
+function createZeroTaskUsageRow(taskId: string): TaskUsageRow {
+	return {
+		taskId,
+		totalCost: 0,
+		totalTokens: 0,
+		eventCount: 0,
+		lastActivity: 0,
+		model: "",
+		provider: "",
+	}
 }
 
 /**
@@ -354,6 +381,7 @@ export class UsageStatsDatabase {
 			CREATE INDEX IF NOT EXISTS idx_usage_events_provider ON usage_events(provider);
 			CREATE INDEX IF NOT EXISTS idx_usage_events_mode ON usage_events(mode);
 			CREATE INDEX IF NOT EXISTS idx_usage_events_seq ON usage_events(seq);
+			CREATE INDEX IF NOT EXISTS idx_usage_events_task ON usage_events(task_id);
 
 			CREATE TABLE IF NOT EXISTS stats_rollup (
 				period_type TEXT NOT NULL,
@@ -391,6 +419,16 @@ export class UsageStatsDatabase {
 
 			CREATE INDEX IF NOT EXISTS idx_session_metadata_last_activity
 				ON session_metadata(last_activity_ms DESC);
+
+			CREATE TABLE IF NOT EXISTS task_usage_metadata (
+				task_id TEXT PRIMARY KEY,
+				total_cost REAL NOT NULL DEFAULT 0,
+				total_tokens INTEGER NOT NULL DEFAULT 0,
+				event_count INTEGER NOT NULL DEFAULT 0,
+				last_activity_ms INTEGER NOT NULL DEFAULT 0,
+				model TEXT NOT NULL DEFAULT '',
+				provider TEXT NOT NULL DEFAULT ''
+			);
 
 			CREATE TABLE IF NOT EXISTS session_activity (
 				root_task_id TEXT NOT NULL,
@@ -462,6 +500,11 @@ export class UsageStatsDatabase {
 		if (metaAfterV3.schemaVersion < 4) {
 			this.migrateToV4(db)
 		}
+
+		const metaAfterV4 = this.readMetaInternal(db)
+		if (metaAfterV4.schemaVersion < 5) {
+			this.migrateToV5(db)
+		}
 	}
 
 	/**
@@ -517,6 +560,42 @@ export class UsageStatsDatabase {
 			throw new StatsDbError(
 				"STATS_DB/migrate/002",
 				"Failed to rebuild derived data after schema v4 migration (timezone offset sign fix)",
+				err,
+			)
+		}
+	}
+
+	/**
+	 * Migration v4 → v5: backfill the direct task usage projection from events.
+	 *
+	 * Schema creation is additive, so existing databases already have the table
+	 * by the time this runs. Rebuilding ensures projection rows are complete and
+	 * uses ascending event sequence to deterministically resolve timestamp ties.
+	 */
+	private migrateToV5(db: DatabaseSync): void {
+		try {
+			db.exec("BEGIN")
+			this.updateMeta(db, { schemaVersion: 5 })
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/003",
+				"Failed to migrate to schema v5 (task usage projection)",
+				err,
+			)
+		}
+
+		try {
+			this.rebuildRollupsFromEvents()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/migrate/003",
+				"Failed to rebuild task usage projection after schema v5 migration",
 				err,
 			)
 		}
@@ -727,7 +806,7 @@ export class UsageStatsDatabase {
 					const cacheReadTokens = usage.cacheReadTokens?.value ?? 0
 					const cacheWriteTokens = usage.cacheWriteTokens?.value ?? 0
 					const reasoningTokens = usage.reasoningTokens?.value ?? 0
-					const totalTokens = inputTokens + outputTokens
+					const totalTokens = usage.totalTokens?.value ?? inputTokens + outputTokens
 					// Use getEffectiveCost for consistency with computeEventDelta
 					const eventForCost = {
 						provider,
@@ -964,15 +1043,17 @@ export class UsageStatsDatabase {
 	// ── Public API: Rebuild Rollups ─────────────────────────────────────────
 
 	/**
-	 * Rebuilds all derived tables (stats_rollup, session_metadata, session_activity)
+	 * Rebuilds all derived tables (stats_rollup, session_metadata, task_usage_metadata,
+	 * session_activity)
 	 * from the raw usage_events table.
 	 *
 	 * This is a self-contained, idempotent operation:
-	 * 1. Deletes all rows from stats_rollup, session_metadata, and session_activity
+	 * 1. Deletes all rows from stats_rollup, session_metadata, task_usage_metadata,
+	 *    and session_activity
 	 * 2. Reads all usage_events in batches
 	 * 3. Rebuilds: daily/monthly/lifetime aggregate rollups, breakdown rollups
-	 *    (per model/provider/mode axis), non-cancelled rollups, session_metadata,
-	 *    and session_activity
+	 *    (per model/provider/mode axis), non-cancelled rollups, root-session and
+	 *    direct-task metadata projections, and session_activity
 	 *
 	 * Use case: when events were inserted before rollup tables were created
 	 * (migration gap), or when rollup tables become stale/corrupt.
@@ -988,6 +1069,7 @@ export class UsageStatsDatabase {
 			// 1. Delete all derived data
 			db.exec("DELETE FROM stats_rollup")
 			db.exec("DELETE FROM session_metadata")
+			db.exec("DELETE FROM task_usage_metadata")
 			db.exec("DELETE FROM session_activity")
 
 			// 2. Read all events in batches and rebuild everything
@@ -1023,10 +1105,31 @@ export class UsageStatsDatabase {
 					updated_at = datetime('now')
 			`)
 
+			const taskUsageMetadataStmt = db.prepare(`
+				INSERT INTO task_usage_metadata (
+					task_id, model, provider, total_cost, total_tokens, event_count, last_activity_ms
+				) VALUES (
+					@taskId, @model, @provider, @costUsd, @totalTokens, 1, @lastActivityMs
+				)
+				ON CONFLICT(task_id) DO UPDATE SET
+					total_cost = total_cost + @costUsd,
+					total_tokens = total_tokens + @totalTokens,
+					event_count = event_count + 1,
+					model = CASE
+						WHEN @lastActivityMs >= last_activity_ms THEN @model
+						ELSE model
+					END,
+					provider = CASE
+						WHEN @lastActivityMs >= last_activity_ms THEN @provider
+						ELSE provider
+					END,
+					last_activity_ms = MAX(last_activity_ms, @lastActivityMs)
+			`)
+
 			while (true) {
 				const rows = db
 					.prepare(
-						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id,
+						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, task_id, root_task_id,
 						 provider, model, mode, usage_json, provenance
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
@@ -1041,6 +1144,7 @@ export class UsageStatsDatabase {
 					const tzOffset = row.timezone_offset_minutes as number
 					const dayBucket = computeLocalDayBucket(epochMs, tzOffset)
 					const monthBucket = dayBucket.slice(0, 7)
+					const taskId = row.task_id as string
 					const rootTaskId = (row.root_task_id as string) ?? ""
 					const status = row.status as string
 					const provider = row.provider as string
@@ -1053,7 +1157,7 @@ export class UsageStatsDatabase {
 					const cacheReadTokens = usage.cacheReadTokens?.value ?? 0
 					const cacheWriteTokens = usage.cacheWriteTokens?.value ?? 0
 					const reasoningTokens = usage.reasoningTokens?.value ?? 0
-					const totalTokens = inputTokens + outputTokens
+					const totalTokens = usage.totalTokens?.value ?? inputTokens + outputTokens
 					// Use getEffectiveCost for consistency with computeEventDelta
 					const eventForCost = {
 						provider,
@@ -1325,11 +1429,22 @@ export class UsageStatsDatabase {
 						}
 					}
 
-					// ── Session projections ──
+					// ── Metadata projections ──
 
 					// Rebuild session_metadata (lifetime totals per root_task_id)
 					sessionMetadataStmt.run({
 						rootTaskId,
+						model,
+						provider,
+						costUsd,
+						totalTokens,
+						lastActivityMs: epochMs,
+					})
+
+					// Rebuild direct task totals. Rows are processed by ascending sequence;
+					// >= intentionally lets a later sequence win timestamp ties.
+					taskUsageMetadataStmt.run({
+						taskId,
 						model,
 						provider,
 						costUsd,
@@ -1570,7 +1685,7 @@ export class UsageStatsDatabase {
 					})
 				}
 
-				// Update session projection
+				// Update root-session and direct-task projections.
 				this.upsertSession(db, {
 					rootTaskId,
 					model: event.model,
@@ -1579,6 +1694,14 @@ export class UsageStatsDatabase {
 					totalTokens,
 					lastActivityMs: occurredEpochMs,
 					dayBucket,
+				})
+				this.upsertTaskUsage(db, {
+					taskId: event.taskId,
+					model: event.model,
+					provider: event.provider,
+					costUsd,
+					totalTokens,
+					lastActivityMs: occurredEpochMs,
 				})
 
 				// Update last sequence in meta
@@ -1779,7 +1902,7 @@ export class UsageStatsDatabase {
 						})
 					}
 
-					// Update session projection
+					// Update root-session and direct-task projections.
 					this.upsertSession(db, {
 						rootTaskId,
 						model: event.model,
@@ -1788,6 +1911,14 @@ export class UsageStatsDatabase {
 						totalTokens,
 						lastActivityMs: occurredEpochMs,
 						dayBucket,
+					})
+					this.upsertTaskUsage(db, {
+						taskId: event.taskId,
+						model: event.model,
+						provider: event.provider,
+						costUsd,
+						totalTokens,
+						lastActivityMs: occurredEpochMs,
 					})
 
 					this.updateMeta(db, { lastSequence: sequence })
@@ -1869,6 +2000,76 @@ export class UsageStatsDatabase {
 			events.push(...batch.events)
 		}
 		return events
+	}
+
+	/**
+	 * Reads direct-task usage summaries without scanning the event log.
+	 * Each SQLite query is chunked below the parameter ceiling. The returned map
+	 * always contains every requested task ID, using zero metrics for no-event
+	 * tasks so callers can compose task trees without per-task fallbacks.
+	 */
+	queryTaskUsageByTaskIds(taskIds: string[]): Map<string, TaskUsageRow> {
+		const db = this.getDb()
+		const uniqueTaskIds = [...new Set(taskIds)]
+		const result = new Map<string, TaskUsageRow>(
+			uniqueTaskIds.map((taskId) => [taskId, createZeroTaskUsageRow(taskId)]),
+		)
+
+		try {
+			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
+				const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
+				const placeholders = chunk.map(() => "?").join(", ")
+				const rows = db
+					.prepare(
+						`SELECT task_id, total_cost, total_tokens, event_count, last_activity_ms, model, provider
+						 FROM task_usage_metadata
+						 WHERE task_id IN (${placeholders})`,
+					)
+					.all(...chunk) as Array<Record<string, unknown>>
+
+				for (const row of rows) {
+					const taskId = row.task_id as string
+					result.set(taskId, {
+						taskId,
+						totalCost: row.total_cost as number,
+						totalTokens: row.total_tokens as number,
+						eventCount: row.event_count as number,
+						lastActivity: row.last_activity_ms as number,
+						model: row.model as string,
+						provider: row.provider as string,
+					})
+				}
+			}
+
+			return result
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query task usage metadata", err)
+		}
+	}
+
+	/**
+	 * Reads events for direct task IDs using the task index, without an
+	 * unbounded full-log read. Result order matches the global event sequence.
+	 */
+	queryEventsByTaskIds(taskIds: string[]): Array<UsageEventV1 & { sequence: number }> {
+		const db = this.getDb()
+		const uniqueTaskIds = [...new Set(taskIds)]
+		const events: Array<UsageEventV1 & { sequence: number }> = []
+
+		try {
+			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
+				const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
+				const placeholders = chunk.map(() => "?").join(", ")
+				const rows = db
+					.prepare(`SELECT * FROM usage_events WHERE task_id IN (${placeholders}) ORDER BY seq ASC`)
+					.all(...chunk) as Array<Record<string, unknown>>
+				events.push(...rows.map((row) => this.rowToEvent(row)))
+			}
+
+			return events.sort((left, right) => left.sequence - right.sequence)
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query events by task IDs", err)
+		}
 	}
 
 	// ── Public API: Session Projections ────────────────────────────────────
@@ -2350,6 +2551,7 @@ export class UsageStatsDatabase {
 			db.exec("DELETE FROM usage_events")
 			db.exec("DELETE FROM stats_rollup")
 			db.exec("DELETE FROM session_metadata")
+			db.exec("DELETE FROM task_usage_metadata")
 			db.exec("DELETE FROM session_activity")
 
 			// Increment generation
@@ -2711,6 +2913,43 @@ export class UsageStatsDatabase {
 			totalTokens: params.totalTokens,
 			lastActivityMs: params.lastActivityMs,
 		})
+	}
+
+	/**
+	 * Upserts one direct task usage projection row. Metadata belongs to the
+	 * newest event; on equal timestamps, the later append wins deterministically.
+	 */
+	private upsertTaskUsage(
+		db: DatabaseSync,
+		params: {
+			taskId: string
+			model: string
+			provider: string
+			costUsd: number
+			totalTokens: number
+			lastActivityMs: number
+		},
+	): void {
+		db.prepare(
+			`INSERT INTO task_usage_metadata (
+				task_id, model, provider, total_cost, total_tokens, event_count, last_activity_ms
+			) VALUES (
+				@taskId, @model, @provider, @costUsd, @totalTokens, 1, @lastActivityMs
+			)
+			ON CONFLICT(task_id) DO UPDATE SET
+				total_cost = total_cost + @costUsd,
+				total_tokens = total_tokens + @totalTokens,
+				event_count = event_count + 1,
+				model = CASE
+					WHEN @lastActivityMs >= last_activity_ms THEN @model
+					ELSE model
+				END,
+				provider = CASE
+					WHEN @lastActivityMs >= last_activity_ms THEN @provider
+					ELSE provider
+				END,
+				last_activity_ms = MAX(last_activity_ms, @lastActivityMs)`,
+		).run(params)
 	}
 
 	// ── Internal: Meta Management ──────────────────────────────────────────

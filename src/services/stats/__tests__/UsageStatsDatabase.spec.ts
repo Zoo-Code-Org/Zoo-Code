@@ -69,6 +69,24 @@ describe("UsageStatsDatabase", () => {
 			expect(fs.existsSync(db._getDbPath())).toBe(true)
 		})
 
+		it("should create the direct task usage projection and task event index", () => {
+			const rawDb = (
+				db as unknown as {
+					db: {
+						prepare: (sql: string) => { all: (...args: unknown[]) => Array<Record<string, unknown>> }
+					}
+				}
+			).db
+
+			const tables = rawDb
+				.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_usage_metadata'")
+				.all()
+			const indexes = rawDb.prepare("PRAGMA index_list('usage_events')").all()
+
+			expect(tables).toHaveLength(1)
+			expect(indexes.some((index) => index.name === "idx_usage_events_task")).toBe(true)
+		})
+
 		it("should be idempotent (calling twice is safe)", () => {
 			expect(() => db.initialize()).not.toThrow()
 		})
@@ -727,6 +745,91 @@ describe("UsageStatsDatabase", () => {
 		})
 	})
 
+	describe("task usage projections", () => {
+		it("should update the direct task exactly once and preserve root-session compatibility", () => {
+			const event = makeEvent({
+				eventId: "evt-task-direct",
+				idempotencyKey: "idem-task-direct",
+				taskId: "child-task",
+				rootTaskId: "root-task",
+				occurredAt: "2026-08-03T10:00:00.000Z",
+				provider: "openrouter",
+				model: "model-child",
+				usage: {
+					totalTokens: { value: 321, source: "provider" },
+					costUsd: { value: 0.123, source: "provider" },
+				},
+			})
+
+			expect(db.append(event).inserted).toBe(true)
+			expect(db.append(event).inserted).toBe(false)
+
+			const taskRows = db.queryTaskUsageByTaskIds(["child-task", "root-task", "no-usage-task"])
+			expect(taskRows.get("child-task")).toMatchObject({
+				taskId: "child-task",
+				totalCost: 0.123,
+				totalTokens: 321,
+				eventCount: 1,
+				model: "model-child",
+				provider: "openrouter",
+			})
+			expect(taskRows.get("no-usage-task")).toEqual({
+				taskId: "no-usage-task",
+				totalCost: 0,
+				totalTokens: 0,
+				eventCount: 0,
+				lastActivity: 0,
+				model: "",
+				provider: "",
+			})
+
+			const rootSession = db.querySessionByRootTaskId("root-task")
+			expect(rootSession?.eventCount).toBe(1)
+			expect(rootSession?.totalTokens).toBe(321)
+		})
+
+		it("should use indexed focused event reads instead of a full event-log read", () => {
+			db.bulkAppend([
+				makeEvent({ eventId: "evt-focused-1", idempotencyKey: "idem-focused-1", taskId: "focus-a" }),
+				makeEvent({ eventId: "evt-focused-2", idempotencyKey: "idem-focused-2", taskId: "other" }),
+				makeEvent({ eventId: "evt-focused-3", idempotencyKey: "idem-focused-3", taskId: "focus-b" }),
+			])
+
+			const events = db.queryEventsByTaskIds(["focus-a", "focus-b"])
+			expect(events.map((event) => event.taskId)).toEqual(["focus-a", "focus-b"])
+
+			const rawDb = (
+				db as unknown as {
+					db: {
+						prepare: (sql: string) => { all: (...args: unknown[]) => Array<Record<string, unknown>> }
+					}
+				}
+			).db
+			const plan = rawDb
+				.prepare("EXPLAIN QUERY PLAN SELECT * FROM usage_events WHERE task_id IN (?, ?) ORDER BY seq ASC")
+				.all("focus-a", "focus-b")
+
+			expect(plan.some((row) => String(row.detail).includes("idx_usage_events_task"))).toBe(true)
+		})
+
+		it("should chunk summary and event queries for task ID sets above SQLite's parameter ceiling", () => {
+			const taskIds = Array.from({ length: 901 }, (_, index) => `chunk-task-${index}`)
+			db.bulkAppend([
+				makeEvent({ eventId: "evt-chunk-first", idempotencyKey: "idem-chunk-first", taskId: taskIds[0] }),
+				makeEvent({ eventId: "evt-chunk-last", idempotencyKey: "idem-chunk-last", taskId: taskIds[900] }),
+			])
+
+			const summaries = db.queryTaskUsageByTaskIds([...taskIds, taskIds[0]])
+			expect(summaries).toHaveLength(901)
+			expect(summaries.get(taskIds[0])?.eventCount).toBe(1)
+			expect(summaries.get(taskIds[900])?.eventCount).toBe(1)
+			expect(summaries.get(taskIds[450])?.eventCount).toBe(0)
+
+			const events = db.queryEventsByTaskIds(taskIds)
+			expect(events.map((event) => event.taskId)).toEqual([taskIds[0], taskIds[900]])
+		})
+	})
+
 	describe("projection atomicity", () => {
 		it("should atomically insert event and update projections in one transaction", () => {
 			const event = makeEvent({
@@ -778,6 +881,36 @@ describe("UsageStatsDatabase", () => {
 
 			const totals = db.queryLifetimeTotals()
 			expect(totals.eventCount).toBe(0)
+		})
+
+		it("should remove task metrics while retaining no task persistence data", () => {
+			db.append(
+				makeEvent({
+					eventId: "evt-clear-task-usage",
+					idempotencyKey: "idem-clear-task-usage",
+					taskId: "task-retained-by-history",
+				}),
+			)
+			expect(db.queryTaskUsageByTaskIds(["task-retained-by-history"]).get("task-retained-by-history")?.eventCount).toBe(1)
+
+			db.clearGeneration()
+
+			expect(db.queryTaskUsageByTaskIds(["task-retained-by-history"])).toEqual(
+				new Map([
+					[
+						"task-retained-by-history",
+						{
+							taskId: "task-retained-by-history",
+							totalCost: 0,
+							totalTokens: 0,
+							eventCount: 0,
+							lastActivity: 0,
+							model: "",
+							provider: "",
+						},
+					],
+				]),
+			)
 		})
 
 		it("should reset migration checkpoint on clear", () => {
@@ -932,6 +1065,60 @@ describe("UsageStatsDatabase", () => {
 	})
 
 	describe("rebuildRollupsFromEvents", () => {
+		it("should rebuild direct task totals and select the later sequence on timestamp ties", () => {
+			const occurredAt = "2026-08-03T10:00:00.000Z"
+			db.bulkAppend([
+				makeEvent({
+					eventId: "evt-rebuild-task-1",
+					idempotencyKey: "idem-rebuild-task-1",
+					taskId: "rebuild-direct-task",
+					rootTaskId: "rebuild-root",
+					occurredAt,
+					provider: "provider-first",
+					model: "model-first",
+					usage: {
+						totalTokens: { value: 100, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-rebuild-task-2",
+					idempotencyKey: "idem-rebuild-task-2",
+					taskId: "rebuild-direct-task",
+					rootTaskId: "rebuild-root",
+					occurredAt,
+					provider: "provider-second",
+					model: "model-second",
+					usage: {
+						totalTokens: { value: 200, source: "provider" },
+						costUsd: { value: 0.02, source: "provider" },
+					},
+				}),
+			])
+
+			const rawDb = (
+				db as unknown as {
+					db: { exec: (sql: string) => void }
+				}
+			).db
+			rawDb.exec("DELETE FROM stats_rollup")
+			rawDb.exec("DELETE FROM session_metadata")
+			rawDb.exec("DELETE FROM task_usage_metadata")
+			rawDb.exec("DELETE FROM session_activity")
+
+			db.rebuildRollupsFromEvents()
+
+			expect(db.queryTaskUsageByTaskIds(["rebuild-direct-task"]).get("rebuild-direct-task")).toEqual({
+				taskId: "rebuild-direct-task",
+				totalCost: 0.03,
+				totalTokens: 300,
+				eventCount: 2,
+				lastActivity: new Date(occurredAt).getTime(),
+				model: "model-second",
+				provider: "provider-second",
+			})
+		})
+
 		it("should rebuild rollups from events after clearing derived tables", () => {
 			const event = makeEvent({
 				eventId: "evt-rebuild-1",
