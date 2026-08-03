@@ -163,7 +163,7 @@ export class MimoHandler extends OpenAiHandler {
 		}
 
 		if (tools && tools.length > 0) {
-			params.tools = this.convertToolsForOpenAI(tools, this.options.openAiToolStrictMode ?? false)
+			params.tools = this.convertToolsForOpenAI(tools)
 		}
 
 		// Honor tool_choice from metadata (OpenAI-compatible passthrough)
