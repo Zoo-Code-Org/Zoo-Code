@@ -149,6 +149,12 @@ const createMockProvider = (service?: Partial<UsageStatsService>): ClineProvider
 			async () => undefined,
 		) as unknown as UsageStatsService["ensureInitialized"]
 	}
+	// resolveTaskRangeMs looks up the stream coordinator through the service.
+	// Default to "no coordinator" (unbounded/all-time range) unless a test
+	// supplies its own coordinator double.
+	if (service !== undefined && !legacyService.getCoordinator) {
+		legacyService.getCoordinator = vi.fn(() => null) as unknown as UsageStatsService["getCoordinator"]
+	}
 
 	let mockService: UsageStatsService | undefined = legacyService as UsageStatsService | undefined
 	if (Object.keys(legacyService).length === 0) {
