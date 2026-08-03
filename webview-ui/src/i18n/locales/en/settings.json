@@ -1041,7 +1041,7 @@
 		"useAzure": "Use Azure",
 		"azureApiVersion": "Set Azure API version",
 		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting.",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.",
 		"gemini": {
 			"freeRequests": "* Free up to {{count}} requests per minute. After that, billing depends on prompt size.",
 			"pricingDetails": "For more info, see pricing details.",

@@ -966,7 +966,7 @@
 			"billingEstimate": "* La facturació és una estimació - el cost exacte depèn de la mida del prompt."
 		},
 		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting."
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "L'extensió obté automàticament la llista més recent de models disponibles a <serviceLink>{{serviceName}}</serviceLink>. Si no esteu segur de quin model triar, Zoo Code funciona millor amb <defaultModelLink>{{defaultModelId}}</defaultModelLink>. També podeu cercar \"free\" per a opcions gratuïtes actualment disponibles.",
