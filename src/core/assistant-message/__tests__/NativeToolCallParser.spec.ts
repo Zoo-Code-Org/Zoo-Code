@@ -4,6 +4,7 @@ describe("NativeToolCallParser", () => {
 	beforeEach(() => {
 		NativeToolCallParser.clearAllStreamingToolCalls()
 		NativeToolCallParser.clearRawChunkState()
+		NativeToolCallParser.clearParseFailures()
 	})
 
 	describe("parseToolCall", () => {
@@ -341,6 +342,72 @@ describe("NativeToolCallParser", () => {
 					expect(nativeArgs.limit).toBe(10)
 				}
 			})
+		})
+	})
+
+	describe("parse failure lifecycle", () => {
+		it("records a failure on malformed JSON and empties both maps via clearParseFailures", () => {
+			const result = NativeToolCallParser.parseToolCall({
+				id: "call_bad_json",
+				name: "read_file",
+				arguments: "{not valid json",
+			})
+
+			expect(result).toBeNull()
+			expect(NativeToolCallParser.hasParseError("call_bad_json")).toBe(true)
+
+			// This is what Task.recursivelyMakeClineRequests invokes when a new
+			// API request starts — the maps must not outlive the stream.
+			NativeToolCallParser.clearParseFailures()
+
+			expect(NativeToolCallParser.hasParseError("call_bad_json")).toBe(false)
+			expect(NativeToolCallParser.consumeParseError("call_bad_json")).toBeUndefined()
+			expect(NativeToolCallParser.consumeParseFailure("call_bad_json")).toBeUndefined()
+		})
+
+		it("clears structural failures (not just JSON syntax failures) via clearParseFailures", () => {
+			// Valid JSON, but missing the required "path" argument.
+			const result = NativeToolCallParser.parseToolCall({
+				id: "call_missing_args",
+				name: "read_file",
+				arguments: "{}",
+			})
+
+			expect(result).toBeNull()
+			expect(NativeToolCallParser.consumeParseFailure("call_missing_args")).toBeDefined()
+
+			// Record another failure and clear everything unconsumed.
+			NativeToolCallParser.parseToolCall({
+				id: "call_missing_args_2",
+				name: "write_to_file",
+				arguments: "{}",
+			})
+
+			NativeToolCallParser.clearParseFailures()
+
+			expect(NativeToolCallParser.hasParseError("call_missing_args")).toBe(false)
+			expect(NativeToolCallParser.hasParseError("call_missing_args_2")).toBe(false)
+			expect(NativeToolCallParser.consumeParseFailure("call_missing_args_2")).toBeUndefined()
+		})
+
+		it("keeps the consume* API working for recorded failures", () => {
+			NativeToolCallParser.parseToolCall({
+				id: "call_consume",
+				name: "read_file",
+				arguments: "{}",
+			})
+
+			const failure = NativeToolCallParser.consumeParseFailure("call_consume")
+			expect(failure).toBeDefined()
+			expect(failure?.kind).toBe("missing_required_arguments")
+			expect(failure?.missingParameters).toEqual(["path"])
+
+			// Consume is atomic — a second read returns undefined.
+			expect(NativeToolCallParser.consumeParseFailure("call_consume")).toBeUndefined()
+
+			// The legacy string side channel is independent and still available.
+			expect(NativeToolCallParser.consumeParseError("call_consume")).toBeDefined()
+			expect(NativeToolCallParser.consumeParseError("call_consume")).toBeUndefined()
 		})
 	})
 })
