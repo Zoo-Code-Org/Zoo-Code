@@ -489,6 +489,145 @@ describe("MimoHandler", () => {
 			expect(textChunks[0].text).toBe("Retried")
 		})
 
+		it("should retry without the strict flag when the endpoint rejects strict tool schemas", async () => {
+			// First call rejects with a 400 error naming the strict field
+			const rejectionError = Object.assign(new Error("400 - Unknown parameter: tools[0].function.strict"), {
+				status: 400,
+			})
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			// Second call (retry) succeeds
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "Read a file",
+						parameters: {
+							type: "object",
+							properties: { path: { type: "string" } },
+							required: ["path"],
+						},
+					},
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: ApiStreamChunk[] = []
+			const stream = handler.createMessage("System prompt", messages, { taskId: "test-task", tools })
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+
+			// First call sent tools with the strict flag applied
+			const firstCallParams = mockCreate.mock.calls[0][0]
+			expect(firstCallParams.tools[0].function).toHaveProperty("strict")
+
+			// Retry stripped the strict flag but kept the original schema
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.tools).toHaveLength(1)
+			expect(retryCallParams.tools[0].function.name).toBe("read_file")
+			expect(retryCallParams.tools[0].function).not.toHaveProperty("strict")
+			expect(retryCallParams.tools[0].function.parameters).toEqual({
+				type: "object",
+				properties: { path: { type: "string" } },
+				required: ["path"],
+			})
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks[0].text).toBe("Retried")
+		})
+
+		it("should retry without the strict flag when the endpoint rejects hardened schema fields", async () => {
+			// 400 naming additionalProperties in a tools context
+			const rejectionError = Object.assign(
+				new Error("400 - Invalid tools: additionalProperties is not a supported field"),
+				{ status: 400 },
+			)
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, { taskId: "test-task", tools })
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.tools[0].function).not.toHaveProperty("strict")
+		})
+
+		it("should not retry schema-unrelated 400 errors", async () => {
+			// A 400 about reasoning_content (not tool schemas) must NOT trigger
+			// the strict-schema fallback.
+			const rejectionError = Object.assign(
+				new Error("400 - reasoning_content is required in multi-turn tool call conversations"),
+				{ status: 400 },
+			)
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, { taskId: "test-task", tools })
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
 		it("should send stream_options with include_usage", async () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
