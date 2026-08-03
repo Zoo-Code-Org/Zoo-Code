@@ -93,6 +93,7 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 				deleteMany: vi.fn().mockResolvedValue(undefined),
 				reconcile: vi.fn().mockResolvedValue(undefined),
 				initialized: Promise.resolve(),
+				onDidChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 			}
 		}),
 	}
@@ -100,7 +101,7 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 
 vi.mock("vscode", () => {
 	const mockDisposable = { dispose: vi.fn() }
-	const mockEventEmitter = { event: vi.fn(), fire: vi.fn() }
+	const mockEventEmitter = { event: vi.fn(), fire: vi.fn(), dispose: vi.fn() }
 	const mockTextDocument = { uri: { fsPath: "/mock/workspace/path/file.ts" } }
 	const mockTextEditor = { document: mockTextDocument }
 	const mockTab = { input: { uri: { fsPath: "/mock/workspace/path/file.ts" } } }

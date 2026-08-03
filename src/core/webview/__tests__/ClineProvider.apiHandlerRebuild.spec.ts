@@ -42,6 +42,13 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	EventEmitter: vi.fn().mockImplementation(function () {
+		return {
+			event: vi.fn(() => ({ dispose: vi.fn() })),
+			fire: vi.fn(),
+			dispose: vi.fn(),
+		}
+	}),
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),

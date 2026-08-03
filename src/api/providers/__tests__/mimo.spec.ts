@@ -710,10 +710,10 @@ describe("MimoHandler", () => {
 			expect(textChunks).toHaveLength(0)
 		})
 
-		it("should handle multiple tool calls in single response", async () => {
-			mockCreate.mockImplementationOnce(async () =>
-				asyncStreamFrom([
-					{
+		it("should suppress parallel tool calls, keeping only the first", async () => {
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
 						choices: [
 							{
 								delta: {
@@ -734,8 +734,8 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					},
-					{
+					}
+					yield {
 						choices: [
 							{
 								delta: {
@@ -748,13 +748,13 @@ describe("MimoHandler", () => {
 							},
 						],
 						usage: null,
-					},
-					{
+					}
+					yield {
 						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
 						usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-					},
-				]),
-			)
+					}
+				},
+			}))
 
 			const tools: any[] = [
 				{
@@ -771,14 +771,19 @@ describe("MimoHandler", () => {
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks = await collectStream(handler.createMessage("System", messages, { taskId: "test", tools }))
+			const chunks: any[] = []
+			const stream = handler.createMessage("System", messages, { taskId: "test", tools })
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
 
 			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			const readChunks = toolChunks.filter((c) => c.name === "read_file")
 			const listChunks = toolChunks.filter((c) => c.name === "list_files")
 			expect(readChunks.length).toBeGreaterThan(0)
-			expect(listChunks.length).toBeGreaterThan(0)
+			expect(listChunks.length).toBe(0)
 		})
+
 
 		it("should handle stream interruption gracefully", async () => {
 			mockCreate.mockImplementationOnce(async () =>

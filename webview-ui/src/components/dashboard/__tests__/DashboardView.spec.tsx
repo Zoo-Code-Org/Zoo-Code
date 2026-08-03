@@ -257,7 +257,7 @@ describe("DashboardView (streaming)", () => {
 				)
 			})
 
-			const { getByRole, getByTestId, findByRole } = render(<DashboardView onDone={() => {}} />)
+			const { getByTestId, findByRole } = render(<DashboardView onDone={() => {}} />)
 			act(() => {
 				setConnectedState({
 					tasks: {
@@ -279,9 +279,7 @@ describe("DashboardView (streaming)", () => {
 			})
 			fireEvent.click(await findByRole("button", { name: "task-race" }))
 
-			await waitFor(() =>
-				expect(getByTestId("task-detail-task-race").textContent).toBe("Loaded before render"),
-			)
+			await waitFor(() => expect(getByTestId("task-detail-task-race").textContent).toBe("Loaded before render"))
 		})
 	})
 

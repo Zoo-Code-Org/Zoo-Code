@@ -389,11 +389,6 @@
 			"count": 2
 		}
 	},
-	"api/providers/mimo.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
 	"api/providers/moonshot.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1

@@ -151,7 +151,7 @@ vi.mock("vscode", () => ({
 	WebviewView: vi.fn(),
 	EventEmitter: vi.fn().mockImplementation(function () {
 		return {
-			event: vi.fn(),
+			event: vi.fn(() => ({ dispose: vi.fn() })),
 			fire: vi.fn(),
 			dispose: vi.fn(),
 		}

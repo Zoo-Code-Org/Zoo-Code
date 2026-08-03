@@ -1,9 +1,23 @@
 // Mock VSCode API for Vitest tests
-const mockEventEmitter = () => ({
-	event: () => () => {},
-	fire: () => {},
-	dispose: () => {},
-})
+// Must be a class (not a factory) so `new vscode.EventEmitter<T>()` works,
+// matching the real VS Code API shape.
+const mockEventEmitter = class {
+	constructor() {
+		this.listeners = new Set()
+		this.event = (listener) => {
+			this.listeners.add(listener)
+			return { dispose: () => this.listeners.delete(listener) }
+		}
+	}
+	fire(data) {
+		for (const listener of this.listeners) {
+			listener(data)
+		}
+	}
+	dispose() {
+		this.listeners.clear()
+	}
+}
 
 const mockDisposable = {
 	dispose: () => {},
