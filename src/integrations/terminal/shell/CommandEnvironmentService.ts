@@ -41,6 +41,8 @@ export interface CommandEnvironmentSettings {
 	terminalProfile?: string
 	/** CLI override (highest priority, ephemeral). */
 	cliOverride?: string
+	/** Whether VS Code shell integration is disabled. */
+	terminalShellIntegrationDisabled?: boolean
 }
 
 /**
@@ -140,9 +142,9 @@ export class CommandEnvironmentService {
 
 		// Create the primary invocation plan.
 		// Provider selection mirrors the legacy getTerminalProviderForExecution
-		// logic: use "vscode" for the integrated terminal when the shell family
-		// is not cmd.exe (which requires execa for reliable fallback).
-		const primaryProvider = primaryShell.family === "cmd" ? "execa" : "vscode"
+		// logic: disabled shell integration and cmd.exe require the Inline Terminal.
+		const primaryProvider =
+			settings.terminalShellIntegrationDisabled || primaryShell.family === "cmd" ? "execa" : "vscode"
 		const primaryPlan = ShellInvocationAdapter.createPlan(
 			primaryShell,
 			"", // Command is filled at execution time by ExecaTerminalProcess.
