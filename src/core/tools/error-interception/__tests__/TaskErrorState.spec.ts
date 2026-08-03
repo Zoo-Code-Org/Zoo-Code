@@ -169,3 +169,42 @@ describe("hasTaskErrorState", () => {
 		expect(hasTaskErrorState(taskB)).toBe(false)
 	})
 })
+
+describe("non-object key guards", () => {
+	// Double assertions are required below to simulate the caller mistake these
+	// guards protect against: passing a primitive (e.g. a string taskId) or
+	// null/undefined where a Task object is expected. There is no typed way to
+	// express that mistake.
+
+	it("getTaskErrorState returns an ephemeral state for a primitive key instead of throwing", () => {
+		const notATask = "task-id" as unknown as object
+		expect(() => getTaskErrorState(notATask)).not.toThrow()
+		// Ephemeral: nothing is stored in the WeakMap for invalid keys.
+		expect(hasTaskErrorState(notATask)).toBe(false)
+	})
+
+	it("getTaskErrorState returns a fresh ephemeral instance per call for invalid keys", () => {
+		const notATask = "task-id" as unknown as object
+		expect(getTaskErrorState(notATask)).not.toBe(getTaskErrorState(notATask))
+	})
+
+	it("getTaskErrorState tolerates null and undefined keys", () => {
+		expect(() => getTaskErrorState(null as unknown as object)).not.toThrow()
+		expect(() => getTaskErrorState(undefined as unknown as object)).not.toThrow()
+	})
+
+	it("hasTaskErrorState returns false for primitive and nullish keys", () => {
+		expect(hasTaskErrorState("task-id" as unknown as object)).toBe(false)
+		expect(hasTaskErrorState(42 as unknown as object)).toBe(false)
+		expect(hasTaskErrorState(null as unknown as object)).toBe(false)
+		expect(hasTaskErrorState(undefined as unknown as object)).toBe(false)
+	})
+
+	it("still works normally for object keys after guarded calls", () => {
+		const task = { id: "task-after-guard" }
+		getTaskErrorState("task-id" as unknown as object).incrementOccurrence("PARAM_MISSING")
+		expect(getTaskErrorState(task).getOccurrence("PARAM_MISSING")).toBe(0)
+		getTaskErrorState(task).incrementOccurrence("PARAM_MISSING")
+		expect(getTaskErrorState(task).getOccurrence("PARAM_MISSING")).toBe(1)
+	})
+})

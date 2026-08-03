@@ -90,15 +90,16 @@ export class ToolErrorInterceptor {
 	 * Creates or returns existing per-task state. Uses a WeakMap keyed by the
 	 * Task object so state is discarded when the task is garbage collected.
 	 *
-	 * When `task` is null or undefined (invalid WeakMap key), returns an
-	 * ephemeral default state to satisfy the fail-open philosophy rather than
-	 * throwing TypeError from WeakMap.set().
+	 * When `task` is not a valid WeakMap key (null, undefined, or a primitive
+	 * such as a string taskId — an easy mistake since InterceptorOptions.taskId
+	 * is a string), returns an ephemeral default state to satisfy the fail-open
+	 * philosophy rather than throwing TypeError from WeakMap.set().
 	 */
 	public getTaskState(task: object): InterceptorTaskState {
-		// WeakMap keys must be objects; null/undefined are invalid and would
-		// throw TypeError on .set(). Fail-open: return an ephemeral default
-		// state so callers can proceed without crashing.
-		if (!task) {
+		// WeakMap keys must be objects (or functions); primitives are invalid
+		// and would throw TypeError on .set(). Fail-open: return an ephemeral
+		// default state so callers can proceed without crashing.
+		if (!task || (typeof task !== "object" && typeof task !== "function")) {
 			return { categoryCounts: new Map(), shellCircuitOpen: false }
 		}
 		let taskState = this.state.perTask.get(task)

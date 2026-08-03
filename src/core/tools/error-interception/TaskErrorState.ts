@@ -144,11 +144,27 @@ export class TaskErrorState {
 const taskStates = new WeakMap<object, TaskErrorState>()
 
 /**
+ * Returns true when the argument can be used as a WeakMap key. Primitives
+ * (including string taskIds, an easy mistake) and null/undefined cannot.
+ */
+function isWeakMapKey(task: object): boolean {
+	return !!task && (typeof task === "object" || typeof task === "function")
+}
+
+/**
  * Returns the persistent TaskErrorState for the given Task, creating it on
  * first access. The Task argument is typed as object to keep this module
  * decoupled from the concrete Task class.
+ *
+ * Non-object keys (null/undefined/primitives) fail open with an ephemeral
+ * instance instead of throwing TypeError from WeakMap.set(); ephemeral
+ * instances are never stored, so counters do not persist across calls for
+ * invalid keys.
  */
 export function getTaskErrorState(task: object): TaskErrorState {
+	if (!isWeakMapKey(task)) {
+		return new TaskErrorState()
+	}
 	let state = taskStates.get(task)
 	if (!state) {
 		state = new TaskErrorState()
@@ -160,8 +176,12 @@ export function getTaskErrorState(task: object): TaskErrorState {
 /**
  * Returns true when a TaskErrorState already exists for the given Task,
  * without materializing a new instance. Use this to guard reset paths that
- * must not create empty state as a side effect.
+ * must not create empty state as a side effect. Returns false for keys that
+ * cannot be stored in the WeakMap.
  */
 export function hasTaskErrorState(task: object): boolean {
+	if (!isWeakMapKey(task)) {
+		return false
+	}
 	return taskStates.has(task)
 }
