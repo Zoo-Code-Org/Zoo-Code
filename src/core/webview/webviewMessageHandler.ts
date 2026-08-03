@@ -110,6 +110,7 @@ import {
 	handleRequestClearNonce,
 	handleGetDashboardSessions,
 	handleGetDashboardSessionDetail,
+	handleGetDashboardTaskDetail,
 	handleSubscribeDashboardStats,
 	handleUnsubscribeDashboardStats,
 	handleReplaceDashboardStatsSubscription,
@@ -117,6 +118,7 @@ import {
 	handleResumeDashboardStats,
 	handleResyncDashboardStats,
 	handleGetDashboardSessionPage,
+	handleGetDashboardTaskPage,
 } from "./usageStatsMessageHandler"
 
 export const webviewMessageHandler = async (
@@ -889,6 +891,9 @@ export const webviewMessageHandler = async (
 		case "getDashboardSessionDetail":
 			await handleGetDashboardSessionDetail(provider, message)
 			break
+		case "getDashboardTaskDetail":
+			await handleGetDashboardTaskDetail(provider, message)
+			break
 		// ── Dashboard Stats Stream Handlers ────────────────────────────────
 		case "subscribeDashboardStats":
 			await handleSubscribeDashboardStats(provider, message)
@@ -910,6 +915,9 @@ export const webviewMessageHandler = async (
 			break
 		case "getDashboardSessionPage":
 			await handleGetDashboardSessionPage(provider, message)
+			break
+		case "getDashboardTaskPage":
+			await handleGetDashboardTaskPage(provider, message)
 			break
 		case "showTaskWithId":
 			await provider.showTaskWithId(message.text!)

@@ -86,6 +86,7 @@ import type { IndexProgressUpdate } from "../../services/code-index/interfaces/m
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 import { UsageStatsService } from "../../services/stats"
+import { DashboardTaskCatalog } from "../../services/stats/DashboardTaskCatalog"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -186,6 +187,7 @@ export class ClineProvider
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
 	private usageStatsService?: UsageStatsService
+	private readonly dashboardTaskCatalog: DashboardTaskCatalog
 	private marketplaceManager: MarketplaceManager
 	private mdmService?: MdmService
 	private taskCreationCallback: (task: Task) => void
@@ -308,6 +310,7 @@ export class ClineProvider
 				this.scheduleGlobalStateWriteThrough()
 			},
 		})
+		this.dashboardTaskCatalog = new DashboardTaskCatalog(this.taskHistoryStore)
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
@@ -360,7 +363,7 @@ export class ClineProvider
 		// and stats handlers return "service unavailable" errors gracefully.
 		try {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
-			this.usageStatsService = new UsageStatsService(globalStoragePath)
+			this.usageStatsService = new UsageStatsService(globalStoragePath, this.dashboardTaskCatalog)
 			this.usageStatsService.initialize().catch((error) => {
 				this.log(`Failed to initialize Usage Stats Service: ${error}`)
 				this.usageStatsService = undefined
@@ -837,6 +840,7 @@ export class ClineProvider
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
 		this.usageStatsService?.dispose()
+		this.dashboardTaskCatalog.dispose()
 		this.taskHistoryStore.dispose()
 		this.flushGlobalStateWriteThrough()
 		this.log("Disposed all disposables")

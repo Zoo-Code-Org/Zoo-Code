@@ -22,6 +22,7 @@ import type { UsageStatsService, JsonExport } from "../../services/stats"
 import { StatsServiceError } from "../../services/stats"
 import type { UsageStatsStreamCoordinator, StatsStreamSink } from "../../services/stats"
 import { getEffectiveCost } from "../../services/stats/costRecalculation"
+import { computeTaskDetail, computeTaskPage } from "../../services/stats/DashboardTaskProjection"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 
@@ -973,6 +974,56 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 	}
 }
 
+/**
+ * Handles a History-first task detail request using only the requested subtree.
+ * A known task with no usage remains a successful zero-detail response.
+ */
+export async function handleGetDashboardTaskDetail(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const requestId = message.requestId
+	const taskId = message.taskId ?? message.text
+
+	if (!taskId || typeof taskId !== "string") {
+		await provider.postMessageToWebview({
+			type: "dashboardTaskDetailResponse",
+			requestId,
+			dashboardTaskDetail: null,
+			error: "[STATS_HANDLER/taskDetail/001] Missing or invalid taskId",
+		})
+		return
+	}
+
+	try {
+		const service = provider.getUsageStatsService()
+		await service?.ensureInitialized()
+		const database = service?.getDatabase()
+		const taskCatalog = service?.getTaskCatalog()
+		if (!database || !taskCatalog) {
+			await provider.postMessageToWebview({
+				type: "dashboardTaskDetailResponse",
+				requestId,
+				dashboardTaskDetail: null,
+				error: "[STATS_HANDLER/taskDetail/002] Task dashboard service is unavailable",
+			})
+			return
+		}
+
+		await provider.postMessageToWebview({
+			type: "dashboardTaskDetailResponse",
+			requestId,
+			dashboardTaskDetail: computeTaskDetail(taskCatalog, database, taskId, requestId ?? ""),
+		})
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		provider.log(`[STATS_HANDLER/taskDetail/003] Error querying dashboard task detail: ${errorMessage}`)
+		await provider.postMessageToWebview({
+			type: "dashboardTaskDetailResponse",
+			requestId,
+			dashboardTaskDetail: null,
+			error: `[STATS_HANDLER/taskDetail/003] Failed to query task detail: ${errorMessage}`,
+		})
+	}
+}
+
 // ── Dashboard Stats Stream Handlers ──────────────────────────────────────────
 
 /**
@@ -1336,6 +1387,48 @@ export async function handleGetDashboardSessionPage(provider: ClineProvider, mes
 				requestId: requestId ?? "",
 				code: "STATS_HANDLER/stream/005",
 				message: `[STATS_HANDLER/stream/005] Failed to fetch session page: ${errorMessage}`,
+			},
+		})
+	}
+}
+
+/** Fetches a task page through the same History-first projection as stream snapshots. */
+export async function handleGetDashboardTaskPage(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const requestId = message.requestId
+	const limit = message.dashboardTaskLimit
+	if (typeof limit !== "number" || limit < 1 || limit > 100) {
+		await provider.postMessageToWebview({
+			type: "dashboardStatsStreamError",
+			dashboardStatsStreamError: {
+				requestId: requestId ?? "",
+				code: "STATS_HANDLER/taskPage/001",
+				message: "[STATS_HANDLER/taskPage/001] Invalid or missing page limit (must be 1-100)",
+			},
+		})
+		return
+	}
+
+	try {
+		const service = provider.getUsageStatsService()
+		await service?.ensureInitialized()
+		const database = service?.getDatabase()
+		const taskCatalog = service?.getTaskCatalog()
+		if (!database || !taskCatalog) {
+			throw new Error("[STATS_HANDLER/taskPage/002] Task dashboard service is unavailable")
+		}
+		await provider.postMessageToWebview({
+			type: "dashboardTaskPageResponse",
+			dashboardTaskPage: computeTaskPage(taskCatalog, database, requestId ?? "", message.dashboardTaskCursor, limit),
+		})
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		provider.log(`[STATS_HANDLER/taskPage/003] Error fetching dashboard task page: ${errorMessage}`)
+		await provider.postMessageToWebview({
+			type: "dashboardStatsStreamError",
+			dashboardStatsStreamError: {
+				requestId: requestId ?? "",
+				code: "STATS_HANDLER/taskPage/003",
+				message: `[STATS_HANDLER/taskPage/003] Failed to fetch task page: ${errorMessage}`,
 			},
 		})
 	}

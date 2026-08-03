@@ -21,6 +21,8 @@ import type {
 	DashboardStatsSubscription,
 	DashboardStatsSnapshot,
 	DashboardStatsDelta,
+	DashboardTaskStatsDelta,
+	DashboardTaskStatsSnapshot,
 	DashboardStatsError,
 	UsageEventV1,
 	StatsQuery,
@@ -33,6 +35,8 @@ import {
 	computeHeatmapSnapshot,
 	applyEventToProjection,
 } from "./UsageStatsProjection"
+import { computeTaskPage, computeTaskSummaries } from "./DashboardTaskProjection"
+import type { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import { resolveTimeRange } from "./UsageAggregator"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
@@ -79,6 +83,8 @@ interface SubscriptionState {
 	paused: boolean
 	/** Whether the subscriber has received its initial snapshot. */
 	snapshotSent: boolean
+	/** Task IDs currently represented by this subscriber's snapshot page. */
+	visibleTaskIds: ReadonlySet<string>
 }
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -94,6 +100,9 @@ const COALESCE_MS = 50
 
 /** Maximum coalescing delay before forced flush (100 ms). */
 const MAX_COALESCE_MS = 100
+
+/** Coalesces catalog changes into one replacement snapshot per mutation burst. */
+const CATALOG_SNAPSHOT_DEBOUNCE_MS = 50
 
 /** Rollover check interval in milliseconds (checks every 30 seconds). */
 const ROLLOVER_CHECK_MS = 30_000
@@ -119,6 +128,9 @@ export class UsageStatsStreamCoordinator {
 	/** Pending drain timer (coalescing). */
 	private drainTimer: ReturnType<typeof setTimeout> | null = null
 
+	/** Pending full replacement snapshot after a catalog revision. */
+	private catalogSnapshotTimer: ReturnType<typeof setTimeout> | null = null
+
 	/** First notification timestamp in the current coalescing window. */
 	private coalesceWindowStart: number = 0
 
@@ -143,9 +155,16 @@ export class UsageStatsStreamCoordinator {
 	/** Optional recording-paused flag provider. */
 	private readonly recordingPausedProvider?: () => boolean
 
-	constructor(database: UsageStatsDatabase | null, options?: { recordingPaused?: () => boolean }) {
+	/** Optional History-first catalog. Undefined preserves legacy stream compatibility. */
+	private readonly taskCatalog?: DashboardTaskCatalog
+
+	constructor(
+		database: UsageStatsDatabase | null,
+		options?: { recordingPaused?: () => boolean; taskCatalog?: DashboardTaskCatalog },
+	) {
 		this.database = database
 		this.recordingPausedProvider = options?.recordingPaused
+		this.taskCatalog = options?.taskCatalog
 
 		// Start rollover checker
 		this.rolloverTimer = setInterval(() => this.checkRollover(), ROLLOVER_CHECK_MS)
@@ -175,6 +194,7 @@ export class UsageStatsStreamCoordinator {
 			generation,
 			paused: false,
 			snapshotSent: false,
+			visibleTaskIds: new Set(),
 		}
 
 		this.subscriptions.set(sink, state)
@@ -272,6 +292,11 @@ export class UsageStatsStreamCoordinator {
 			this.drainTimer = null
 		}
 
+		if (this.catalogSnapshotTimer) {
+			clearTimeout(this.catalogSnapshotTimer)
+			this.catalogSnapshotTimer = null
+		}
+
 		if (this.rolloverTimer) {
 			clearInterval(this.rolloverTimer)
 			this.rolloverTimer = null
@@ -300,6 +325,26 @@ export class UsageStatsStreamCoordinator {
 		if (this.subscriptions.size === 0) return
 
 		this.scheduleDrain()
+	}
+
+	/**
+	 * Schedules one authoritative page replacement after a History catalog
+	 * revision. The catalog cursor embeds the revision, so a replacement prevents
+	 * old cursors from mixing rows with the new catalog ordering.
+	 */
+	notifyTaskCatalogChanged(): void {
+		if (this.disposed || this.subscriptions.size === 0 || !this.taskCatalog) return
+		if (this.catalogSnapshotTimer) {
+			clearTimeout(this.catalogSnapshotTimer)
+		}
+		this.catalogSnapshotTimer = setTimeout(() => {
+			this.catalogSnapshotTimer = null
+			for (const state of this.subscriptions.values()) {
+				if (!state.paused) {
+					this.sendSnapshot(state)
+				}
+			}
+		}, CATALOG_SNAPSHOT_DEBOUNCE_MS)
 	}
 
 	/**
@@ -399,10 +444,10 @@ export class UsageStatsStreamCoordinator {
 				}
 
 				// Compute deltas for each unseen event
-				const deltas: DashboardStatsDelta[] = []
+				const deltas: Array<DashboardStatsDelta | DashboardTaskStatsDelta> = []
 				for (const event of unseenEvents) {
 					try {
-						const delta = applyEventToProjection(
+						const legacyDelta = applyEventToProjection(
 							this.database,
 							event,
 							sub.subscription.range,
@@ -411,7 +456,20 @@ export class UsageStatsStreamCoordinator {
 							sub.generation,
 							event.sequence,
 						)
-						deltas.push(delta)
+						if (this.taskCatalog) {
+							const ancestorTaskIds = this.taskCatalog.ancestorsByTaskId.get(event.taskId) ?? []
+							const affectedTaskIds = [
+								event.taskId,
+								...ancestorTaskIds.filter((taskId) => sub.visibleTaskIds.has(taskId)),
+							]
+							const { sessionUpsert: _sessionUpsert, ...taskDelta } = legacyDelta
+							deltas.push({
+								...taskDelta,
+								taskUpsert: computeTaskSummaries(this.taskCatalog, this.database, affectedTaskIds),
+							})
+						} else {
+							deltas.push(legacyDelta)
+						}
 					} catch (err) {
 						console.warn(
 							`[UsageStatsStreamCoordinator] Failed to compute delta for event ${event.eventId}:`,
@@ -467,27 +525,33 @@ export class UsageStatsStreamCoordinator {
 
 			// 1. Assemble the snapshot from whatever data currently exists
 			const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
-			const sessions = computeSessionPage(
-				this.database,
-				state.subscription.requestId,
-				undefined,
-				state.subscription.sessionPageSize,
-			)
 			const heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
 
 			// 2. Get current generation and sequence
 			const generation = this.database.getGeneration()
 			const sequence = this.database.getLastSequence()
 
-			const snapshot: DashboardStatsSnapshot = {
-				requestId: state.subscription.requestId,
-				generation,
-				sequence,
-				stats,
-				sessions,
-				cursor: sessions.cursor,
-				heatmap,
-			}
+			const snapshot: DashboardStatsSnapshot | DashboardTaskStatsSnapshot = this.taskCatalog
+				? (() => {
+						const tasks = computeTaskPage(
+							this.taskCatalog!,
+							this.database!,
+							state.subscription.requestId,
+							undefined,
+							state.subscription.sessionPageSize,
+						)
+						state.visibleTaskIds = new Set(tasks.tasks.map((task) => task.taskId))
+						return { requestId: state.subscription.requestId, generation, sequence, stats, tasks, cursor: tasks.cursor, heatmap }
+					})()
+				: (() => {
+						const sessions = computeSessionPage(
+							this.database!,
+							state.subscription.requestId,
+							undefined,
+							state.subscription.sessionPageSize,
+						)
+						return { requestId: state.subscription.requestId, generation, sequence, stats, sessions, cursor: sessions.cursor, heatmap }
+					})()
 
 			state.generation = generation
 			state.lastSequence = sequence
@@ -538,7 +602,7 @@ export class UsageStatsStreamCoordinator {
 	 * Uses setImmediate to yield the event loop before the rebuild starts,
 	 * allowing pending I/O (including the snapshot postMessage) to flush.
 	 */
-	private scheduleAsyncRebuild(triggerState: SubscriptionState): void {
+	private scheduleAsyncRebuild(_triggerState: SubscriptionState): void {
 		this.rebuildInFlight = true
 
 		setImmediate(() => {
@@ -560,12 +624,6 @@ export class UsageStatsStreamCoordinator {
 						const recordingPaused = this.recordingPausedProvider?.() ?? false
 
 						const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
-						const sessions = computeSessionPage(
-							this.database,
-							state.subscription.requestId,
-							undefined,
-							state.subscription.sessionPageSize,
-						)
 						const heatmap = computeHeatmapSnapshot(
 							this.database,
 							state.subscription.heatmapRangeDays,
@@ -575,15 +633,27 @@ export class UsageStatsStreamCoordinator {
 						const generation = this.database.getGeneration()
 						const sequence = this.database.getLastSequence()
 
-						const updatedSnapshot: DashboardStatsSnapshot = {
-							requestId: state.subscription.requestId,
-							generation,
-							sequence,
-							stats,
-							sessions,
-							cursor: sessions.cursor,
-							heatmap,
-						}
+						const updatedSnapshot: DashboardStatsSnapshot | DashboardTaskStatsSnapshot = this.taskCatalog
+							? (() => {
+									const tasks = computeTaskPage(
+										this.taskCatalog!,
+										this.database!,
+										state.subscription.requestId,
+										undefined,
+										state.subscription.sessionPageSize,
+									)
+									state.visibleTaskIds = new Set(tasks.tasks.map((task) => task.taskId))
+									return { requestId: state.subscription.requestId, generation, sequence, stats, tasks, cursor: tasks.cursor, heatmap }
+								})()
+							: (() => {
+									const sessions = computeSessionPage(
+										this.database!,
+										state.subscription.requestId,
+										undefined,
+										state.subscription.sessionPageSize,
+									)
+									return { requestId: state.subscription.requestId, generation, sequence, stats, sessions, cursor: sessions.cursor, heatmap }
+								})()
 
 						state.generation = generation
 						state.lastSequence = sequence
@@ -613,7 +683,7 @@ export class UsageStatsStreamCoordinator {
 	 * Sends a delta message to a subscriber.
 	 * If postMessage throws, the subscriber is marked for snapshot fallback.
 	 */
-	private sendDelta(state: SubscriptionState, delta: DashboardStatsDelta): void {
+	private sendDelta(state: SubscriptionState, delta: DashboardStatsDelta | DashboardTaskStatsDelta): void {
 		try {
 			this.postMessage(state, {
 				type: "dashboardStatsStreamDelta",

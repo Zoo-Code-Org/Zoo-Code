@@ -6,6 +6,7 @@ import { UsageAggregator, startOfDayInTimezone } from "./UsageAggregator"
 import { UsageStatsDatabase } from "./UsageStatsDatabase"
 import { UsageStatsMigration } from "./UsageStatsMigration"
 import { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
+import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 
 // ── Export Format ───────────────────────────────────────────────────────────
 
@@ -97,9 +98,13 @@ export class UsageStatsService {
 	private readonly aggregator: UsageAggregator
 	private readonly storageDir: string
 	private readonly database: UsageStatsDatabase
+	/** Read-only History-first task catalog supplied by the extension host. */
+	private readonly taskCatalog?: DashboardTaskCatalog
 
 	/** Demand-driven host stream coordinator for dashboard stats. */
 	private coordinator: UsageStatsStreamCoordinator | null = null
+	/** Releases the catalog change listener owned by this service. */
+	private taskCatalogSubscription: vscode.Disposable | null = null
 
 	/** Nonce for clear verification (short-lived) */
 	private clearNonce: string | null = null
@@ -117,11 +122,12 @@ export class UsageStatsService {
 	 */
 	private readonly changeListeners: Array<() => void> = []
 
-	constructor(globalStoragePath: string) {
+	constructor(globalStoragePath: string, taskCatalog?: DashboardTaskCatalog) {
 		this.storageDir = globalStoragePath
 		this.database = new UsageStatsDatabase(this.getStatsDir(globalStoragePath))
 		this.store = new UsageEventStore(globalStoragePath, this.database)
 		this.aggregator = new UsageAggregator()
+		this.taskCatalog = taskCatalog
 	}
 
 	// ── Public API ──────────────────────────────────────────────────────────
@@ -141,6 +147,12 @@ export class UsageStatsService {
 	}
 
 	private async doInitialize(): Promise<void> {
+		// The catalog is a History-store projection. Do not construct the stream
+		// until its source has completed initialization, otherwise the first page
+		// can race the initial history reconciliation.
+		await this.taskCatalog?.sourceInitialized
+		this.taskCatalog?.rebuild()
+
 		// Initialize the SQLite database
 		try {
 			this.database.initialize()
@@ -171,8 +183,12 @@ export class UsageStatsService {
 
 		this.setupFileWatcher()
 
-		// Create the stream coordinator after the database is initialized
-		this.coordinator = new UsageStatsStreamCoordinator(this.database._isInitialized() ? this.database : null)
+		// Create the stream coordinator only after both the database and catalog
+		// are readable. The catalog remains read-only from the stats boundary.
+		this.coordinator = new UsageStatsStreamCoordinator(this.database._isInitialized() ? this.database : null, {
+			taskCatalog: this.taskCatalog,
+		})
+		this.taskCatalogSubscription = this.taskCatalog?.onDidChange(() => this.coordinator?.notifyTaskCatalogChanged()) ?? null
 	}
 
 	async ensureInitialized(): Promise<void> {
@@ -184,9 +200,11 @@ export class UsageStatsService {
 	/**
 	 * Disposes the service, releasing the file system watcher and database.
 	 */
-	dispose(): void {
+		dispose(): void {
 		this.coordinator?.dispose()
 		this.coordinator = null
+		this.taskCatalogSubscription?.dispose()
+		this.taskCatalogSubscription = null
 		this.watcher?.dispose()
 		this.watcher = null
 		this.changeListeners.length = 0
@@ -199,6 +217,11 @@ export class UsageStatsService {
 	 */
 	getDatabase(): UsageStatsDatabase | null {
 		return this.database._isInitialized() ? this.database : null
+	}
+
+	/** Returns the injected read-only History-first Dashboard task catalog, when configured by the host. */
+	getTaskCatalog(): DashboardTaskCatalog | undefined {
+		return this.taskCatalog
 	}
 
 	/**

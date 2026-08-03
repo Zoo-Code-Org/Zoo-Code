@@ -9,6 +9,17 @@ import type { UsageEventV1, StatsQuery } from "@roo-code/types"
 import { UsageStatsService, StatsServiceError } from "../UsageStatsService"
 import { StatsStoreError } from "../UsageEventStore"
 
+vi.mock("vscode", () => ({
+	workspace: {
+		createFileSystemWatcher: vi.fn(() => ({
+			onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
+			onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
+			onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
+			dispose: vi.fn(),
+		})),
+	},
+}))
+
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
 /**
@@ -99,6 +110,46 @@ describe("UsageStatsService", () => {
 		it("should be idempotent (calling initialize twice does not throw)", async () => {
 			// Second call is a no-op
 			await expect(service.initialize()).resolves.toBeUndefined()
+		})
+
+		it("waits for the injected catalog source before creating the coordinator", async () => {
+			let resolveSourceInitialization: (() => void) | undefined
+			const sourceInitialized = new Promise<void>((resolve) => {
+				resolveSourceInitialization = resolve
+			})
+			const onDidChange = vi.fn(() => ({ dispose: vi.fn() }))
+			const catalog = {
+				sourceInitialized,
+				rebuild: vi.fn(),
+				onDidChange,
+			} as any
+			const delayedService = new UsageStatsService(tempDir, catalog)
+			const initialization = delayedService.initialize()
+
+			await Promise.resolve()
+			expect(catalog.rebuild).not.toHaveBeenCalled()
+			resolveSourceInitialization!()
+			await initialization
+
+			expect(catalog.rebuild).toHaveBeenCalledOnce()
+			expect(onDidChange).toHaveBeenCalledOnce()
+			expect(delayedService.getTaskCatalog()).toBe(catalog)
+			delayedService.dispose()
+		})
+
+		it("disposes the injected catalog listener with the service", async () => {
+			const catalogSubscription = { dispose: vi.fn() }
+			const catalog = {
+				sourceInitialized: Promise.resolve(),
+				rebuild: vi.fn(),
+				onDidChange: vi.fn(() => catalogSubscription),
+			} as any
+			const catalogService = new UsageStatsService(tempDir, catalog)
+			await catalogService.initialize()
+
+			catalogService.dispose()
+
+			expect(catalogSubscription.dispose).toHaveBeenCalledOnce()
 		})
 	})
 

@@ -54,6 +54,8 @@ import {
 	handleResumeDashboardStats,
 	handleResyncDashboardStats,
 	handleGetDashboardSessionPage,
+	handleGetDashboardTaskDetail,
+	handleGetDashboardTaskPage,
 } from "../usageStatsMessageHandler"
 
 // ── Test Fixtures ────────────────────────────────────────────────────────────
@@ -163,6 +165,8 @@ const createMockDatabase = () => ({
 	getLastSequence: vi.fn(() => 0),
 	readEventsAfter: vi.fn(() => ({ events: [], hasMore: false })),
 	querySessions: vi.fn(() => ({ sessions: [], cursor: undefined, totalEstimate: 0 })),
+	queryTaskUsageByTaskIds: vi.fn(() => new Map()),
+	queryEventsByTaskIds: vi.fn(() => []),
 	clearGeneration: vi.fn(() => 2),
 	_isInitialized: vi.fn(() => true),
 	_getDbPath: vi.fn(() => "/tmp/usage.db"),
@@ -1681,6 +1685,81 @@ describe("usageStatsMessageHandler", () => {
 					}),
 				}),
 			)
+		})
+	})
+
+	// ── History-first Dashboard task handlers ──────────────────────────────────
+
+	describe("handleGetDashboardTaskDetail", () => {
+		it("queries only the selected task subtree and returns an empty known-task detail", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				byId: new Map([["root", { id: "root", task: "History root", ts: 123 }]]),
+				getDescendantTaskIds: vi.fn(() => ["child"]),
+			}
+			const ensureInitialized = vi.fn().mockResolvedValue(undefined)
+			const provider = createMockProvider({
+				ensureInitialized,
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+			} as any)
+
+			await handleGetDashboardTaskDetail(provider, {
+				type: "getDashboardTaskDetail",
+				requestId: "task-detail-1",
+				taskId: "root",
+			})
+
+			expect(ensureInitialized).toHaveBeenCalledOnce()
+			expect(mockDb.queryEventsByTaskIds).toHaveBeenCalledWith(["root", "child"])
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "dashboardTaskDetailResponse",
+				requestId: "task-detail-1",
+				dashboardTaskDetail: expect.objectContaining({
+					taskId: "root",
+					title: "History root",
+					totalTokens: 0,
+					totalCost: 0,
+					callCount: 0,
+					apiCalls: [],
+				}),
+			})
+		})
+	})
+
+	describe("handleGetDashboardTaskPage", () => {
+		it("uses the History-first projection and preserves the request cursor", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				catalogRevision: 7,
+				getPage: vi.fn(() => ({ tasks: ["history-task"], cursor: "next", totalEstimate: 1 })),
+				getDescendantTaskIds: vi.fn(() => []),
+				byId: new Map([
+					["history-task", { id: "history-task", task: "History task", ts: 321 }],
+				]),
+				ancestorsByTaskId: new Map(),
+			}
+			const provider = createMockProvider({
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+			} as any)
+
+			await handleGetDashboardTaskPage(provider, {
+				type: "getDashboardTaskPage",
+				requestId: "task-page-1",
+				dashboardTaskCursor: "prior-cursor",
+				dashboardTaskLimit: 50,
+			})
+
+			expect(taskCatalog.getPage).toHaveBeenCalledWith("prior-cursor", 50)
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "dashboardTaskPageResponse",
+				dashboardTaskPage: expect.objectContaining({
+					requestId: "task-page-1",
+					catalogRevision: 7,
+					tasks: [expect.objectContaining({ taskId: "history-task", eventCount: 0 })],
+				}),
+			})
 		})
 	})
 })

@@ -6,8 +6,30 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 
 import type { UsageEventV1, StatsQuery, ExtensionMessage, DashboardStatsSubscription } from "@roo-code/types"
 
+import type { HistoryItem } from "@roo-code/types"
+import { DashboardTaskCatalog, type DashboardTaskCatalogSource } from "../DashboardTaskCatalog"
 import { UsageStatsDatabase } from "../UsageStatsDatabase"
 import { UsageStatsStreamCoordinator, type StatsStreamSink } from "../UsageStatsStreamCoordinator"
+
+vi.mock("vscode", () => {
+	class EventEmitter<T> {
+		private readonly listeners = new Set<(event: T) => unknown>()
+		readonly event = (listener: (event: T) => unknown) => {
+			this.listeners.add(listener)
+			return { dispose: () => this.listeners.delete(listener) }
+		}
+		fire(event: T): void {
+			for (const listener of this.listeners) {
+				listener(event)
+			}
+		}
+		dispose(): void {
+			this.listeners.clear()
+		}
+	}
+
+	return { EventEmitter }
+})
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -63,6 +85,47 @@ function makeSubscription(overrides: Partial<DashboardStatsSubscription> = {}): 
 		sessionPageSize: 50,
 		heatmapRangeDays: 30,
 		...overrides,
+	}
+}
+
+function makeHistoryItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
+	return {
+		id: `task-${Math.random().toString(36).slice(2)}`,
+		number: 1,
+		ts: Date.now(),
+		task: "History task",
+		tokensIn: 0,
+		tokensOut: 0,
+		totalCost: 0,
+		...overrides,
+	}
+}
+
+function createTaskCatalog(initialItems: HistoryItem[]): {
+	catalog: DashboardTaskCatalog
+	replace(items: HistoryItem[]): void
+	emitChange(): void
+} {
+	let items = initialItems
+	const listeners = new Set<() => void>()
+	const source: DashboardTaskCatalogSource = {
+		getAll: () => items,
+		onDidChange: (listener) => {
+			listeners.add(listener)
+			return { dispose: () => listeners.delete(listener) }
+		},
+	}
+
+	return {
+		catalog: new DashboardTaskCatalog(source),
+		replace(nextItems: HistoryItem[]) {
+			items = nextItems
+		},
+		emitChange() {
+			for (const listener of listeners) {
+				listener()
+			}
+		},
 	}
 }
 
@@ -172,6 +235,101 @@ describe("UsageStatsStreamCoordinator", () => {
 			expect(errors[0].dashboardStatsStreamError?.code).toBe("STATS_STREAM/subscribe/001")
 
 			coordinator.dispose()
+		})
+
+		it("includes zero-usage History tasks in a task snapshot", () => {
+			const { catalog } = createTaskCatalog([makeHistoryItem({ id: "history-only", ts: 100 })])
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+
+			coordinator.subscribe(sink, makeSubscription())
+
+			const snapshot = sink.messagesOfType("dashboardStatsStreamSnapshot")[0].dashboardStatsStreamSnapshot
+			if (!snapshot || !("tasks" in snapshot)) {
+				throw new Error("STATS_TEST/historyTaskSnapshot/001: expected task snapshot")
+			}
+			expect(snapshot.tasks.tasks).toEqual([
+				expect.objectContaining({ taskId: "history-only", eventCount: 0, totalTokens: 0, totalCost: 0 }),
+			])
+
+			coordinator.dispose()
+			catalog.dispose()
+		})
+	})
+
+	describe("History-first task stream updates", () => {
+		it("upserts the direct task and its visible ancestor after usage", () => {
+			const { catalog } = createTaskCatalog([
+				makeHistoryItem({ id: "root", ts: 200 }),
+				makeHistoryItem({ id: "child", ts: 100, parentTaskId: "root", rootTaskId: "root" }),
+			])
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			const event = makeEvent({ taskId: "child", rootTaskId: "root" })
+			db.append(event)
+			coordinator.notifyEventAppended(event)
+			vi.advanceTimersByTime(100)
+
+			const delta = sink.messagesOfType("dashboardStatsStreamDelta")[0].dashboardStatsStreamDelta
+			if (!delta || !("taskUpsert" in delta)) {
+				throw new Error("STATS_TEST/historyTaskDelta/001: expected task delta")
+			}
+			expect(delta.taskUpsert.map((task) => task.taskId)).toEqual(["child", "root"])
+			expect(delta.taskUpsert.find((task) => task.taskId === "root")).toMatchObject({ eventCount: 1 })
+
+			coordinator.dispose()
+			catalog.dispose()
+		})
+
+		it("coalesces a History mutation burst into one replacement task snapshot", async () => {
+			const source = createTaskCatalog([makeHistoryItem({ id: "initial", ts: 100 })])
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: source.catalog })
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			source.replace([makeHistoryItem({ id: "updated", ts: 200 })])
+			source.emitChange()
+			await vi.advanceTimersByTimeAsync(300)
+			coordinator.notifyTaskCatalogChanged()
+			coordinator.notifyTaskCatalogChanged()
+			await vi.advanceTimersByTimeAsync(50)
+
+			const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+			expect(snapshots).toHaveLength(1)
+			const snapshot = snapshots[0].dashboardStatsStreamSnapshot
+			if (!snapshot || !("tasks" in snapshot)) {
+				throw new Error("STATS_TEST/historyTaskCatalogChange/001: expected task snapshot")
+			}
+			expect(snapshot.tasks.tasks).toEqual([
+				expect.objectContaining({ taskId: "updated" }),
+			])
+
+			coordinator.dispose()
+			source.catalog.dispose()
+		})
+
+		it("keeps History task IDs with zero metrics after a generation reset", () => {
+			const { catalog } = createTaskCatalog([makeHistoryItem({ id: "history-task", ts: 100 })])
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			db.append(makeEvent({ taskId: "history-task", rootTaskId: "history-task" }))
+			coordinator.resetGeneration()
+
+			const snapshot = sink.messagesOfType("dashboardStatsStreamSnapshot").at(-1)?.dashboardStatsStreamSnapshot
+			if (!snapshot || !("tasks" in snapshot)) {
+				throw new Error("STATS_TEST/historyTaskReset/001: expected task snapshot")
+			}
+			expect(snapshot.tasks.tasks).toEqual([
+				expect.objectContaining({ taskId: "history-task", eventCount: 0, totalTokens: 0, totalCost: 0 }),
+			])
+
+			coordinator.dispose()
+			catalog.dispose()
 		})
 	})
 
