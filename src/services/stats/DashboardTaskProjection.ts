@@ -60,6 +60,21 @@ export function computeTaskPage(
 }
 
 /**
+ * Computes complete current summaries for a known set of History task IDs.
+ * Callers use this for stream upserts after usage mutations without changing
+ * catalog membership or pagination order.
+ */
+export function computeTaskSummaries(
+	catalog: DashboardTaskCatalog,
+	db: DashboardTaskUsageReader,
+	taskIds: readonly string[],
+): DashboardTaskSummary[] {
+	const knownTaskIds = [...new Set(taskIds)].filter((taskId) => catalog.byId.has(taskId))
+	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, knownTaskIds))
+	return knownTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId))
+}
+
+/**
  * Returns focused detail for a History task and its descendants. Empty usage is
  * successful and still includes the History title and timestamp.
  */

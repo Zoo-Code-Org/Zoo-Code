@@ -64,13 +64,6 @@
 		"label": "Коэффициент кэша для оценки",
 		"hint": "Применяется, когда провайдер не сообщает данные кэша"
 	},
-	"sessions": {
-		"title": "Задачи",
-		"noSessions": "Нет записанных задач",
-		"filterModel": "Все модели",
-		"filterProvider": "Все поставщики",
-		"callCount": "{{count}} вызовов"
-	},
 	"sessionDetail": {
 		"summary": "Сводка по сессии",
 		"apiCalls": "Вызовы API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} ч назад",
 		"yesterday": "вчера",
 		"daysAgo": "{{count}} дн. назад"
+	},
+	"tasks": {
+		"title": "Задачи",
+		"noTasks": "Нет записанных задач",
+		"filterModel": "Все модели",
+		"filterProvider": "Все поставщики",
+		"callCount": "{{count}} вызовов"
 	}
 }

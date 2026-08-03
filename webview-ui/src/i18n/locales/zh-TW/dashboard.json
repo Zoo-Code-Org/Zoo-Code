@@ -64,13 +64,6 @@
 		"label": "緩存比率估計",
 		"hint": "當提供商未報告緩存數據時應用"
 	},
-	"sessions": {
-		"title": "工作",
-		"noSessions": "沒有記錄的工作",
-		"filterModel": "所有模型",
-		"filterProvider": "所有供應商",
-		"callCount": "{{count}} 次呼叫"
-	},
 	"sessionDetail": {
 		"summary": "工作階段摘要",
 		"apiCalls": "API 呼叫",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}}小時前",
 		"yesterday": "昨天",
 		"daysAgo": "{{count}}天前"
+	},
+	"tasks": {
+		"title": "工作",
+		"noTasks": "尚未記錄工作",
+		"filterModel": "所有模型",
+		"filterProvider": "所有供應商",
+		"callCount": "{{count}} 次呼叫"
 	}
 }

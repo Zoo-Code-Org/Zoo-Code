@@ -6,6 +6,7 @@ import type { HistoryItem } from "@roo-code/types"
 export interface DashboardTaskCatalogSource {
 	getAll(): HistoryItem[]
 	onDidChange: vscode.Event<void>
+	initialized?: Promise<void>
 }
 
 /** Immutable indexes associated with one dashboard task catalog revision. */
@@ -71,6 +72,25 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 	/** Current task-store-derived revision. */
 	get catalogRevision(): number {
 		return this.snapshot.revision
+	}
+
+	/** Resolves when the authoritative TaskHistoryStore has finished loading. */
+	get sourceInitialized(): Promise<void> {
+		return this.source.initialized ?? Promise.resolve()
+	}
+
+	/**
+	 * Rebuilds synchronously after the History store's initial load completes.
+	 * This is separate from the debounced source event because loading a valid
+	 * index need not itself produce a TaskHistoryStore change event.
+	 */
+	rebuild(): void {
+		if (this.disposed) {
+			return
+		}
+		this.snapshot = this.createSnapshot(this.snapshot.revision + 1)
+		this.descendantsMemo = new Map()
+		this.didChangeEmitter.fire(this.snapshot)
 	}
 
 	get byId(): ReadonlyMap<string, HistoryItem> {
@@ -181,9 +201,7 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 			if (this.disposed) {
 				return
 			}
-			this.snapshot = this.createSnapshot(this.snapshot.revision + 1)
-			this.descendantsMemo = new Map()
-			this.didChangeEmitter.fire(this.snapshot)
+			this.rebuild()
 		}, CATALOG_REBUILD_DEBOUNCE_MS)
 	}
 

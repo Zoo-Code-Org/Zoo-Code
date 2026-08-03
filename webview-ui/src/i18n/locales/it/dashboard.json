@@ -64,13 +64,6 @@
 		"label": "Rapporto cache per stima",
 		"hint": "Applicato quando il provider non segnala i dati della cache"
 	},
-	"sessions": {
-		"title": "Attività",
-		"noSessions": "Nessuna attività registrata",
-		"filterModel": "Tutti i modelli",
-		"filterProvider": "Tutti i provider",
-		"callCount": "{{count}} chiamate"
-	},
 	"sessionDetail": {
 		"summary": "Riepilogo sessione",
 		"apiCalls": "Chiamate API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} ora fa",
 		"yesterday": "ieri",
 		"daysAgo": "{{count}} giorni fa"
+	},
+	"tasks": {
+		"title": "Attività",
+		"noTasks": "Nessuna attività registrata",
+		"filterModel": "Tutti i modelli",
+		"filterProvider": "Tutti i provider",
+		"callCount": "{{count}} chiamate"
 	}
 }

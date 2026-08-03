@@ -64,13 +64,6 @@
 		"label": "Rasio cache untuk estimasi",
 		"hint": "Diterapkan ketika penyedia tidak melaporkan data cache"
 	},
-	"sessions": {
-		"title": "Tugas",
-		"noSessions": "Tidak ada tugas yang tercatat",
-		"filterModel": "Semua Model",
-		"filterProvider": "Semua Penyedia",
-		"callCount": "{{count}} panggilan"
-	},
 	"sessionDetail": {
 		"summary": "Ringkasan Sesi",
 		"apiCalls": "Panggilan API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} jam lalu",
 		"yesterday": "kemarin",
 		"daysAgo": "{{count}} hari lalu"
+	},
+	"tasks": {
+		"title": "Tugas",
+		"noTasks": "Belum ada tugas yang tercatat",
+		"filterModel": "Semua Model",
+		"filterProvider": "Semua Penyedia",
+		"callCount": "{{count}} panggilan"
 	}
 }

@@ -2,16 +2,16 @@
 
 import type {
 	DashboardStatsSubscription,
-	DashboardStatsSnapshot,
-	DashboardStatsDelta,
+	DashboardTaskStatsSnapshot,
+	DashboardTaskStatsDelta,
 	DashboardStatsError,
-	DashboardSessionPage,
+	DashboardTaskPage,
 	StatsBucket,
 	StatsBucketDelta,
 	StatsSnapshot,
 	StatsQuery,
-	DashboardSessionSummary,
-	DashboardSessionUpsert,
+	DashboardTaskSummary,
+	DashboardTaskUpsert,
 } from "@roo-code/types"
 
 import {
@@ -64,15 +64,16 @@ function makeStatsSnapshot(overrides: Partial<StatsSnapshot> = {}): StatsSnapsho
 	}
 }
 
-function makeSession(overrides: Partial<DashboardSessionSummary> = {}): DashboardSessionSummary {
+function makeTask(overrides: Partial<DashboardTaskSummary> = {}): DashboardTaskSummary {
 	return {
+		taskId: "task-001",
 		rootTaskId: "root-001",
-		title: "Test session",
+		title: "Test task",
+		taskTimestamp: Date.now(),
 		totalCost: 0.05,
 		totalTokens: 1500,
 		model: "gpt-4",
 		provider: "openai",
-		lastActivity: Date.now(),
 		eventCount: 1,
 		...overrides,
 	}
@@ -88,15 +89,16 @@ function makeSubscription(overrides: Partial<DashboardStatsSubscription> = {}): 
 	}
 }
 
-function makeSnapshot(overrides: Partial<DashboardStatsSnapshot> = {}): DashboardStatsSnapshot {
+function makeSnapshot(overrides: Partial<DashboardTaskStatsSnapshot> = {}): DashboardTaskStatsSnapshot {
 	return {
 		requestId: "sub-001",
 		generation: 1,
 		sequence: 100,
 		stats: makeStatsSnapshot(),
-		sessions: {
+		tasks: {
 			requestId: "sub-001",
-			sessions: [makeSession()],
+			catalogRevision: 1,
+			tasks: [makeTask()],
 			totalEstimate: 1,
 		},
 		heatmap: {
@@ -126,7 +128,7 @@ function makeBucketDelta(overrides: Partial<StatsBucketDelta> = {}): StatsBucket
 	}
 }
 
-function makeDelta(overrides: Partial<DashboardStatsDelta> = {}): DashboardStatsDelta {
+function makeDelta(overrides: Partial<DashboardTaskStatsDelta> = {}): DashboardTaskStatsDelta {
 	return {
 		requestId: "sub-001",
 		generation: 1,
@@ -134,15 +136,16 @@ function makeDelta(overrides: Partial<DashboardStatsDelta> = {}): DashboardStats
 		totalDelta: makeBucketDelta(),
 		breakdownDelta: [makeBucketDelta()],
 		heatmapDayDelta: { dayIndex: 29, delta: 0.01 },
-		sessionUpsert: [],
+		taskUpsert: [],
 		...overrides,
 	}
 }
 
-function makeSessionPage(overrides: Partial<DashboardSessionPage> = {}): DashboardSessionPage {
+function makeTaskPage(overrides: Partial<DashboardTaskPage> = {}): DashboardTaskPage {
 	return {
 		requestId: "sub-001",
-		sessions: [makeSession({ rootTaskId: "root-002", title: "Second session" })],
+		catalogRevision: 1,
+		tasks: [makeTask({ taskId: "task-002", rootTaskId: "root-002", title: "Second task" })],
 		totalEstimate: 2,
 		...overrides,
 	}
@@ -159,7 +162,7 @@ function makeError(overrides: Partial<DashboardStatsError> = {}): DashboardStats
 
 // Helper: subscribe then snapshot to get a connected state
 function connectedState(
-	snapshotOverrides: Partial<DashboardStatsSnapshot> = {},
+	snapshotOverrides: Partial<DashboardTaskStatsSnapshot> = {},
 	subscriptionOverrides: Partial<DashboardStatsSubscription> = {},
 ): DashboardStreamState {
 	const sub = makeSubscription(subscriptionOverrides)
@@ -183,7 +186,7 @@ describe("dashboardStreamReducer", () => {
 			expect(initialDashboardStreamState.isLoading).toBe(false)
 			expect(initialDashboardStreamState.totals).toBeNull()
 			expect(initialDashboardStreamState.buckets).toEqual({})
-			expect(initialDashboardStreamState.sessions).toEqual({})
+			expect(initialDashboardStreamState.tasks).toEqual({})
 		})
 	})
 
@@ -227,8 +230,8 @@ describe("dashboardStreamReducer", () => {
 			expect(state.bucketOrder).toHaveLength(1)
 			expect(state.heatmapValues).toHaveLength(30)
 			expect(state.heatmapRangeDays).toBe(30)
-			expect(Object.keys(state.sessions)).toHaveLength(1)
-			expect(state.sessionOrder).toEqual(["root-001"])
+			expect(Object.keys(state.tasks)).toHaveLength(1)
+			expect(state.taskOrder).toEqual(["task-001"])
 			expect(state.pendingResync).toBe(false)
 			expect(state.backgroundError).toBeNull()
 		})
@@ -275,25 +278,26 @@ describe("dashboardStreamReducer", () => {
 			expect(state.buckets[state.bucketOrder[1]].key).toEqual({ model: "claude" })
 		})
 
-		it("should normalize sessions into keyed map with stable order", () => {
-			const session1 = makeSession({ rootTaskId: "root-a" })
-			const session2 = makeSession({ rootTaskId: "root-b" })
+		it("should normalize tasks into keyed map with stable order", () => {
+			const task1 = makeTask({ taskId: "task-a", rootTaskId: "root-a" })
+			const task2 = makeTask({ taskId: "task-b", rootTaskId: "root-b" })
 			const snapshot = makeSnapshot({
-				sessions: {
+				tasks: {
 					requestId: "sub-001",
-					sessions: [session1, session2],
+					catalogRevision: 1,
+					tasks: [task1, task2],
 					totalEstimate: 2,
 				},
 			})
-
+	
 			let state = dashboardStreamReducer(initialDashboardStreamState, {
 				type: "SUBSCRIBE",
 				subscription: makeSubscription(),
 			})
 			state = dashboardStreamReducer(state, { type: "SNAPSHOT", snapshot })
-
-			expect(Object.keys(state.sessions)).toHaveLength(2)
-			expect(state.sessionOrder).toEqual(["root-a", "root-b"])
+	
+			expect(Object.keys(state.tasks)).toHaveLength(2)
+			expect(state.taskOrder).toEqual(["task-a", "task-b"])
 		})
 	})
 
@@ -353,44 +357,46 @@ describe("dashboardStreamReducer", () => {
 			expect(newState.heatmapValues).toEqual(originalValues)
 		})
 
-		it("should apply session upsert to existing session without reordering", () => {
+		it("should apply task upsert to existing task without reordering", () => {
 			const state = connectedState()
-			const upsert: DashboardSessionUpsert = {
+			const upsert: DashboardTaskUpsert = {
+				taskId: "task-001",
 				rootTaskId: "root-001",
 				title: "Updated title",
+				taskTimestamp: Date.now(),
 				totalCost: 0.1,
 				totalTokens: 2000,
 				model: "gpt-4",
 				provider: "openai",
-				lastActivity: Date.now(),
 				eventCount: 2,
 			}
-			const delta = makeDelta({ sessionUpsert: [upsert] })
+			const delta = makeDelta({ taskUpsert: [upsert] })
 			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
-
-			expect(newState.sessions["root-001"].title).toBe("Updated title")
-			expect(newState.sessions["root-001"].totalCost).toBe(0.1)
-			expect(newState.sessionOrder).toEqual(["root-001"]) // No reorder
+	
+			expect(newState.tasks["task-001"].title).toBe("Updated title")
+			expect(newState.tasks["task-001"].totalCost).toBe(0.1)
+			expect(newState.taskOrder).toEqual(["task-001"]) // No reorder
 		})
 
-		it("should insert new session at top of order", () => {
+		it("should insert new task at top of order", () => {
 			const state = connectedState()
-			const upsert: DashboardSessionUpsert = {
+			const upsert: DashboardTaskUpsert = {
+				taskId: "task-new",
 				rootTaskId: "root-new",
-				title: "New session",
+				title: "New task",
+				taskTimestamp: Date.now(),
 				totalCost: 0.02,
 				totalTokens: 500,
 				model: "claude",
 				provider: "anthropic",
-				lastActivity: Date.now(),
 				eventCount: 1,
 			}
-			const delta = makeDelta({ sessionUpsert: [upsert] })
+			const delta = makeDelta({ taskUpsert: [upsert] })
 			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
-
-			expect(newState.sessions["root-new"]).toBeDefined()
-			expect(newState.sessionOrder[0]).toBe("root-new") // Inserted at top
-			expect(newState.sessionOrder[1]).toBe("root-001") // Existing pushed down
+	
+			expect(newState.tasks["task-new"]).toBeDefined()
+			expect(newState.taskOrder[0]).toBe("task-new") // Inserted at top
+			expect(newState.taskOrder[1]).toBe("task-001") // Existing pushed down
 		})
 
 		it("should reject delta with mismatched requestId (stale epoch)", () => {
@@ -471,42 +477,43 @@ describe("dashboardStreamReducer", () => {
 		})
 	})
 
-	describe("SESSION_PAGE", () => {
-		it("should append new sessions to the end of order", () => {
+	describe("TASK_PAGE", () => {
+		it("should append new tasks to the end of order", () => {
 			const state = connectedState()
-			const page = makeSessionPage()
-			const newState = dashboardStreamReducer(state, { type: "SESSION_PAGE", page })
+			const page = makeTaskPage()
+			const newState = dashboardStreamReducer(state, { type: "TASK_PAGE", page })
 
-			expect(newState.sessions["root-002"]).toBeDefined()
-			expect(newState.sessionOrder).toEqual(["root-001", "root-002"])
+			expect(newState.tasks["task-002"]).toBeDefined()
+			expect(newState.taskOrder).toEqual(["task-001", "task-002"])
 		})
 
-		it("should update existing sessions without reordering", () => {
+		it("should update existing tasks without reordering", () => {
 			const state = connectedState()
-			const page: DashboardSessionPage = {
+			const page: DashboardTaskPage = {
 				requestId: "sub-001",
-				sessions: [makeSession({ rootTaskId: "root-001", title: "Updated" })],
+				catalogRevision: 1,
+				tasks: [makeTask({ taskId: "task-001", rootTaskId: "root-001", title: "Updated" })],
 				totalEstimate: 1,
 			}
-			const newState = dashboardStreamReducer(state, { type: "SESSION_PAGE", page })
+			const newState = dashboardStreamReducer(state, { type: "TASK_PAGE", page })
 
-			expect(newState.sessions["root-001"].title).toBe("Updated")
-			expect(newState.sessionOrder).toEqual(["root-001"]) // No reorder
+			expect(newState.tasks["task-001"].title).toBe("Updated")
+			expect(newState.taskOrder).toEqual(["task-001"]) // No reorder
 		})
 
 		it("should update cursor and totalEstimate", () => {
 			const state = connectedState()
-			const page = makeSessionPage({ cursor: "next-page-cursor", totalEstimate: 50 })
-			const newState = dashboardStreamReducer(state, { type: "SESSION_PAGE", page })
+			const page = makeTaskPage({ cursor: "next-page-cursor", totalEstimate: 50 })
+			const newState = dashboardStreamReducer(state, { type: "TASK_PAGE", page })
 
-			expect(newState.sessionCursor).toBe("next-page-cursor")
-			expect(newState.sessionTotalEstimate).toBe(50)
+			expect(newState.taskCursor).toBe("next-page-cursor")
+			expect(newState.taskTotalEstimate).toBe(50)
 		})
 
 		it("should reject page with mismatched requestId", () => {
 			const state = connectedState()
-			const page = makeSessionPage({ requestId: "sub-999" })
-			const newState = dashboardStreamReducer(state, { type: "SESSION_PAGE", page })
+			const page = makeTaskPage({ requestId: "sub-999" })
+			const newState = dashboardStreamReducer(state, { type: "TASK_PAGE", page })
 
 			expect(newState).toBe(state) // No change
 		})
@@ -559,7 +566,7 @@ describe("dashboardStreamReducer", () => {
 
 			expect(newState.totals).toBe(state.totals)
 			expect(newState.buckets).toBe(state.buckets)
-			expect(newState.sessions).toBe(state.sessions)
+			expect(newState.tasks).toBe(state.tasks)
 		})
 	})
 
@@ -595,7 +602,7 @@ describe("dashboardStreamReducer", () => {
 
 			expect(newState.totals).toBe(state.totals)
 			expect(newState.buckets).toBe(state.buckets)
-			expect(newState.sessions).toBe(state.sessions)
+			expect(newState.tasks).toBe(state.tasks)
 			expect(newState.heatmapValues).toBe(state.heatmapValues)
 		})
 

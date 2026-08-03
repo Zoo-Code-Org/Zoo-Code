@@ -64,13 +64,6 @@
 		"label": "अनुमान के लिए कैश अनुपात",
 		"hint": "जब प्रदाता कैश डेटा की रिपोर्ट नहीं करता है तो लागू होता है"
 	},
-	"sessions": {
-		"title": "कार्य",
-		"noSessions": "कोई कार्य दर्ज नहीं",
-		"filterModel": "सभी मॉडल",
-		"filterProvider": "सभी प्रदाता",
-		"callCount": "{{count}} कॉल"
-	},
 	"sessionDetail": {
 		"summary": "सत्र सारांश",
 		"apiCalls": "API कॉल",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} घंटे पहले",
 		"yesterday": "कल",
 		"daysAgo": "{{count}} दिन पहले"
+	},
+	"tasks": {
+		"title": "कार्य",
+		"noTasks": "कोई कार्य दर्ज नहीं है",
+		"filterModel": "सभी मॉडल",
+		"filterProvider": "सभी प्रदाता",
+		"callCount": "{{count}} कॉल"
 	}
 }

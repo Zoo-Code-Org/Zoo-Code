@@ -64,13 +64,6 @@
 		"label": "Proporção de cache para estimativa",
 		"hint": "Aplicado quando o provedor não relata dados de cache"
 	},
-	"sessions": {
-		"title": "Tarefas",
-		"noSessions": "Nenhuma tarefa registrada",
-		"filterModel": "Todos os modelos",
-		"filterProvider": "Todos os provedores",
-		"callCount": "{{count}} chamadas"
-	},
 	"sessionDetail": {
 		"summary": "Resumo da sessão",
 		"apiCalls": "Chamadas de API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "há {{count}} h",
 		"yesterday": "ontem",
 		"daysAgo": "há {{count}} dias"
+	},
+	"tasks": {
+		"title": "Tarefas",
+		"noTasks": "Nenhuma tarefa registrada",
+		"filterModel": "Todos os modelos",
+		"filterProvider": "Todos os provedores",
+		"callCount": "{{count}} chamadas"
 	}
 }

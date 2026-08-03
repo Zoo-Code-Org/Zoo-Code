@@ -2,14 +2,14 @@
 // See docs/260729_0001_session_branch-recovery/dashboard-streaming-architecture.md
 // for the full specification.
 
-import { useCallback, useEffect, useReducer, useRef } from "react"
+import { useCallback, useEffect, useReducer, useRef, useState } from "react"
 
 import type {
 	DashboardStatsSubscription,
-	DashboardStatsSnapshot,
-	DashboardStatsDelta,
 	DashboardStatsError,
-	DashboardSessionPage,
+	DashboardTaskPage,
+	DashboardTaskStatsDelta,
+	DashboardTaskStatsSnapshot,
 	StatsQuery,
 } from "@roo-code/types"
 
@@ -28,7 +28,7 @@ export interface UseDashboardStatsStreamOptions {
 	range: StatsQuery
 	/** Number of days for the heatmap (30, 60, 120, 360). */
 	heatmapRangeDays: number
-	/** Maximum sessions per page (1–100). Default 50. */
+	/** Maximum tasks per page (1–100). Default 50. */
 	sessionPageSize?: number
 	/** Whether the webview is currently visible. Default true. */
 	visible?: boolean
@@ -36,8 +36,10 @@ export interface UseDashboardStatsStreamOptions {
 
 export interface UseDashboardStatsStreamResult {
 	state: DashboardStreamState
-	/** Request an additional session page using the current cursor. */
-	requestSessionPage: (cursor?: string) => void
+	/** Request an additional task page using the current cursor. */
+	requestTaskPage: (cursor?: string) => void
+	/** Whether an additional task page request is in flight. */
+	isTaskPageLoading: boolean
 	/** Replace the subscription with a new query set (new epoch). */
 	replaceSubscription: (range: StatsQuery, heatmapRangeDays: number, sessionPageSize?: number) => void
 }
@@ -55,6 +57,7 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 	const { range, heatmapRangeDays, sessionPageSize = 50, visible = true } = options
 
 	const [state, dispatch] = useReducer(dashboardStreamReducer, initialDashboardStreamState)
+	const [isTaskPageLoading, setIsTaskPageLoading] = useState(false)
 
 	// Refs to avoid stale closures in event listeners and effects
 	const visibleRef = useRef(visible)
@@ -96,6 +99,7 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 			}
 			subscriptionIdRef.current = null
 			subscribedRef.current = false
+			setIsTaskPageLoading(false)
 		}
 	}, [])
 
@@ -110,19 +114,20 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 
 			switch (message.type) {
 				case "dashboardStatsStreamSnapshot": {
-					const snapshot: DashboardStatsSnapshot | undefined = message.dashboardStatsStreamSnapshot
+					const snapshot: DashboardTaskStatsSnapshot | undefined = message.dashboardStatsStreamSnapshot
 					if (snapshot) {
 						// Stale-epoch check using ref (synchronous) to avoid race condition
 						// where snapshot arrives before React processes REPLACE_SUBSCRIPTION dispatch.
 						// The reducer also has this check but uses state.subscriptionId which is async.
 						if (snapshot.requestId === subscriptionIdRef.current) {
 							dispatch({ type: "SNAPSHOT", snapshot })
+							setIsTaskPageLoading(false)
 						}
 					}
 					break
 				}
 				case "dashboardStatsStreamDelta": {
-					const delta: DashboardStatsDelta | undefined = message.dashboardStatsStreamDelta
+					const delta: DashboardTaskStatsDelta | undefined = message.dashboardStatsStreamDelta
 					if (delta) {
 						// Same stale-epoch check for deltas
 						if (delta.requestId === subscriptionIdRef.current) {
@@ -141,12 +146,13 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 					}
 					break
 				}
-				case "dashboardSessionPageResponse": {
-					const page: DashboardSessionPage | undefined = message.dashboardSessionPage
+				case "dashboardTaskPageResponse": {
+					const page: DashboardTaskPage | undefined = message.dashboardTaskPage
 					if (page) {
-						// Only process session pages for the current subscription epoch
+						// Only process task pages for the current subscription epoch.
 						if (page.requestId === subscriptionIdRef.current) {
-							dispatch({ type: "SESSION_PAGE", page })
+							dispatch({ type: "TASK_PAGE", page })
+							setIsTaskPageLoading(false)
 						}
 					}
 					break
@@ -207,19 +213,21 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 		}
 	}, [state.isLoading, state.subscriptionId])
 
-	// ── requestSessionPage ──────────────────────────────────────────────────
-	const requestSessionPage = useCallback(
+	// ── requestTaskPage ─────────────────────────────────────────────────────
+	const requestTaskPage = useCallback(
 		(cursor?: string) => {
-			if (!subscriptionIdRef.current) return
-			const effectiveCursor = cursor ?? state.sessionCursor
+			if (!subscriptionIdRef.current || isTaskPageLoading) return
+			const effectiveCursor = cursor ?? state.taskCursor
+			if (!effectiveCursor) return
+			setIsTaskPageLoading(true)
 			vscode.postMessage({
-				type: "getDashboardSessionPage",
+				type: "getDashboardTaskPage",
 				requestId: subscriptionIdRef.current,
-				dashboardSessionCursor: effectiveCursor,
-				dashboardSessionLimit: sessionPageSizeRef.current,
+				dashboardTaskCursor: effectiveCursor,
+				dashboardTaskLimit: sessionPageSizeRef.current,
 			})
 		},
-		[state.sessionCursor],
+		[state.taskCursor, isTaskPageLoading],
 	)
 
 	// ── replaceSubscription ──────────────────────────────────────────────────
@@ -227,6 +235,7 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 		(newRange: StatsQuery, newHeatmapRangeDays: number, newSessionPageSize?: number) => {
 			const requestId = generateRequestId("replace")
 			subscriptionIdRef.current = requestId
+			setIsTaskPageLoading(false)
 
 			const effectivePageSize = newSessionPageSize ?? sessionPageSizeRef.current
 
@@ -248,7 +257,8 @@ export function useDashboardStatsStream(options: UseDashboardStatsStreamOptions)
 
 	return {
 		state,
-		requestSessionPage,
+		requestTaskPage,
+		isTaskPageLoading,
 		replaceSubscription,
 	}
 }

@@ -64,13 +64,6 @@
 		"label": "推定用キャッシュ比率",
 		"hint": "プロバイダーがキャッシュデータを報告しない場合に適用"
 	},
-	"sessions": {
-		"title": "タスク",
-		"noSessions": "記録されたタスクはありません",
-		"filterModel": "すべてのモデル",
-		"filterProvider": "すべてのプロバイダー",
-		"callCount": "{{count}} 回の呼び出し"
-	},
 	"sessionDetail": {
 		"summary": "セッションサマリー",
 		"apiCalls": "API呼び出し",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}}時間前",
 		"yesterday": "昨日",
 		"daysAgo": "{{count}}日前"
+	},
+	"tasks": {
+		"title": "タスク",
+		"noTasks": "記録されたタスクはありません",
+		"filterModel": "すべてのモデル",
+		"filterProvider": "すべてのプロバイダー",
+		"callCount": "{{count}} 回の呼び出し"
 	}
 }

@@ -3,10 +3,10 @@
 import { renderHook, act } from "@/utils/test-utils"
 
 import type {
-	DashboardStatsSnapshot,
-	DashboardStatsDelta,
+	DashboardTaskStatsDelta,
+	DashboardTaskStatsSnapshot,
 	DashboardStatsError,
-	DashboardSessionPage,
+	DashboardTaskPage,
 	StatsQuery,
 } from "@roo-code/types"
 
@@ -32,7 +32,7 @@ function makeQuery(overrides: Partial<StatsQuery> = {}): StatsQuery {
 	}
 }
 
-function makeSnapshot(overrides: Partial<DashboardStatsSnapshot> = {}): DashboardStatsSnapshot {
+function makeSnapshot(overrides: Partial<DashboardTaskStatsSnapshot> = {}): DashboardTaskStatsSnapshot {
 	return {
 		requestId: "test-sub",
 		generation: 1,
@@ -77,17 +77,19 @@ function makeSnapshot(overrides: Partial<DashboardStatsSnapshot> = {}): Dashboar
 				backfilledEventCount: 0,
 			},
 		},
-		sessions: {
+		tasks: {
 			requestId: "test-sub",
-			sessions: [
+			catalogRevision: 1,
+			tasks: [
 				{
+					taskId: "task-001",
 					rootTaskId: "root-001",
-					title: "Test session",
+					title: "Test task",
+					taskTimestamp: Date.now(),
 					totalCost: 0.05,
 					totalTokens: 1500,
 					model: "gpt-4",
 					provider: "openai",
-					lastActivity: Date.now(),
 					eventCount: 1,
 				},
 			],
@@ -101,7 +103,7 @@ function makeSnapshot(overrides: Partial<DashboardStatsSnapshot> = {}): Dashboar
 	}
 }
 
-function makeDelta(overrides: Partial<DashboardStatsDelta> = {}): DashboardStatsDelta {
+function makeDelta(overrides: Partial<DashboardTaskStatsDelta> = {}): DashboardTaskStatsDelta {
 	return {
 		requestId: "test-sub",
 		generation: 1,
@@ -139,7 +141,7 @@ function makeDelta(overrides: Partial<DashboardStatsDelta> = {}): DashboardStats
 			},
 		],
 		heatmapDayDelta: { dayIndex: 29, delta: 0.01 },
-		sessionUpsert: [],
+		taskUpsert: [],
 		...overrides,
 	}
 }
@@ -313,7 +315,7 @@ describe("useDashboardStatsStream", () => {
 			expect(result.current.state.totals).not.toBeNull() // Data preserved
 		})
 
-		it("should apply session page to state", () => {
+		it("should apply task page to state", () => {
 			const { result } = renderHook(() =>
 				useDashboardStatsStream({
 					range: makeQuery(),
@@ -327,17 +329,19 @@ describe("useDashboardStatsStream", () => {
 				dashboardStatsStreamSnapshot: makeSnapshot({ requestId: subId }),
 			})
 
-			const page: DashboardSessionPage = {
+			const page: DashboardTaskPage = {
 				requestId: subId,
-				sessions: [
+				catalogRevision: 1,
+				tasks: [
 					{
+						taskId: "task-002",
 						rootTaskId: "root-002",
-						title: "Second session",
+						title: "Second task",
+						taskTimestamp: Date.now(),
 						totalCost: 0.03,
 						totalTokens: 800,
 						model: "claude",
 						provider: "anthropic",
-						lastActivity: Date.now(),
 						eventCount: 1,
 					},
 				],
@@ -345,12 +349,12 @@ describe("useDashboardStatsStream", () => {
 			}
 
 			postExtensionMessage({
-				type: "dashboardSessionPageResponse",
-				dashboardSessionPage: page,
+				type: "dashboardTaskPageResponse",
+				dashboardTaskPage: page,
 			})
 
-			expect(result.current.state.sessions["root-002"]).toBeDefined()
-			expect(result.current.state.sessionOrder).toEqual(["root-001", "root-002"])
+			expect(result.current.state.tasks["task-002"]).toBeDefined()
+			expect(result.current.state.taskOrder).toEqual(["task-001", "task-002"])
 		})
 
 		it("should reject stale-epoch snapshot", () => {
@@ -578,8 +582,8 @@ describe("useDashboardStatsStream", () => {
 		})
 	})
 
-	describe("requestSessionPage", () => {
-		it("should send getDashboardSessionPage with cursor", () => {
+	describe("requestTaskPage", () => {
+		it("should send getDashboardTaskPage with cursor", () => {
 			const { result } = renderHook(() =>
 				useDashboardStatsStream({
 					range: makeQuery(),
@@ -591,20 +595,20 @@ describe("useDashboardStatsStream", () => {
 			postMessageMock.mockClear()
 
 			act(() => {
-				result.current.requestSessionPage("cursor-123")
+				result.current.requestTaskPage("cursor-123")
 			})
 
 			expect(postMessageMock).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "getDashboardSessionPage",
+					type: "getDashboardTaskPage",
 					requestId: subId,
-					dashboardSessionCursor: "cursor-123",
-					dashboardSessionLimit: 50,
+					dashboardTaskCursor: "cursor-123",
+					dashboardTaskLimit: 50,
 				}),
 			)
 		})
 
-		it("should use state sessionCursor when no cursor provided", () => {
+		it("should use state taskCursor when no cursor provided", () => {
 			const { result } = renderHook(() =>
 				useDashboardStatsStream({
 					range: makeQuery(),
@@ -617,9 +621,10 @@ describe("useDashboardStatsStream", () => {
 				type: "dashboardStatsStreamSnapshot",
 				dashboardStatsStreamSnapshot: makeSnapshot({
 					requestId: subId,
-					sessions: {
+					tasks: {
 						requestId: subId,
-						sessions: [],
+						catalogRevision: 1,
+						tasks: [],
 						cursor: "state-cursor",
 						totalEstimate: 0,
 					},
@@ -629,13 +634,13 @@ describe("useDashboardStatsStream", () => {
 			postMessageMock.mockClear()
 
 			act(() => {
-				result.current.requestSessionPage()
+				result.current.requestTaskPage()
 			})
 
 			expect(postMessageMock).toHaveBeenCalledWith(
 				expect.objectContaining({
-					type: "getDashboardSessionPage",
-					dashboardSessionCursor: "state-cursor",
+					type: "getDashboardTaskPage",
+					dashboardTaskCursor: "state-cursor",
 				}),
 			)
 		})

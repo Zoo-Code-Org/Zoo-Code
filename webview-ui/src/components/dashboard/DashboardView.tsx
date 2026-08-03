@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw, Database } from "lucide-react"
 
-import type { ExtensionMessage, StatsQuery, StatsBucket, SessionDetail, DashboardSessionSummary } from "@roo-code/types"
+import type { DashboardTaskDetail, DashboardTaskSummary, ExtensionMessage, StatsBucket, StatsQuery } from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -21,9 +21,9 @@ import {
 
 import { Tab, TabHeader, TabContent } from "../common/Tab"
 import DashboardSummary from "./DashboardSummary"
-import SessionList from "./SessionList"
+import TaskList from "@/components/dashboard/TaskList"
 import UsageHeatmap from "../stats/UsageHeatmap"
-import { useDashboardStatsStream } from "./useDashboardStatsStream"
+import { useDashboardStatsStream } from "@/components/dashboard/useDashboardStatsStream"
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -59,16 +59,16 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [heatmapRange, setHeatmapRange] = useState<HeatmapRange>("30d")
 	const [isResyncing, setIsResyncing] = useState(false)
 
-	// ── Session detail state ────────────────────────────────────────────────
-	// Only one session is expanded at a time (accordion pattern). The detail
-	// is fetched on first expansion via `getDashboardSessionDetail` and cached
-	// in `sessionDetails` so re-expanding does not refetch.
+	// ── Task detail state ───────────────────────────────────────────────────
+	// Only one task is expanded at a time (accordion pattern). The detail is
+	// fetched on first expansion via `getDashboardTaskDetail` and cached in
+	// `taskDetails` so re-expanding does not refetch.
 	const [expandedTaskId, setExpandedTaskId] = useState<string | undefined>(undefined)
-	const [sessionDetails, setSessionDetails] = useState<Record<string, SessionDetail | null>>({})
-	const [sessionDetailErrors, setSessionDetailErrors] = useState<Record<string, string | null>>({})
-	const [sessionDetailLoading, setSessionDetailLoading] = useState<Set<string>>(new Set())
-	const latestSessionDetailRequestIdRef = useRef<string>("")
-	const latestSessionDetailTaskIdRef = useRef<string | undefined>(undefined)
+	const [taskDetails, setTaskDetails] = useState<Record<string, DashboardTaskDetail | null>>({})
+	const [taskDetailErrors, setTaskDetailErrors] = useState<Record<string, string | null>>({})
+	const [taskDetailLoading, setTaskDetailLoading] = useState<Set<string>>(new Set())
+	const latestTaskDetailRequestIdRef = useRef<string>("")
+	const latestTaskDetailIdRef = useRef<string | undefined>(undefined)
 
 	// ── Error state (for clear/export errors) ───────────────────────────────
 	const [error, setError] = useState<string | null>(null)
@@ -160,7 +160,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const {
 		state: streamState,
-		requestSessionPage,
+		requestTaskPage,
+		isTaskPageLoading,
 		replaceSubscription,
 	} = useDashboardStatsStream({
 		range: streamRange,
@@ -206,19 +207,19 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [streamState.generatedAt])
 
-	// ── Fetch session detail (on expand) ───────────────────────────────────
+	// ── Fetch task detail (on expand) ──────────────────────────────────────
 
-	const fetchSessionDetail = useCallback((taskId: string) => {
-		const requestId = `dashboard-session-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-		latestSessionDetailRequestIdRef.current = requestId
-		latestSessionDetailTaskIdRef.current = taskId
+	const fetchTaskDetail = useCallback((taskId: string) => {
+		const requestId = `dashboard-task-detail-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+		latestTaskDetailRequestIdRef.current = requestId
+		latestTaskDetailIdRef.current = taskId
 
-		setSessionDetailLoading((prev) => {
+		setTaskDetailLoading((prev) => {
 			const next = new Set(prev)
 			next.add(taskId)
 			return next
 		})
-		setSessionDetailErrors((prev) => {
+		setTaskDetailErrors((prev) => {
 			if (prev[taskId] === undefined) return prev
 			const next = { ...prev }
 			next[taskId] = null
@@ -226,23 +227,23 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		})
 
 		vscode.postMessage({
-			type: "getDashboardSessionDetail",
+			type: "getDashboardTaskDetail",
 			requestId,
 			taskId,
 		})
 	}, [])
 
-	const handleToggleSession = useCallback(
+	const handleToggleTask = useCallback(
 		(taskId: string) => {
 			setExpandedTaskId((current) => {
 				if (current === taskId) return undefined
 				return taskId
 			})
-			if (sessionDetails[taskId] === undefined && !sessionDetailLoading.has(taskId)) {
-				fetchSessionDetail(taskId)
+			if (taskDetails[taskId] === undefined && !taskDetailLoading.has(taskId)) {
+				fetchTaskDetail(taskId)
 			}
 		},
-		[sessionDetails, sessionDetailLoading, fetchSessionDetail],
+		[taskDetails, taskDetailLoading, fetchTaskDetail],
 	)
 
 	// ── Manual refresh = explicit background resync ────────────────────────
@@ -271,33 +272,33 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		replaceSubscription(buildQuery("custom", groupBy, customFrom, customTo), HEATMAP_RANGE_DAYS[heatmapRange], 50)
 	}, [customFrom, customTo, groupBy, heatmapRange, buildQuery, replaceSubscription])
 
-	// ── Listen for session detail + clear/export responses ──────────────────
+	// ── Listen for task detail + clear/export responses ─────────────────────
 
 	useEffect(() => {
 		const handleMessage = (e: MessageEvent) => {
 			const message: ExtensionMessage = e.data
 
-			if (message.type === "dashboardSessionDetailResponse") {
-				if (message.requestId !== latestSessionDetailRequestIdRef.current) return
+			if (message.type === "dashboardTaskDetailResponse") {
+				if (message.requestId !== latestTaskDetailRequestIdRef.current) return
 
-				const taskId = latestSessionDetailTaskIdRef.current
+				const taskId = latestTaskDetailIdRef.current
 				if (!taskId) return
 
-				setSessionDetailLoading((prev) => {
+				setTaskDetailLoading((prev) => {
 					if (!prev.has(taskId)) return prev
 					const next = new Set(prev)
 					next.delete(taskId)
 					return next
 				})
 
-				const detail = message.dashboardSessionDetail ?? null
+				const detail = message.dashboardTaskDetail ?? null
 				const detailError = message.error || t("dashboard:states.error")
 
-				setSessionDetails((prev) => ({
+				setTaskDetails((prev) => ({
 					...prev,
 					[taskId]: detail,
 				}))
-				setSessionDetailErrors((prev) => ({
+				setTaskDetailErrors((prev) => ({
 					...prev,
 					[taskId]: detail ? null : detailError,
 				}))
@@ -420,12 +421,14 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 		[streamState.buckets, streamState.bucketOrder],
 	)
 
-	const sessions: DashboardSessionSummary[] = useMemo(
-		() => streamState.sessionOrder.map((id) => streamState.sessions[id]).filter(Boolean),
-		[streamState.sessions, streamState.sessionOrder],
+	const tasks: DashboardTaskSummary[] = useMemo(
+		() => streamState.taskOrder.map((id) => streamState.tasks[id]).filter(Boolean),
+		[streamState.tasks, streamState.taskOrder],
 	)
 
 	const hasData = totals.events > 0
+	const hasTaskCatalog = streamState.taskOrder.length > 0
+	const hasVisibleDashboardContent = hasData || hasTaskCatalog
 
 	// Loading is only true before the first snapshot arrives.
 	// After the first snapshot, we never show a loading spinner (architecture goal 1.1#1).
@@ -593,7 +596,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				)}
 
 				{/* Error state — only when no data and a fatal error occurred */}
-				{!isLoading && error && !hasData && (
+				{!isLoading && error && !hasVisibleDashboardContent && (
 					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-error">
 						<span className="text-sm text-vscode-errorForeground">{error}</span>
 						<Button variant="secondary" size="sm" onClick={handleRefresh}>
@@ -603,7 +606,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				)}
 
 				{/* Background error banner — non-fatal, data stays visible */}
-				{!isLoading && backgroundError && hasData && (
+				{!isLoading && backgroundError && hasVisibleDashboardContent && (
 					<div
 						className="flex items-center gap-2 rounded-md border border-vscode-inputValidation-warningBorder bg-vscode-inputValidation-warningBackground px-3 py-2 text-xs text-vscode-foreground"
 						data-testid="dashboard-background-error">
@@ -615,7 +618,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				)}
 
 				{/* Clear/export error — non-fatal, data stays visible */}
-				{!isLoading && error && hasData && (
+				{!isLoading && error && hasVisibleDashboardContent && (
 					<div
 						className="flex items-center gap-2 rounded-md border border-vscode-inputValidation-warningBorder bg-vscode-inputValidation-warningBackground px-3 py-2 text-xs text-vscode-foreground"
 						data-testid="dashboard-error-banner">
@@ -624,7 +627,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				)}
 
 				{/* Empty state */}
-				{!isLoading && !error && !hasData && (
+				{!isLoading && !error && !hasVisibleDashboardContent && (
 					<div className="flex flex-col items-center justify-center gap-2 py-8" data-testid="dashboard-empty">
 						<span className="text-sm text-vscode-descriptionForeground">{t("dashboard:states.empty")}</span>
 						<span className="text-xs text-vscode-descriptionForeground">
@@ -634,9 +637,9 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				)}
 
 				{/* Data display */}
-				{!isLoading && !error && hasData && (
+				{!isLoading && !error && hasVisibleDashboardContent && (
 					<>
-						{/* Resync loading indicator — shown during preset transitions */}
+						{/* Resync loading indicator, shown during preset transitions. */}
 						{isResyncing && (
 							<div
 								className="flex items-center justify-center gap-2 rounded-md border border-vscode-inputValidation-infoBorder bg-vscode-inputValidation-infoBackground px-3 py-2 text-xs text-vscode-foreground"
@@ -646,19 +649,21 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 							</div>
 						)}
 
-						{/* Summary cards */}
-						<DashboardSummary totals={totals} />
+						{hasData && (
+							<>
+								{/* Summary cards */}
+								<DashboardSummary totals={totals} />
 
-						{/* Heatmap — controlled by stream */}
-						<UsageHeatmap
-							values={streamState.heatmapValues}
-							rangeDays={streamState.heatmapRangeDays ?? HEATMAP_RANGE_DAYS[heatmapRange]}
-							selectedRange={heatmapRange}
-							onRangeChange={handleHeatmapRangeChange}
-						/>
+								{/* Heatmap, controlled by stream. */}
+								<UsageHeatmap
+									values={streamState.heatmapValues}
+									rangeDays={streamState.heatmapRangeDays ?? HEATMAP_RANGE_DAYS[heatmapRange]}
+									selectedRange={heatmapRange}
+									onRangeChange={handleHeatmapRangeChange}
+								/>
 
-						{/* Breakdown table */}
-						<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">
+								{/* Breakdown table */}
+								<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">
 							<div className="flex items-center justify-between">
 								<h4 className="text-sm font-medium text-vscode-foreground m-0">
 									{t("dashboard:breakdown.title")}
@@ -751,18 +756,22 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 									</tbody>
 								</table>
 							</div>
-						</div>
+								</div>
+							</>
+						)}
 
-						{/* Sessions list — virtualized, stream-controlled */}
-						<SessionList
-							sessions={sessions}
+						{/* Task list, virtualized and stream-controlled. */}
+						<TaskList
+							tasks={tasks}
 							expandedTaskId={expandedTaskId}
-							sessionDetails={sessionDetails}
-							sessionDetailErrors={sessionDetailErrors}
-							sessionDetailLoading={sessionDetailLoading}
-							onToggleSession={handleToggleSession}
-							onLoadMore={() => requestSessionPage()}
-							totalEstimate={streamState.sessionTotalEstimate}
+							taskDetails={taskDetails}
+							taskDetailErrors={taskDetailErrors}
+							taskDetailLoading={taskDetailLoading}
+							onToggleTask={handleToggleTask}
+							onLoadMore={requestTaskPage}
+							taskCursor={streamState.taskCursor}
+							taskPageLoading={isTaskPageLoading}
+							totalEstimate={streamState.taskTotalEstimate}
 						/>
 
 						{/* Data coverage */}

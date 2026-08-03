@@ -4,12 +4,12 @@
 
 import type {
 	DashboardStatsSubscription,
-	DashboardStatsSnapshot,
-	DashboardStatsDelta,
 	DashboardStatsError,
-	DashboardSessionPage,
-	DashboardSessionSummary,
-	DashboardSessionUpsert,
+	DashboardTaskPage,
+	DashboardTaskStatsDelta,
+	DashboardTaskStatsSnapshot,
+	DashboardTaskSummary,
+	DashboardTaskUpsert,
 	StatsBucket,
 	StatsBucketDelta,
 	StatsQuery,
@@ -65,11 +65,11 @@ export interface DashboardStreamState {
 	heatmapRangeDays: number | null
 	heatmapValues: number[]
 
-	// Sessions (normalized)
-	sessions: Record<string, DashboardSessionSummary>
-	sessionOrder: string[]
-	sessionCursor: string | undefined
-	sessionTotalEstimate: number
+	// Tasks (normalized)
+	tasks: Record<string, DashboardTaskSummary>
+	taskOrder: string[]
+	taskCursor: string | undefined
+	taskTotalEstimate: number
 }
 
 export const initialDashboardStreamState: DashboardStreamState = {
@@ -88,10 +88,10 @@ export const initialDashboardStreamState: DashboardStreamState = {
 	coverage: null,
 	heatmapRangeDays: null,
 	heatmapValues: [],
-	sessions: {},
-	sessionOrder: [],
-	sessionCursor: undefined,
-	sessionTotalEstimate: 0,
+	tasks: {},
+	taskOrder: [],
+	taskCursor: undefined,
+	taskTotalEstimate: 0,
 }
 
 // ── Actions ─────────────────────────────────────────────────────────────────
@@ -99,9 +99,9 @@ export const initialDashboardStreamState: DashboardStreamState = {
 export type DashboardStreamAction =
 	| { type: "SUBSCRIBE"; subscription: DashboardStatsSubscription }
 	| { type: "REPLACE_SUBSCRIPTION"; subscription: DashboardStatsSubscription }
-	| { type: "SNAPSHOT"; snapshot: DashboardStatsSnapshot }
-	| { type: "DELTA"; delta: DashboardStatsDelta }
-	| { type: "SESSION_PAGE"; page: DashboardSessionPage }
+	| { type: "SNAPSHOT"; snapshot: DashboardTaskStatsSnapshot }
+	| { type: "DELTA"; delta: DashboardTaskStatsDelta }
+	| { type: "TASK_PAGE"; page: DashboardTaskPage }
 	| { type: "ERROR"; error: DashboardStatsError }
 	| { type: "REQUEST_RESYNC" }
 	| { type: "RESET" }
@@ -142,50 +142,53 @@ function applyBucketDelta(bucket: StatsBucket, delta: StatsBucketDelta): StatsBu
 }
 
 /**
- * Convert a `DashboardSessionUpsert` (which has the same shape) into a
- * `DashboardSessionSummary` for storage in the normalized sessions map.
+ * Convert a `DashboardTaskUpsert` (which has the same shape) into a
+ * `DashboardTaskSummary` for storage in the normalized tasks map.
  */
-function upsertToSummary(upsert: DashboardSessionUpsert): DashboardSessionSummary {
+function upsertToSummary(upsert: DashboardTaskUpsert): DashboardTaskSummary {
 	return {
+		taskId: upsert.taskId,
 		rootTaskId: upsert.rootTaskId,
+		parentTaskId: upsert.parentTaskId,
 		title: upsert.title,
+		taskTimestamp: upsert.taskTimestamp,
 		totalCost: upsert.totalCost,
 		totalTokens: upsert.totalTokens,
 		model: upsert.model,
 		provider: upsert.provider,
-		lastActivity: upsert.lastActivity,
+		lastUsageAt: upsert.lastUsageAt,
 		eventCount: upsert.eventCount,
 	}
 }
 
 /**
- * Upsert a session into the normalized sessions map and order array.
+ * Upsert a task into the normalized task map and order array.
  *
- * - If the session already exists, update its values in place WITHOUT
+ * - If the task already exists, update its values in place WITHOUT
  *   reordering (architecture rule: "ordinary numeric updates do not reorder
  *   the visible page").
- * - If it is a new root session, insert at the top of the order array
- *   (architecture rule: "A newly created session may be inserted at the top").
+ * - A new task is inserted at the top until its next authoritative snapshot
+ *   establishes catalog order.
  */
-function upsertSession(
-	sessions: Record<string, DashboardSessionSummary>,
+function upsertTask(
+	tasks: Record<string, DashboardTaskSummary>,
 	order: string[],
-	upsert: DashboardSessionUpsert,
-): { sessions: Record<string, DashboardSessionSummary>; order: string[] } {
+	upsert: DashboardTaskUpsert,
+): { tasks: Record<string, DashboardTaskSummary>; order: string[] } {
 	const summary = upsertToSummary(upsert)
 
-	if (upsert.rootTaskId in sessions) {
+	if (upsert.taskId in tasks) {
 		// Update in place — do not reorder
 		return {
-			sessions: { ...sessions, [upsert.rootTaskId]: summary },
+			tasks: { ...tasks, [upsert.taskId]: summary },
 			order,
 		}
 	}
 
-	// New session — insert at top
+	// New task — insert at top until the next catalog snapshot establishes order.
 	return {
-		sessions: { ...sessions, [upsert.rootTaskId]: summary },
-		order: [upsert.rootTaskId, ...order],
+		tasks: { ...tasks, [upsert.taskId]: summary },
+		order: [upsert.taskId, ...order],
 	}
 }
 
@@ -228,10 +231,10 @@ export function dashboardStreamReducer(
 				coverage: state.coverage,
 				heatmapRangeDays: state.heatmapRangeDays,
 				heatmapValues: state.heatmapValues,
-				sessions: state.sessions,
-				sessionOrder: state.sessionOrder,
-				sessionCursor: state.sessionCursor,
-				sessionTotalEstimate: state.sessionTotalEstimate,
+				tasks: state.tasks,
+				taskOrder: state.taskOrder,
+				taskCursor: state.taskCursor,
+				taskTotalEstimate: state.taskTotalEstimate,
 			}
 		}
 
@@ -256,12 +259,12 @@ export function dashboardStreamReducer(
 				newBucketOrder.push(key)
 			}
 
-			// Normalize sessions into a keyed map with stable order
-			const newSessions: Record<string, DashboardSessionSummary> = {}
-			const newSessionOrder: string[] = []
-			for (const session of snap.sessions.sessions) {
-				newSessions[session.rootTaskId] = session
-				newSessionOrder.push(session.rootTaskId)
+			// Normalize tasks into a keyed map with catalog order.
+			const newTasks: Record<string, DashboardTaskSummary> = {}
+			const newTaskOrder: string[] = []
+			for (const task of snap.tasks.tasks) {
+				newTasks[task.taskId] = task
+				newTaskOrder.push(task.taskId)
 			}
 
 			return {
@@ -281,10 +284,10 @@ export function dashboardStreamReducer(
 				coverage: snap.stats.coverage,
 				heatmapRangeDays: snap.heatmap.rangeDays,
 				heatmapValues: [...snap.heatmap.values],
-				sessions: newSessions,
-				sessionOrder: newSessionOrder,
-				sessionCursor: snap.sessions.cursor,
-				sessionTotalEstimate: snap.sessions.totalEstimate,
+				tasks: newTasks,
+				taskOrder: newTaskOrder,
+				taskCursor: snap.tasks.cursor,
+				taskTotalEstimate: snap.tasks.totalEstimate,
 			}
 		}
 
@@ -357,13 +360,13 @@ export function dashboardStreamReducer(
 				}
 			}
 
-			// Apply session upserts
-			let newSessions = state.sessions
-			let newSessionOrder = state.sessionOrder
-			for (const upsert of delta.sessionUpsert) {
-				const result = upsertSession(newSessions, newSessionOrder, upsert)
-				newSessions = result.sessions
-				newSessionOrder = result.order
+			// Apply task upserts
+			let newTasks = state.tasks
+			let newTaskOrder = state.taskOrder
+			for (const upsert of delta.taskUpsert) {
+				const result = upsertTask(newTasks, newTaskOrder, upsert)
+				newTasks = result.tasks
+				newTaskOrder = result.order
 			}
 
 			return {
@@ -373,35 +376,35 @@ export function dashboardStreamReducer(
 				totals: newTotals,
 				buckets: newBuckets,
 				heatmapValues: newHeatmapValues,
-				sessions: newSessions,
-				sessionOrder: newSessionOrder,
+				tasks: newTasks,
+				taskOrder: newTaskOrder,
 			}
 		}
 
-		// ── SESSION_PAGE ───────────────────────────────────────────────────
-		// Append a cursor-paged session page. Existing sessions are updated;
-		// new sessions are appended to the end of the order array.
-		case "SESSION_PAGE": {
+		// ── TASK_PAGE ──────────────────────────────────────────────────────
+		// Append a cursor-paged task page. Existing tasks are updated;
+		// new tasks are appended to the end of the catalog order array.
+		case "TASK_PAGE": {
 			// Stale-epoch rejection
 			if (action.page.requestId !== state.subscriptionId) {
 				return state
 			}
 
-			const newSessions = { ...state.sessions }
-			const newSessionOrder = [...state.sessionOrder]
-			for (const session of action.page.sessions) {
-				if (!(session.rootTaskId in newSessions)) {
-					newSessionOrder.push(session.rootTaskId)
+			const newTasks = { ...state.tasks }
+			const newTaskOrder = [...state.taskOrder]
+			for (const task of action.page.tasks) {
+				if (!(task.taskId in newTasks)) {
+					newTaskOrder.push(task.taskId)
 				}
-				newSessions[session.rootTaskId] = session
+				newTasks[task.taskId] = task
 			}
 
 			return {
 				...state,
-				sessions: newSessions,
-				sessionOrder: newSessionOrder,
-				sessionCursor: action.page.cursor,
-				sessionTotalEstimate: action.page.totalEstimate,
+				tasks: newTasks,
+				taskOrder: newTaskOrder,
+				taskCursor: action.page.cursor,
+				taskTotalEstimate: action.page.totalEstimate,
 			}
 		}
 

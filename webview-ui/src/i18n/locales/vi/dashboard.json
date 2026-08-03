@@ -64,13 +64,6 @@
 		"label": "Tỷ lệ bộ nhớ đệm để ước tính",
 		"hint": "Áp dụng khi nhà cung cấp không báo cáo dữ liệu bộ nhớ đệm"
 	},
-	"sessions": {
-		"title": "Nhiệm vụ",
-		"noSessions": "Không có nhiệm vụ nào được ghi nhận",
-		"filterModel": "Tất cả mô hình",
-		"filterProvider": "Tất cả nhà cung cấp",
-		"callCount": "{{count}} lượt gọi"
-	},
 	"sessionDetail": {
 		"summary": "Tóm tắt phiên",
 		"apiCalls": "Lời gọi API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} gio truoc",
 		"yesterday": "hom qua",
 		"daysAgo": "{{count}} ngay truoc"
+	},
+	"tasks": {
+		"title": "Tác vụ",
+		"noTasks": "Chưa có tác vụ nào được ghi nhận",
+		"filterModel": "Tất cả mô hình",
+		"filterProvider": "Tất cả nhà cung cấp",
+		"callCount": "{{count}} lượt gọi"
 	}
 }

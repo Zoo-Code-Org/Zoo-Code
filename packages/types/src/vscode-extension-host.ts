@@ -737,6 +737,7 @@ export interface WebviewMessage {
 		| "getDashboardStats"
 		| "getDashboardSessionDetail"
 		| "getDashboardSessions"
+		| "getDashboardTaskDetail"
 		// Dashboard streaming request types
 		| "subscribeDashboardStats"
 		| "unsubscribeDashboardStats"
@@ -745,6 +746,7 @@ export interface WebviewMessage {
 		| "resumeDashboardStats"
 		| "resyncDashboardStats"
 		| "getDashboardSessionPage"
+		| "getDashboardTaskPage"
 		| "taskOrganizationMutation"
 	text?: string
 	taskId?: string
@@ -881,6 +883,10 @@ export interface WebviewMessage {
 	dashboardSessionCursor?: string
 	// Page size for `getDashboardSessionPage` requests (1–100).
 	dashboardSessionLimit?: number
+	// Opaque cursor for `getDashboardTaskPage` requests.
+	dashboardTaskCursor?: string
+	// Page size for `getDashboardTaskPage` requests (1–100).
+	dashboardTaskLimit?: number
 
 	/**
 	 * Task organization mutation request from webview to extension host.

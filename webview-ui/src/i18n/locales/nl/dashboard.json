@@ -64,13 +64,6 @@
 		"label": "Cache-verhouding voor schatting",
 		"hint": "Toegepast wanneer de provider geen cachegegevens rapporteert"
 	},
-	"sessions": {
-		"title": "Taken",
-		"noSessions": "Geen taken geregistreerd",
-		"filterModel": "Alle modellen",
-		"filterProvider": "Alle providers",
-		"callCount": "{{count}} aanroepen"
-	},
 	"sessionDetail": {
 		"summary": "Sessieoverzicht",
 		"apiCalls": "API-aanroepen",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} uur geleden",
 		"yesterday": "gisteren",
 		"daysAgo": "{{count}} dagen geleden"
+	},
+	"tasks": {
+		"title": "Taken",
+		"noTasks": "Geen taken geregistreerd",
+		"filterModel": "Alle modellen",
+		"filterProvider": "Alle providers",
+		"callCount": "{{count}} aanroepen"
 	}
 }

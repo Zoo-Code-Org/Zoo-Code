@@ -64,13 +64,6 @@
 		"label": "Relació de memòria cau per a estimació",
 		"hint": "S'aplica quan el proveïdor no informa dades de memòria cau"
 	},
-	"sessions": {
-		"title": "Tasques",
-		"noSessions": "No hi ha tasques registrades",
-		"filterModel": "Tots els models",
-		"filterProvider": "Tots els proveïdors",
-		"callCount": "{{count}} trucades"
-	},
 	"sessionDetail": {
 		"summary": "Resum de la sessió",
 		"apiCalls": "Trucades API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "fa {{count}} h",
 		"yesterday": "ahir",
 		"daysAgo": "fa {{count}} dies"
+	},
+	"tasks": {
+		"title": "Tasques",
+		"noTasks": "No s’han registrat tasques",
+		"filterModel": "Tots els models",
+		"filterProvider": "Tots els proveïdors",
+		"callCount": "{{count}} trucades"
 	}
 }

@@ -64,13 +64,6 @@
 		"label": "Współczynnik pamięci podręcznej do szacowania",
 		"hint": "Stosowany, gdy dostawca nie zgłasza danych pamięci podręcznej"
 	},
-	"sessions": {
-		"title": "Zadania",
-		"noSessions": "Brak zarejestrowanych zadań",
-		"filterModel": "Wszystkie modele",
-		"filterProvider": "Wszyscy dostawcy",
-		"callCount": "{{count}} wywołań"
-	},
 	"sessionDetail": {
 		"summary": "Podsumowanie sesji",
 		"apiCalls": "Wywołania API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} godz. temu",
 		"yesterday": "wczoraj",
 		"daysAgo": "{{count}} dni temu"
+	},
+	"tasks": {
+		"title": "Zadania",
+		"noTasks": "Nie zarejestrowano żadnych zadań",
+		"filterModel": "Wszystkie modele",
+		"filterProvider": "Wszyscy dostawcy",
+		"callCount": "{{count}} wywołań"
 	}
 }

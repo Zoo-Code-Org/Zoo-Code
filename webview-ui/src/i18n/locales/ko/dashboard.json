@@ -64,13 +64,6 @@
 		"label": "추정을 위한 캐시 비율",
 		"hint": "제공자가 캐시 데이터를 보고하지 않을 때 적용됨"
 	},
-	"sessions": {
-		"title": "작업",
-		"noSessions": "기록된 작업이 없습니다",
-		"filterModel": "모든 모델",
-		"filterProvider": "모든 공급자",
-		"callCount": "{{count}}회 호출"
-	},
 	"sessionDetail": {
 		"summary": "세션 요약",
 		"apiCalls": "API 호출",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}}시간 전",
 		"yesterday": "어제",
 		"daysAgo": "{{count}}일 전"
+	},
+	"tasks": {
+		"title": "작업",
+		"noTasks": "기록된 작업이 없습니다",
+		"filterModel": "모든 모델",
+		"filterProvider": "모든 공급자",
+		"callCount": "{{count}}회 호출"
 	}
 }

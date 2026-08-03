@@ -115,6 +115,8 @@ const createMockDatabase = () => ({
 	getLastSequence: vi.fn(() => 0),
 	readEventsAfter: vi.fn(() => ({ events: [], hasMore: false })),
 	querySessions: vi.fn(() => ({ sessions: [], cursor: undefined, totalEstimate: 0 })),
+	queryTaskUsageByTaskIds: vi.fn(() => new Map()),
+	queryEventsByTaskIds: vi.fn(() => []),
 	clearGeneration: vi.fn(() => 2),
 	_isInitialized: vi.fn(() => true),
 	_getDbPath: vi.fn(() => "/tmp/usage.db"),
@@ -267,6 +269,28 @@ describe("usageStatsMessageRouting", () => {
 				.mock.calls.find((c) => c[0]?.type === "dashboardSessionDetailResponse")
 			expect(response).toBeDefined()
 		})
+
+		it("routes getDashboardTaskDetail without replacing the legacy session route", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				byId: new Map([["task-001", { id: "task-001", task: "History task", ts: 100 }]]),
+				getDescendantTaskIds: vi.fn(() => []),
+			}
+			const provider = createMockProvider({
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+			} as any)
+
+			await webviewMessageHandler(provider, {
+				type: "getDashboardTaskDetail",
+				requestId: "task-detail-route",
+				taskId: "task-001",
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "dashboardTaskDetailResponse", requestId: "task-detail-route" }),
+			)
+		})
 	})
 
 	// ── New dashboard stream handlers are routed ──────────────────────────────
@@ -387,6 +411,31 @@ describe("usageStatsMessageRouting", () => {
 				expect.objectContaining({
 					type: "dashboardSessionPageResponse",
 				}),
+			)
+		})
+
+		it("routes getDashboardTaskPage through the task projection", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				catalogRevision: 2,
+				getPage: vi.fn(() => ({ tasks: ["task-001"], cursor: undefined, totalEstimate: 1 })),
+				getDescendantTaskIds: vi.fn(() => []),
+				byId: new Map([["task-001", { id: "task-001", task: "History task", ts: 100 }]]),
+				ancestorsByTaskId: new Map(),
+			}
+			const provider = createMockProvider({
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+			} as any)
+
+			await webviewMessageHandler(provider, {
+				type: "getDashboardTaskPage",
+				requestId: "task-page-route",
+				dashboardTaskLimit: 50,
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "dashboardTaskPageResponse" }),
 			)
 		})
 	})

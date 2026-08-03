@@ -64,13 +64,6 @@
 		"label": "Cache ratio for estimation",
 		"hint": "Applied when provider doesn't report cache data"
 	},
-	"sessions": {
-		"title": "Tasks",
-		"noSessions": "No tasks recorded",
-		"filterModel": "All Models",
-		"filterProvider": "All Providers",
-		"callCount": "{{count}} calls"
-	},
 	"sessionDetail": {
 		"summary": "Session Summary",
 		"apiCalls": "API Calls",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} hr ago",
 		"yesterday": "yesterday",
 		"daysAgo": "{{count}} days ago"
+	},
+	"tasks": {
+		"title": "Tasks",
+		"noTasks": "No tasks recorded",
+		"filterModel": "All Models",
+		"filterProvider": "All Providers",
+		"callCount": "{{count}} calls"
 	}
 }

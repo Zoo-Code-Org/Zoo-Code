@@ -7,6 +7,12 @@ import {
 	DashboardSessionSummary,
 	DashboardSessionPageRequest,
 	DashboardSessionUpsert,
+	DashboardTaskSummary,
+	DashboardTaskPage,
+	DashboardTaskUpsert,
+	DashboardTaskDetail,
+	DashboardTaskStatsSnapshot,
+	DashboardTaskStatsDelta,
 	HeatmapSnapshot,
 	StatsBucketDelta,
 } from "../usage-stats.js"
@@ -55,6 +61,20 @@ const validSessionSummary: DashboardSessionSummary = {
 	model: "claude-sonnet-4-20250514",
 	provider: "anthropic",
 	lastActivity: 1722259200000,
+	eventCount: 5,
+}
+
+const validTaskSummary: DashboardTaskSummary = {
+	taskId: "task-001",
+	rootTaskId: "root-task-001",
+	parentTaskId: "parent-task-001",
+	title: "Fix task projection",
+	taskTimestamp: 1722259100000,
+	lastUsageAt: 1722259200000,
+	totalCost: 0.15,
+	totalTokens: 12000,
+	model: "claude-sonnet-4-20250514",
+	provider: "anthropic",
 	eventCount: 5,
 }
 
@@ -233,6 +253,80 @@ describe("DashboardSessionPage", () => {
 	it("should reject missing totalEstimate", () => {
 		const { totalEstimate: _est, ...withoutEst } = validPage
 		expect(() => DashboardSessionPage.parse(withoutEst)).toThrow()
+	})
+})
+
+// ── DashboardTaskSummary / DashboardTaskPage ────────────────────────────────
+
+describe("DashboardTaskSummary", () => {
+	it("should parse a History-first task summary including zero-usage metadata", () => {
+		const result = DashboardTaskSummary.parse(validTaskSummary)
+		expect(result.taskId).toBe("task-001")
+		expect(result.parentTaskId).toBe("parent-task-001")
+		expect(result.lastUsageAt).toBe(1722259200000)
+	})
+
+	it("should accept a zero-usage task without lastUsageAt", () => {
+		const { lastUsageAt: _lastUsageAt, ...zeroUsageTask } = validTaskSummary
+		const result = DashboardTaskSummary.parse({
+			...zeroUsageTask,
+			totalCost: 0,
+			totalTokens: 0,
+			eventCount: 0,
+			model: "",
+			provider: "",
+		})
+		expect(result.lastUsageAt).toBeUndefined()
+		expect(result.eventCount).toBe(0)
+	})
+
+	it("should reject a negative event count", () => {
+		expect(() => DashboardTaskSummary.parse({ ...validTaskSummary, eventCount: -1 })).toThrow()
+	})
+})
+
+describe("DashboardTaskPage", () => {
+	const validPage = {
+		requestId: "sub-001",
+		catalogRevision: 4,
+		tasks: [validTaskSummary],
+		cursor: "next-task-page",
+		totalEstimate: 100,
+	}
+
+	it("should parse a revisioned task page", () => {
+		const result = DashboardTaskPage.parse(validPage)
+		expect(result.catalogRevision).toBe(4)
+		expect(result.tasks).toHaveLength(1)
+	})
+
+	it("should reject a negative catalog revision", () => {
+		expect(() => DashboardTaskPage.parse({ ...validPage, catalogRevision: -1 })).toThrow()
+	})
+})
+
+describe("DashboardTaskUpsert", () => {
+	it("should use the full task summary shape so no client join is required", () => {
+		const result = DashboardTaskUpsert.parse(validTaskSummary)
+		expect(result.rootTaskId).toBe("root-task-001")
+		expect(result.taskTimestamp).toBe(1722259100000)
+	})
+})
+
+describe("DashboardTaskDetail", () => {
+	it("should parse a successful empty detail for a known zero-usage task", () => {
+		const result = DashboardTaskDetail.parse({
+			taskId: "unused-task",
+			title: "No API usage",
+			taskTimestamp: 1234,
+			models: [],
+			modes: [],
+			totalTokens: 0,
+			totalCost: 0,
+			callCount: 0,
+			apiCalls: [],
+		})
+		expect(result.apiCalls).toEqual([])
 	})
 })
 
@@ -645,5 +739,77 @@ describe("serialization round trips", () => {
 		const result = DashboardSessionPage.parse(parsed)
 		expect(result.sessions).toHaveLength(1)
 		expect(result.totalEstimate).toBe(50)
+	})
+
+	it("should round-trip task snapshot, delta, page, and detail through JSON", () => {
+		const taskPage = {
+			requestId: "sub-001",
+			catalogRevision: 7,
+			tasks: [validTaskSummary],
+			cursor: "next-task-cursor",
+			totalEstimate: 50,
+		}
+		const bucketDelta = {
+			key: { day: "2026-07-29" },
+			events: 1,
+			completedCalls: 1,
+			failedCalls: 0,
+			cancelledCalls: 0,
+			inputTokens: 500,
+			outputTokens: 200,
+			cacheReadTokens: 100,
+			cacheWriteTokens: 50,
+			reasoningTokens: 0,
+			totalTokens: 700,
+			costUsd: 0.01,
+			unknownEventCount: 0,
+		}
+		const snapshot = {
+			requestId: "sub-001",
+			generation: 1,
+			sequence: 100,
+			stats: validStatsSnapshot,
+			tasks: taskPage,
+			cursor: taskPage.cursor,
+			heatmap: { rangeDays: 30, values: [0.1, 0.2] },
+		}
+		const delta = {
+			requestId: "sub-001",
+			generation: 1,
+			sequence: 101,
+			totalDelta: bucketDelta,
+			breakdownDelta: [bucketDelta],
+			taskUpsert: [validTaskSummary],
+		}
+		const detail = {
+			taskId: "task-001",
+			title: "Fix task projection",
+			taskTimestamp: 1722259100000,
+			models: ["claude-sonnet-4-20250514"],
+			modes: ["code"],
+			totalTokens: 12000,
+			totalCost: 0.15,
+			callCount: 1,
+			apiCalls: [
+				{
+					index: 1,
+					mode: "code",
+					timestamp: 1722259200000,
+					inputTokens: 5000,
+					outputTokens: 2500,
+					cacheReadTokens: 1000,
+					cacheWriteTokens: 500,
+					reasoningTokens: 200,
+					costUsd: 0.15,
+					status: "completed",
+					model: "claude-sonnet-4-20250514",
+				},
+			],
+		}
+
+		expect(DashboardTaskPage.parse(JSON.parse(JSON.stringify(taskPage))).catalogRevision).toBe(7)
+		expect(DashboardTaskStatsSnapshot.parse(JSON.parse(JSON.stringify(snapshot))).tasks.tasks).toHaveLength(1)
+		expect(DashboardTaskStatsDelta.parse(JSON.parse(JSON.stringify(delta))).taskUpsert).toHaveLength(1)
+		expect(DashboardTaskDetail.parse(JSON.parse(JSON.stringify(detail))).apiCalls).toHaveLength(1)
 	})
 })

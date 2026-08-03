@@ -64,13 +64,6 @@
 		"label": "缓存比率估计",
 		"hint": "当提供商未报告缓存数据时应用"
 	},
-	"sessions": {
-		"title": "任务",
-		"noSessions": "没有记录的任务",
-		"filterModel": "所有模型",
-		"filterProvider": "所有提供商",
-		"callCount": "{{count}} 次调用"
-	},
 	"sessionDetail": {
 		"summary": "会话摘要",
 		"apiCalls": "API 调用",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}}小时前",
 		"yesterday": "昨天",
 		"daysAgo": "{{count}}天前"
+	},
+	"tasks": {
+		"title": "任务",
+		"noTasks": "尚未记录任务",
+		"filterModel": "所有模型",
+		"filterProvider": "所有提供商",
+		"callCount": "{{count}} 次调用"
 	}
 }

@@ -1,6 +1,11 @@
 import React, { memo, useMemo } from "react"
 
-import type { SessionDetail as SessionDetailType, APICallRecord } from "@roo-code/types"
+import type {
+	APICallRecord,
+	DashboardTaskApiCall,
+	DashboardTaskDetail,
+	SessionDetail as SessionDetailType,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { formatCompact, formatCost } from "@/utils/formatNumber"
@@ -37,7 +42,7 @@ function formatTime(timestamp: number): string {
  * The icon is paired with an `aria-label` and a `title` so screen readers and
  * tooltips convey the status without relying on the emoji alone.
  */
-function StatusIcon({ status }: { status: APICallRecord["status"] }) {
+function StatusIcon({ status }: { status: APICallRecord["status"] | DashboardTaskApiCall["status"] }) {
 	const { t } = useAppTranslation()
 	const icon = status === "completed" ? "✅" : status === "failed" ? "❌" : "🔄"
 	const label = t(`dashboard:sessionDetail.status`)
@@ -51,7 +56,7 @@ function StatusIcon({ status }: { status: APICallRecord["status"] }) {
 // ── API call list ────────────────────────────────────────────────────────────
 
 interface APICallListProps {
-	apiCalls: APICallRecord[]
+	apiCalls: Array<APICallRecord | DashboardTaskApiCall>
 }
 
 /**
@@ -150,8 +155,8 @@ APICallList.displayName = "APICallList"
 // ── SessionDetail ────────────────────────────────────────────────────────────
 
 interface SessionDetailProps {
-	/** The full session detail including per-API-call records. */
-	detail: SessionDetailType
+	/** The full legacy session or task detail including per-API-call records. */
+	detail: SessionDetailType | DashboardTaskDetail
 }
 
 /**
@@ -182,8 +187,8 @@ const SessionDetail = memo(({ detail }: SessionDetailProps) => {
 	// delegating to code, debug, ask). Prefer the full `models`/`modes`
 	// arrays when present and non-empty, falling back to the legacy
 	// single-value fields for older payloads.
-	const modelDisplay = detail.models && detail.models.length > 0 ? detail.models.join(", ") : detail.model || "—"
-	const modeDisplay = detail.modes && detail.modes.length > 0 ? detail.modes.join(", ") : detail.mode || "—"
+	const modelDisplay = detail.models.length > 0 ? detail.models.join(", ") : "—"
+	const modeDisplay = detail.modes.length > 0 ? detail.modes.join(", ") : "—"
 
 	const summaryItems = useMemo(
 		() => [

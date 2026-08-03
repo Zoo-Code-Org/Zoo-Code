@@ -64,13 +64,6 @@
 		"label": "Ratio de cache pour estimation",
 		"hint": "Appliqué lorsque le fournisseur ne signale pas les données de cache"
 	},
-	"sessions": {
-		"title": "Tâches",
-		"noSessions": "Aucune tâche enregistrée",
-		"filterModel": "Tous les modèles",
-		"filterProvider": "Tous les fournisseurs",
-		"callCount": "{{count}} appels"
-	},
 	"sessionDetail": {
 		"summary": "Résumé de la session",
 		"apiCalls": "Appels API",
@@ -89,5 +82,12 @@
 		"hoursAgo": "il y a {{count}} h",
 		"yesterday": "hier",
 		"daysAgo": "il y a {{count}} jours"
+	},
+	"tasks": {
+		"title": "Tâches",
+		"noTasks": "Aucune tâche enregistrée",
+		"filterModel": "Tous les modèles",
+		"filterProvider": "Tous les fournisseurs",
+		"callCount": "{{count}} appels"
 	}
 }

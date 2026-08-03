@@ -64,13 +64,6 @@
 		"label": "Tahmin için önbellek oranı",
 		"hint": "Sağlayıcı önbellek verilerini bildirmediğinde uygulanır"
 	},
-	"sessions": {
-		"title": "Görevler",
-		"noSessions": "Kayıtlı görev yok",
-		"filterModel": "Tüm Modeller",
-		"filterProvider": "Tüm Sağlayıcılar",
-		"callCount": "{{count}} çağrı"
-	},
 	"sessionDetail": {
 		"summary": "Oturum Özeti",
 		"apiCalls": "API Çağrıları",
@@ -89,5 +82,12 @@
 		"hoursAgo": "{{count}} saat önce",
 		"yesterday": "dün",
 		"daysAgo": "{{count}} gün önce"
+	},
+	"tasks": {
+		"title": "Görevler",
+		"noTasks": "Kaydedilmiş görev yok",
+		"filterModel": "Tüm Modeller",
+		"filterProvider": "Tüm Sağlayıcılar",
+		"callCount": "{{count}} çağrı"
 	}
 }

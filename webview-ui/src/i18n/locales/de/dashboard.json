@@ -64,13 +64,6 @@
 		"label": "Cache-Verhältnis zur Schätzung",
 		"hint": "Wird angewendet, wenn der Anbieter keine Cache-Daten meldet"
 	},
-	"sessions": {
-		"title": "Aufgaben",
-		"noSessions": "Keine Aufgaben aufgezeichnet",
-		"filterModel": "Alle Modelle",
-		"filterProvider": "Alle Anbieter",
-		"callCount": "{{count}} Aufrufe"
-	},
 	"sessionDetail": {
 		"summary": "Sitzungsübersicht",
 		"apiCalls": "API-Aufrufe",
@@ -89,5 +82,12 @@
 		"hoursAgo": "vor {{count}} Std.",
 		"yesterday": "gestern",
 		"daysAgo": "vor {{count}} Tagen"
+	},
+	"tasks": {
+		"title": "Aufgaben",
+		"noTasks": "Keine Aufgaben aufgezeichnet",
+		"filterModel": "Alle Modelle",
+		"filterProvider": "Alle Anbieter",
+		"callCount": "{{count}} Aufrufe"
 	}
 }

@@ -1,7 +1,7 @@
 // npx vitest run src/components/dashboard/__tests__/DashboardView.spec.tsx
 
-import React from "react"
-import { render, fireEvent, waitFor } from "@/utils/test-utils"
+import React, { useSyncExternalStore } from "react"
+import { render, fireEvent, waitFor, act } from "@/utils/test-utils"
 
 import type { StatsBucket } from "@roo-code/types"
 
@@ -29,42 +29,63 @@ vi.mock("@/utils/vscode", () => ({
 }))
 
 // ── Mock useDashboardStatsStream ─────────────────────────────────────────────
-// Use vi.hoisted so the mock state is available inside the hoisted vi.mock factory.
+// Use useSyncExternalStore so external state changes trigger React re-renders.
 
-const { streamStateRef, replaceSubscriptionMock, requestSessionPageMock } = vi.hoisted(() => ({
-	streamStateRef: {
-		current: {
-			status: "idle" as string,
-			subscriptionId: null as string | null,
-			generation: null as number | null,
-			sequence: 0,
-			isLoading: true,
-			pendingResync: false,
-			backgroundError: null as { code: string; message: string } | null,
-			query: null,
-			generatedAt: null,
-			totals: null as StatsBucket | null,
-			buckets: {} as Record<string, StatsBucket>,
-			bucketOrder: [] as string[],
-			coverage: null as Record<string, unknown> | null,
-			heatmapRangeDays: null as number | null,
-			heatmapValues: [] as number[],
-			sessions: {} as Record<string, unknown>,
-			sessionOrder: [] as string[],
-			sessionCursor: undefined as string | undefined,
-			sessionTotalEstimate: 0,
+const { streamStore, replaceSubscriptionMock, requestTaskPageMock } = vi.hoisted(() => {
+	const initialState = {
+		status: "idle" as string,
+		subscriptionId: null as string | null,
+		generation: null as number | null,
+		sequence: 0,
+		isLoading: true,
+		pendingResync: false,
+		backgroundError: null as { code: string; message: string } | null,
+		query: null,
+		generatedAt: null,
+		totals: null as StatsBucket | null,
+		buckets: {} as Record<string, StatsBucket>,
+		bucketOrder: [] as string[],
+		coverage: null as Record<string, unknown> | null,
+		heatmapRangeDays: null as number | null,
+		heatmapValues: [] as number[],
+		tasks: {} as Record<string, unknown>,
+		taskOrder: [] as string[],
+		taskCursor: undefined as string | undefined,
+		taskTotalEstimate: 0,
+	}
+
+	type State = typeof initialState
+	let currentState: State = initialState
+	const listeners = new Set<() => void>()
+
+	return {
+		streamStore: {
+			getSnapshot: () => currentState,
+			subscribe: (listener: () => void) => {
+				listeners.add(listener)
+				return () => listeners.delete(listener)
+			},
+			setState: (next: State) => {
+				currentState = next
+				listeners.forEach((l) => l())
+			},
+			getInitialState: () => initialState,
 		},
-	},
-	replaceSubscriptionMock: vi.fn(),
-	requestSessionPageMock: vi.fn(),
-}))
+		replaceSubscriptionMock: vi.fn(),
+		requestTaskPageMock: vi.fn(),
+	}
+})
 
-vi.mock("../useDashboardStatsStream", () => ({
-	useDashboardStatsStream: () => ({
-		state: streamStateRef.current,
-		requestSessionPage: requestSessionPageMock,
-		replaceSubscription: replaceSubscriptionMock,
-	}),
+vi.mock("@/components/dashboard/useDashboardStatsStream", () => ({
+	useDashboardStatsStream: () => {
+		const state = useSyncExternalStore(streamStore.subscribe, streamStore.getSnapshot)
+		return {
+			state,
+			requestTaskPage: requestTaskPageMock,
+			isTaskPageLoading: false,
+			replaceSubscription: replaceSubscriptionMock,
+		}
+	},
 }))
 
 // ── Mock child components to avoid deep rendering ────────────────────────────
@@ -73,24 +94,24 @@ vi.mock("../DashboardSummary", () => ({
 	default: () => <div data-testid="dashboard-summary" />,
 }))
 
-vi.mock("../SessionList", () => ({
+vi.mock("@/components/dashboard/TaskList", () => ({
 	default: ({
-		sessions,
-		sessionDetails,
-		onToggleSession,
+		tasks,
+		taskDetails,
+		onToggleTask,
 	}: {
-		sessions: Array<{ rootTaskId: string }>
-		sessionDetails: Record<string, { title: string } | null>
-		onToggleSession: (taskId: string) => void
+		tasks: Array<{ taskId: string }>
+		taskDetails: Record<string, { title: string } | null>
+		onToggleTask: (taskId: string) => void
 	}) => (
-		<div data-testid="session-list">
-			{sessions.map((session) => (
-				<button key={session.rootTaskId} onClick={() => onToggleSession(session.rootTaskId)}>
-					{session.rootTaskId}
+		<div data-testid="task-list">
+			{tasks.map((task) => (
+				<button key={task.taskId} onClick={() => onToggleTask(task.taskId)}>
+					{task.taskId}
 				</button>
 			))}
-			{Object.entries(sessionDetails).map(([taskId, detail]) => (
-				<div key={taskId} data-testid={`session-detail-${taskId}`}>
+			{Object.entries(taskDetails).map(([taskId, detail]) => (
+				<div key={taskId} data-testid={`task-detail-${taskId}`}>
 					{detail?.title}
 				</div>
 			))}
@@ -185,31 +206,16 @@ function makeBucket(overrides: Partial<StatsBucket> = {}): StatsBucket {
 }
 
 function setStreamState(overrides: Record<string, unknown>) {
-	streamStateRef.current = { ...streamStateRef.current, ...overrides }
+	const next = { ...streamStore.getSnapshot(), ...overrides }
+	act(() => {
+		streamStore.setState(next)
+	})
 }
 
 function resetStreamState() {
-	streamStateRef.current = {
-		status: "idle",
-		subscriptionId: null,
-		generation: null,
-		sequence: 0,
-		isLoading: true,
-		pendingResync: false,
-		backgroundError: null,
-		query: null,
-		generatedAt: null,
-		totals: null,
-		buckets: {},
-		bucketOrder: [],
-		coverage: null,
-		heatmapRangeDays: null,
-		heatmapValues: [],
-		sessions: {},
-		sessionOrder: [],
-		sessionCursor: undefined,
-		sessionTotalEstimate: 0,
-	}
+	act(() => {
+		streamStore.setState(streamStore.getInitialState())
+	})
 }
 
 function setConnectedState(overrides: Record<string, unknown> = {}) {
@@ -232,45 +238,49 @@ describe("DashboardView (streaming)", () => {
 	beforeEach(() => {
 		postMessageMock.mockClear()
 		replaceSubscriptionMock.mockClear()
-		requestSessionPageMock.mockClear()
+		requestTaskPageMock.mockClear()
 		resetStreamState()
 	})
 
-	describe("session detail responses", () => {
+	describe("task detail responses", () => {
 		it("stores a synchronous detail response for the task that initiated the request", async () => {
-			setConnectedState({
-				sessions: {
-					"task-race": {
-						rootTaskId: "task-race",
-						title: "Race task",
-						totalCost: 0,
-						totalTokens: 1,
-						model: "model",
-						provider: "provider",
-						lastActivity: 0,
-						eventCount: 1,
-					},
-				},
-				sessionOrder: ["task-race"],
-			})
 			postMessageMock.mockImplementationOnce((message: { type: string; requestId: string }) => {
-				if (message.type !== "getDashboardSessionDetail") return
+				if (message.type !== "getDashboardTaskDetail") return
 				window.dispatchEvent(
 					new MessageEvent("message", {
 						data: {
-							type: "dashboardSessionDetailResponse",
+							type: "dashboardTaskDetailResponse",
 							requestId: message.requestId,
-							dashboardSessionDetail: { title: "Loaded before render" },
+							dashboardTaskDetail: { title: "Loaded before render" },
 						},
 					}),
 				)
 			})
 
-			const { getByRole, getByTestId } = render(<DashboardView onDone={() => {}} />)
-			fireEvent.click(getByRole("button", { name: "task-race" }))
+			const { getByRole, getByTestId, findByRole } = render(<DashboardView onDone={() => {}} />)
+			act(() => {
+				setConnectedState({
+					tasks: {
+						"task-race": {
+							taskId: "task-race",
+							rootTaskId: "task-race",
+							title: "Race task",
+							taskTimestamp: 0,
+							totalCost: 0,
+							totalTokens: 1,
+							model: "model",
+							provider: "provider",
+							lastUsageAt: 0,
+							eventCount: 1,
+						},
+					},
+					taskOrder: ["task-race"],
+				})
+			})
+			fireEvent.click(await findByRole("button", { name: "task-race" }))
 
 			await waitFor(() =>
-				expect(getByTestId("session-detail-task-race").textContent).toBe("Loaded before render"),
+				expect(getByTestId("task-detail-task-race").textContent).toBe("Loaded before render"),
 			)
 		})
 	})

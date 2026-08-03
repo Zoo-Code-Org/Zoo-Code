@@ -3,7 +3,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import i18next from "i18next"
 
-import type { DashboardSessionSummary, SessionDetail as SessionDetailType } from "@roo-code/types"
+import type { DashboardTaskDetail, DashboardTaskSummary } from "@roo-code/types"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { formatCompact, formatCost } from "@/utils/formatNumber"
@@ -39,52 +39,52 @@ function formatRelativeTime(timestamp: number): string {
 	return new Date(timestamp).toLocaleDateString()
 }
 
-// ── Session detail loading / error states ───────────────────────────────────
+// ── Task detail loading / error states ──────────────────────────────────────
 
 /**
- * The loading state for a session row whose detail is being fetched.
+ * The loading state for a task row whose detail is being fetched.
  * Rendered in place of {@link SessionDetail} while the IPC request is in
  * flight so the user gets immediate feedback that their click was registered.
  */
-const SessionDetailLoading = memo(() => {
+const TaskDetailLoading = memo(() => {
 	const { t } = useAppTranslation()
 	return (
 		<div
 			className="flex items-center justify-center gap-2 border-t border-vscode-panel-border bg-vscode-editor-background px-2 py-3"
-			data-testid="dashboard-session-detail-loading">
+			data-testid="dashboard-task-detail-loading">
 			<RefreshCw className="size-3.5 animate-spin text-vscode-descriptionForeground" />
 			<span className="text-xs text-vscode-descriptionForeground">{t("dashboard:states.loading")}</span>
 		</div>
 	)
 })
 
-SessionDetailLoading.displayName = "SessionDetailLoading"
+TaskDetailLoading.displayName = "TaskDetailLoading"
 
 /**
- * The error state for a session row whose detail fetch failed. Rendered in
+ * The error state for a task row whose detail fetch failed. Rendered in
  * place of {@link SessionDetail} so the user can see the error inline and
  * try expanding another row.
  */
-const SessionDetailError = memo(({ error }: { error: string }) => {
+const TaskDetailError = memo(({ error }: { error: string }) => {
 	return (
 		<div
 			className="flex items-center justify-center border-t border-vscode-panel-border bg-vscode-editor-background px-2 py-3 text-xs text-vscode-errorForeground"
-			data-testid="dashboard-session-detail-error">
+			data-testid="dashboard-task-detail-error">
 			{error}
 		</div>
 	)
 })
 
-SessionDetailError.displayName = "SessionDetailError"
+TaskDetailError.displayName = "TaskDetailError"
 
-// ── Session row ──────────────────────────────────────────────────────────────
+// ── Task row ─────────────────────────────────────────────────────────────────
 
-interface SessionRowProps {
-	session: DashboardSessionSummary
+interface TaskRowProps {
+	task: DashboardTaskSummary
 	/** Whether this row is currently expanded. */
 	isExpanded: boolean
-	/** The loaded detail for this session, or undefined if not loaded/failed. */
-	detail?: SessionDetailType | null
+	/** The loaded detail for this task, or undefined if not loaded/failed. */
+	detail?: DashboardTaskDetail | null
 	/** The error message if the detail fetch failed, or undefined. */
 	detailError?: string | null
 	/** Whether the detail fetch is currently in flight. */
@@ -93,28 +93,31 @@ interface SessionRowProps {
 	onToggle: (taskId: string) => void
 }
 
-const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoading, onToggle }: SessionRowProps) => {
+const TaskRow = memo(({ task, isExpanded, detail, detailError, detailLoading, onToggle }: TaskRowProps) => {
 	const { t } = useAppTranslation()
+	const metadata = [formatRelativeTime(task.lastUsageAt ?? task.taskTimestamp), task.model, task.provider]
+		.filter(Boolean)
+		.join(" · ")
 
 	const handleClick = useCallback(() => {
-		onToggle(session.rootTaskId)
-	}, [onToggle, session.rootTaskId])
+		onToggle(task.taskId)
+	}, [onToggle, task.taskId])
 
 	const handleKeyDown = useCallback(
 		(e: React.KeyboardEvent) => {
 			if (e.key === "Enter" || e.key === " ") {
 				e.preventDefault()
-				onToggle(session.rootTaskId)
+				onToggle(task.taskId)
 			}
 		},
-		[onToggle, session.rootTaskId],
+		[onToggle, task.taskId],
 	)
 
 	return (
-		<div data-testid="dashboard-session-row-container">
+		<div data-testid="dashboard-task-row-container">
 			<div
 				className="flex items-center justify-between gap-2 border-b border-vscode-panel-border px-2 py-1.5 last:border-b-0 hover:bg-vscode-list-hoverBackground cursor-pointer"
-				data-testid="dashboard-session-row"
+				data-testid="dashboard-task-row"
 				role="button"
 				tabIndex={0}
 				aria-expanded={isExpanded}
@@ -127,35 +130,29 @@ const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoadi
 						<ChevronRight className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
 					)}
 					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate text-xs font-medium text-vscode-foreground" title={session.title}>
-							{session.title}
+						<span className="truncate text-xs font-medium text-vscode-foreground" title={task.title}>
+							{task.title}
 						</span>
-						<span className="text-[10px] text-vscode-descriptionForeground">
-							{formatRelativeTime(session.lastActivity)}
-							{" \u00b7 "}
-							{session.model}
-							{" \u00b7 "}
-							{session.provider}
-						</span>
+						<span className="text-[10px] text-vscode-descriptionForeground">{metadata}</span>
 					</div>
 				</div>
 				<div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
 					<span className="text-xs font-medium text-vscode-foreground tabular-nums">
-						{formatCompact(session.totalTokens)}
+						{formatCompact(task.totalTokens)}
 					</span>
 					<span className="text-[10px] text-vscode-descriptionForeground tabular-nums">
-						{formatCost(session.totalCost)}
+						{formatCost(task.totalCost)}
 						{" \u00b7 "}
-						{t("dashboard:sessions.callCount", { count: session.eventCount })}
+						{t("dashboard:tasks.callCount", { count: task.eventCount })}
 					</span>
 				</div>
 			</div>
 			{isExpanded && (
 				<>
 					{detailLoading ? (
-						<SessionDetailLoading />
+						<TaskDetailLoading />
 					) : detailError ? (
-						<SessionDetailError error={detailError} />
+						<TaskDetailError error={detailError} />
 					) : detail ? (
 						<SessionDetail detail={detail} />
 					) : null}
@@ -165,86 +162,94 @@ const SessionRow = memo(({ session, isExpanded, detail, detailError, detailLoadi
 	)
 })
 
-SessionRow.displayName = "SessionRow"
+TaskRow.displayName = "TaskRow"
 
-// ── SessionList ─────────────────────────────────────────────────────────────
+// ── TaskList ────────────────────────────────────────────────────────────────
 
-interface SessionListProps {
-	/** Ordered list of session summaries from the stream. */
-	sessions: DashboardSessionSummary[]
-	/** The rootTaskId of the currently expanded session, or undefined if none. */
+interface TaskListProps {
+	/** Ordered list of task summaries from the stream. */
+	tasks: DashboardTaskSummary[]
+	/** The task ID of the currently expanded task, or undefined if none. */
 	expandedTaskId?: string
-	/** Map of rootTaskId -> loaded session detail (only populated for expanded rows). */
-	sessionDetails: Record<string, SessionDetailType | null>
-	/** Map of rootTaskId -> detail fetch error message (only populated for failed fetches). */
-	sessionDetailErrors: Record<string, string | null>
-	/** Set of rootTaskIds whose detail is currently being fetched. */
-	sessionDetailLoading: Set<string>
-	/** Called when the user clicks a session row to toggle its expansion. */
-	onToggleSession: (taskId: string) => void
+	/** Map of task ID -> loaded task detail (only populated for expanded rows). */
+	taskDetails: Record<string, DashboardTaskDetail | null>
+	/** Map of task ID -> detail fetch error message (only populated for failed fetches). */
+	taskDetailErrors: Record<string, string | null>
+	/** Set of task IDs whose detail is currently being fetched. */
+	taskDetailLoading: Set<string>
+	/** Called when the user clicks a task row to toggle its expansion. */
+	onToggleTask: (taskId: string) => void
 	/** Called when the user scrolls near the bottom (for cursor paging). Optional. */
 	onLoadMore?: () => void
-	/** Estimated total session count for display. Optional. */
+	/** Opaque cursor for the next task page, undefined when the final page is loaded. */
+	taskCursor?: string
+	/** Whether a task page request is currently in flight. */
+	taskPageLoading?: boolean
+	/** Estimated total task count for display. Optional. */
 	totalEstimate?: number
 }
 
-const SessionList = memo(
+const TaskList = memo(
 	({
-		sessions,
+		tasks,
 		expandedTaskId,
-		sessionDetails,
-		sessionDetailErrors,
-		sessionDetailLoading,
-		onToggleSession,
+		taskDetails,
+		taskDetailErrors,
+		taskDetailLoading,
+		onToggleTask,
 		onLoadMore,
+		taskCursor,
+		taskPageLoading = false,
 		totalEstimate,
-	}: SessionListProps) => {
+	}: TaskListProps) => {
 		const { t } = useAppTranslation()
 		const virtuosoRef = useRef<VirtuosoHandle>(null)
 
 		return (
-			<div className="flex flex-col gap-2" data-testid="dashboard-sessions">
+			<div className="flex flex-col gap-2" data-testid="dashboard-tasks">
 				<div className="flex items-center justify-between">
 					<h4 className="m-0 text-sm font-medium text-vscode-foreground">
-						{t("dashboard:sessions.title")}
+						{t("dashboard:tasks.title")}
 						{totalEstimate !== undefined && totalEstimate > 0 && (
 							<span className="ml-1 text-xs text-vscode-descriptionForeground">({totalEstimate})</span>
 						)}
 					</h4>
 				</div>
 
-				{sessions.length === 0 ? (
+				{tasks.length === 0 ? (
 					<div
 						className="flex items-center justify-center py-4 text-xs text-vscode-descriptionForeground"
-						data-testid="dashboard-sessions-empty">
-						{t("dashboard:sessions.noSessions")}
+						data-testid="dashboard-tasks-empty">
+						{t("dashboard:tasks.noTasks")}
 					</div>
 				) : (
 					<div className="overflow-hidden rounded-md border border-vscode-panel-border">
 						<Virtuoso
 							ref={virtuosoRef}
-							data={sessions}
+							data={tasks}
 							style={{ maxHeight: 400 }}
-							itemContent={(_index, session) => {
-								const isExpanded = expandedTaskId === session.rootTaskId
+							itemContent={(_index, task) => {
+								const isExpanded = expandedTaskId === task.taskId
 								return (
-									<SessionRow
-										key={session.rootTaskId}
-										session={session}
+									<TaskRow
+										key={task.taskId}
+										task={task}
 										isExpanded={isExpanded}
-										detail={isExpanded ? sessionDetails[session.rootTaskId] : undefined}
+										detail={isExpanded ? taskDetails[task.taskId] : undefined}
 										detailError={
 											isExpanded
-												? (sessionDetailErrors[session.rootTaskId] ?? undefined)
+												? (taskDetailErrors[task.taskId] ?? undefined)
 												: undefined
 										}
-										detailLoading={isExpanded && sessionDetailLoading.has(session.rootTaskId)}
-										onToggle={onToggleSession}
+										detailLoading={isExpanded && taskDetailLoading.has(task.taskId)}
+										onToggle={onToggleTask}
 									/>
 								)
 							}}
 							endReached={() => {
-								onLoadMore?.()
+								if (taskCursor && !taskPageLoading) {
+									onLoadMore?.()
+								}
 							}}
 						/>
 					</div>
@@ -254,6 +259,6 @@ const SessionList = memo(
 	},
 )
 
-SessionList.displayName = "SessionList"
+TaskList.displayName = "TaskList"
 
-export default SessionList
+export default TaskList
