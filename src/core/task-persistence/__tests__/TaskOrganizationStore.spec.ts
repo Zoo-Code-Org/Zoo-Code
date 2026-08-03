@@ -633,6 +633,32 @@ describe("TaskOrganizationStore", () => {
 			expect(result.success).toBe(true)
 			expect(store.getState().folders[0].taskIds).toEqual(["t1", "t2", "parent", "child"])
 		})
+
+		it("resolves a root drag with children to its full group", async () => {
+			const parent = makeHistoryItem({ id: "parent" })
+			const child = makeHistoryItem({ id: "child", parentTaskId: "parent" })
+			history.add(parent)
+			history.add(child)
+
+			await store.initialize()
+			await store.mutate(
+				{
+					kind: "createFolder",
+					folderId: "folder-1",
+					name: "A",
+					source: { kind: "task", taskId: "t1" },
+					destination: { kind: "task", taskId: "t2" },
+				},
+				0,
+			)
+			const result = await store.mutate(
+				{ kind: "moveToFolder", source: { kind: "task", taskId: "parent" }, folderId: "folder-1" },
+				1,
+			)
+
+			expect(result.success).toBe(true)
+			expect(store.getState().folders[0].taskIds).toEqual(["t1", "t2", "parent", "child"])
+		})
 	})
 
 	describe("reconcile()", () => {
@@ -669,7 +695,7 @@ describe("TaskOrganizationStore", () => {
 	})
 
 	describe("concurrent mutations", () => {
-		it("serializes concurrent mutations so revisions are sequential", async () => {
+		it("captures each concurrent mutation's revision after it acquires the lock", async () => {
 			await store.initialize()
 			const promises = Array.from({ length: 5 }, (_, i) =>
 				store.mutate(
@@ -685,9 +711,8 @@ describe("TaskOrganizationStore", () => {
 			)
 			const results = await Promise.all(promises)
 			const successful = results.filter((r) => r.success)
-			// Only the first mutation can succeed because each uses the previous revision.
-			expect(successful).toHaveLength(1)
-			expect(successful[0].committedRevision).toBe(1)
+			expect(successful).toHaveLength(5)
+			expect(successful.map((result) => result.committedRevision)).toEqual([1, 2, 3, 4, 5])
 		})
 	})
 })

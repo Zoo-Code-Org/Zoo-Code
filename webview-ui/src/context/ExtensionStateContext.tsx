@@ -289,6 +289,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	initialState?: ExtensionStateProviderInitialState
 }> = ({ children, initialState }) => {
 	const pendingTaskOrgMutations = useRef<Map<string, (result: TaskOrganizationMutationResultV1) => void>>(new Map())
+	const taskOrgRevisionRef = useRef<number>(0)
 
 	const [state, setState] = useState<ExtensionState>(() =>
 		mergeExtensionState(createInitialExtensionState(), initialState ?? {}),
@@ -550,7 +551,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	const mutateTaskOrganization = useCallback(
 		async (mutation: TaskOrganizationMutationRequestV1["mutation"]): Promise<TaskOrganizationMutationResultV1> => {
 			const requestId = `task-org-${Date.now()}-${Math.random().toString(36).slice(2)}`
-			const currentRevision = state.taskOrganization?.revision ?? 0
+			const currentRevision = taskOrgRevisionRef.current
 
 			vscode.postMessage({
 				type: "taskOrganizationMutation",
@@ -565,8 +566,15 @@ export const ExtensionStateContextProvider: React.FC<{
 				pendingTaskOrgMutations.current.set(requestId, resolve)
 			})
 		},
-		[state.taskOrganization?.revision],
+		[],
 	)
+
+	// Keep taskOrgRevisionRef in sync with the latest taskOrganization.revision
+	// so mutateTaskOrganization always reads the freshest value from the ref
+	// rather than from a potentially stale closure.
+	useEffect(() => {
+		taskOrgRevisionRef.current = state.taskOrganization?.revision ?? 0
+	}, [state.taskOrganization?.revision])
 
 	useEffect(() => {
 		vscode.postMessage({ type: "webviewDidLaunch" })

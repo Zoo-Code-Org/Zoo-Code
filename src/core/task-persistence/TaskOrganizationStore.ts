@@ -172,12 +172,8 @@ export class TaskOrganizationStore {
 		mutation: TaskOrganizationMutationV1,
 		expectedRevision: number,
 	): Promise<TaskOrganizationMutationResultV1> {
-		// Capture the revision snapshot at call time (before entering the
-		// lock) so that concurrent mutations are validated against the
-		// revision they observed, not against the latest committed
-		// revision after serialization.
-		const revisionAtCallTime = this.state.revision
 		return this.withLock(async () => {
+			const revisionAtCallTime = this.state.revision
 			const requestId =
 				"requestId" in mutation && typeof (mutation as Record<string, unknown>).requestId === "string"
 					? (mutation as Record<string, unknown>).requestId as string
@@ -592,14 +588,11 @@ export class TaskOrganizationStore {
 	private resolveUnit(target: TaskOrganizationTargetV1): string[] {
 		switch (target.kind) {
 			case "task": {
-				// When a task belongs to a parent/child group, resolve the
-				// entire closure from the root so that dragging any member
-				// moves the whole group together.
-				if (this.taskHistory) {
-					const item = this.taskHistory.get(target.taskId)
-					if (item?.parentTaskId) {
-						return this.resolveTaskClosure(target.taskId).ids
-					}
+				// Resolve any known task through its closure. This covers both
+				// children and roots that have children, so dragging any group
+				// member moves the whole group together.
+				if (this.taskHistory?.get(target.taskId)) {
+					return this.resolveTaskClosure(target.taskId).ids
 				}
 				return [target.taskId]
 			}
