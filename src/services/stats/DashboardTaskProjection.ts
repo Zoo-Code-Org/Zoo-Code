@@ -1,0 +1,195 @@
+import type {
+	DashboardTaskApiCall,
+	DashboardTaskDetail,
+	DashboardTaskPage,
+	DashboardTaskSummary,
+	UsageEventV1,
+} from "@roo-code/types"
+
+import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
+import type { TaskUsageRow } from "./UsageStatsDatabase"
+import { getEffectiveCost } from "./costRecalculation"
+
+/** Error codes emitted by the History-first Dashboard task projection. */
+export type DashboardTaskProjectionErrorCode = "DASHBOARD_TASK_PROJECTION/computeTaskDetail/001"
+
+/** Raised when a detail is requested for a task absent from the History catalog. */
+export class DashboardTaskProjectionError extends Error {
+	constructor(public readonly code: DashboardTaskProjectionErrorCode, message: string) {
+		super(`[${code}] ${message}`)
+		this.name = "DashboardTaskProjectionError"
+	}
+}
+
+interface SubtreeUsageSummary {
+	totalCost: number
+	totalTokens: number
+	eventCount: number
+	lastUsageAt?: number
+	model: string
+	provider: string
+}
+
+/** Read-only usage queries required by the Dashboard task projection. */
+export interface DashboardTaskUsageReader {
+	queryTaskUsageByTaskIds(taskIds: string[]): Map<string, TaskUsageRow>
+	queryEventsByTaskIds(taskIds: string[]): Array<UsageEventV1 & { sequence: number }>
+}
+
+/**
+ * Pages the immutable History task catalog, batch-loads direct task usage for
+ * every required subtree, then composes one summary per catalog row.
+ */
+export function computeTaskPage(
+	catalog: DashboardTaskCatalog,
+	db: DashboardTaskUsageReader,
+	requestId: string,
+	cursor?: string,
+	limit?: number,
+): DashboardTaskPage {
+	const catalogPage = catalog.getPage(cursor, limit)
+	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, catalogPage.tasks))
+
+	return {
+		requestId,
+		catalogRevision: catalog.catalogRevision,
+		tasks: catalogPage.tasks.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId)),
+		cursor: catalogPage.cursor,
+		totalEstimate: catalogPage.totalEstimate,
+	}
+}
+
+/**
+ * Returns focused detail for a History task and its descendants. Empty usage is
+ * successful and still includes the History title and timestamp.
+ */
+export function computeTaskDetail(
+	catalog: DashboardTaskCatalog,
+	db: DashboardTaskUsageReader,
+	taskId: string,
+	_requestId: string,
+): DashboardTaskDetail {
+	const task = catalog.byId.get(taskId)
+	if (!task) {
+		throw new DashboardTaskProjectionError(
+			"DASHBOARD_TASK_PROJECTION/computeTaskDetail/001",
+			`Task ${taskId} was not found in the current History catalog`,
+		)
+	}
+
+	const events = db.queryEventsByTaskIds([taskId, ...catalog.getDescendantTaskIds(taskId)])
+	const sortedEvents = [...events].sort((left, right) => left.sequence - right.sequence)
+
+	return {
+		taskId,
+		title: task.task,
+		taskTimestamp: task.ts,
+		models: uniqueInFirstSeenOrder(sortedEvents.map((event) => event.model)),
+		modes: uniqueInFirstSeenOrder(sortedEvents.map((event) => event.mode)),
+		totalTokens: sortedEvents.reduce((total, event) => total + getTotalTokens(event), 0),
+		totalCost: sortedEvents.reduce((total, event) => total + getEffectiveCost(event), 0),
+		callCount: sortedEvents.length,
+		apiCalls: sortedEvents.map((event, index) => eventToApiCall(event, index + 1)),
+	}
+}
+
+function collectPageSubtreeTaskIds(catalog: DashboardTaskCatalog, pageTaskIds: readonly string[]): string[] {
+	const taskIds = new Set<string>()
+	for (const taskId of pageTaskIds) {
+		taskIds.add(taskId)
+		for (const descendantTaskId of catalog.getDescendantTaskIds(taskId)) {
+			taskIds.add(descendantTaskId)
+		}
+	}
+	return [...taskIds]
+}
+
+function computeTaskSummary(
+	catalog: DashboardTaskCatalog,
+	taskId: string,
+	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
+): DashboardTaskSummary {
+	const task = catalog.byId.get(taskId)!
+	const subtreeUsage = summarizeSubtreeUsage([taskId, ...catalog.getDescendantTaskIds(taskId)], usageByTaskId)
+
+	return {
+		taskId,
+		rootTaskId: task.rootTaskId ?? resolveRootTaskId(catalog, taskId),
+		parentTaskId: task.parentTaskId,
+		title: task.task,
+		taskTimestamp: task.ts,
+		lastUsageAt: subtreeUsage.lastUsageAt,
+		totalCost: subtreeUsage.totalCost,
+		totalTokens: subtreeUsage.totalTokens,
+		model: subtreeUsage.model,
+		provider: subtreeUsage.provider,
+		eventCount: subtreeUsage.eventCount,
+	}
+}
+
+function summarizeSubtreeUsage(
+	taskIds: readonly string[],
+	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
+): SubtreeUsageSummary {
+	let totalCost = 0
+	let totalTokens = 0
+	let eventCount = 0
+	let latestUsage: TaskUsageRow | undefined
+
+	for (const taskId of taskIds) {
+		const usage = usageByTaskId.get(taskId)
+		if (!usage) {
+			continue
+		}
+
+		totalCost += usage.totalCost
+		totalTokens += usage.totalTokens
+		eventCount += usage.eventCount
+		if (
+			usage.eventCount > 0 &&
+			(!latestUsage ||
+				usage.lastActivity > latestUsage.lastActivity ||
+				(usage.lastActivity === latestUsage.lastActivity && usage.taskId > latestUsage.taskId))
+		) {
+			latestUsage = usage
+		}
+	}
+
+	return {
+		totalCost,
+		totalTokens,
+		eventCount,
+		lastUsageAt: latestUsage?.lastActivity,
+		model: latestUsage?.model ?? "",
+		provider: latestUsage?.provider ?? "",
+	}
+}
+
+function resolveRootTaskId(catalog: DashboardTaskCatalog, taskId: string): string {
+	const ancestors = catalog.ancestorsByTaskId.get(taskId)
+	return ancestors?.at(-1) ?? taskId
+}
+
+function getTotalTokens(event: UsageEventV1): number {
+	return event.usage.totalTokens?.value ?? (event.usage.inputTokens?.value ?? 0) + (event.usage.outputTokens?.value ?? 0)
+}
+
+function eventToApiCall(event: UsageEventV1, index: number): DashboardTaskApiCall {
+	return {
+		index,
+		mode: event.mode,
+		timestamp: new Date(event.occurredAt).getTime(),
+		inputTokens: event.usage.inputTokens?.value ?? 0,
+		outputTokens: event.usage.outputTokens?.value ?? 0,
+		cacheReadTokens: event.usage.cacheReadTokens?.value ?? 0,
+		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
+		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
+		costUsd: getEffectiveCost(event),
+		status: event.status,
+		model: event.model,
+	}
+}
+
+function uniqueInFirstSeenOrder(values: readonly string[]): string[] {
+	return [...new Set(values)]
+}

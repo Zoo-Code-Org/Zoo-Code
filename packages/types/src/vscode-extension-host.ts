@@ -32,6 +32,10 @@ import type {
 	DashboardStatsSnapshot,
 	DashboardStatsDelta,
 	DashboardSessionPage,
+	DashboardTaskPage,
+	DashboardTaskDetail,
+	DashboardTaskStatsSnapshot,
+	DashboardTaskStatsDelta,
 	DashboardStatsError,
 } from "./usage-stats.js"
 
@@ -135,6 +139,8 @@ export interface ExtensionMessage {
 		| "dashboardStatsStreamDelta"
 		| "dashboardStatsStreamError"
 		| "dashboardSessionPageResponse"
+		| "dashboardTaskPageResponse"
+		| "dashboardTaskDetailResponse"
 		| "taskOrganizationUpdated"
 		| "taskOrganizationMutationResult"
 	text?: string
@@ -315,14 +321,22 @@ export interface ExtensionMessage {
 	taskOrganizationMutationResult?: TaskOrganizationMutationResultV1
 
 	// Dashboard streaming response payloads
-	/** Full state snapshot for `dashboardStatsStreamSnapshot`. */
-	dashboardStatsStreamSnapshot?: DashboardStatsSnapshot
-	/** Incremental delta for `dashboardStatsStreamDelta`. */
-	dashboardStatsStreamDelta?: DashboardStatsDelta
+	/**
+	 * Full state snapshot for `dashboardStatsStreamSnapshot`. Legacy session
+	 * payloads remain valid until all producers and consumers migrate to the
+	 * History-first task page shape.
+	 */
+	dashboardStatsStreamSnapshot?: DashboardTaskStatsSnapshot | DashboardStatsSnapshot
+	/** Incremental delta for `dashboardStatsStreamDelta` during the same transition. */
+	dashboardStatsStreamDelta?: DashboardTaskStatsDelta | DashboardStatsDelta
 	/** Typed error for `dashboardStatsStreamError`. */
 	dashboardStatsStreamError?: DashboardStatsError
 	/** Cursor-paged session page for `dashboardSessionPageResponse`. */
 	dashboardSessionPage?: DashboardSessionPage
+	/** Cursor-paged History task page for `dashboardTaskPageResponse`. */
+	dashboardTaskPage?: DashboardTaskPage
+	/** History task detail for `dashboardTaskDetailResponse`. */
+	dashboardTaskDetail?: DashboardTaskDetail | null
 }
 
 export interface OpenAiCodexRateLimitsMessage {

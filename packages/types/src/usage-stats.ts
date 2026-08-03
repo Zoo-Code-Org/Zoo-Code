@@ -268,6 +268,89 @@ export const DashboardSessionPage = z.object({
 })
 export type DashboardSessionPage = z.infer<typeof DashboardSessionPage>
 
+// ── Dashboard Task Protocol ────────────────────────────────────────────────
+//
+// Task rows are History-first: identity, title, timestamp, and hierarchy come
+// from History, while the numeric metrics are composed from direct task usage.
+// Each row intentionally represents the task's whole subtree, so parent and
+// child rows must not be summed together for dashboard-wide totals.
+
+/**
+ * One History task and its aggregate usage for the task plus all descendants.
+ * A missing usage row is represented by zero metrics and no `lastUsageAt`.
+ */
+export const DashboardTaskSummary = z.object({
+	taskId: z.string(),
+	rootTaskId: z.string(),
+	parentTaskId: z.string().optional(),
+	title: z.string(),
+	/** History task timestamp (epoch ms), not a usage timestamp. */
+	taskTimestamp: z.number(),
+	/** Latest usage timestamp in this task's subtree (epoch ms). */
+	lastUsageAt: z.number().optional(),
+	totalCost: z.number(),
+	totalTokens: z.number(),
+	/** Provider/model from the latest usage row in the subtree, or empty when unused. */
+	model: z.string(),
+	provider: z.string(),
+	eventCount: z.number().int().nonnegative(),
+})
+export type DashboardTaskSummary = z.infer<typeof DashboardTaskSummary>
+
+/** Cursor-paged History task list for one immutable catalog revision. */
+export const DashboardTaskPage = z.object({
+	/** Correlation ID matching the page or subscription request. */
+	requestId: z.string(),
+	/** Immutable History catalog revision used to produce this page. */
+	catalogRevision: z.number().int().nonnegative(),
+	tasks: z.array(DashboardTaskSummary),
+	/** Opaque host-issued cursor for the next page. */
+	cursor: z.string().optional(),
+	/** Exact catalog size for the current revision. */
+	totalEstimate: z.number().int().nonnegative(),
+})
+export type DashboardTaskPage = z.infer<typeof DashboardTaskPage>
+
+/**
+ * Current task summary emitted after usage changes. It has the same complete
+ * identity and metrics as a page row so reducers never need a second join.
+ */
+export const DashboardTaskUpsert = DashboardTaskSummary
+export type DashboardTaskUpsert = z.infer<typeof DashboardTaskUpsert>
+
+/** One API call shown in a task detail's chronologically ordered call list. */
+export const DashboardTaskApiCall = z.object({
+	index: z.number().int().positive(),
+	mode: z.string(),
+	timestamp: z.number(),
+	inputTokens: z.number(),
+	outputTokens: z.number(),
+	cacheReadTokens: z.number(),
+	cacheWriteTokens: z.number(),
+	reasoningTokens: z.number(),
+	costUsd: z.number(),
+	status: UsageEventStatus,
+	model: z.string(),
+})
+export type DashboardTaskApiCall = z.infer<typeof DashboardTaskApiCall>
+
+/**
+ * Usage detail for a selected task and all descendants. Known tasks without
+ * usage succeed with zero totals, empty models/modes, and an empty call list.
+ */
+export const DashboardTaskDetail = z.object({
+	taskId: z.string(),
+	title: z.string(),
+	taskTimestamp: z.number(),
+	models: z.array(z.string()),
+	modes: z.array(z.string()),
+	totalTokens: z.number(),
+	totalCost: z.number(),
+	callCount: z.number().int().nonnegative(),
+	apiCalls: z.array(DashboardTaskApiCall),
+})
+export type DashboardTaskDetail = z.infer<typeof DashboardTaskDetail>
+
 /**
  * Daily heatmap values snapshot.
  */
@@ -300,6 +383,24 @@ export const DashboardStatsSnapshot = z.object({
 	heatmap: HeatmapSnapshot,
 })
 export type DashboardStatsSnapshot = z.infer<typeof DashboardStatsSnapshot>
+
+/**
+ * Task-based full state snapshot. This is intentionally separate from
+ * DashboardStatsSnapshot so legacy session stream consumers remain valid while
+ * the extension host and webview migrate together.
+ */
+export const DashboardTaskStatsSnapshot = z.object({
+	requestId: z.string(),
+	generation: z.number().int(),
+	sequence: z.number().int(),
+	stats: StatsSnapshot,
+	/** First History-first task page for this catalog revision. */
+	tasks: DashboardTaskPage,
+	/** Opaque cursor for fetching the next task page. */
+	cursor: z.string().optional(),
+	heatmap: HeatmapSnapshot,
+})
+export type DashboardTaskStatsSnapshot = z.infer<typeof DashboardTaskStatsSnapshot>
 
 /**
  * Signed delta for a single stats bucket.
@@ -382,6 +483,23 @@ export const DashboardStatsDelta = z.object({
 	sessionUpsert: z.array(DashboardSessionUpsert),
 })
 export type DashboardStatsDelta = z.infer<typeof DashboardStatsDelta>
+
+/** Task-based stream delta with complete subtree summaries for changed rows. */
+export const DashboardTaskStatsDelta = z.object({
+	requestId: z.string(),
+	generation: z.number().int(),
+	sequence: z.number().int(),
+	totalDelta: StatsBucketDelta,
+	breakdownDelta: z.array(StatsBucketDelta),
+	heatmapDayDelta: z
+		.object({
+			dayIndex: z.number().int().min(0),
+			delta: z.number(),
+		})
+		.optional(),
+	taskUpsert: z.array(DashboardTaskUpsert),
+})
+export type DashboardTaskStatsDelta = z.infer<typeof DashboardTaskStatsDelta>
 
 /**
  * Typed error message for the dashboard stats stream.

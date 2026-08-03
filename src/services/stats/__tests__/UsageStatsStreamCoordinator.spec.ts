@@ -718,12 +718,15 @@ describe("UsageStatsStreamCoordinator", () => {
 				expect(snapshots).toHaveLength(2)
 				const rebuiltSnapshot = snapshots[1].dashboardStatsStreamSnapshot
 				expect(rebuiltSnapshot).toBeDefined()
+				if (!rebuiltSnapshot || !("sessions" in rebuiltSnapshot)) {
+					throw new Error("STATS_TEST/rebuildSnapshot/001: expected legacy session snapshot")
+				}
 
 				// After rebuild, sessions should be populated
-				expect(rebuiltSnapshot!.sessions.sessions.length).toBeGreaterThan(0)
+				expect(rebuiltSnapshot.sessions.sessions.length).toBeGreaterThan(0)
 
 				// After rebuild, heatmap should have at least one non-zero value
-				expect(rebuiltSnapshot!.heatmap.values.some((v) => v > 0)).toBe(true)
+				expect(rebuiltSnapshot.heatmap.values.some((v) => v > 0)).toBe(true)
 
 				coordinator.dispose()
 				rebuildSpy.mockRestore()
@@ -749,7 +752,10 @@ describe("UsageStatsStreamCoordinator", () => {
 				const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
 				expect(snapshots).toHaveLength(1)
 				const snapshot = snapshots[0].dashboardStatsStreamSnapshot
-				expect(snapshot!.sessions.sessions.length).toBeGreaterThan(0)
+				if (!snapshot || !("sessions" in snapshot)) {
+					throw new Error("STATS_TEST/consistentSnapshot/001: expected legacy session snapshot")
+				}
+				expect(snapshot.sessions.sessions.length).toBeGreaterThan(0)
 
 				coordinator.dispose()
 				rebuildSpy.mockRestore()

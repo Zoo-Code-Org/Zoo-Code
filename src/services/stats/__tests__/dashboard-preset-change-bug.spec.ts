@@ -337,6 +337,9 @@ describe("Dashboard Preset Change Bug", () => {
 			expect(snapshots).toHaveLength(1)
 
 			const snap = snapshots[0].dashboardStatsStreamSnapshot!
+			if (!("sessions" in snap)) {
+				throw new Error("STATS_TEST/dashboardPresetChange/001: expected legacy session snapshot")
+			}
 			const sessions = snap.sessions
 
 			// Should have 2 sessions
