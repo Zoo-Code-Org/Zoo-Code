@@ -309,7 +309,14 @@ export class ClineProvider
 				// Reconcile organization state after task history changes (deletion,
 				// new child, etc.). Failures are logged but do not block history writes.
 				try {
-					await this.taskOrganizationStore.reconcile()
+					// The organization store is assigned immediately after the
+					// history store below; a history write landing in that
+					// window must not throw a TypeError dereferencing the
+					// not-yet-assigned field.
+					const organizationStore: TaskOrganizationStore | undefined = this.taskOrganizationStore
+					if (organizationStore) {
+						await organizationStore.reconcile()
+					}
 				} catch (error) {
 					this.log(
 						`[TaskHistoryStore.onWrite] Task organization reconciliation failed: ${

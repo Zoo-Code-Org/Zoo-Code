@@ -847,4 +847,37 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[onTaskCompleted] Failed to write"))
 		})
 	})
+	describe("taskHistoryStore onWrite reconciliation", () => {
+		const getOnWrite = () => {
+			const onWrite = provider.taskHistoryStore["onWrite"]
+			expect(onWrite).toBeDefined()
+			return onWrite!
+		}
+
+		it("reconciles the organization store after a history write", async () => {
+			const reconcileSpy = vi.spyOn(provider.taskOrganizationStore, "reconcile").mockResolvedValue(undefined)
+
+			await getOnWrite()([])
+
+			expect(reconcileSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("skips reconciliation without logging a failure when the organization store is not yet assigned", async () => {
+			// Simulate the constructor-order window in which TaskHistoryStore
+			// exists but taskOrganizationStore has not been assigned yet.
+			const appendLineSpy = vi.spyOn(mockOutputChannel, "appendLine")
+			const original = provider.taskOrganizationStore
+			Object.assign(provider, { taskOrganizationStore: undefined })
+			try {
+				await getOnWrite()([])
+			} finally {
+				Object.assign(provider, { taskOrganizationStore: original })
+			}
+
+			const reconciliationFailures = appendLineSpy.mock.calls.filter((call) =>
+				String(call[0]).includes("Task organization reconciliation failed"),
+			)
+			expect(reconciliationFailures).toHaveLength(0)
+		})
+	})
 })
