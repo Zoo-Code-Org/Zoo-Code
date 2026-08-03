@@ -506,9 +506,9 @@ export class TaskHistoryStore {
 	 * file if one doesn't already exist. This is idempotent and safe to re-run.
 	 */
 	async migrateFromGlobalState(taskHistoryEntries: HistoryItem[]): Promise<void> {
-		return this.withLock(async () => {
+		const changed = await this.withLock(async () => {
 			if (!taskHistoryEntries || taskHistoryEntries.length === 0) {
-				return
+				return false
 			}
 
 			let changed = false
@@ -536,12 +536,20 @@ export class TaskHistoryStore {
 			}
 
 			if (!changed) {
-				return
+				return false
 			}
 
 			await this.writeIndex()
 			this.fireDidChange()
+			return true
 		})
+
+		if (changed) {
+			// Repair any delegation inconsistencies introduced by the migrated entries.
+			// Runs after the write lock is released — reconcileDelegationState()
+			// acquires the lock itself, and is idempotent so running it again is safe.
+			await this.reconcileDelegationState()
+		}
 	}
 
 	// ────────────────────────────── Private: Index management ──────────────────────────────
