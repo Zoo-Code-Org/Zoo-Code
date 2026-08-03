@@ -1,13 +1,16 @@
 /**
  * Tests for the terminal shell selection webview message handlers.
  *
- * Tests the `requestTerminalShellOptions` and `setTerminalShellSelection`
- * message handling through the webviewMessageHandler delegation pattern,
- * verifying that:
+ * Tests the `requestTerminalShellOptions`, `setTerminalShellSelection`, and
+ * `requestCustomShellPath` message handling through the webviewMessageHandler
+ * delegation pattern, verifying that:
  * - `requestTerminalShellOptions` returns sanitized trusted options
  * - `setTerminalShellSelection` with valid selection persists and invalidates
  * - `setTerminalShellSelection` with invalid selection returns error and keeps previous
  * - Idle terminals are closed after shell change
+ * - `requestCustomShellPath` validates the picked path and returns it to the
+ *   webview via `customShellPathSelected` WITHOUT persisting (persistence
+ *   happens only on Save via `setTerminalShellSelection`)
  *
  * See ARCH-TERMINAL-001 section 1.9 (Frontend to extension-host settings flow).
  */
@@ -16,12 +19,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 
 import type { TerminalShellSelection, TerminalShellOption } from "@roo-code/types"
 
+// Mock the native file dialog so requestCustomShellPath can be driven per-test.
+const showOpenDialogMock = vi.fn()
+
 // Mock vscode (minimal — enough for webviewMessageHandler import chain)
 vi.mock("vscode", () => ({
 	window: {
 		showErrorMessage: vi.fn(),
 		showWarningMessage: vi.fn(),
 		showInformationMessage: vi.fn(),
+		showOpenDialog: (options?: unknown) => showOpenDialogMock(options),
 		activeTextEditor: undefined,
 		onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
 		createTextEditorDecorationType: vi.fn(),
@@ -321,6 +328,33 @@ describe("terminal-shell-messages — webview message handlers", () => {
 					},
 				})
 			}),
+			handleCustomShellPathPicked: vi.fn().mockImplementation(async (path: string) => {
+				// Mirrors ClineProvider.handleCustomShellPathPicked: validate via
+				// ShellResolver and return the path (or a typed error) to the
+				// webview WITHOUT persisting anything.
+				const state = await mockProvider.getState()
+
+				const result = resolveMock({
+					terminalShellSelection: { kind: "path", path },
+					execaShellPath: state.execaShellPath,
+					terminalProfile: state.terminalProfile,
+				})
+
+				if (!result.ok && result.rejectable) {
+					await mockProvider.postMessageToWebview({
+						type: "customShellPathSelected",
+						customShellPathSelected: {
+							error: `SHELL/handleCustomShellPathPicked/001: ${result.error.message}`,
+						},
+					})
+					return
+				}
+
+				await mockProvider.postMessageToWebview({
+					type: "customShellPathSelected",
+					customShellPathSelected: { path },
+				})
+			}),
 		}
 	})
 
@@ -463,6 +497,66 @@ describe("terminal-shell-messages — webview message handlers", () => {
 			} as any)
 
 			expect(mockProvider.handleSetTerminalShellSelection).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("requestCustomShellPath", () => {
+		it("returns the validated path to the webview without persisting", async () => {
+			showOpenDialogMock.mockResolvedValue([{ fsPath: "/usr/bin/zsh" }])
+
+			await webviewMessageHandler(mockProvider, {
+				type: "requestCustomShellPath",
+			})
+
+			// The picked path must go through the non-persisting handler — the
+			// webview buffers it as pending until the user clicks Save.
+			expect(mockProvider.handleCustomShellPathPicked).toHaveBeenCalledWith("/usr/bin/zsh")
+			expect(mockProvider.handleSetTerminalShellSelection).not.toHaveBeenCalled()
+			expect(mockProvider.contextProxy.setValue).not.toHaveBeenCalled()
+			expect(invalidateMock).not.toHaveBeenCalled()
+			expect(closeIdleTerminalsMock).not.toHaveBeenCalled()
+
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledTimes(1)
+			const call = mockProvider.postMessageToWebview.mock.calls[0][0]
+			expect(call.type).toBe("customShellPathSelected")
+			expect(call.customShellPathSelected.path).toBe("/usr/bin/zsh")
+			expect(call.customShellPathSelected.error).toBeUndefined()
+		})
+
+		it("returns a typed error on validation failure without persisting", async () => {
+			showOpenDialogMock.mockResolvedValue([{ fsPath: "/nonexistent/evil.exe" }])
+			resolveMock.mockReturnValue({
+				ok: false,
+				error: {
+					code: "SHELL_PATH_NOT_ALLOWED",
+					message: "The selected shell path is not in the trusted allowlist: evil.exe",
+				},
+				rejectable: true,
+			})
+
+			await webviewMessageHandler(mockProvider, {
+				type: "requestCustomShellPath",
+			})
+
+			expect(mockProvider.contextProxy.setValue).not.toHaveBeenCalled()
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledTimes(1)
+			const call = mockProvider.postMessageToWebview.mock.calls[0][0]
+			expect(call.type).toBe("customShellPathSelected")
+			expect(call.customShellPathSelected.path).toBeUndefined()
+			expect(call.customShellPathSelected.error).toContain("SHELL/handleCustomShellPathPicked/001")
+			expect(call.customShellPathSelected.error).toContain("not in the trusted allowlist")
+		})
+
+		it("does nothing when the file dialog is cancelled", async () => {
+			showOpenDialogMock.mockResolvedValue(undefined)
+
+			await webviewMessageHandler(mockProvider, {
+				type: "requestCustomShellPath",
+			})
+
+			expect(mockProvider.handleCustomShellPathPicked).not.toHaveBeenCalled()
+			expect(mockProvider.contextProxy.setValue).not.toHaveBeenCalled()
+			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 		})
 	})
 })

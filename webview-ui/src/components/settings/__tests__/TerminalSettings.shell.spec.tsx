@@ -214,4 +214,47 @@ describe("TerminalSettings inline shell selector", () => {
 
 		expect(screen.getByTestId("terminal-inline-shell-error")).toBeDefined()
 	})
+
+	it("buffers the picked custom path as pending selection without persisting", () => {
+		const { onShellSelectionChange } = setup({ terminalShellIntegrationDisabled: true })
+
+		// Simulate the extension host returning the validated picked path.
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "customShellPathSelected",
+						customShellPathSelected: { path: "C:\\tools\\git-bash.exe" },
+					},
+				}),
+			)
+		})
+
+		// The selection is buffered as pending state (persisted only on Save),
+		// and shown as a selectable item so the dropdown reflects the pick.
+		// (The Select mock renders items as `option-${value}` buttons.)
+		expect(onShellSelectionChange).toHaveBeenCalledWith({ kind: "path", path: "C:\\tools\\git-bash.exe" })
+		expect(screen.getByTestId("option-path:C:\\tools\\git-bash.exe")).toBeDefined()
+		expect(screen.queryByTestId("terminal-inline-shell-error")).toBeNull()
+	})
+
+	it("shows an error when customShellPathSelected carries a validation error", () => {
+		const { onShellSelectionChange } = setup({ terminalShellIntegrationDisabled: true })
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "customShellPathSelected",
+						customShellPathSelected: {
+							error: "SHELL/handleCustomShellPathPicked/001: The selected shell path is not in the trusted allowlist",
+						},
+					},
+				}),
+			)
+		})
+
+		expect(onShellSelectionChange).not.toHaveBeenCalled()
+		expect(screen.getByTestId("terminal-inline-shell-error")).toBeDefined()
+	})
 })

@@ -3186,6 +3186,62 @@ export class ClineProvider
 	}
 
 	/**
+	 * Handles a custom shell executable path picked via the native file dialog
+	 * (`requestCustomShellPath` webview message).
+	 *
+	 * Validates the path via ShellResolver and responds with a
+	 * `customShellPathSelected` message carrying the validated path or a
+	 * typed error. Unlike handleSetTerminalShellSelection(), this does NOT
+	 * persist the selection, invalidate the environment cache, or close
+	 * terminals — the webview buffers the picked path as a pending selection
+	 * and persistence happens only when the user saves settings (via the
+	 * `setTerminalShellSelection` message).
+	 *
+	 * See ARCH-TERMINAL-001 section 1.9 (Frontend to extension-host settings flow).
+	 */
+	public async handleCustomShellPathPicked(path: string): Promise<void> {
+		try {
+			// Validate the path by resolving with the new selection applied.
+			// We use the ShellResolver directly to check validity without
+			// persisting anything.
+			const state = await this.getState()
+			const profileResolver = TerminalProfileResolver.forRuntime()
+			const resolver = ShellResolver.forRuntime(profileResolver)
+
+			const result = resolver.resolve({
+				terminalShellSelection: { kind: "path", path },
+				execaShellPath: state.execaShellPath,
+				terminalProfile: state.terminalProfile,
+			})
+
+			if (!result.ok && result.rejectable) {
+				// Validation failure: return typed error; nothing was persisted.
+				await this.postMessageToWebview({
+					type: "customShellPathSelected",
+					customShellPathSelected: {
+						error: `SHELL/handleCustomShellPathPicked/001: ${result.error.message}`,
+					},
+				})
+				return
+			}
+
+			await this.postMessageToWebview({
+				type: "customShellPathSelected",
+				customShellPathSelected: { path },
+			})
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			console.error(`[ClineProvider] SHELL/handleCustomShellPathPicked/002: ${message}`)
+			await this.postMessageToWebview({
+				type: "customShellPathSelected",
+				customShellPathSelected: {
+					error: `SHELL/handleCustomShellPathPicked/002: Failed to validate shell path`,
+				},
+			})
+		}
+	}
+
+	/**
 	 * Builds the sanitized TerminalShellOption[] list from trusted profiles
 	 * and known OS defaults. Workspace-controlled profiles are never included.
 	 */

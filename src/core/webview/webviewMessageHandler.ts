@@ -1851,6 +1851,10 @@ export const webviewMessageHandler = async (
 
 		case "requestCustomShellPath": {
 			// Open a native file picker to let the user select a shell executable.
+			// The picked path is validated and returned to the webview via a
+			// `customShellPathSelected` message; it is NOT persisted here.
+			// The webview buffers it as a pending selection and persistence
+			// happens only on Save (via `setTerminalShellSelection`).
 			const filters: Record<string, string[]> =
 				process.platform === "win32" ? { Executables: ["exe", "cmd", "bat"] } : { "All Files": ["*"] }
 			const result = await vscode.window.showOpenDialog({
@@ -1861,10 +1865,7 @@ export const webviewMessageHandler = async (
 				filters,
 			})
 			if (result && result[0]) {
-				await provider.handleSetTerminalShellSelection({
-					kind: "path",
-					path: result[0].fsPath,
-				})
+				await provider.handleCustomShellPathPicked(result[0].fsPath)
 			}
 			break
 		}

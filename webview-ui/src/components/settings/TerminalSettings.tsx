@@ -94,27 +94,46 @@ export const TerminalSettings = ({
 		vscode.postMessage({ type: "requestTerminalShellOptions" })
 	})
 
-	const onMessage = useCallback((event: MessageEvent) => {
-		const message: ExtensionMessage = event.data
+	const onMessage = useCallback(
+		(event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
 
-		switch (message.type) {
-			case "vsCodeSetting":
-				if (message.setting === "terminal.integrated.inheritEnv") {
-					setInheritEnv(message.value ?? true)
+			switch (message.type) {
+				case "vsCodeSetting":
+					if (message.setting === "terminal.integrated.inheritEnv") {
+						setInheritEnv(message.value ?? true)
+					}
+					break
+				case "terminalProfiles":
+					setProfileNames(message.profiles ?? [])
+					setIsProfilesLoaded(true)
+					break
+				case "terminalShellOptions":
+					setShellOptions(message.terminalShellOptions)
+					setShellError(message.terminalShellOptions?.error)
+					break
+				case "customShellPathSelected": {
+					// The extension host validated the path picked via the native
+					// file dialog and returned it here WITHOUT persisting it.
+					// Buffer it as a pending selection; it is persisted only when
+					// the user clicks Save (which posts setTerminalShellSelection).
+					const payload = message.customShellPathSelected
+					if (payload?.path) {
+						const selection: TerminalShellSelection = { kind: "path", path: payload.path }
+						setPendingShellSelection(selection)
+						onShellSelectionChange?.(selection)
+						setShellError(undefined)
+					} else {
+						setShellError(payload?.error)
+					}
+					break
 				}
-				break
-			case "terminalProfiles":
-				setProfileNames(message.profiles ?? [])
-				setIsProfilesLoaded(true)
-				break
-			case "terminalShellOptions":
-				setShellOptions(message.terminalShellOptions)
-				setShellError(message.terminalShellOptions?.error)
-				break
-			default:
-				break
-		}
-	}, [])
+				default:
+					break
+			}
+		},
+		[onShellSelectionChange],
+	)
 
 	useEvent("message", onMessage)
 
@@ -217,7 +236,7 @@ export const TerminalSettings = ({
 								</Trans>
 							</div>
 						</SearchableSetting>
-	
+
 						{isInlineModeEnabled && (
 							<SearchableSetting
 								settingId="terminal-inline-shell"
@@ -231,13 +250,14 @@ export const TerminalSettings = ({
 										pendingShellSelection?.kind === "profile"
 											? `profile:${pendingShellSelection.profileName}`
 											: pendingShellSelection?.kind === "path"
-												? (shellOptions?.options?.find((opt) =>
-													opt.id === `path:${pendingShellSelection.path}` ||
-													(opt.id === "cmd" && (
-														pendingShellSelection.path === "cmd.exe" ||
-														pendingShellSelection.path === "C:\\Windows\\System32\\cmd.exe"
-													))
-												)?.id ?? `path:${pendingShellSelection.path}`)
+												? (shellOptions?.options?.find(
+														(opt) =>
+															opt.id === `path:${pendingShellSelection.path}` ||
+															(opt.id === "cmd" &&
+																(pendingShellSelection.path === "cmd.exe" ||
+																	pendingShellSelection.path ===
+																		"C:\\Windows\\System32\\cmd.exe")),
+													)?.id ?? `path:${pendingShellSelection.path}`)
 												: "auto"
 									}
 									onValueChange={(value) => {
@@ -271,9 +291,7 @@ export const TerminalSettings = ({
 											onTerminalProfilePickerOpened?.()
 										}
 									}}>
-									<SelectTrigger
-										className="w-full"
-										data-testid="terminal-inline-shell-dropdown">
+									<SelectTrigger className="w-full" data-testid="terminal-inline-shell-dropdown">
 										<SelectValue placeholder={t("settings:terminal.inlineShell.auto")} />
 									</SelectTrigger>
 									<SelectContent>
@@ -290,9 +308,27 @@ export const TerminalSettings = ({
 													{opt.label}
 												</SelectItem>
 											))}
+										{/* Pending custom path picked via Browse — not yet a trusted
+											option, shown so the dropdown reflects the buffered
+											selection until it is saved (or discarded). */}
+										{pendingShellSelection?.kind === "path" &&
+											!shellOptions?.options?.some(
+												(opt) =>
+													opt.id === `path:${pendingShellSelection.path}` ||
+													(opt.id === "cmd" &&
+														(pendingShellSelection.path === "cmd.exe" ||
+															pendingShellSelection.path ===
+																"C:\\Windows\\System32\\cmd.exe")),
+											) && (
+												<SelectItem
+													value={`path:${pendingShellSelection.path}`}
+													data-testid="terminal-inline-shell-option-pending-path">
+													{pendingShellSelection.path}
+												</SelectItem>
+											)}
 									</SelectContent>
 								</Select>
-	
+
 								{/* Custom executable button */}
 								<div className="mt-2">
 									<Button
@@ -308,7 +344,7 @@ export const TerminalSettings = ({
 										{t("settings:terminal.inlineShell.customPath")}
 									</Button>
 								</div>
-	
+
 								{/* Effective shell display */}
 								{shellOptions?.effectiveShell && (
 									<div
@@ -330,7 +366,7 @@ export const TerminalSettings = ({
 										</div>
 									</div>
 								)}
-	
+
 								{/* Error message */}
 								{shellError && (
 									<div
@@ -339,13 +375,13 @@ export const TerminalSettings = ({
 										{t("settings:terminal.inlineShell.error.invalid")}
 									</div>
 								)}
-	
+
 								<div className="text-vscode-descriptionForeground text-sm mt-1">
 									{t("settings:terminal.inlineShell.description")}
 								</div>
 							</SearchableSetting>
 						)}
-	
+
 						{isVSCodeTerminalEnabled && (
 							<>
 								{/* Profile override — unified dropdown, now below checkbox */}

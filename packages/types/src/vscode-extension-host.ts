@@ -105,6 +105,8 @@ export interface ExtensionMessage {
 		| "rooHistoryImportProgress"
 		// Terminal shell options response type
 		| "terminalShellOptions"
+		// Custom shell path picker response type
+		| "customShellPathSelected"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -251,6 +253,10 @@ export interface ExtensionMessage {
 	// Terminal shell options response payload.
 	// Contains sanitized trusted shell options and the effective-shell summary.
 	terminalShellOptions?: TerminalShellOptionsPayload
+	// Custom shell path picker response payload.
+	// Carries the validated picked path (or a validation error) back to the
+	// webview so it can buffer the selection as pending until Save.
+	customShellPathSelected?: CustomShellPathSelectedPayload
 	// folderSelected
 	path?: string
 }
@@ -465,6 +471,21 @@ export interface TerminalShellOptionsPayload {
 		source: string
 	}
 	/** Error message if option discovery failed (non-fatal; UI shows warning). */
+	error?: string
+}
+
+/**
+ * Payload for the `customShellPathSelected` extension-host → webview response.
+ *
+ * Sent after the user picks a shell executable via the native file dialog
+ * (`requestCustomShellPath`). Carries the validated path back to the webview
+ * so the selection can be buffered as pending state and persisted only when
+ * the user saves settings. Nothing is persisted when this message is sent.
+ */
+export interface CustomShellPathSelectedPayload {
+	/** The validated shell executable path. Present on success. */
+	path?: string
+	/** Error message if validation failed (non-fatal; UI shows warning). */
 	error?: string
 }
 
