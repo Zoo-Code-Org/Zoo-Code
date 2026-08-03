@@ -190,7 +190,8 @@ export class UsageStatsService {
 		this.coordinator = new UsageStatsStreamCoordinator(this.database._isInitialized() ? this.database : null, {
 			taskCatalog: this.taskCatalog,
 		})
-		this.taskCatalogSubscription = this.taskCatalog?.onDidChange(() => this.coordinator?.notifyTaskCatalogChanged()) ?? null
+		this.taskCatalogSubscription =
+			this.taskCatalog?.onDidChange(() => this.coordinator?.notifyTaskCatalogChanged()) ?? null
 	}
 
 	async ensureInitialized(): Promise<void> {
@@ -202,7 +203,7 @@ export class UsageStatsService {
 	/**
 	 * Disposes the service, releasing the file system watcher and database.
 	 */
-		dispose(): void {
+	dispose(): void {
 		this.coordinator?.dispose()
 		this.coordinator = null
 		this.taskCatalogSubscription?.dispose()
@@ -372,6 +373,21 @@ export class UsageStatsService {
 
 		// Clear the store
 		await this.store.clear()
+
+		// Clear the SQLite projection so the dashboard stops showing cleared
+		// data. Prefer the coordinator's resetGeneration(), which also pushes a
+		// reset snapshot to all stream subscribers; fall back to clearing the
+		// database directly when no coordinator exists. A projection failure
+		// must never fail the clear operation itself.
+		try {
+			if (this.coordinator) {
+				this.coordinator.resetGeneration()
+			} else if (this.database._isInitialized()) {
+				this.database.clearGeneration()
+			}
+		} catch (err) {
+			console.warn("[UsageStatsService] Failed to clear SQLite stats projection:", err)
+		}
 	}
 
 	/**

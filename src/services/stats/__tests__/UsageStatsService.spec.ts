@@ -8,6 +8,7 @@ import type { UsageEventV1, StatsQuery } from "@roo-code/types"
 
 import { UsageStatsService, StatsServiceError } from "../UsageStatsService"
 import { StatsStoreError } from "../UsageEventStore"
+import type { DashboardTaskCatalog } from "../DashboardTaskCatalog"
 
 vi.mock("vscode", () => ({
 	workspace: {
@@ -118,11 +119,14 @@ describe("UsageStatsService", () => {
 				resolveSourceInitialization = resolve
 			})
 			const onDidChange = vi.fn(() => ({ dispose: vi.fn() }))
+			// Partial double of the only members the service consumes; a full
+			// DashboardTaskCatalog requires a TaskHistoryStore, hence the double
+			// assertion.
 			const catalog = {
 				sourceInitialized,
 				rebuild: vi.fn(),
 				onDidChange,
-			} as any
+			} as unknown as DashboardTaskCatalog
 			const delayedService = new UsageStatsService(tempDir, catalog)
 			const initialization = delayedService.initialize()
 
@@ -139,11 +143,14 @@ describe("UsageStatsService", () => {
 
 		it("disposes the injected catalog listener with the service", async () => {
 			const catalogSubscription = { dispose: vi.fn() }
+			// Partial double of the only members the service consumes; a full
+			// DashboardTaskCatalog requires a TaskHistoryStore, hence the double
+			// assertion.
 			const catalog = {
 				sourceInitialized: Promise.resolve(),
 				rebuild: vi.fn(),
 				onDidChange: vi.fn(() => catalogSubscription),
-			} as any
+			} as unknown as DashboardTaskCatalog
 			const catalogService = new UsageStatsService(tempDir, catalog)
 			await catalogService.initialize()
 
@@ -751,6 +758,56 @@ describe("UsageStatsService", () => {
 
 			// Retry with the same nonce → should fail
 			await expect(service.clearStats(nonce)).rejects.toThrow(StatsServiceError)
+		})
+
+		it("clears the SQLite projection and bumps the generation", async () => {
+			const db = service.getDatabase()
+			expect(db).not.toBeNull()
+			if (!db) return
+
+			await service.backfillFromHistory([makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" })])
+
+			const clearSpy = vi.spyOn(db, "clearGeneration")
+			const generationBefore = db.getGeneration()
+
+			const nonce = service.issueClearNonce()
+			await service.clearStats(nonce)
+
+			expect(clearSpy).toHaveBeenCalledOnce()
+			expect(db.getGeneration()).toBeGreaterThan(generationBefore)
+		})
+
+		it("sends a reset snapshot through the stream coordinator", async () => {
+			const coordinator = service.getCoordinator()
+			expect(coordinator).not.toBeNull()
+			if (!coordinator) return
+
+			const resetSpy = vi.spyOn(coordinator, "resetGeneration")
+
+			const nonce = service.issueClearNonce()
+			await service.clearStats(nonce)
+
+			expect(resetSpy).toHaveBeenCalledOnce()
+		})
+
+		it("does not throw when the SQLite projection clear fails", async () => {
+			const db = service.getDatabase()
+			expect(db).not.toBeNull()
+			if (!db) return
+
+			vi.spyOn(db, "clearGeneration").mockImplementation(() => {
+				throw new Error("boom")
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const nonce = service.issueClearNonce()
+			await expect(service.clearStats(nonce)).resolves.toBeUndefined()
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to clear SQLite stats projection"),
+				expect.anything(),
+			)
+
+			warnSpy.mockRestore()
 		})
 	})
 
