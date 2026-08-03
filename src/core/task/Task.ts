@@ -54,12 +54,13 @@ import {
 	ConsecutiveMistakeError,
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
 
 // api
-import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler, resolveToolCallPolicy } from "../../api"
+import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
 import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 
@@ -78,8 +79,6 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
-import { UsageRecorder } from "../../services/stats"
-import type { UsageRecordingContext, UsageEventStore } from "../../services/stats"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -110,11 +109,6 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import {
-	classifyStreamedCall,
-	isProvablyEmptyGhost,
-	emitGhostDropTelemetry,
-} from "../assistant-message/ToolCallRetentionPolicy"
 import { manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -150,100 +144,6 @@ const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
-
-// ── Usage Stats: endpoint domain extraction ──────────────────────────────────
-
-/**
- * Default base URLs per provider. Only providers with a user-configurable
- * base URL field are listed. When the user's configured URL matches the
- * default, `endpoint` is left undefined to keep events clean.
- */
-const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
-	openai: "https://api.openai.com/v1",
-	"openai-native": "https://api.openai.com",
-	openrouter: "https://openrouter.ai/api/v1",
-	deepseek: "https://api.deepseek.com",
-	litellm: "http://localhost:4000",
-	ollama: "http://127.0.0.1:11434",
-	lmstudio: "http://localhost:1234/v1",
-	requesty: "https://router.requesty.ai/v1",
-}
-
-/**
- * Maps a provider name to the corresponding base URL field on ProviderSettings.
- * Returns the raw configured value (may be undefined if the user hasn't
- * customized it). Providers not in this map have no user-configurable base URL.
- */
-function getProviderBaseUrlField(provider: string, config: ProviderSettings): string | undefined {
-	switch (provider) {
-		case "anthropic":
-			return config.anthropicBaseUrl
-		case "openai":
-			return config.openAiBaseUrl
-		case "openai-native":
-			return config.openAiNativeBaseUrl
-		case "openrouter":
-			return config.openRouterBaseUrl
-		case "deepseek":
-			return config.deepSeekBaseUrl
-		case "litellm":
-			return config.litellmBaseUrl
-		case "ollama":
-			return config.ollamaBaseUrl
-		case "lmstudio":
-			return config.lmStudioBaseUrl
-		case "requesty":
-			return config.requestyBaseUrl
-		case "zoo-gateway":
-			return config.zooGatewayBaseUrl
-		default:
-			return undefined
-	}
-}
-
-/**
- * Extracts a display-friendly endpoint domain from the provider's base URL.
- *
- * Only returns a value when the user has configured a CUSTOM base URL that
- * differs from the provider's default. For localhost / 127.0.0.1 hosts the
- * port is included (e.g. "localhost:1234") so distinct local servers can be
- * distinguished. Returns undefined for default endpoints, providers without
- * a base URL field, or malformed URLs.
- */
-function resolveEndpoint(config: ProviderSettings): string | undefined {
-	const provider = config.apiProvider
-	if (!provider) return undefined
-
-	const configuredUrl = getProviderBaseUrlField(provider, config)
-	if (!configuredUrl) return undefined
-
-	// Only record endpoint when the user customized the base URL.
-	const defaultUrl = PROVIDER_DEFAULT_BASE_URLS[provider]
-	if (configuredUrl === defaultUrl) return undefined
-
-	// zoo-gateway default is dynamic — skip when it matches the derived default.
-	if (provider === "zoo-gateway") {
-		// The dynamic default is `${getZooCodeBaseUrl()}/api/gateway/v1`.
-		// We can't import getZooCodeBaseUrl here without a circular dependency,
-		// so we compare against the known suffix pattern. If the configured URL
-		// ends with /api/gateway/v1 and starts with a zoocode host, treat as default.
-		if (/^https?:\/\/[^/]*zoocode\.dev\/api\/gateway\/v1\/?$/.test(configuredUrl)) {
-			return undefined
-		}
-	}
-
-	try {
-		const url = new URL(configuredUrl)
-		const hostname = url.hostname
-		// Include port for localhost / 127.0.0.1 so distinct local servers differ.
-		if ((hostname === "localhost" || hostname === "127.0.0.1") && url.port) {
-			return `${hostname}:${url.port}`
-		}
-		return hostname
-	} catch {
-		return undefined
-	}
-}
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -374,14 +274,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
-
-	/**
-	 * Usage event recorder. Called only at terminal finalize of API attempts.
-	 * Null if store initialization failed; in that case recording is silently skipped.
-	 * (Architecture report section 5.5-5.8, rollback: writer injected as optional service)
-	 */
-	private readonly usageRecorder: UsageRecorder | null = null
-
 	private resolvedCommandEnvironment?: ResolvedCommandEnvironment
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
@@ -617,12 +509,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.rootTaskId = historyItem ? historyItem.rootTaskId : rootTask?.taskId
 		this.parentTaskId = historyItem ? historyItem.parentTaskId : parentTask?.taskId
 		this.childTaskId = undefined
-		this._isHistoryTask = !!historyItem && !task && !images
 
 		this.metadata = {
 			task: historyItem ? historyItem.task : task,
 			images: historyItem ? [] : images,
 		}
+		this._isHistoryTask = !!historyItem && !task && !images
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -651,24 +543,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
-
-		// Initialize usage recorder (best-effort: failure results in null recorder).
-		// Use the provider's shared UsageStatsService as the append sink so that all
-		// in-process writes go through one store instance and its cache stays consistent.
-		// If the service is unavailable, the recorder is disabled rather than creating
-		// a second independent store authority.
-		try {
-			const service = provider.getUsageStatsService()
-			if (service) {
-				this.usageRecorder = new UsageRecorder(service as unknown as UsageEventStore, () => {
-					provider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
-						// View disposed, drop message silently
-					})
-				})
-			}
-		} catch (err) {
-			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
-		}
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
@@ -1773,7 +1647,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Build metadata with tools and taskId for the condensing API call
-		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
@@ -1786,7 +1659,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: toolCallPolicy.generation === "parallel",
+						parallelToolCalls: true,
 					}
 				: {}),
 		}
@@ -3098,77 +2971,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 											}
 										}
 									} else if (event.type === "tool_call_end") {
-										// Ghost quarantine: inspect streaming state BEFORE
-										// finalizeStreamingToolCall() (which deletes it).
-										// A "ghost" is a call with no resolved tool name and no
-										// non-whitespace argument bytes at stream completion.
-										// Such calls are transport artifacts, not model intent,
-										// and must be silently dropped BEFORE insertion into
-										// assistantMessageContent or conversation history.
-										//
-										// A named call (even with `{}` args) is NOT a ghost —
-										// it is a malformed named call that must receive a
-										// tool_result. A call with any argument bytes is NOT a
-										// ghost — it carries partial model intent.
-										const preFinalizeState = NativeToolCallParser.getStreamingToolCallState(event.id)
-										const ghostDisposition = preFinalizeState
-											? classifyStreamedCall({
-													callId: event.id,
-													toolName: preFinalizeState.name,
-													argumentsAccumulator: preFinalizeState.argumentsAccumulator,
-													streamEnded: true,
-												})
-											: undefined
-
-										if (ghostDisposition && isProvablyEmptyGhost(ghostDisposition)) {
-											// Silently drop the ghost: remove its partial block
-											// from assistantMessageContent and discard streaming
-											// state. It will NOT receive a tool_result.
-											const ghostIndex = this.streamingToolCallIndices.get(event.id)
-											if (ghostIndex !== undefined) {
-												// Remove the partial tool_use block that was pushed
-												// at tool_call_start. This is safe because the call
-												// never resolved a name or arguments — it carries
-												// no model intent and has not been presented to the
-												// user as a tool call.
-												this.assistantMessageContent.splice(ghostIndex, 1)
-												// Re-index remaining streaming tool call indices
-												// since we removed an element from the array.
-												for (const [cid, idx] of this.streamingToolCallIndices.entries()) {
-													if (idx > ghostIndex) {
-														this.streamingToolCallIndices.set(cid, idx - 1)
-													}
-												}
-												this.streamingToolCallIndices.delete(event.id)
-											}
-											// Discard streaming state (finalizeStreamingToolCall
-											// would also delete it, but we bypass that path).
-											NativeToolCallParser.discardStreamingToolCall(event.id)
-											// Emit telemetry for the ghost drop. Only counts and
-											// metadata are sent — no call ID, tool name, or args.
-											const ghostPolicy1 = resolveToolCallPolicy(
-												this.api.getModel().info,
-												this.apiConfiguration.apiProvider,
-											)
-											emitGhostDropTelemetry({
-												taskId: this.taskId,
-												provider: this.apiConfiguration.apiProvider ?? "unknown",
-												model: this.api.getModel().id,
-												policySource: ghostPolicy1.source,
-												maxCallsPerTurn: ghostPolicy1.maxCallsPerTurn,
-												enforcement: ghostPolicy1.enforcement,
-												callCount: this.assistantMessageContent.filter(
-													(b: AssistantMessageContent): b is ToolUse => b.type === "tool_use",
-												).length,
-												ghostDroppedCount: 1,
-												errorResultCount: 0,
-												parallelToolCallsRequested: ghostPolicy1.generation === "parallel",
-											})
-											// Do NOT call presentAssistantMessageSafe — there is
-											// nothing to present for a ghost.
-											continue
-										}
-
 										// Finalize the streaming tool call
 										const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
 
@@ -3221,65 +3023,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							case "tool_call": {
 								// Legacy: Handle complete tool calls (for backward compatibility)
-								// Ghost quarantine: classify before any history insertion.
-								// A ghost has no name and no argument bytes — it is a transport
-								// artifact and must be silently dropped before becoming a
-								// tool_use block in assistantMessageContent.
-								const legacyDisposition = classifyStreamedCall({
-									callId: chunk.id ?? "",
-									toolName: chunk.name,
-									argumentsAccumulator: chunk.arguments ?? "",
-									streamEnded: true,
-								})
-	
-								if (isProvablyEmptyGhost(legacyDisposition)) {
-									// Silently drop the ghost. Do not push to
-									// assistantMessageContent, do not present.
-									// Emit telemetry for the ghost drop. Only counts
-									// and metadata — no call ID, tool name, or args.
-									const ghostPolicy2 = resolveToolCallPolicy(
-										this.api.getModel().info,
-										this.apiConfiguration.apiProvider,
-									)
-									emitGhostDropTelemetry({
-										taskId: this.taskId,
-										provider: this.apiConfiguration.apiProvider ?? "unknown",
-										model: this.api.getModel().id,
-										policySource: ghostPolicy2.source,
-										maxCallsPerTurn: ghostPolicy2.maxCallsPerTurn,
-										enforcement: ghostPolicy2.enforcement,
-										callCount: this.assistantMessageContent.filter(
-											(b: AssistantMessageContent): b is ToolUse => b.type === "tool_use",
-										).length,
-										ghostDroppedCount: 1,
-										errorResultCount: 0,
-										parallelToolCallsRequested: ghostPolicy2.generation === "parallel",
-									})
-									break
-								}
-	
 								// Convert native tool call to ToolUse format
 								const toolUse = NativeToolCallParser.parseToolCall({
 									id: chunk.id,
 									name: chunk.name as ToolName,
 									arguments: chunk.arguments,
 								})
-	
+
 								if (!toolUse) {
 									console.error(`Failed to parse tool call for task ${this.taskId}:`, chunk)
 									break
 								}
-	
+
 								// Store the tool call ID on the ToolUse object for later reference
 								// This is needed to create tool_result blocks that reference the correct tool_use_id
 								toolUse.id = chunk.id
-	
+
 								// Add the tool use to assistant message content
 								this.assistantMessageContent.push(toolUse)
-	
+
 								// Mark that we have new content to process
 								this.userMessageContentReady = false
-	
+
 								// Present the tool call to user - presentAssistantMessage will execute
 								// tools sequentially and accumulate all results in userMessageContent
 								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
@@ -3432,47 +3197,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cacheReadTokens: tokens.cacheRead,
 									cost: tokens.total ?? costResult.totalCost,
 								})
-
-								// ── Usage Stats: terminal finalize ──────────────────────────
-								// captureUsageData is the single terminal boundary for completed/cancelled
-								// API attempts. We record the final usage event here.
-								// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
-								if (this.usageRecorder) {
-									// B1 fix: include apiReqIndex so each tool-use turn produces a unique
-									// requestKey. Previously requestKey = taskId:retryAttempt, which was
-									// identical for every turn of a task (retryAttempt resets to 0 per turn),
-									// causing the idempotency dedupe to drop all but the first turn's usage.
-									const requestKey = `${this.taskId}:${apiReqIndex}:${currentItem.retryAttempt ?? 0}`
-									const ctx: UsageRecordingContext = {
-										taskId: this.taskId,
-										parentTaskId: this.parentTaskId,
-										provider: String(
-											this.apiConfiguration.apiProvider &&
-												!isRetiredProvider(this.apiConfiguration.apiProvider)
-												? this.apiConfiguration.apiProvider
-												: "unknown",
-										),
-										model: getModelId(this.apiConfiguration) || "unknown",
-										mode: this._taskMode || defaultModeSlug,
-										attempt: currentItem.retryAttempt ?? 0,
-										inputTokens: tokens.input,
-										outputTokens: tokens.output,
-										cacheWriteTokens: tokens.cacheWrite,
-										cacheReadTokens: tokens.cacheRead,
-										totalCost: tokens.total,
-										// V1 semantics: provider-reported values, inclusion unknown
-										// (aggregator handles double-counting via inclusion metadata)
-										cacheReadInInput: "unknown",
-										cacheWriteInInput: "unknown",
-										reasoningInOutput: "unknown",
-										costSource: "provider",
-										tokenSource: "provider",
-										endpoint: resolveEndpoint(this.apiConfiguration),
-									}
-									// Fire-and-forget: store error must not block task
-									this.usageRecorder.finalizeUsageEvent(requestKey, status, ctx).catch(() => {})
-								}
-								// ── End Usage Stats ──────────────────────────────────────────
 							}
 						}
 
@@ -3581,44 +3305,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Clean up partial state
 						await abortStream(cancelReason, streamingFailedMessage)
 
-						// ── Usage Stats: terminal finalize for failed/cancelled ───────
-						// This catch block is the terminal path for streaming failures and
-						// user cancellations. Record the partial usage with the appropriate status.
-						// (Architecture report section 5.5-5.8: terminal finalize only)
-						if (this.usageRecorder) {
-							// B1 fix: include apiReqIndex so each tool-use turn produces a unique
-							// requestKey (see completed-path comment above).
-							const requestKey = `${this.taskId}:${lastApiReqIndex}:${currentItem.retryAttempt ?? 0}`
-							const failedStatus: "failed" | "cancelled" = this.abort ? "cancelled" : "failed"
-							const ctx: UsageRecordingContext = {
-								taskId: this.taskId,
-								parentTaskId: this.parentTaskId,
-								provider: String(
-									this.apiConfiguration.apiProvider &&
-										!isRetiredProvider(this.apiConfiguration.apiProvider)
-										? this.apiConfiguration.apiProvider
-										: "unknown",
-								),
-								model: getModelId(this.apiConfiguration) || "unknown",
-								mode: this._taskMode || defaultModeSlug,
-								attempt: currentItem.retryAttempt ?? 0,
-								inputTokens: inputTokens,
-								outputTokens: outputTokens,
-								cacheWriteTokens: cacheWriteTokens,
-								cacheReadTokens: cacheReadTokens,
-								totalCost: totalCost,
-								cacheReadInInput: "unknown",
-								cacheWriteInInput: "unknown",
-								reasoningInOutput: "unknown",
-								costSource: "provider",
-								tokenSource: "provider",
-								endpoint: resolveEndpoint(this.apiConfiguration),
-							}
-							// Fire-and-forget: store error must not block task
-							this.usageRecorder.finalizeUsageEvent(requestKey, failedStatus, ctx).catch(() => {})
-						}
-						// ── End Usage Stats ──────────────────────────────────────────
-
 						if (this.abort) {
 							// User cancelled - abort the entire task
 							this.abortReason = cancelReason
@@ -3685,106 +3371,55 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This is critical for MCP tools which need tool_call_end events to be properly
 				// converted from ToolUse to McpToolUse via finalizeStreamingToolCall()
 				const finalizeEvents = NativeToolCallParser.finalizeRawChunks()
-					for (const event of finalizeEvents) {
-						if (event.type === "tool_call_end") {
-							// Ghost quarantine (same logic as the streaming tool_call_end
-							// handler above): inspect streaming state BEFORE
-							// finalizeStreamingToolCall() deletes it.
-							const preFinalizeState = NativeToolCallParser.getStreamingToolCallState(event.id)
-							const ghostDisposition = preFinalizeState
-								? classifyStreamedCall({
-										callId: event.id,
-										toolName: preFinalizeState.name,
-										argumentsAccumulator: preFinalizeState.argumentsAccumulator,
-										streamEnded: true,
-									})
-								: undefined
-	
-							if (ghostDisposition && isProvablyEmptyGhost(ghostDisposition)) {
-								// Silently drop the ghost: remove its partial block
-								// from assistantMessageContent and discard streaming
-								// state. It will NOT receive a tool_result.
-								const ghostIndex = this.streamingToolCallIndices.get(event.id)
-								if (ghostIndex !== undefined) {
-									this.assistantMessageContent.splice(ghostIndex, 1)
-									for (const [cid, idx] of this.streamingToolCallIndices.entries()) {
-										if (idx > ghostIndex) {
-											this.streamingToolCallIndices.set(cid, idx - 1)
-										}
-									}
-									this.streamingToolCallIndices.delete(event.id)
-								}
-								NativeToolCallParser.discardStreamingToolCall(event.id)
-								// Emit telemetry for the ghost drop. Only counts and
-								// metadata are sent — no call ID, tool name, or args.
-								const ghostPolicy3 = resolveToolCallPolicy(
-									this.api.getModel().info,
-									this.apiConfiguration.apiProvider,
-								)
-								emitGhostDropTelemetry({
-									taskId: this.taskId,
-									provider: this.apiConfiguration.apiProvider ?? "unknown",
-									model: this.api.getModel().id,
-									policySource: ghostPolicy3.source,
-									maxCallsPerTurn: ghostPolicy3.maxCallsPerTurn,
-									enforcement: ghostPolicy3.enforcement,
-									callCount: this.assistantMessageContent.filter(
-										(b: AssistantMessageContent): b is ToolUse => b.type === "tool_use",
-									).length,
-									ghostDroppedCount: 1,
-									errorResultCount: 0,
-									parallelToolCallsRequested: ghostPolicy3.generation === "parallel",
-								})
-								continue
+				for (const event of finalizeEvents) {
+					if (event.type === "tool_call_end") {
+						// Finalize the streaming tool call
+						const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
+
+						// Get the index for this tool call
+						const toolUseIndex = this.streamingToolCallIndices.get(event.id)
+
+						if (finalToolUse) {
+							// Store the tool call ID
+							;(finalToolUse as any).id = event.id
+
+							// Get the index and replace partial with final
+							if (toolUseIndex !== undefined) {
+								this.assistantMessageContent[toolUseIndex] = finalToolUse
 							}
-	
-							// Finalize the streaming tool call
-							const finalToolUse = NativeToolCallParser.finalizeStreamingToolCall(event.id)
-	
-							// Get the index for this tool call
-							const toolUseIndex = this.streamingToolCallIndices.get(event.id)
-	
-							if (finalToolUse) {
-								// Store the tool call ID
-								;(finalToolUse as any).id = event.id
-	
-								// Get the index and replace partial with final
-								if (toolUseIndex !== undefined) {
-									this.assistantMessageContent[toolUseIndex] = finalToolUse
-								}
-	
-								// Clean up tracking
-								this.streamingToolCallIndices.delete(event.id)
-	
-								// Mark that we have new content to process
-								this.userMessageContentReady = false
-	
-								// Present the finalized tool call
-								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-								this.presentAssistantMessageSafe()
-							} else if (toolUseIndex !== undefined) {
-								// finalizeStreamingToolCall returned null (malformed JSON or missing args)
-								// We still need to mark the tool as non-partial so it gets executed
-								// The tool's validation will catch any missing required parameters
-								const existingToolUse = this.assistantMessageContent[toolUseIndex]
-								if (existingToolUse && existingToolUse.type === "tool_use") {
-									existingToolUse.partial = false
-									// Ensure it has the ID for native protocol
-									;(existingToolUse as any).id = event.id
-								}
-	
-								// Clean up tracking
-								this.streamingToolCallIndices.delete(event.id)
-	
-								// Mark that we have new content to process
-								this.userMessageContentReady = false
-	
-								// Present the tool call - validation will handle missing params
-								/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
-								this.presentAssistantMessageSafe()
+
+							// Clean up tracking
+							this.streamingToolCallIndices.delete(event.id)
+
+							// Mark that we have new content to process
+							this.userMessageContentReady = false
+
+							// Present the finalized tool call
+							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+							this.presentAssistantMessageSafe()
+						} else if (toolUseIndex !== undefined) {
+							// finalizeStreamingToolCall returned null (malformed JSON or missing args)
+							// We still need to mark the tool as non-partial so it gets executed
+							// The tool's validation will catch any missing required parameters
+							const existingToolUse = this.assistantMessageContent[toolUseIndex]
+							if (existingToolUse && existingToolUse.type === "tool_use") {
+								existingToolUse.partial = false
+								// Ensure it has the ID for native protocol
+								;(existingToolUse as any).id = event.id
 							}
+
+							// Clean up tracking
+							this.streamingToolCallIndices.delete(event.id)
+
+							// Mark that we have new content to process
+							this.userMessageContentReady = false
+
+							// Present the tool call - validation will handle missing params
+							/* v8 ignore next -- streaming presenter; .catch lives in presentAssistantMessageSafe (covered) */
+							this.presentAssistantMessageSafe()
 						}
 					}
+				}
 
 				// IMPORTANT: Capture partialBlocks AFTER finalizeRawChunks() to avoid double-presentation.
 				// Tools finalized above are already presented, so we only want blocks still partial after finalization.
@@ -4384,7 +4019,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Build metadata with tools and taskId for the condensing API call
-		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode,
 			taskId: this.taskId,
@@ -4397,7 +4031,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: toolCallPolicy.generation === "parallel",
+						parallelToolCalls: true,
 					}
 				: {}),
 		}
@@ -4625,9 +4259,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					? {
 							tools: contextMgmtTools,
 							tool_choice: "auto",
-							parallelToolCalls:
-								resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
-									.generation === "parallel",
+							parallelToolCalls: true,
 						}
 					: {}),
 			}
@@ -4761,7 +4393,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// but uses allowedFunctionNames to restrict which tools can be called.
 		// Other providers (Anthropic, OpenAI, etc.) don't support this feature yet,
 		// so they continue to receive only the filtered tools for the current mode.
-		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === "gemini"
+		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === providerIdentifiers.gemini
 
 		{
 			const provider = this.providerRef.deref()
@@ -4791,8 +4423,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.currentRequestAbortController = new AbortController()
 		const abortSignal = this.currentRequestAbortController.signal
 
-		const toolCallPolicy = resolveToolCallPolicy(this.api.getModel().info, this.apiConfiguration.apiProvider)
-		const parallelToolCallsRequested = toolCallPolicy.generation === "parallel"
 		const metadata: ApiHandlerCreateMessageMetadata = {
 			mode: mode,
 			taskId: this.taskId,
@@ -4803,24 +4433,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				? {
 						tools: allTools,
 						tool_choice: "auto",
-						parallelToolCalls: parallelToolCallsRequested,
+						parallelToolCalls: true,
 						// When mode restricts tools, provide allowedFunctionNames so providers
 						// like Gemini can see all tools in history but only call allowed ones
 						...(allowedFunctionNames ? { allowedFunctionNames } : {}),
 					}
 				: {}),
 		}
-		// Emit telemetry for the policy resolution. Only metadata is sent —
-		// no raw commands, paths, file contents, tool arguments, or API keys.
-		TelemetryService.instance.captureToolCallPolicyResolution(this.taskId, {
-			provider: this.apiConfiguration.apiProvider ?? "unknown",
-			model: this.api.getModel().id,
-			policySource: toolCallPolicy.source,
-			maxCallsPerTurn: toolCallPolicy.maxCallsPerTurn,
-			enforcement: toolCallPolicy.enforcement,
-			parallelToolCallsRequested,
-			parallelToolCallsSent: shouldIncludeTools ? parallelToolCallsRequested : undefined,
-		})
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 

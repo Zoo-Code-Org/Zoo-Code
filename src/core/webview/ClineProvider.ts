@@ -52,8 +52,6 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
-	type TaskOrganizationStateV1,
-	createEmptyTaskOrganizationState,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -88,7 +86,6 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
-import { UsageStatsService } from "../../services/stats"
 import { CommandEnvironmentService } from "../../integrations/terminal/shell/CommandEnvironmentService"
 import { ShellResolver } from "../../integrations/terminal/shell/ShellResolver"
 import { TerminalProfileResolver } from "../../integrations/terminal/shell/TerminalProfileResolver"
@@ -118,7 +115,6 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
-	TaskOrganizationStore,
 	assertValidTransition,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
@@ -191,7 +187,6 @@ export class ClineProvider
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
-	private usageStatsService?: UsageStatsService
 	private commandEnvironmentService?: CommandEnvironmentService
 	private marketplaceManager: MarketplaceManager
 	private mdmService?: MdmService
@@ -204,8 +199,6 @@ export class ClineProvider
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
 	private taskHistoryStoreInitialized = false
-	public readonly taskOrganizationStore: TaskOrganizationStore
-	private taskOrganizationStoreInitialized = false
 	private globalStateWriteThroughTimer: ReturnType<typeof setTimeout> | null = null
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	private static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
@@ -228,29 +221,9 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jul-2026-v3.72.0-moonshot-kimi-models-workflows" // v3.72.0 Moonshot/Kimi providers, new models, subtask/indexing improvements
+	public readonly latestAnnouncementId = "jul-2026-v3.74.0-openai-provider-workflows" // v3.74.0 OpenAI controls, provider reliability, and smoother workflows
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
-
-	/**
-	 * Returns the CommandEnvironmentService instance, lazily initializing it
-	 * on first access. The service resolves the shell environment for each
-	 * API request and provides the same snapshot to the system prompt, tool
-	 * descriptions, and runtime execution.
-	 */
-	public getCommandEnvironmentService(): CommandEnvironmentService | undefined {
-		if (!this.commandEnvironmentService) {
-			try {
-				const profileResolver = TerminalProfileResolver.forRuntime()
-				const resolver = ShellResolver.forRuntime(profileResolver)
-				this.commandEnvironmentService = new CommandEnvironmentService(resolver)
-			} catch (error) {
-				console.error("[ClineProvider] Failed to create CommandEnvironmentService:", error)
-				return undefined
-			}
-		}
-		return this.commandEnvironmentService
-	}
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -277,42 +250,11 @@ export class ClineProvider
 		this.taskHistoryStore = new TaskHistoryStore(this.contextProxy.globalStorageUri.fsPath, {
 			onWrite: async () => {
 				this.scheduleGlobalStateWriteThrough()
-				// Reconcile organization state after task history changes (deletion,
-				// new child, etc.). Failures are logged but do not block history writes.
-				try {
-					await this.taskOrganizationStore.reconcile()
-				} catch (error) {
-					this.log(
-						`[TaskHistoryStore.onWrite] Task organization reconciliation failed: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-					)
-				}
 			},
 		})
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
-
-		this.taskOrganizationStore = new TaskOrganizationStore(this.contextProxy.globalStorageUri.fsPath, {
-			taskHistory: this.taskHistoryStore,
-		// Initialize the task organization store. It shares the same global
-		// storage directory as task history and resolves automatic-group
-		// closures against the loaded task history.
-			onChange: async (state) => {
-				if (this.isViewLaunched) {
-					await this.postMessageToWebview({ type: "taskOrganizationUpdated", taskOrganization: state })
-				}
-			},
-		})
-		this.taskOrganizationStore
-			.initialize()
-			.then(() => {
-				this.taskOrganizationStoreInitialized = true
-			})
-			.catch((error) => {
-				this.log(`Failed to initialize TaskOrganizationStore: ${error}`)
-			})
 
 		// Start configuration loading (which might trigger indexing) in the background.
 		// Don't await, allowing activation to continue immediately.
@@ -344,29 +286,6 @@ export class ClineProvider
 		this.skillsManager.initialize().catch((error) => {
 			this.log(`Failed to initialize Skills Manager: ${error}`)
 		})
-
-		// Initialize Usage Stats Service for local token usage tracking.
-		// Initialization failure is non-fatal — the service becomes unavailable
-		// and stats handlers return "service unavailable" errors gracefully.
-		try {
-			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
-			this.usageStatsService = new UsageStatsService(globalStoragePath)
-			this.usageStatsService.initialize().catch((error) => {
-				this.log(`Failed to initialize Usage Stats Service: ${error}`)
-				this.usageStatsService = undefined
-			})
-
-			// Subscribe to cross-window file changes so this window's dashboard
-			// refreshes when another VS Code window records new usage events.
-			this.usageStatsService.onDidChange(() => {
-				this.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
-					// View disposed, drop message silently
-				})
-			})
-		} catch (error) {
-			this.log(`Failed to create Usage Stats Service: ${error}`)
-			this.usageStatsService = undefined
-		}
 
 		this.marketplaceManager = new MarketplaceManager(this.context, this.customModesManager)
 
@@ -826,9 +745,7 @@ export class ClineProvider
 		this.skillsManager = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
-		this.usageStatsService?.dispose()
 		this.taskHistoryStore.dispose()
-		this.taskOrganizationStore.dispose()
 		this.flushGlobalStateWriteThrough()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
@@ -2408,9 +2325,8 @@ export class ClineProvider
 	}
 
 	async getStateToPostToWebview(): Promise<ExtensionState> {
-		// Ensure the stores are initialized before reading persisted state.
+		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
-		await this.taskOrganizationStore.waitForInitialized()
 
 		const {
 			apiConfiguration,
@@ -2712,20 +2628,6 @@ export class ClineProvider
 			platform: process.platform,
 			arch: process.arch,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
-			taskOrganization: (() => {
-				try {
-					return this.taskOrganizationStoreInitialized
-						? this.taskOrganizationStore.getState()
-						: createEmptyTaskOrganizationState()
-				} catch (error) {
-					this.log(
-						`[getStateToPostToWebview] Failed to read task organization state: ${
-							error instanceof Error ? error.message : String(error)
-						}`,
-					)
-					return createEmptyTaskOrganizationState()
-				}
-			})(),
 		}
 	}
 
@@ -3100,6 +3002,25 @@ export class ClineProvider
 		return this.skillsManager
 	}
 
+	/**
+	 * Returns the CommandEnvironmentService instance, lazily initializing it
+	 * on first access. The service resolves the shell environment for each
+	 * API request and provides the same snapshot to the system prompt, tool
+	 * descriptions, and runtime execution.
+	 */
+	public getCommandEnvironmentService(): CommandEnvironmentService | undefined {
+		if (!this.commandEnvironmentService) {
+			try {
+				const profileResolver = TerminalProfileResolver.forRuntime()
+				const resolver = ShellResolver.forRuntime(profileResolver)
+				this.commandEnvironmentService = new CommandEnvironmentService(resolver)
+			} catch (error) {
+				console.error("[ClineProvider] Failed to create CommandEnvironmentService:", error)
+				return undefined
+			}
+		}
+		return this.commandEnvironmentService
+	}
 
 	/**
 	 * Handles the `requestTerminalShellOptions` webview message.
@@ -3311,21 +3232,6 @@ export class ClineProvider
 	}
 
 	/**
-	 * Returns the UsageStatsService instance, or undefined if initialization failed.
-	 * The service provides local token usage statistics: query, export, clear.
-	 */
-	public getUsageStatsService(): UsageStatsService | undefined {
-		return this.usageStatsService
-	}
-
-	/**
-	 * Returns the TaskOrganizationStore instance for use by message handlers.
-	 */
-	public getTaskOrganizationStore(): TaskOrganizationStore {
-		return this.taskOrganizationStore
-	}
-
-	/**
 	 * Check if the current state is compliant with MDM policy
 	 * @returns true if compliant or no MDM policy exists, false if MDM policy exists and user is non-compliant
 	 */
@@ -3404,13 +3310,6 @@ export class ClineProvider
 
 	public getCurrentTask(): Task | undefined {
 		return this.taskRegistry.current
-	}
-
-	/**
-	 * Returns the TaskOrganizationStore instance for use by message handlers.
-	 */
-	public getTaskOrganizationStore(): TaskOrganizationStore {
-		return this.taskOrganizationStore
 	}
 
 	private logWebviewHiddenDiagnostics(): void {
