@@ -27,10 +27,7 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 		const message = error.message.toLowerCase()
 		const status = (error as { status?: number }).status
 		// OpenAI SDK APIError carries an HTTP status; some endpoints return 400
-		if (
-			message.includes("parallel_tool_calls") ||
-			(status === 400 && message.includes("unrecognized"))
-		) {
+		if (message.includes("parallel_tool_calls") || (status === 400 && message.includes("unrecognized"))) {
 			return true
 		}
 	}
@@ -38,15 +35,15 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 }
 
 /**
-	* Filters a streamed delta so that only the FIRST tool call (index 0) survives.
-	* MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
-	* parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
-	* configured for maxCallsPerTurn === 1; dropping extras here prevents the
-	* "multiple-valid-calls-under-single-policy" rejection path that triggers the
-	* error-interception retry loop.
-	*
-	* Confined to MimoHandler — no other provider is affected.
-	*/
+ * Filters a streamed delta so that only the FIRST tool call (index 0) survives.
+ * MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
+ * parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
+ * configured for maxCallsPerTurn === 1; dropping extras here prevents the
+ * "multiple-valid-calls-under-single-policy" rejection path that triggers the
+ * error-interception retry loop.
+ *
+ * Confined to MimoHandler — no other provider is affected.
+ */
 function filterToFirstToolCall(
 	delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta,
 	state: { firstToolCallId: string | undefined },
@@ -166,7 +163,7 @@ export class MimoHandler extends OpenAiHandler {
 		}
 
 		if (tools && tools.length > 0) {
-			params.tools = this.convertToolsForOpenAI(tools)
+			params.tools = this.convertToolsForOpenAI(tools, this.options.openAiToolStrictMode ?? false)
 		}
 
 		// Honor tool_choice from metadata (OpenAI-compatible passthrough)
