@@ -65,8 +65,8 @@
 		"hint": "Applicato quando il provider non segnala i dati della cache"
 	},
 	"sessions": {
-		"title": "Sessioni",
-		"noSessions": "Nessuna sessione in questo intervallo di tempo",
+		"title": "Attività",
+		"noSessions": "Nessuna attività registrata",
 		"filterModel": "Tutti i modelli",
 		"filterProvider": "Tutti i provider",
 		"callCount": "{{count}} chiamate"

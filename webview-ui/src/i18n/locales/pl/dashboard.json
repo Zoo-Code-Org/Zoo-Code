@@ -65,8 +65,8 @@
 		"hint": "Stosowany, gdy dostawca nie zgłasza danych pamięci podręcznej"
 	},
 	"sessions": {
-		"title": "Sesje",
-		"noSessions": "Brak sesji w tym zakresie czasu",
+		"title": "Zadania",
+		"noSessions": "Brak zarejestrowanych zadań",
 		"filterModel": "Wszystkie modele",
 		"filterProvider": "Wszyscy dostawcy",
 		"callCount": "{{count}} wywołań"

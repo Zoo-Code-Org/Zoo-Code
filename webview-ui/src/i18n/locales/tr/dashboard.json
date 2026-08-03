@@ -65,8 +65,8 @@
 		"hint": "Sağlayıcı önbellek verilerini bildirmediğinde uygulanır"
 	},
 	"sessions": {
-		"title": "Oturumlar",
-		"noSessions": "Bu zaman aralığında oturum yok",
+		"title": "Görevler",
+		"noSessions": "Kayıtlı görev yok",
 		"filterModel": "Tüm Modeller",
 		"filterProvider": "Tüm Sağlayıcılar",
 		"callCount": "{{count}} çağrı"

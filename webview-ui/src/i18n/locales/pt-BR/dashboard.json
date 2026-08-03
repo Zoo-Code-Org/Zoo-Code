@@ -65,8 +65,8 @@
 		"hint": "Aplicado quando o provedor não relata dados de cache"
 	},
 	"sessions": {
-		"title": "Sessões",
-		"noSessions": "Nenhuma sessão neste período",
+		"title": "Tarefas",
+		"noSessions": "Nenhuma tarefa registrada",
 		"filterModel": "Todos os modelos",
 		"filterProvider": "Todos os provedores",
 		"callCount": "{{count}} chamadas"

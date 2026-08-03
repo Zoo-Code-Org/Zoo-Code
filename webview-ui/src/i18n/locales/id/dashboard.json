@@ -65,8 +65,8 @@
 		"hint": "Diterapkan ketika penyedia tidak melaporkan data cache"
 	},
 	"sessions": {
-		"title": "Sesi",
-		"noSessions": "Tidak ada sesi dalam rentang waktu ini",
+		"title": "Tugas",
+		"noSessions": "Tidak ada tugas yang tercatat",
 		"filterModel": "Semua Model",
 		"filterProvider": "Semua Penyedia",
 		"callCount": "{{count}} panggilan"

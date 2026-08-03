@@ -65,8 +65,8 @@
 		"hint": "当提供商未报告缓存数据时应用"
 	},
 	"sessions": {
-		"title": "会话",
-		"noSessions": "此时间范围内没有会话",
+		"title": "任务",
+		"noSessions": "没有记录的任务",
 		"filterModel": "所有模型",
 		"filterProvider": "所有提供商",
 		"callCount": "{{count}} 次调用"

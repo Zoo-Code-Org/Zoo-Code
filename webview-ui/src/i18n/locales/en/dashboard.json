@@ -65,8 +65,8 @@
 		"hint": "Applied when provider doesn't report cache data"
 	},
 	"sessions": {
-		"title": "Sessions",
-		"noSessions": "No sessions in this time range",
+		"title": "Tasks",
+		"noSessions": "No tasks recorded",
 		"filterModel": "All Models",
 		"filterProvider": "All Providers",
 		"callCount": "{{count}} calls"

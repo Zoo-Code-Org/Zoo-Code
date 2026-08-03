@@ -65,8 +65,8 @@
 		"hint": "Wird angewendet, wenn der Anbieter keine Cache-Daten meldet"
 	},
 	"sessions": {
-		"title": "Sitzungen",
-		"noSessions": "Keine Sitzungen in diesem Zeitraum",
+		"title": "Aufgaben",
+		"noSessions": "Keine Aufgaben aufgezeichnet",
 		"filterModel": "Alle Modelle",
 		"filterProvider": "Alle Anbieter",
 		"callCount": "{{count}} Aufrufe"

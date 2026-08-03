@@ -65,8 +65,8 @@
 		"hint": "當提供商未報告緩存數據時應用"
 	},
 	"sessions": {
-		"title": "工作階段",
-		"noSessions": "此時間範圍內沒有工作階段",
+		"title": "工作",
+		"noSessions": "沒有記錄的工作",
 		"filterModel": "所有模型",
 		"filterProvider": "所有供應商",
 		"callCount": "{{count}} 次呼叫"

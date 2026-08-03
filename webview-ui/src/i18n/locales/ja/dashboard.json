@@ -65,8 +65,8 @@
 		"hint": "プロバイダーがキャッシュデータを報告しない場合に適用"
 	},
 	"sessions": {
-		"title": "セッション",
-		"noSessions": "この期間にはセッションがありません",
+		"title": "タスク",
+		"noSessions": "記録されたタスクはありません",
 		"filterModel": "すべてのモデル",
 		"filterProvider": "すべてのプロバイダー",
 		"callCount": "{{count}} 回の呼び出し"

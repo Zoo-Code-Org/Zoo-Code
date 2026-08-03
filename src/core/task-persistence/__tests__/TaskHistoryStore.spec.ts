@@ -9,6 +9,26 @@ import type { HistoryItem } from "@roo-code/types"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 
+vi.mock("vscode", () => {
+	class EventEmitter<T> {
+		private readonly listeners = new Set<(event: T) => unknown>()
+		public readonly event = (listener: (event: T) => unknown) => {
+			this.listeners.add(listener)
+			return { dispose: () => this.listeners.delete(listener) }
+		}
+		fire(event: T): void {
+			for (const listener of this.listeners) {
+				listener(event)
+			}
+		}
+		dispose(): void {
+			this.listeners.clear()
+		}
+	}
+
+	return { EventEmitter }
+})
+
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
 		return defaultPath
@@ -115,6 +135,38 @@ describe("TaskHistoryStore", () => {
 			expect(all[0].id).toBe("new")
 			expect(all[1].id).toBe("mid")
 			expect(all[2].id).toBe("old")
+		})
+	})
+
+	describe("onDidChange", () => {
+		it("fires only after cache mutations are consistent and not for no-op deletes", async () => {
+			await store.initialize()
+			const changeEmitter = store["didChangeEmitter"]
+			const fire = vi.spyOn(changeEmitter, "fire")
+
+			await store.upsert(makeHistoryItem({ id: "event-task", ts: 1000 }))
+			expect(store.getAll().map((item) => item.id)).toEqual(["event-task"])
+			await store.delete("event-task")
+			await store.delete("event-task")
+
+			expect(fire).toHaveBeenCalledTimes(2)
+	})
+
+		it("fires after reconciliation updates the cache", async () => {
+			await store.initialize()
+			const changeEmitter = store["didChangeEmitter"]
+			const fire = vi.spyOn(changeEmitter, "fire")
+			const taskDir = path.join(tmpDir, "tasks", "reconciled-event-task")
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(
+				path.join(taskDir, GlobalFileNames.historyItem),
+				JSON.stringify(makeHistoryItem({ id: "reconciled-event-task" })),
+			)
+
+			await store.reconcile()
+
+			expect(store.getAll()).toHaveLength(1)
+			expect(fire).toHaveBeenCalledTimes(1)
 		})
 	})
 

@@ -65,8 +65,8 @@
 		"hint": "Appliqué lorsque le fournisseur ne signale pas les données de cache"
 	},
 	"sessions": {
-		"title": "Sessions",
-		"noSessions": "Aucune session dans cette période",
+		"title": "Tâches",
+		"noSessions": "Aucune tâche enregistrée",
 		"filterModel": "Tous les modèles",
 		"filterProvider": "Tous les fournisseurs",
 		"callCount": "{{count}} appels"

@@ -65,8 +65,8 @@
 		"hint": "Áp dụng khi nhà cung cấp không báo cáo dữ liệu bộ nhớ đệm"
 	},
 	"sessions": {
-		"title": "Phiên",
-		"noSessions": "Không có phiên trong khoảng thời gian này",
+		"title": "Nhiệm vụ",
+		"noSessions": "Không có nhiệm vụ nào được ghi nhận",
 		"filterModel": "Tất cả mô hình",
 		"filterProvider": "Tất cả nhà cung cấp",
 		"callCount": "{{count}} lượt gọi"

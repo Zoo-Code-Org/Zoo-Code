@@ -65,8 +65,8 @@
 		"hint": "Toegepast wanneer de provider geen cachegegevens rapporteert"
 	},
 	"sessions": {
-		"title": "Sessies",
-		"noSessions": "Geen sessies in dit tijdsbereik",
+		"title": "Taken",
+		"noSessions": "Geen taken geregistreerd",
 		"filterModel": "Alle modellen",
 		"filterProvider": "Alle providers",
 		"callCount": "{{count}} aanroepen"

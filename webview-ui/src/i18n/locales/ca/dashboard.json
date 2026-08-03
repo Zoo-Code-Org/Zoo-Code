@@ -65,8 +65,8 @@
 		"hint": "S'aplica quan el proveïdor no informa dades de memòria cau"
 	},
 	"sessions": {
-		"title": "Sessions",
-		"noSessions": "No hi ha sessions en aquest període",
+		"title": "Tasques",
+		"noSessions": "No hi ha tasques registrades",
 		"filterModel": "Tots els models",
 		"filterProvider": "Tots els proveïdors",
 		"callCount": "{{count}} trucades"
