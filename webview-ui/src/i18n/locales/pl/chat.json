@@ -367,6 +367,10 @@
 		}
 	},
 	"profileViolationWarning": "Bieżący profil nie jest kompatybilny z ustawieniami Twojej organizacji",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Zmiana trybu bez formalnej delegacji",
+		"message": "⚠️ Tryb zmieniony z {{fromMode}} na {{toMode}} bez delegacji zadania — historia rozmowy może być niekompatybilna z nowym modelem ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Ostrzeżenie wykonania polecenia",
 		"description": "Twoje polecenie jest wykonywane bez integracji powłoki terminala VSCode. Aby ukryć to ostrzeżenie, możesz wyłączyć integrację powłoki w sekcji <strong>Terminal</strong> w <settingsLink>ustawieniach Zoo Code</settingsLink> lub rozwiązać problemy z integracją terminala VSCode korzystając z poniższego linku.",

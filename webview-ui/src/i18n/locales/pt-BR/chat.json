@@ -367,6 +367,10 @@
 		}
 	},
 	"profileViolationWarning": "O perfil atual não é compatível com as configurações da sua organização",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Mudança de modo sem delegação formal",
+		"message": "⚠️ Modo alterado de {{fromMode}} para {{toMode}} sem delegação de tarefa — o histórico da conversa pode ser incompatível com o novo modelo ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Aviso de execução de comando",
 		"description": "Seu comando está sendo executado sem a integração de shell do terminal VSCode. Para suprimir este aviso, você pode desativar a integração de shell na seção <strong>Terminal</strong> das <settingsLink>configurações do Zoo Code</settingsLink> ou solucionar problemas de integração do terminal VSCode usando o link abaixo.",

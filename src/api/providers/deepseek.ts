@@ -18,7 +18,6 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { convertToR1Format } from "../transform/r1-format"
 import { historyHasToolCallsWithoutReasoning } from "./utils/reasoning-history-guard"
-import { historyHasToolCallsWithoutReasoning } from "./utils/reasoning-history-guard"
 
 import { OpenAiHandler } from "./openai"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"

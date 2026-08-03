@@ -397,6 +397,10 @@
 		}
 	},
 	"profileViolationWarning": "目前設定檔與您的組織設定不相容",
+	"modeSwitchCompatibilityWarning": {
+		"title": "未經正式委派切換模式",
+		"message": "⚠️ 模式已從 {{fromMode}} 切換到 {{toMode}}，未進行任務委派 — 對話歷史可能與新模型 ({{toProvider}}) 不相容。"
+	},
 	"shellIntegration": {
 		"title": "命令執行警告",
 		"description": "命令正在沒有 VS Code 終端機 Shell 整合的情況下執行。若要隱藏此警告，可在 <settingsLink>Zoo Code 設定</settingsLink> 的 <strong>終端機</strong> 區塊中停用 Shell 整合，或使用下方連結排解 VS Code 終端機整合問題。",

@@ -404,6 +404,10 @@
 		}
 	},
 	"profileViolationWarning": "Profil saat ini tidak kompatibel dengan pengaturan organisasi kamu",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Perubahan mode tanpa delegasi formal",
+		"message": "⚠️ Mode berpindah dari {{fromMode}} ke {{toMode}} tanpa delegasi tugas — riwayat percakapan mungkin tidak kompatibel dengan model baru ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Peringatan Eksekusi Perintah",
 		"description": "Perintah kamu dijalankan tanpa integrasi shell terminal VSCode. Untuk menekan peringatan ini kamu bisa menonaktifkan integrasi shell di bagian <strong>Terminal</strong> dari <settingsLink>pengaturan Zoo Code</settingsLink> atau troubleshoot integrasi terminal VSCode menggunakan link di bawah.",

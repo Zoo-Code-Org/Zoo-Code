@@ -368,6 +368,10 @@
 		}
 	},
 	"profileViolationWarning": "当前配置文件与您的组织设置不兼容",
+	"modeSwitchCompatibilityWarning": {
+		"title": "未经正式委派切换模式",
+		"message": "⚠️ 模式已从 {{fromMode}} 切换到 {{toMode}}，未进行任务委派 — 对话历史可能与新模型 ({{toProvider}}) 不兼容。"
+	},
 	"shellIntegration": {
 		"title": "命令执行警告",
 		"description": "您的命令正在没有 VSCode 终端 shell 集成的情况下执行。要隐藏此警告，您可以在 <settingsLink>Zoo Code 设置</settingsLink>的 <strong>Terminal</strong> 部分禁用 shell 集成，或使用下方链接排查 VSCode 终端集成问题。",

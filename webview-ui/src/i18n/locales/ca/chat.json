@@ -367,6 +367,10 @@
 		}
 	},
 	"profileViolationWarning": "El perfil actual no és compatible amb la configuració de la teva organització",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Canvi de mode sense delegació formal",
+		"message": "⚠️ S'ha canviat del mode {{fromMode}} al mode {{toMode}} sense delegació de tasca — l'historial de conversa pot ser incompatible amb el nou model ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Advertència d'execució d'ordres",
 		"description": "La teva ordre s'està executant sense la integració de shell del terminal VSCode. Per suprimir aquest advertiment, pots desactivar la integració de shell a la secció <strong>Terminal</strong> de la <settingsLink>configuració de Zoo Code</settingsLink> o solucionar problemes d'integració del terminal VSCode utilitzant l'enllaç de sota.",
