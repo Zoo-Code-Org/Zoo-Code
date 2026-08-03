@@ -3287,6 +3287,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									const ctx: UsageRecordingContext = {
 										taskId: this.taskId,
 										parentTaskId: this.parentTaskId,
+										rootTaskId: this.rootTaskId,
 										provider: String(
 											this.apiConfiguration.apiProvider &&
 												!isRetiredProvider(this.apiConfiguration.apiProvider)
@@ -3434,6 +3435,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							const ctx: UsageRecordingContext = {
 								taskId: this.taskId,
 								parentTaskId: this.parentTaskId,
+								rootTaskId: this.rootTaskId,
 								provider: String(
 									this.apiConfiguration.apiProvider &&
 										!isRetiredProvider(this.apiConfiguration.apiProvider)

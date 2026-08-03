@@ -19,6 +19,12 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { UsageRecorder } from "../../../services/stats/UsageRecorder"
 import type { UsageRecordingContext } from "../../../services/stats/UsageRecorder"
 import { UsageEventStore } from "../../../services/stats/UsageEventStore"
+import type { ApiStream } from "../../../api/transform/stream"
+
+/** Typed access to Task privates needed by these tests (avoids `as any`). */
+interface TaskTestAccess {
+	safeEnsureModelFetched: () => Promise<void>
+}
 
 // Mock @roo-code/core
 vi.mock("@roo-code/core", () => ({
@@ -396,6 +402,20 @@ describe("Usage Stats Recording", () => {
 			expect(recordedEvent.parentTaskId).toBe("parent-task-001")
 		})
 
+		it("should include rootTaskId when provided", async () => {
+			const mockStore = {
+				append: vi.fn().mockResolvedValue(true),
+				initialize: vi.fn().mockResolvedValue(undefined),
+			} as unknown as UsageEventStore
+			const recorder = new UsageRecorder(mockStore)
+
+			const ctx = makeRecordingContext({ parentTaskId: "parent-task-001", rootTaskId: "root-task-001" })
+			await recorder.finalizeUsageEvent("task-1:0", "completed", ctx)
+
+			const recordedEvent = (mockStore.append as unknown as ReturnType<typeof vi.fn>).mock.calls[0][0]
+			expect(recordedEvent.rootTaskId).toBe("root-task-001")
+		})
+
 		it("should generate unique eventId for each event", async () => {
 			const mockStore = {
 				append: vi.fn().mockResolvedValue(true),
@@ -506,6 +526,50 @@ describe("Usage Stats Recording", () => {
 			// The recorder should have a sink (the event store, renamed from `store` in the
 			// usage-capture refactor) that was constructed with the globalStoragePath
 			expect((recorder as unknown as Record<string, unknown>)["sink"]).toBeDefined()
+		})
+
+		it("passes rootTaskId and parentTaskId to the recorder when a sub-task stream fails", async () => {
+			const parent = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "parent task",
+				startTask: false,
+			})
+			const child = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "child task",
+				parentTask: parent,
+				rootTask: parent,
+				startTask: false,
+			})
+
+			const recorder = (child as unknown as Record<string, unknown>).usageRecorder as UsageRecorder
+			const finalizeSpy = vi.spyOn(recorder, "finalizeUsageEvent").mockImplementation(async () => {
+				// End the retry loop after the failed-usage recording: the stream
+				// failure path otherwise re-queues the request and loops forever.
+				;(child as unknown as Record<string, unknown>).abort = true
+			})
+
+			// Avoid model-fetch network access inside the request loop.
+			vi.spyOn(child as unknown as TaskTestAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(child.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+
+			// Fail during stream iteration so the inner catch records partial usage.
+			const failingStream = (async function* (): ApiStream {
+				yield { type: "text", text: "partial" }
+				throw new Error("stream boom")
+			})()
+			vi.spyOn(child, "attemptApiRequest").mockReturnValue(failingStream)
+
+			const result = await child.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
+
+			expect(result).toBe(true)
+			expect(finalizeSpy).toHaveBeenCalledOnce()
+			const ctx = finalizeSpy.mock.calls[0][2]
+			expect(ctx.taskId).toBe(child.taskId)
+			expect(ctx.parentTaskId).toBe(parent.taskId)
+			expect(ctx.rootTaskId).toBe(parent.taskId)
 		})
 	})
 
