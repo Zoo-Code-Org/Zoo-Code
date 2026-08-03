@@ -309,14 +309,14 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 	const renderPinnedHeader = () => {
 		// When workspace filtering is active, exclude pins whose targets
 		// resolve to tasks that don't exist in the current workspace.
-		// Folder pins are kept — they are handled by the projection with
-		// workspace filtering.
+		// Folder pins follow the projection's workspace scoping: a folder
+		// whose members all belong to another workspace is not visible here.
 		const visiblePins = showAllWorkspaces
 			? organization.pins
 			: organization.pins.filter((pin) => {
 					const target = pin.target
 					if (target.kind === "folder") {
-						return true
+						return projection.folderProjections.some((p) => p.folderId === target.folderId)
 					}
 					const rootId =
 						target.kind === "task" ? buildCanonicalTarget(target.taskId, groups) : target.rootTaskId
