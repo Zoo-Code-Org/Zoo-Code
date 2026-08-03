@@ -1565,7 +1565,7 @@ export class ClineProvider
 				} catch (innerError) {
 					// Non-fatal: log but don't block the mode switch if the check fails.
 					this.log(
-						\`Mode-switch compatibility check failed: ${innerError instanceof Error ? innerError.message : String(innerError)}\`,
+						`Mode-switch compatibility check failed: ${innerError instanceof Error ? innerError.message : String(innerError)}`,
 					)
 				}
 			}
