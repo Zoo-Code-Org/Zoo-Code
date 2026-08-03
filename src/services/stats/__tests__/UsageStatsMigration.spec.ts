@@ -150,6 +150,49 @@ describe("UsageStatsMigration", () => {
 			expect(result.complete).toBe(true)
 			expect(result.totalMigrated).toBe(0)
 		})
+
+		it("flips the legacy inverted timezone_offset sign for NDJSON-sourced events", () => {
+			// Pre-fix recorder stored getTimezoneOffset() directly: minutes WEST
+			// of UTC, i.e. -540 for KST (UTC+9). The v4 SQLite migration flips
+			// rows already in the database; NDJSON-sourced rows must receive the
+			// same correction during migration.
+			writeSegment(statsDir, "events-000001.ndjson", [
+				makeEvent({
+					eventId: "evt-legacy",
+					idempotencyKey: "idem-legacy",
+					timezoneOffsetMinutes: -540,
+				}),
+			])
+
+			const result = migration.migrate()
+
+			expect(result.totalMigrated).toBe(1)
+			const dbEvents = db.readAllEvents()
+			expect(dbEvents).toHaveLength(1)
+			expect(dbEvents[0].timezoneOffsetMinutes).toBe(540)
+		})
+
+		it("does not double-flip events that were already dual-written to SQLite", () => {
+			// Post-fix events are appended to SQLite by UsageEventStore at write
+			// time (correct sign, +540 for KST). Their NDJSON lines are skipped
+			// by INSERT OR IGNORE, so the in-memory flip never persists.
+			const dualWritten = makeEvent({
+				eventId: "evt-dual",
+				idempotencyKey: "idem-dual",
+				timezoneOffsetMinutes: 540,
+			})
+			db.append(dualWritten)
+
+			writeSegment(statsDir, "events-000001.ndjson", [dualWritten])
+
+			const result = migration.migrate()
+
+			expect(result.totalMigrated).toBe(0)
+			expect(result.totalSkipped).toBe(1)
+			const dbEvents = db.readAllEvents()
+			expect(dbEvents).toHaveLength(1)
+			expect(dbEvents[0].timezoneOffsetMinutes).toBe(540)
+		})
 	})
 
 	describe("idempotency", () => {

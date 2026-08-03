@@ -165,6 +165,23 @@ export class UsageStatsMigration {
 					continue
 				}
 
+				// Timezone offset sign correction (NDJSON counterpart of the v4
+				// SQLite migration). NDJSON segments pending migration were written
+				// by the pre-fix recorder, which stored getTimezoneOffset() with the
+				// inverted (minutes-west-of-UTC) sign; computeLocalDayBucket expects
+				// minutes EAST of UTC. The v4 migration flips rows already in SQLite,
+				// but NDJSON-sourced rows would otherwise keep the wrong sign forever.
+				//
+				// There is no per-event discriminator (schemaVersion is unchanged by
+				// the sign fix), so every migrated event is flipped. This is safe for
+				// post-fix events: UsageEventStore dual-writes them to SQLite, so the
+				// INSERT OR IGNORE below skips them as duplicates and the flipped
+				// value is never persisted. The only false positives are post-fix
+				// events whose dual-write failed (logged at append time) — accepting
+				// that residual risk because pre-fix NDJSON events are wrong with
+				// certainty otherwise.
+				event = { ...event, timezoneOffsetMinutes: -event.timezoneOffsetMinutes }
+
 				// Resolve root task ID if not present
 				if (!event.rootTaskId) {
 					event = {
