@@ -38,15 +38,23 @@ function isParallelToolCallsRejected(error: unknown): boolean {
  * Filters a streamed delta so that only the FIRST tool call (index 0) survives.
  * MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
  * parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
- * configured for maxCallsPerTurn === 1; dropping extras here prevents the
- * "multiple-valid-calls-under-single-policy" rejection path that triggers the
- * error-interception retry loop.
+ * configured for maxCallsPerTurn === 1, which rejects ALL calls when two or
+ * more valid calls arrive; dropping extras here lets the first call execute
+ * normally instead of failing the whole turn.
+ *
+ * Some providers reuse `index: 0` with a NEW id for a disguised second
+ * parallel call. Once such an id chunk is dropped, its subsequent id-less
+ * argument-continuation fragments must be dropped too — an id-less fragment
+ * belongs to the most recent id chunk seen at that index — otherwise they
+ * concatenate into the FIRST call's argument accumulator and corrupt its
+ * JSON. `state.droppedIndexes` tracks indexes currently owned by a dropped
+ * call.
  *
  * Confined to MimoHandler — no other provider is affected.
  */
 function filterToFirstToolCall(
 	delta: OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta,
-	state: { firstToolCallId: string | undefined },
+	state: { firstToolCallId: string | undefined; droppedIndexes: Set<number> },
 ): OpenAI.Chat.Completions.ChatCompletionChunk.Choice.Delta {
 	if (!delta.tool_calls || delta.tool_calls.length === 0) {
 		return delta
@@ -62,11 +70,20 @@ function filterToFirstToolCall(
 				state.firstToolCallId = toolCall.id
 				return true
 			}
+			if (toolCall.id === state.firstToolCallId) {
+				// Provider re-sent the kept call's id — this index belongs to
+				// the kept call again.
+				state.droppedIndexes.delete(index)
+				return true
+			}
 			// A second distinct id at index 0 is a disguised parallel call.
-			return toolCall.id === state.firstToolCallId
+			// Mark the index so its argument fragments are dropped as well.
+			state.droppedIndexes.add(index)
+			return false
 		}
-		// Argument-continuation fragment for the kept call.
-		return true
+		// Argument-continuation fragment for the most recent id chunk seen at
+		// this index — keep it only if that call was not dropped.
+		return !state.droppedIndexes.has(index)
 	})
 
 	if (kept.length === delta.tool_calls.length) {
@@ -195,8 +212,9 @@ export class MimoHandler extends OpenAiHandler {
 
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
-		const firstCallState: { firstToolCallId: string | undefined } = {
+		const firstCallState: { firstToolCallId: string | undefined; droppedIndexes: Set<number> } = {
 			firstToolCallId: undefined,
+			droppedIndexes: new Set<number>(),
 		}
 
 		for await (const chunk of stream) {

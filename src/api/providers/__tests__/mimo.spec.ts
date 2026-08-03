@@ -1277,6 +1277,241 @@ describe("MimoHandler", () => {
 				expect(endChunks).toHaveLength(1)
 				expect(endChunks[0].id).toBe("call_a")
 			})
+
+			it("keeps all argument-continuation fragments of a compliant single call", async () => {
+				mockCreate.mockImplementationOnce(async () => ({
+					[Symbol.asyncIterator]: async function* () {
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: "call_a",
+												function: { name: "read_file", arguments: '{"path' },
+											},
+										],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [{ index: 0, function: { arguments: '":"a' } }],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [{ index: 0, function: { arguments: '.txt"}' } }],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [{ delta: {}, index: 0, finish_reason: "tool_calls" }],
+							usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+						}
+					},
+				}))
+
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{ role: "user", content: [{ type: "text", text: "Hello" }] },
+				]
+
+				const chunks: ApiStreamChunk[] = []
+				const stream = handler.createMessage("System", messages)
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				const toolChunks = chunks.filter(
+					(c): c is Extract<ApiStreamChunk, { type: "tool_call_partial" }> => c.type === "tool_call_partial",
+				)
+				expect(toolChunks).toHaveLength(3)
+				const accumulated = toolChunks.map((c) => c.arguments ?? "").join("")
+				expect(accumulated).toBe('{"path":"a.txt"}')
+			})
+
+			it("keeps fragments after the provider re-sends the kept call's id", async () => {
+				mockCreate.mockImplementationOnce(async () => ({
+					[Symbol.asyncIterator]: async function* () {
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: "call_a",
+												function: { name: "read_file", arguments: '{"path' },
+											},
+										],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						// Provider re-sends the same id at index 0 (compliant duplicate).
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [{ index: 0, id: "call_a", function: { arguments: '":"a.txt"}' } }],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [{ index: 0, function: { arguments: "" } }],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [{ delta: {}, index: 0, finish_reason: "tool_calls" }],
+							usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+						}
+					},
+				}))
+
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{ role: "user", content: [{ type: "text", text: "Hello" }] },
+				]
+
+				const chunks: ApiStreamChunk[] = []
+				const stream = handler.createMessage("System", messages)
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				const toolChunks = chunks.filter(
+					(c): c is Extract<ApiStreamChunk, { type: "tool_call_partial" }> => c.type === "tool_call_partial",
+				)
+				const accumulated = toolChunks.map((c) => c.arguments ?? "").join("")
+				expect(accumulated).toBe('{"path":"a.txt"}')
+				// Every emitted chunk belongs to the kept call.
+				expect(toolChunks.every((c) => c.id === undefined || c.id === "call_a")).toBe(true)
+			})
+
+			it("drops a disguised parallel call's argument fragments so they don't pollute the first call", async () => {
+				mockCreate.mockImplementationOnce(async () => ({
+					[Symbol.asyncIterator]: async function* () {
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: "call_a",
+												function: { name: "read_file", arguments: '{"path' },
+											},
+										],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						// Compliant continuation of the first call.
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [{ index: 0, function: { arguments: '":"a.txt"}' } }],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						// Disguised second call: index 0 reused with a NEW id.
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: "call_b",
+												function: { name: "list_files", arguments: '{"path"' },
+											},
+										],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						// Id-less fragments of the disguised call — these previously
+						// concatenated into the FIRST call's accumulator, corrupting
+						// its JSON.
+						yield {
+							choices: [
+								{
+									delta: {
+										tool_calls: [{ index: 0, function: { arguments: '":"./"}' } }],
+									},
+									index: 0,
+								},
+							],
+							usage: null,
+						}
+						yield {
+							choices: [{ delta: {}, index: 0, finish_reason: "tool_calls" }],
+							usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
+						}
+					},
+				}))
+
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{ role: "user", content: [{ type: "text", text: "Hello" }] },
+				]
+
+				const chunks: ApiStreamChunk[] = []
+				const stream = handler.createMessage("System", messages)
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+
+				const toolChunks = chunks.filter(
+					(c): c is Extract<ApiStreamChunk, { type: "tool_call_partial" }> => c.type === "tool_call_partial",
+				)
+				// Only the first call's id chunk + compliant continuation survive.
+				expect(toolChunks).toHaveLength(2)
+				const accumulated = toolChunks.map((c) => c.arguments ?? "").join("")
+				// The disguised call's fragments must NOT pollute the first call —
+				// the accumulated arguments stay valid JSON.
+				expect(accumulated).toBe('{"path":"a.txt"}')
+				expect(() => JSON.parse(accumulated)).not.toThrow()
+
+				const endChunks = chunks.filter(
+					(c): c is Extract<ApiStreamChunk, { type: "tool_call_end" }> => c.type === "tool_call_end",
+				)
+				expect(endChunks).toHaveLength(1)
+				expect(endChunks[0].id).toBe("call_a")
+			})
 		})
 
 		it("should handle stream interruption gracefully", async () => {
