@@ -176,7 +176,7 @@ export class TaskOrganizationStore {
 			const revisionAtCallTime = this.state.revision
 			const requestId =
 				"requestId" in mutation && typeof (mutation as Record<string, unknown>).requestId === "string"
-					? (mutation as Record<string, unknown>).requestId as string
+					? ((mutation as Record<string, unknown>).requestId as string)
 					: ""
 
 			try {
