@@ -123,7 +123,6 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								// may return early below. hasFlushedTelemetry prevents the shared
 								// fallthrough flush further down from double-reporting if delegation
 								// falls through to "continue" instead of returning.
-								task.emitFinalTokenUsageUpdate()
 								task.flushTelemetryInstallment("attempt_completion")
 								hasFlushedTelemetry = true
 

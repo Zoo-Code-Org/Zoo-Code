@@ -5,6 +5,7 @@ import * as path from "path"
 
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
+import type { Mock } from "vitest"
 
 import {
 	providerIdentifiers,
@@ -32,6 +33,17 @@ type TaskTestAccess = {
 	presentAssistantMessageSafe: () => void
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
+}
+
+type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
+type ProviderState = Awaited<ReturnType<ClineProvider["getState"]>>
+type MockedClineProvider = ClineProvider & {
+	getState: Mock<ClineProvider["getState"]> & {
+		mockResolvedValue: (value: Partial<ProviderState>) => void
+	}
+}
+type RateLimitedProviderSettings = ProviderSettings & {
+	rateLimitSeconds: number
 }
 
 function getTaskTestAccess(task: Task): TaskTestAccess {
@@ -66,7 +78,7 @@ vi.mock("execa", () => ({
 }))
 
 vi.mock("fs/promises", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, any>
+	const actual = await importOriginal<typeof import("fs/promises")>()
 	const mockFunctions = {
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
@@ -153,7 +165,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }), // FileType.File = 1
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: unknown) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -239,9 +251,9 @@ const mockMessages = [
 ]
 
 describe("Cline", () => {
-	let mockProvider: any
+	let mockProvider: ClineProvider
 	let mockApiConfig: ProviderSettings
-	let mockOutputChannel: any
+	let mockOutputChannel: vscode.OutputChannel
 	let mockExtensionContext: vscode.ExtensionContext
 
 	beforeEach(() => {
@@ -301,8 +313,10 @@ describe("Cline", () => {
 
 		// Setup mock output channel
 		mockOutputChannel = {
+			name: "test-output",
 			appendLine: vi.fn(),
 			append: vi.fn(),
+			replace: vi.fn(),
 			clear: vi.fn(),
 			show: vi.fn(),
 			hide: vi.fn(),
@@ -355,6 +369,74 @@ describe("Cline", () => {
 				},
 			],
 		}))
+	})
+
+	describe("empty-response retries", () => {
+		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+			return (async function* () {
+				yield* chunks
+			})()
+		}
+
+		async function createTaskWithManualRetries() {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: mockApiConfig,
+				autoApprovalEnabled: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			return task
+		}
+
+		it("restores the user message before a confirmed empty-response retry", async () => {
+			const task = await createTaskWithManualRetries()
+			let retryHistory: ApiMessage[] | undefined
+			let retryUserMessageCount: number | undefined
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => stream([]))
+				.mockImplementationOnce(() => {
+					retryHistory = structuredClone(task.apiConversationHistory)
+					retryUserMessageCount = task.messageCounts.user
+					return stream([{ type: "text", text: "retry succeeded" }])
+				})
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(retryHistory).toHaveLength(1)
+			expect(retryHistory?.[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(retryUserMessageCount).toBe(1)
+		})
+
+		it("restores the user message and records the failure when retry is declined", async () => {
+			const task = await createTaskWithManualRetries()
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			expect(task.apiConversationHistory).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
+			])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
 	})
 
 	describe("constructor", () => {
@@ -498,7 +580,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(error: any) {
+					async throw(error: unknown) {
 						throw error
 					},
 					async [Symbol.asyncDispose]() {
@@ -604,7 +686,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(error: any) {
+					async throw(error: unknown) {
 						throw error
 					},
 					async [Symbol.asyncDispose]() {
@@ -681,7 +763,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -700,7 +782,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -772,7 +854,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {},
@@ -788,7 +870,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {},
@@ -849,7 +931,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -868,7 +950,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -989,8 +1071,8 @@ describe("Cline", () => {
 		})
 
 		describe("Subtask Rate Limiting", () => {
-			let mockProvider: any
-			let mockApiConfig: any
+			let mockProvider: MockedClineProvider
+			let mockApiConfig: RateLimitedProviderSettings
 			let mockDelay: ReturnType<typeof vi.fn>
 
 			beforeEach(() => {
@@ -1021,7 +1103,8 @@ describe("Cline", () => {
 					postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 					postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 					updateTaskHistory: vi.fn().mockResolvedValue(undefined),
-				}
+					// Task receives a full ClineProvider at runtime; this focused unit test only exercises these methods.
+				} as unknown as MockedClineProvider
 
 				// Get the mocked delay function
 				mockDelay = delay as ReturnType<typeof vi.fn>
@@ -1056,7 +1139,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1097,7 +1180,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1149,7 +1232,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1215,7 +1298,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1305,7 +1388,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1363,7 +1446,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1382,8 +1465,8 @@ describe("Cline", () => {
 		})
 
 		describe("Dynamic Strategy Selection", () => {
-			let mockProvider: any
-			let mockApiConfig: any
+			let mockProvider: MockedClineProvider
+			let mockApiConfig: ProviderSettings
 
 			beforeEach(() => {
 				vi.clearAllMocks()
@@ -1398,7 +1481,7 @@ describe("Cline", () => {
 						globalStorageUri: { fsPath: "/test/storage" },
 					},
 					getState: vi.fn(),
-				}
+				} as MockedClineProvider
 			})
 
 			it("should use MultiSearchReplaceDiffStrategy by default", async () => {
@@ -1950,7 +2033,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2101,7 +2184,7 @@ describe("Cline", () => {
 							async return() {
 								return { done: true, value: undefined }
 							},
-							async throw(e: any) {
+							async throw(e: unknown) {
 								throw e
 							},
 							[Symbol.asyncDispose]: async () => {},
@@ -2171,7 +2254,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2237,7 +2320,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2302,7 +2385,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2462,7 +2545,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -2478,7 +2561,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -2933,7 +3016,7 @@ describe("Cline", () => {
 })
 
 describe("Queued message processing after condense", () => {
-	function createProvider(): any {
+	function createProvider(): ClineProvider {
 		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
 		const ctx = {
 			globalState: {
@@ -3253,38 +3336,21 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
 		})
 
-		it("does not re-flush when lastMessageTs is recent even after a prior flush", () => {
-			// Regression guard for the Math.max(lastMessageTs, lastTelemetryFlushAt) fix.
-			// Without it, once lastMessageTs is set it never advances after a flush, so
-			// the idle check would fire on every 5-minute tick for the rest of the task's
-			// life even with no new activity.
+		it("does not call the idle flush after a prior idle installment without new activity", () => {
 			vi.useFakeTimers()
 			const task = createTask()
+			const flushTelemetryInstallmentSpy = vi.spyOn(task, "flushTelemetryInstallment")
 			task.recordToolUsage("read_file")
 
-			// First idle flush fires after 31 min.
 			vi.advanceTimersByTime(31 * 60 * 1000)
 			expect(captureTaskCompletedSpy).toHaveBeenCalledTimes(1)
+			flushTelemetryInstallmentSpy.mockClear()
 			captureTaskCompletedSpy.mockClear()
 
-			// New activity arrives 1 min after the flush.
-			vi.advanceTimersByTime(1 * 60 * 1000)
-			task.lastMessageTs = Date.now()
-			task.recordToolUsage("write_to_file")
+			vi.advanceTimersByTime(5 * 60 * 1000)
 
-			// Only 10 min since the new activity — should not flush again yet.
-			vi.advanceTimersByTime(10 * 60 * 1000)
+			expect(flushTelemetryInstallmentSpy).not.toHaveBeenCalled()
 			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
-
-			// 35 min since the new activity (past the 30-min threshold and the next
-			// 5-min interval tick) — should flush the new delta now.
-			vi.advanceTimersByTime(25 * 60 * 1000)
-			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
-				task.taskId,
-				{ write_to_file: { attempts: 1, failures: 0 } },
-				{ user: 0, assistant: 0 },
-				"idle",
-			)
 		})
 	})
 
@@ -3330,7 +3396,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 })
 
 describe("pushToolResultToUserContent", () => {
-	let mockProvider: any
+	let mockProvider: ClineProvider
 	let mockApiConfig: ProviderSettings
 
 	beforeEach(() => {

@@ -11,17 +11,6 @@ vi.mock("../../prompts/responses", () => ({
 	},
 }))
 
-const { mockCaptureTaskCompleted } = vi.hoisted(() => ({
-	mockCaptureTaskCompleted: vi.fn(),
-}))
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			captureTaskCompleted: mockCaptureTaskCompleted,
-		},
-	},
-}))
-
 // Mock vscode module
 vi.mock("vscode", () => ({
 	workspace: {
@@ -53,7 +42,6 @@ describe("attemptCompletionTool", () => {
 	let mockGetConfiguration: ReturnType<typeof vi.fn<() => any>>
 
 	beforeEach(() => {
-		mockCaptureTaskCompleted.mockReset()
 		mockPushToolResult = vi.fn<PushToolResult>()
 		mockAskApproval = vi.fn<AskApproval>()
 		mockHandleError = vi.fn<HandleError>()
@@ -85,9 +73,7 @@ describe("attemptCompletionTool", () => {
 			taskId: "task_1",
 			apiConfiguration: { apiProvider: "test" } as any,
 			api: { getModel: vi.fn().mockReturnValue({ id: "test-model", info: {} }) } as any,
-			flushTelemetryInstallment: vi.fn((reason: "attempt_completion" | "idle" | "shutdown") => {
-				mockCaptureTaskCompleted(mockTask.taskId, mockTask.toolUsage, mockTask.messageCounts, reason)
-			}),
+			flushTelemetryInstallment: vi.fn(),
 		}
 	})
 
@@ -589,14 +575,10 @@ describe("attemptCompletionTool", () => {
 				})
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 				expect(mockPushToolResult).not.toHaveBeenCalledWith("")
-				// Emission now happens once per validated attempt_completion call, before
-				// delegation is attempted -- independent of whether delegation succeeds.
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-					mockTask.taskId,
-					mockTask.toolUsage,
-					mockTask.messageCounts,
-					"attempt_completion",
-				)
+				// Flush once per validated attempt_completion call, before delegation is
+				// attempted, independent of whether delegation succeeds.
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 			})
 
 			it("does not resume the parent when the parent is no longer awaiting this child", async () => {
@@ -644,12 +626,8 @@ describe("attemptCompletionTool", () => {
 				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
 				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-					"child-1",
-					{},
-					{ user: 0, assistant: 0 },
-					"attempt_completion",
-				)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 			})
 
 			it("delegates an interrupted subtask completion when the parent is still delegated and awaiting that child", async () => {
@@ -748,12 +726,8 @@ describe("attemptCompletionTool", () => {
 				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
 				expect(mockProvider.log).toHaveBeenCalledWith(expect.stringContaining("Skipping delegation"))
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-					"child-1",
-					{},
-					{ user: 0, assistant: 0 },
-					"attempt_completion",
-				)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 			})
 
 			it("emits TaskCompleted only when completion is accepted", async () => {
@@ -778,12 +752,8 @@ describe("attemptCompletionTool", () => {
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
 
 				expect(mockHandleError).not.toHaveBeenCalled()
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-					"task_1",
-					{},
-					{ user: 0, assistant: 0 },
-					"attempt_completion",
-				)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 				expect(mockTask.emit).toHaveBeenCalledWith(
 					RooCodeEventName.TaskCompleted,
 					"task_1",
@@ -820,12 +790,8 @@ describe("attemptCompletionTool", () => {
 				expect(mockHandleError).not.toHaveBeenCalled()
 				// Telemetry is reported on every model-initiated attempt_completion call,
 				// regardless of whether the user accepts, declines, or gives feedback.
-				expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-					"task_1",
-					{},
-					{ user: 0, assistant: 0 },
-					"attempt_completion",
-				)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 				// The public RooCodeEventName.TaskCompleted API event still only fires once
 				// the user actually accepts the result.
 				expect(mockTask.emit).not.toHaveBeenCalledWith(
@@ -840,8 +806,6 @@ describe("attemptCompletionTool", () => {
 	})
 })
 
-// Uses the same top-level mocks (vi.mock("@roo-code/telemetry") etc.) and
-// mockCaptureTaskCompleted already established for the "attemptCompletionTool" suite above.
 describe("attemptCompletionTool telemetry invariants", () => {
 	function makeTask(overrides: Partial<Task> = {}): Partial<Task> {
 		return {
@@ -856,16 +820,10 @@ describe("attemptCompletionTool telemetry invariants", () => {
 			toolUsage: {},
 			messageCounts: { user: 0, assistant: 0 },
 			taskId: "task_1",
-			flushTelemetryInstallment: vi.fn((reason: "attempt_completion" | "idle" | "shutdown") => {
-				mockCaptureTaskCompleted("task_1", {}, { user: 0, assistant: 0 }, reason)
-			}),
+			flushTelemetryInstallment: vi.fn(),
 			...overrides,
 		}
 	}
-
-	beforeEach(() => {
-		mockCaptureTaskCompleted.mockReset()
-	})
 
 	it("does not emit a duplicate telemetry installment when replaying an already-completed subtask from history", async () => {
 		const block: AttemptCompletionToolUse = {
@@ -900,7 +858,7 @@ describe("attemptCompletionTool telemetry invariants", () => {
 			toolDescription: vi.fn(),
 		} as AttemptCompletionCallbacks)
 
-		expect(mockCaptureTaskCompleted).not.toHaveBeenCalled()
+		expect(task.flushTelemetryInstallment).not.toHaveBeenCalled()
 	})
 
 	it("does not emit the public TaskCompleted event when replaying an already-completed subtask from history", async () => {
@@ -964,12 +922,8 @@ describe("attemptCompletionTool telemetry invariants", () => {
 			toolDescription: vi.fn(),
 		} as AttemptCompletionCallbacks)
 
-		expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-			"task_1",
-			{},
-			{ user: 0, assistant: 0 },
-			"attempt_completion",
-		)
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 		expect(task.emit).toHaveBeenCalledWith(
 			RooCodeEventName.TaskCompleted,
 			"task_1",
@@ -999,12 +953,8 @@ describe("attemptCompletionTool telemetry invariants", () => {
 			toolDescription: vi.fn(),
 		} as AttemptCompletionCallbacks)
 
-		expect(mockCaptureTaskCompleted).toHaveBeenCalledWith(
-			"task_1",
-			{},
-			{ user: 0, assistant: 0 },
-			"attempt_completion",
-		)
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
+		expect(task.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
 		expect(task.emit).not.toHaveBeenCalledWith(
 			RooCodeEventName.TaskCompleted,
 			expect.anything(),
