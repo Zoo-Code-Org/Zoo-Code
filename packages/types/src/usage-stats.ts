@@ -42,6 +42,13 @@ export const UsageEventV1 = z.object({
 	attempt: z.number(),
 	taskId: z.string(),
 	parentTaskId: z.string().optional(),
+	/**
+	 * Stable root-session identity for dashboard streaming.
+	 * Resolved from the task hierarchy by the recorder; migration resolves
+	 * legacy parent chains with the existing cycle guard. Absent on events
+	 * recorded before this field was introduced (backward compatible).
+	 */
+	rootTaskId: z.string().optional(),
 	provider: z.string(),
 	model: z.string(),
 	mode: z.string(),

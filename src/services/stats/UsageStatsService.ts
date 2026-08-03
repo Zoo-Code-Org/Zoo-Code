@@ -71,6 +71,8 @@ const CSV_COLUMNS = [
 	"cacheWriteInInput",
 	"reasoningInOutput",
 	"provenance",
+	"rootTaskId",
+	"endpoint",
 ] as const
 
 // ── UsageStatsService ───────────────────────────────────────────────────────
@@ -567,6 +569,10 @@ export class UsageStatsService {
 				return event.semantics.reasoningInOutput
 			case "provenance":
 				return event.provenance
+			case "rootTaskId":
+				return event.rootTaskId ?? ""
+			case "endpoint":
+				return event.endpoint ?? ""
 			default:
 				return ""
 		}
