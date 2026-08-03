@@ -35,6 +35,50 @@ function isParallelToolCallsRejected(error: unknown): boolean {
 }
 
 /**
+ * Detects whether an API error is specifically caused by the endpoint
+ * rejecting the `strict` tool flag or a hardened strict-mode schema
+ * (`additionalProperties: false`, forced `required`, ...). OpenAI-compatible
+ * endpoints that don't support structured outputs typically return a 400
+ * Bad Request naming the offending field.
+ *
+ * Detection is intentionally narrow (400 status plus a schema-specific
+ * keyword) so unrelated 400s — e.g. MiMo's missing-reasoning_content
+ * rejection — are NOT mistaken for schema rejections and retried pointlessly.
+ */
+function isStrictToolSchemaRejected(error: unknown): boolean {
+	if (error instanceof Error) {
+		const message = error.message.toLowerCase()
+		const status = (error as { status?: number }).status
+		if (status !== 400) {
+			return false
+		}
+		if (message.includes("strict")) {
+			return true
+		}
+		const mentionsTools = message.includes("tool") || message.includes("function")
+		const mentionsSchemaField =
+			message.includes("additionalproperties") || message.includes("additional_properties")
+		return mentionsTools && mentionsSchemaField
+	}
+	return false
+}
+
+/**
+ * Removes the `strict` flag from function tools, keeping their original
+ * (non-hardened) schemas. Used by the one-time retry fallback when an
+ * endpoint rejects strict tool schemas.
+ */
+function stripStrictFromTools(tools: OpenAI.Chat.ChatCompletionTool[]): OpenAI.Chat.ChatCompletionTool[] {
+	return tools.map((tool) => {
+		if (tool.type !== "function") {
+			return tool
+		}
+		const { strict: _omit, ...functionWithoutStrict } = tool.function
+		return { ...tool, function: functionWithoutStrict }
+	})
+}
+
+/**
  * Filters a streamed delta so that only the FIRST tool call (index 0) survives.
  * MiMo v2.5 Pro ignores `parallel_tool_calls: false` and may emit multiple
  * parallel tool_calls in one turn. Downstream (ToolCallRetentionPolicy) is
@@ -205,6 +249,13 @@ export class MimoHandler extends OpenAiHandler {
 			if (params.parallel_tool_calls !== undefined && isParallelToolCallsRejected(error)) {
 				const { parallel_tool_calls: _omit, ...paramsWithoutParallel } = params
 				stream = await this.client.chat.completions.create(paramsWithoutParallel as MiMoCompletionParams)
+			} else if (params.tools !== undefined && isStrictToolSchemaRejected(error)) {
+				// Fallback: if the endpoint rejects the strict tool flag or a
+				// hardened strict-mode schema, retry once with the original
+				// schemas and no strict flag. Build a new params object so the
+				// rejected request is left untouched.
+				const paramsWithoutStrict = { ...params, tools: stripStrictFromTools(tools ?? []) }
+				stream = await this.client.chat.completions.create(paramsWithoutStrict)
 			} else {
 				throw handleProviderError(error, "MiMo")
 			}
