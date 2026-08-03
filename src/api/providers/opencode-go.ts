@@ -189,7 +189,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				this.options.includeMaxTokens === true ? this.options.modelMaxTokens || maxTokens : maxTokens,
 			stream: true,
 			stream_options: { include_usage: true },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			tools: this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			...(reasoningEffort && {

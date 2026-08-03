@@ -169,7 +169,7 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
 			stream: true,
 			stream_options: { include_usage: true },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			tools: this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			...friendliExtra,

@@ -162,7 +162,7 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 		const aiSdkMessages = convertToAiSdkMessages(messages)
 
 		// Convert tools to OpenAI format first, then to AI SDK format
-		const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
+		const openAiTools = this.convertToolsForOpenAI(metadata?.tools, this.options.openAiToolStrictMode ?? false)
 		const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
 
 		// Build the request options

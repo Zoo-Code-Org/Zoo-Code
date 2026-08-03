@@ -1013,6 +1013,7 @@ describe("OpenAiHandler", () => {
 		it("should handle O3 model with streaming and include max_completion_tokens when includeMaxTokens is true", async () => {
 			const o3Handler = new OpenAiHandler({
 				...o3Options,
+				reasoningEffort: "high",
 				includeMaxTokens: true,
 				modelMaxTokens: 32000,
 				modelTemperature: 0.5,
@@ -1040,7 +1041,7 @@ describe("OpenAiHandler", () => {
 					],
 					stream: true,
 					stream_options: { include_usage: true },
-					reasoning_effort: "medium",
+					reasoning_effort: "high",
 					temperature: undefined,
 					// O3 models do not support deprecated max_tokens but do support max_completion_tokens
 					max_completion_tokens: 32000,
@@ -1199,6 +1200,7 @@ describe("OpenAiHandler", () => {
 		it("should handle O3 model non-streaming with reasoning_effort and max_completion_tokens when includeMaxTokens is true", async () => {
 			const o3Handler = new OpenAiHandler({
 				...o3Options,
+				reasoningEffort: "high",
 				openAiStreamingEnabled: false,
 				includeMaxTokens: true,
 				modelTemperature: 0.3,
@@ -1224,7 +1226,7 @@ describe("OpenAiHandler", () => {
 						},
 						{ role: "user", content: "Hello!" },
 					],
-					reasoning_effort: "medium",
+					reasoning_effort: "high",
 					temperature: undefined,
 					// O3 models do not support deprecated max_tokens but do support max_completion_tokens
 					max_completion_tokens: 65536, // Using default maxTokens from o3Options

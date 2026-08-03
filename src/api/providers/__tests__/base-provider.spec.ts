@@ -176,6 +176,16 @@ describe("BaseProvider", () => {
 			expect(result.additionalProperties).toBe(false)
 			expect(result.required).toEqual([])
 		})
+
+		it("should add empty properties and required arrays to zero-argument object schemas", () => {
+			const result = provider.testConvertToolSchemaForOpenAI({ type: "object" })
+
+			expect(result).toMatchObject({
+				additionalProperties: false,
+				properties: {},
+				required: [],
+			})
+		})
 	})
 
 	describe("convertToolsForOpenAI", () => {

@@ -110,6 +110,11 @@ export abstract class BaseProvider implements ApiHandler {
 			result.additionalProperties = false
 		}
 
+		if (result.properties === undefined) {
+			result.properties = {}
+			result.required = []
+		}
+
 		if (result.properties) {
 			const allKeys = Object.keys(result.properties)
 			// OpenAI strict mode requires ALL properties to be in required array
