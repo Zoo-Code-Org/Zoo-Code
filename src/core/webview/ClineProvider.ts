@@ -86,6 +86,7 @@ import type { IndexProgressUpdate } from "../../services/code-index/interfaces/m
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 import { UsageStatsService } from "../../services/stats"
+import type { StatsStreamSink } from "../../services/stats"
 import { DashboardTaskCatalog } from "../../services/stats/DashboardTaskCatalog"
 
 import { fileExistsAtPath } from "../../utils/fs"
@@ -775,6 +776,14 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		// Release the dashboard stats stream subscription held on behalf of this
+		// webview, so a dead webview stops receiving coordinator drains.
+		const streamSink = (this as unknown as { _streamSink?: StatsStreamSink })._streamSink
+		if (streamSink) {
+			this.getUsageStatsService()?.getCoordinator()?.unsubscribe(streamSink)
+			;(this as unknown as { _streamSink?: StatsStreamSink })._streamSink = undefined
+		}
+
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {

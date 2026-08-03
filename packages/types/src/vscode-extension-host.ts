@@ -734,7 +734,6 @@ export interface WebviewMessage {
 		| "requestClearNonce"
 		| "rebuildUsageStats"
 		// Dashboard request types
-		| "getDashboardStats"
 		| "getDashboardSessionDetail"
 		| "getDashboardSessions"
 		| "getDashboardTaskDetail"
