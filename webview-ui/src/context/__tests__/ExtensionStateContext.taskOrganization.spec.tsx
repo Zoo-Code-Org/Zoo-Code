@@ -102,6 +102,62 @@ describe("ExtensionStateContext task organization", () => {
 		expect(JSON.parse(screen.getByTestId("task-organization").textContent!)).toEqual(snapshot)
 	})
 
+	it("applies a newer taskOrganization revision in a full state message", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TaskOrganizationTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { taskOrganization: makeSnapshot(1) } },
+				}),
+			)
+		})
+
+		const next = makeSnapshot(2)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { taskOrganization: next } },
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("task-organization").textContent!)).toEqual(next)
+	})
+
+	it("ignores a stale taskOrganization revision in a full state message", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TaskOrganizationTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { taskOrganization: makeSnapshot(2) } },
+				}),
+			)
+		})
+
+		// A full-state push assembled before the revision-2 commit arrives late
+		// and must not regress the webview to the older revision.
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { taskOrganization: makeSnapshot(1) } },
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("task-organization").textContent!)).toEqual(makeSnapshot(2))
+	})
+
 	it("updates task organization on taskOrganizationUpdated with a greater revision", () => {
 		render(
 			<ExtensionStateContextProvider>

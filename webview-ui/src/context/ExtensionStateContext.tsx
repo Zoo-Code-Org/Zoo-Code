@@ -191,6 +191,18 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 		rest.clineMessagesSeq = prevState.clineMessagesSeq
 	}
 
+	// Protect taskOrganization from stale state pushes, mirroring the
+	// revision guard in the taskOrganizationUpdated handler: a full-state
+	// push assembled before a mutation commit can arrive after the
+	// broadcast and regress the webview to an older revision.
+	if (
+		newState.taskOrganization !== undefined &&
+		prevState.taskOrganization !== undefined &&
+		newState.taskOrganization.revision < prevState.taskOrganization.revision
+	) {
+		rest.taskOrganization = prevState.taskOrganization
+	}
+
 	// Note that we completely replace the previous apiConfiguration and customSupportPrompts objects
 	// with new ones since the state that is broadcast is the entire objects so merging is not necessary.
 	return {
