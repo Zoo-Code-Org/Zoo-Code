@@ -76,6 +76,7 @@ import { useTaskSearch } from "../useTaskSearch"
 import { useGroupedTasks } from "../useGroupedTasks"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useTaskOrganizationDnd } from "../useTaskOrganizationDnd"
+import TaskGroupItem from "../TaskGroupItem"
 
 const mockUseTaskSearch = useTaskSearch as any
 const mockUseGroupedTasks = useGroupedTasks as any
@@ -330,6 +331,65 @@ describe("HistoryView task organization integration", () => {
 		expect(screen.getByTestId("draggable-entry-unfiled-unit-t2")).toBeInTheDocument()
 		// t3 stays in the unfiled list (pins are shortcuts, not moves).
 		expect(screen.getByTestId("draggable-entry-unfiled-unit-t3")).toBeInTheDocument()
+	})
+
+	it("passes pin props to grouped rows and pins a task via the row toggle", async () => {
+		mockUseTaskOrganizationDnd.mockReturnValue({
+			sensors: [],
+			activeDrag: null,
+			targetMeta: { isOverTarget: false },
+			handleDragStart: vi.fn(),
+			handleDragOver: vi.fn(),
+			handleDragEnd: vi.fn(),
+			handleDragCancel: vi.fn(),
+			UNFILED_DROP_ZONE_ID,
+		})
+		const t1 = makeTask("t1")
+		const t2 = makeTask("t2")
+		const t3 = makeTask("t3")
+		const mutateSpy = vi.fn().mockResolvedValue({
+			requestId: "",
+			success: true,
+			committedRevision: 1,
+		})
+
+		mockUseExtensionState.mockReturnValue({
+			taskOrganization: {
+				...createEmptyOrganizationState(),
+				pins: [{ target: { kind: "task", taskId: "t3" }, pinnedAt: 100 }],
+			},
+			mutateTaskOrganization: mutateSpy,
+			cwd: "/test/workspace",
+		})
+		mockUseTaskSearch.mockReturnValue({
+			...defaultSearchResult,
+			tasks: [t1, t2, t3],
+		})
+		mockUseGroupedTasks.mockReturnValue({
+			groups: [makeGroup(t1), makeGroup(t2), makeGroup(t3)],
+			flatTasks: null,
+			toggleExpand: vi.fn(),
+			isSearchMode: false,
+		})
+
+		render(<HistoryView onDone={vi.fn()} />)
+
+		// Every grouped row receives pin props; only t3 is pinned.
+		const calls = vi.mocked(TaskGroupItem).mock.calls.map(([props]) => props)
+		const byId = new Map(calls.map((props) => [props.group.parent.id, props]))
+		expect(byId.get("t1")).toMatchObject({ showPin: true, isPinned: false, canPin: true })
+		expect(byId.get("t2")).toMatchObject({ showPin: true, isPinned: false, canPin: true })
+		expect(byId.get("t3")).toMatchObject({ showPin: true, isPinned: true, canPin: true })
+
+		// Toggling t1's pin posts a setPinned mutation with the task target.
+		byId.get("t1")?.onTogglePin?.()
+		await waitFor(() => {
+			expect(mutateSpy).toHaveBeenCalledWith({
+				kind: "setPinned",
+				target: { kind: "task", taskId: "t1" },
+				pinned: true,
+			})
+		})
 	})
 
 	it("opens the folder-name dialog after a real task-on-task drop and posts createFolder on confirm", async () => {
