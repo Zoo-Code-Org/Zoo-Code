@@ -607,6 +607,37 @@ describe("ToolErrorInterceptor", () => {
 		})
 	})
 
+	describe("getTaskState non-object key guard", () => {
+		// Double assertions are required below to simulate the caller mistake
+		// this guard protects against: passing a primitive (e.g. the string
+		// InterceptorOptions.taskId) where a Task object is expected. There is
+		// no typed way to express that mistake.
+
+		it("returns an ephemeral state for a string key instead of throwing", () => {
+			const interceptor = createToolErrorInterceptor()
+			const notATask = "task-123" as unknown as object
+			expect(() => interceptor.getTaskState(notATask)).not.toThrow()
+			// Ephemeral: nothing is persisted for invalid keys, so each call
+			// returns a fresh state container.
+			expect(interceptor.getTaskState(notATask)).not.toBe(interceptor.getTaskState(notATask))
+		})
+
+		it("returns an ephemeral state for null, undefined, and numeric keys", () => {
+			const interceptor = createToolErrorInterceptor()
+			expect(() => interceptor.getTaskState(null as unknown as object)).not.toThrow()
+			expect(() => interceptor.getTaskState(undefined as unknown as object)).not.toThrow()
+			expect(() => interceptor.getTaskState(42 as unknown as object)).not.toThrow()
+		})
+
+		it("ephemeral state does not leak into real task state", () => {
+			const interceptor = createToolErrorInterceptor()
+			const notATask = "task-123" as unknown as object
+			interceptor.getTaskState(notATask).categoryCounts.set("SHELL_INTEGRATION", 5)
+			const task = createTask()
+			expect(interceptor.getTaskState(task).categoryCounts.get("SHELL_INTEGRATION")).toBeUndefined()
+		})
+	})
+
 	describe("MCP branch compatibility", () => {
 		it("forwards the feedbackImages second argument unchanged", () => {
 			const interceptor = createToolErrorInterceptor()
