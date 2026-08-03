@@ -302,6 +302,18 @@ describe("taskOrganizationModel", () => {
 			expect(filterByWorkspace(entries, [t1], undefined)).toHaveLength(entries.length)
 		})
 
+		it("filters to tasks without a workspace when cwd is an empty string", () => {
+			const noWorkspace = makeTask({ id: "no-ws", workspace: "" })
+			const local = makeTask({ id: "local", workspace: "/workspace/project" })
+			const entries = buildFlattenedVirtualEntries(
+				createEmptyTaskOrganizationState(),
+				[makeGroup(noWorkspace), makeGroup(local)],
+				[noWorkspace, local],
+			)
+			const filtered = filterByWorkspace(entries, [noWorkspace, local], "")
+			expect(filtered.map((e) => e.unit?.rootTaskId)).toEqual(["no-ws"])
+		})
+
 		it("filters unfiled units outside the current workspace", () => {
 			const local = makeTask({ id: "local", workspace: "/workspace/project" })
 			const other = makeTask({ id: "other", workspace: "/workspace/other" })

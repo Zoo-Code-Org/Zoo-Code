@@ -308,13 +308,17 @@ function collectDescendantsWithMaps(
  * Filters display entries by workspace. For folders, visible members are kept
  * in Current Workspace mode; folders with no visible members are hidden unless
  * pinned. Genuinely empty folders remain visible.
+ *
+ * cwd === undefined means "show all workspaces" (no filtering);
+ * cwd === "" means "no workspace open" and filters to tasks without a
+ * workspace, matching buildGroupedOrganizationProjection.
  */
 export function filterByWorkspace(
 	entries: VirtualDisplayEntry[],
 	tasks: HistoryItem[],
 	cwd: string | undefined,
 ): VirtualDisplayEntry[] {
-	if (!cwd) {
+	if (cwd === undefined) {
 		return entries
 	}
 

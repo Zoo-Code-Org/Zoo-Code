@@ -981,6 +981,106 @@ describe("HistoryView task organization integration", () => {
 			expect(screen.queryByTestId("pinned-unit-t-other")).not.toBeInTheDocument()
 		})
 
+		it("hides pinned folders whose members all belong to another workspace when showAllWorkspaces is false", () => {
+			mockUseTaskOrganizationDnd.mockReturnValue({
+				sensors: [],
+				activeDrag: null,
+				targetMeta: { isOverTarget: false },
+				handleDragStart: vi.fn(),
+				handleDragOver: vi.fn(),
+				handleDragEnd: vi.fn(),
+				handleDragCancel: vi.fn(),
+				UNFILED_DROP_ZONE_ID,
+			})
+
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: {
+					...createEmptyOrganizationState(),
+					folders: [
+						{
+							folderId: "folder-other",
+							name: "Other Folder",
+							taskIds: ["t-other"],
+							createdAt: 1,
+							updatedAt: 1,
+						},
+					],
+					pins: [{ target: { kind: "folder", folderId: "folder-other" }, pinnedAt: 100 }],
+				},
+				mutateTaskOrganization: vi.fn().mockResolvedValue({
+					requestId: "",
+					success: true,
+					committedRevision: 1,
+				}),
+				cwd: "/test/workspace",
+			})
+			// The other workspace's task is not part of the current view.
+			mockUseTaskSearch.mockReturnValue({
+				...defaultSearchResult,
+				tasks: [],
+			})
+			mockUseGroupedTasks.mockReturnValue({
+				groups: [],
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryView onDone={vi.fn()} />)
+
+			expect(screen.queryByTestId("pinned-folder-folder-other")).not.toBeInTheDocument()
+		})
+
+		it("shows a pinned folder that has a member in the current workspace", () => {
+			mockUseTaskOrganizationDnd.mockReturnValue({
+				sensors: [],
+				activeDrag: null,
+				targetMeta: { isOverTarget: false },
+				handleDragStart: vi.fn(),
+				handleDragOver: vi.fn(),
+				handleDragEnd: vi.fn(),
+				handleDragCancel: vi.fn(),
+				UNFILED_DROP_ZONE_ID,
+			})
+			const localTask = makeTask("t-local", { workspace: "/test/workspace" })
+
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: {
+					...createEmptyOrganizationState(),
+					folders: [
+						{
+							folderId: "folder-local",
+							name: "Local Folder",
+							taskIds: ["t-local"],
+							createdAt: 1,
+							updatedAt: 1,
+						},
+					],
+					pins: [{ target: { kind: "folder", folderId: "folder-local" }, pinnedAt: 100 }],
+				},
+				mutateTaskOrganization: vi.fn().mockResolvedValue({
+					requestId: "",
+					success: true,
+					committedRevision: 1,
+				}),
+				cwd: "/test/workspace",
+			})
+			mockUseTaskSearch.mockReturnValue({
+				...defaultSearchResult,
+				tasks: [localTask],
+			})
+			mockUseGroupedTasks.mockReturnValue({
+				groups: [makeGroup(localTask)],
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryView onDone={vi.fn()} />)
+
+			expect(screen.getByTestId("pinned-folder-folder-local")).toBeInTheDocument()
+		})
+
 		it("shows pinned tasks from other workspaces when showAllWorkspaces is true", () => {
 			mockUseTaskOrganizationDnd.mockReturnValue({
 				sensors: [],
