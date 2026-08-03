@@ -195,6 +195,22 @@ export class NativeToolCallParser {
 		return NativeToolCallParser.parseErrors.has(toolCallId)
 	}
 
+	/**
+	 * Clear all recorded parse failures — both the typed {@link parseFailures}
+	 * descriptors and the legacy {@link parseErrors} strings.
+	 *
+	 * Called alongside {@link clearAllStreamingToolCalls} /
+	 * {@link clearRawChunkState} when a new API request starts (see
+	 * Task.recursivelyMakeClineRequests), so failures recorded by an
+	 * interrupted or completed stream do not accumulate for the lifetime of
+	 * the extension host. The consume* APIs keep working for per-call
+	 * retrieval; this clears everything still unconsumed.
+	 */
+	public static clearParseFailures(): void {
+		NativeToolCallParser.parseFailures.clear()
+		NativeToolCallParser.parseErrors.clear()
+	}
+
 	private static coerceOptionalBoolean(value: unknown): boolean | undefined {
 		if (typeof value === "boolean") {
 			return value
