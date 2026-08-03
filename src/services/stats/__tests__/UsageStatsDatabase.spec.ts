@@ -352,6 +352,80 @@ describe("UsageStatsDatabase", () => {
 			expect(rollups[0].totalCost).toBeCloseTo(0.05, 10)
 			expect(rollups[0].eventCount).toBe(1)
 		})
+
+		it("records uncached input as input minus included cache tokens (OpenAI semantics)", () => {
+			db.append(
+				makeEvent({
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 100, source: "provider" },
+						cacheReadTokens: { value: 600, source: "provider" },
+						cacheWriteTokens: { value: 100, source: "provider" },
+					},
+					semantics: {
+						cacheReadInInput: "included",
+						cacheWriteInInput: "included",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			)
+
+			// 1000 input − 600 cache read − 100 cache write
+			expect(db.queryLifetimeTotalsFiltered(false).uncachedInputTokens).toBe(300)
+		})
+
+		it("keeps full input as uncached base when cache tokens are excluded from input (Anthropic-style)", () => {
+			const cachedUsage = {
+				inputTokens: { value: 1000, source: "provider" as const },
+				outputTokens: { value: 100, source: "provider" as const },
+				cacheReadTokens: { value: 600, source: "provider" as const },
+				cacheWriteTokens: { value: 100, source: "provider" as const },
+			}
+			db.append(
+				makeEvent({
+					usage: cachedUsage,
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "excluded",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			)
+			db.append(
+				makeEvent({
+					usage: cachedUsage,
+					semantics: {
+						cacheReadInInput: "unknown",
+						cacheWriteInInput: "unknown",
+						reasoningInOutput: "unknown",
+					},
+				}),
+			)
+
+			expect(db.queryLifetimeTotalsFiltered(false).uncachedInputTokens).toBe(2000)
+		})
+
+		it("preserves semantics-aware uncached input across rollup rebuilds", () => {
+			db.append(
+				makeEvent({
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 100, source: "provider" },
+						cacheReadTokens: { value: 600, source: "provider" },
+						cacheWriteTokens: { value: 100, source: "provider" },
+					},
+					semantics: {
+						cacheReadInInput: "included",
+						cacheWriteInInput: "included",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			)
+
+			db.rebuildRollupsFromEvents()
+
+			expect(db.queryLifetimeTotalsFiltered(false).uncachedInputTokens).toBe(300)
+		})
 	})
 
 	describe("computeLocalDayBucket", () => {
@@ -724,6 +798,32 @@ describe("UsageStatsDatabase", () => {
 			expect(page.sessions[1].rootTaskId).toBe("old-task")
 		})
 
+		it("should not move session last activity backward on backfilled older events", () => {
+			const newer = new Date(2026, 0, 15, 12, 0, 0)
+			const older = new Date(2026, 0, 10, 12, 0, 0)
+
+			db.append(
+				makeEvent({
+					taskId: "task-A",
+					rootTaskId: "task-A",
+					occurredAt: newer.toISOString(),
+				}),
+			)
+			// A backfilled older event arrives after the newer one.
+			db.append(
+				makeEvent({
+					taskId: "task-A",
+					rootTaskId: "task-A",
+					occurredAt: older.toISOString(),
+					provenance: "history-backfill",
+				}),
+			)
+
+			const page = db.querySessions(50)
+			expect(page.sessions).toHaveLength(1)
+			expect(page.sessions[0].lastActivity).toBe(newer.getTime())
+		})
+
 		it("should support cursor pagination", () => {
 			for (let i = 0; i < 60; i++) {
 				db.append(
@@ -891,7 +991,9 @@ describe("UsageStatsDatabase", () => {
 					taskId: "task-retained-by-history",
 				}),
 			)
-			expect(db.queryTaskUsageByTaskIds(["task-retained-by-history"]).get("task-retained-by-history")?.eventCount).toBe(1)
+			expect(
+				db.queryTaskUsageByTaskIds(["task-retained-by-history"]).get("task-retained-by-history")?.eventCount,
+			).toBe(1)
 
 			db.clearGeneration()
 

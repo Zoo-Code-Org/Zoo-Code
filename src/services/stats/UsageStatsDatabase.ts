@@ -649,7 +649,7 @@ export class UsageStatsDatabase {
 			while (true) {
 				const rows = db
 					.prepare(
-						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id, usage_json
+						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id, usage_json, semantics_json
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -666,6 +666,7 @@ export class UsageStatsDatabase {
 					const rootTaskId = (row.root_task_id as string) ?? ""
 					const status = row.status as string
 					const usage = JSON.parse(row.usage_json as string)
+					const semantics = JSON.parse(row.semantics_json as string)
 
 					const inputTokens = usage.inputTokens?.value ?? 0
 					const outputTokens = usage.outputTokens?.value ?? 0
@@ -674,6 +675,7 @@ export class UsageStatsDatabase {
 					const reasoningTokens = usage.reasoningTokens?.value ?? 0
 					const totalTokens = usage.totalTokens?.value ?? inputTokens + outputTokens
 					const costUsd = usage.costUsd?.value ?? 0
+					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -697,6 +699,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Rebuild monthly rollup
@@ -717,6 +720,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Rebuild session_activity (without touching session_metadata)
@@ -780,7 +784,7 @@ export class UsageStatsDatabase {
 				const rows = db
 					.prepare(
 						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id,
-						 provider, model, mode, usage_json, provenance
+						 provider, model, mode, usage_json, semantics_json, provenance
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -800,6 +804,7 @@ export class UsageStatsDatabase {
 					const mode = row.mode as string
 					const provenance = (row.provenance as string) ?? "live"
 					const usage = JSON.parse(row.usage_json as string)
+					const semantics = JSON.parse(row.semantics_json as string)
 
 					const inputTokens = usage.inputTokens?.value ?? 0
 					const outputTokens = usage.outputTokens?.value ?? 0
@@ -814,6 +819,7 @@ export class UsageStatsDatabase {
 						usage: { ...usage },
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
+					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -845,6 +851,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Monthly breakdown
@@ -865,6 +872,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Lifetime breakdown
@@ -885,6 +893,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 					}
 
@@ -908,6 +917,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Monthly non-cancelled
@@ -928,6 +938,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Lifetime non-cancelled
@@ -948,6 +959,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Non-cancelled breakdown rows for each axis
@@ -974,6 +986,7 @@ export class UsageStatsDatabase {
 								reasoningTokens,
 								totalTokens,
 								costUsd,
+								uncachedInputTokens,
 							})
 
 							// Monthly non-cancelled breakdown
@@ -994,6 +1007,7 @@ export class UsageStatsDatabase {
 								reasoningTokens,
 								totalTokens,
 								costUsd,
+								uncachedInputTokens,
 							})
 
 							// Lifetime non-cancelled breakdown
@@ -1014,6 +1028,7 @@ export class UsageStatsDatabase {
 								reasoningTokens,
 								totalTokens,
 								costUsd,
+								uncachedInputTokens,
 							})
 						}
 					}
@@ -1123,14 +1138,14 @@ export class UsageStatsDatabase {
 						WHEN @lastActivityMs >= last_activity_ms THEN @provider
 						ELSE provider
 					END,
-					last_activity_ms = MAX(last_activity_ms, @lastActivityMs)
+					last_activity_ms = @lastActivityMs
 			`)
 
 			while (true) {
 				const rows = db
 					.prepare(
 						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, task_id, root_task_id,
-						 provider, model, mode, usage_json, provenance
+						 provider, model, mode, usage_json, semantics_json, provenance
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -1151,6 +1166,7 @@ export class UsageStatsDatabase {
 					const model = row.model as string
 					const mode = row.mode as string
 					const usage = JSON.parse(row.usage_json as string)
+					const semantics = JSON.parse(row.semantics_json as string)
 
 					const inputTokens = usage.inputTokens?.value ?? 0
 					const outputTokens = usage.outputTokens?.value ?? 0
@@ -1165,6 +1181,7 @@ export class UsageStatsDatabase {
 						usage: { ...usage },
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
+					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -1190,6 +1207,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Monthly aggregate
@@ -1210,6 +1228,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Lifetime aggregate
@@ -1230,6 +1249,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// ── Breakdown rollups (per axis) ──
@@ -1259,6 +1279,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Monthly breakdown
@@ -1279,6 +1300,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Lifetime breakdown
@@ -1299,6 +1321,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 					}
 
@@ -1323,6 +1346,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Monthly non-cancelled aggregate
@@ -1343,6 +1367,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Lifetime non-cancelled aggregate
@@ -1363,6 +1388,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 
 						// Non-cancelled breakdown rows for each axis
@@ -1385,6 +1411,7 @@ export class UsageStatsDatabase {
 								reasoningTokens,
 								totalTokens,
 								costUsd,
+								uncachedInputTokens,
 							})
 
 							// Monthly non-cancelled breakdown
@@ -1405,6 +1432,7 @@ export class UsageStatsDatabase {
 								reasoningTokens,
 								totalTokens,
 								costUsd,
+								uncachedInputTokens,
 							})
 
 							// Lifetime non-cancelled breakdown
@@ -1425,6 +1453,7 @@ export class UsageStatsDatabase {
 								reasoningTokens,
 								totalTokens,
 								costUsd,
+								uncachedInputTokens,
 							})
 						}
 					}
@@ -1537,6 +1566,7 @@ export class UsageStatsDatabase {
 		const totalTokens = event.usage.totalTokens?.value ?? inputTokens + outputTokens
 		// Use getEffectiveCost for rollup consistency with computeEventDelta
 		const costUsd = getEffectiveCost(event)
+		const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
 
 		const status = event.status
 		const completedCalls = status === "completed" ? 1 : 0
@@ -1613,6 +1643,7 @@ export class UsageStatsDatabase {
 					reasoningTokens,
 					totalTokens,
 					costUsd,
+					uncachedInputTokens,
 				})
 
 				// Update rollups: monthly
@@ -1633,6 +1664,7 @@ export class UsageStatsDatabase {
 					reasoningTokens,
 					totalTokens,
 					costUsd,
+					uncachedInputTokens,
 				})
 
 				// Update rollups: lifetime
@@ -1653,6 +1685,7 @@ export class UsageStatsDatabase {
 					reasoningTokens,
 					totalTokens,
 					costUsd,
+					uncachedInputTokens,
 				})
 
 				// Update breakdown rollups for each supported axis
@@ -1667,6 +1700,7 @@ export class UsageStatsDatabase {
 					reasoningTokens,
 					totalTokens,
 					costUsd,
+					uncachedInputTokens,
 				})
 
 				// Update non-cancelled-only rollups (root_task_id = '__nc__')
@@ -1682,6 +1716,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 				}
 
@@ -1761,6 +1796,7 @@ export class UsageStatsDatabase {
 				const totalTokens = event.usage.totalTokens?.value ?? inputTokens + outputTokens
 				// Use getEffectiveCost for rollup consistency with computeEventDelta
 				const costUsd = getEffectiveCost(event)
+				const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
 
 				const status = event.status
 				const completedCalls = status === "completed" ? 1 : 0
@@ -1830,6 +1866,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Update rollups: monthly
@@ -1850,6 +1887,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Update rollups: lifetime
@@ -1870,6 +1908,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Update breakdown rollups for each supported axis
@@ -1884,6 +1923,7 @@ export class UsageStatsDatabase {
 						reasoningTokens,
 						totalTokens,
 						costUsd,
+						uncachedInputTokens,
 					})
 
 					// Update non-cancelled-only rollups
@@ -1899,6 +1939,7 @@ export class UsageStatsDatabase {
 							reasoningTokens,
 							totalTokens,
 							costUsd,
+							uncachedInputTokens,
 						})
 					}
 
@@ -2617,6 +2658,31 @@ export class UsageStatsDatabase {
 	// ── Internal: Rollup Update ────────────────────────────────────────────
 
 	/**
+	 * Computes the uncached portion of an event's input tokens. This is the
+	 * base the dashboard cacheRatio simulation scales to estimate unreported
+	 * cache reads, so it must exclude tokens that were already served from
+	 * (or written to) the cache.
+	 *
+	 * Cache components are subtracted only when the event semantics say they
+	 * are included in inputTokens (OpenAI-style: prompt_tokens includes
+	 * cached tokens). Events that exclude them (Anthropic-style) — or carry
+	 * unknown inclusion — keep their full input as the uncached base.
+	 */
+	private computeUncachedInputTokens(
+		usage: {
+			inputTokens?: { value?: number }
+			cacheReadTokens?: { value?: number }
+			cacheWriteTokens?: { value?: number }
+		},
+		semantics: { cacheReadInInput?: string; cacheWriteInInput?: string },
+	): number {
+		const inputTokens = usage.inputTokens?.value ?? 0
+		const includedCacheRead = semantics.cacheReadInInput === "included" ? (usage.cacheReadTokens?.value ?? 0) : 0
+		const includedCacheWrite = semantics.cacheWriteInInput === "included" ? (usage.cacheWriteTokens?.value ?? 0) : 0
+		return Math.max(0, inputTokens - includedCacheRead - includedCacheWrite)
+	}
+
+	/**
 	 * Parameters for updating a rollup row.
 	 */
 	private updateRollup(
@@ -2641,8 +2707,7 @@ export class UsageStatsDatabase {
 			uncachedInputTokens?: number
 		},
 	): void {
-		const uncachedInputTokens =
-			params.uncachedInputTokens ?? (params.cacheReadTokens === 0 ? params.inputTokens : 0)
+		const uncachedInputTokens = params.uncachedInputTokens ?? params.inputTokens
 
 		db.prepare(
 			`INSERT INTO stats_rollup (
@@ -2713,6 +2778,7 @@ export class UsageStatsDatabase {
 			reasoningTokens: number
 			totalTokens: number
 			costUsd: number
+			uncachedInputTokens?: number
 		},
 	): void {
 		const axisValueMap: Record<string, string> = {
@@ -2817,6 +2883,7 @@ export class UsageStatsDatabase {
 			reasoningTokens: number
 			totalTokens: number
 			costUsd: number
+			uncachedInputTokens?: number
 		},
 	): void {
 		// Daily non-cancelled
@@ -2883,7 +2950,7 @@ export class UsageStatsDatabase {
 				total_cost = total_cost + @costUsd,
 				total_tokens = total_tokens + @totalTokens,
 				event_count = event_count + 1,
-				last_activity_ms = @lastActivityMs,
+				last_activity_ms = MAX(last_activity_ms, @lastActivityMs),
 				updated_at = datetime('now')`,
 		).run({
 			rootTaskId: params.rootTaskId,
@@ -2905,7 +2972,7 @@ export class UsageStatsDatabase {
 				total_cost = total_cost + @costUsd,
 				total_tokens = total_tokens + @totalTokens,
 				event_count = event_count + 1,
-				last_activity_ms = @lastActivityMs`,
+				last_activity_ms = MAX(last_activity_ms, @lastActivityMs)`,
 		).run({
 			rootTaskId: params.rootTaskId,
 			day: params.dayBucket,
@@ -2948,7 +3015,7 @@ export class UsageStatsDatabase {
 					WHEN @lastActivityMs >= last_activity_ms THEN @provider
 					ELSE provider
 				END,
-				last_activity_ms = MAX(last_activity_ms, @lastActivityMs)`,
+				last_activity_ms = @lastActivityMs`,
 		).run(params)
 	}
 
