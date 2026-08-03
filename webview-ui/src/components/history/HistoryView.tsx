@@ -413,6 +413,10 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 												onDelete={handleDelete}
 												onToggleExpand={() => toggleExpand(rootId)}
 												onToggleSubtaskExpand={toggleExpand}
+												showPin
+												isPinned={isPinned({ kind: "task", taskId: rootId })}
+												canPin={canPin}
+												onTogglePin={() => void togglePin({ kind: "task", taskId: rootId })}
 											/>
 										</DraggableTaskEntry>
 									</ManualFolderMemberItem>
@@ -688,6 +692,10 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 													onDelete={handleDelete}
 													onToggleExpand={() => toggleExpand(rootId)}
 													onToggleSubtaskExpand={toggleExpand}
+													showPin
+													isPinned={isPinned({ kind: "task", taskId: rootId })}
+													canPin={canPin}
+													onTogglePin={() => void togglePin({ kind: "task", taskId: rootId })}
 												/>
 											</DraggableTaskEntry>
 										)
