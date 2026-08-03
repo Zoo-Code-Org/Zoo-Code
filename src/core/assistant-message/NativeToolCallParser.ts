@@ -102,9 +102,10 @@ export class NativeToolCallParser {
 	/**
 	 * Stores JSON.parse error messages keyed by tool call ID.
 	 * When parseToolCall() catches a JSON.parse failure, it records the error
-	 * here so presentAssistantMessage can retrieve it and route the signal to
-	 * the INVALID_JSON_ARGUMENTS error-interception pattern instead of the
-	 * generic PARAM_MISSING path.
+	 * message here so it can be retrieved later via {@link consumeParseError}
+	 * / {@link hasParseError} (currently exercised by tests and diagnostics;
+	 * no production consumer exists). Entries persist until consumed or until
+	 * {@link clearParseFailures} runs at the start of the next API request.
 	 *
 	 * @deprecated Use {@link parseFailures} and {@link consumeParseFailure} for
 	 * typed failure descriptors. This legacy string map is retained only as a
@@ -117,7 +118,9 @@ export class NativeToolCallParser {
 	 * When parseToolCall() catches any failure (JSON syntax, missing required
 	 * arguments, or invalid argument shape), it records a typed descriptor here
 	 * so downstream consumers can classify the failure precisely instead of
-	 * relying on raw error strings.
+	 * relying on raw error strings. Entries persist until consumed via
+	 * {@link consumeParseFailure} or until {@link clearParseFailures} runs at
+	 * the start of the next API request.
 	 */
 	private static parseFailures = new Map<string, NativeToolParseFailure>()
 
