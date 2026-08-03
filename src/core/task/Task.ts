@@ -158,6 +158,7 @@ const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
 	ollama: "http://127.0.0.1:11434",
 	lmstudio: "http://localhost:1234/v1",
 	requesty: "https://router.requesty.ai/v1",
+	mimo: "https://token-plan-sgp.xiaomimimo.com/v1",
 }
 
 /**
@@ -185,6 +186,8 @@ function getProviderBaseUrlField(provider: string, config: ProviderSettings): st
 			return config.lmStudioBaseUrl
 		case "requesty":
 			return config.requestyBaseUrl
+		case "mimo":
+			return config.mimoBaseUrl
 		case "zoo-gateway":
 			return config.zooGatewayBaseUrl
 		default:
