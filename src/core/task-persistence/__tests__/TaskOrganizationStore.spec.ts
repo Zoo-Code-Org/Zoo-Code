@@ -714,5 +714,138 @@ describe("TaskOrganizationStore", () => {
 			expect(successful).toHaveLength(5)
 			expect(successful.map((result) => result.committedRevision)).toEqual([1, 2, 3, 4, 5])
 		})
+
+		describe("cross-process writes", () => {
+			it("rejects a same-revision write from another instance (lost update)", async () => {
+				await store.initialize()
+				// A second instance sharing the same backing file.
+				const other = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000 })
+				await other.initialize()
+
+				const first = await store.mutate(
+					{
+						kind: "createFolder",
+						folderId: "folder-a",
+						name: "A",
+						source: { kind: "task", taskId: "t1" },
+						destination: { kind: "task", taskId: "t2" },
+					},
+					0,
+				)
+				expect(first.success).toBe(true)
+
+				// `other` still holds revision 0 in memory and computes next = 1,
+				// the same revision the first instance just committed.
+				const second = await other.mutate(
+					{
+						kind: "createFolder",
+						folderId: "folder-b",
+						name: "B",
+						source: { kind: "task", taskId: "t3" },
+						destination: { kind: "task", taskId: "t4" },
+					},
+					0,
+				)
+				expect(second.success).toBe(false)
+				expect(second.error?.code).toBe("TASK_ORG/PERSISTENCE/005")
+
+				// The first instance's write must survive on disk.
+				const raw = JSON.parse(
+					await fs.readFile(path.join(tmpDir, "tasks", GlobalFileNames.taskOrganization), "utf8"),
+				)
+				expect(raw.folders.map((f: { folderId: string }) => f.folderId)).toEqual(["folder-a"])
+
+				other.dispose()
+			})
+		})
+
+		describe("watcher reload resilience", () => {
+			it("keeps in-memory state on transient read errors", async () => {
+				await store.initialize()
+				await store.mutate(
+					{
+						kind: "createFolder",
+						folderId: "folder-1",
+						name: "A",
+						source: { kind: "task", taskId: "t1" },
+						destination: { kind: "task", taskId: "t2" },
+					},
+					0,
+				)
+				expect(store.getState().revision).toBe(1)
+
+				// Simulate a transient read failure (e.g. the watcher firing while a
+				// temp+rename write replaces the file): swap the file for a
+				// directory so readFile rejects with a non-ENOENT error.
+				const filePath = path.join(tmpDir, "tasks", GlobalFileNames.taskOrganization)
+				await fs.rm(filePath)
+				await fs.mkdir(filePath)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				try {
+					await store["reloadFromWatcher"]()
+				} finally {
+					errorSpy.mockRestore()
+					await fs.rmdir(filePath)
+				}
+
+				// The loaded state must survive; the next mutation computes from it.
+				expect(store.getState().revision).toBe(1)
+				expect(store.getState().folders).toHaveLength(1)
+				const result = await store.mutate(
+					{ kind: "setPinned", target: { kind: "task", taskId: "t9" }, pinned: true },
+					1,
+				)
+				expect(result.success).toBe(true)
+				expect(result.committedRevision).toBe(2)
+			})
+
+			it("fires onChange when reloaded content differs at the same revision", async () => {
+				const onChange = vi.fn()
+				const watched = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000, onChange })
+				await watched.initialize()
+				await watched.mutate(
+					{
+						kind: "createFolder",
+						folderId: "folder-1",
+						name: "A",
+						source: { kind: "task", taskId: "t1" },
+						destination: { kind: "task", taskId: "t2" },
+					},
+					0,
+				)
+				onChange.mockClear()
+
+				// Simulate another process overwriting the file with different
+				// content at the SAME revision (a lost update).
+				const filePath = path.join(tmpDir, "tasks", GlobalFileNames.taskOrganization)
+				const diverged = watched.getState()
+				diverged.folders = [
+					{ folderId: "folder-other", name: "Other", taskIds: ["t9"], createdAt: 1000, updatedAt: 1000 },
+				]
+				await fs.writeFile(filePath, JSON.stringify(diverged), "utf8")
+
+				await watched["reloadFromWatcher"]()
+
+				expect(onChange).toHaveBeenCalledTimes(1)
+				expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ revision: 1 }))
+				expect(watched.getState().folders[0].folderId).toBe("folder-other")
+				watched.dispose()
+			})
+
+			it("does not fire onChange when the reloaded content is identical", async () => {
+				const onChange = vi.fn()
+				const watched = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000, onChange })
+				await watched.initialize()
+				await watched.mutate({ kind: "setPinned", target: { kind: "task", taskId: "t1" }, pinned: true }, 0)
+				onChange.mockClear()
+
+				// A watcher reload of unchanged content (e.g. our own write's event)
+				// must not notify again.
+				await watched["reloadFromWatcher"]()
+
+				expect(onChange).not.toHaveBeenCalled()
+				watched.dispose()
+			})
+		})
 	})
 })

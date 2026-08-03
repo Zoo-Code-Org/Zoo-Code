@@ -39,9 +39,9 @@ export interface TaskOrganizationError {
  */
 export interface TaskOrganizationStoreOptions {
 	/**
-	 * Optional callback invoked when the on-disk aggregate changes with a
-	 * greater revision than the in-memory snapshot. Called during watcher
-	 * reloads and after each local mutation.
+	 * Optional callback invoked when the reloaded on-disk aggregate differs
+	 * from the in-memory snapshot (compared by content, not just revision).
+	 * Called during watcher reloads and after each local mutation.
 	 */
 	onChange?: (state: TaskOrganizationStateV1) => Promise<void> | void
 
@@ -68,8 +68,8 @@ export interface TaskOrganizationStoreOptions {
  * are serialized and the revision monotonically increases.
  *
  * The in-memory state is a projection of the on-disk aggregate. A file watcher
- * reloads greater revisions written by other extension instances and triggers
- * the onChange callback.
+ * reloads changes written by other extension instances and triggers the
+ * onChange callback whenever the reloaded content differs.
  */
 export class TaskOrganizationStore {
 	private readonly globalStoragePath: string
@@ -267,8 +267,11 @@ export class TaskOrganizationStore {
 				this.state = createEmptyTaskOrganizationState(this.now)
 				return
 			}
+			// Transient read errors (e.g. the watcher firing while our own
+			// temp+rename write replaces the file) must not wipe the in-memory
+			// state: resetting to empty would make the next mutation compute
+			// from an empty aggregate and fail to save.
 			console.error("[TaskOrganizationStore] Failed to read organization file:", err)
-			this.state = createEmptyTaskOrganizationState(this.now)
 			return
 		}
 
@@ -314,8 +317,10 @@ export class TaskOrganizationStore {
 				if (current && current.schemaVersion > 1) {
 					throw this.createError("TASK_ORG/FUTURE_SCHEMA/007", "Organization data is from a newer version.")
 				}
-				if (current && current.revision > next.revision) {
-					// Another process wrote a newer revision while we held the lock.
+				if (current && current.revision >= next.revision) {
+					// Another process wrote the same or a newer revision while we
+					// held the lock. Same-revision writes lose: two processes that
+					// both computed `next` from the same base must not both commit.
 					throw this.createError("TASK_ORG/PERSISTENCE/005", "Concurrent modification detected.")
 				}
 				return next
@@ -871,9 +876,12 @@ export class TaskOrganizationStore {
 	}
 
 	private async reloadFromWatcher(): Promise<void> {
-		const previousRevision = this.state.revision
+		const previous = this.state
 		await this.load()
-		if (this.state.revision > previousRevision && this.onChange) {
+		// Notify on any actual content change, not just a revision increase:
+		// a same-revision overwrite (lost update from another process)
+		// changes the aggregate without bumping its revision.
+		if (this.stateHasChanged(previous, this.state) && this.onChange) {
 			await this.onChange(this.getState())
 		}
 	}
