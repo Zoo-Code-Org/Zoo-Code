@@ -919,7 +919,14 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalProfile={terminalProfile}
 								terminalShellSelection={pendingTerminalShellSelection ?? terminalShellSelection}
 								onTerminalProfilePickerOpened={() => setChangeDetected(true)}
-								onShellSelectionChange={setPendingTerminalShellSelection}
+								onShellSelectionChange={(selection) => {
+									// Buffer the selection and explicitly mark the settings as
+									// dirty so the Save button enables on shell-only changes.
+									// (Previously the dirty flag was only set incidentally via
+									// onTerminalProfilePickerOpened.)
+									setPendingTerminalShellSelection(selection)
+									setChangeDetected(true)
+								}}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}
