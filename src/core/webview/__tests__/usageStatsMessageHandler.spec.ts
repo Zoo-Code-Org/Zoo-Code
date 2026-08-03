@@ -1702,6 +1702,7 @@ describe("usageStatsMessageHandler", () => {
 				ensureInitialized,
 				getDatabase: () => mockDb,
 				getTaskCatalog: () => taskCatalog,
+				getCoordinator: () => null,
 			} as any)
 
 			await handleGetDashboardTaskDetail(provider, {
@@ -1711,7 +1712,8 @@ describe("usageStatsMessageHandler", () => {
 			})
 
 			expect(ensureInitialized).toHaveBeenCalledOnce()
-			expect(mockDb.queryEventsByTaskIds).toHaveBeenCalledWith(["root", "child"])
+			// No active stream subscription: the range falls back to unbounded.
+			expect(mockDb.queryEventsByTaskIds).toHaveBeenCalledWith(["root", "child"], {})
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 				type: "dashboardTaskDetailResponse",
 				requestId: "task-detail-1",
@@ -1725,6 +1727,45 @@ describe("usageStatsMessageHandler", () => {
 				}),
 			})
 		})
+
+		it("resolves the detail range from the provider's active stream subscription", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				byId: new Map([["root", { id: "root", task: "History root", ts: 123 }]]),
+				getDescendantTaskIds: vi.fn(() => ["child"]),
+			}
+			const subscription = {
+				requestId: "sub-1",
+				range: {
+					from: "2026-07-15T00:00:00.000Z",
+					to: "2026-08-15T00:00:00.000Z",
+					timezone: "UTC",
+					groupBy: ["day"],
+					includeCancelled: false,
+				},
+				sessionPageSize: 50,
+				heatmapRangeDays: 30,
+			}
+			const coordinator = { getSubscription: vi.fn(() => subscription) }
+			const provider = createMockProvider({
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+				getCoordinator: () => coordinator,
+			} as any)
+			;(provider as any)._streamSink = { marker: "sink" }
+
+			await handleGetDashboardTaskDetail(provider, {
+				type: "getDashboardTaskDetail",
+				requestId: "task-detail-2",
+				taskId: "root",
+			})
+
+			expect(coordinator.getSubscription).toHaveBeenCalledWith({ marker: "sink" })
+			expect(mockDb.queryEventsByTaskIds).toHaveBeenCalledWith(["root", "child"], {
+				fromMs: Date.parse("2026-07-15T00:00:00.000Z"),
+				toMs: Date.parse("2026-08-15T00:00:00.000Z"),
+			})
+		})
 	})
 
 	describe("handleGetDashboardTaskPage", () => {
@@ -1734,14 +1775,13 @@ describe("usageStatsMessageHandler", () => {
 				catalogRevision: 7,
 				getPage: vi.fn(() => ({ tasks: ["history-task"], cursor: "next", totalEstimate: 1 })),
 				getDescendantTaskIds: vi.fn(() => []),
-				byId: new Map([
-					["history-task", { id: "history-task", task: "History task", ts: 321 }],
-				]),
+				byId: new Map([["history-task", { id: "history-task", task: "History task", ts: 321 }]]),
 				ancestorsByTaskId: new Map(),
 			}
 			const provider = createMockProvider({
 				getDatabase: () => mockDb,
 				getTaskCatalog: () => taskCatalog,
+				getCoordinator: () => null,
 			} as any)
 
 			await handleGetDashboardTaskPage(provider, {
@@ -1751,7 +1791,7 @@ describe("usageStatsMessageHandler", () => {
 				dashboardTaskLimit: 50,
 			})
 
-			expect(taskCatalog.getPage).toHaveBeenCalledWith("prior-cursor", 50)
+			expect(taskCatalog.getPage).toHaveBeenCalledWith("prior-cursor", 50, {})
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 				type: "dashboardTaskPageResponse",
 				dashboardTaskPage: expect.objectContaining({
@@ -1759,6 +1799,49 @@ describe("usageStatsMessageHandler", () => {
 					catalogRevision: 7,
 					tasks: [expect.objectContaining({ taskId: "history-task", eventCount: 0 })],
 				}),
+			})
+		})
+
+		it("resolves the page range from the provider's active stream subscription", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				catalogRevision: 7,
+				getPage: vi.fn(() => ({ tasks: [], cursor: undefined, totalEstimate: 0 })),
+				getDescendantTaskIds: vi.fn(() => []),
+				byId: new Map(),
+				ancestorsByTaskId: new Map(),
+			}
+			const subscription = {
+				requestId: "sub-1",
+				range: {
+					preset: "today",
+					timezone: "UTC",
+					groupBy: ["day"],
+					includeCancelled: false,
+				},
+				sessionPageSize: 50,
+				heatmapRangeDays: 30,
+			}
+			const coordinator = { getSubscription: vi.fn(() => subscription) }
+			const provider = createMockProvider({
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+				getCoordinator: () => coordinator,
+			} as any)
+			;(provider as any)._streamSink = { marker: "sink" }
+
+			await handleGetDashboardTaskPage(provider, {
+				type: "getDashboardTaskPage",
+				requestId: "task-page-2",
+				dashboardTaskCursor: "prior-cursor",
+				dashboardTaskLimit: 50,
+			})
+
+			expect(coordinator.getSubscription).toHaveBeenCalledWith({ marker: "sink" })
+			// Preset "today" always resolves to a bounded local-day range.
+			expect(taskCatalog.getPage).toHaveBeenCalledWith("prior-cursor", 50, {
+				fromMs: expect.any(Number),
+				toMs: expect.any(Number),
 			})
 		})
 	})

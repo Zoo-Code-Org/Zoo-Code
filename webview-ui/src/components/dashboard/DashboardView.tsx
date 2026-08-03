@@ -1,7 +1,13 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Download, Trash2, RefreshCw, Database } from "lucide-react"
 
-import type { DashboardTaskDetail, DashboardTaskSummary, ExtensionMessage, StatsBucket, StatsQuery } from "@roo-code/types"
+import type {
+	DashboardTaskDetail,
+	DashboardTaskSummary,
+	ExtensionMessage,
+	StatsBucket,
+	StatsQuery,
+} from "@roo-code/types"
 
 import { vscode } from "@/utils/vscode"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -91,6 +97,16 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const [customFrom, setCustomFrom] = useState<string>(defaultDateRange.from)
 	const [customTo, setCustomTo] = useState<string>(defaultDateRange.to)
+
+	// Task details are aggregated for the active subscription's range, so a
+	// range change makes the per-task detail cache stale: drop it (and the
+	// expansion) so the next expand re-fetches against the new range.
+	const resetTaskDetails = useCallback(() => {
+		setExpandedTaskId(undefined)
+		setTaskDetails({})
+		setTaskDetailErrors({})
+		setTaskDetailLoading(new Set())
+	}, [])
 
 	// ── Query construction ──────────────────────────────────────────────────
 
@@ -193,6 +209,12 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 				return
 			}
 
+			// The task list membership/figures follow the preset range, so
+			// cached task details become stale whenever the preset changes.
+			if (presetChanged) {
+				resetTaskDetails()
+			}
+
 			replaceSubscription(buildQuery(preset, groupBy), HEATMAP_RANGE_DAYS[heatmapRange], 50)
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -269,8 +291,9 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const handleApplyCustomRange = useCallback(() => {
 		if (!customFrom || !customTo) return
+		resetTaskDetails()
 		replaceSubscription(buildQuery("custom", groupBy, customFrom, customTo), HEATMAP_RANGE_DAYS[heatmapRange], 50)
-	}, [customFrom, customTo, groupBy, heatmapRange, buildQuery, replaceSubscription])
+	}, [customFrom, customTo, groupBy, heatmapRange, buildQuery, replaceSubscription, resetTaskDetails])
 
 	// ── Listen for task detail + clear/export responses ─────────────────────
 
@@ -664,98 +687,99 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 								{/* Breakdown table */}
 								<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">
-							<div className="flex items-center justify-between">
-								<h4 className="text-sm font-medium text-vscode-foreground m-0">
-									{t("dashboard:breakdown.title")}
-								</h4>
-								<div className="flex flex-wrap gap-1">
-									{(["model", "provider", "mode"] as DashboardGroupBy[]).map((g) => (
-										<Button
-											key={g}
-											variant={groupBy === g ? "primary" : "ghost"}
-											size="sm"
-											onClick={() => handleGroupByChange(g)}
-											data-testid={`dashboard-groupby-${g}`}>
-											{t(`dashboard:breakdown.${g}`)}
-										</Button>
-									))}
-								</div>
-							</div>
+									<div className="flex items-center justify-between">
+										<h4 className="text-sm font-medium text-vscode-foreground m-0">
+											{t("dashboard:breakdown.title")}
+										</h4>
+										<div className="flex flex-wrap gap-1">
+											{(["model", "provider", "mode"] as DashboardGroupBy[]).map((g) => (
+												<Button
+													key={g}
+													variant={groupBy === g ? "primary" : "ghost"}
+													size="sm"
+													onClick={() => handleGroupByChange(g)}
+													data-testid={`dashboard-groupby-${g}`}>
+													{t(`dashboard:breakdown.${g}`)}
+												</Button>
+											))}
+										</div>
+									</div>
 
-							{/* Responsive table wrapper */}
-							<div className="overflow-x-auto rounded-md border border-vscode-panel-border">
-								<table className="w-full text-xs">
-									<thead className="bg-vscode-editor-inactiveSelectionBackground">
-										<tr>
-											<th className="px-2 py-1.5 text-left font-medium text-vscode-foreground whitespace-nowrap">
-												{t(`dashboard:breakdown.${groupBy}`)}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.events")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.inputTokens")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.outputTokens")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.cacheReadTokens")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.cacheWriteTokens")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.reasoningTokens")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.totalTokens")}
-											</th>
-											<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
-												{t("dashboard:breakdown.costUsd")}
-											</th>
-										</tr>
-									</thead>
-									<tbody>
-										{buckets.map((bucket, index) => {
-											const keyValue = bucket.key?.[groupBy] ?? t("dashboard:breakdown.unknown")
-											return (
-												<tr
-													key={`${groupBy}-${index}`}
-													className="border-t border-vscode-panel-border">
-													<td className="px-2 py-1.5 text-vscode-foreground whitespace-nowrap">
-														{String(keyValue)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{bucket.events}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{formatCompact(bucket.inputTokens)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{formatCompact(bucket.outputTokens)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{formatCompact(bucket.cacheReadTokens)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{formatCompact(bucket.cacheWriteTokens)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{formatCompact(bucket.reasoningTokens)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums font-medium">
-														{formatCompact(bucket.totalTokens)}
-													</td>
-													<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
-														{formatCost(bucket.costUsd)}
-													</td>
+									{/* Responsive table wrapper */}
+									<div className="overflow-x-auto rounded-md border border-vscode-panel-border">
+										<table className="w-full text-xs">
+											<thead className="bg-vscode-editor-inactiveSelectionBackground">
+												<tr>
+													<th className="px-2 py-1.5 text-left font-medium text-vscode-foreground whitespace-nowrap">
+														{t(`dashboard:breakdown.${groupBy}`)}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.events")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.inputTokens")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.outputTokens")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.cacheReadTokens")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.cacheWriteTokens")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.reasoningTokens")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.totalTokens")}
+													</th>
+													<th className="px-2 py-1.5 text-right font-medium text-vscode-foreground whitespace-nowrap">
+														{t("dashboard:breakdown.costUsd")}
+													</th>
 												</tr>
-											)
-										})}
-									</tbody>
-								</table>
-							</div>
+											</thead>
+											<tbody>
+												{buckets.map((bucket, index) => {
+													const keyValue =
+														bucket.key?.[groupBy] ?? t("dashboard:breakdown.unknown")
+													return (
+														<tr
+															key={`${groupBy}-${index}`}
+															className="border-t border-vscode-panel-border">
+															<td className="px-2 py-1.5 text-vscode-foreground whitespace-nowrap">
+																{String(keyValue)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{bucket.events}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{formatCompact(bucket.inputTokens)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{formatCompact(bucket.outputTokens)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{formatCompact(bucket.cacheReadTokens)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{formatCompact(bucket.cacheWriteTokens)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{formatCompact(bucket.reasoningTokens)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums font-medium">
+																{formatCompact(bucket.totalTokens)}
+															</td>
+															<td className="px-2 py-1.5 text-right text-vscode-foreground tabular-nums">
+																{formatCost(bucket.costUsd)}
+															</td>
+														</tr>
+													)
+												})}
+											</tbody>
+										</table>
+									</div>
 								</div>
 							</>
 						)}

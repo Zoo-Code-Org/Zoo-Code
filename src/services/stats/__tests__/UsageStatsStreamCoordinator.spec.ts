@@ -304,9 +304,7 @@ describe("UsageStatsStreamCoordinator", () => {
 			if (!snapshot || !("tasks" in snapshot)) {
 				throw new Error("STATS_TEST/historyTaskCatalogChange/001: expected task snapshot")
 			}
-			expect(snapshot.tasks.tasks).toEqual([
-				expect.objectContaining({ taskId: "updated" }),
-			])
+			expect(snapshot.tasks.tasks).toEqual([expect.objectContaining({ taskId: "updated" })])
 
 			coordinator.dispose()
 			source.catalog.dispose()
@@ -330,6 +328,109 @@ describe("UsageStatsStreamCoordinator", () => {
 
 			coordinator.dispose()
 			catalog.dispose()
+		})
+
+		it("filters the snapshot task page to the subscription range", () => {
+			const { catalog } = createTaskCatalog([
+				makeHistoryItem({ id: "old-task", ts: Date.parse("2026-07-01T00:00:00.000Z") }),
+				makeHistoryItem({ id: "recent-task", ts: Date.parse("2026-08-01T00:00:00.000Z") }),
+			])
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+
+			coordinator.subscribe(
+				sink,
+				makeSubscription({
+					range: makeQuery({ from: "2026-07-15T00:00:00.000Z", to: "2026-08-15T00:00:00.000Z" }),
+				}),
+			)
+
+			const snapshot = sink.messagesOfType("dashboardStatsStreamSnapshot")[0].dashboardStatsStreamSnapshot
+			if (!snapshot || !("tasks" in snapshot)) {
+				throw new Error("STATS_TEST/historyTaskRangeSnapshot/001: expected task snapshot")
+			}
+			expect(snapshot.tasks.tasks.map((task) => task.taskId)).toEqual(["recent-task"])
+			expect(snapshot.tasks.totalEstimate).toBe(1)
+
+			coordinator.dispose()
+			catalog.dispose()
+		})
+
+		it("filters task upserts by creation timestamp and in-range figures on drain", () => {
+			const { catalog } = createTaskCatalog([
+				makeHistoryItem({ id: "old-task", ts: Date.parse("2026-07-01T00:00:00.000Z") }),
+				makeHistoryItem({ id: "recent-task", ts: Date.parse("2026-08-01T00:00:00.000Z") }),
+			])
+			// An out-of-range event for the in-range task: counted all-time but
+			// excluded from range-filtered figures.
+			db.append(
+				makeEvent({
+					taskId: "recent-task",
+					rootTaskId: "recent-task",
+					occurredAt: "2026-07-10T00:00:00.000Z",
+					usage: {
+						totalTokens: { value: 999, source: "provider" },
+						costUsd: { value: 9, source: "provider" },
+					},
+				}),
+			)
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+			coordinator.subscribe(
+				sink,
+				makeSubscription({
+					range: makeQuery({ from: "2026-07-15T00:00:00.000Z", to: "2026-08-15T00:00:00.000Z" }),
+				}),
+			)
+			sink.messages.length = 0
+
+			// In-range activity on a task created outside the range: no upsert.
+			const oldTaskEvent = makeEvent({
+				taskId: "old-task",
+				rootTaskId: "old-task",
+				occurredAt: "2026-08-02T00:00:00.000Z",
+			})
+			db.append(oldTaskEvent)
+			// In-range activity on the in-range task: upsert with ranged figures.
+			const recentTaskEvent = makeEvent({
+				taskId: "recent-task",
+				rootTaskId: "recent-task",
+				occurredAt: "2026-08-02T00:00:00.000Z",
+				usage: { totalTokens: { value: 100, source: "provider" }, costUsd: { value: 1, source: "provider" } },
+			})
+			db.append(recentTaskEvent)
+			coordinator.notifyEventAppended(recentTaskEvent)
+			vi.advanceTimersByTime(100)
+
+			const deltas = sink.messagesOfType("dashboardStatsStreamDelta")
+			expect(deltas.length).toBeGreaterThan(0)
+			let recentUpsert: { taskId: string } | undefined
+			for (const message of deltas) {
+				const delta = message.dashboardStatsStreamDelta
+				if (!delta || !("taskUpsert" in delta)) {
+					throw new Error("STATS_TEST/historyTaskRangeDelta/001: expected task delta")
+				}
+				expect(delta.taskUpsert.map((task) => task.taskId)).not.toContain("old-task")
+				recentUpsert = delta.taskUpsert.find((task) => task.taskId === "recent-task") ?? recentUpsert
+			}
+			expect(recentUpsert).toMatchObject({ eventCount: 1, totalTokens: 100, totalCost: 1 })
+
+			coordinator.dispose()
+			catalog.dispose()
+		})
+
+		it("exposes the sink's active subscription via getSubscription", () => {
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+
+			expect(coordinator.getSubscription(sink)).toBeUndefined()
+			const subscription = makeSubscription()
+			coordinator.subscribe(sink, subscription)
+			expect(coordinator.getSubscription(sink)).toBe(subscription)
+			coordinator.unsubscribe(sink)
+			expect(coordinator.getSubscription(sink)).toBeUndefined()
+
+			coordinator.dispose()
 		})
 	})
 

@@ -9,13 +9,17 @@ import type {
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import type { TaskUsageRow } from "./UsageStatsDatabase"
 import { getEffectiveCost } from "./costRecalculation"
+import { isWithinStatsQueryRange, type StatsQueryRangeMs } from "./statsQueryRange"
 
 /** Error codes emitted by the History-first Dashboard task projection. */
 export type DashboardTaskProjectionErrorCode = "DASHBOARD_TASK_PROJECTION/computeTaskDetail/001"
 
 /** Raised when a detail is requested for a task absent from the History catalog. */
 export class DashboardTaskProjectionError extends Error {
-	constructor(public readonly code: DashboardTaskProjectionErrorCode, message: string) {
+	constructor(
+		public readonly code: DashboardTaskProjectionErrorCode,
+		message: string,
+	) {
 		super(`[${code}] ${message}`)
 		this.name = "DashboardTaskProjectionError"
 	}
@@ -32,13 +36,17 @@ interface SubtreeUsageSummary {
 
 /** Read-only usage queries required by the Dashboard task projection. */
 export interface DashboardTaskUsageReader {
-	queryTaskUsageByTaskIds(taskIds: string[]): Map<string, TaskUsageRow>
-	queryEventsByTaskIds(taskIds: string[]): Array<UsageEventV1 & { sequence: number }>
+	queryTaskUsageByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskUsageRow>
+	queryEventsByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Array<UsageEventV1 & { sequence: number }>
 }
 
 /**
  * Pages the immutable History task catalog, batch-loads direct task usage for
  * every required subtree, then composes one summary per catalog row.
+ *
+ * When `rangeMs` is bounded, the catalog pages only tasks whose creation
+ * timestamp falls inside the range and per-task figures aggregate only
+ * in-range usage events. An absent or unbounded range keeps all-time behavior.
  */
 export function computeTaskPage(
 	catalog: DashboardTaskCatalog,
@@ -46,9 +54,10 @@ export function computeTaskPage(
 	requestId: string,
 	cursor?: string,
 	limit?: number,
+	rangeMs?: StatsQueryRangeMs,
 ): DashboardTaskPage {
-	const catalogPage = catalog.getPage(cursor, limit)
-	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, catalogPage.tasks))
+	const catalogPage = catalog.getPage(cursor, limit, rangeMs)
+	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, catalogPage.tasks), rangeMs)
 
 	return {
 		requestId,
@@ -63,26 +72,36 @@ export function computeTaskPage(
  * Computes complete current summaries for a known set of History task IDs.
  * Callers use this for stream upserts after usage mutations without changing
  * catalog membership or pagination order.
+ *
+ * When `rangeMs` is bounded, tasks whose creation timestamp falls outside the
+ * range are dropped (matching page membership) and figures aggregate only
+ * in-range usage events.
  */
 export function computeTaskSummaries(
 	catalog: DashboardTaskCatalog,
 	db: DashboardTaskUsageReader,
 	taskIds: readonly string[],
+	rangeMs?: StatsQueryRangeMs,
 ): DashboardTaskSummary[] {
-	const knownTaskIds = [...new Set(taskIds)].filter((taskId) => catalog.byId.has(taskId))
-	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, knownTaskIds))
+	const knownTaskIds = [...new Set(taskIds)].filter((taskId) => {
+		const item = catalog.byId.get(taskId)
+		return item !== undefined && isWithinStatsQueryRange(rangeMs, item.ts)
+	})
+	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, knownTaskIds), rangeMs)
 	return knownTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId))
 }
 
 /**
  * Returns focused detail for a History task and its descendants. Empty usage is
  * successful and still includes the History title and timestamp.
+ * When `rangeMs` is bounded, only in-range usage events are included.
  */
 export function computeTaskDetail(
 	catalog: DashboardTaskCatalog,
 	db: DashboardTaskUsageReader,
 	taskId: string,
 	_requestId: string,
+	rangeMs?: StatsQueryRangeMs,
 ): DashboardTaskDetail {
 	const task = catalog.byId.get(taskId)
 	if (!task) {
@@ -92,7 +111,7 @@ export function computeTaskDetail(
 		)
 	}
 
-	const events = db.queryEventsByTaskIds([taskId, ...catalog.getDescendantTaskIds(taskId)])
+	const events = db.queryEventsByTaskIds([taskId, ...catalog.getDescendantTaskIds(taskId)], rangeMs)
 	const sortedEvents = [...events].sort((left, right) => left.sequence - right.sequence)
 
 	return {
@@ -186,7 +205,9 @@ function resolveRootTaskId(catalog: DashboardTaskCatalog, taskId: string): strin
 }
 
 function getTotalTokens(event: UsageEventV1): number {
-	return event.usage.totalTokens?.value ?? (event.usage.inputTokens?.value ?? 0) + (event.usage.outputTokens?.value ?? 0)
+	return (
+		event.usage.totalTokens?.value ?? (event.usage.inputTokens?.value ?? 0) + (event.usage.outputTokens?.value ?? 0)
+	)
 }
 
 function eventToApiCall(event: UsageEventV1, index: number): DashboardTaskApiCall {

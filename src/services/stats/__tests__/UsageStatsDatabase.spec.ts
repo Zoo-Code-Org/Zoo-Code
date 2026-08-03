@@ -928,6 +928,151 @@ describe("UsageStatsDatabase", () => {
 			const events = db.queryEventsByTaskIds(taskIds)
 			expect(events.map((event) => event.taskId)).toEqual([taskIds[0], taskIds[900]])
 		})
+
+		describe("range-bounded task usage", () => {
+			const FROM = Date.parse("2026-08-01T00:00:00.000Z")
+			const TO = Date.parse("2026-08-03T00:00:00.000Z")
+
+			function appendRangedFixtures(): void {
+				db.bulkAppend([
+					// Out of range: before fromMs.
+					makeEvent({
+						eventId: "evt-range-early",
+						idempotencyKey: "idem-range-early",
+						taskId: "ranged-task",
+						occurredAt: "2026-07-30T00:00:00.000Z",
+						model: "model-early",
+						usage: {
+							totalTokens: { value: 10, source: "provider" },
+							costUsd: { value: 1, source: "provider" },
+						},
+					}),
+					// In range: exactly at fromMs (half-open lower bound is inclusive).
+					makeEvent({
+						eventId: "evt-range-in-1",
+						idempotencyKey: "idem-range-in-1",
+						taskId: "ranged-task",
+						occurredAt: "2026-08-01T00:00:00.000Z",
+						model: "model-in-1",
+						usage: {
+							totalTokens: { value: 100, source: "provider" },
+							costUsd: { value: 0.5, source: "provider" },
+						},
+					}),
+					// In range.
+					makeEvent({
+						eventId: "evt-range-in-2",
+						idempotencyKey: "idem-range-in-2",
+						taskId: "ranged-task",
+						occurredAt: "2026-08-02T00:00:00.000Z",
+						model: "model-in-2",
+						usage: {
+							totalTokens: { value: 200, source: "provider" },
+							costUsd: { value: 0.25, source: "provider" },
+						},
+					}),
+					// In range and cancelled: still aggregated, matching the all-time path.
+					makeEvent({
+						eventId: "evt-range-in-3",
+						idempotencyKey: "idem-range-in-3",
+						taskId: "ranged-task",
+						occurredAt: "2026-08-02T12:00:00.000Z",
+						status: "cancelled",
+						model: "model-in-3",
+						usage: {
+							totalTokens: { value: 50, source: "provider" },
+							costUsd: { value: 0.125, source: "provider" },
+						},
+					}),
+					// Out of range: exactly at toMs (half-open upper bound is exclusive).
+					makeEvent({
+						eventId: "evt-range-late",
+						idempotencyKey: "idem-range-late",
+						taskId: "ranged-task",
+						occurredAt: "2026-08-03T00:00:00.000Z",
+						model: "model-late",
+						usage: {
+							totalTokens: { value: 20, source: "provider" },
+							costUsd: { value: 2, source: "provider" },
+						},
+					}),
+					// Different task with only out-of-range events.
+					makeEvent({
+						eventId: "evt-range-other",
+						idempotencyKey: "idem-range-other",
+						taskId: "outside-task",
+						occurredAt: "2026-07-30T00:00:00.000Z",
+					}),
+				])
+			}
+
+			it("aggregates only in-range events, including cancelled, with metadata from the latest", () => {
+				appendRangedFixtures()
+
+				const rows = db.queryTaskUsageByTaskIds(["ranged-task", "outside-task"], { fromMs: FROM, toMs: TO })
+
+				expect(rows.get("ranged-task")).toEqual({
+					taskId: "ranged-task",
+					totalCost: 0.875,
+					totalTokens: 350,
+					eventCount: 3,
+					lastActivity: Date.parse("2026-08-02T12:00:00.000Z"),
+					model: "model-in-3",
+					provider: "anthropic",
+				})
+				// A task without in-range events stays a zero row.
+				expect(rows.get("outside-task")).toEqual({
+					taskId: "outside-task",
+					totalCost: 0,
+					totalTokens: 0,
+					eventCount: 0,
+					lastActivity: 0,
+					model: "",
+					provider: "",
+				})
+			})
+
+			it("keeps the all-time metadata path for an absent or unbounded range", () => {
+				appendRangedFixtures()
+
+				for (const rows of [
+					db.queryTaskUsageByTaskIds(["ranged-task"]),
+					db.queryTaskUsageByTaskIds(["ranged-task"], {}),
+				]) {
+					expect(rows.get("ranged-task")).toMatchObject({
+						totalCost: 3.875,
+						totalTokens: 380,
+						eventCount: 5,
+						lastActivity: TO,
+						model: "model-late",
+					})
+				}
+
+				// One-sided bounds still route through the ranged aggregation.
+				const fromOnly = db.queryTaskUsageByTaskIds(["ranged-task"], { fromMs: FROM })
+				expect(fromOnly.get("ranged-task")?.eventCount).toBe(4)
+			})
+
+			it("filters queryEventsByTaskIds to the half-open range", () => {
+				appendRangedFixtures()
+
+				const ranged = db.queryEventsByTaskIds(["ranged-task"], { fromMs: FROM, toMs: TO })
+				expect(ranged.map((event) => event.eventId)).toEqual([
+					"evt-range-in-1",
+					"evt-range-in-2",
+					"evt-range-in-3",
+				])
+
+				const all = db.queryEventsByTaskIds(["ranged-task"])
+				expect(all.map((event) => event.eventId)).toEqual([
+					"evt-range-early",
+					"evt-range-in-1",
+					"evt-range-in-2",
+					"evt-range-in-3",
+					"evt-range-late",
+				])
+			})
+		})
 	})
 
 	describe("projection atomicity", () => {

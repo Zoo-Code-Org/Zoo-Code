@@ -23,6 +23,7 @@ import { StatsServiceError } from "../../services/stats"
 import type { UsageStatsStreamCoordinator, StatsStreamSink } from "../../services/stats"
 import { getEffectiveCost } from "../../services/stats/costRecalculation"
 import { computeTaskDetail, computeTaskPage } from "../../services/stats/DashboardTaskProjection"
+import { resolveStatsQueryRangeMs, type StatsQueryRangeMs } from "../../services/stats/statsQueryRange"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 
@@ -975,6 +976,20 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 }
 
 /**
+ * Resolves the active dashboard stream subscription's range for one-off task
+ * reads (page/detail), so they agree with the figures in the streamed task
+ * list. The provider's stream sink identifies its subscription in the
+ * coordinator. Falls back to an unbounded range (all-time, pre-filter
+ * behavior) when there is no active subscription.
+ */
+function resolveTaskRangeMs(provider: ClineProvider, service: UsageStatsService | undefined): StatsQueryRangeMs {
+	const coordinator = service?.getCoordinator()
+	const sink = (provider as unknown as { _streamSink?: ProviderStreamSink })._streamSink
+	const subscription = sink && coordinator ? coordinator.getSubscription(sink) : undefined
+	return subscription ? resolveStatsQueryRangeMs(subscription.range) : {}
+}
+
+/**
  * Handles a History-first task detail request using only the requested subtree.
  * A known task with no usage remains a successful zero-detail response.
  */
@@ -1010,7 +1025,13 @@ export async function handleGetDashboardTaskDetail(provider: ClineProvider, mess
 		await provider.postMessageToWebview({
 			type: "dashboardTaskDetailResponse",
 			requestId,
-			dashboardTaskDetail: computeTaskDetail(taskCatalog, database, taskId, requestId ?? ""),
+			dashboardTaskDetail: computeTaskDetail(
+				taskCatalog,
+				database,
+				taskId,
+				requestId ?? "",
+				resolveTaskRangeMs(provider, service),
+			),
 		})
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
@@ -1147,7 +1168,10 @@ export async function handleSubscribeDashboardStats(provider: ClineProvider, mes
  * Handles the `unsubscribeDashboardStats` message.
  * Releases the provider's subscription from the coordinator.
  */
-export async function handleUnsubscribeDashboardStats(provider: ClineProvider, _message: WebviewMessage): Promise<void> {
+export async function handleUnsubscribeDashboardStats(
+	provider: ClineProvider,
+	_message: WebviewMessage,
+): Promise<void> {
 	const result = await getCoordinatorAndSink(provider, undefined)
 
 	if (!result) return
@@ -1163,7 +1187,10 @@ export async function handleUnsubscribeDashboardStats(provider: ClineProvider, _
  * Validates the new subscription payload and replaces the existing subscription.
  * The coordinator sends a fresh snapshot for the new query.
  */
-export async function handleReplaceDashboardStatsSubscription(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+export async function handleReplaceDashboardStatsSubscription(
+	provider: ClineProvider,
+	message: WebviewMessage,
+): Promise<void> {
 	const requestId = message.requestId
 
 	const result = await getCoordinatorAndSink(provider, requestId)
@@ -1418,7 +1445,14 @@ export async function handleGetDashboardTaskPage(provider: ClineProvider, messag
 		}
 		await provider.postMessageToWebview({
 			type: "dashboardTaskPageResponse",
-			dashboardTaskPage: computeTaskPage(taskCatalog, database, requestId ?? "", message.dashboardTaskCursor, limit),
+			dashboardTaskPage: computeTaskPage(
+				taskCatalog,
+				database,
+				requestId ?? "",
+				message.dashboardTaskCursor,
+				limit,
+				resolveTaskRangeMs(provider, service),
+			),
 		})
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)

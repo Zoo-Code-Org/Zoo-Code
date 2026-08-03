@@ -38,6 +38,7 @@ import {
 import { computeTaskPage, computeTaskSummaries } from "./DashboardTaskProjection"
 import type { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import { resolveTimeRange } from "./UsageAggregator"
+import { resolveStatsQueryRangeMs } from "./statsQueryRange"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -281,6 +282,15 @@ export class UsageStatsStreamCoordinator {
 	}
 
 	/**
+	 * Returns the sink's active subscription, when present.
+	 * Request/response handlers (task page, task detail) use it to align
+	 * one-off reads with the range of the stream subscription.
+	 */
+	getSubscription(sink: StatsStreamSink): DashboardStatsSubscription | undefined {
+		return this.subscriptions.get(sink)?.subscription
+	}
+
+	/**
 	 * Disposes the coordinator, releasing all subscriptions and timers.
 	 */
 	dispose(): void {
@@ -445,6 +455,9 @@ export class UsageStatsStreamCoordinator {
 
 				// Compute deltas for each unseen event
 				const deltas: Array<DashboardStatsDelta | DashboardTaskStatsDelta> = []
+				// Resolve the subscription range once per drain: task upserts filter
+				// membership (task creation ts) and figures (event occurredAt) to it.
+				const taskRangeMs = this.taskCatalog ? resolveStatsQueryRangeMs(sub.subscription.range) : undefined
 				for (const event of unseenEvents) {
 					try {
 						const legacyDelta = applyEventToProjection(
@@ -465,7 +478,12 @@ export class UsageStatsStreamCoordinator {
 							const { sessionUpsert: _sessionUpsert, ...taskDelta } = legacyDelta
 							deltas.push({
 								...taskDelta,
-								taskUpsert: computeTaskSummaries(this.taskCatalog, this.database, affectedTaskIds),
+								taskUpsert: computeTaskSummaries(
+									this.taskCatalog,
+									this.database,
+									affectedTaskIds,
+									taskRangeMs,
+								),
 							})
 						} else {
 							deltas.push(legacyDelta)
@@ -539,9 +557,18 @@ export class UsageStatsStreamCoordinator {
 							state.subscription.requestId,
 							undefined,
 							state.subscription.sessionPageSize,
+							resolveStatsQueryRangeMs(state.subscription.range),
 						)
 						state.visibleTaskIds = new Set(tasks.tasks.map((task) => task.taskId))
-						return { requestId: state.subscription.requestId, generation, sequence, stats, tasks, cursor: tasks.cursor, heatmap }
+						return {
+							requestId: state.subscription.requestId,
+							generation,
+							sequence,
+							stats,
+							tasks,
+							cursor: tasks.cursor,
+							heatmap,
+						}
 					})()
 				: (() => {
 						const sessions = computeSessionPage(
@@ -550,7 +577,15 @@ export class UsageStatsStreamCoordinator {
 							undefined,
 							state.subscription.sessionPageSize,
 						)
-						return { requestId: state.subscription.requestId, generation, sequence, stats, sessions, cursor: sessions.cursor, heatmap }
+						return {
+							requestId: state.subscription.requestId,
+							generation,
+							sequence,
+							stats,
+							sessions,
+							cursor: sessions.cursor,
+							heatmap,
+						}
 					})()
 
 			state.generation = generation
@@ -641,9 +676,18 @@ export class UsageStatsStreamCoordinator {
 										state.subscription.requestId,
 										undefined,
 										state.subscription.sessionPageSize,
+										resolveStatsQueryRangeMs(state.subscription.range),
 									)
 									state.visibleTaskIds = new Set(tasks.tasks.map((task) => task.taskId))
-									return { requestId: state.subscription.requestId, generation, sequence, stats, tasks, cursor: tasks.cursor, heatmap }
+									return {
+										requestId: state.subscription.requestId,
+										generation,
+										sequence,
+										stats,
+										tasks,
+										cursor: tasks.cursor,
+										heatmap,
+									}
 								})()
 							: (() => {
 									const sessions = computeSessionPage(
@@ -652,7 +696,15 @@ export class UsageStatsStreamCoordinator {
 										undefined,
 										state.subscription.sessionPageSize,
 									)
-									return { requestId: state.subscription.requestId, generation, sequence, stats, sessions, cursor: sessions.cursor, heatmap }
+									return {
+										requestId: state.subscription.requestId,
+										generation,
+										sequence,
+										stats,
+										sessions,
+										cursor: sessions.cursor,
+										heatmap,
+									}
 								})()
 
 						state.generation = generation

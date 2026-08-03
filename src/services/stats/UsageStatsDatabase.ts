@@ -11,6 +11,7 @@ import * as path from "path"
 import type { UsageEventV1 } from "@roo-code/types"
 
 import { getEffectiveCost } from "./costRecalculation"
+import { isStatsQueryRangeBounded, type StatsQueryRangeMs } from "./statsQueryRange"
 
 // ── Lazy node:sqlite loader ──────────────────────────────────────────────────
 
@@ -2048,13 +2049,45 @@ export class UsageStatsDatabase {
 	 * Each SQLite query is chunked below the parameter ceiling. The returned map
 	 * always contains every requested task ID, using zero metrics for no-event
 	 * tasks so callers can compose task trees without per-task fallbacks.
+	 *
+	 * When `rangeMs` is bounded, totals are aggregated from the raw usage_events
+	 * rows whose `occurred_epoch_ms` falls inside the half-open range, because
+	 * the task_usage_metadata projection only holds all-time totals. The
+	 * aggregation mirrors upsertTaskUsage exactly: cancelled events are
+	 * included, cost uses getEffectiveCost, and model/provider come from the
+	 * in-range event with the latest occurred timestamp. An absent or
+	 * unbounded range keeps the metadata-table fast path.
 	 */
-	queryTaskUsageByTaskIds(taskIds: string[]): Map<string, TaskUsageRow> {
+	queryTaskUsageByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskUsageRow> {
 		const db = this.getDb()
 		const uniqueTaskIds = [...new Set(taskIds)]
 		const result = new Map<string, TaskUsageRow>(
 			uniqueTaskIds.map((taskId) => [taskId, createZeroTaskUsageRow(taskId)]),
 		)
+
+		if (isStatsQueryRangeBounded(rangeMs)) {
+			try {
+				// Events arrive in ascending sequence order, so per-task rows see
+				// the same event order the append-time metadata upsert saw.
+				for (const event of this.queryEventsByTaskIds(uniqueTaskIds, rangeMs)) {
+					const row = result.get(event.taskId)!
+					row.totalCost += getEffectiveCost(event)
+					row.totalTokens +=
+						event.usage.totalTokens?.value ??
+						(event.usage.inputTokens?.value ?? 0) + (event.usage.outputTokens?.value ?? 0)
+					row.eventCount += 1
+					const occurredMs = new Date(event.occurredAt).getTime()
+					if (occurredMs >= row.lastActivity) {
+						row.model = event.model
+						row.provider = event.provider
+					}
+					row.lastActivity = occurredMs
+				}
+				return result
+			} catch (err) {
+				throw new StatsDbError("STATS_DB/read/001", "Failed to query ranged task usage", err)
+			}
+		}
 
 		try {
 			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
@@ -2091,8 +2124,10 @@ export class UsageStatsDatabase {
 	/**
 	 * Reads events for direct task IDs using the task index, without an
 	 * unbounded full-log read. Result order matches the global event sequence.
+	 * When `rangeMs` is bounded, only events whose `occurred_epoch_ms` falls
+	 * inside the half-open range are returned; status inclusion is unchanged.
 	 */
-	queryEventsByTaskIds(taskIds: string[]): Array<UsageEventV1 & { sequence: number }> {
+	queryEventsByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Array<UsageEventV1 & { sequence: number }> {
 		const db = this.getDb()
 		const uniqueTaskIds = [...new Set(taskIds)]
 		const events: Array<UsageEventV1 & { sequence: number }> = []
@@ -2101,9 +2136,18 @@ export class UsageStatsDatabase {
 			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
 				const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
 				const placeholders = chunk.map(() => "?").join(", ")
-				const rows = db
-					.prepare(`SELECT * FROM usage_events WHERE task_id IN (${placeholders}) ORDER BY seq ASC`)
-					.all(...chunk) as Array<Record<string, unknown>>
+				let sql = `SELECT * FROM usage_events WHERE task_id IN (${placeholders})`
+				const params: Array<string | number> = [...chunk]
+				if (rangeMs?.fromMs !== undefined) {
+					sql += " AND occurred_epoch_ms >= ?"
+					params.push(rangeMs.fromMs)
+				}
+				if (rangeMs?.toMs !== undefined) {
+					sql += " AND occurred_epoch_ms < ?"
+					params.push(rangeMs.toMs)
+				}
+				sql += " ORDER BY seq ASC"
+				const rows = db.prepare(sql).all(...params) as Array<Record<string, unknown>>
 				events.push(...rows.map((row) => this.rowToEvent(row)))
 			}
 

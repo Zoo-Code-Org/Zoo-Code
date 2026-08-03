@@ -2,10 +2,7 @@ import type * as vscode from "vscode"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import {
-	DashboardTaskCatalog,
-	type DashboardTaskCatalogSource,
-} from "../DashboardTaskCatalog"
+import { DashboardTaskCatalog, type DashboardTaskCatalogSource } from "../DashboardTaskCatalog"
 
 vi.mock("vscode", () => {
 	class EventEmitter<T> {
@@ -107,6 +104,56 @@ describe("DashboardTaskCatalog", () => {
 
 		expect(traversed).toEqual(["d", "c", "b", "a"])
 		expect(new Set(traversed).size).toBe(4)
+
+		catalog.dispose()
+	})
+
+	it("filters pages by creation timestamp within [fromMs, toMs) with cursor continuity", () => {
+		const source = createCatalogSource([
+			makeHistoryItem({ id: "ts-100", ts: 100 }),
+			makeHistoryItem({ id: "ts-200", ts: 200 }),
+			makeHistoryItem({ id: "ts-300", ts: 300 }),
+			makeHistoryItem({ id: "ts-400", ts: 400 }),
+			makeHistoryItem({ id: "ts-500", ts: 500 }),
+			makeHistoryItem({ id: "ts-600", ts: 600 }),
+		])
+		const catalog = new DashboardTaskCatalog(source.source)
+		// Half-open: ts 200 is included, ts 500 is excluded.
+		const rangeMs = { fromMs: 200, toMs: 500 }
+		const traversed: string[] = []
+		let cursor: string | undefined
+		let totalEstimate = -1
+
+		do {
+			const page = catalog.getPage(cursor, 2, rangeMs)
+			traversed.push(...page.tasks)
+			totalEstimate = page.totalEstimate
+			cursor = page.cursor
+		} while (cursor)
+
+		expect(traversed).toEqual(["ts-400", "ts-300", "ts-200"])
+		expect(new Set(traversed).size).toBe(3)
+		expect(totalEstimate).toBe(3)
+
+		catalog.dispose()
+	})
+
+	it("treats an absent or unbounded range as no filtering", () => {
+		const source = createCatalogSource([
+			makeHistoryItem({ id: "ts-100", ts: 100 }),
+			makeHistoryItem({ id: "ts-200", ts: 200 }),
+		])
+		const catalog = new DashboardTaskCatalog(source.source)
+
+		for (const rangeMs of [undefined, {}, { fromMs: undefined, toMs: undefined }]) {
+			const page = catalog.getPage(undefined, 50, rangeMs)
+			expect(page.tasks).toEqual(["ts-200", "ts-100"])
+			expect(page.totalEstimate).toBe(2)
+		}
+
+		// One-sided bounds still filter.
+		expect(catalog.getPage(undefined, 50, { fromMs: 150 }).tasks).toEqual(["ts-200"])
+		expect(catalog.getPage(undefined, 50, { toMs: 150 }).tasks).toEqual(["ts-100"])
 
 		catalog.dispose()
 	})

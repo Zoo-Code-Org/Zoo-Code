@@ -5,9 +5,11 @@ import type { HistoryItem, UsageEventV1 } from "@roo-code/types"
 import {
 	computeTaskDetail,
 	computeTaskPage,
+	computeTaskSummaries,
 	type DashboardTaskUsageReader,
 } from "../DashboardTaskProjection"
 import { DashboardTaskCatalog, type DashboardTaskCatalogSource } from "../DashboardTaskCatalog"
+import { isWithinStatsQueryRange, type StatsQueryRangeMs } from "../statsQueryRange"
 import type { TaskUsageRow } from "../UsageStatsDatabase"
 
 vi.mock("vscode", () => {
@@ -84,19 +86,34 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 function createUsageReader(
 	usageByTaskId: Map<string, TaskUsageRow> = new Map(),
 	events: Array<UsageEventV1 & { sequence: number }> = [],
-): DashboardTaskUsageReader & { queriedUsageTaskIds: string[][]; queriedEventTaskIds: string[][] } {
+): DashboardTaskUsageReader & {
+	queriedUsageTaskIds: string[][]
+	queriedEventTaskIds: string[][]
+	queriedUsageRanges: Array<StatsQueryRangeMs | undefined>
+	queriedEventRanges: Array<StatsQueryRangeMs | undefined>
+} {
 	const queriedUsageTaskIds: string[][] = []
 	const queriedEventTaskIds: string[][] = []
+	const queriedUsageRanges: Array<StatsQueryRangeMs | undefined> = []
+	const queriedEventRanges: Array<StatsQueryRangeMs | undefined> = []
 	return {
 		queriedUsageTaskIds,
 		queriedEventTaskIds,
-		queryTaskUsageByTaskIds(taskIds) {
+		queriedUsageRanges,
+		queriedEventRanges,
+		queryTaskUsageByTaskIds(taskIds, rangeMs) {
 			queriedUsageTaskIds.push(taskIds)
+			queriedUsageRanges.push(rangeMs)
 			return new Map(taskIds.map((taskId) => [taskId, usageByTaskId.get(taskId) ?? makeUsageRow({ taskId })]))
 		},
-		queryEventsByTaskIds(taskIds) {
+		queryEventsByTaskIds(taskIds, rangeMs) {
 			queriedEventTaskIds.push(taskIds)
-			return events.filter((event) => taskIds.includes(event.taskId))
+			queriedEventRanges.push(rangeMs)
+			return events.filter(
+				(event) =>
+					taskIds.includes(event.taskId) &&
+					isWithinStatsQueryRange(rangeMs, new Date(event.occurredAt).getTime()),
+			)
 		},
 	}
 }
@@ -240,14 +257,11 @@ describe("DashboardTaskProjection", () => {
 			makeHistoryItem({ id: "child", ts: 200, task: "Child", parentTaskId: "root" }),
 			makeHistoryItem({ id: "other", ts: 100, task: "Other" }),
 		])
-		const reader = createUsageReader(
-			new Map(),
-			[
-				{ ...makeEvent({ taskId: "child", model: "child-model", mode: "ask" }), sequence: 2 },
-				{ ...makeEvent({ taskId: "root", model: "root-model", mode: "code" }), sequence: 1 },
-				{ ...makeEvent({ taskId: "other" }), sequence: 3 },
-			],
-		)
+		const reader = createUsageReader(new Map(), [
+			{ ...makeEvent({ taskId: "child", model: "child-model", mode: "ask" }), sequence: 2 },
+			{ ...makeEvent({ taskId: "root", model: "root-model", mode: "code" }), sequence: 1 },
+			{ ...makeEvent({ taskId: "other" }), sequence: 3 },
+		])
 
 		const detail = computeTaskDetail(catalog, reader, "root", "request-5")
 
@@ -258,6 +272,74 @@ describe("DashboardTaskProjection", () => {
 		expect(detail.models).toEqual(["root-model", "child-model"])
 		expect(detail.modes).toEqual(["code", "ask"])
 		expect(detail.apiCalls.map((call) => call.model)).toEqual(["root-model", "child-model"])
+		catalog.dispose()
+	})
+
+	it("pages only tasks created within the range and threads the range to usage reads", () => {
+		const catalog = createCatalog([
+			makeHistoryItem({ id: "in-range", ts: 200, task: "In range" }),
+			makeHistoryItem({ id: "out-of-range", ts: 50, task: "Out of range" }),
+		])
+		const reader = createUsageReader(
+			new Map([["in-range", makeUsageRow({ taskId: "in-range", totalTokens: 42, eventCount: 2 })]]),
+		)
+		const rangeMs = { fromMs: 100, toMs: 300 }
+
+		const page = computeTaskPage(catalog, reader, "request-6", undefined, 50, rangeMs)
+
+		expect(page.tasks.map((task) => task.taskId)).toEqual(["in-range"])
+		expect(page.totalEstimate).toBe(1)
+		expect(page.tasks[0]).toMatchObject({ totalTokens: 42, eventCount: 2 })
+		expect(reader.queriedUsageRanges).toEqual([rangeMs])
+		catalog.dispose()
+	})
+
+	it("drops summaries for tasks created outside the range while keeping unbounded behavior", () => {
+		const catalog = createCatalog([
+			makeHistoryItem({ id: "in-range", ts: 200, task: "In range" }),
+			makeHistoryItem({ id: "out-of-range", ts: 50, task: "Out of range" }),
+		])
+		const reader = createUsageReader()
+		const rangeMs = { fromMs: 100, toMs: 300 }
+
+		const ranged = computeTaskSummaries(catalog, reader, ["in-range", "out-of-range", "unknown"], rangeMs)
+		expect(ranged.map((task) => task.taskId)).toEqual(["in-range"])
+		expect(reader.queriedUsageRanges).toEqual([rangeMs])
+
+		// Without a range, every catalog task keeps its summary.
+		const unbounded = computeTaskSummaries(catalog, reader, ["in-range", "out-of-range", "unknown"])
+		expect(unbounded.map((task) => task.taskId)).toEqual(["in-range", "out-of-range"])
+		catalog.dispose()
+	})
+
+	it("filters task detail events to the range", () => {
+		const catalog = createCatalog([
+			makeHistoryItem({ id: "root", ts: 300, task: "Root" }),
+			makeHistoryItem({ id: "child", ts: 200, task: "Child", parentTaskId: "root" }),
+		])
+		const reader = createUsageReader(new Map(), [
+			{
+				...makeEvent({ taskId: "root", model: "root-model", occurredAt: "2026-08-01T00:00:00.000Z" }),
+				sequence: 1,
+			},
+			{
+				...makeEvent({ taskId: "child", model: "child-model", occurredAt: "2026-07-01T00:00:00.000Z" }),
+				sequence: 2,
+			},
+		])
+		const rangeMs = {
+			fromMs: Date.parse("2026-07-15T00:00:00.000Z"),
+			toMs: Date.parse("2026-08-15T00:00:00.000Z"),
+		}
+
+		const detail = computeTaskDetail(catalog, reader, "root", "request-7", rangeMs)
+
+		expect(reader.queriedEventRanges).toEqual([rangeMs])
+		expect(detail.callCount).toBe(1)
+		expect(detail.totalTokens).toBe(15)
+		expect(detail.totalCost).toBeCloseTo(0.01)
+		expect(detail.models).toEqual(["root-model"])
+		expect(detail.apiCalls.map((call) => call.model)).toEqual(["root-model"])
 		catalog.dispose()
 	})
 })

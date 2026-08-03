@@ -2,11 +2,12 @@ import * as vscode from "vscode"
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
-import { UsageAggregator, startOfDayInTimezone } from "./UsageAggregator"
+import { UsageAggregator } from "./UsageAggregator"
 import { UsageStatsDatabase } from "./UsageStatsDatabase"
 import { UsageStatsMigration } from "./UsageStatsMigration"
 import { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
+import { isWithinStatsQueryRange, resolveStatsQueryRangeMs } from "./statsQueryRange"
 
 // ── Export Format ───────────────────────────────────────────────────────────
 
@@ -479,26 +480,11 @@ export class UsageStatsService {
 	 * Handles time range and includeCancelled.
 	 */
 	private filterEventsByQuery(events: UsageEventV1[], query: StatsQuery): UsageEventV1[] {
-		// Time range
-		let from: Date | undefined
-		let to: Date | undefined
-
-		if (query.preset) {
-			const now = new Date()
-			const range = this.resolvePresetRange(query.preset, query.timezone, now)
-			from = range.from
-			to = range.to
-		} else {
-			from = query.from ? new Date(query.from) : undefined
-			to = query.to ? new Date(query.to) : undefined
-		}
-
-		let filtered = events.filter((event) => {
-			const eventTime = new Date(event.occurredAt).getTime()
-			if (from && eventTime < from.getTime()) return false
-			if (to && eventTime >= to.getTime()) return false
-			return true
-		})
+		// Time range (half-open: fromMs <= t < toMs), resolved by the shared
+		// range module so export/getFilteredEvents and the Dashboard "Tasks"
+		// list can never drift apart.
+		const rangeMs = resolveStatsQueryRangeMs(query)
+		let filtered = events.filter((event) => isWithinStatsQueryRange(rangeMs, new Date(event.occurredAt).getTime()))
 
 		// Cancelled filtering
 		const includeCancelled = query.includeCancelled ?? false
@@ -507,42 +493,6 @@ export class UsageStatsService {
 		}
 
 		return filtered
-	}
-
-	/**
-	 * Computes the time range from a preset.
-	 */
-	private resolvePresetRange(
-		preset: NonNullable<StatsQuery["preset"]>,
-		timezone: string,
-		now: Date,
-	): { from?: Date; to?: Date } {
-		const tzNow = startOfDayInTimezone(now, timezone)
-
-		switch (preset) {
-			case "today": {
-				const from = new Date(tzNow)
-				const to = new Date(from)
-				to.setDate(to.getDate() + 1)
-				return { from, to }
-			}
-			case "7d": {
-				const to = new Date(tzNow)
-				to.setDate(to.getDate() + 1)
-				const from = new Date(to)
-				from.setDate(from.getDate() - 7)
-				return { from, to }
-			}
-			case "30d": {
-				const to = new Date(tzNow)
-				to.setDate(to.getDate() + 1)
-				const from = new Date(to)
-				from.setDate(from.getDate() - 30)
-				return { from, to }
-			}
-			case "all":
-				return {}
-		}
 	}
 
 	// ── Internal: CSV ────────────────────────────────────────────────────────

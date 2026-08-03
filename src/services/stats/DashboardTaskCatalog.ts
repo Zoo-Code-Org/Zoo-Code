@@ -2,6 +2,8 @@ import * as vscode from "vscode"
 
 import type { HistoryItem } from "@roo-code/types"
 
+import { isStatsQueryRangeBounded, isWithinStatsQueryRange, type StatsQueryRangeMs } from "./statsQueryRange"
+
 /** The read-only TaskHistoryStore surface consumed by the task catalog. */
 export interface DashboardTaskCatalogSource {
 	getAll(): HistoryItem[]
@@ -25,13 +27,14 @@ export interface DashboardTaskCatalogPage {
 	totalEstimate: number
 }
 
-export type DashboardTaskCatalogErrorCode =
-	| "DASHBOARD_TASK_CATALOG/getPage/001"
-	| "DASHBOARD_TASK_CATALOG/getPage/002"
+export type DashboardTaskCatalogErrorCode = "DASHBOARD_TASK_CATALOG/getPage/001" | "DASHBOARD_TASK_CATALOG/getPage/002"
 
 /** An invalid or stale page cursor. */
 export class DashboardTaskCatalogError extends Error {
-	constructor(public readonly code: DashboardTaskCatalogErrorCode, message: string) {
+	constructor(
+		public readonly code: DashboardTaskCatalogErrorCode,
+		message: string,
+	) {
 		super(`[${code}] ${message}`)
 		this.name = "DashboardTaskCatalogError"
 	}
@@ -161,20 +164,62 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 	/**
 	 * Uses a compound `(ts DESC, id DESC)` cursor. Cursors from older snapshots
 	 * are rejected so pages never combine task catalog revisions.
+	 *
+	 * When `rangeMs` is bounded, membership is filtered on the task's creation
+	 * timestamp (`HistoryItem.ts`) within the half-open `[fromMs, toMs)` range;
+	 * ordering, cursor semantics, and `totalEstimate` (now the filtered count)
+	 * are otherwise unchanged. An absent or unbounded range keeps the legacy
+	 * unfiltered behavior.
 	 */
-	getPage(cursor?: string, limit: number = DEFAULT_PAGE_LIMIT): DashboardTaskCatalogPage {
+	getPage(
+		cursor?: string,
+		limit: number = DEFAULT_PAGE_LIMIT,
+		rangeMs?: StatsQueryRangeMs,
+	): DashboardTaskCatalogPage {
 		const pageLimit = normalizePageLimit(limit)
 		const startIndex = cursor ? this.findPageStartIndex(this.decodeCursor(cursor)) : 0
-		const tasks = this.snapshot.orderedTaskIds.slice(startIndex, startIndex + pageLimit)
-		const lastTaskId = tasks.at(-1)
 
+		if (!isStatsQueryRangeBounded(rangeMs)) {
+			const tasks = this.snapshot.orderedTaskIds.slice(startIndex, startIndex + pageLimit)
+			const lastTaskId = tasks.at(-1)
+
+			return {
+				tasks: [...tasks],
+				cursor:
+					lastTaskId && startIndex + tasks.length < this.snapshot.orderedTaskIds.length
+						? this.encodeCursor(lastTaskId)
+						: undefined,
+				totalEstimate: this.snapshot.orderedTaskIds.length,
+			}
+		}
+
+		const orderedTaskIds = this.snapshot.orderedTaskIds
+		const tasks: string[] = []
+		let totalEstimate = 0
+		let hasMore = false
+
+		for (let index = 0; index < orderedTaskIds.length; index++) {
+			const taskId = orderedTaskIds[index]
+			const item = this.snapshot.byId.get(taskId)!
+			if (!isWithinStatsQueryRange(rangeMs, item.ts)) {
+				continue
+			}
+			totalEstimate += 1
+			if (index < startIndex) {
+				continue
+			}
+			if (tasks.length < pageLimit) {
+				tasks.push(taskId)
+			} else {
+				hasMore = true
+			}
+		}
+
+		const lastTaskId = tasks.at(-1)
 		return {
-			tasks: [...tasks],
-			cursor:
-				lastTaskId && startIndex + tasks.length < this.snapshot.orderedTaskIds.length
-					? this.encodeCursor(lastTaskId)
-					: undefined,
-			totalEstimate: this.snapshot.orderedTaskIds.length,
+			tasks,
+			cursor: lastTaskId && hasMore ? this.encodeCursor(lastTaskId) : undefined,
+			totalEstimate,
 		}
 	}
 
@@ -308,7 +353,9 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 
 	private decodeCursor(cursor: string): DashboardTaskCatalogCursor {
 		try {
-			const decoded = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as Partial<DashboardTaskCatalogCursor>
+			const decoded = JSON.parse(
+				Buffer.from(cursor, "base64url").toString("utf8"),
+			) as Partial<DashboardTaskCatalogCursor>
 			if (
 				decoded.v !== 1 ||
 				typeof decoded.r !== "number" ||

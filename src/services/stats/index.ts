@@ -33,3 +33,6 @@ export { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
 export type { StatsStreamSink, StatsStreamErrorCode } from "./UsageStatsStreamCoordinator"
 
 export { getEffectiveCost, computeEventCost, lookupModelInfo } from "./costRecalculation"
+
+export { resolveStatsQueryRangeMs, isStatsQueryRangeBounded, isWithinStatsQueryRange } from "./statsQueryRange"
+export type { StatsQueryRangeMs } from "./statsQueryRange"
