@@ -381,6 +381,35 @@ describe("DashboardView (streaming)", () => {
 			expect(call[1]).toBe(30) // heatmapRangeDays for 30d
 			expect(call[2]).toBe(50) // sessionPageSize
 		})
+
+		it("does not re-arm the resync indicator when the active preset is clicked again", async () => {
+			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
+
+			setConnectedState({ generatedAt: "2026-08-01T00:00:00Z" })
+			rerender(<DashboardView onDone={() => {}} />)
+
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
+			})
+
+			// First click on a different preset: indicator shows, replace fires.
+			const btn7d = container.querySelector('[data-testid="dashboard-range-7d"]') as HTMLButtonElement
+			fireEvent.click(btn7d)
+			expect(container.querySelector('[data-testid="dashboard-resyncing"]')).toBeTruthy()
+
+			// New snapshot arrives -> indicator clears.
+			setStreamState({ generatedAt: "2026-08-02T00:00:00Z" })
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-resyncing"]')).toBeFalsy()
+			})
+
+			// Clicking the now-active preset again must not re-arm the indicator:
+			// no resubscription happens, so no snapshot would ever clear it.
+			replaceSubscriptionMock.mockClear()
+			fireEvent.click(btn7d)
+			expect(replaceSubscriptionMock).not.toHaveBeenCalled()
+			expect(container.querySelector('[data-testid="dashboard-resyncing"]')).toBeFalsy()
+		})
 	})
 
 	// ── 4. GroupBy change triggers replaceSubscription ─────────────────────

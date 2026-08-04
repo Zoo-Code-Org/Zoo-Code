@@ -206,6 +206,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 			// For custom preset, only replace if both dates are present
 			if (preset === "custom" && (!customFrom || !customTo)) {
+				setIsResyncing(false)
 				return
 			}
 
@@ -276,10 +277,17 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	// ── Preset / groupBy / heatmap range handlers ───────────────────────────
 
-	const handlePresetChange = useCallback((newPreset: DashboardPreset) => {
-		setPreset(newPreset)
-		setIsResyncing(true)
-	}, [])
+	const handlePresetChange = useCallback(
+		(newPreset: DashboardPreset) => {
+			// Ignore re-clicks of the active preset: no resubscription happens, so
+			// no new snapshot would ever arrive to clear the resyncing banner
+			// (double-click previously left it spinning forever).
+			if (newPreset === preset) return
+			setPreset(newPreset)
+			setIsResyncing(true)
+		},
+		[preset],
+	)
 
 	const handleGroupByChange = useCallback((newGroupBy: DashboardGroupBy) => {
 		setGroupBy(newGroupBy)
