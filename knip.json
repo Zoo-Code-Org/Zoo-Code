@@ -73,11 +73,11 @@
 	},
 	"rules": {
 		"classMembers": "off",
-		"duplicates": "off",
-		"enumMembers": "off",
-		"exports": "off",
-		"nsExports": "off",
-		"types": "off",
-		"nsTypes": "off"
+		"duplicates": "warn",
+		"enumMembers": "warn",
+		"exports": "warn",
+		"nsExports": "warn",
+		"types": "warn",
+		"nsTypes": "warn"
 	}
 }
