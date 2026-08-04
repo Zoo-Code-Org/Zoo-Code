@@ -2,21 +2,21 @@ import { z } from "zod"
 
 // ── Enums ──────────────────────────────────────────────────────────────────
 
-/** LLM API 호출의 최종 상태 */
+/** Final status of an LLM API call */
 export const UsageEventStatus = z.enum(["completed", "failed", "cancelled"])
 export type UsageEventStatus = z.infer<typeof UsageEventStatus>
 
-/** 토큰 사용량 값의 출처 */
+/** Source of a token usage value */
 export const UsageValueSource = z.enum(["provider", "estimated", "backfilled"])
 export type UsageValueSource = z.infer<typeof UsageValueSource>
 
-/** 토큰 중복 계산 여부 (예: cacheRead이 inputTokens에 포함되어 있는지) */
+/** Whether a token field is double-counted (e.g. cacheRead included in inputTokens) */
 export const InclusionRule = z.enum(["included", "excluded", "unknown"])
 export type InclusionRule = z.infer<typeof InclusionRule>
 
 // ── SourcedNumber ──────────────────────────────────────────────────────────
 
-/** 값과 그 출처를 함께 표현 */
+/** A numeric value paired with its source */
 export const SourcedNumber = z.object({
 	value: z.number(),
 	source: UsageValueSource,
@@ -26,11 +26,11 @@ export type SourcedNumber = z.infer<typeof SourcedNumber>
 // ── UsageEventV1 ────────────────────────────────────────────────────────────
 
 /**
- * 단일 LLM API 호출의 사용량 이벤트.
- * schemaVersion 1 — 향후 스키마 변경 시 버전을 올립니다.
+ * A usage event for a single LLM API call.
+ * schemaVersion 1 — bump when the schema changes.
  *
- * 보안: prompt 본문, response 본문, API key, workspace path는
- * 이 스키마에 절대 포함하지 않습니다.
+ * Security: prompt bodies, response bodies, API keys, and workspace paths
+ * must never be included in this schema.
  */
 export const UsageEventV1 = z.object({
 	schemaVersion: z.literal(1),
@@ -42,9 +42,24 @@ export const UsageEventV1 = z.object({
 	attempt: z.number(),
 	taskId: z.string(),
 	parentTaskId: z.string().optional(),
+	/**
+	 * Stable root-session identity for dashboard streaming.
+	 * Resolved from the task hierarchy by the recorder; migration resolves
+	 * legacy parent chains with the existing cycle guard. Absent on events
+	 * recorded before this field was introduced (backward compatible).
+	 */
+	rootTaskId: z.string().optional(),
 	provider: z.string(),
 	model: z.string(),
 	mode: z.string(),
+	/**
+	 * Domain extracted from the provider's custom base URL (e.g. "kimi.ai",
+	 * "localhost:1234"). Only set when the user configured a custom base URL
+	 * that differs from the provider's default. Absent for default endpoints
+	 * and for providers without a base URL field. Backward compatible:
+	 * events recorded before this field was introduced remain valid.
+	 */
+	endpoint: z.string().optional(),
 	usage: z.object({
 		inputTokens: SourcedNumber.optional(),
 		outputTokens: SourcedNumber.optional(),
@@ -65,7 +80,7 @@ export type UsageEventV1 = z.infer<typeof UsageEventV1>
 
 // ── StatsQuery ──────────────────────────────────────────────────────────────
 
-/** 통계 조회 쿼리 */
+/** Statistics query */
 export const StatsQuery = z.object({
 	from: z.string().optional(), // ISO 8601
 	to: z.string().optional(),
@@ -73,12 +88,18 @@ export const StatsQuery = z.object({
 	timezone: z.string(), // IANA
 	groupBy: z.array(z.enum(["day", "week", "month", "provider", "model", "mode", "status", "source"])).max(3),
 	includeCancelled: z.boolean().default(false),
+	/**
+	 * Cache ratio for estimation when provider doesn't report cacheReadTokens.
+	 * Default: 0.94 (94% of input tokens are estimated as cached)
+	 * Range: 0.0 to 1.0
+	 */
+	cacheRatio: z.number().min(0).max(1).optional(),
 })
 export type StatsQuery = z.infer<typeof StatsQuery>
 
 // ── StatsBucket ──────────────────────────────────────────────────────────────
 
-/** 그룹화된 통계 버킷 */
+/** Grouped statistics bucket */
 export const StatsBucket = z.object({
 	key: z.record(z.string()),
 	events: z.number(),
@@ -98,7 +119,7 @@ export type StatsBucket = z.infer<typeof StatsBucket>
 
 // ── StatsSnapshot ────────────────────────────────────────────────────────────
 
-/** 통계 조회 결과 스냅샷 */
+/** Statistics query result snapshot */
 export const StatsSnapshot = z.object({
 	query: StatsQuery,
 	generatedAt: z.string(),
@@ -112,3 +133,64 @@ export const StatsSnapshot = z.object({
 	}),
 })
 export type StatsSnapshot = z.infer<typeof StatsSnapshot>
+
+// ── SessionSummary / SessionDetail / APICallRecord ──────────────────────────
+
+/**
+ * A summary of a single task session, aggregated from all usage events that
+ * share the same `taskId`. Used by the Dashboard "Sessions" list.
+ *
+ * Security: does not include prompt bodies, response bodies, API keys, or
+ * workspace paths. The `title` is derived from the first user message text
+ * (truncated); if unavailable, falls back to the taskId.
+ */
+export interface SessionSummary {
+	taskId: string
+	title: string // First line of user input (truncated); falls back to taskId
+	timestamp: number // Last activity (epoch ms)
+	model: string // First-seen model (kept for backward compatibility)
+	provider: string
+	mode: string // First-seen mode (kept for backward compatibility)
+	/**
+	 * All unique models used in the session, in first-seen order.
+	 * A session may switch models (e.g. orchestrator delegating to a
+	 * different provider), so this array captures the full set while
+	 * `model` retains the earliest value for backward compatibility.
+	 */
+	models: string[]
+	/**
+	 * All unique modes used in the session, in first-seen order.
+	 * A session may span multiple modes (e.g. orchestrator-crow
+	 * delegating to code, debug, ask), so this array captures the full
+	 * set while `mode` retains the earliest value for backward compat.
+	 */
+	modes: string[]
+	totalTokens: number
+	totalCost: number
+	callCount: number
+}
+
+/**
+ * Detailed view of a single session, including the per-API-call records.
+ * Used by the Dashboard session detail expansion (Commit 4).
+ */
+export interface SessionDetail extends SessionSummary {
+	apiCalls: APICallRecord[]
+}
+
+/**
+ * A single API call record within a session, used in `SessionDetail.apiCalls`.
+ */
+export interface APICallRecord {
+	index: number
+	mode: string
+	timestamp: number
+	inputTokens: number
+	outputTokens: number
+	cacheReadTokens: number
+	cacheWriteTokens: number
+	reasoningTokens: number
+	costUsd: number
+	status: "completed" | "failed" | "cancelled"
+	model: string
+}

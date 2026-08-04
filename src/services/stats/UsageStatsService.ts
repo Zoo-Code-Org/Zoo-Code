@@ -1,3 +1,4 @@
+import * as vscode from "vscode"
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
@@ -7,7 +8,7 @@ import { UsageAggregator } from "./UsageAggregator"
 
 export type ExportFormat = "json" | "csv"
 
-/** JSON export 결과 */
+/** JSON export result */
 export interface JsonExport {
 	exportSchemaVersion: 1
 	exportedAt: string
@@ -18,9 +19,9 @@ export interface JsonExport {
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
 export type StatsServiceErrorCode =
-	| "STATS_SERVICE/export/001" // 지원하지 않는 format
-	| "STATS_SERVICE/clear/001" // nonce 불일치
-	| "STATS_SERVICE/backfill/001" // backfill 실패
+	| "STATS_SERVICE/export/001" // Unsupported format
+	| "STATS_SERVICE/clear/001" // Nonce mismatch
+	| "STATS_SERVICE/backfill/001" // Backfill failed
 
 export class StatsServiceError extends Error {
 	constructor(
@@ -36,9 +37,9 @@ export class StatsServiceError extends Error {
 // ── CSV Column Order ────────────────────────────────────────────────────────
 
 /**
- * CSV export의 고정 column 순서.
- * 누락 값은 빈 cell, 0은 `0`.
- * source와 inclusion field를 별도 column으로 둔다.
+ * Fixed column order for CSV export.
+ * Missing values become empty cells, 0 becomes `0`.
+ * Source and inclusion fields are placed in separate columns.
  */
 const CSV_COLUMNS = [
 	"eventId",
@@ -70,31 +71,47 @@ const CSV_COLUMNS = [
 	"cacheWriteInInput",
 	"reasoningInOutput",
 	"provenance",
+	"rootTaskId",
+	"endpoint",
 ] as const
 
 // ── UsageStatsService ───────────────────────────────────────────────────────
 
 /**
- * 통계 서비스 facade.
- * UsageEventStore과 UsageAggregator를 통합하여 제공한다.
+ * Statistics service facade.
+ * Integrates UsageEventStore and UsageAggregator.
  *
- * 설계 원칙 (아키텍처 보고서 섹션 5.15-5.17):
- * - query: 집계 엔진을 통한 통계 조회
- * - export: JSON/CSV 형식으로 통계 내보내기
- * - clear: nonce 검증 후 통계 데이터 삭제
- * - backfill: 과거 task history에서 이벤트 복원
+ * Design principles (architecture report section 5.15-5.17):
+ * - query: Query statistics via the aggregation engine
+ * - export: Export statistics in JSON/CSV format
+ * - clear: Delete statistics data after nonce verification
+ * - backfill: Restore events from past task history
  *
- * 보안: prompt, response, API key, workspace path를 저장하지 않는다.
+ * Security: does not store prompt, response, API key, or workspace path.
  */
 export class UsageStatsService {
 	private readonly store: UsageEventStore
 	private readonly aggregator: UsageAggregator
+	private readonly storageDir: string
 
-	/** clear 검증용 nonce (짧은 수명) */
+	/** Nonce for clear verification (short-lived) */
 	private clearNonce: string | null = null
 	private clearNonceExpiresAt: number = 0
 
+	/**
+	 * File system watcher for cross-window change detection.
+	 * Watches events-*.ndjson in the globalStorage usage-stats directory.
+	 */
+	private watcher: vscode.FileSystemWatcher | null = null
+
+	/**
+	 * Listeners registered for external change notifications.
+	 * Fires when another VS Code window writes to the usage stats files.
+	 */
+	private readonly changeListeners: Array<() => void> = []
+
 	constructor(globalStoragePath: string) {
+		this.storageDir = globalStoragePath
 		this.store = new UsageEventStore(globalStoragePath)
 		this.aggregator = new UsageAggregator()
 	}
@@ -102,42 +119,73 @@ export class UsageStatsService {
 	// ── Public API ──────────────────────────────────────────────────────────
 
 	/**
-	 * 서비스를 초기화한다.
-	 * 저장소 초기화를 수행한다.
+	 * Initializes the service.
+	 * Performs store initialization and sets up the file system watcher.
 	 */
 	async initialize(): Promise<void> {
 		await this.store.initialize()
+		this.setupFileWatcher()
 	}
 
 	/**
-	 * 통계를 조회한다.
-	 *
-	 * @param query 통계 조회 쿼리
-	 * @param options 추가 옵션
-	 * @returns 통계 스냅샷
+	 * Disposes the service, releasing the file system watcher.
 	 */
-	async queryStats(
-		query: StatsQuery,
-		options: { recordingPaused?: boolean } = {},
-	): Promise<StatsSnapshot> {
+	dispose(): void {
+		this.watcher?.dispose()
+		this.watcher = null
+		this.changeListeners.length = 0
+	}
+
+	/**
+	 * Registers a listener that fires when the usage stats files change on disk.
+	 * Returns a disposable that unregisters the listener.
+	 */
+	onDidChange(listener: () => void): { dispose(): void } {
+		this.changeListeners.push(listener)
+		return {
+			dispose: () => {
+				const idx = this.changeListeners.indexOf(listener)
+				if (idx >= 0) {
+					this.changeListeners.splice(idx, 1)
+				}
+			},
+		}
+	}
+
+	/**
+	 * Appends a usage event to the shared store.
+	 * This is the single in-process write entry for live recordings.
+	 * Delegates to the owned UsageEventStore.
+	 *
+	 * @returns true if appended, false if deduplicated
+	 */
+	append(event: UsageEventV1): Promise<boolean> {
+		return this.store.append(event)
+	}
+
+	/**
+	 * Queries statistics.
+	 *
+	 * @param query Statistics query
+	 * @param options Additional options
+	 * @returns Statistics snapshot
+	 */
+	async queryStats(query: StatsQuery, options: { recordingPaused?: boolean } = {}): Promise<StatsSnapshot> {
 		const events = await this.store.readAll()
 		return this.aggregator.query(events, query, options)
 	}
 
 	/**
-	 * 통계를 내보낸다.
+	 * Exports statistics.
 	 *
-	 * @param query 통계 조회 쿼리 (export 대상 범위)
-	 * @param format 내보낼 형식 ("json" 또는 "csv")
-	 * @returns JSON인 경우 객체, CSV인 경우 문자열
+	 * @param query Statistics query (export target range)
+	 * @param format Export format ("json" or "csv")
+	 * @returns Object for JSON, string for CSV
 	 */
-	async exportStats(
-		query: StatsQuery,
-		format: ExportFormat,
-	): Promise<JsonExport | string> {
+	async exportStats(query: StatsQuery, format: ExportFormat): Promise<JsonExport | string> {
 		const events = await this.store.readAll()
 
-		// 시간 범위 필터링
+		// Time range filtering
 		const filtered = this.filterEventsByQuery(events, query)
 
 		switch (format) {
@@ -161,63 +209,71 @@ export class UsageStatsService {
 	}
 
 	/**
-	 * 통계 삭제를 위한 nonce를 발급한다.
-	 * UI 1차 confirmation dialog 후 Host가 이 메서드를 호출한다.
+	 * Returns the raw events filtered by the query's time range and
+	 * includeCancelled flag. This avoids the JSON serialize/parse round-trip
+	 * that `exportStats(query, "json")` performs for callers that only need
+	 * in-memory events (e.g., dashboard session grouping).
 	 *
-	 * @returns 짧은 수명의 nonce (5분 유효)
+	 * @param query Statistics query
+	 * @returns Filtered events
+	 */
+	async getFilteredEvents(query: StatsQuery): Promise<UsageEventV1[]> {
+		const events = await this.store.readAll()
+		return this.filterEventsByQuery(events, query)
+	}
+
+	/**
+	 * Issues a nonce for statistics deletion.
+	 * The Host calls this method after the UI's first confirmation dialog.
+	 *
+	 * @returns Short-lived nonce (valid for 5 minutes)
 	 */
 	issueClearNonce(): string {
 		const nonce = this.generateNonce()
 		this.clearNonce = nonce
-		// 5분 유효
+		// Valid for 5 minutes
 		this.clearNonceExpiresAt = Date.now() + 5 * 60 * 1000
 		return nonce
 	}
 
 	/**
-	 * 통계 데이터를 삭제한다.
-	 * nonce가 유효해야 한다 (5분 이내, 1회용).
+	 * Deletes statistics data.
+	 * The nonce must be valid (within 5 minutes, single-use).
 	 *
-	 * @param nonce issueClearNonce()로 발급받은 nonce
-	 * @throws StatsServiceError nonce 불일치 또는 만료 시
+	 * @param nonce Nonce issued by issueClearNonce()
+	 * @throws StatsServiceError on nonce mismatch or expiration
 	 */
 	async clearStats(nonce: string): Promise<void> {
-		// nonce 검증
+		// Nonce verification
 		if (!this.clearNonce || this.clearNonce !== nonce) {
-			throw new StatsServiceError(
-				"STATS_SERVICE/clear/001",
-				"Invalid clear nonce: nonce mismatch",
-			)
+			throw new StatsServiceError("STATS_SERVICE/clear/001", "Invalid clear nonce: nonce mismatch")
 		}
 
 		if (Date.now() > this.clearNonceExpiresAt) {
 			this.clearNonce = null
-			throw new StatsServiceError(
-				"STATS_SERVICE/clear/001",
-				"Invalid clear nonce: nonce expired",
-			)
+			throw new StatsServiceError("STATS_SERVICE/clear/001", "Invalid clear nonce: nonce expired")
 		}
 
-		// 1회용 nonce 소비
+		// Consume single-use nonce
 		this.clearNonce = null
 
-		// 저장소 clear
+		// Clear the store
 		await this.store.clear()
 	}
 
 	/**
-	 * 과거 task history에서 사용량 이벤트를 복원한다.
-	 * Commit 3의 UsageRecorder에서 실제 구현 시 호출된다.
+	 * Restores usage events from past task history.
+	 * Called when UsageRecorder in Commit 3 is actually implemented.
 	 *
-	 * @param events 복원할 이벤트 배열
-	 * @returns 복원된 이벤트 수 (dedupe로 인해 실제 append된 수는 다를 수 있음)
+	 * @param events Array of events to restore
+	 * @returns Number of restored events (actual appended count may differ due to dedupe)
 	 */
 	async backfillFromHistory(events: UsageEventV1[]): Promise<number> {
 		let appended = 0
 
 		for (const event of events) {
 			try {
-				// provenance가 "history-backfill"이어야 함
+				// provenance must be "history-backfill"
 				const backfillEvent: UsageEventV1 = {
 					...event,
 					provenance: "history-backfill",
@@ -227,7 +283,7 @@ export class UsageStatsService {
 					appended++
 				}
 			} catch (err) {
-				// storage 오류는 LLM task를 실패시키지 않음
+				// Storage errors do not fail the LLM task
 				if (err instanceof StatsStoreError) {
 					console.warn(`[UsageStatsService] backfill append failed for event ${event.eventId}:`, err)
 				} else {
@@ -244,20 +300,57 @@ export class UsageStatsService {
 	}
 
 	/**
-	 * 저장소가 hard cap에 도달했는지 확인한다.
+	 * Checks whether the store has reached the hard cap.
 	 */
 	isCapped(): boolean {
 		return this.store.isCapped()
 	}
 
+	// ── Internal: File Watcher ──────────────────────────────────────────────
+
+	/**
+	 * Sets up a FileSystemWatcher on the usage-stats directory to detect
+	 * changes made by other VS Code windows. When another window writes to
+	 * events-*.ndjson, this window emits onDidChange so the local webview
+	 * can refresh its dashboard.
+	 */
+	private setupFileWatcher(): void {
+		try {
+			// globalStorageUri is outside the workspace, so RelativePattern
+			// may not match. Use a glob pattern on the absolute path instead.
+			const pattern = new vscode.RelativePattern(this.storageDir, "usage-stats/events-*.ndjson")
+			this.watcher = vscode.workspace.createFileSystemWatcher(pattern)
+
+			let debounceTimer: ReturnType<typeof setTimeout> | null = null
+			const notify = () => {
+				if (debounceTimer) {
+					clearTimeout(debounceTimer)
+				}
+				debounceTimer = setTimeout(() => {
+					for (const listener of this.changeListeners) {
+						listener()
+					}
+					debounceTimer = null
+				}, 300)
+			}
+
+			this.watcher.onDidChange(notify)
+			this.watcher.onDidCreate(notify)
+		} catch {
+			// Watcher setup failure is non-fatal — cross-window refresh
+			// will simply not work, but same-window refresh still does.
+			console.warn("[UsageStatsService] Failed to set up file watcher for cross-window stats sync")
+		}
+	}
+
 	// ── Internal: Event Filtering ───────────────────────────────────────────
 
 	/**
-	 * 쿼리 조건에 따라 이벤트를 필터링한다.
-	 * 시간 범위와 includeCancelled를 처리한다.
+	 * Filters events according to the query conditions.
+	 * Handles time range and includeCancelled.
 	 */
 	private filterEventsByQuery(events: UsageEventV1[], query: StatsQuery): UsageEventV1[] {
-		// 시간 범위
+		// Time range
 		let from: Date | undefined
 		let to: Date | undefined
 
@@ -278,7 +371,7 @@ export class UsageStatsService {
 			return true
 		})
 
-		// cancelled 필터링
+		// Cancelled filtering
 		const includeCancelled = query.includeCancelled ?? false
 		if (!includeCancelled) {
 			filtered = filtered.filter((e) => e.status !== "cancelled")
@@ -288,7 +381,7 @@ export class UsageStatsService {
 	}
 
 	/**
-	 * preset에서 시간 범위를 계산한다.
+	 * Computes the time range from a preset.
 	 */
 	private resolvePresetRange(
 		preset: NonNullable<StatsQuery["preset"]>,
@@ -324,7 +417,7 @@ export class UsageStatsService {
 	}
 
 	/**
-	 * timezone 기준으로 해당 날짜의 00:00:00 UTC를 반환한다.
+	 * Returns the 00:00:00 UTC for the given date based on the timezone.
 	 */
 	private toTimezoneStartOfDay(date: Date, timezone: string): Date {
 		const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -339,16 +432,16 @@ export class UsageStatsService {
 		const month = get("month") - 1
 		const day = get("day")
 
-		// timezone의 wall-clock 자정을 UTC로 변환
+		// Convert timezone wall-clock midnight to UTC
 		const midnightEpoch = Date.UTC(year, month, day, 0, 0, 0)
 		const tzOffset = this.getTimezoneOffsetMinutes(date, timezone)
 		// tzOffset = UTC - (timezone wall-clock as UTC)
-		// timezone 자정의 실제 UTC = timezone 자정 wall-clock as UTC + tzOffset
+		// Actual UTC of timezone midnight = timezone midnight wall-clock as UTC + tzOffset
 		return new Date(midnightEpoch + tzOffset * 60 * 1000)
 	}
 
 	/**
-	 * 지정된 timezone에서의 UTC offset을 분 단위로 반환한다.
+	 * Returns the UTC offset for the specified timezone in minutes.
 	 */
 	private getTimezoneOffsetMinutes(date: Date, timezone: string): number {
 		const utcDate = new Date(date.toISOString())
@@ -378,12 +471,12 @@ export class UsageStatsService {
 	// ── Internal: CSV ────────────────────────────────────────────────────────
 
 	/**
-	 * 이벤트 배열을 CSV 문자열로 변환한다.
-	 * - event당 한 행
-	 * - 고정 column 순서
-	 * - 누락 값은 빈 cell, 0은 `0`
-	 * - source와 inclusion field를 별도 column으로 둔다
-	 * - spreadsheet formula injection 방지: `=`, `+`, `-`, `@`로 시작하면 `'`를 붙임
+	 * Converts an array of events to a CSV string.
+	 * - One row per event
+	 * - Fixed column order
+	 * - Missing values become empty cells, 0 becomes `0`
+	 * - Source and inclusion fields are placed in separate columns
+	 * - Prevents spreadsheet formula injection: prefixes `=`, `+`, `-`, `@` with `'`
 	 */
 	private eventsToCsv(events: UsageEventV1[]): string {
 		const rows: string[] = []
@@ -400,7 +493,7 @@ export class UsageStatsService {
 	}
 
 	/**
-	 * 단일 이벤트를 CSV 행으로 변환한다.
+	 * Converts a single event to a CSV row.
 	 */
 	private eventToCsvRow(event: UsageEventV1): string {
 		const values: string[] = []
@@ -414,7 +507,7 @@ export class UsageStatsService {
 	}
 
 	/**
-	 * 이벤트에서 column에 해당하는 값을 추출한다.
+	 * Extracts the value corresponding to a column from an event.
 	 */
 	private extractCsvValue(event: UsageEventV1, column: string): string {
 		switch (column) {
@@ -476,29 +569,33 @@ export class UsageStatsService {
 				return event.semantics.reasoningInOutput
 			case "provenance":
 				return event.provenance
+			case "rootTaskId":
+				return event.rootTaskId ?? ""
+			case "endpoint":
+				return event.endpoint ?? ""
 			default:
 				return ""
 		}
 	}
 
 	/**
-	 * CSV cell을 escape한다.
-	 * - spreadsheet formula injection 방지: `=`, `+`, `-`, `@`로 시작하면 `'`를 붙임
-	 * - 값에 `,`, `"`, `\n`이 포함되면 `"..."`로 감싸고 내부 `"`는 `""`로 escape
+	 * Escapes a CSV cell.
+	 * - Prevents spreadsheet formula injection: prefixes `=`, `+`, `-`, `@` with `'`
+	 * - If the value contains `,`, `"`, or `\n`, wraps it in `"..."` and escapes inner `"` as `""`
 	 */
 	private escapeCsvCell(value: string): string {
-		// 빈 값은 빈 cell
+		// Empty value becomes an empty cell
 		if (value === "") {
 			return ""
 		}
 
-		// formula injection 방지
+		// Prevent formula injection
 		let escaped = value
 		if (/^[=+\-@]/.test(escaped)) {
 			escaped = `'${escaped}`
 		}
 
-		// quoting 필요 여부
+		// Check if quoting is needed
 		if (/[",\n]/.test(escaped)) {
 			escaped = `"${escaped.replace(/"/g, '""')}"`
 		}
@@ -509,8 +606,8 @@ export class UsageStatsService {
 	// ── Internal: Nonce ─────────────────────────────────────────────────────
 
 	/**
-	 * 짧은 수명의 nonce를 생성한다.
-	 * crypto.randomUUID를 사용할 수 없는 환경을 위해 fallback을 제공한다.
+	 * Generates a short-lived nonce.
+	 * Provides a fallback for environments where crypto.randomUUID is unavailable.
 	 */
 	private generateNonce(): string {
 		try {
