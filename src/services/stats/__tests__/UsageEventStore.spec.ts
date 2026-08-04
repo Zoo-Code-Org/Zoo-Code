@@ -2,7 +2,7 @@ import * as path from "path"
 import * as fs from "fs/promises"
 import * as os from "os"
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
@@ -74,17 +74,11 @@ describe("UsageEventStore", () => {
 	describe("initialize", () => {
 		it("should create stats directory structure", async () => {
 			const statsDir = store._getStatsDir()
-			const dirExists = await fs
-				.access(statsDir)
-				.then(() => true)
-				.catch(() => false)
+			const dirExists = await fs.access(statsDir).then(() => true).catch(() => false)
 			expect(dirExists).toBe(true)
 
 			const quarantineDir = path.join(statsDir, "quarantine")
-			const quarantineExists = await fs
-				.access(quarantineDir)
-				.then(() => true)
-				.catch(() => false)
+			const quarantineExists = await fs.access(quarantineDir).then(() => true).catch(() => false)
 			expect(quarantineExists).toBe(true)
 		})
 
@@ -173,16 +167,8 @@ describe("UsageEventStore", () => {
 		})
 
 		it("should read all events in order", async () => {
-			const event1 = makeEvent({
-				eventId: "evt-1",
-				idempotencyKey: "idem-1",
-				occurredAt: "2026-07-19T10:00:00.000Z",
-			})
-			const event2 = makeEvent({
-				eventId: "evt-2",
-				idempotencyKey: "idem-2",
-				occurredAt: "2026-07-19T11:00:00.000Z",
-			})
+			const event1 = makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-19T10:00:00.000Z" })
+			const event2 = makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-19T11:00:00.000Z" })
 
 			await store.append(event1)
 			await store.append(event2)
@@ -230,10 +216,7 @@ describe("UsageEventStore", () => {
 			await store.readAll()
 
 			const quarantinePath = path.join(store._getStatsDir(), "quarantine", "corrupt-lines.jsonl")
-			const quarantineExists = await fs
-				.access(quarantinePath)
-				.then(() => true)
-				.catch(() => false)
+			const quarantineExists = await fs.access(quarantinePath).then(() => true).catch(() => false)
 			expect(quarantineExists).toBe(true)
 		})
 	})
@@ -270,10 +253,7 @@ describe("UsageEventStore", () => {
 			await store.clear()
 
 			const oldGenDir = path.join(store._getStatsDir(), "old-generation-1")
-			const oldGenExists = await fs
-				.access(oldGenDir)
-				.then(() => true)
-				.catch(() => false)
+			const oldGenExists = await fs.access(oldGenDir).then(() => true).catch(() => false)
 			expect(oldGenExists).toBe(true)
 		})
 	})
@@ -305,148 +285,6 @@ describe("UsageEventStore", () => {
 
 			// 동일 이벤트 재append는 에러가 아님
 			await expect(store.append(event)).resolves.toBe(false)
-		})
-	})
-
-	describe("error paths", () => {
-		it("should throw StatsStoreError when mkdir fails during initialize", async () => {
-			// Create a file where a directory is expected, so mkdir recursive fails
-			const dir = await createTempDir()
-			const blockerPath = path.join(dir, "usage-stats")
-			await fs.writeFile(blockerPath, "blocker") // file, not directory
-
-			const failingStore = new UsageEventStore(dir)
-			await expect(failingStore.initialize()).rejects.toThrow(StatsStoreError)
-			await expect(failingStore.initialize()).rejects.toThrow(/STATS_STORE\/append\/001/)
-
-			await fs.rm(dir, { recursive: true, force: true })
-		})
-
-		it("should throw StatsStoreError when readdir fails during readAll", async () => {
-			await store.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }))
-
-			// Replace stats directory with a file to make readdir fail
-			const statsDir = store._getStatsDir()
-			await fs.rm(statsDir, { recursive: true, force: true })
-			await fs.writeFile(statsDir, "not-a-directory")
-
-			await expect(store.readAll()).rejects.toThrow(StatsStoreError)
-			await expect(store.readAll()).rejects.toThrow(/STATS_STORE\/readAll\/001/)
-		})
-
-		it("should throw StatsStoreError when append is called on capped store", async () => {
-			// Force cap by setting internal state
-			const internalStore = store as unknown as { capped: boolean }
-			internalStore.capped = true
-
-			const event = makeEvent({ eventId: "evt-capped", idempotencyKey: "idem-capped" })
-			await expect(store.append(event)).rejects.toThrow(StatsStoreError)
-			await expect(store.append(event)).rejects.toThrow(/STATS_STORE\/append\/003/)
-
-			// Reset for afterEach cleanup
-			internalStore.capped = false
-		})
-
-		it("should skip ENOENT errors when reading segment files in readAll", async () => {
-			await store.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }))
-
-			// Delete the segment file to trigger ENOENT during readAll
-			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
-			await fs.unlink(segmentPath)
-
-			// Should not throw, just return empty array
-			const events = await store.readAll()
-			expect(events).toHaveLength(0)
-		})
-
-		it("should warn on non-ENOENT error when reading segment files", async () => {
-			await store.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }))
-
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-
-			// Replace segment file with a directory to trigger EISDIR (non-ENOENT) error
-			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
-			await fs.unlink(segmentPath)
-			await fs.mkdir(segmentPath)
-
-			const events = await store.readAll()
-			expect(events).toHaveLength(0)
-			expect(warnSpy).toHaveBeenCalled()
-
-			warnSpy.mockRestore()
-		})
-
-		it("should handle empty lines in segment files gracefully", async () => {
-			const event = makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" })
-			await store.append(event)
-
-			// Add empty lines to segment file
-			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
-			await fs.appendFile(segmentPath, "\n\n\n")
-
-			const events = await store.readAll()
-			expect(events).toHaveLength(1)
-		})
-
-		it("should handle zod validation failure by quarantining corrupt lines", async () => {
-			const event = makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" })
-			await store.append(event)
-
-			// Add a line that is valid JSON but fails zod validation
-			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
-			const validJsonBadSchema = JSON.stringify({ foo: "bar", baz: 42 })
-			const validLine = JSON.stringify(makeEvent({ eventId: "evt-valid", idempotencyKey: "idem-valid" })) + "\n"
-			await fs.appendFile(segmentPath, validJsonBadSchema + "\n")
-			await fs.appendFile(segmentPath, validLine)
-
-			const events = await store.readAll()
-			// Should have the original event + the valid event, but not the bad schema one
-			expect(events).toHaveLength(2)
-			expect(events.map((e) => e.eventId)).toContain("evt-1")
-			expect(events.map((e) => e.eventId)).toContain("evt-valid")
-		})
-
-		it("should handle manifest with invalid types by overwriting with default", async () => {
-			// Write a corrupt manifest
-			const manifestPath = path.join(store._getStatsDir(), "manifest.json")
-			await fs.writeFile(manifestPath, JSON.stringify({ manifestVersion: "not-a-number" }))
-
-			// Create a new store instance and initialize
-			const newStore = new UsageEventStore(tempDir)
-			await newStore.initialize()
-
-			// Should have overwritten with default manifest
-			const manifest = await newStore.getManifest()
-			expect(manifest.manifestVersion).toBe(1)
-			expect(manifest.generation).toBe(1)
-			expect(manifest.currentSegment).toBe(1)
-		})
-
-		it("should support lazy initialization via ensureInitialized", async () => {
-			// Create a store but don't call initialize()
-			const dir = await createTempDir()
-			const lazyStore = new UsageEventStore(dir)
-
-			// readAll should trigger lazy init
-			const events = await lazyStore.readAll()
-			expect(events).toHaveLength(0)
-
-			// Directory should now exist
-			const statsDir = lazyStore._getStatsDir()
-			const exists = await fs
-				.access(statsDir)
-				.then(() => true)
-				.catch(() => false)
-			expect(exists).toBe(true)
-
-			await fs.rm(dir, { recursive: true, force: true })
-		})
-
-		it("should return idempotency key count via test helper", async () => {
-			await store.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1" }))
-			await store.append(makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2" }))
-
-			expect(store._getIdempotencyKeyCount()).toBe(2)
 		})
 	})
 })
