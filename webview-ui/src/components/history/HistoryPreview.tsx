@@ -16,7 +16,12 @@ import { TaskOrganizationErrorBoundary } from "./TaskOrganizationErrorBoundary"
 import { TaskOrganizationDndSurface } from "./TaskOrganizationDndSurface"
 import { DraggableTaskEntry } from "./DraggableTaskEntry"
 import { ManualFolderItem, ManualFolderMemberItem } from "./ManualFolderItem"
-import { buildGroupedOrganizationProjection, resolveOrganizationUnit } from "./taskOrganizationModel"
+import {
+	buildGroupedOrganizationProjection,
+	buildCanonicalTarget,
+	resolveOrganizationUnit,
+} from "./taskOrganizationModel"
+import { PinnedHistoryItem } from "./PinnedHistoryItem"
 import { UNFILED_DROP_ZONE_ID } from "./useTaskOrganizationDnd"
 import type { ActiveDragState, DndItemData } from "./useTaskOrganizationDnd"
 
@@ -98,6 +103,23 @@ const HistoryPreviewInner = memo(() => {
 		[organization, groups, tasks, cwd],
 	)
 
+	// Pinned shortcuts section, mirroring HistoryView's pinned header: pins
+	// follow the same workspace scoping as the projection (a folder whose
+	// members all belong to another workspace is not visible here; task pins
+	// resolve to their canonical group root within the visible tasks).
+	const visiblePins = useMemo(
+		() =>
+			organization.pins.filter((pin) => {
+				const target = pin.target
+				if (target.kind === "folder") {
+					return projection.folderProjections.some((p) => p.folderId === target.folderId)
+				}
+				const rootId = target.kind === "task" ? buildCanonicalTarget(target.taskId, groups) : target.rootTaskId
+				return tasks.some((x) => x.id === rootId)
+			}),
+		[organization.pins, projection.folderProjections, groups, tasks],
+	)
+
 	// Resolve a human-readable label for the drag overlay.
 	const resolveDragLabel = useCallback(
 		(activeDrag: ActiveDragState): React.ReactNode => {
@@ -139,6 +161,45 @@ const HistoryPreviewInner = memo(() => {
 				{({ isFolderMemberDragActive }) => (
 					<div className="flex flex-col gap-1">
 						<UnfiledDropZone visible={isFolderMemberDragActive} disabled={false} />
+
+						{/* Pinned shortcuts (same section as History's pinned header) */}
+						{visiblePins.length > 0 && (
+							<div className="flex flex-col gap-1 m-2" data-testid="preview-pinned-section">
+								{visiblePins.map((pin) => {
+									const target = pin.target
+									if (target.kind === "folder") {
+										const folder = organization.folders.find((f) => f.folderId === target.folderId)
+										return (
+											<PinnedHistoryItem
+												key={`preview-pin-folder-${target.folderId}`}
+												folderName={folder?.name ?? target.folderId}
+												isPinned
+												canPin={canPin}
+												onTogglePin={() => void togglePin(target)}
+												data-testid={`preview-pinned-folder-${target.folderId}`}
+											/>
+										)
+									}
+									const rootId =
+										target.kind === "task"
+											? buildCanonicalTarget(target.taskId, groups)
+											: target.rootTaskId
+									const unit = resolveOrganizationUnit(rootId, tasks)
+									const rootTask = tasks.find((x) => x.id === unit.rootTaskId)
+									return (
+										<PinnedHistoryItem
+											key={`preview-pin-unit-${unit.rootTaskId}`}
+											unit={unit}
+											label={rootTask?.task ?? unit.rootTaskId}
+											isPinned
+											canPin={canPin}
+											onTogglePin={() => void togglePin(target)}
+											data-testid={`preview-pinned-unit-${unit.rootTaskId}`}
+										/>
+									)
+								})}
+							</div>
+						)}
 
 						{/* Manual Folders */}
 						{projection.folderProjections.map((folder) => (
