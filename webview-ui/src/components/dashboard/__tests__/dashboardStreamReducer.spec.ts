@@ -258,6 +258,26 @@ describe("dashboardStreamReducer", () => {
 			expect(state.pendingResync).toBe(false)
 		})
 
+		it("should tolerate a legacy snapshot without a task page instead of throwing", () => {
+			const sub = makeSubscription()
+			let state = dashboardStreamReducer(initialDashboardStreamState, { type: "SUBSCRIBE", subscription: sub })
+			const legacySnapshot = makeSnapshot() as unknown as Record<string, unknown>
+			delete legacySnapshot.tasks
+
+			expect(() => {
+				state = dashboardStreamReducer(state, {
+					type: "SNAPSHOT",
+					snapshot: legacySnapshot as ReturnType<typeof makeSnapshot>,
+				})
+			}).not.toThrow()
+			expect(state.status).toBe("connected")
+			expect(state.taskOrder).toEqual([])
+			expect(state.taskTotalEstimate).toBe(0)
+			// The rest of the dashboard still updates.
+			expect(state.totals).toBeDefined()
+			expect(state.totals!.events).toBe(10)
+		})
+
 		it("should normalize buckets into keyed map with stable order", () => {
 			const bucket1 = makeBucket({ key: { model: "gpt-4" }, events: 5 })
 			const bucket2 = makeBucket({ key: { model: "claude" }, events: 3 })
@@ -289,13 +309,13 @@ describe("dashboardStreamReducer", () => {
 					totalEstimate: 2,
 				},
 			})
-	
+
 			let state = dashboardStreamReducer(initialDashboardStreamState, {
 				type: "SUBSCRIBE",
 				subscription: makeSubscription(),
 			})
 			state = dashboardStreamReducer(state, { type: "SNAPSHOT", snapshot })
-	
+
 			expect(Object.keys(state.tasks)).toHaveLength(2)
 			expect(state.taskOrder).toEqual(["task-a", "task-b"])
 		})
@@ -372,7 +392,7 @@ describe("dashboardStreamReducer", () => {
 			}
 			const delta = makeDelta({ taskUpsert: [upsert] })
 			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
-	
+
 			expect(newState.tasks["task-001"].title).toBe("Updated title")
 			expect(newState.tasks["task-001"].totalCost).toBe(0.1)
 			expect(newState.taskOrder).toEqual(["task-001"]) // No reorder
@@ -393,7 +413,7 @@ describe("dashboardStreamReducer", () => {
 			}
 			const delta = makeDelta({ taskUpsert: [upsert] })
 			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
-	
+
 			expect(newState.tasks["task-new"]).toBeDefined()
 			expect(newState.taskOrder[0]).toBe("task-new") // Inserted at top
 			expect(newState.taskOrder[1]).toBe("task-001") // Existing pushed down

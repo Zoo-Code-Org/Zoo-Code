@@ -260,9 +260,19 @@ export function dashboardStreamReducer(
 			}
 
 			// Normalize tasks into a keyed map with catalog order.
+			// Tolerate legacy snapshots without a task page (e.g. an older
+			// extension host that still sends the sessions-based shape), so the
+			// rest of the dashboard keeps working instead of throwing here.
+			const snapTasks = snap.tasks ?? {
+				requestId: snap.requestId,
+				catalogRevision: 0,
+				tasks: [],
+				cursor: undefined,
+				totalEstimate: 0,
+			}
 			const newTasks: Record<string, DashboardTaskSummary> = {}
 			const newTaskOrder: string[] = []
-			for (const task of snap.tasks.tasks) {
+			for (const task of snapTasks.tasks) {
 				newTasks[task.taskId] = task
 				newTaskOrder.push(task.taskId)
 			}
@@ -286,8 +296,8 @@ export function dashboardStreamReducer(
 				heatmapValues: [...snap.heatmap.values],
 				tasks: newTasks,
 				taskOrder: newTaskOrder,
-				taskCursor: snap.tasks.cursor,
-				taskTotalEstimate: snap.tasks.totalEstimate,
+				taskCursor: snapTasks.cursor,
+				taskTotalEstimate: snapTasks.totalEstimate,
 			}
 		}
 
