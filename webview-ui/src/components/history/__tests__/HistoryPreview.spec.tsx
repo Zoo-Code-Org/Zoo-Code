@@ -184,6 +184,51 @@ describe("HistoryPreview", () => {
 		expect(screen.queryByTestId("task-group-task-6")).not.toBeInTheDocument()
 	})
 
+	it("renders pinned tasks in a pinned section even when they are outside the first 4 groups", () => {
+		mockUseExtensionState.mockReturnValue({
+			taskOrganization: {
+				...createEmptyOrganizationState(),
+				pins: [
+					{ target: { kind: "task", taskId: "task-1" }, pinnedAt: 100 },
+					{ target: { kind: "task", taskId: "task-6" }, pinnedAt: 200 },
+					// Not in the visible (workspace-filtered) task list — hidden.
+					{ target: { kind: "task", taskId: "task-other-workspace" }, pinnedAt: 300 },
+				],
+			},
+			mutateTaskOrganization: vi.fn().mockResolvedValue({
+				requestId: "",
+				success: true,
+				committedRevision: 1,
+			}),
+			cwd: "/test/workspace",
+		})
+		mockUseTaskSearch.mockReturnValue({
+			tasks: mockTasks,
+			searchQuery: "",
+			setSearchQuery: vi.fn(),
+			sortOption: "newest",
+			setSortOption: vi.fn(),
+			lastNonRelevantSort: null,
+			setLastNonRelevantSort: vi.fn(),
+			showAllWorkspaces: false,
+			setShowAllWorkspaces: vi.fn(),
+		})
+		mockUseGroupedTasks.mockReturnValue({
+			groups: createMockGroups(mockTasks),
+			flatTasks: null,
+			toggleExpand: vi.fn(),
+			isSearchMode: false,
+		})
+
+		render(<HistoryPreview />)
+
+		// task-6 is not among the first 4 unfiled groups but must appear as pinned.
+		expect(screen.getByTestId("preview-pinned-section")).toBeInTheDocument()
+		expect(screen.getByTestId("preview-pinned-unit-task-1")).toBeInTheDocument()
+		expect(screen.getByTestId("preview-pinned-unit-task-6")).toBeInTheDocument()
+		expect(screen.queryByTestId("preview-pinned-unit-task-other-workspace")).not.toBeInTheDocument()
+	})
+
 	it("renders all groups when there are 4 or fewer", () => {
 		const threeTasks = mockTasks.slice(0, 3)
 		mockUseTaskSearch.mockReturnValue({
