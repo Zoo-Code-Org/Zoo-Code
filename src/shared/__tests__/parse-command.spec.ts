@@ -290,6 +290,25 @@ describe("parseCommand", () => {
 			expect(result[1]).toBe("echo done")
 		})
 
+		it("does not absorb a control operator into the delimiter on the opener line", () => {
+			// A heredoc delimiter is a single shell word; a control operator
+			// (`;`, `|`, `&&`) on the same line terminates the word and must not
+			// be absorbed into the delimiter. Otherwise the terminator line is
+			// never found and the whole (valid) command is rejected as an
+			// unterminated heredoc. The whole heredoc is kept as one opaque token
+			// (matching the other heredoc cases), but must not produce a parse error.
+			const inputs = [
+				"sh -c bash << EOF; echo done\necho hello\nEOF",
+				"sh -c bash << EOF | grep hi\necho hello\nEOF",
+				"sh -c bash << EOF && cat f\necho hello\nEOF",
+			]
+			for (const input of inputs) {
+				const { commands: result, parseError } = parseCommand(input)
+				expect(parseError).toBeNull()
+				expect(result).toEqual([input])
+			}
+		})
+
 		it("treats a heredoc with a missing terminator as one opaque token", () => {
 			// An unterminated heredoc is a syntax error; the whole input must be
 			// returned as a single token so no body line can be auto-approved alone.

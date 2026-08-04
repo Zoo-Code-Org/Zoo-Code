@@ -142,6 +142,26 @@ interface ScanResult {
  * Returns the bare delimiter word (for terminator line matching) and the index
  * of the first character after the delimiter token.
  */
+// POSIX control operators that terminate a word. A heredoc delimiter is a
+// single word, so it must stop at these just like the shell's tokenizer does.
+// This prevents a trailing control operator (e.g. `;`, `|`, `&&`) from being
+// absorbed into the delimiter (see the "match POSIX shell tokenization" rule
+// in scanTopLevelQuotes).
+function isHeredocDelimiterTerminator(char: string): boolean {
+	return (
+		char === "\n" ||
+		char === " " ||
+		char === "\t" ||
+		char === ";" ||
+		char === "|" ||
+		char === "&" ||
+		char === ">" ||
+		char === "<" ||
+		char === "(" ||
+		char === ")"
+	)
+}
+
 function parseHeredocDelimiter(command: string, start: number): { delimiter: string; endIndex: number } {
 	let i = start
 	let delimiter = ""
@@ -160,11 +180,11 @@ function parseHeredocDelimiter(command: string, start: number): { delimiter: str
 		if (command[i] === '"') i++ // consume closing "
 	} else if (command[i] === "\\") {
 		i++ // skip backslash
-		while (i < command.length && command[i] !== "\n" && command[i] !== " " && command[i] !== "\t") {
+		while (i < command.length && !isHeredocDelimiterTerminator(command[i])) {
 			delimiter += command[i++]
 		}
 	} else {
-		while (i < command.length && command[i] !== "\n" && command[i] !== " " && command[i] !== "\t") {
+		while (i < command.length && !isHeredocDelimiterTerminator(command[i])) {
 			delimiter += command[i++]
 		}
 	}
