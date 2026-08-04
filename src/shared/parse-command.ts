@@ -150,6 +150,7 @@ interface ScanResult {
 function isHeredocDelimiterTerminator(char: string): boolean {
 	return (
 		char === "\n" ||
+		char === "\r" ||
 		char === " " ||
 		char === "\t" ||
 		char === ";" ||

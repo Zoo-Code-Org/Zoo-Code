@@ -309,6 +309,20 @@ describe("parseCommand", () => {
 			}
 		})
 
+		it("treats a CRLF heredoc as one command without an unterminated error", () => {
+			// With CRLF line endings the delimiter word ends at `\r` (just like
+			// the body scanner strips `\r` before comparing the terminator line).
+			// Without treating `\r` as a terminator, the delimiter would become
+			// `EOF\r`, never match the `EOF` terminator, and be rejected as an
+			// unterminated heredoc. The whole heredoc is kept as one opaque token
+			// (the trailing `\r\n` after the terminator is consumed, matching the
+			// LF case where the trailing newline is left as a separator).
+			const input = "sh -c bash << EOF\r\necho hello\r\nEOF\r\n"
+			const { commands: result, parseError } = parseCommand(input)
+			expect(parseError).toBeNull()
+			expect(result).toEqual(["sh -c bash << EOF\r\necho hello\r\nEOF"])
+		})
+
 		it("treats a heredoc with a missing terminator as one opaque token", () => {
 			// An unterminated heredoc is a syntax error; the whole input must be
 			// returned as a single token so no body line can be auto-approved alone.
