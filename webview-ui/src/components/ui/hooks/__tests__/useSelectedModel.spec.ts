@@ -1,13 +1,15 @@
 // npx vitest src/components/ui/hooks/__tests__/useSelectedModel.spec.ts
 
 import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, type UseQueryResult } from "@tanstack/react-query"
 import { renderHook } from "@testing-library/react"
 import type { Mock } from "vitest"
 
 import {
 	ProviderSettings,
 	ModelInfo,
+	type RouterModels,
+	type ProviderName,
 	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
@@ -36,6 +38,147 @@ vi.mock("../useOpenRouterModelProviders")
 
 const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 const mockUseOpenRouterModelProviders = useOpenRouterModelProviders as Mock<typeof useOpenRouterModelProviders>
+
+type OpenRouterModelProviders = NonNullable<ReturnType<typeof useOpenRouterModelProviders>["data"]>
+
+const emptyRouterModels: RouterModels = {
+	openrouter: {},
+	"vercel-ai-gateway": {},
+	"zoo-gateway": {},
+	litellm: {},
+	requesty: {},
+	unbound: {},
+	poe: {},
+	deepseek: {},
+	moonshot: {},
+	"opencode-go": {},
+	kenari: {},
+	"kimi-code": {},
+	ollama: {},
+	lmstudio: {},
+}
+
+const routerProviderCases = [
+	{
+		provider: providerIdentifiers.openrouter,
+		modelKey: "openrouter",
+		modelId: "openrouter/future-model",
+		settings: {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openrouter/future-model",
+		},
+	},
+	{
+		provider: providerIdentifiers.requesty,
+		modelKey: "requesty",
+		modelId: "requesty/future-model",
+		settings: {
+			apiProvider: providerIdentifiers.requesty,
+			requestyModelId: "requesty/future-model",
+		},
+	},
+	{
+		provider: providerIdentifiers.unbound,
+		modelKey: "unbound",
+		modelId: "unbound/future-model",
+		settings: {
+			apiProvider: providerIdentifiers.unbound,
+			unboundModelId: "unbound/future-model",
+		},
+	},
+	{
+		provider: providerIdentifiers.vercelAiGateway,
+		modelKey: "vercel-ai-gateway",
+		modelId: "vercel/future-model",
+		settings: {
+			apiProvider: providerIdentifiers.vercelAiGateway,
+			vercelAiGatewayModelId: "vercel/future-model",
+		},
+	},
+	{
+		provider: providerIdentifiers.zooGateway,
+		modelKey: "zoo-gateway",
+		modelId: "zoo/future-model",
+		settings: {
+			apiProvider: providerIdentifiers.zooGateway,
+			zooGatewayModelId: "zoo/future-model",
+		},
+	},
+] as const satisfies ReadonlyArray<{
+	provider: ProviderName
+	modelKey: keyof RouterModels
+	modelId: string
+	settings: ProviderSettings
+}>
+
+const createRouterModels = (modelKey: keyof RouterModels, modelId: string, info?: ModelInfo): RouterModels => {
+	const models = { ...emptyRouterModels }
+	models[modelKey] = info ? { [modelId]: info } : {}
+	return models
+}
+
+const createQueryResult = <TData>(
+	data: TData | undefined,
+	fallbackData: TData,
+	isLoading: boolean,
+): UseQueryResult<TData, Error> =>
+	isLoading
+		? {
+				data: undefined,
+				dataUpdatedAt: 0,
+				error: null,
+				errorUpdatedAt: 0,
+				failureCount: 0,
+				failureReason: null,
+				errorUpdateCount: 0,
+				isError: false,
+				isFetched: false,
+				isFetchedAfterMount: false,
+				isFetching: true,
+				isLoading: true,
+				isPending: true,
+				isLoadingError: false,
+				isInitialLoading: true,
+				isPaused: false,
+				isPlaceholderData: false,
+				isRefetchError: false,
+				isRefetching: false,
+				isStale: false,
+				isSuccess: false,
+				isEnabled: true,
+				refetch: vi.fn(),
+				status: "pending",
+				fetchStatus: "fetching",
+				promise: Promise.resolve(fallbackData),
+			}
+		: {
+				data: data ?? fallbackData,
+				dataUpdatedAt: 0,
+				error: null,
+				errorUpdatedAt: 0,
+				failureCount: 0,
+				failureReason: null,
+				errorUpdateCount: 0,
+				isError: false,
+				isFetched: true,
+				isFetchedAfterMount: true,
+				isFetching: false,
+				isLoading: false,
+				isPending: false,
+				isLoadingError: false,
+				isInitialLoading: false,
+				isPaused: false,
+				isPlaceholderData: false,
+				isRefetchError: false,
+				isRefetching: false,
+				isStale: false,
+				isSuccess: true,
+				isEnabled: true,
+				refetch: vi.fn(),
+				status: "success",
+				fetchStatus: "idle",
+				promise: Promise.resolve(data ?? fallbackData),
+			}
 
 const createWrapper = () => {
 	const queryClient = new QueryClient({
@@ -307,18 +450,80 @@ describe("useSelectedModel", () => {
 	})
 
 	describe("loading and error states", () => {
-		it("preserves a router model ID and applies custom metadata while model data is loading", () => {
-			mockUseRouterModels.mockReturnValue({
-				data: undefined,
-				isLoading: true,
-				isError: false,
-			} as any)
+		it.each(routerProviderCases)(
+			"preserves the configured %s model ID and applies custom metadata while data is loading",
+			({ provider, modelId, settings }) => {
+				mockUseRouterModels.mockReturnValue(createQueryResult(undefined, emptyRouterModels, true))
+				mockUseOpenRouterModelProviders.mockReturnValue(
+					createQueryResult<OpenRouterModelProviders>({}, {}, false),
+				)
 
-			mockUseOpenRouterModelProviders.mockReturnValue({
-				data: undefined,
-				isLoading: false,
-				isError: false,
-			} as any)
+				const apiConfiguration: ProviderSettings = {
+					...settings,
+					customModelInfo: {
+						contextWindow: 100_000,
+						maxTokens: 10_000,
+						supportsImages: true,
+					},
+				}
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+				expect(result.current.provider).toBe(provider)
+				expect(result.current.id).toBe(modelId)
+				expect(result.current.info).toMatchObject({
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+					supportsImages: true,
+				})
+			},
+		)
+
+		it.each(routerProviderCases)(
+			"applies custom metadata to a listed %s model",
+			({ provider, modelKey, modelId, settings }) => {
+				const discoveredInfo: ModelInfo = {
+					contextWindow: 8192,
+					maxTokens: 4096,
+					supportsImages: false,
+					supportsPromptCache: false,
+				}
+
+				mockUseRouterModels.mockReturnValue(
+					createQueryResult(createRouterModels(modelKey, modelId, discoveredInfo), emptyRouterModels, false),
+				)
+				mockUseOpenRouterModelProviders.mockReturnValue(
+					createQueryResult<OpenRouterModelProviders>({}, {}, false),
+				)
+
+				const apiConfiguration: ProviderSettings = {
+					...settings,
+					customModelInfo: {
+						contextWindow: 100_000,
+						maxTokens: 10_000,
+						supportsImages: true,
+					},
+				}
+
+				const wrapper = createWrapper()
+				const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+				expect(result.current.provider).toBe(provider)
+				expect(result.current.id).toBe(modelId)
+				expect(result.current.info).toMatchObject({
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+					supportsImages: true,
+					supportsPromptCache: false,
+				})
+			},
+		)
+
+		it("preserves a router model ID and applies custom metadata while model data is loading", () => {
+			mockUseRouterModels.mockReturnValue(createQueryResult(undefined, emptyRouterModels, true))
+
+			mockUseOpenRouterModelProviders.mockReturnValue(createQueryResult<OpenRouterModelProviders>({}, {}, false))
 
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.openrouter,

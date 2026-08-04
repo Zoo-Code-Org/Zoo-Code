@@ -65,4 +65,11 @@ describe("custom model info", () => {
 			}).success,
 		).toBe(false)
 	})
+
+	it("rejects unsafe integer overrides", () => {
+		const unsafeInteger = Number.MAX_SAFE_INTEGER + 1
+
+		expect(customModelInfoSchema.safeParse({ contextWindow: unsafeInteger }).success).toBe(false)
+		expect(customModelInfoSchema.safeParse({ maxTokens: unsafeInteger }).success).toBe(false)
+	})
 })

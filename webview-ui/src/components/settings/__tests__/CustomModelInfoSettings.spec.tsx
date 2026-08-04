@@ -64,4 +64,61 @@ describe("CustomModelInfoSettings", () => {
 		expect(maxTokensInput).toHaveAttribute("aria-invalid", "true")
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", undefined)
 	})
+
+	it("updates capability overrides and warns when output exceeds the context window", () => {
+		const setApiConfigurationField = vi.fn()
+
+		render(
+			<CustomModelInfoSettings
+				apiConfiguration={{
+					apiProvider: "unbound",
+					customModelInfo: { contextWindow: 1000, maxTokens: 2000 },
+				}}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.title"))
+
+		expect(screen.getByText("settings:providers.customModelInfo.maxTokensWarning")).toBeInTheDocument()
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.supportsImages.label"))
+		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", {
+			contextWindow: 1000,
+			maxTokens: 2000,
+			supportsImages: true,
+		})
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.supportsPromptCache.label"))
+		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", {
+			contextWindow: 1000,
+			maxTokens: 2000,
+			supportsPromptCache: false,
+		})
+	})
+
+	it("syncs externally updated numeric overrides into the inputs", () => {
+		const setApiConfigurationField = vi.fn()
+
+		const { rerender } = render(
+			<CustomModelInfoSettings
+				apiConfiguration={{ apiProvider: "openrouter" }}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.title"))
+
+		rerender(
+			<CustomModelInfoSettings
+				apiConfiguration={{ apiProvider: "openrouter", customModelInfo: { maxTokens: 200 } }}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		expect(screen.getByLabelText("settings:providers.customModelInfo.maxTokens.label")).toHaveValue("200")
+	})
 })

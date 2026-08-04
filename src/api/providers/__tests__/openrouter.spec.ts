@@ -18,6 +18,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { OpenRouterHandler } from "../openrouter"
+import { getModelEndpoints } from "../fetchers/modelEndpointCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -101,6 +102,10 @@ vitest.mock("../fetchers/modelCache", () => ({
 	}),
 }))
 
+vitest.mock("../fetchers/modelEndpointCache", () => ({
+	getModelEndpoints: vitest.fn().mockResolvedValue({}),
+}))
+
 describe("OpenRouterHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
 		openRouterApiKey: "test-key",
@@ -156,6 +161,47 @@ describe("OpenRouterHandler", () => {
 			expect(result.info.maxTokens).toBe(10_000)
 			expect(result.info.supportsImages).toBe(false)
 			expect(result.info.supportsPromptCache).toBe(false)
+			expect(result.maxTokens).toBe(10_000)
+		})
+
+		it("applies custom metadata to a discovered specific-provider endpoint", async () => {
+			vitest.mocked(getModelEndpoints).mockResolvedValue({
+				"test-provider": {
+					contextWindow: 128_000,
+					maxTokens: 16_384,
+					supportsImages: true,
+					supportsPromptCache: true,
+				},
+			})
+
+			const handler = new OpenRouterHandler({
+				...mockOptions,
+				openRouterSpecificProvider: "test-provider",
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+		})
+
+		it("synthesizes metadata for an unlisted configured model", async () => {
+			const modelId = "provider/unlisted-model"
+			const handler = new OpenRouterHandler({
+				...mockOptions,
+				openRouterModelId: modelId,
+				customModelInfo: {
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+				},
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.id).toBe(modelId)
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
 			expect(result.maxTokens).toBe(10_000)
 		})
 

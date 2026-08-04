@@ -188,10 +188,16 @@ export type ModelInfo = z.infer<typeof modelInfoSchema>
  * or unavailable. This is intentionally narrower than ModelInfo: prices and
  * other accounting fields must remain provider-owned.
  */
+const positiveSafeIntegerSchema = z
+	.number()
+	.int()
+	.positive()
+	.refine(Number.isSafeInteger, { message: "Expected a safe integer" })
+
 export const customModelInfoSchema = z
 	.object({
-		maxTokens: z.number().int().positive().optional(),
-		contextWindow: z.number().int().positive().optional(),
+		maxTokens: positiveSafeIntegerSchema.optional(),
+		contextWindow: positiveSafeIntegerSchema.optional(),
 		supportsImages: z.boolean().optional(),
 		supportsPromptCache: z.boolean().optional(),
 	})

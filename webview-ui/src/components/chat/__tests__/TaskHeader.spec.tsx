@@ -356,5 +356,15 @@ describe("TaskHeader", () => {
 			expect(condenseButton).toBeDefined()
 			expect(screen.queryByText(/%$/)).not.toBeInTheDocument()
 		})
+
+		it("should not display context progress when the context window is infinite", () => {
+			mockModelInfo = { contextWindow: Number.POSITIVE_INFINITY, maxTokens: 200 }
+
+			renderTaskHeader()
+
+			expect(screen.queryByTestId("context-tokens-count")).not.toBeInTheDocument()
+			expect(screen.queryByTestId("context-window-size")).not.toBeInTheDocument()
+			expect(screen.queryByText(/%$/)).not.toBeInTheDocument()
+		})
 	})
 })

@@ -165,6 +165,18 @@ describe("VercelAiGatewayHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(true)
 		})
 
+		it("applies custom metadata overrides to the discovered model", async () => {
+			const handler = new VercelAiGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsImages: false },
+			})
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.info.supportsImages).toBe(false)
+		})
+
 		it("returns default model info when options are not provided", async () => {
 			const handler = new VercelAiGatewayHandler({})
 			const result = await handler.fetchModel()

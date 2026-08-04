@@ -30,21 +30,13 @@ const parsePositiveInteger = (value: string): number | undefined => {
 const getEventValue = (event: ValueChangeEvent): string => {
 	const target = event.target
 
-	if (target && "value" in target && typeof target.value === "string") {
-		return target.value
-	}
-
-	return ""
+	return target && "value" in target && typeof target.value === "string" ? target.value : ""
 }
 
 const getCheckboxValue = (event: ValueChangeEvent): boolean => {
 	const target = event.target
 
-	if (target && "checked" in target && typeof target.checked === "boolean") {
-		return target.checked
-	}
-
-	return false
+	return target && "checked" in target && typeof target.checked === "boolean" ? target.checked : false
 }
 
 const getInputBorderColor = (value: string): string | undefined => {

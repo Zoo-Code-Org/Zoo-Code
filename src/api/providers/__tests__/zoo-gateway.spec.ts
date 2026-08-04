@@ -214,6 +214,18 @@ describe("ZooGatewayHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(true)
 		})
 
+		it("applies custom metadata overrides to the discovered model", async () => {
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000, supportsPromptCache: false },
+			})
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.info.supportsPromptCache).toBe(false)
+		})
+
 		it("falls back to the default model when none is configured", async () => {
 			const handler = new ZooGatewayHandler({ zooSessionToken: "zoo_ext_test_token" })
 			const result = await handler.fetchModel()

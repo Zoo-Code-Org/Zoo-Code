@@ -70,7 +70,10 @@ const TaskHeader = ({
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
 	const contextWindow = model?.contextWindow
-	const contextWindowForDisplay = typeof contextWindow === "number" && contextWindow > 0 ? contextWindow : undefined
+	const contextWindowForDisplay =
+		typeof contextWindow === "number" && Number.isFinite(contextWindow) && contextWindow > 0
+			? contextWindow
+			: undefined
 
 	// Calculate maxTokens (reserved for output) once for reuse in percentage and tooltip
 	const maxTokens = useMemo(

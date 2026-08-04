@@ -176,6 +176,25 @@ describe("RequestyHandler", () => {
 			expect(result.maxTokens).toBe(10_000)
 		})
 
+		it("synthesizes metadata for an unlisted configured model", async () => {
+			const modelId = "provider/unlisted-model"
+			const handler = new RequestyHandler({
+				...mockOptions,
+				requestyModelId: modelId,
+				customModelInfo: {
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+				},
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.id).toBe(modelId)
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.maxTokens).toBe(10_000)
+		})
+
 		it("returns default model info when options are not provided", async () => {
 			const handler = new RequestyHandler({})
 			const result = await handler.fetchModel()

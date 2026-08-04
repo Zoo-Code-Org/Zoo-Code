@@ -59,6 +59,25 @@ describe("UnboundHandler", () => {
 		expect(result.maxTokens).toBe(10_000)
 	})
 
+	it("synthesizes metadata for an unlisted configured model", async () => {
+		const modelId = "provider/unlisted-model"
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: modelId,
+			customModelInfo: {
+				contextWindow: 100_000,
+				maxTokens: 10_000,
+			},
+		})
+
+		const result = await handler.fetchModel()
+
+		expect(result.id).toBe(modelId)
+		expect(result.info.contextWindow).toBe(100_000)
+		expect(result.info.maxTokens).toBe(10_000)
+		expect(result.maxTokens).toBe(10_000)
+	})
+
 	it("identifies itself as Zoo Code in the Unbound request headers", () => {
 		new UnboundHandler({
 			unboundApiKey: "test-key",
