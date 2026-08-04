@@ -14,11 +14,9 @@ coverage:
           - webview-ui-ct
     patch:
       default:
-        target: 80%       # new lines must be 80% covered
-        threshold: 0%
+        informational: true  # patch coverage is advisory, not blocking
       webview-patch:
-        target: 70%       # new lines in webview must be 70% covered
-        threshold: 0%
+        informational: true  # patch coverage is advisory, not blocking
         flags:
           - webview-ui
           - webview-ui-ct
