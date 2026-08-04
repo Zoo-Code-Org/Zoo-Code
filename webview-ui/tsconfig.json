@@ -24,6 +24,5 @@
 			"@roo/*": ["../src/shared/*"]
 		}
 	},
-	"include": ["src", "../src/shared", "vitest.setup.ts"],
-	"exclude": ["playwright", "playwright-ct.config.ts", "**/*.visual.tsx", "node_modules", "dist", "out"]
+	"include": ["src", "playwright", "playwright-ct.config.ts", "../src/shared", "vitest.setup.ts"]
 }

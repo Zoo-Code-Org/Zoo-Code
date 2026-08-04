@@ -514,10 +514,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 		if (Terminal.getTerminalProfile() !== previousProfile) {
 			TerminalRegistry.closeIdleTerminals()
-			// Invalidate the cached command environment so the next task
-			// re-resolves with the updated profile. Use optional call syntax
-			// to tolerate mocks that lack getCommandEnvironmentService.
-			this.sidebarProvider.getCommandEnvironmentService?.()?.invalidate()
 		}
 	}
 

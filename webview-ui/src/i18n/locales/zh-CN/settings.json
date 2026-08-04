@@ -845,24 +845,6 @@
 			"description": "Zoo Code 默认使用 VS Code 配置的 Shell。选择一个终端配置文件来覆盖此行为。此处仅列出 terminal.integrated.profiles 中的路径型配置文件。<0>了解更多</0>",
 			"configureButton": "在 VS Code 中选择默认配置文件",
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* 每分钟免费 {{count}} 个请求。之后，计费取决于提示大小。",
 			"pricingDetails": "有关更多信息，请参阅定价详情。",
 			"billingEstimate": "* 计费为估计值 - 具体费用取决于提示大小。"
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "自动获取 <serviceLink>{{serviceName}}</serviceLink> 上可用的最新模型列表。如果您不确定选择哪个模型，Zoo Code 与 <defaultModelLink>{{defaultModelId}}</defaultModelLink> 配合最佳。您还可以搜索\"free\"以查找当前可用的免费选项。",

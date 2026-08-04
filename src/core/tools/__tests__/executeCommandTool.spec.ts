@@ -1,3 +1,5 @@
+// npx vitest run src/core/tools/__tests__/executeCommandTool.spec.ts
+
 import type { ToolUsage } from "@roo-code/types"
 import * as vscode from "vscode"
 
@@ -6,6 +8,7 @@ import { formatResponse } from "../../prompts/responses"
 import { ToolUse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { Terminal } from "../../../integrations/terminal/Terminal"
+import type { RooTerminalCallbacks, RooTerminalProcess } from "../../../integrations/terminal/types"
 
 // Mock dependencies
 vitest.mock("execa", () => ({
@@ -24,20 +27,9 @@ vitest.mock("vscode", () => ({
 	},
 }))
 
-vitest.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			captureShellIntegrationError: vitest.fn(),
-		},
-	},
-}))
-
 vitest.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 	TerminalRegistry: {
 		getOrCreateTerminal: vitest.fn().mockResolvedValue({
-			provider: "execa",
-			lifecycle: { state: "ready" },
-			terminal: { shellIntegration: undefined },
 			runCommand: vitest.fn().mockImplementation((_cmd: string, callbacks: any) => {
 				// Invoke onCompleted so onCompletedPromise resolves and the tool returns.
 				callbacks?.onCompleted?.("")
@@ -47,19 +39,6 @@ vitest.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 			}),
 			getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
 		}),
-		prepareProviderSwitch: vitest.fn().mockResolvedValue({ terminal: undefined }),
-		setExecaShellFamily: vitest.fn(),
-	},
-}))
-
-vitest.mock("../../../integrations/terminal/CommandScheduler", () => ({
-	CommandScheduler: {
-		getInstance: vitest.fn().mockReturnValue({
-			enqueue: vitest.fn().mockResolvedValue(undefined),
-			release: vitest.fn(),
-		}),
-		initialize: vitest.fn(),
-		cleanup: vitest.fn(),
 	},
 }))
 
@@ -80,7 +59,7 @@ describe("executeCommandTool", () => {
 	const originalCliRuntime = process.env.ROO_CLI_RUNTIME
 
 	beforeEach(() => {
-		// Reset call history but preserve module mock factory defaults.
+		// Reset mocks
 		vitest.clearAllMocks()
 		vitest.useRealTimers()
 
@@ -92,16 +71,14 @@ describe("executeCommandTool", () => {
 			ask: vitest.fn().mockResolvedValue(undefined),
 			say: vitest.fn().mockResolvedValue(undefined),
 			sayAndCreateMissingParamError: vitest.fn().mockResolvedValue("Missing parameter error"),
-			supersedePendingAsk: vitest.fn(),
 			consecutiveMistakeCount: 0,
 			didRejectTool: false,
-			taskId: "test-task",
 			rooIgnoreController: {
 				validateCommand: vitest.fn().mockReturnValue(null),
 			},
-			apiConfiguration: {},
 			recordToolUsage: vitest.fn().mockReturnValue({} as ToolUsage),
 			recordToolError: vitest.fn(),
+			supersedePendingAsk: vitest.fn(),
 			providerRef: {
 				deref: vitest.fn().mockResolvedValue({
 					getState: vitest.fn().mockResolvedValue({
@@ -114,15 +91,11 @@ describe("executeCommandTool", () => {
 			},
 			lastMessageTs: Date.now(),
 			cwd: "/test/workspace",
-			getResolvedCommandEnvironment: vitest.fn().mockReturnValue(undefined),
 		}
 
 		mockAskApproval = vitest.fn().mockResolvedValue(true)
 		mockHandleError = vitest.fn().mockResolvedValue(undefined)
 		mockPushToolResult = vitest.fn()
-
-		// Default mock for toolError so typed error paths return a deterministic message.
-		;(formatResponse.toolError as any).mockImplementation((message: string) => message)
 
 		// Setup vscode config mock
 		const mockConfig = {
@@ -156,26 +129,26 @@ describe("executeCommandTool", () => {
 	 * This verifies that HTML entities are properly converted to their actual characters
 	 */
 	describe("HTML entity unescaping", () => {
-		it("should unescape < to < character", () => {
-			const input = "echo <test>"
+		it("should unescape &lt; to < character", () => {
+			const input = "echo &lt;test&gt;"
 			const expected = "echo <test>"
 			expect(unescapeHtmlEntities(input)).toBe(expected)
 		})
 
-		it("should unescape > to > character", () => {
-			const input = "echo test > output.txt"
+		it("should unescape &gt; to > character", () => {
+			const input = "echo test &gt; output.txt"
 			const expected = "echo test > output.txt"
 			expect(unescapeHtmlEntities(input)).toBe(expected)
 		})
 
-		it("should unescape & to & character", () => {
-			const input = "echo foo && echo bar"
+		it("should unescape &amp; to & character", () => {
+			const input = "echo foo &amp;&amp; echo bar"
 			const expected = "echo foo && echo bar"
 			expect(unescapeHtmlEntities(input)).toBe(expected)
 		})
 
 		it("should handle multiple mixed HTML entities", () => {
-			const input = "grep -E 'pattern' <file.txt >output.txt 2>&1"
+			const input = "grep -E 'pattern' &lt;file.txt &gt;output.txt 2&gt;&amp;1"
 			const expected = "grep -E 'pattern' <file.txt >output.txt 2>&1"
 			expect(unescapeHtmlEntities(input)).toBe(expected)
 		})
@@ -222,74 +195,6 @@ describe("executeCommandTool", () => {
 			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
 			const firstArg = (TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mock.calls[0][0]
 			expect(firstArg).toBe("/custom/path")
-		})
-	})
-
-	describe("CommandScheduler integration", () => {
-		it("enqueues the command and releases the lease after execution", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
-
-			const { CommandScheduler } = await import("../../../integrations/terminal/CommandScheduler")
-			const scheduler = CommandScheduler.getInstance()
-
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
-
-			expect(scheduler.enqueue).toHaveBeenCalledWith(
-				expect.objectContaining({
-					executionId: expect.any(String),
-					taskId: mockCline.taskId,
-					requestedAt: expect.any(Number),
-				}),
-			)
-			expect(scheduler.release).toHaveBeenCalled()
-		})
-
-		it("emits a queued status before the command runs", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
-
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
-
-			const provider = await mockCline.providerRef.deref()
-			const postMessageCalls = provider.postMessageToWebview.mock.calls
-			const statuses = postMessageCalls
-				.map((call: any) => {
-					try {
-						return JSON.parse(call[0].text)
-					} catch {
-						return undefined
-					}
-				})
-				.filter(Boolean)
-			expect(statuses.some((s: any) => s.status === "queued")).toBe(true)
-		})
-
-		it("releases the CommandScheduler lease even when executeCommandInTerminal fails", async () => {
-			const genericError = new Error("unexpected failure")
-			vitest.spyOn(executeCommandModule, "executeCommandInTerminal").mockRejectedValueOnce(genericError)
-
-			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
-
-			const { CommandScheduler } = await import("../../../integrations/terminal/CommandScheduler")
-			const scheduler = CommandScheduler.getInstance()
-
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
-
-			expect(scheduler.release).toHaveBeenCalled()
 		})
 	})
 
@@ -363,102 +268,16 @@ describe("executeCommandTool", () => {
 			// executeCommandInTerminal should not be called since rooignore blocked it
 		})
 
-		it("allows retry when shell integration fails before command submission", () => {
+		it("allows Execa retry when shell integration fails before command submission", () => {
 			const error = new executeCommandModule.ShellIntegrationError("startup failed", false)
 
 			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(true)
 		})
 
-		it("prevents retry when shell integration fails after command submission", () => {
+		it("prevents Execa retry when shell integration fails after command submission", () => {
 			const error = new executeCommandModule.ShellIntegrationError("stream missing", true)
 
 			expect(executeCommandModule.canRetryShellIntegrationError(error)).toBe(false)
-		})
-
-		it("does not replay command when ShellIntegrationError has commandSubmitted=true", async () => {
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-
-			// Use a resolved environment so the terminal provider is vscode and the
-			// onNoShellIntegration callback is registered.
-			mockCline.getResolvedCommandEnvironment = vitest.fn().mockReturnValue({
-				primaryPlan: { provider: "vscode", family: "zsh" },
-				fallbackPlan: { provider: "execa", family: "zsh" },
-			})
-
-			const originalTerminal = {
-				id: 1,
-				provider: "vscode",
-				lifecycle: { state: "ready" },
-				terminal: { shellIntegration: undefined },
-				runCommand: vitest.fn().mockImplementation((_cmd: string, callbacks: any) => {
-					callbacks?.onNoShellIntegration?.({
-						message: "stream missing",
-						commandSubmitted: true,
-						code: "SI_ACTIVATION_TIMEOUT",
-						retryDisposition: "never",
-						terminalId: 1,
-					})
-					const p = Promise.resolve()
-					return Object.assign(p, { continue: () => {}, abort: () => {} })
-				}),
-				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
-			}
-
-			;(TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
-				originalTerminal,
-			)
-
-			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
-
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
-
-			// The terminal's runCommand should be invoked only once (no retry).
-			expect(originalTerminal.runCommand).toHaveBeenCalledTimes(1)
-
-			// Post-submit shell integration errors are surfaced as a tool result, not retried.
-			expect(mockPushToolResult).toHaveBeenCalled()
-			const result = mockPushToolResult.mock.calls[0][0]
-			expect(result).toContain("SI_ACTIVATION_TIMEOUT")
-			expect(mockHandleError).not.toHaveBeenCalled()
-		})
-
-		it("shows error for non-ShellIntegrationError exceptions in the catch block", async () => {
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			const genericError = new Error("unexpected failure")
-
-			// Override the terminal mock to reject with a non-ShellIntegrationError
-			const mockRunCommandFn = vitest.fn().mockImplementation(() => {
-				const rejectPromise = Promise.reject(genericError)
-				return Object.assign(rejectPromise, { continue: () => {}, abort: () => {} })
-			})
-
-			;(TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mockResolvedValueOnce({
-				provider: "execa",
-				lifecycle: { state: "ready" },
-				terminal: { shellIntegration: undefined },
-				runCommand: mockRunCommandFn,
-				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
-			})
-
-			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
-
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
-
-			// Should NOT retry — only one call to runCommand
-			expect(mockRunCommandFn).toHaveBeenCalledTimes(1)
-
-			// Unknown errors are passed to the error handler.
-			expect(mockHandleError).toHaveBeenCalledWith("executing command", genericError)
 		})
 
 		it("selects the Execa fallback provider for cmd.exe shell integration", () => {
@@ -468,107 +287,6 @@ describe("executeCommandTool", () => {
 				terminalProvider: "execa",
 				isCmdExeFallback: true,
 			})
-		})
-
-		it("selects the provider from the resolved environment's primary plan", () => {
-			const resolvedEnv = {
-				primaryPlan: { provider: "execa", family: "zsh" },
-				fallbackPlan: { provider: "execa", family: "zsh" },
-			}
-
-			expect(executeCommandModule.getTerminalProviderForExecution(false, resolvedEnv as any)).toEqual({
-				terminalProvider: "execa",
-				isCmdExeFallback: false,
-			})
-		})
-
-		it("detects cmd.exe fallback when the resolved environment's primary plan is cmd family", () => {
-			const resolvedEnv = {
-				primaryPlan: { provider: "execa", family: "cmd" },
-				fallbackPlan: { provider: "execa", family: "cmd" },
-			}
-
-			expect(executeCommandModule.getTerminalProviderForExecution(false, resolvedEnv as any)).toEqual({
-				terminalProvider: "execa",
-				isCmdExeFallback: true,
-			})
-		})
-	})
-
-	describe("Safe fallback orchestration", () => {
-		it("switches to a same-family execa plan after a pre-submit shell integration error", async () => {
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-
-			const fallbackTerminal = {
-				id: 2,
-				provider: "execa",
-				lifecycle: { state: "ready" },
-				terminal: { shellIntegration: undefined },
-				runCommand: vitest.fn().mockImplementation((_cmd: string, callbacks: any) => {
-					callbacks?.onCompleted?.("fallback succeeded")
-					const p = Promise.resolve()
-					return Object.assign(p, { continue: () => {}, abort: () => {} })
-				}),
-				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
-			}
-
-			;(TerminalRegistry.prepareProviderSwitch as any).mockResolvedValueOnce({ terminal: fallbackTerminal })
-
-			const originalTerminal = {
-				id: 1,
-				provider: "vscode",
-				lifecycle: { state: "ready" },
-				terminal: { shellIntegration: undefined },
-				runCommand: vitest.fn().mockImplementation((_cmd: string, callbacks: any) => {
-					callbacks?.onNoShellIntegration?.({
-						message: "startup failed",
-						commandSubmitted: false,
-						code: "SI_ACTIVATION_TIMEOUT",
-						retryDisposition: "fallback-safe",
-						terminalId: 1,
-					})
-					const p = Promise.resolve()
-					return Object.assign(p, { continue: () => {}, abort: () => {} })
-				}),
-				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
-			}
-
-			;(TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mockResolvedValueOnce(
-				originalTerminal,
-			)
-
-			mockCline.getResolvedCommandEnvironment = vitest.fn().mockReturnValue({
-				primaryPlan: { provider: "vscode", family: "powershell" },
-				fallbackPlan: { provider: "execa", family: "powershell" },
-			})
-
-			mockToolUse.params.command = "echo test"
-			mockToolUse.nativeArgs = { command: "echo test" }
-
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
-
-			expect(TerminalRegistry.prepareProviderSwitch).toHaveBeenCalledWith(
-				expect.objectContaining({
-					terminalId: 1,
-					executionId: expect.any(String),
-					fromProvider: "vscode",
-					toProvider: "execa",
-					reasonCode: "SI_ACTIVATION_TIMEOUT",
-					commandSubmitted: false,
-					resolvedEnv: expect.objectContaining({
-						primaryPlan: { provider: "vscode", family: "powershell" },
-						fallbackPlan: { provider: "execa", family: "powershell" },
-					}),
-				}),
-			)
-
-			const result = mockPushToolResult.mock.calls[0][0]
-			expect(result).toContain("fallback succeeded")
-			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 	})
 
@@ -618,187 +336,337 @@ describe("executeCommandTool", () => {
 		})
 	})
 
-	describe("cwd parameter validation", () => {
-		const invalidCwdCases = [
-			{ label: "object", value: { path: "/foo" } },
-			{ label: "array", value: ["/foo"] },
-			{ label: "number", value: 12345 },
-			{ label: "empty string", value: "" },
-		]
+	describe("command_output ask policy", () => {
+		type MockProcess = Promise<void> & {
+			continue: ReturnType<typeof vitest.fn>
+			abort: ReturnType<typeof vitest.fn>
+		}
 
-		invalidCwdCases.forEach(({ label, value }) => {
-			it(`rejects ${label} cwd`, async () => {
-				mockToolUse.params.command = "echo test"
-				mockToolUse.params.cwd = value as any
-				mockToolUse.nativeArgs = { command: "echo test", cwd: value as any }
+		interface ControllableTerminal {
+			callbacks: RooTerminalCallbacks | undefined
+			proc: MockProcess
+			resolveProcess: () => void
+		}
 
-				await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-					askApproval: mockAskApproval as unknown as AskApproval,
-					handleError: mockHandleError as unknown as HandleError,
-					pushToolResult: mockPushToolResult as unknown as PushToolResult,
-				})
-
-				expect(mockPushToolResult).toHaveBeenCalledWith(
-					expect.stringContaining("cwd must be a non-empty string"),
-				)
-				expect(mockAskApproval).not.toHaveBeenCalled()
-				expect(executeCommandModule.executeCommandInTerminal).not.toHaveBeenCalled()
+		const setupControllableTerminal = async (): Promise<ControllableTerminal> => {
+			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
+			const state: ControllableTerminal = {
+				callbacks: undefined,
+				proc: undefined as unknown as MockProcess,
+				resolveProcess: () => {},
+			}
+			const processPromise = new Promise<void>((resolve) => {
+				state.resolveProcess = resolve
 			})
-		})
+			// Mirror real terminal behavior: continue() resolves the wait early
+			// while the command keeps running in the background.
+			state.proc = Object.assign(processPromise, {
+				continue: vitest.fn(() => state.resolveProcess()),
+				abort: vitest.fn(),
+			})
+			;(TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mockResolvedValue({
+				runCommand: vitest.fn((_cmd: string, callbacks: RooTerminalCallbacks) => {
+					state.callbacks = callbacks
+					return state.proc
+				}),
+				getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+			})
+			return state
+		}
 
-		it("accepts absolute string cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.params.cwd = "/custom/path"
-			mockToolUse.nativeArgs = { command: "echo test", cwd: "/custom/path" }
+		const handleCommand = (command: string, timeout?: number) => {
+			mockToolUse.params.command = command
+			mockToolUse.params.timeout = timeout === undefined ? undefined : String(timeout)
+			mockToolUse.nativeArgs = timeout === undefined ? { command } : { command, timeout }
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+			return executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
 				askApproval: mockAskApproval as unknown as AskApproval,
 				handleError: mockHandleError as unknown as HandleError,
 				pushToolResult: mockPushToolResult as unknown as PushToolResult,
 			})
+		}
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalled()
+		it("does not ask about command output when a short command emits output and exits normally", async () => {
+			vitest.useFakeTimers()
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("echo hello")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("hello\n", proc)
+			await callbacks.onCompleted!("hello\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+
+			// Advance past the ask delay to prove the scheduled ask was cancelled
+			// on completion, not merely deferred beyond the test's runtime.
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS + 1_000)
+
+			await handlePromise
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalled()
+			const result = mockPushToolResult.mock.calls[0][0]
+			expect(result).toContain("hello")
+			expect(result).toContain("Exit code: 0")
 		})
 
-		it("accepts relative string cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.params.cwd = "relative/path"
-			mockToolUse.nativeArgs = { command: "echo test", cwd: "relative/path" }
+		it("asks about command output when the command is still running after the ask delay", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockResolvedValue({ response: "messageResponse", text: "keep going", images: undefined })
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("sleep 60")
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalled()
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("working...\n", proc)
+
+			// First output alone must not trigger the ask.
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+			expect(terminal.proc.continue).toHaveBeenCalled()
+
+			// Further output after the ask must not schedule another ask.
+			await callbacks.onLine("still working...\n", proc)
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+
+			// Let the command finish so the tool can resolve.
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
-		it("accepts undefined cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			delete mockToolUse.params.cwd
-			mockToolUse.nativeArgs = { command: "echo test" }
+		it("anchors the ask delay to execution start so shell integration startup does not consume it", async () => {
+			vitest.useFakeTimers()
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("echo hello")
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalled()
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			// Simulate a cold terminal spending most of the grace period waiting
+			// for shell integration before the command actually starts.
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS - 2_000)
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("hello\n", proc)
+
+			// Past the pre-runCommand anchor deadline but well within the window
+			// measured from execution start: still no ask.
+			await vitest.advanceTimersByTimeAsync(2_500)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			await callbacks.onCompleted!("hello\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS + 1_000)
+
+			await handlePromise
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
-		it("does not acquire a terminal for malformed cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.params.cwd = 12345 as any
-			mockToolUse.nativeArgs = { command: "echo test", cwd: 12345 as any }
+		it("re-anchors a pending ask when execution start is reported after early output", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockResolvedValue({ response: "messageResponse", text: "keep going", images: undefined })
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("sleep 60")
 
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
-		})
-	})
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
 
-	describe("cwd parameter validation", () => {
-		const invalidCwdCases = [
-			{ label: "object", value: { path: "/foo" } },
-			{ label: "array", value: ["/foo"] },
-			{ label: "number", value: 12345 },
-			{ label: "empty string", value: "" },
-		]
+			// Output arrives before the execution-started event (defensive case).
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS - 2_000)
+			callbacks.onShellExecutionStarted!(1234, proc)
 
-		invalidCwdCases.forEach(({ label, value }) => {
-			it(`rejects ${label} cwd`, async () => {
-				mockToolUse.params.command = "echo test"
-				mockToolUse.params.cwd = value as any
-				mockToolUse.nativeArgs = { command: "echo test", cwd: value as any }
+			// The pending ask was rescheduled against the new anchor, so the old
+			// deadline passing must not fire it.
+			await vitest.advanceTimersByTimeAsync(2_500)
+			expect(mockCline.ask).not.toHaveBeenCalled()
 
-				await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-					askApproval: mockAskApproval as unknown as AskApproval,
-					handleError: mockHandleError as unknown as HandleError,
-					pushToolResult: mockPushToolResult as unknown as PushToolResult,
-				})
+			// The ask must still fire at the re-anchored deadline — a version
+			// that cleared the old timer without rescheduling would fail here.
+			await vitest.advanceTimersByTimeAsync(2_500)
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
 
-				expect(mockPushToolResult).toHaveBeenCalledWith(
-					expect.stringContaining("cwd must be a non-empty string"),
-				)
-				expect(mockAskApproval).not.toHaveBeenCalled()
-				expect(executeCommandModule.executeCommandInTerminal).not.toHaveBeenCalled()
-			})
+			// Let the command finish so the tool can resolve.
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
-		it("accepts absolute string cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.params.cwd = "/custom/path"
-			mockToolUse.nativeArgs = { command: "echo test", cwd: "/custom/path" }
+		it("cancels a pending ask when the agent timeout moves the command to the background", async () => {
+			vitest.useFakeTimers()
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("npm run dev", 2)
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalled()
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("server starting...\n", proc)
+
+			// Agent timeout (2s) fires before the ask delay (5s).
+			await vitest.advanceTimersByTimeAsync(2_000)
+			expect(terminal.proc.continue).toHaveBeenCalled()
+			expect(mockCline.supersedePendingAsk).toHaveBeenCalled()
+
+			// Output after the background transition must never schedule an ask.
+			await callbacks.onLine("listening...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS + 1_000)
+			expect(mockCline.ask).not.toHaveBeenCalled()
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
 		})
 
-		it("accepts relative string cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.params.cwd = "relative/path"
-			mockToolUse.nativeArgs = { command: "echo test", cwd: "relative/path" }
+		it("falls back to the command dispatch time when execution start is never reported", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockResolvedValue({ response: "messageResponse", text: "keep going", images: undefined })
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("sleep 60")
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalled()
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			// No onShellExecutionStarted: the pre-runCommand anchor applies.
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
 		})
 
-		it("accepts undefined cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			delete mockToolUse.params.cwd
-			mockToolUse.nativeArgs = { command: "echo test" }
+		it("swallows ask errors without failing the command", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockRejectedValue(new Error("Current ask promise was ignored"))
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("sleep 60")
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalled()
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+			expect(terminal.proc.continue).not.toHaveBeenCalled()
+
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("Exit code: 0")
 		})
 
-		it("does not acquire a terminal for malformed cwd", async () => {
-			mockToolUse.params.command = "echo test"
-			mockToolUse.params.cwd = 12345 as any
-			mockToolUse.nativeArgs = { command: "echo test", cwd: 12345 as any }
+		it("resolves before completion when the ask is answered without a message", async () => {
+			// Note: in production only messageResponse answers reach a
+			// command_output ask (Proceed/Kill route through terminalOperation);
+			// yesButtonClicked is synthetic here to pin the non-message branch.
+			vitest.useFakeTimers()
+			mockCline.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			const terminal = await setupControllableTerminal()
 
-			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
-				askApproval: mockAskApproval as unknown as AskApproval,
-				handleError: mockHandleError as unknown as HandleError,
-				pushToolResult: mockPushToolResult as unknown as PushToolResult,
-			})
+			const handlePromise = handleCommand("sleep 60")
 
-			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
-			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			// Any ask answer backgrounds the command: the process is continued and
+			// the tool resolves without waiting for the command to complete.
+			// Note the process promise is never resolved in this test.
+			await vitest.advanceTimersByTimeAsync(100)
+			await handlePromise
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+			expect(terminal.proc.continue).toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("still running")
+
+			// Cleanup: let the command finish.
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+		})
+
+		it("supersedes a pending ask when the command completes", async () => {
+			vitest.useFakeTimers()
+			mockCline.ask.mockReturnValue(new Promise(() => {}))
+			const terminal = await setupControllableTerminal()
+
+			const handlePromise = handleCommand("sleep 5")
+
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			callbacks.onShellExecutionStarted!(1234, proc)
+			await callbacks.onLine("working...\n", proc)
+			await vitest.advanceTimersByTimeAsync(executeCommandModule.COMMAND_OUTPUT_ASK_DELAY_MS)
+
+			expect(mockCline.ask).toHaveBeenCalledWith("command_output", "")
+
+			// The command completes while the ask is still pending.
+			await callbacks.onCompleted!("working...\n", proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+
+			await handlePromise
+
+			expect(mockCline.supersedePendingAsk).toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalled()
+			expect(mockPushToolResult.mock.calls[0][0]).toContain("Exit code: 0")
 		})
 	})
 })

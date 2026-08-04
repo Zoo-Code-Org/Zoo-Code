@@ -7,10 +7,6 @@ import { TerminalProcess } from "./TerminalProcess"
 import { Terminal } from "./Terminal"
 import { ExecaTerminal } from "./ExecaTerminal"
 import { ShellIntegrationManager } from "./ShellIntegrationManager"
-import { CommandScheduler, TerminalCreationPermitResult } from "./CommandScheduler"
-import { TerminalLifecycle, type TerminalState } from "./TerminalLifecycle"
-import { emitCommandTrace } from "./CommandTrace"
-import type { ShellFamily, ResolvedCommandEnvironment, ShellInvocationPlan } from "./shell/types"
 
 // Although vscode.window.terminals provides a list of all open terminals,
 // there's no way to know whether they're busy or not (exitStatus does not
@@ -21,45 +17,11 @@ import type { ShellFamily, ResolvedCommandEnvironment, ShellInvocationPlan } fro
 // Since we have promises keeping track of terminal processes, we get the added
 // benefit of keep track of busy terminals even after a task is closed.
 
-/** Interval between watchdog sweeps. */
-const WATCHDOG_INTERVAL_MS = 1_000
-
-/** Deadline for a ready reservation to reach submission. */
-const READY_RESERVATION_DEADLINE_MS = 10_000
-
-/** Input to {@link TerminalRegistry.prepareProviderSwitch}. */
-export interface ProviderSwitchInput {
-	terminalId: number
-	executionId: string
-	fromProvider: RooTerminalProvider
-	toProvider: RooTerminalProvider
-	reasonCode: string
-	commandSubmitted: boolean
-	resolvedEnv: ResolvedCommandEnvironment
-}
-
-/** Result of a successful provider switch. */
-export interface ProviderSwitchResult {
-	terminal: RooTerminal
-	provider: RooTerminalProvider
-}
-
 export class TerminalRegistry {
 	private static terminals: RooTerminal[] = []
 	private static nextTerminalId = 1
 	private static disposables: vscode.Disposable[] = []
 	private static isInitialized = false
-
-	/**
-	 * The current shell family for Execa terminals. When the shell family
-	 * changes (e.g. user switches from PowerShell to bash), idle Execa
-	 * terminals with a different family are not reused. This ensures the
-	 * terminal's invocation plan matches the current shell.
-	 */
-	private static execaShellFamily: ShellFamily | undefined = undefined
-
-	/** Registry-owned watchdog timer. */
-	private static watchdogTimer: ReturnType<typeof setInterval> | undefined
 
 	public static initialize() {
 		if (this.isInitialized) {
@@ -122,9 +84,13 @@ export class TerminalRegistry {
 						}
 						const stream = e.execution.read()
 						terminal.setActiveStream(stream)
-						// setActiveStream already transitions the lifecycle to `running`, so no
-						// explicit busy flag is needed. The legacy busy setter is intentionally a
-						// no-op in production; the lifecycle state machine is the source of truth.
+						// Only mark busy when there is a live process to clear it later.
+						// If the end event already fired (early-completion race), process is
+						// undefined and setActiveStream returned early — setting busy here would
+						// leave the terminal stuck busy with nothing to clear it.
+						if (terminal.process) {
+							terminal.busy = true
+						}
 					} else {
 						console.error(
 							"[onDidStartTerminalShellExecution] Shell execution started, but not from a Roo-registered terminal:",
@@ -197,7 +163,7 @@ export class TerminalRegistry {
 								"[TerminalRegistry] End event arrived before running=true (race); delivering completion signal",
 								{ terminalId: terminal.id, exitCode: e.exitCode },
 							)
-							terminal.shellExecutionComplete(exitDetails, { executionId: process.executionId })
+							terminal.shellExecutionComplete(exitDetails)
 						} else {
 							terminal.busy = false
 						}
@@ -215,7 +181,7 @@ export class TerminalRegistry {
 					}
 
 					// Signal completion to any waiting processes.
-					terminal.shellExecutionComplete(exitDetails, { executionId: process?.executionId })
+					terminal.shellExecutionComplete(exitDetails)
 				},
 			)
 
@@ -225,26 +191,15 @@ export class TerminalRegistry {
 		} catch (error) {
 			console.error("[TerminalRegistry] Error setting up shell execution handlers:", error)
 		}
-
-		// Start the registry watchdog.
-		this.watchdogTimer = setInterval(() => this.runWatchdog(), WATCHDOG_INTERVAL_MS)
 	}
 
-	public static createTerminal(
-		cwd: string,
-		provider: RooTerminalProvider,
-		resolvedEnv?: ResolvedCommandEnvironment,
-	): RooTerminal {
+	public static createTerminal(cwd: string, provider: RooTerminalProvider): RooTerminal {
 		let newTerminal
 
 		if (provider === "vscode") {
-			// Pass the resolved environment so the integrated terminal is created
-			// with the same shell executable reported in the system prompt.
-			newTerminal = new Terminal(this.nextTerminalId++, undefined, cwd, resolvedEnv)
+			newTerminal = new Terminal(this.nextTerminalId++, undefined, cwd)
 		} else {
-			// Pass the shell-family-aware reuse key so that changing shells
-			// prevents reuse of terminals created with a different family.
-			newTerminal = new ExecaTerminal(this.nextTerminalId++, cwd, this.getExecaReuseKey())
+			newTerminal = new ExecaTerminal(this.nextTerminalId++, cwd)
 		}
 
 		this.terminals.push(newTerminal)
@@ -254,177 +209,64 @@ export class TerminalRegistry {
 
 	/**
 	 * Gets an existing terminal or creates a new one for the given working
-	 * directory. Terminal acquisition is atomic: the selected terminal is
-	 * reserved before this method returns, so two concurrent acquisitions cannot
-	 * receive the same idle terminal.
+	 * directory.
 	 *
 	 * @param cwd The working directory path
 	 * @param taskId Optional task ID to associate with the terminal
-	 * @param executionId Required execution ID that will own the reserved terminal
-	 * @param provider Terminal provider to use
-	 * @param resolvedEnv Optional resolved command environment
 	 * @returns A Terminal instance
 	 */
 	public static async getOrCreateTerminal(
 		cwd: string,
-		taskId: string | undefined,
-		executionId: string,
+		taskId?: string,
 		provider: RooTerminalProvider = "vscode",
-		resolvedEnv?: ResolvedCommandEnvironment,
 	): Promise<RooTerminal> {
-		const normalizedCwd = vscode.Uri.file(cwd).fsPath
-		const reuseKey = provider === "vscode" ? Terminal.getReuseKey() : this.getExecaReuseKey()
-
-		return CommandScheduler.getInstance().withTerminalCreationPermit(async () => {
-			let terminal: RooTerminal | undefined
-			let createdNewTerminal = false
-
-			// First priority: Find a terminal already assigned to this task with
-			// matching directory and reuse key.
-			if (taskId) {
-				terminal = this.findReusableTerminal({
-					cwd: normalizedCwd,
-					taskId,
-					provider,
-					reuseKey,
-				})
-			}
-
-			// Second priority: Find any available terminal with matching directory
-			// and reuse key.
-			if (!terminal) {
-				terminal = this.findReusableTerminal({
-					cwd: normalizedCwd,
-					provider,
-					reuseKey,
-				})
-			}
-
-			// If no suitable terminal found, create a new one under the global
-			// creation permit.
-			if (!terminal) {
-				terminal = this.createTerminal(cwd, provider, resolvedEnv)
-				createdNewTerminal = true
-			}
-
-			// Atomically reserve the terminal for this execution.
-			terminal.lifecycle.acquireOwner(executionId)
-			terminal.taskId = taskId
-
-			if (createdNewTerminal && terminal.provider === "vscode") {
-				// New VS Code terminals are constructed in `creating`; once the VS Code
-				// terminal process has been created we move to `process-started` so
-				// subsequent shell-integration waits can transition to
-				// `integration-pending` without an illegal transition.
-				terminal.lifecycle.transition("process-started", executionId)
-			}
-
-			if (terminal.provider === "vscode") {
-				// Reused VS Code terminals are promoted from idle to integration-ready.
-				// New terminals are already in `creating` from the constructor and must
-				// progress through process-started/integration-pending before running.
-				//
-				// A reused terminal may still be in `integration-ready` when a command
-				// completes without driving the state through `running`/`idle` (e.g. the
-				// shell-race paths that re-reserve the terminal on the next execute_command
-				// before the previous execution idles). `integration-ready → integration-ready`
-				// is not a legal self-transition, so skip the promotion when already ready.
-				if (!createdNewTerminal && terminal.lifecycle.state !== "integration-ready") {
-					terminal.lifecycle.transition("integration-ready", executionId)
-				}
-			} else {
-				terminal.lifecycle.transition("fallback-ready", executionId)
-			}
-
-			return { value: terminal, createdNewTerminal } as TerminalCreationPermitResult<RooTerminal>
-		})
-	}
-
-	/**
-	 * Finds a reusable terminal matching the given constraints, applying the
-	 * provider-specific health/reuse predicate. Any VS Code terminal whose
-	 * shell integration has disappeared is marked broken and disposed.
-	 */
-	private static findReusableTerminal(options: {
-		cwd: string
-		taskId?: string
-		provider: RooTerminalProvider
-		reuseKey: string
-	}): RooTerminal | undefined {
 		const terminals = this.getAllTerminals()
+		const reuseKey = provider === "vscode" ? Terminal.getReuseKey() : provider
+		let terminal: RooTerminal | undefined
 
-		for (const terminal of terminals) {
-			if (terminal.provider !== options.provider) {
-				continue
-			}
-
-			if (options.taskId !== undefined && terminal.taskId !== options.taskId) {
-				continue
-			}
-
-			const terminalCwd = terminal.getCurrentWorkingDirectory()
-			if (!terminalCwd || !arePathsEqual(options.cwd, terminalCwd)) {
-				continue
-			}
-
-			const hasProcess = terminal.process !== undefined
-			const shellIntegrationDefined =
-				terminal.provider !== "vscode" || (terminal as Terminal).terminal.shellIntegration !== undefined
-
-			// If a previously healthy idle VS Code terminal has lost shell
-			// integration, mark it broken and dispose it instead of offering it
-			// as a candidate.
-			if (
-				terminal.provider === "vscode" &&
-				terminal.lifecycle.health === "healthy" &&
-				terminal.lifecycle.state === "idle" &&
-				!shellIntegrationDefined
-			) {
-				console.info(
-					`[TerminalRegistry] VS Code terminal ${terminal.id} lost shell integration while idle; marking broken and disposing`,
-				)
-				terminal.lifecycle.markBroken()
-				if (terminal instanceof Terminal) {
-					terminal.terminal.dispose()
-					ShellIntegrationManager.zshCleanupTmpDir(terminal.id)
+		// First priority: Find a terminal already assigned to this task with
+		// matching directory.
+		if (taskId) {
+			terminal = terminals.find((t) => {
+				if (t.busy || t.taskId !== taskId || t.provider !== provider || t.reuseKey !== reuseKey) {
+					return false
 				}
-				continue
-			}
 
-			const canReuse = terminal.canReuse({
-				cwd: options.cwd,
-				reuseKey: options.reuseKey,
-				hasProcess,
-				shellIntegrationDefined,
-				hasStaleActiveShellExecution:
-					terminal.provider === "vscode" && (terminal as Terminal).activeShellExecution !== undefined,
+				const terminalCwd = t.getCurrentWorkingDirectory()
+
+				if (!terminalCwd) {
+					return false
+				}
+
+				return arePathsEqual(vscode.Uri.file(cwd).fsPath, terminalCwd)
 			})
-
-			if (canReuse) {
-				return terminal
-			}
 		}
 
-		return undefined
-	}
+		// Second priority: Find any available terminal with matching directory.
+		if (!terminal) {
+			terminal = terminals.find((t) => {
+				if (t.busy || t.provider !== provider || t.reuseKey !== reuseKey) {
+					return false
+				}
 
-	/**
-	 * Sets the current shell family for Execa terminal reuse keying.
-	 * When the shell family changes, idle Execa terminals with a different
-	 * family are not reused.
-	 * @param family The shell family, or undefined to reset
-	 */
-	public static setExecaShellFamily(family: ShellFamily | undefined): void {
-		TerminalRegistry.execaShellFamily = family
-	}
+				const terminalCwd = t.getCurrentWorkingDirectory()
 
-	/**
-	 * Gets the current Execa shell family reuse key.
-	 * @returns The reuse key string incorporating provider and shell family
-	 */
-	private static getExecaReuseKey(): string {
-		const family = TerminalRegistry.execaShellFamily
-		return family ? `execa:${family}` : "execa"
+				if (!terminalCwd) {
+					return false
+				}
+
+				return arePathsEqual(vscode.Uri.file(cwd).fsPath, terminalCwd)
+			})
+		}
+
+		// If no suitable terminal found, create a new one.
+		if (!terminal) {
+			terminal = this.createTerminal(cwd, provider)
+		}
+
+		terminal.taskId = taskId
+
+		return terminal
 	}
 
 	/**
@@ -499,11 +341,6 @@ export class TerminalRegistry {
 		ShellIntegrationManager.clear()
 		this.disposables.forEach((disposable) => disposable.dispose())
 		this.disposables = []
-
-		if (this.watchdogTimer) {
-			clearInterval(this.watchdogTimer)
-			this.watchdogTimer = undefined
-		}
 	}
 
 	/**
@@ -517,38 +354,6 @@ export class TerminalRegistry {
 			}
 
 			t.terminal.dispose()
-			ShellIntegrationManager.zshCleanupTmpDir(t.id)
-			return false
-		})
-	}
-
-	/**
-	 * Closes and removes idle (non-busy) terminals matching the given working
-	 * directory, task ID, and provider. This forces `getOrCreateTerminal` to
-	 * create a fresh terminal on the next call, which resolves persistent
-	 * shell-integration failures on a stale terminal.
-	 *
-	 * Busy terminals are left untouched.
-	 */
-	public static closeTerminalForCwd(cwd: string, taskId: string, provider: RooTerminalProvider): void {
-		const normalizedCwd = vscode.Uri.file(cwd).fsPath
-
-		this.terminals = this.terminals.filter((t) => {
-			if (t.busy || t.provider !== provider || t.taskId !== taskId) {
-				return true
-			}
-
-			const terminalCwd = t.getCurrentWorkingDirectory()
-
-			if (!terminalCwd || !arePathsEqual(normalizedCwd, terminalCwd)) {
-				return true
-			}
-
-			// Dispose the terminal if possible (VS Code terminals only).
-			if (t instanceof Terminal) {
-				t.terminal.dispose()
-			}
-
 			ShellIntegrationManager.zshCleanupTmpDir(t.id)
 			return false
 		})
@@ -581,319 +386,6 @@ export class TerminalRegistry {
 				terminal.taskId = undefined
 			}
 		})
-	}
-
-	// ─────────────────────────────────────────────────────────────────────────
-	// Watchdog (REQ-009)
-	// ─────────────────────────────────────────────────────────────────────────
-
-	/**
-	 * Evidence-based watchdog. Only recovers stale ownership that can be proven
-	 * by process/terminal state, not by elapsed time for a running command.
-	 */
-	private static runWatchdog(): void {
-		const now = Date.now()
-		const shellIntegrationTimeout = Terminal.getShellIntegrationTimeout()
-
-		// Iterate over the raw terminals array so the watchdog can see closed
-		// terminals and recover them before getAllTerminals() filters them out.
-		for (const terminal of [...this.terminals]) {
-			const lifecycle = terminal.lifecycle
-			const ownerExecutionId = lifecycle.ownerExecutionId
-			if (ownerExecutionId === undefined) {
-				continue
-			}
-
-			const state = lifecycle.state
-			const process = terminal.process
-			const terminalClosed = terminal.isClosed()
-
-			// Evidence 1: terminal closed while owned.
-			if (terminalClosed) {
-				console.info(
-					`[TerminalRegistry/watchdog] Terminal ${terminal.id} closed while owned by ${ownerExecutionId}; recovering`,
-				)
-				this.recoverStaleTerminal(terminal.id, ownerExecutionId, "TERMINAL_DISPOSED")
-				continue
-			}
-
-			// Evidence 2: attached process belongs to a different execution.
-			if (
-				process &&
-				"executionId" in process &&
-				process.executionId !== undefined &&
-				process.executionId !== ownerExecutionId
-			) {
-				console.info(
-					`[TerminalRegistry/watchdog] Terminal ${terminal.id} process belongs to ${process.executionId} but owner is ${ownerExecutionId}; recovering`,
-				)
-				this.recoverStaleTerminal(terminal.id, ownerExecutionId, "TERMINAL_BUSY_STALE")
-				continue
-			}
-
-			// Evidence 3: pre-submission states exceeded their deadline.
-			const elapsed = now - lifecycle.stateChangedAt
-			const preSubmissionDeadline = shellIntegrationTimeout + 1_000
-
-			if (state === "creating" || state === "process-started" || state === "integration-pending") {
-				if (elapsed > preSubmissionDeadline) {
-					console.info(
-						`[TerminalRegistry/watchdog] Terminal ${terminal.id} pre-submission state ${state} exceeded deadline (${elapsed}ms); recovering`,
-					)
-					this.recoverStaleTerminal(terminal.id, ownerExecutionId, "TERMINAL_BUSY_STALE")
-				}
-				continue
-			}
-
-			if (state === "integration-ready" || state === "fallback-ready") {
-				if (elapsed > READY_RESERVATION_DEADLINE_MS) {
-					console.info(
-						`[TerminalRegistry/watchdog] Terminal ${terminal.id} ready reservation exceeded ${READY_RESERVATION_DEADLINE_MS}ms; recovering`,
-					)
-					this.recoverStaleTerminal(terminal.id, ownerExecutionId, "TERMINAL_BUSY_STALE")
-				}
-				continue
-			}
-
-			// Evidence 4: owned but no process in a state that requires one.
-			if (state === "running" && !process) {
-				console.info(
-					`[TerminalRegistry/watchdog] Terminal ${terminal.id} is running but has no process; recovering`,
-				)
-				this.recoverStaleTerminal(terminal.id, ownerExecutionId, "TERMINAL_BUSY_STALE")
-				continue
-			}
-
-			// Running with a matching process is intentionally NOT reset by time.
-			if (state === "running") {
-				if (elapsed > 10_000) {
-					console.info(
-						`[TerminalRegistry/watchdog] Terminal ${terminal.id} has been running for ${elapsed}ms with a matching process; diagnostic only`,
-					)
-				}
-			}
-		}
-	}
-
-	/**
-	 * Compare-and-set recovery of a stale terminal. Only acts if the terminal
-	 * is still owned by the expected execution and the stale predicate still
-	 * holds.
-	 */
-	public static recoverStaleTerminal(terminalId: number, ownerExecutionId: string, reasonCode: string): void {
-		const terminal = this.terminals.find((t) => t.id === terminalId)
-		if (!terminal) {
-			return
-		}
-
-		const lifecycle = terminal.lifecycle
-		if (lifecycle.ownerExecutionId !== ownerExecutionId) {
-			console.info(
-				`[TerminalRegistry/recoverStaleTerminal] Terminal ${terminalId} owner changed (${lifecycle.ownerExecutionId}); skipping recovery`,
-			)
-			return
-		}
-
-		// Cancel any pending shell-integration wait.
-		if (terminal instanceof Terminal) {
-			terminal.cancelShellIntegrationWait()
-		}
-
-		// Abort any attached process that has an execution ID. A stale process
-		// belonging to a different execution is the evidence that triggered this
-		// recovery, so it must be terminated to free the terminal.
-		const process = terminal.process
-		if (process && "executionId" in process && process.executionId !== undefined) {
-			try {
-				process.abort()
-			} catch (error) {
-				console.error(
-					`[TerminalRegistry/recoverStaleTerminal] Error aborting process for terminal ${terminalId}:`,
-					error,
-				)
-			}
-		}
-
-		// Clear active shell execution only when it belongs to the same owner.
-		if (terminal instanceof Terminal && terminal.activeShellExecution) {
-			terminal.activeShellExecution = undefined
-		}
-
-		// Emit a diagnostic trace. (CommandTrace is now available in Sub-task 6.)
-		emitCommandTrace({
-			executionId: ownerExecutionId,
-			taskId: terminal.taskId ?? "unknown",
-			provider: terminal.provider,
-			terminalReused: false,
-			priorTerminalState: lifecycle.state,
-			errorType: reasonCode,
-			concurrentCommandCount: 1,
-			concurrentTerminalCreationCount: 0,
-			commandLength: 0,
-			commandCountInChain: 0,
-			queueDepth: 0,
-			queueWaitMs: 0,
-			toolCallGeneratedAt: Date.now(),
-			queueEnteredAt: Date.now(),
-			queueReleasedAt: Date.now(),
-			terminalRequestedAt: Date.now(),
-			terminalCreatedAt: Date.now(),
-			commandSubmittedAt: Date.now(),
-			shellIntegrationInitiallyAvailable: false,
-		})
-		console.info("[TerminalRegistry/recoverStaleTerminal]", {
-			terminalId,
-			ownerExecutionId,
-			reasonCode,
-			state: lifecycle.state,
-		})
-
-		// Mark VS Code terminals broken and dispose; safe idle Execa wrappers reset.
-		if (terminal.provider === "vscode") {
-			terminal.lifecycle.transition("failed", ownerExecutionId)
-			terminal.lifecycle.markBroken()
-			if (terminal instanceof Terminal) {
-				terminal.terminal.dispose()
-				ShellIntegrationManager.zshCleanupTmpDir(terminal.id)
-			}
-			terminal.lifecycle.transition("disposed", ownerExecutionId)
-			this.removeTerminal(terminal.id)
-		} else {
-			// Execa: reset to idle only when no child process exists.
-			if (!process) {
-				terminal.lifecycle.resetToIdle()
-				terminal.taskId = undefined
-			}
-		}
-	}
-
-	// ─────────────────────────────────────────────────────────────────────────
-	// Provider-switch cleanup (REQ-008)
-	// ─────────────────────────────────────────────────────────────────────────
-
-	/**
-	 * Cleans up a VS Code source terminal before switching to the same-family
-	 * Execa fallback. The source is removed from the registry and disposed
-	 * before the Execa terminal is acquired.
-	 */
-	public static async prepareProviderSwitch(input: ProviderSwitchInput): Promise<ProviderSwitchResult> {
-		const { terminalId, executionId, fromProvider, toProvider, commandSubmitted, resolvedEnv } = input
-
-		// Preconditions.
-		if (fromProvider !== "vscode") {
-			throw new Error("TERMINAL/PROVIDER_SWITCH/001: source provider must be VS Code")
-		}
-		if (toProvider !== "execa") {
-			throw new Error("TERMINAL/PROVIDER_SWITCH/002: target provider must be Execa")
-		}
-		if (commandSubmitted) {
-			return {
-				terminal: this.getTerminalById(terminalId)!,
-				provider: fromProvider,
-			}
-		}
-		if (!resolvedEnv.fallbackPlan) {
-			throw new Error("TERMINAL/PROVIDER_SWITCH/003: fallback plan is required")
-		}
-
-		const source = this.getTerminalById(terminalId)
-		if (!source) {
-			throw new Error(`TERMINAL/PROVIDER_SWITCH/004: source terminal ${terminalId} not found`)
-		}
-		if (source.provider !== "vscode") {
-			throw new Error("TERMINAL/PROVIDER_SWITCH/005: source terminal is not a VS Code terminal")
-		}
-		if (source.lifecycle.ownerExecutionId !== executionId) {
-			throw new Error(
-				`TERMINAL/PROVIDER_SWITCH/006: owner mismatch (expected ${executionId}, got ${source.lifecycle.ownerExecutionId})`,
-			)
-		}
-
-		// 1. Transition source to failed.
-		source.lifecycle.transition("failed", executionId)
-
-		// 2. Cancel shell-integration wait.
-		;(source as Terminal).cancelShellIntegrationWait()
-
-		// 3. Detach pre-submit process listeners without invoking sendText.
-		const process = source.process
-		if (process) {
-			process.removeAllListeners()
-			if ("cleanupScriptFile" in process) {
-				// cleanupScriptFile is a private method on TerminalProcess (not on the
-				// RooTerminalProcess interface). Access it via a minimal structural type
-				// instead of `as any` to satisfy @typescript-eslint/no-explicit-any.
-				;(process as { cleanupScriptFile?: () => void }).cleanupScriptFile?.()
-			}
-		}
-
-		// 4. Clear process and activeShellExecution after owner comparison.
-		if (source instanceof Terminal) {
-			const activeExecution = source.activeShellExecution
-			if (activeExecution) {
-				// Only clear if it belongs to the same owner.
-				source.activeShellExecution = undefined
-			}
-		}
-		source.process = undefined
-
-		// 5. Remove from registry selection.
-		this.removeTerminal(terminalId)
-
-		// 6. Dispose the VS Code terminal and clean ZDOTDIR.
-		if (source instanceof Terminal) {
-			source.terminal.dispose()
-			ShellIntegrationManager.zshCleanupTmpDir(source.id)
-		}
-
-		// 7. Transition to disposed.
-		source.lifecycle.transition("disposed", executionId)
-
-		// 8. Emit PROVIDER_SWITCH trace.
-		emitCommandTrace({
-			executionId,
-			taskId: source.taskId ?? "unknown",
-			provider: toProvider,
-			terminalReused: false,
-			priorTerminalState: source.lifecycle.state,
-			errorType: input.reasonCode,
-			concurrentCommandCount: 1,
-			concurrentTerminalCreationCount: 0,
-			commandLength: 0,
-			commandCountInChain: 0,
-			queueDepth: 0,
-			queueWaitMs: 0,
-			toolCallGeneratedAt: Date.now(),
-			queueEnteredAt: Date.now(),
-			queueReleasedAt: Date.now(),
-			terminalRequestedAt: Date.now(),
-			terminalCreatedAt: Date.now(),
-			commandSubmittedAt: Date.now(),
-			shellIntegrationInitiallyAvailable: false,
-		})
-		console.info("[TerminalRegistry/PROVIDER_SWITCH]", {
-			terminalId,
-			executionId,
-			fromProvider,
-			toProvider,
-			reasonCode: input.reasonCode,
-		})
-
-		// 9. Acquire an Execa terminal under the same scheduler lease and apply
-		// the fallback plan.
-		const fallbackTerminal = await this.getOrCreateTerminal(
-			source.getCurrentWorkingDirectory(),
-			source.taskId,
-			executionId,
-			"execa",
-			resolvedEnv,
-		)
-
-		if (fallbackTerminal instanceof ExecaTerminal) {
-			fallbackTerminal.setShellInvocationPlan(resolvedEnv.fallbackPlan as ShellInvocationPlan)
-		}
-
-		return { terminal: fallbackTerminal, provider: toProvider }
 	}
 
 	private static getAllTerminals(): RooTerminal[] {

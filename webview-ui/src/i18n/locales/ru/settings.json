@@ -845,24 +845,6 @@
 			"description": "По умолчанию Zoo Code использует оболочку, настроенную в VS Code. Выберите профиль оболочки из списка, чтобы указать профиль оболочки с путём, предоставленный VS Code. Профили только с источником (например, встроенная запись PowerShell) не могут быть перечислены здесь. <0>Подробнее</0>",
 			"configureButton": "Выбрать профиль по умолчанию в VS Code",
 			"noProfiles": "(профили с путём в terminal.integrated.profiles не найдены)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* Бесплатно до {{count}} запросов в минуту. Далее тарификация зависит от размера подсказки.",
 			"pricingDetails": "Подробнее о ценах.",
 			"billingEstimate": "* Счёт — приблизительный, точная стоимость зависит от размера подсказки."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Также попробуйте поискать \"free\" для бесплатных вариантов.",

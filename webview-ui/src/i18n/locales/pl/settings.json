@@ -845,24 +845,6 @@
 			"description": "Domyślnie Zoo Code używa powłoki skonfigurowanej w VS Code. Wybierz profil powłoki z listy, aby użyć profilu ze ścieżką udostępnionego przez VS Code. Profile tylko ze źródłem (np. wbudowany wpis PowerShell) nie mogą być tutaj wyświetlone. <0>Dowiedz się więcej</0>",
 			"configureButton": "Wybierz domyślny profil w VS Code",
 			"noProfiles": "(brak profili ze ścieżką w terminal.integrated.profiles)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
 			"pricingDetails": "Więcej informacji znajdziesz w szczegółach cennika.",
 			"billingEstimate": "* Rozliczenie jest szacunkowe - dokładny koszt zależy od rozmiaru podpowiedzi."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowszą listę modeli dostępnych w <serviceLink>{{serviceName}}</serviceLink>. Jeśli nie jesteś pewien, który model wybrać, Zoo Code działa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Możesz również wyszukać \"free\", aby znaleźć obecnie dostępne opcje bezpłatne.",

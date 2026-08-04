@@ -665,9 +665,6 @@ importers:
       '@types/semver-compare':
         specifier: 1.0.3
         version: 1.0.3
-      '@types/shell-quote':
-        specifier: 1.7.5
-        version: 1.7.5
       '@types/vscode':
         specifier: 1.100.0
         version: 1.100.0
@@ -3219,9 +3216,6 @@ packages:
 
   '@types/semver-compare@1.0.3':
     resolution: {integrity: sha512-mVZkB2QjXmZhh+MrtwMlJ8BqUnmbiSkpd88uOWskfwB8yitBT0tBRAKt+41VRgZD9zr9Sc+Xs02qGgvzd1Rq/Q==}
-
-  '@types/shell-quote@1.7.5':
-    resolution: {integrity: sha512-+UE8GAGRPbJVQDdxi16dgadcBfQ+KG2vgZhV1+3A1XmHbmwcdwhCUwIdy+d3pAGrbvgRoVSjeI9vOWyq376Yzw==}
 
   '@types/stack-utils@2.0.3':
     resolution: {integrity: sha512-9aEbYZ3TbYMznPdcdr3SmIrLXwC/AKZXQeCf9Pgao5CKb8CyHuEX5jzWPTkvregvhRJHcpRO6BFoGW9ycaOkYw==}
@@ -11037,8 +11031,6 @@ snapshots:
   '@types/sarif@2.1.7': {}
 
   '@types/semver-compare@1.0.3': {}
-
-  '@types/shell-quote@1.7.5': {}
 
   '@types/stack-utils@2.0.3': {}
 

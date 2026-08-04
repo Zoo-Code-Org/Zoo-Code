@@ -166,3 +166,75 @@ describe("getApiProtocol", () => {
 		})
 	})
 })
+
+describe("openAiToolStrictMode", () => {
+	it("should be optional and absent by default", () => {
+		const result = providerSettingsSchemaDiscriminated.parse({
+			apiProvider: "openai",
+			openAiModelId: "test-model",
+		})
+		expect(result.apiProvider).toBe("openai")
+		if (result.apiProvider === "openai") {
+			expect(result.openAiToolStrictMode).toBeUndefined()
+		}
+	})
+
+	it("should accept true when provided", () => {
+		const result = providerSettingsSchemaDiscriminated.parse({
+			apiProvider: "openai",
+			openAiModelId: "test-model",
+			openAiToolStrictMode: true,
+		})
+		expect(result.apiProvider).toBe("openai")
+		if (result.apiProvider === "openai") {
+			expect(result.openAiToolStrictMode).toBe(true)
+		}
+	})
+
+	it("should accept false when provided", () => {
+		const result = providerSettingsSchemaDiscriminated.parse({
+			apiProvider: "openai",
+			openAiModelId: "test-model",
+			openAiToolStrictMode: false,
+		})
+		expect(result.apiProvider).toBe("openai")
+		if (result.apiProvider === "openai") {
+			expect(result.openAiToolStrictMode).toBe(false)
+		}
+	})
+
+	it("should not break existing profile deserialization when absent", () => {
+		const existingProfile = {
+			apiProvider: "openai" as const,
+			openAiBaseUrl: "https://api.example.com/v1",
+			openAiApiKey: "sk-test",
+			openAiModelId: "gpt-4",
+			openAiStreamingEnabled: true,
+		}
+		const result = providerSettingsSchemaDiscriminated.parse(existingProfile)
+		expect(result.apiProvider).toBe("openai")
+		if (result.apiProvider === "openai") {
+			expect(result.openAiModelId).toBe("gpt-4")
+			expect(result.openAiToolStrictMode).toBeUndefined()
+		}
+	})
+
+	it("should only exist on the openai (OpenAI Compatible) provider profile", () => {
+		const openAiResult = providerSettingsSchemaDiscriminated.parse({
+			apiProvider: "openai",
+			openAiToolStrictMode: true,
+		})
+		expect(openAiResult.apiProvider).toBe("openai")
+		if (openAiResult.apiProvider === "openai") {
+			expect(openAiResult.openAiToolStrictMode).toBe(true)
+		}
+
+		// Anthropic provider should not have this field
+		const anthropicResult = providerSettingsSchemaDiscriminated.parse({
+			apiProvider: "anthropic",
+			apiKey: "sk-test",
+		})
+		expect(anthropicResult.apiProvider).toBe("anthropic")
+		expect((anthropicResult as Record<string, unknown>).openAiToolStrictMode).toBeUndefined()
+	})
+})

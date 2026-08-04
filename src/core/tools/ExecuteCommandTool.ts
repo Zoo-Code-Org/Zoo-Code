@@ -4,12 +4,7 @@ import * as vscode from "vscode"
 
 import delay from "delay"
 
-import {
-	CommandExecutionStatus,
-	DEFAULT_TERMINAL_OUTPUT_PREVIEW_SIZE,
-	PersistedCommandOutput,
-	getModelId,
-} from "@roo-code/types"
+import { CommandExecutionStatus, DEFAULT_TERMINAL_OUTPUT_PREVIEW_SIZE, PersistedCommandOutput } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../task/Task"
@@ -20,52 +15,24 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { parseCommand } from "../../shared/parse-command"
 import {
 	ExitCodeDetails,
-	RooTerminal,
 	RooTerminalCallbacks,
 	RooTerminalProvider,
 	RooTerminalProcess,
 	ShellIntegrationError,
 	ShellIntegrationErrorDetails,
-	TerminalErrorCode,
-	TerminalExecutionError,
 } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
-import { CommandScheduler } from "../../integrations/terminal/CommandScheduler"
 import { Terminal } from "../../integrations/terminal/Terminal"
-import { ExecaTerminal } from "../../integrations/terminal/ExecaTerminal"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
-import { CommandTraceBuilder } from "../../integrations/terminal/CommandTrace"
 import { Package } from "../../shared/package"
 import { t } from "../../i18n"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
-import type { ResolvedCommandEnvironment, ShellInvocationPlan } from "../../integrations/terminal/shell/types"
 
 export { ShellIntegrationError } from "../../integrations/terminal/types"
 
 export function canRetryShellIntegrationError(error: unknown): error is ShellIntegrationError {
-	return error instanceof ShellIntegrationError && error.retryDisposition !== "never"
-}
-
-/**
- * Error thrown when shell integration fails and no same-family fallback plan
- * is available. The command must NOT be retried under a different shell family.
- */
-export class ShellFallbackMismatchError extends Error {
-	readonly code = "SHELL_FALLBACK_MISMATCH" as const
-	readonly primaryFamily: string
-	readonly fallbackFamily: string | undefined
-
-	constructor(primaryFamily: string, fallbackFamily: string | undefined) {
-		super(
-			`SHELL_FALLBACK_MISMATCH: Primary shell family "${primaryFamily}" has no compatible fallback` +
-				(fallbackFamily ? ` (fallback family: "${fallbackFamily}")` : " (no fallback plan available)") +
-				". Command was not executed.",
-		)
-		this.name = "ShellFallbackMismatchError"
-		this.primaryFamily = primaryFamily
-		this.fallbackFamily = fallbackFamily
-	}
+	return error instanceof ShellIntegrationError && !error.commandSubmitted
 }
 
 /**
@@ -77,36 +44,10 @@ export class ShellFallbackMismatchError extends Error {
  */
 export const COMMAND_OUTPUT_ASK_DELAY_MS = 5_000
 
-/**
- * Determines the terminal provider for command execution.
- *
- * When a {@link ResolvedCommandEnvironment} is provided, the provider is
- * determined from `primaryPlan.provider` — this is the single source of truth
- * that matches the system prompt and tool description.
- *
- * When no environment is provided (legacy callers), falls back to the
- * original `terminalShellIntegrationDisabled` + `isActiveShellCmdExe()` logic.
- *
- * @param terminalShellIntegrationDisabled Whether shell integration is disabled.
- * @param env Optional resolved command environment snapshot.
- * @returns The terminal provider and whether this is a cmd.exe fallback.
- */
-export function getTerminalProviderForExecution(
-	terminalShellIntegrationDisabled: boolean,
-	env?: ResolvedCommandEnvironment,
-): {
+export function getTerminalProviderForExecution(terminalShellIntegrationDisabled: boolean): {
 	terminalProvider: RooTerminalProvider
 	isCmdExeFallback: boolean
 } {
-	// When a resolved environment is available, use its primary plan provider.
-	// This ensures the execution provider matches what the system prompt told the model.
-	if (env) {
-		const terminalProvider = env.primaryPlan.provider
-		const isCmdExeFallback = terminalProvider === "execa" && env.primaryPlan.family === "cmd"
-		return { terminalProvider, isCmdExeFallback }
-	}
-
-	// Legacy path: no resolved environment available.
 	const isCmdExeFallback = !terminalShellIntegrationDisabled && Terminal.isActiveShellCmdExe()
 	const terminalProvider = terminalShellIntegrationDisabled || isCmdExeFallback ? "execa" : "vscode"
 
@@ -136,31 +77,10 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 		const { handleError, pushToolResult, askApproval } = callbacks
 
 		try {
-			// Runtime type validation — LLM may send malformed parameters
-			if (typeof command !== "string" || command.trim().length === 0) {
+			if (!command) {
 				task.consecutiveMistakeCount++
 				task.recordToolError("execute_command")
 				pushToolResult(await task.sayAndCreateMissingParamError("execute_command", "command"))
-				return
-			}
-
-			if (customCwd !== undefined && (typeof customCwd !== "string" || customCwd.length === 0)) {
-				task.consecutiveMistakeCount++
-				task.recordToolError("execute_command")
-				pushToolResult(formatResponse.toolError("Invalid cwd parameter: cwd must be a non-empty string."))
-				return
-			}
-
-			if (
-				timeoutSeconds !== undefined &&
-				timeoutSeconds !== null &&
-				(typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds))
-			) {
-				task.consecutiveMistakeCount++
-				task.recordToolError("execute_command")
-				pushToolResult(
-					formatResponse.toolError("Invalid timeout parameter: timeout must be a finite number or null."),
-				)
 				return
 			}
 
@@ -207,11 +127,6 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 
 			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
 
-			// Resolve the command environment snapshot for this request.
-			// This is the same snapshot used by the system prompt and tool description.
-			// When available, it provides the primary and fallback invocation plans.
-			const resolvedEnv = task.getResolvedCommandEnvironment()
-
 			// Get command execution timeout from VSCode configuration (in seconds)
 			const commandExecutionTimeoutSeconds = vscode.workspace
 				.getConfiguration(Package.name)
@@ -233,17 +148,6 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// Convert agent-specified timeout from seconds to milliseconds
 			const agentTimeout = resolveAgentTimeoutMs(timeoutSeconds)
 
-			// Observability trace builder — one instance across initial attempt,
-			// same-terminal recovery, and provider fallback.
-			const traceBuilder = new CommandTraceBuilder({
-				executionId,
-				taskId: task.taskId,
-				modelId: getModelId(task.apiConfiguration),
-				commandLength: canonicalCommand.length,
-				commandCountInChain: 1,
-			})
-			traceBuilder.markToolCallGeneratedAt(Date.now())
-
 			const options: ExecuteCommandOptions = {
 				executionId,
 				command: canonicalCommand,
@@ -251,20 +155,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				terminalShellIntegrationDisabled,
 				commandExecutionTimeout,
 				agentTimeout,
-				resolvedEnv,
-				traceBuilder,
 			}
-
-			const scheduler = CommandScheduler.getInstance()
-			const queuedStatus: CommandExecutionStatus = { executionId, status: "queued" }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(queuedStatus) })
-
-			const queueEnteredAt = Date.now()
-			traceBuilder.markQueueEnteredAt(queueEnteredAt)
-			await scheduler.enqueue({ executionId, taskId: task.taskId, requestedAt: queueEnteredAt })
-			const queueReleasedAt = Date.now()
-			traceBuilder.markQueueReleasedAt(queueReleasedAt)
-			traceBuilder.markQueueWaitMs(queueReleasedAt - queueEnteredAt)
 
 			try {
 				const [rejected, result] = await executeCommandInTerminal(task, options)
@@ -278,94 +169,33 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				// Invalidate pending ask from first execution to prevent race condition
 				task.supersedePendingAsk()
 
-				if (error instanceof TerminalExecutionError) {
-					// Safe fallback orchestration: pre-submit failures can switch to the
-					// same-family Execa fallback after cleaning up the source terminal.
-					if (error.retryDisposition === "fallback-safe" && !error.commandSubmitted) {
-						const terminalId = typeof error.terminalId === "number" ? error.terminalId : undefined
+				if (canRetryShellIntegrationError(error)) {
+					// Silent retry via execa — shell startup race, command was not submitted.
+					const status: CommandExecutionStatus = { executionId, status: "fallback" }
+					provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 
-						const fallbackStatus: CommandExecutionStatus = {
-							executionId,
-							status: "fallback",
-							reasonCode: error.code,
-						}
-						provider?.postMessageToWebview({
-							type: "commandExecutionStatus",
-							text: JSON.stringify(fallbackStatus),
-						})
+					const [rejected, result] = await executeCommandInTerminal(task, {
+						...options,
+						terminalShellIntegrationDisabled: true,
+					})
 
-						let fallbackTerminal: RooTerminal | undefined
-
-						if (terminalId !== undefined && resolvedEnv) {
-							try {
-								fallbackTerminal = (
-									await TerminalRegistry.prepareProviderSwitch({
-										terminalId,
-										executionId,
-										fromProvider: "vscode",
-										toProvider: "execa",
-										reasonCode: error.code,
-										commandSubmitted: error.commandSubmitted,
-										resolvedEnv,
-									})
-								).terminal
-							} catch (switchError) {
-								await handleError("executing command", switchError as Error)
-								return
-							}
-						}
-
-						try {
-							const [rejected, result] = await executeCommandInTerminal(task, {
-								...options,
-								terminalShellIntegrationDisabled: true,
-								useFallbackPlan: !!resolvedEnv,
-								reuseTerminal: fallbackTerminal,
-							})
-
-							if (rejected) {
-								task.didRejectTool = true
-							}
-
-							pushToolResult(
-								`[Note: VS Code's terminal shell integration was temporarily unavailable — this is a known VS Code infrastructure issue and does not affect command results. The command was automatically retried and completed successfully.]\n\n${result}`,
-							)
-						} catch (fallbackError) {
-							await handleError("executing command", fallbackError as Error)
-						}
-
-						return
+					if (rejected) {
+						task.didRejectTool = true
 					}
 
-					// No-replay policy: post-submit or otherwise unknown outcomes must not
-					// run the command a second time.
-					if (error.retryDisposition === "never") {
-						const errorStatus: CommandExecutionStatus = {
-							executionId,
-							status: "error",
-							code: error.code,
-						}
-						provider?.postMessageToWebview({
-							type: "commandExecutionStatus",
-							text: JSON.stringify(errorStatus),
-						})
+					pushToolResult(result)
+				} else {
+					// Command was submitted but shell integration lost track of it — show warning.
+					await task.say("shell_integration_warning")
+
+					if (error instanceof ShellIntegrationError) {
 						pushToolResult(
-							formatResponse.toolError(
-								`Command failed to execute in terminal due to a shell integration error (${error.code}).`,
-							),
+							"Command was submitted in the VS Code terminal, but shell integration did not report its output or completion status. Do not run the command again automatically.",
 						)
-						return
+					} else {
+						pushToolResult(`Command failed to execute in terminal due to a shell integration error.`)
 					}
 				}
-
-				// Unknown terminal error
-				await handleError("executing command", error as Error)
-			} finally {
-				scheduler.release(executionId)
-				// Ensure the trace is emitted exactly once even when the command
-				// throws before reaching the normal completion path in
-				// executeCommandInTerminal.
-				traceBuilder.finalize()
 			}
 
 			return
@@ -388,46 +218,22 @@ export type ExecuteCommandOptions = {
 	terminalShellIntegrationDisabled?: boolean
 	commandExecutionTimeout?: number
 	agentTimeout?: number
-	/** Resolved command environment snapshot from CommandEnvironmentService. */
-	resolvedEnv?: ResolvedCommandEnvironment
-	/** When true, use the fallback plan instead of the primary plan (retry path). */
-	useFallbackPlan?: boolean
-	/** Optional terminal to reuse instead of acquiring a new one. Used by recovery and fallback. */
-	reuseTerminal?: RooTerminal
-	/** When true, a same-terminal recovery has already been attempted. */
-	recoveryAttempted?: boolean
-	/**
-	 * Optional trace builder for observability. When provided, the function
-	 * records terminal lifecycle timestamps and emits a final trace at completion.
-	 */
-	traceBuilder?: CommandTraceBuilder
 }
 
 export async function executeCommandInTerminal(
 	task: Task,
-	options: ExecuteCommandOptions,
-): Promise<[boolean, ToolResponse]> {
-	const {
+	{
 		executionId,
 		command,
 		customCwd,
 		terminalShellIntegrationDisabled = true,
 		commandExecutionTimeout = 0,
 		agentTimeout = 0,
-		resolvedEnv,
-		useFallbackPlan = false,
-		reuseTerminal,
-		recoveryAttempted = false,
-		traceBuilder,
-	} = options
+	}: ExecuteCommandOptions,
+): Promise<[boolean, ToolResponse]> {
 	// Convert milliseconds back to seconds for display purposes.
 	const commandExecutionTimeoutSeconds = commandExecutionTimeout / 1000
 	let workingDir: string
-
-	// Defense-in-depth: ensure customCwd is a string before passing to path APIs
-	if (customCwd !== undefined && (typeof customCwd !== "string" || customCwd.length === 0)) {
-		return [false, formatResponse.toolError("Invalid cwd parameter: cwd must be a non-empty string.")]
-	}
 
 	if (!customCwd) {
 		workingDir = task.cwd
@@ -437,20 +243,9 @@ export async function executeCommandInTerminal(
 		workingDir = path.resolve(task.cwd, customCwd)
 	}
 
-	let traceFinalized = false
-	const finalizeTrace = () => {
-		if (traceFinalized || !traceBuilder) {
-			return
-		}
-		traceFinalized = true
-		traceBuilder.finalize()
-	}
-
 	try {
 		await fs.access(workingDir)
 	} catch (error) {
-		traceBuilder?.markError("WORKING_DIR_NOT_FOUND")
-		finalizeTrace()
 		return [false, `Working directory '${workingDir}' does not exist.`]
 	}
 
@@ -463,13 +258,7 @@ export async function executeCommandInTerminal(
 	let shellIntegrationError: ShellIntegrationError | undefined
 	let hasAskedForCommandOutput = false
 
-	// Determine the terminal provider. When a resolved environment is available,
-	// the provider comes from the primary plan — this is the single source of truth
-	// that matches the system prompt and tool description shown to the model.
-	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(
-		terminalShellIntegrationDisabled,
-		resolvedEnv,
-	)
+	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
 
 	// cmd.exe can't use shell integration — tell the webview to expand the output
@@ -523,7 +312,6 @@ export async function executeCommandInTerminal(
 					isNonInteractive: true,
 				})
 			})
-			// Best-effort: output publishing failures should not crash the command. Logging only.
 			.catch((error) => {
 				console.error("[ExecuteCommandTool] Failed to publish command output:", error)
 			})
@@ -615,7 +403,6 @@ export async function executeCommandInTerminal(
 
 	const callbacks: RooTerminalCallbacks = {
 		onLine: async (lines: string, process: RooTerminalProcess) => {
-			traceBuilder?.markFirstOutputAt(Date.now())
 			accumulatedOutput += lines
 
 			// Trim accumulated output to prevent unbounded memory growth
@@ -657,7 +444,6 @@ export async function executeCommandInTerminal(
 					persistedResult = await interceptor.finalize()
 				}
 			} catch (error) {
-				// Best-effort: output publishing failures should not crash the command. Logging only.
 				console.error("[ExecuteCommandTool] interceptor.finalize() failed:", error)
 			}
 
@@ -676,15 +462,11 @@ export async function executeCommandInTerminal(
 			// errors here are UI-only and must not surface to the tool result.
 			commandOutputSayChain
 				.then(() => queueCommandOutputMessage(result, false, true))
-				// Best-effort: output publishing failures should not crash the command. Logging only.
 				.catch((error) => {
 					console.error("[ExecuteCommandTool] Failed to flush final command_output:", error)
 				})
 		},
 		onShellExecutionStarted: (pid: number | undefined, process: RooTerminalProcess) => {
-			const now = Date.now()
-			traceBuilder?.markProcessIdResolvedAt(now)
-			traceBuilder?.markShellExecutionStartedAt(now)
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 
@@ -701,7 +483,6 @@ export async function executeCommandInTerminal(
 			}
 		},
 		onShellExecutionComplete: (details: ExitCodeDetails) => {
-			traceBuilder?.markShellExecutionEndedAt(Date.now(), details.exitCode ?? undefined)
 			const status: CommandExecutionStatus = { executionId, status: "exited", exitCode: details.exitCode }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 			exitDetails = details
@@ -710,42 +491,12 @@ export async function executeCommandInTerminal(
 
 	if (terminalProvider === "vscode") {
 		callbacks.onNoShellIntegration = async (details: ShellIntegrationErrorDetails) => {
-			traceBuilder?.markShellIntegrationTimeoutAt(Date.now())
-			traceBuilder?.markError(details.code ?? "SI_ACTIVATION_TIMEOUT")
 			TelemetryService.instance.captureShellIntegrationError(task.taskId)
 			shellIntegrationError = new ShellIntegrationError(details.message, details.commandSubmitted)
 		}
 	}
 
-	// When a resolved environment is available, set the shell family for
-	// terminal reuse keying so that changing shells prevents reuse of terminals
-	// created with a different family.
-	if (!reuseTerminal && resolvedEnv) {
-		TerminalRegistry.setExecaShellFamily(resolvedEnv.primaryPlan.family)
-	}
-
-	traceBuilder?.markTerminalRequestedAt(Date.now())
-	const terminal =
-		reuseTerminal ??
-		(await TerminalRegistry.getOrCreateTerminal(
-			workingDir,
-			task.taskId,
-			executionId,
-			terminalProvider,
-			resolvedEnv,
-		))
-
-	const terminalAcquiredAt = Date.now()
-	const terminalReused = reuseTerminal !== undefined || terminal.lifecycle.state !== "creating"
-	traceBuilder?.markTerminalCreatedAt(terminalAcquiredAt, terminalReused, terminal.lifecycle.state)
-	traceBuilder?.markProvider(terminal.provider)
-	traceBuilder?.markShellIntegrationInitiallyAvailable(
-		terminal.provider === "vscode" && terminal instanceof Terminal
-			? terminal.terminal.shellIntegration !== undefined
-			: false,
-	)
-	traceBuilder?.markConcurrentCommandCount(1)
-	traceBuilder?.markConcurrentTerminalCreationCount(terminalReused ? 0 : 1)
+	const terminal = await TerminalRegistry.getOrCreateTerminal(workingDir, task.taskId, terminalProvider)
 
 	if (terminal instanceof Terminal) {
 		terminal.terminal.show(true)
@@ -756,23 +507,9 @@ export async function executeCommandInTerminal(
 		workingDir = terminal.getCurrentWorkingDirectory()
 	}
 
-	// When using execa with a resolved environment, set the shell invocation
-	// plan so ExecaTerminalProcess uses the family-specific adapter instead of
-	// the legacy `shell: true` path. On the retry path, use the fallback plan.
-	if (terminal instanceof ExecaTerminal && resolvedEnv) {
-		const plan: ShellInvocationPlan | undefined = useFallbackPlan
-			? resolvedEnv.fallbackPlan
-			: resolvedEnv.primaryPlan
-		if (plan) {
-			terminal.setShellInvocationPlan(plan)
-		}
-	}
-
 	// Fallback anchor for providers that never fire onShellExecutionStarted.
 	commandStartedAt = Date.now()
-
-	traceBuilder?.markCommandSubmittedAt(Date.now())
-	const process = terminal.runCommand(command, callbacks, executionId)
+	const process = terminal.runCommand(command, callbacks)
 	task.terminalProcess = process
 
 	// Dual-timeout logic:
@@ -819,14 +556,12 @@ export async function executeCommandInTerminal(
 		await Promise.race(racers)
 	} catch (error) {
 		if (isUserTimedOut) {
-			traceBuilder?.markError("USER_TIMEOUT")
 			const status: CommandExecutionStatus = { executionId, status: "timeout" }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 			await task.say("error", t("common:errors:command_timeout", { seconds: commandExecutionTimeoutSeconds }))
 			task.didToolFailInCurrentTurn = true
 			task.terminalProcess = undefined
 
-			finalizeTrace()
 			return [
 				false,
 				`The command was terminated after exceeding a user-configured ${commandExecutionTimeoutSeconds}s timeout. Do not try to re-run the command.`,
@@ -842,102 +577,7 @@ export async function executeCommandInTerminal(
 	}
 
 	if (shellIntegrationError) {
-		const error = shellIntegrationError
-
-		// One same-terminal recovery attempt for pre-submit SI activation timeout.
-		// The recovery never submits the command until shell integration is confirmed.
-		if (
-			!recoveryAttempted &&
-			error.retryDisposition === "same-terminal-once" &&
-			!error.commandSubmitted &&
-			terminal instanceof Terminal
-		) {
-			try {
-				terminal.lifecycle.incrementRecovery()
-			} catch {
-				terminal.lifecycle.markBroken()
-				terminal.terminal.dispose()
-				throw new ShellIntegrationError(
-					"Recovery limit exceeded for shell integration timeout",
-					false,
-					"SI_ACTIVATION_TIMEOUT",
-					{
-						terminalId: terminal.id,
-						retryDisposition: "fallback-safe",
-					},
-				)
-			}
-
-			const recoveringStatus: CommandExecutionStatus = {
-				executionId,
-				status: "recovering",
-				errorCode: error.code,
-			}
-			provider?.postMessageToWebview({
-				type: "commandExecutionStatus",
-				text: JSON.stringify(recoveringStatus),
-			})
-
-			if (!terminal.isClosed()) {
-				await delay(400)
-
-				if (!terminal.isClosed()) {
-					try {
-						terminal.lifecycle.transition("failed", executionId)
-						return await executeCommandInTerminal(task, {
-							...options,
-							reuseTerminal: terminal,
-							recoveryAttempted: true,
-						})
-					} catch (retryError) {
-						traceBuilder?.markError(
-							retryError instanceof TerminalExecutionError ? retryError.code : "RECOVERY_FAILED",
-						)
-						if (retryError instanceof TerminalExecutionError) {
-							throw new ShellIntegrationError(
-								`Shell integration recovery failed: ${retryError.message}`,
-								retryError.commandSubmitted,
-								retryError.code as TerminalErrorCode,
-								{
-									phase: retryError.phase,
-									provider: retryError.provider,
-									terminalId: terminal.id,
-									outcome: retryError.outcome,
-									retryDisposition: "fallback-safe",
-									causeName: retryError.causeName,
-								},
-							)
-						}
-						throw retryError
-					}
-				}
-			}
-
-			// Recovery not possible: quarantine the terminal and request a provider switch.
-			terminal.lifecycle.markBroken()
-			terminal.terminal.dispose()
-			throw new ShellIntegrationError(
-				"Shell integration not available after recovery attempt",
-				false,
-				"SI_ACTIVATION_TIMEOUT",
-				{
-					terminalId: terminal.id,
-					retryDisposition: "fallback-safe",
-				},
-			)
-		}
-
-		// If recovery is not applicable or already exhausted, convert a pre-submit
-		// same-terminal-once error into a fallback-safe request so the caller can
-		// switch provider instead of leaving the command unexecuted.
-		if (error.retryDisposition === "same-terminal-once" && !error.commandSubmitted) {
-			throw new ShellIntegrationError("Shell integration recovery not possible", false, error.code, {
-				terminalId: terminal.id,
-				retryDisposition: "fallback-safe",
-			})
-		}
-
-		throw error
+		throw shellIntegrationError
 	}
 
 	// Wait for a short delay to ensure all messages are sent to the webview.
@@ -960,7 +600,6 @@ export async function executeCommandInTerminal(
 		const { text, images } = message
 		await task.say("user_feedback", text, images)
 
-		finalizeTrace()
 		return [
 			true,
 			formatResponse.toolResult(
@@ -977,7 +616,6 @@ export async function executeCommandInTerminal(
 
 		// Use persisted output format when output was truncated and spilled to disk
 		if (persistedResult?.truncated) {
-			finalizeTrace()
 			return [false, formatPersistedOutput(persistedResult, exitDetails, currentWorkingDir)]
 		}
 
@@ -990,13 +628,11 @@ export async function executeCommandInTerminal(
 
 		const exitStatus = formatExitStatus(exitDetails)
 
-		finalizeTrace()
 		return [
 			false,
 			`Command executed in terminal within working directory '${currentWorkingDir}'. ${exitStatus}\nOutput:\n${result}`,
 		]
 	} else {
-		finalizeTrace()
 		return [
 			false,
 			[

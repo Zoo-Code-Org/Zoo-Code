@@ -845,24 +845,6 @@
 			"description": "Theo mặc định Zoo Code sử dụng shell được cấu hình trong VS Code. Chọn một hồ sơ shell từ danh sách để chọn hồ sơ shell dựa trên đường dẫn được VS Code cung cấp. Các hồ sơ chỉ nguồn (ví dụ: mục PowerShell tích hợp) không thể được liệt kê ở đây. <0>Tìm hiểu thêm</0>",
 			"configureButton": "Chọn hồ sơ mặc định trong VS Code",
 			"noProfiles": "(không tìm thấy hồ sơ dựa trên đường dẫn trong terminal.integrated.profiles)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* Miễn phí đến {{count}} yêu cầu mỗi phút. Sau đó, thanh toán phụ thuộc vào kích thước lời nhắc.",
 			"pricingDetails": "Để biết thêm thông tin, xem chi tiết giá.",
 			"billingEstimate": "* Thanh toán là ước tính - chi phí chính xác phụ thuộc vào kích thước lời nhắc."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "Tiện ích mở rộng tự động lấy danh sách mới nhất các mô hình có sẵn trên <serviceLink>{{serviceName}}</serviceLink>. Nếu bạn không chắc chắn nên chọn mô hình nào, Zoo Code hoạt động tốt nhất với <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Bạn cũng có thể thử tìm kiếm \"free\" cho các tùy chọn miễn phí hiện có.",

@@ -845,24 +845,6 @@
 			"description": "Varsayılan olarak Zoo Code, VS Code'da yapılandırılmış kabuğu kullanır. VS Code'un sunduğu yol tabanlı bir kabuk profili seçmek için listeden bir kabuk profili seçin. Yalnızca kaynak profiller (örn. yerleşik PowerShell girişi) burada listelenemez. <0>Daha fazla bilgi</0>",
 			"configureButton": "VS Code'da varsayılan profili seç",
 			"noProfiles": "(terminal.integrated.profiles'da yol tabanlı profil bulunamadı)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* Dakikada {{count}} isteğe kadar ücretsiz. Bundan sonra, ücretlendirme istem boyutuna bağlıdır.",
 			"pricingDetails": "Daha fazla bilgi için fiyatlandırma ayrıntılarına bakın.",
 			"billingEstimate": "* Ücretlendirme bir tahmindir - kesin maliyet istem boyutuna bağlıdır."
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",

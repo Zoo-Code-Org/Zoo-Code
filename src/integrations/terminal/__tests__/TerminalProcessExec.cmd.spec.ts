@@ -97,7 +97,7 @@ async function testCmdCommand(
 
 	// Create terminal info with running state
 	const mockTerminalInfo = new Terminal(1, mockTerminal, "C:\\test\\path")
-	mockTerminalInfo.lifecycle._setStateForTest("running", "test-exec")
+	mockTerminalInfo.running = true
 
 	// Add the terminal to the registry
 	TerminalRegistry["terminals"] = [mockTerminalInfo]
@@ -222,9 +222,6 @@ async function testCmdCommand(
 
 		// Verify the output matches the expected output
 		expect(capturedOutput).toBe(expectedOutput)
-
-		// Lifecycle state assertion: terminal should be idle after command completion.
-		expect(mockTerminalInfo.lifecycle.state).toBe("idle")
 
 		return { executionTimeUs, capturedOutput, exitDetails }
 	} finally {

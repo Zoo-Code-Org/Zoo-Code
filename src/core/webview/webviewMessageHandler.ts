@@ -1810,47 +1810,6 @@ export const webviewMessageHandler = async (
 			break
 		}
 
-		case "requestTerminalShellOptions": {
-			// Ask the CommandEnvironmentService for sanitized trusted shell
-			// options and the current effective shell. Delegates to
-			// ClineProvider.handleRequestTerminalShellOptions().
-			// See ARCH-TERMINAL-001 section 1.9.
-			await provider.handleRequestTerminalShellOptions()
-			break
-		}
-
-		case "setTerminalShellSelection": {
-			// Validate the selection via ShellResolver, persist
-			// terminalShellSelection, invalidate the environment cache,
-			// close idle terminals, and respond with the resolved effective
-			// shell. Delegates to ClineProvider.handleSetTerminalShellSelection().
-			// See ARCH-TERMINAL-001 section 1.9.
-			if (message.terminalShellSelection) {
-				await provider.handleSetTerminalShellSelection(message.terminalShellSelection)
-			}
-			break
-		}
-
-		case "requestCustomShellPath": {
-			// Open a native file picker to let the user select a shell executable.
-			const filters: Record<string, string[]> =
-				process.platform === "win32" ? { Executables: ["exe", "cmd", "bat"] } : { "All Files": ["*"] }
-			const result = await vscode.window.showOpenDialog({
-				canSelectFiles: true,
-				canSelectFolders: false,
-				canSelectMany: false,
-				title: "Select Shell Executable",
-				filters,
-			})
-			if (result && result[0]) {
-				await provider.handleSetTerminalShellSelection({
-					kind: "path",
-					path: result[0].fsPath,
-				})
-			}
-			break
-		}
-
 		case "mode":
 			await provider.handleModeSwitch(message.text as Mode)
 			break

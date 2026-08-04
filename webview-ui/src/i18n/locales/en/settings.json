@@ -925,24 +925,6 @@
 			"configureButton": "Choose default profile in VS Code",
 			"noProfiles": "(no path-based profiles found in terminal.integrated.profiles)",
 			"description": "Zoo Code uses the shell configured in VS Code by default. Select a specific terminal profile to override this. Only path-based profiles from terminal.integrated.profiles are listed here. <0>Learn more</0>"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -1058,6 +1040,8 @@
 		"enableR1FormatTips": "Must be enabled when using R1 models such as QWQ to prevent 400 errors",
 		"useAzure": "Use Azure",
 		"azureApiVersion": "Set Azure API version",
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.",
 		"gemini": {
 			"freeRequests": "* Free up to {{count}} requests per minute. After that, billing depends on prompt size.",
 			"pricingDetails": "For more info, see pricing details.",

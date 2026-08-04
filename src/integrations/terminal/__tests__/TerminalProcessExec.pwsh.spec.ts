@@ -98,7 +98,7 @@ async function testPowerShellCommand(
 
 	// Create terminal info with running state
 	const mockTerminalInfo = new Terminal(1, mockTerminal, "/test/path")
-	mockTerminalInfo.lifecycle._setStateForTest("running", "test-exec")
+	mockTerminalInfo.running = true
 
 	// Add the terminal to the registry
 	TerminalRegistry["terminals"] = [mockTerminalInfo]
@@ -218,9 +218,6 @@ async function testPowerShellCommand(
 		if (!skipVerification) {
 			expect(capturedOutput).toBe(expectedOutput)
 		}
-
-		// Lifecycle state assertion: terminal should be idle after command completion.
-		expect(mockTerminalInfo.lifecycle.state).toBe("idle")
 
 		return { executionTimeUs, capturedOutput, exitDetails }
 	} finally {

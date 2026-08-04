@@ -845,24 +845,6 @@
 			"description": "デフォルトでは Zoo Code は VS Code に設定されたシェルを使用します。VS Code が公開するパスベースのシェルプロファイルを選択するには一覧からシェルプロファイルを選択してください。ソースのみのプロファイル（例：組み込みの PowerShell エントリ）はここに表示できません。 <0>詳細を見る</0>",
 			"configureButton": "VS Code でデフォルトプロファイルを選択",
 			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* 1分間あたり{{count}}リクエストまで無料。それ以降は、プロンプトサイズに応じて課金されます。",
 			"pricingDetails": "詳細は価格情報をご覧ください。",
 			"billingEstimate": "* 課金は見積もりです - 正確な費用はプロンプトのサイズによって異なります。"
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。また、「free」で検索すると、現在利用可能な無料オプションを見つけることができます。",

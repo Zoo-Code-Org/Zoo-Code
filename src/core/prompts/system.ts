@@ -12,7 +12,6 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
 import type { SystemPromptSettings } from "./types"
-import type { ResolvedCommandEnvironment } from "../../integrations/terminal/shell/types"
 import {
 	getRulesSection,
 	getSystemInfoSection,
@@ -56,7 +55,6 @@ async function generatePrompt(
 	todoList?: TodoItem[],
 	modelId?: string,
 	skillsManager?: SkillsManager,
-	resolvedEnv?: ResolvedCommandEnvironment,
 ): Promise<string> {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -114,9 +112,9 @@ ${
 
 ${modesSection}
 ${skillsSection ? `\n${skillsSection}` : ""}
-${getRulesSection(cwd, settings, resolvedEnv)}
+${getRulesSection(cwd, settings)}
 
-${getSystemInfoSection(cwd, resolvedEnv)}
+${getSystemInfoSection(cwd)}
 
 ${getObjectiveSection()}
 
@@ -146,7 +144,6 @@ export const SYSTEM_PROMPT = async (
 	todoList?: TodoItem[],
 	modelId?: string,
 	skillsManager?: SkillsManager,
-	resolvedEnv?: ResolvedCommandEnvironment,
 ): Promise<string> => {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -175,6 +172,5 @@ export const SYSTEM_PROMPT = async (
 		todoList,
 		modelId,
 		skillsManager,
-		resolvedEnv,
 	)
 }

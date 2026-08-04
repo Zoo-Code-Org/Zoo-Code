@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import * as vscode from "vscode"
 import { existsSync } from "fs"
 import { userInfo } from "os"
-import { getShell, classifyShellFamily, isShellPathAllowed } from "../shell"
+import { getShell } from "../shell"
 
 // Mock vscode module
 vi.mock("vscode", () => ({
@@ -791,117 +791,6 @@ describe("Shell Detection Tests", () => {
 
 			const result = getShell()
 			expect(result).toBe("/bin/bash") // Should fall back to safe default
-		})
-
-		// --------------------------------------------------------------------------
-		// classifyShellFamily
-		// --------------------------------------------------------------------------
-
-		describe("classifyShellFamily", () => {
-			it.each([
-				// PowerShell variants
-				["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "powershell"],
-				["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "powershell"],
-				["/usr/bin/pwsh", "powershell"],
-				["/usr/local/bin/pwsh", "powershell"],
-				["pwsh", "powershell"],
-				["powershell", "powershell"],
-
-				// Command Prompt
-				["C:\\Windows\\System32\\cmd.exe", "cmd"],
-				["cmd", "cmd"],
-				["cmd.exe", "cmd"],
-
-				// WSL
-				["C:\\Windows\\System32\\wsl.exe", "wsl"],
-				["wsl", "wsl"],
-				["wsl.exe", "wsl"],
-
-				// Fish
-				["/usr/bin/fish", "fish"],
-				["/usr/local/bin/fish", "fish"],
-				["fish", "fish"],
-
-				// POSIX shells
-				["/bin/bash", "posix"],
-				["/usr/bin/bash", "posix"],
-				["/bin/zsh", "posix"],
-				["/bin/sh", "posix"],
-				["/bin/dash", "posix"],
-				["/bin/ksh", "posix"],
-				["/bin/ash", "posix"],
-				["/bin/csh", "posix"],
-				["/bin/tcsh", "posix"],
-				["/bin/busybox", "posix"],
-				["bash", "posix"],
-				["zsh", "posix"],
-			])("classifyShellFamily(%s) === %s", (input, expected) => {
-				expect(classifyShellFamily(input)).toBe(expected)
-			})
-
-			it("returns undefined for unsupported shells", () => {
-				expect(classifyShellFamily("/usr/bin/python3")).toBeUndefined()
-				expect(classifyShellFamily("/usr/bin/node")).toBeUndefined()
-				expect(classifyShellFamily("C:\\Tools\\custom-shell.exe")).toBeUndefined()
-			})
-
-			it("returns undefined for empty or invalid input", () => {
-				expect(classifyShellFamily("")).toBeUndefined()
-				expect(classifyShellFamily("   ")).toBeUndefined()
-			})
-
-			it("is case-insensitive for Windows-style paths", () => {
-				expect(classifyShellFamily("C:\\WINDOWS\\SYSTEM32\\CMD.EXE")).toBe("cmd")
-				expect(classifyShellFamily("C:\\Program Files\\PowerShell\\7\\PWSH.EXE")).toBe("powershell")
-			})
-		})
-
-		// --------------------------------------------------------------------------
-		// isShellPathAllowed
-		// --------------------------------------------------------------------------
-
-		describe("isShellPathAllowed", () => {
-			it("returns true for allowlisted shell paths", () => {
-				expect(isShellPathAllowed("/bin/bash")).toBe(true)
-				expect(isShellPathAllowed("/bin/zsh")).toBe(true)
-				expect(isShellPathAllowed("/bin/sh")).toBe(true)
-				expect(isShellPathAllowed("C:\\Windows\\System32\\cmd.exe")).toBe(true)
-				expect(isShellPathAllowed("C:\\Windows\\System32\\wsl.exe")).toBe(true)
-			})
-
-			it("returns false for non-allowlisted paths", () => {
-				expect(isShellPathAllowed("/usr/bin/python3")).toBe(false)
-				expect(isShellPathAllowed("/usr/bin/node")).toBe(false)
-				expect(isShellPathAllowed("C:\\Tools\\malicious.exe")).toBe(false)
-			})
-
-			it("returns false for empty input", () => {
-				expect(isShellPathAllowed("")).toBe(false)
-			})
-
-			it("is case-insensitive on Windows", () => {
-				const originalPlatform = process.platform
-				try {
-					Object.defineProperty(process, "platform", { value: "win32" })
-					expect(isShellPathAllowed("C:\\WINDOWS\\SYSTEM32\\CMD.EXE")).toBe(true)
-					expect(isShellPathAllowed("C:\\Program Files\\PowerShell\\7\\PWSH.EXE")).toBe(true)
-				} finally {
-					Object.defineProperty(process, "platform", { value: originalPlatform })
-				}
-			})
-
-			it("is case-sensitive on Unix", () => {
-				const originalPlatform = process.platform
-				try {
-					Object.defineProperty(process, "platform", { value: "linux" })
-					// /BIN/BASH is not in the allowlist (case-sensitive)
-					expect(isShellPathAllowed("/BIN/BASH")).toBe(false)
-					// /bin/bash is in the allowlist
-					expect(isShellPathAllowed("/bin/bash")).toBe(true)
-				} finally {
-					Object.defineProperty(process, "platform", { value: originalPlatform })
-				}
-			})
 		})
 	})
 })

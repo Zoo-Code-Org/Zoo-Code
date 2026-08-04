@@ -991,7 +991,7 @@
 	},
 	"core/tools/__tests__/executeCommandTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 8
 		}
 	},
 	"core/tools/__tests__/generateImageTool.test.ts": {
@@ -1251,7 +1251,7 @@
 	},
 	"integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 18
+			"count": 10
 		}
 	},
 	"integrations/terminal/__tests__/OutputInterceptor.test.ts": {
@@ -1291,12 +1291,12 @@
 	},
 	"integrations/terminal/__tests__/TerminalProfile.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 39
+			"count": 35
 		}
 	},
 	"integrations/terminal/__tests__/TerminalRegistry.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 33
+			"count": 22
 		}
 	},
 	"integrations/terminal/__tests__/setupTerminalTests.ts": {
@@ -1777,21 +1777,6 @@
 	"vitest.setup.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"core/prompts/__tests__/shell-environment-prompt.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/webview/__tests__/terminal-shell-messages.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"integrations/terminal/__tests__/ShellResolver.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
 		}
 	}
 }

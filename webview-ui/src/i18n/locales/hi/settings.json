@@ -845,24 +845,6 @@
 			"description": "डिफ़ॉल्ट रूप से Zoo Code VS Code में कॉन्फ़िगर की गई शेल का उपयोग करता है। VS Code द्वारा प्रदर्शित पथ-आधारित शेल प्रोफ़ाइल चुनने के लिए सूची से एक शेल प्रोफ़ाइल चुनें। केवल-स्रोत प्रोफ़ाइल (जैसे, अंतर्निर्मित PowerShell प्रविष्टि) यहाँ सूचीबद्ध नहीं किए जा सकते। <0>अधिक जानें</0>",
 			"configureButton": "VS Code में डिफ़ॉल्ट प्रोफ़ाइल चुनें",
 			"noProfiles": "(terminal.integrated.profiles में कोई पथ-आधारित प्रोफ़ाइल नहीं मिली)"
-		},
-		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
-			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
-			},
-			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
-			}
 		}
 	},
 	"advancedSettings": {
@@ -982,7 +964,9 @@
 			"freeRequests": "* प्रति मिनट {{count}} अनुरोधों तक मुफ्त। उसके बाद, बिलिंग प्रॉम्प्ट आकार पर निर्भर करती है।",
 			"pricingDetails": "अधिक जानकारी के लिए, मूल्य निर्धारण विवरण देखें।",
 			"billingEstimate": "* बिलिंग एक अनुमान है - सटीक लागत प्रॉम्प्ट आकार पर निर्भर करती है।"
-		}
+		},
+		"strictToolSchemas": "Strict tool schemas",
+		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
 	},
 	"modelPicker": {
 		"automaticFetch": "एक्सटेंशन <serviceLink>{{serviceName}}</serviceLink> पर उपलब्ध मॉडलों की नवीनतम सूची स्वचालित रूप से प्राप्त करता है। यदि आप अनिश्चित हैं कि कौन सा मॉडल चुनना है, तो Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> के साथ सबसे अच्छा काम करता है। आप वर्तमान में उपलब्ध निःशुल्क विकल्पों के लिए \"free\" भी खोज सकते हैं।",

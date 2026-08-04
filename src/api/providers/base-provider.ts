@@ -23,11 +23,23 @@ export abstract class BaseProvider implements ApiHandler {
 	abstract getModel(): { id: string; info: ModelInfo }
 
 	/**
-	 * Converts an array of tools to be compatible with OpenAI's strict mode.
-	 * Filters for function tools, applies schema conversion to their parameters,
-	 * and ensures all tools have consistent strict: true values.
+	 * Converts an array of tools for OpenAI-compatible providers.
+	 * Filters for function tools and applies schema conversion to their parameters.
+	 *
+	 * When `strictMode` is true, non-MCP function tools get `strict: true` and
+	 * their schemas are hardened via `convertToolSchemaForOpenAI()` (adds
+	 * `additionalProperties: false`, marks all properties required, etc.).
+	 *
+	 * When `strictMode` is false (default), non-MCP function tools get
+	 * `strict: false` and their original best-effort schemas are preserved
+	 * without hardening. This is semantically consistent: `strict: false`
+	 * should not imply strict-schema transformations.
+	 *
+	 * MCP tools are ALWAYS `strict: false` with original parameters preserved,
+	 * regardless of the `strictMode` setting, because MCP schemas may contain
+	 * optional properties that must remain optional.
 	 */
-	protected convertToolsForOpenAI(tools: any[] | undefined): any[] | undefined {
+	protected convertToolsForOpenAI(tools: any[] | undefined, strictMode: boolean = false): any[] | undefined {
 		if (!tools) {
 			return undefined
 		}
@@ -37,18 +49,40 @@ export abstract class BaseProvider implements ApiHandler {
 				return tool
 			}
 
-			// MCP tools use the 'mcp--' prefix - disable strict mode for them
+			// MCP tools use the 'mcp--' prefix - always disable strict mode
 			// to preserve optional parameters from the MCP server schema
 			const isMcp = isMcpTool(tool.function.name)
 
+			if (isMcp) {
+				return {
+					...tool,
+					function: {
+						...tool.function,
+						strict: false,
+						parameters: tool.function.parameters,
+					},
+				}
+			}
+
+			// Non-MCP function tools respect the strictMode setting
+			if (strictMode) {
+				return {
+					...tool,
+					function: {
+						...tool.function,
+						strict: true,
+						parameters: this.convertToolSchemaForOpenAI(tool.function.parameters),
+					},
+				}
+			}
+
+			// strictMode false: preserve original best-effort schema
 			return {
 				...tool,
 				function: {
 					...tool.function,
-					strict: !isMcp,
-					parameters: isMcp
-						? tool.function.parameters
-						: this.convertToolSchemaForOpenAI(tool.function.parameters),
+					strict: false,
+					parameters: tool.function.parameters,
 				},
 			}
 		})
@@ -74,6 +108,11 @@ export abstract class BaseProvider implements ApiHandler {
 		// Only add if not already set to false (to avoid unnecessary mutations)
 		if (result.additionalProperties !== false) {
 			result.additionalProperties = false
+		}
+
+		if (result.properties === undefined) {
+			result.properties = {}
+			result.required = []
 		}
 
 		if (result.properties) {

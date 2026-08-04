@@ -579,17 +579,12 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			expect(Terminal.getProfileShell("win32")).toBeUndefined()
 		})
 
-		it("resolves source-only PowerShell profiles to PowerShell 7 or 5.1 on Windows", () => {
-			// ARCH-TERMINAL-001: Source-only profiles (e.g. { source: "PowerShell" })
-			// are now resolved to the known PowerShell executable instead of
-			// returning undefined. This is an intentional behavior change.
+		it("falls back to default when the profile has no resolvable path (source-only profile)", () => {
 			stubProfiles({ windows: { PowerShell: { source: "PowerShell" } } })
 
 			Terminal.setTerminalProfile("PowerShell")
 
-			const result = Terminal.getProfileShell("win32")
-			expect(result).toBeDefined()
-			expect(result?.shellPath).toMatch(/pwsh\.exe|powershell\.exe$/i)
+			expect(Terminal.getProfileShell("win32")).toBeUndefined()
 		})
 
 		it("resolves profiles defined only in user/global settings", () => {
@@ -773,112 +768,6 @@ describe("Terminal VS Code terminal profile (#277)", () => {
 			const env = Terminal.getEnv()
 			expect(zshInitTmpDirSpy).not.toHaveBeenCalled()
 			expect(env.ZDOTDIR).toBeUndefined()
-		})
-	})
-
-	// --------------------------------------------------------------------------
-	// TerminalProfileResolver delegation (Sub-task 2)
-	// --------------------------------------------------------------------------
-
-	describe("TerminalProfileResolver delegation", () => {
-		it("getConfiguredProfiles delegates to TerminalProfileResolver", () => {
-			stubProfiles({
-				linux: {
-					bash: { path: "/bin/bash" },
-					zsh: { path: "/bin/zsh" },
-				},
-			})
-
-			const profiles = Terminal.getConfiguredProfiles("linux")
-			expect(profiles).toEqual({
-				bash: { path: "/bin/bash" },
-				zsh: { path: "/bin/zsh" },
-			})
-		})
-
-		it("getConfiguredProfiles ignores workspace profiles (trusted scopes only)", () => {
-			getConfigurationSpy = vi
-				.spyOn(vscode.workspace, "getConfiguration")
-				.mockImplementation((section?: string) => {
-					if (section === "terminal.integrated.profiles") {
-						return {
-							inspect: () => ({
-								defaultValue: { bash: { path: "/bin/bash" } },
-								globalValue: { zsh: { path: "/bin/zsh" } },
-								workspaceValue: { malicious: { path: "/workspace/malicious-shell" } },
-							}),
-						} as any
-					}
-
-					return { get: (_key: string, defaultValue?: unknown) => defaultValue } as any
-				})
-
-			const profiles = Terminal.getConfiguredProfiles("linux")
-			expect(profiles).toEqual({
-				bash: { path: "/bin/bash" },
-				zsh: { path: "/bin/zsh" },
-			})
-			expect(profiles).not.toHaveProperty("malicious")
-		})
-
-		it("getConfiguredDefaultProfileName delegates to TerminalProfileResolver", () => {
-			getConfigurationSpy = vi
-				.spyOn(vscode.workspace, "getConfiguration")
-				.mockImplementation((section?: string) => {
-					if (section === "terminal.integrated") {
-						return {
-							inspect: () => ({
-								globalValue: "PowerShell",
-								defaultValue: undefined,
-							}),
-						} as any
-					}
-					return { get: () => undefined } as any
-				})
-
-			expect(Terminal.getConfiguredDefaultProfileName("win32")).toBe("PowerShell")
-		})
-
-		it("resolveProfilePath delegates to TerminalProfileResolver", () => {
-			mockedExistsSync.mockReturnValue(true)
-			const resolved = Terminal.resolveProfilePath("/bin/bash", "linux", { PATH: "/usr/bin:/bin" })
-			expect(resolved).toBe("/bin/bash")
-		})
-
-		it("getAvailableProfileNames delegates to TerminalProfileResolver and excludes cmd.exe", () => {
-			stubProfiles({
-				windows: {
-					"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
-					PowerShell: { path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" },
-				},
-			})
-
-			expect(Terminal.getAvailableProfileNames("win32")).toEqual(["PowerShell"])
-		})
-
-		it("getProfileShell delegates to TerminalProfileResolver for path resolution", () => {
-			stubProfiles({
-				linux: {
-					bash: { path: "/bin/bash" },
-				},
-			})
-			Terminal.setTerminalProfile("bash")
-
-			const result = Terminal.getProfileShell("linux")
-			expect(result).toEqual({
-				shellPath: "/bin/bash",
-			})
-
-			Terminal.setTerminalProfile(undefined)
-		})
-
-		it("getProfileShell returns undefined when profile is not found", () => {
-			stubProfiles({ linux: {} })
-			Terminal.setTerminalProfile("nonexistent")
-
-			expect(Terminal.getProfileShell("linux")).toBeUndefined()
-
-			Terminal.setTerminalProfile(undefined)
 		})
 	})
 })
