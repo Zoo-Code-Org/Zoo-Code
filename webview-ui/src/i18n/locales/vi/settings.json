@@ -845,6 +845,24 @@
 			"description": "Theo mặc định Zoo Code sử dụng shell được cấu hình trong VS Code. Chọn một hồ sơ shell từ danh sách để chọn hồ sơ shell dựa trên đường dẫn được VS Code cung cấp. Các hồ sơ chỉ nguồn (ví dụ: mục PowerShell tích hợp) không thể được liệt kê ở đây. <0>Tìm hiểu thêm</0>",
 			"configureButton": "Chọn hồ sơ mặc định trong VS Code",
 			"noProfiles": "(không tìm thấy hồ sơ dựa trên đường dẫn trong terminal.integrated.profiles)"
+		},
+		"inlineShell": {
+			"label": "Shell terminal nội tuyến",
+			"description": "Chọn shell được sử dụng để chạy lệnh terminal nội tuyến. Auto theo hồ sơ terminal VS Code đáng tin cậy của bạn. Đường dẫn tùy chỉnh được xác nhận bởi extension host.",
+			"auto": "Auto (theo hồ sơ terminal đáng tin cậy)",
+			"customPath": "Chọn tệp thực thi tùy chỉnh",
+			"customPathPlaceholder": "Chọn một tệp thực thi shell...",
+			"effectiveShell": {
+				"label": "Shell hiệu lực",
+				"family": "Họ",
+				"source": "Nguồn",
+				"fallback": "Hành vi dự phòng",
+				"fallbackDescription": "Nếu tích hợp shell thất bại, các lệnh sẽ được thử lại bằng cùng một họ shell."
+			},
+			"error": {
+				"invalid": "Shell đã chọn không được hỗ trợ. Chọn một hồ sơ đáng tin cậy hoặc một tệp thực thi shell hợp lệ.",
+				"unavailable": "Tùy chọn shell hiện không khả dụng. Extension host có thể vẫn đang khởi tạo."
+			}
 		}
 	},
 	"advancedSettings": {

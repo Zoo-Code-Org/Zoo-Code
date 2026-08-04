@@ -845,6 +845,24 @@
 			"description": "Zoo Code 默认使用 VS Code 配置的 Shell。选择一个终端配置文件来覆盖此行为。此处仅列出 terminal.integrated.profiles 中的路径型配置文件。<0>了解更多</0>",
 			"configureButton": "在 VS Code 中选择默认配置文件",
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
+		},
+		"inlineShell": {
+			"label": "内联终端 Shell",
+			"description": "选择用于内联终端命令执行的 Shell。Auto 跟随你信任的 VS Code 终端配置文件。自定义路径由扩展主机验证。",
+			"auto": "Auto（跟随信任的终端配置文件）",
+			"customPath": "选择自定义可执行文件",
+			"customPathPlaceholder": "选择 Shell 可执行文件...",
+			"effectiveShell": {
+				"label": "有效 Shell",
+				"family": "系列",
+				"source": "来源",
+				"fallback": "回退行为",
+				"fallbackDescription": "如果 Shell 集成失败，命令将使用相同的 Shell 系列重试。"
+			},
+			"error": {
+				"invalid": "所选 Shell 不受支持。请选择一个受信任的配置文件或有效的 Shell 可执行文件。",
+				"unavailable": "Shell 选项当前不可用。扩展主机可能仍在初始化中。"
+			}
 		}
 	},
 	"advancedSettings": {

@@ -845,6 +845,24 @@
 			"description": "Varsayılan olarak Zoo Code, VS Code'da yapılandırılmış kabuğu kullanır. VS Code'un sunduğu yol tabanlı bir kabuk profili seçmek için listeden bir kabuk profili seçin. Yalnızca kaynak profiller (örn. yerleşik PowerShell girişi) burada listelenemez. <0>Daha fazla bilgi</0>",
 			"configureButton": "VS Code'da varsayılan profili seç",
 			"noProfiles": "(terminal.integrated.profiles'da yol tabanlı profil bulunamadı)"
+		},
+		"inlineShell": {
+			"label": "Satır içi terminal kabuğu",
+			"description": "Satır içi terminal komutları için kullanılan kabuğu seçin. Auto, güvenilir VS Code terminal profilinizi takip eder. Özel yollar, eklenti sunucusu tarafından doğrulanır.",
+			"auto": "Auto (güvenilir terminal profilini takip eder)",
+			"customPath": "Özel çalıştırılabilir dosya seç",
+			"customPathPlaceholder": "Bir kabuk çalıştırılabilir dosyası seçin...",
+			"effectiveShell": {
+				"label": "Etkin kabuk",
+				"family": "Aile",
+				"source": "Kaynak",
+				"fallback": "Geri çekilme davranışı",
+				"fallbackDescription": "Kabuk entegrasyonu başarısız olursa, komutlar aynı kabuk ailesi kullanılarak yeniden denenir."
+			},
+			"error": {
+				"invalid": "Seçilen kabuk desteklenmiyor. Güvenilir bir profil veya geçerli bir kabuk çalıştırılabilir dosyası seçin.",
+				"unavailable": "Kabuk seçenekleri şu anda kullanılamıyor. Eklenti sunucusu hâlâ başlatılıyor olabilir."
+			}
 		}
 	},
 	"advancedSettings": {

@@ -845,6 +845,24 @@
 			"description": "Domyślnie Zoo Code używa powłoki skonfigurowanej w VS Code. Wybierz profil powłoki z listy, aby użyć profilu ze ścieżką udostępnionego przez VS Code. Profile tylko ze źródłem (np. wbudowany wpis PowerShell) nie mogą być tutaj wyświetlone. <0>Dowiedz się więcej</0>",
 			"configureButton": "Wybierz domyślny profil w VS Code",
 			"noProfiles": "(brak profili ze ścieżką w terminal.integrated.profiles)"
+		},
+		"inlineShell": {
+			"label": "Inline shell terminala",
+			"description": "Wybierz shell używany do wykonywania poleceń w terminalu inline. Auto podąża za zaufanym profilem terminala VS Code. Niestandardowe ścieżki są walidowane przez hosta rozszerzenia.",
+			"auto": "Auto (podąża za zaufanym profilem terminala)",
+			"customPath": "Wybierz niestandardowy plik wykonywalny",
+			"customPathPlaceholder": "Wybierz plik wykonywalny shella...",
+			"effectiveShell": {
+				"label": "Aktywny shell",
+				"family": "Rodzina",
+				"source": "Źródło",
+				"fallback": "Zachowanie awaryjne",
+				"fallbackDescription": "Jeśli integracja shella się nie powiedzie, polecenia są ponawiane przy użyciu tej samej rodziny shella."
+			},
+			"error": {
+				"invalid": "Wybrany shell nie jest obsługiwany. Wybierz zaufany profil lub prawidłowy plik wykonywalny shella.",
+				"unavailable": "Opcje shella są obecnie niedostępne. Host rozszerzenia może nadal się inicjalizować."
+			}
 		}
 	},
 	"advancedSettings": {

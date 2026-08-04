@@ -845,6 +845,24 @@
 			"description": "De forma predeterminada, Zoo Code usa la shell que VS Code tiene configurada. Selecciona un perfil de shell de la lista para elegir un perfil de shell con ruta expuesto por VS Code. Los perfiles solo de fuente (p. ej., la entrada integrada de PowerShell) no se pueden listar aquí. <0>Más información</0>",
 			"configureButton": "Elegir perfil predeterminado en VS Code",
 			"noProfiles": "(no se encontraron perfiles con ruta en terminal.integrated.profiles)"
+		},
+		"inlineShell": {
+			"label": "Shell del terminal en línea",
+			"description": "Selecciona el shell utilizado para la ejecución de comandos en el terminal en línea. Auto sigue tu perfil de terminal de VS Code de confianza. Las rutas personalizadas son validadas por el host de la extensión.",
+			"auto": "Auto (sigue el perfil de terminal de confianza)",
+			"customPath": "Elegir ejecutable personalizado",
+			"customPathPlaceholder": "Selecciona un ejecutable de shell...",
+			"effectiveShell": {
+				"label": "Shell efectivo",
+				"family": "Familia",
+				"source": "Fuente",
+				"fallback": "Comportamiento de respaldo",
+				"fallbackDescription": "Si la integración del shell falla, los comandos se reintentan utilizando la misma familia de shell."
+			},
+			"error": {
+				"invalid": "El shell seleccionado no es compatible. Elige un perfil de confianza o un ejecutable de shell válido.",
+				"unavailable": "Las opciones de shell no están disponibles actualmente. El host de la extensión aún puede estar inicializándose."
+			}
 		}
 	},
 	"advancedSettings": {

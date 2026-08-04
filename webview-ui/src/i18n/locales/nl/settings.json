@@ -845,6 +845,24 @@
 			"description": "Standaard gebruikt Zoo Code de shell die in VS Code is geconfigureerd. Selecteer een shell-profiel uit de lijst om een pad-gebaseerd shell-profiel te gebruiken dat VS Code beschikbaar stelt. Uitsluitend op bron gebaseerde profielen (bijv. de ingebouwde PowerShell-vermelding) kunnen hier niet worden vermeld. <0>Meer informatie</0>",
 			"configureButton": "Standaardprofiel kiezen in VS Code",
 			"noProfiles": "(geen profielen met pad gevonden in terminal.integrated.profiles)"
+		},
+		"inlineShell": {
+			"label": "Inline terminalshell",
+			"description": "Selecteer de shell die wordt gebruikt voor inline terminalopdrachten. Auto volgt je vertrouwde VS Code-terminalprofiel. Aangepaste paden worden gevalideerd door de extension host.",
+			"auto": "Auto (volgt vertrouwd terminalprofiel)",
+			"customPath": "Aangepast uitvoerbaar bestand kiezen",
+			"customPathPlaceholder": "Selecteer een shell-uitvoerbaar bestand...",
+			"effectiveShell": {
+				"label": "Effectieve shell",
+				"family": "Familie",
+				"source": "Bron",
+				"fallback": "Fallback-gedrag",
+				"fallbackDescription": "Als de shell-integratie mislukt, worden opdrachten opnieuw geprobeerd met dezelfde shell-familie."
+			},
+			"error": {
+				"invalid": "De geselecteerde shell wordt niet ondersteund. Kies een vertrouwd profiel of een geldig shell-uitvoerbaar bestand.",
+				"unavailable": "Shellopties zijn momenteel niet beschikbaar. De extension host is mogelijk nog bezig met initialisatie."
+			}
 		}
 	},
 	"advancedSettings": {

@@ -35,6 +35,7 @@ import {
 	type ProviderSettings,
 	type ExperimentId,
 	type TelemetrySetting,
+	type TerminalShellSelection,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
@@ -135,6 +136,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const [isDiscardDialogShow, setDiscardDialogShow] = useState(false)
 	const [isChangeDetected, setChangeDetected] = useState(false)
 	const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined)
+	const [pendingTerminalShellSelection, setPendingTerminalShellSelection] = useState<
+		TerminalShellSelection | undefined
+	>(undefined)
 	const [activeTab, setActiveTab] = useState<SectionName>(
 		targetSection && sectionNames.includes(targetSection as SectionName)
 			? (targetSection as SectionName)
@@ -191,6 +195,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		terminalZshP10k,
 		terminalZdotdir,
 		terminalProfile,
+		terminalShellSelection,
 		writeDelayMs,
 		diffFuzzyThreshold,
 		showRooIgnoredFiles,
@@ -455,6 +460,22 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
+			// Send pending terminal shell selection (uses a separate message
+			// type with validation that isn't part of the updateSettings flow).
+			// Note: Do NOT reset pendingTerminalShellSelection here. Resetting it
+			// immediately causes the prop to TerminalSettings to temporarily revert
+			// to the stale state_terminalShellSelection (before postStateToWebview
+			// arrives), which triggers the useEffect that overwrites the user's
+			// selection and makes the dropdown show "Auto". Instead, let the
+			// pending value persist until the extension host syncs the updated
+			// state back via postStateToWebview().
+			if (pendingTerminalShellSelection) {
+				vscode.postMessage({
+					type: "setTerminalShellSelection",
+					terminalShellSelection: pendingTerminalShellSelection,
+				})
+			}
+
 			setChangeDetected(false)
 		}
 	}
@@ -479,6 +500,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				// Discard changes: Reset state and flag
 				setCachedState(extensionState) // Revert to original state
 				setChangeDetected(false) // Reset change flag
+				setPendingTerminalShellSelection(undefined) // Revert pending shell selection
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}
 			// If confirm is false (Cancel), do nothing, dialog closes automatically
@@ -892,7 +914,16 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								terminalZshP10k={terminalZshP10k}
 								terminalZdotdir={terminalZdotdir}
 								terminalProfile={terminalProfile}
+								terminalShellSelection={pendingTerminalShellSelection ?? terminalShellSelection}
 								onTerminalProfilePickerOpened={() => setChangeDetected(true)}
+								onShellSelectionChange={(selection) => {
+									// Buffer the selection and explicitly mark the settings as
+									// dirty so the Save button enables on shell-only changes.
+									// (Previously the dirty flag was only set incidentally via
+									// onTerminalProfilePickerOpened.)
+									setPendingTerminalShellSelection(selection)
+									setChangeDetected(true)
+								}}
 								setCachedStateField={setCachedStateField}
 							/>
 						)}

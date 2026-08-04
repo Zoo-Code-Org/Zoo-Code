@@ -845,6 +845,24 @@
 			"description": "Standardmäßig verwendet Zoo Code die in VS Code konfigurierte Shell. Wähle ein Shell-Profil aus der Liste, um ein pfadbasiertes Shell-Profil zu verwenden, das VS Code bereitstellt. Quellenbasierte Profile (z. B. der integrierte PowerShell-Eintrag) können hier nicht aufgelistet werden. <0>Mehr erfahren</0>",
 			"configureButton": "Standardprofil in VS Code auswählen",
 			"noProfiles": "(keine pfadbasierten Profile in terminal.integrated.profiles gefunden)"
+		},
+		"inlineShell": {
+			"label": "Inline-Terminal-Shell",
+			"description": "Wähle das Shell für die Inline-Terminal-Befehlsausführung. Auto folgt deinem vertrauenswürdigen VS Code Terminal-Profil. Benutzerdefinierte Pfade werden vom Extension-Host validiert.",
+			"auto": "Auto (folgt vertrauenswürdigem Terminal-Profil)",
+			"customPath": "Eigenes ausführbares Programm wählen",
+			"customPathPlaceholder": "Ein Shell-Programm auswählen...",
+			"effectiveShell": {
+				"label": "Aktives Shell",
+				"family": "Familie",
+				"source": "Quelle",
+				"fallback": "Fallback-Verhalten",
+				"fallbackDescription": "Wenn die Shell-Integration fehlschlägt, werden Befehle mit derselben Shell-Familie erneut versucht."
+			},
+			"error": {
+				"invalid": "Das ausgewählte Shell wird nicht unterstützt. Wähle ein vertrauenswürdiges Profil oder ein gültiges Shell-Programm.",
+				"unavailable": "Shell-Optionen sind derzeit nicht verfügbar. Der Extension-Host wird möglicherweise noch initialisiert."
+			}
 		}
 	},
 	"advancedSettings": {
