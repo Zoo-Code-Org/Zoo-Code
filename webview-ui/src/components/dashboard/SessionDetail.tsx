@@ -7,7 +7,7 @@ import type {
 	SessionDetail as SessionDetailType,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { formatCompact, formatCost } from "@/utils/formatNumber"
 
 // ── Time formatting ──────────────────────────────────────────────────────────

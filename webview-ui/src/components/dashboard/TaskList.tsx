@@ -1,11 +1,11 @@
-import React, { memo, useCallback, useRef } from "react"
+import React, { memo, useCallback, useRef, useState } from "react"
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import { ChevronDown, ChevronRight, RefreshCw } from "lucide-react"
 import i18next from "i18next"
 
 import type { DashboardTaskDetail, DashboardTaskSummary } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { formatCompact, formatCost } from "@/utils/formatNumber"
 
 import SessionDetail from "./SessionDetail"
@@ -205,6 +205,14 @@ const TaskList = memo(
 		const { t } = useAppTranslation()
 		const virtuosoRef = useRef<VirtuosoHandle>(null)
 
+		// Virtuoso requires a definite viewport height: with only `maxHeight` set,
+		// the scroller's `height: 100%` resolves against an auto-height parent,
+		// collapses to 0, and deadlocks (0 viewport → 0 rendered items → 0 content
+		// height). Driving an explicit (capped) height from the measured total list
+		// height keeps the "grow up to 400px" behavior without the deadlock;
+		// `initialItemCount` bootstraps the first measurement pass.
+		const [listHeight, setListHeight] = useState(0)
+
 		return (
 			<div className="flex flex-col gap-2" data-testid="dashboard-tasks">
 				<div className="flex items-center justify-between">
@@ -227,7 +235,9 @@ const TaskList = memo(
 						<Virtuoso
 							ref={virtuosoRef}
 							data={tasks}
-							style={{ maxHeight: 400 }}
+							initialItemCount={Math.min(5, tasks.length)}
+							style={{ height: Math.min(listHeight, 400) || undefined }}
+							totalListHeightChanged={setListHeight}
 							itemContent={(_index, task) => {
 								const isExpanded = expandedTaskId === task.taskId
 								return (
@@ -237,9 +247,7 @@ const TaskList = memo(
 										isExpanded={isExpanded}
 										detail={isExpanded ? taskDetails[task.taskId] : undefined}
 										detailError={
-											isExpanded
-												? (taskDetailErrors[task.taskId] ?? undefined)
-												: undefined
+											isExpanded ? (taskDetailErrors[task.taskId] ?? undefined) : undefined
 										}
 										detailLoading={isExpanded && taskDetailLoading.has(task.taskId)}
 										onToggle={onToggleTask}
