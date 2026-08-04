@@ -24,6 +24,7 @@ import {
 	mainlandZAiModels,
 	fireworksModels,
 	friendliModels,
+	applyCustomModelInfo,
 	basetenModels,
 	qwenCodeModels,
 	kimiCodeDefaultModelInfo,
@@ -45,15 +46,48 @@ import { useLmStudioModels } from "./useLmStudioModels"
 import { useOllamaModels } from "./useOllamaModels"
 
 /**
- * Helper to get a validated model ID for dynamic providers.
- * Returns the configured model ID if it exists in the available models, otherwise returns the default.
+ * Helper to get a model ID for dynamic providers.
+ * Some router providers accept arbitrary model IDs, so their configured value
+ * must survive both an empty list and a list that does not contain the ID.
  */
 function getValidatedModelId(
 	configuredId: string | undefined,
 	availableModels: ModelRecord | undefined,
 	defaultModelId: string,
+	preserveConfiguredId = false,
 ): string {
+	if (preserveConfiguredId && configuredId) {
+		return configuredId
+	}
+
 	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
+}
+
+function getConfiguredRouterModelId(provider: ProviderName, apiConfiguration: ProviderSettings): string | undefined {
+	switch (provider) {
+		case providerIdentifiers.openrouter:
+			return apiConfiguration.openRouterModelId
+		case providerIdentifiers.requesty:
+			return apiConfiguration.requestyModelId
+		case providerIdentifiers.unbound:
+			return apiConfiguration.unboundModelId
+		case providerIdentifiers.vercelAiGateway:
+			return apiConfiguration.vercelAiGatewayModelId
+		case providerIdentifiers.zooGateway:
+			return apiConfiguration.zooGatewayModelId
+		default:
+			return undefined
+	}
+}
+
+function supportsCustomModelInfo(provider: ProviderName): boolean {
+	return (
+		provider === providerIdentifiers.openrouter ||
+		provider === providerIdentifiers.requesty ||
+		provider === providerIdentifiers.unbound ||
+		provider === providerIdentifiers.vercelAiGateway ||
+		provider === providerIdentifiers.zooGateway
+	)
 }
 
 export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
@@ -95,7 +129,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 		hasValidRouterData &&
 		(!needOpenRouterProviders || typeof openRouterModelProviders.data !== "undefined")
 
-	const { id, info } =
+	const selectedModel =
 		apiConfiguration && isReady && activeProvider
 			? getSelectedModel({
 					provider: activeProvider,
@@ -110,7 +144,20 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 						id: apiConfiguration.apiModelId || getProviderDefaultModelId("kimi-code"),
 						info: kimiCodeDefaultModelInfo,
 					}
-				: { id: getProviderDefaultModelId(activeProvider ?? "openrouter"), info: undefined }
+				: {
+						id:
+							(activeProvider &&
+								apiConfiguration &&
+								getConfiguredRouterModelId(activeProvider, apiConfiguration)) ||
+							getProviderDefaultModelId(activeProvider ?? "openrouter"),
+						info: undefined,
+					}
+
+	const { id } = selectedModel
+	const info =
+		activeProvider && supportsCustomModelInfo(activeProvider)
+			? applyCustomModelInfo(selectedModel.info, apiConfiguration)
+			: selectedModel.info
 
 	return {
 		provider,
@@ -150,7 +197,12 @@ function getSelectedModel({
 	const defaultModelId = getProviderDefaultModelId(provider)
 	switch (provider) {
 		case providerIdentifiers.openrouter: {
-			const id = getValidatedModelId(apiConfiguration.openRouterModelId, routerModels.openrouter, defaultModelId)
+			const id = getValidatedModelId(
+				apiConfiguration.openRouterModelId,
+				routerModels.openrouter,
+				defaultModelId,
+				true,
+			)
 			let info = routerModels.openrouter?.[id]
 			const specificProvider = apiConfiguration.openRouterSpecificProvider
 
@@ -166,12 +218,17 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.requesty: {
-			const id = getValidatedModelId(apiConfiguration.requestyModelId, routerModels.requesty, defaultModelId)
+			const id = getValidatedModelId(
+				apiConfiguration.requestyModelId,
+				routerModels.requesty,
+				defaultModelId,
+				true,
+			)
 			const routerInfo = routerModels.requesty?.[id]
 			return { id, info: routerInfo }
 		}
 		case providerIdentifiers.unbound: {
-			const id = getValidatedModelId(apiConfiguration.unboundModelId, routerModels.unbound, defaultModelId)
+			const id = getValidatedModelId(apiConfiguration.unboundModelId, routerModels.unbound, defaultModelId, true)
 			const routerInfo = routerModels.unbound?.[id]
 			return { id, info: routerInfo }
 		}
@@ -387,6 +444,7 @@ function getSelectedModel({
 				apiConfiguration.vercelAiGatewayModelId,
 				routerModels["vercel-ai-gateway"],
 				defaultModelId,
+				true,
 			)
 			const info = routerModels["vercel-ai-gateway"]?.[id]
 			return { id, info }
@@ -414,6 +472,7 @@ function getSelectedModel({
 				apiConfiguration.zooGatewayModelId,
 				routerModels["zoo-gateway"],
 				defaultModelId,
+				true,
 			)
 			const info = routerModels["zoo-gateway"]?.[id]
 			return { id, info }

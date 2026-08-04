@@ -158,6 +158,24 @@ describe("RequestyHandler", () => {
 			})
 		})
 
+		it("applies custom metadata before deriving request parameters", async () => {
+			const handler = new RequestyHandler({
+				...mockOptions,
+				customModelInfo: {
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+					supportsImages: false,
+					supportsPromptCache: false,
+				},
+			})
+
+			const result = await handler.fetchModel()
+
+			expect(result.info.contextWindow).toBe(100_000)
+			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.maxTokens).toBe(10_000)
+		})
+
 		it("returns default model info when options are not provided", async () => {
 			const handler = new RequestyHandler({})
 			const result = await handler.fetchModel()

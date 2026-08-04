@@ -1,6 +1,6 @@
 import OpenAI from "openai"
 
-import { type ModelInfo, type ModelRecord } from "@roo-code/types"
+import { applyCustomModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
@@ -58,6 +58,14 @@ export abstract class RouterProvider extends BaseProvider {
 
 	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
 
+	private resolveModelInfo(info: ModelInfo | undefined, fallback: ModelInfo): ModelInfo {
+		if (this.name !== "vercel-ai-gateway" && this.name !== "zoo-gateway") {
+			return info ?? fallback
+		}
+
+		return applyCustomModelInfo(info, this.options) ?? fallback
+	}
+
 	public async fetchModel() {
 		if (Object.keys(this.models).length > 0) {
 			return this.getModel()
@@ -96,7 +104,7 @@ export abstract class RouterProvider extends BaseProvider {
 
 		// First check instance models (populated by fetchModel)
 		if (this.models[id]) {
-			return { id, info: this.models[id] }
+			return { id, info: this.resolveModelInfo(this.models[id], this.models[id]) }
 		}
 
 		// Fall back to global cache (synchronous disk/memory cache).
@@ -110,14 +118,14 @@ export abstract class RouterProvider extends BaseProvider {
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls
 			this.models = cachedModels
-			return { id, info: cachedModels[id] }
+			return { id, info: this.resolveModelInfo(cachedModels[id], cachedModels[id]) }
 		}
 
 		// Last resort: preserve the configured model ID (falling back to the default
 		// only when none is configured) so an as-yet-unfetched model isn't silently
 		// swapped for the hardcoded default. info still comes from defaults since we
 		// have no fetched or cached metadata for the configured model at this point.
-		return { id, info: this.defaultModelInfo }
+		return { id, info: this.resolveModelInfo(undefined, this.defaultModelInfo) }
 	}
 
 	protected supportsTemperature(modelId: string): boolean {

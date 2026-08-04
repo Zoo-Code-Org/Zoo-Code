@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react"
 import {
 	type ProviderSettings,
+	type ModelInfo,
 	type OrganizationAllowList,
 	type RouterModels,
 	zooGatewayDefaultModelId,
@@ -12,12 +13,14 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { ModelPicker } from "../ModelPicker"
+import { CustomModelInfoSettings } from "../CustomModelInfoSettings"
 import { ApiErrorMessage } from "../ApiErrorMessage"
 
 type ZooGatewayProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 	routerModels?: RouterModels
+	selectedModelInfo?: ModelInfo
 	organizationAllowList: OrganizationAllowList
 	modelValidationError?: string
 	simplifySettings?: boolean
@@ -55,6 +58,7 @@ export const ZooGateway = ({
 	organizationAllowList,
 	modelValidationError,
 	simplifySettings,
+	selectedModelInfo,
 }: ZooGatewayProps) => {
 	const { t } = useAppTranslation()
 	const { zooCodeIsAuthenticated, zooCodeUserEmail, zooCodeUserName, zooCodeBaseUrl, uriScheme, deviceName } =
@@ -73,7 +77,7 @@ export const ZooGateway = ({
 		}
 
 		const current = apiConfiguration.zooGatewayModelId
-		if (!current || !modelIds.includes(current)) {
+		if (!current) {
 			setApiConfigurationField("zooGatewayModelId", resolvedDefaultModelId)
 		}
 	}, [apiConfiguration.zooGatewayModelId, modelIds, resolvedDefaultModelId, setApiConfigurationField])
@@ -119,6 +123,11 @@ export const ZooGateway = ({
 				organizationAllowList={organizationAllowList}
 				errorMessage={modelValidationError}
 				simplifySettings={simplifySettings}
+			/>
+			<CustomModelInfoSettings
+				apiConfiguration={apiConfiguration}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={selectedModelInfo}
 			/>
 		</>
 	)

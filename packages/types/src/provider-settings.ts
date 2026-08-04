@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import {
 	modelInfoSchema,
+	customModelInfoSchema,
 	openAiCodexServiceTierSchema,
 	reasoningEffortSettingSchema,
 	verbosityLevelsSchema,
@@ -185,6 +186,7 @@ const baseProviderSettingsSchema = z.object({
 	reasoningEffort: reasoningEffortSettingSchema.optional(),
 	modelMaxTokens: z.number().optional(),
 	modelMaxThinkingTokens: z.number().optional(),
+	customModelInfo: customModelInfoSchema.nullish(),
 
 	// Model verbosity.
 	verbosity: verbosityLevelsSchema.optional(),

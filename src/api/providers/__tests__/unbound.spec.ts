@@ -38,6 +38,27 @@ describe("UnboundHandler", () => {
 		vi.clearAllMocks()
 	})
 
+	it("applies custom metadata before deriving request parameters", async () => {
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+			customModelInfo: {
+				contextWindow: 100_000,
+				maxTokens: 10_000,
+				supportsImages: false,
+				supportsPromptCache: true,
+			},
+		})
+
+		const result = await handler.fetchModel()
+
+		expect(result.info.contextWindow).toBe(100_000)
+		expect(result.info.maxTokens).toBe(10_000)
+		expect(result.info.supportsImages).toBe(false)
+		expect(result.info.supportsPromptCache).toBe(true)
+		expect(result.maxTokens).toBe(10_000)
+	})
+
 	it("identifies itself as Zoo Code in the Unbound request headers", () => {
 		new UnboundHandler({
 			unboundApiKey: "test-key",

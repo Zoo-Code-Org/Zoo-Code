@@ -106,7 +106,7 @@ describe("ZooGateway component", () => {
 		})
 	})
 
-	it("reassigns a stale model id that is not in the catalog", async () => {
+	it("preserves a configured model id that is not in the catalog", async () => {
 		const setApiConfigurationField = vi.fn()
 		render(
 			<ZooGateway
@@ -126,10 +126,7 @@ describe("ZooGateway component", () => {
 		)
 
 		await waitFor(() => {
-			expect(setApiConfigurationField).toHaveBeenCalledWith(
-				"zooGatewayModelId",
-				"anthropic.claude-sonnet-4-5-20250929-v1:0",
-			)
+			expect(setApiConfigurationField).not.toHaveBeenCalled()
 		})
 	})
 

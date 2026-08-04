@@ -110,7 +110,7 @@ describe("useSelectedModel", () => {
 			})
 		})
 
-		it("should fall back to default when configured model doesn't exist in available models", () => {
+		it("should preserve a configured model when it is absent from available models", () => {
 			const specificProviderInfo: ModelInfo = {
 				maxTokens: 8192,
 				contextWindow: 16384,
@@ -159,22 +159,8 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			// Should fall back to provider default since "test-model" doesn't exist
-			expect(result.current.id).toBe("anthropic/claude-sonnet-4.5")
-			// Should still use specific provider info for the default model if specified
-			expect(result.current.info).toEqual({
-				...{
-					maxTokens: 8192,
-					contextWindow: 200_000,
-					supportsImages: true,
-					supportsPromptCache: true,
-					inputPrice: 3.0,
-					outputPrice: 15.0,
-					cacheWritesPrice: 3.75,
-					cacheReadsPrice: 0.3,
-				},
-				...specificProviderInfo,
-			})
+			expect(result.current.id).toBe("test-model")
+			expect(result.current.info).toEqual(specificProviderInfo)
 		})
 
 		it("should demonstrate the merging behavior validates the comment about missing fields", () => {
@@ -277,7 +263,7 @@ describe("useSelectedModel", () => {
 			expect(result.current.info).toEqual(baseModelInfo)
 		})
 
-		it("should fall back to default when configured model and provider don't exist", () => {
+		it("should preserve an unknown configured model when its provider metadata is unavailable", () => {
 			mockUseRouterModels.mockReturnValue({
 				data: {
 					openrouter: {
@@ -315,23 +301,46 @@ describe("useSelectedModel", () => {
 			const wrapper = createWrapper()
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
-			// Should fall back to provider default since "non-existent-model" doesn't exist
-			expect(result.current.id).toBe("anthropic/claude-sonnet-4.5")
-			// Should use base model info since provider doesn't exist
-			expect(result.current.info).toEqual({
-				maxTokens: 8192,
-				contextWindow: 200_000,
-				supportsImages: true,
-				supportsPromptCache: true,
-				inputPrice: 3.0,
-				outputPrice: 15.0,
-				cacheWritesPrice: 3.75,
-				cacheReadsPrice: 0.3,
-			})
+			expect(result.current.id).toBe("non-existent-model")
+			expect(result.current.info).toBeUndefined()
 		})
 	})
 
 	describe("loading and error states", () => {
+		it("preserves a router model ID and applies custom metadata while model data is loading", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: undefined,
+				isLoading: true,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: undefined,
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "provider/future-model",
+				customModelInfo: {
+					contextWindow: 100_000,
+					maxTokens: 10_000,
+					supportsImages: true,
+				},
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("provider/future-model")
+			expect(result.current.info).toMatchObject({
+				contextWindow: 100_000,
+				maxTokens: 10_000,
+				supportsImages: true,
+			})
+		})
+
 		it("should set loading when router models are loading for the default OpenRouter provider", () => {
 			mockUseRouterModels.mockReturnValue({
 				data: undefined,

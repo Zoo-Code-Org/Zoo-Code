@@ -3,6 +3,7 @@ import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
 import {
 	type ProviderSettings,
+	type ModelInfo,
 	type OrganizationAllowList,
 	type RouterModels,
 	vercelAiGatewayDefaultModelId,
@@ -13,11 +14,13 @@ import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
 
 import { inputEventTransform } from "../transforms"
 import { ModelPicker } from "../ModelPicker"
+import { CustomModelInfoSettings } from "../CustomModelInfoSettings"
 
 type VercelAiGatewayProps = {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 	routerModels?: RouterModels
+	selectedModelInfo?: ModelInfo
 	organizationAllowList: OrganizationAllowList
 	modelValidationError?: string
 	simplifySettings?: boolean
@@ -30,6 +33,7 @@ export const VercelAiGateway = ({
 	organizationAllowList,
 	modelValidationError,
 	simplifySettings,
+	selectedModelInfo,
 }: VercelAiGatewayProps) => {
 	const { t } = useAppTranslation()
 
@@ -76,6 +80,11 @@ export const VercelAiGateway = ({
 				organizationAllowList={organizationAllowList}
 				errorMessage={modelValidationError}
 				simplifySettings={simplifySettings}
+			/>
+			<CustomModelInfoSettings
+				apiConfiguration={apiConfiguration}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={selectedModelInfo}
 			/>
 		</>
 	)

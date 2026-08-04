@@ -69,7 +69,8 @@ const TaskHeader = ({
 
 	const textContainerRef = useRef<HTMLDivElement>(null)
 	const textRef = useRef<HTMLDivElement>(null)
-	const contextWindow = model?.contextWindow || 1
+	const contextWindow = model?.contextWindow
+	const contextWindowForDisplay = typeof contextWindow === "number" && contextWindow > 0 ? contextWindow : undefined
 
 	// Calculate maxTokens (reserved for output) once for reuse in percentage and tooltip
 	const maxTokens = useMemo(
@@ -201,71 +202,82 @@ const TaskHeader = ({
 						</div>
 					</div>
 				</div>
-				{!isTaskExpanded && contextWindow > 0 && (
+				{!isTaskExpanded && (
 					<div
 						className="flex items-center justify-between text-sm text-muted-foreground/70"
 						onClick={(e) => e.stopPropagation()}>
 						<div className="flex items-center gap-2">
-							<StandardTooltip
-								content={(() => {
-									const availableSpace = contextWindow - (contextTokens || 0) - reservedForOutput
+							{contextWindowForDisplay !== undefined && (
+								<StandardTooltip
+									content={(() => {
+										const availableSpace =
+											contextWindowForDisplay - (contextTokens || 0) - reservedForOutput
 
-									return (
-										<Table className="text-base ml-1.5">
-											<TableBody>
-												<TableRow>
-													<TableCell className="font-medium whitespace-nowrap">
-														{t("chat:tokenProgress.tokensUsedLabel")}
-													</TableCell>
-													<TableCell className="text-right text-[0.9em] font-mono">
-														{formatLargeNumber(contextTokens || 0)} /{" "}
-														{formatLargeNumber(contextWindow)}
-													</TableCell>
-												</TableRow>
-												{reservedForOutput > 0 && (
-													<TableRow>
-														<TableCell className="font-medium whitespace-nowrap">
-															{t("chat:tokenProgress.reservedForResponseLabel")}
-														</TableCell>
-														<TableCell className="text-right text-[0.9em] font-mono">
-															{formatLargeNumber(reservedForOutput)}
-														</TableCell>
-													</TableRow>
-												)}
-												{availableSpace > 0 && (
-													<TableRow>
-														<TableCell className="font-medium whitespace-nowrap">
-															{t("chat:tokenProgress.availableSpaceLabel")}
-														</TableCell>
-														<TableCell className="text-right text-[0.9em] font-mono">
-															{formatLargeNumber(availableSpace)}
-														</TableCell>
-													</TableRow>
-												)}
-											</TableBody>
-										</Table>
-									)
-								})()}
-								side="top"
-								sideOffset={8}>
-								<span className="flex items-center gap-1.5">
-									{(() => {
-										// Calculate percentage of available input space used
-										// Available input space = context window - reserved for output
-										const availableInputSpace = contextWindow - reservedForOutput
-										const percentage =
-											availableInputSpace > 0
-												? Math.round(((contextTokens || 0) / availableInputSpace) * 100)
-												: 0
 										return (
-											<>
-												<CircularProgress percentage={percentage} />
-												<span>{percentage}%</span>
-											</>
+											<Table className="text-base ml-1.5">
+												<TableBody>
+													<TableRow>
+														<TableCell className="font-medium whitespace-nowrap">
+															{t("chat:tokenProgress.tokensUsedLabel")}
+														</TableCell>
+														<TableCell className="text-right text-[0.9em] font-mono">
+															{formatLargeNumber(contextTokens || 0)} /{" "}
+															{formatLargeNumber(contextWindowForDisplay)}
+														</TableCell>
+													</TableRow>
+													{reservedForOutput > 0 && (
+														<TableRow>
+															<TableCell className="font-medium whitespace-nowrap">
+																{t("chat:tokenProgress.reservedForResponseLabel")}
+															</TableCell>
+															<TableCell className="text-right text-[0.9em] font-mono">
+																{formatLargeNumber(reservedForOutput)}
+															</TableCell>
+														</TableRow>
+													)}
+													{availableSpace > 0 && (
+														<TableRow>
+															<TableCell className="font-medium whitespace-nowrap">
+																{t("chat:tokenProgress.availableSpaceLabel")}
+															</TableCell>
+															<TableCell className="text-right text-[0.9em] font-mono">
+																{formatLargeNumber(availableSpace)}
+															</TableCell>
+														</TableRow>
+													)}
+												</TableBody>
+											</Table>
 										)
 									})()}
-								</span>
-							</StandardTooltip>
+									side="top"
+									sideOffset={8}>
+									<span className="flex items-center gap-1.5">
+										{(() => {
+											// Calculate percentage of available input space used
+											// Available input space = context window - reserved for output
+											const availableInputSpace = contextWindowForDisplay - reservedForOutput
+											const rawPercentage =
+												availableInputSpace > 0
+													? Math.round(((contextTokens || 0) / availableInputSpace) * 100)
+													: 0
+											const percentage = Math.min(100, rawPercentage)
+											const isAtLimit =
+												availableInputSpace > 0 && (contextTokens || 0) >= availableInputSpace
+											return (
+												<>
+													<CircularProgress percentage={percentage} />
+													<span
+														className={
+															isAtLimit ? "text-vscode-errorForeground" : undefined
+														}>
+														{percentage}%
+													</span>
+												</>
+											)
+										})()}
+									</span>
+								</StandardTooltip>
+							)}
 							{!!totalCost && (
 								<>
 									<span>·</span>
@@ -307,11 +319,13 @@ const TaskHeader = ({
 						<div
 							className="flex items-center gap-1 ml-8 w-60 min-w-[120px] shrink"
 							onClick={(e) => e.stopPropagation()}>
-							<ContextWindowProgress
-								contextWindow={contextWindow}
-								contextTokens={contextTokens || 0}
-								maxTokens={maxTokens ?? undefined}
-							/>
+							{contextWindowForDisplay !== undefined && (
+								<ContextWindowProgress
+									contextWindow={contextWindowForDisplay}
+									contextTokens={contextTokens || 0}
+									maxTokens={maxTokens ?? undefined}
+								/>
+							)}
 							{condenseButton}
 						</div>
 					</div>
@@ -342,7 +356,7 @@ const TaskHeader = ({
 						<div className="pt-3 mt-2 -mx-2.5 px-2.5 border-t border-vscode-sideBar-background">
 							<table className="w-full text-sm">
 								<tbody>
-									{contextWindow > 0 && (
+									{contextWindowForDisplay !== undefined ? (
 										<tr>
 											<th
 												className="font-medium text-left align-top w-1 whitespace-nowrap pr-3 h-[24px]"
@@ -350,14 +364,20 @@ const TaskHeader = ({
 												{t("chat:task.contextWindow")}
 											</th>
 											<td className="font-light align-top">
-												<div className={`max-w-md -mt-1.5 flex flex-nowrap gap-1`}>
+												<div className="max-w-md -mt-1.5 flex flex-nowrap gap-1">
 													<ContextWindowProgress
-														contextWindow={contextWindow}
+														contextWindow={contextWindowForDisplay}
 														contextTokens={contextTokens || 0}
 														maxTokens={maxTokens ?? undefined}
 													/>
 													{condenseButton}
 												</div>
+											</td>
+										</tr>
+									) : (
+										<tr>
+											<td colSpan={2} className="font-light align-top">
+												<div className="flex justify-end">{condenseButton}</div>
 											</td>
 										</tr>
 									)}
