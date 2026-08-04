@@ -426,6 +426,7 @@ describe("usageStatsMessageRouting", () => {
 				catalogRevision: 2,
 				getPage: vi.fn(() => ({ tasks: ["task-001"], cursor: undefined, totalEstimate: 1 })),
 				getDescendantTaskIds: vi.fn(() => []),
+				childrenByParentId: new Map(),
 				byId: new Map([["task-001", { id: "task-001", task: "History task", ts: 100 }]]),
 				ancestorsByTaskId: new Map(),
 			}

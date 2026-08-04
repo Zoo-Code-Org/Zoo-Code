@@ -1775,6 +1775,7 @@ describe("usageStatsMessageHandler", () => {
 				catalogRevision: 7,
 				getPage: vi.fn(() => ({ tasks: ["history-task"], cursor: "next", totalEstimate: 1 })),
 				getDescendantTaskIds: vi.fn(() => []),
+				childrenByParentId: new Map(),
 				byId: new Map([["history-task", { id: "history-task", task: "History task", ts: 321 }]]),
 				ancestorsByTaskId: new Map(),
 			}
@@ -1808,6 +1809,7 @@ describe("usageStatsMessageHandler", () => {
 				catalogRevision: 7,
 				getPage: vi.fn(() => ({ tasks: [], cursor: undefined, totalEstimate: 0 })),
 				getDescendantTaskIds: vi.fn(() => []),
+				childrenByParentId: new Map(),
 				byId: new Map(),
 				ancestorsByTaskId: new Map(),
 			}
