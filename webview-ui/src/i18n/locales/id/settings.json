@@ -1046,6 +1046,12 @@
 	"limitMaxTokensDescription": "Batasi jumlah maksimum token dalam respons",
 	"maxOutputTokensLabel": "Token output maksimum",
 	"maxTokensGenerateDescription": "Token maksimum untuk dihasilkan dalam respons",
+	"openAiCodexSpeed": {
+		"label": "Kecepatan",
+		"tooltip": "Mode Cepat menggunakan pemrosesan prioritas Codex untuk kecepatan sekitar 1,5x dan memakai lebih banyak kuota langganan.",
+		"standard": "Standar",
+		"fast": "Cepat (kecepatan 1,5x, penggunaan meningkat)"
+	},
 	"serviceTier": {
 		"label": "Tingkat layanan",
 		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih rendah dengan latensi lebih tinggi, coba tingkat pemrosesan fleksibel.",

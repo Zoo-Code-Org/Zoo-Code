@@ -215,7 +215,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jul-2026-v3.72.0-moonshot-kimi-models-workflows" // v3.72.0 Moonshot/Kimi providers, new models, subtask/indexing improvements
+	public readonly latestAnnouncementId = "jul-2026-v3.74.0-openai-provider-workflows" // v3.74.0 OpenAI controls, provider reliability, and smoother workflows
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 

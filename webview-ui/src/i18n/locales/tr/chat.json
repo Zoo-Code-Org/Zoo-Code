@@ -344,9 +344,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Moonshot ve Kimi Code provider'ları — canlı model keşfiyle Moonshot modellerine bağlan veya OAuth cihaz akışıyla Kimi Code'da oturum aç.",
-			"highlight2": "En yeni model desteği — provider'lar genelinde Claude Opus 5'in yanı sıra Kimi K3, Gemini 3.6 Flash ve MiniMax-M3'ü kullan.",
-			"highlight3": "Daha güvenilir iş akışları — kesintiye uğramış alt görevleri temiz biçimde bırak ve kod tabanındaki Dart ile düz metin dosyalarını indeksle."
+			"highlight1": "Daha fazla OpenAI denetimi — OpenAI Codex ile Fast öncelik modunu kullan ve OpenAI uyumlu modeller için daha yüksek reasoning effort seç.",
+			"highlight2": "Daha güvenilir provider'lar ve modeller — router metadata işleme, Ollama model yenileme, Bedrock proxy desteği ve Friendli reasoning denetimleri iyileştirildi.",
+			"highlight3": "Daha akıcı ayarlar ve geliştirici iş akışları — ayarlar kaydedilmemiş düzenlemeleri koruyor, kısa terminal komutları düzgün tamamlanıyor, architect planları workspace'e göreli yollar kullanıyor ve kullanıcıya görünen kalan Roo markaları Zoo olarak güncellendi."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

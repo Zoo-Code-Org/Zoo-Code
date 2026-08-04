@@ -36,15 +36,28 @@
 
 Je vindt een korte handleiding voor de overstap van Roo Code naar Zoo Code in de [Roo→Zoo-migratiegids](https://docs.zoocode.dev/roo-to-zoo-migration). We willen gebruikers zo goed mogelijk helpen tijdens de overgang, en precies daarvoor zijn onze [Reddit](https://www.reddit.com/r/ZooCode) en [Discord](https://discord.gg/VxfP4Vx3gX) er. Als je ergens tegenaan loopt of vragen hebt, kom langs en vraag het.
 
-## Nieuw in v3.72.0
+## Nieuw in v3.74.0
 
-- **Moonshot- en Kimi Code-providers** — ontdek Moonshot-modellen dynamisch of meld je aan bij Kimi Code via de OAuth-apparaatstroom.
-- **Ondersteuning voor de nieuwste modellen** — gebruik Claude Opus 5 bij verschillende providers, plus Kimi K3, Gemini 3.6 Flash en MiniMax-M3.
-- **Verbeterde subtaakworkflows** — breek onderbroken subtaken netjes af, met veiligere invalidatie van taakgeschiedenis en betere hervattingsdekking.
-- **Uitgebreide codebase-indexering** — indexeer Dart- en plattetekstbestanden.
-- **Betrouwbaardere providers** — fixes voor GPT-5.6 Luna met ChatGPT OAuth, LiteLLM-reasoningcontent en DeepSeek V4-beeldinvoer.
-- **Soepelere installatie en instellingen** — verbeterde Zoo Gateway-aanmelding en moduswisseling.
-- Verbeteringen aan API, providertypen, dependencies, lokalisatie en CI.
+**Zoo Gateway is live!**
+
+De gateway is één endpoint voor alle providers, met één saldo en een uitsplitsing van kosten en gebruik per verzoek.
+
+**Instellen:**
+
+- Tegoed toevoegen: https://www.zoocode.dev/dashboard/credits
+- Log in vanuit de extensie.
+- Selecteer in de instellingen Zoo Gateway als provider bij het aanmaken van profielen voor verschillende modellen
+
+Gebruik en kosten zijn te zien in het [dashboard](https://www.zoocode.dev/dashboard).
+
+Modellen: https://www.zoocode.dev/dashboard/models
+
+- **Meer OpenAI-bediening** — gebruik de Fast-prioriteitsmodus met OpenAI Codex en kies een hogere reasoning effort voor OpenAI-compatibele modellen.
+- **Betrouwbaardere providers en modellen** — verbeterde verwerking van routermetadata, Ollama-modelverversing, Bedrock-proxyondersteuning en Friendli-reasoningbediening.
+- **Soepelere instellingen en ontwikkelworkflows** — instellingen bewaren niet-opgeslagen wijzigingen, korte terminalopdrachten worden correct voltooid, architectuurplannen gebruiken werkruimterelatieve paden en de resterende zichtbare Roo-branding is bijgewerkt naar Zoo.
+- **Sterkere taakfundamenten** — een nieuw taakregister en een op semaforen gebaseerde scheduler bereiden Zoo Code voor op veiligere taakcoördinatie.
+- **Consistente providerarchitectuur** — provider-ID's en service-tiercomponenten zijn nu gecentraliseerd in de API, kern, gedeelde typen en webview.
+- Verbeteringen aan beveiliging, dependencies, linting, visuele regressie en end-to-endtests.
 
 ## Wat kan Zoo Code voor JOU doen?
 

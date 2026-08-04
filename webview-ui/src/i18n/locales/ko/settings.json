@@ -1046,6 +1046,12 @@
 	"limitMaxTokensDescription": "응답에서 최대 토큰 수 제한",
 	"maxOutputTokensLabel": "최대 출력 토큰",
 	"maxTokensGenerateDescription": "응답에서 생성할 최대 토큰 수",
+	"openAiCodexSpeed": {
+		"label": "속도",
+		"tooltip": "빠른 모드는 Codex 우선 처리를 사용하여 약 1.5배 빠른 속도를 제공하며 구독 할당량을 더 많이 사용합니다.",
+		"standard": "표준",
+		"fast": "빠름(1.5배 속도, 사용량 증가)"
+	},
 	"serviceTier": {
 		"label": "서비스 등급",
 		"tooltip": "API 요청을 더 빠르게 처리하려면 우선 처리 서비스 등급을 사용해 보세요. 더 낮은 가격에 더 높은 지연 시간을 원하시면 플렉스 처리 등급을 사용해 보세요.",

@@ -2,6 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { UnboundHandler } from "../unbound"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 vi.mock("openai", () => {
 	const createMock = vi.fn()
@@ -54,51 +55,49 @@ describe("UnboundHandler", () => {
 
 	it("streams reasoning chunks from delta.reasoning_content", async () => {
 		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
-		mockCreate.mockResolvedValue({
-			async *[Symbol.asyncIterator]() {
-				yield { choices: [{ delta: { reasoning_content: "thinking..." } }] }
-				yield { choices: [{ delta: { content: "answer" } }] }
-				yield { choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } }
-			},
-		})
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{ choices: [{ delta: { reasoning_content: "thinking..." } }] },
+				{ choices: [{ delta: { content: "answer" } }] },
+				{ choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+			]),
+		)
 
 		const handler = new UnboundHandler({
 			unboundApiKey: "test-key",
 			unboundModelId: "openai/gpt-4o",
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }], {
-			taskId: "t",
-			tools: [],
-		})) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(
+			handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "t",
+				tools: [],
+			}),
+		)
 
 		expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 	})
 
 	it("falls back to delta.reasoning when reasoning_content is absent", async () => {
 		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
-		mockCreate.mockResolvedValue({
-			async *[Symbol.asyncIterator]() {
-				yield { choices: [{ delta: { reasoning: "router-style thought" } }] }
-				yield { choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } }
-			},
-		})
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{ choices: [{ delta: { reasoning: "router-style thought" } }] },
+				{ choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+			]),
+		)
 
 		const handler = new UnboundHandler({
 			unboundApiKey: "test-key",
 			unboundModelId: "openai/gpt-4o",
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }], {
-			taskId: "t",
-			tools: [],
-		})) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(
+			handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "t",
+				tools: [],
+			}),
+		)
 
 		expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 	})
@@ -106,9 +105,9 @@ describe("UnboundHandler", () => {
 	it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
 		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
 
-		mockCreate.mockResolvedValue({
-			async *[Symbol.asyncIterator]() {
-				yield {
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{
 					choices: [
 						{
 							delta: {
@@ -117,24 +116,22 @@ describe("UnboundHandler", () => {
 							},
 						},
 					],
-				}
-				yield { choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } }
-			},
-		})
+				},
+				{ choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+			]),
+		)
 
 		const handler = new UnboundHandler({
 			unboundApiKey: "test-key",
 			unboundModelId: "openai/gpt-4o",
 		})
 
-		const chunks: any[] = []
-
-		for await (const chunk of handler.createMessage("system", [{ role: "user", content: "hi" }], {
-			taskId: "t",
-			tools: [],
-		})) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(
+			handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "t",
+				tools: [],
+			}),
+		)
 
 		const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 
@@ -143,17 +140,17 @@ describe("UnboundHandler", () => {
 
 	it("identifies itself as Zoo Code in per-request Unbound metadata", async () => {
 		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
-		mockCreate.mockResolvedValue({
-			async *[Symbol.asyncIterator]() {
-				yield {
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{
 					choices: [{ delta: { content: "ok" } }],
-				}
-				yield {
+				},
+				{
 					choices: [{ delta: {} }],
 					usage: { prompt_tokens: 1, completion_tokens: 1 },
-				}
-			},
-		})
+				},
+			]),
+		)
 
 		const handler = new UnboundHandler({
 			unboundApiKey: "test-key",
@@ -167,9 +164,7 @@ describe("UnboundHandler", () => {
 			tools: [],
 		})
 
-		for await (const _chunk of stream) {
-			// drain stream
-		}
+		await collectStream(stream)
 
 		expect(mockCreate).toHaveBeenCalledWith(
 			expect.objectContaining({

@@ -1046,6 +1046,12 @@
 	"limitMaxTokensDescription": "限制响应中的最大 Token 数量",
 	"maxOutputTokensLabel": "最大输出 Token 数",
 	"maxTokensGenerateDescription": "响应中生成的最大 Token 数",
+	"openAiCodexSpeed": {
+		"label": "速度",
+		"tooltip": "快速模式使用 Codex 优先处理，速度约为 1.5 倍，但会消耗更多订阅配额。",
+		"standard": "标准",
+		"fast": "快速（1.5 倍速度，用量增加）"
+	},
 	"serviceTier": {
 		"label": "服务等级",
 		"tooltip": "为加快API请求处理速度，请尝试优先处理服务等级。为获得更低价格但延迟较高，请尝试灵活处理等级。",

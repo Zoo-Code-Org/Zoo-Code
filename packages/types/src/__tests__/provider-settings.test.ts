@@ -1,4 +1,49 @@
-import { ANTHROPIC_API_PROTOCOL, getApiProtocol, OPENAI_API_PROTOCOL, providerIdentifiers } from "../index.js"
+import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers } from "../index.js"
+import {
+	getApiProtocol,
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	PROVIDER_SETTINGS_KEYS,
+	providerSettingsSchema,
+	providerSettingsSchemaDiscriminated,
+} from "../provider-settings.js"
+import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
+
+describe("OpenAI Codex provider settings", () => {
+	it("preserves the Fast preference in general and provider-specific schemas", () => {
+		const settings = {
+			apiProvider: providerIdentifiers.openaiCodex,
+			apiModelId: "gpt-5.6-sol",
+			[OPEN_AI_CODEX_SERVICE_TIER_KEY]: OpenAiCodexServiceTier.Priority,
+		}
+
+		expect(providerSettingsSchema.parse(settings)).toEqual(settings)
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+		expect(PROVIDER_SETTINGS_KEYS).toContain(OPEN_AI_CODEX_SERVICE_TIER_KEY)
+	})
+
+	it.each([undefined, OpenAiCodexServiceTier.Default])(
+		"accepts %s as the Standard preference",
+		(openAiCodexServiceTier) => {
+			const standardSettings = {
+				apiProvider: providerIdentifiers.openaiCodex,
+				apiModelId: "gpt-5.6-sol",
+				...(openAiCodexServiceTier ? { [OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTier } : {}),
+			}
+
+			expect(providerSettingsSchemaDiscriminated.parse(standardSettings)).toEqual(standardSettings)
+		},
+	)
+
+	it("rejects unsupported service tiers", () => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openaiCodex,
+				apiModelId: "gpt-5.6-sol",
+				[OPEN_AI_CODEX_SERVICE_TIER_KEY]: OpenAiServiceTier.Flex,
+			}).success,
+		).toBe(false)
+	})
+})
 
 describe("getApiProtocol", () => {
 	it("preserves API protocol wire values", () => {

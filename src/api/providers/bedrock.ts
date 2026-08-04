@@ -33,6 +33,7 @@ import {
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
+	SERVICE_TIER_KEY,
 	ApiProviderError,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -99,7 +100,7 @@ interface BedrockPayload {
 // AWS Bedrock service tiers (STANDARD, FLEX, PRIORITY) are specified at the top level
 // https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html
 type BedrockPayloadWithServiceTier = BedrockPayload & {
-	service_tier?: BedrockServiceTier
+	[SERVICE_TIER_KEY]?: BedrockServiceTier
 }
 
 // Define specific types for content block events to avoid 'as any' usage
@@ -553,7 +554,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(thinkingEnabled && { anthropic_version: "bedrock-2023-05-31" }),
 			toolConfig,
 			// Add service_tier as a top-level parameter (not inside additionalModelRequestFields)
-			...(useServiceTier && { service_tier: this.options.awsBedrockServiceTier }),
+			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
 		}
 
 		// Create AbortController with 10 minute timeout

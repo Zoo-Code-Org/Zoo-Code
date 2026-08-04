@@ -1046,6 +1046,12 @@
 	"limitMaxTokensDescription": "Giới hạn số lượng token tối đa trong phản hồi",
 	"maxOutputTokensLabel": "Token đầu ra tối đa",
 	"maxTokensGenerateDescription": "Token tối đa để tạo trong phản hồi",
+	"openAiCodexSpeed": {
+		"label": "Tốc độ",
+		"tooltip": "Chế độ Nhanh sử dụng xử lý ưu tiên của Codex để đạt tốc độ nhanh hơn khoảng 1,5 lần và tiêu tốn nhiều hạn mức đăng ký hơn.",
+		"standard": "Tiêu chuẩn",
+		"fast": "Nhanh (tốc độ 1,5 lần, mức sử dụng cao hơn)"
+	},
 	"serviceTier": {
 		"label": "Cấp độ dịch vụ",
 		"tooltip": "Để xử lý các yêu cầu API nhanh hơn, hãy thử cấp độ dịch vụ xử lý ưu tiên. Để có giá thấp hơn với độ trễ cao hơn, hãy thử cấp độ xử lý linh hoạt.",

@@ -121,6 +121,17 @@ Example:
 
 The `model` field can be added to either match when a test targets a specific model.
 
+## Delaying a fixture response (simulating a slow or hung provider)
+
+Use `streamingProfile: { ttft: <ms> }` on a fixture, not a flat `latency: <ms>`, when a test needs
+to simulate a slow or hung provider (e.g. to cancel an in-flight request mid-stream). `ttft` delays
+only the first SSE chunk, so the pending window is exactly the configured value. Flat `latency`
+delays _every_ chunk, and aimock never observes client disconnects — after a test cancels the
+request, a flat-latency stream keeps flushing chunks server-side for `chunks × latency` before
+reaching the dead socket, which can interleave with the next test's request against the same mock
+server. See `SUBTASK_API_HANG_RESPONSE_LATENCY_MS` in `fixtures/subtasks.ts` for an example,
+including the bounded post-test drain the calling suite uses to wait out that window.
+
 ## 404 errors in logs are expected
 
 Background API calls from the extension (usage collection, initialization) hit aimock with no matching fixture and return 404. These do **not** affect test results — the tests still pass. You'll see `[OpenRouter] API error: { message: '404 No fixture matched' }` in the output; this is normal.

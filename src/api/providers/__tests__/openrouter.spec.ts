@@ -20,6 +20,7 @@ import OpenAI from "openai"
 import { OpenRouterHandler } from "../openrouter"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -224,19 +225,17 @@ describe("OpenRouterHandler", () => {
 		it("generates correct stream chunks", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						id: mockOptions.openRouterModelId,
-						choices: [{ delta: { content: "test response" } }],
-					}
-					yield {
-						id: "test-id",
-						choices: [{ delta: {} }],
-						usage: { prompt_tokens: 10, completion_tokens: 20, cost: 0.001 },
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					id: mockOptions.openRouterModelId,
+					choices: [{ delta: { content: "test response" } }],
 				},
-			}
+				{
+					id: "test-id",
+					choices: [{ delta: {} }],
+					usage: { prompt_tokens: 10, completion_tokens: 20, cost: 0.001 },
+				},
+			])
 
 			// Mock OpenAI chat.completions.create
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
@@ -248,12 +247,7 @@ describe("OpenRouterHandler", () => {
 			const systemPrompt = "test system prompt"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "test message" }]
 
-			const generator = handler.createMessage(systemPrompt, messages)
-			const chunks = []
-
-			for await (const chunk of generator) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			// Verify stream chunks
 			expect(chunks).toHaveLength(2) // One text chunk and one usage chunk
@@ -292,14 +286,12 @@ describe("OpenRouterHandler", () => {
 				openRouterModelId: "anthropic/claude-3.5-sonnet",
 			})
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						id: "test-id",
-						choices: [{ delta: { content: "test response" } }],
-					}
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [{ delta: { content: "test response" } }],
 				},
-			}
+			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 			;(OpenAI as any).prototype.chat = {
@@ -331,11 +323,7 @@ describe("OpenRouterHandler", () => {
 
 		it("handles API errors and captures telemetry", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield { error: { message: "API Error", code: 500 } }
-				},
-			}
+			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 			;(OpenAI as any).prototype.chat = {
@@ -444,11 +432,7 @@ describe("OpenRouterHandler", () => {
 
 		it("passes 429 rate limit errors from stream to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield { error: { message: "Rate limit exceeded", code: 429 } }
-				},
-			}
+			const mockStream = asyncStreamFrom([{ error: { message: "Rate limit exceeded", code: 429 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 			;(OpenAI as any).prototype.chat = {
@@ -479,38 +463,36 @@ describe("OpenRouterHandler", () => {
 
 			const handler = new OpenRouterHandler(mockOptions)
 
-			const mockStream = {
-				async *[Symbol.asyncIterator]() {
-					yield {
-						id: "test-id",
-						choices: [
-							{
-								delta: {
-									tool_calls: [
-										{
-											index: 0,
-											id: "call_openrouter_test",
-											function: { name: "read_file", arguments: '{"path":"test.ts"}' },
-										},
-									],
-								},
-								index: 0,
+			const mockStream = asyncStreamFrom([
+				{
+					id: "test-id",
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_openrouter_test",
+										function: { name: "read_file", arguments: '{"path":"test.ts"}' },
+									},
+								],
 							},
-						],
-					}
-					yield {
-						id: "test-id",
-						choices: [
-							{
-								delta: {},
-								finish_reason: "tool_calls",
-								index: 0,
-							},
-						],
-						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-					}
+							index: 0,
+						},
+					],
 				},
-			}
+				{
+					id: "test-id",
+					choices: [
+						{
+							delta: {},
+							finish_reason: "tool_calls",
+							index: 0,
+						},
+					],
+					usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+				},
+			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 			;(OpenAI as any).prototype.chat = {

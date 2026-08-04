@@ -1,0 +1,35 @@
+.vscode-light {
+	color-scheme: light;
+	--vscode-foreground: #3b3b3b;
+	--vscode-disabledForeground: #61616180;
+	--vscode-descriptionForeground: #717171;
+	--vscode-errorForeground: #a1260d;
+	--vscode-focusBorder: #0090f1;
+	--vscode-editor-foreground: #333333;
+	--vscode-editor-background: #ffffff;
+	--vscode-button-foreground: #ffffff;
+	--vscode-button-background: #007acc;
+	--vscode-button-hoverBackground: #0062a3;
+	--vscode-dropdown-foreground: #3b3b3b;
+	--vscode-dropdown-background: #ffffff;
+	--vscode-dropdown-border: #cecece;
+	--vscode-input-foreground: #3b3b3b;
+	--vscode-input-background: #ffffff;
+	--vscode-input-border: #cecece;
+	--vscode-list-hoverForeground: #3b3b3b;
+	--vscode-list-hoverBackground: #e8e8e8;
+	--vscode-list-focusBackground: #d6ebff;
+	--vscode-list-activeSelectionBackground: #0060c0;
+	--vscode-list-activeSelectionForeground: #ffffff;
+	--vscode-toolbar-hoverBackground: #e8e8e8;
+	--vscode-widget-border: #d4d4d4;
+	--vscode-widget-shadow: #00000029;
+	--vscode-menu-foreground: #3b3b3b;
+	--vscode-menu-background: #ffffff;
+	--vscode-editorHoverWidget-foreground: #3b3b3b;
+	--vscode-editorHoverWidget-background: #f8f8f8;
+	--vscode-editorHoverWidget-border: #c8c8c8;
+	--vscode-scrollbarSlider-background: #64646466;
+	--vscode-scrollbarSlider-hoverBackground: #64646499;
+	--vscode-scrollbarSlider-activeBackground: #00000099;
+}

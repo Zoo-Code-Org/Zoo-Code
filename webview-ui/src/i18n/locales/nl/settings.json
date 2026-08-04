@@ -1046,6 +1046,12 @@
 	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
 	"maxOutputTokensLabel": "Maximale output tokens",
 	"maxTokensGenerateDescription": "Maximale tokens om te genereren in het antwoord",
+	"openAiCodexSpeed": {
+		"label": "Snelheid",
+		"tooltip": "De snelle modus gebruikt prioriteitsverwerking van Codex voor ongeveer 1,5 keer hogere snelheid en verbruikt meer abonnementquotum.",
+		"standard": "Standaard",
+		"fast": "Snel (1,5 keer hogere snelheid, meer verbruik)"
+	},
 	"serviceTier": {
 		"label": "Serviceniveau",
 		"tooltip": "Voor snellere verwerking van API-verzoeken, probeer het prioriteitsverwerkingsniveau. Voor lagere prijzen met hogere latentie, probeer het flexverwerkingsniveau.",

@@ -11,6 +11,14 @@
 				"types": "./dist/index.d.cts",
 				"default": "./dist/index.cjs"
 			}
+		},
+		"./model": {
+			"types": "./src/model.ts",
+			"import": "./src/model.ts"
+		},
+		"./provider-identifiers": {
+			"types": "./src/provider-identifiers.ts",
+			"import": "./src/provider-identifiers.ts"
 		}
 	},
 	"scripts": {

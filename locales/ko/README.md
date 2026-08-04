@@ -34,15 +34,28 @@
 
 Roo Code에서 Zoo Code로 옮겨오는 빠른 가이드는 [Roo→Zoo 마이그레이션 가이드](https://docs.zoocode.dev/roo-to-zoo-migration)에서 확인할 수 있어. 전환하는 동안 사용자들을 최대한 돕고 싶고, 바로 그 지원을 위해 [Reddit](https://www.reddit.com/r/ZooCode)와 [Discord](https://discord.gg/VxfP4Vx3gX)를 운영하고 있어. 문제가 있거나 궁금한 점이 있으면 들어와서 편하게 물어봐.
 
-## v3.72.0의 새로운 기능
+## v3.74.0의 새로운 기능
 
-- **Moonshot 및 Kimi Code 프로바이더** — Moonshot 모델을 동적으로 검색하거나 OAuth 기기 흐름으로 Kimi Code에 로그인하세요.
-- **최신 모델 지원** — 여러 프로바이더에서 Claude Opus 5를 사용하고 Kimi K3, Gemini 3.6 Flash, MiniMax-M3도 이용하세요.
-- **개선된 하위 작업 워크플로우** — 더 안전한 작업 기록 무효화와 향상된 재개 테스트 범위로 중단된 하위 작업을 깔끔하게 포기하세요.
-- **확장된 코드베이스 인덱싱** — Dart 및 일반 텍스트 파일을 인덱싱하세요.
-- **프로바이더 안정성** — ChatGPT OAuth의 GPT-5.6 Luna, LiteLLM reasoning content, DeepSeek V4 이미지 입력 문제를 수정했습니다.
-- **더 원활한 설정** — Zoo Gateway 로그인과 모드 전환 동작을 개선했습니다.
-- API, 프로바이더 유형, 의존성, 현지화 및 CI 개선.
+**Zoo Gateway가 출시되었습니다!**
+
+게이트웨이는 모든 제공업체를 위한 단일 엔드포인트로, 하나의 잔액과 요청별 지출/사용량 내역을 제공합니다.
+
+**설정:**
+
+- 크레딧 추가: https://www.zoocode.dev/dashboard/credits
+- 확장 프로그램에서 로그인하세요.
+- 설정에서 다양한 모델의 프로필을 만들 때 Zoo Gateway를 제공업체로 선택하세요
+
+사용량과 요금은 [대시보드](https://www.zoocode.dev/dashboard)에서 확인할 수 있습니다.
+
+모델: https://www.zoocode.dev/dashboard/models
+
+- **더 다양한 OpenAI 제어** — OpenAI Codex에서 Fast 우선 모드를 사용하고 OpenAI 호환 모델의 reasoning effort를 더 높게 선택하세요.
+- **더 안정적인 프로바이더와 모델** — router 메타데이터 처리, Ollama 모델 새로고침, Bedrock 프록시 지원, Friendli reasoning 제어가 개선되었습니다.
+- **더 매끄러운 설정 및 개발 워크플로우** — 설정에서 저장하지 않은 편집을 유지하고, 짧은 터미널 명령을 올바르게 완료하며, Architect 계획에 워크스페이스 상대 경로를 사용합니다. 남아 있던 사용자용 Roo 브랜드도 Zoo로 업데이트했습니다.
+- **더 강력한 작업 기반** — 새로운 작업 레지스트리와 세마포어 기반 스케줄러가 Zoo Code의 작업 조정을 더 안전하게 준비합니다.
+- **일관된 프로바이더 아키텍처** — 프로바이더 식별자와 service tier 구성 요소를 API, 코어, 공유 타입, webview 전체에서 중앙화했습니다.
+- 보안, 의존성, lint, 시각적 회귀 및 엔드투엔드 테스트를 개선했습니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 

@@ -1,6 +1,5 @@
 import React from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ChatRowContent } from "../ChatRow"
 import type { HistoryItem, ClineMessage } from "@roo-code/types"
 
@@ -50,26 +49,22 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({ info: { supportsImages: true } }),
 }))
 
-const queryClient = new QueryClient()
-
 function renderChatRow(message: any, currentTaskItem?: Partial<HistoryItem>, clineMessages?: ClineMessage[]) {
 	mockCurrentTaskItem = currentTaskItem
 	mockClineMessages = clineMessages || [message]
 
 	return render(
-		<QueryClientProvider client={queryClient}>
-			<ChatRowContent
-				message={message}
-				isExpanded={false}
-				isLast={false}
-				isStreaming={false}
-				onToggleExpand={() => {}}
-				onSuggestionClick={() => {}}
-				onBatchFileResponse={() => {}}
-				onFollowUpUnmount={() => {}}
-				isFollowUpAnswered={false}
-			/>
-		</QueryClientProvider>,
+		<ChatRowContent
+			message={message}
+			isExpanded={false}
+			isLast={false}
+			isStreaming={false}
+			onToggleExpand={() => {}}
+			onSuggestionClick={() => {}}
+			onBatchFileResponse={() => {}}
+			onFollowUpUnmount={() => {}}
+			isFollowUpAnswered={false}
+		/>,
 	)
 }
 

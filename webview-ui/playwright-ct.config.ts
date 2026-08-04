@@ -58,10 +58,15 @@ export default defineConfig({
 			],
 			resolve: {
 				alias: {
+					"@src/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
 					"@": path.resolve(dirname, "./src"),
 					"@src": path.resolve(dirname, "./src"),
 					"@roo": path.resolve(dirname, "../src/shared"),
-					vscode: path.resolve(dirname, "./src/__mocks__/vscode.ts"),
+					"@vscode/webview-ui-toolkit/react": path.resolve(
+						dirname,
+						"./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx",
+					),
+					vscode: path.resolve(dirname, "../src/__mocks__/vscode.js"),
 				},
 			},
 			define: {

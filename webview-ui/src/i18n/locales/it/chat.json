@@ -343,9 +343,9 @@
 		"support": "Sostieni Zoo Code lasciandoci una stella su <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novità:",
-			"highlight1": "Provider Moonshot e Kimi Code — connettiti ai modelli Moonshot con il rilevamento dei modelli in tempo reale oppure accedi a Kimi Code tramite il flusso dispositivo OAuth.",
-			"highlight2": "Supporto per i modelli più recenti — usa Claude Opus 5 con tutti i provider, oltre a Kimi K3, Gemini 3.6 Flash e MiniMax-M3.",
-			"highlight3": "Workflow più affidabili — abbandona in modo pulito le sottoattività interrotte e indicizza i file Dart e di testo semplice nella tua codebase."
+			"highlight1": "Più controlli OpenAI — usa la modalità di priorità Fast con OpenAI Codex e scegli un livello di reasoning più elevato per i modelli compatibili con OpenAI.",
+			"highlight2": "Provider e modelli più affidabili — gestione migliorata dei metadati del router, aggiornamento dei modelli Ollama, supporto proxy per Bedrock e controlli di reasoning per Friendli.",
+			"highlight3": "Impostazioni e workflow di sviluppo più fluidi — le impostazioni conservano le modifiche non salvate, i comandi brevi del terminale terminano correttamente, i piani di architettura usano percorsi relativi al workspace e le ultime occorrenze visibili del brand Roo sono state aggiornate a Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Novità nel Cloud:",

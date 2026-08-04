@@ -36,15 +36,28 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.72.0
+## Novità in v3.74.0
 
-- **Provider Moonshot e Kimi Code** — rileva dinamicamente i modelli Moonshot oppure accedi a Kimi Code tramite il flusso dispositivo OAuth.
-- **Supporto per i modelli più recenti** — usa Claude Opus 5 con tutti i provider, oltre a Kimi K3, Gemini 3.6 Flash e MiniMax-M3.
-- **Workflow delle sottoattività migliorati** — abbandona in modo pulito le sottoattività interrotte, con un'invalidazione più sicura della cronologia e una migliore copertura della ripresa.
-- **Indicizzazione della codebase ampliata** — indicizza i file Dart e di testo semplice.
-- **Affidabilità dei provider** — correzioni per GPT-5.6 Luna con ChatGPT OAuth, il reasoning content di LiteLLM e l'input di immagini di DeepSeek V4.
-- **Configurazione e impostazioni più fluide** — accesso a Zoo Gateway e cambio modalità migliorati.
-- Miglioramenti ad API, tipi di provider, dipendenze, localizzazione e CI.
+**Zoo Gateway è live!**
+
+Il gateway è un unico endpoint per tutti i provider, con un solo saldo e un dettaglio delle spese e dell'utilizzo per richiesta.
+
+**Configurazione:**
+
+- Aggiungi crediti: https://www.zoocode.dev/dashboard/credits
+- Accedi dall'estensione.
+- Nelle impostazioni, seleziona Zoo Gateway come provider quando crei profili per modelli diversi
+
+Utilizzo e addebiti sono visibili nella [dashboard](https://www.zoocode.dev/dashboard).
+
+Modelli: https://www.zoocode.dev/dashboard/models
+
+- **Più controlli OpenAI** — usa la modalità di priorità Fast con OpenAI Codex e scegli un livello di reasoning più elevato per i modelli compatibili con OpenAI.
+- **Provider e modelli più affidabili** — gestione migliorata dei metadati del router, aggiornamento dei modelli Ollama, supporto proxy per Bedrock e controlli di reasoning per Friendli.
+- **Impostazioni e workflow di sviluppo più fluidi** — le impostazioni conservano le modifiche non salvate, i comandi brevi del terminale terminano correttamente, i piani di architettura usano percorsi relativi al workspace e le ultime occorrenze visibili del brand Roo sono state aggiornate a Zoo.
+- **Fondamenta più solide per le attività** — il nuovo registro delle attività e lo scheduler basato su semafori preparano Zoo Code a coordinare le attività in modo più sicuro.
+- **Architettura dei provider coerente** — gli identificatori dei provider e i componenti service tier sono ora centralizzati in API, core, tipi condivisi e webview.
+- Miglioramenti a sicurezza, dipendenze, lint, regressione visiva e test end-to-end.
 
 ## Cosa può fare Zoo Code per TE?
 
