@@ -50,15 +50,22 @@ function makeTask(overrides: Partial<DashboardTaskSummary> = {}): DashboardTaskS
 		provider: "openai",
 		lastUsageAt: Date.now(),
 		eventCount: 1,
+		childTaskIds: [],
 		...overrides,
 	}
+}
+
+function toTasksById(tasks: DashboardTaskSummary[]): Record<string, DashboardTaskSummary> {
+	return Object.fromEntries(tasks.map((task) => [task.taskId, task]))
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 describe("TaskList", () => {
 	const defaultProps = {
-		expandedTaskId: undefined,
+		tasksById: {} as Record<string, DashboardTaskSummary>,
+		expandedRootId: undefined,
+		expandedDetailTaskId: undefined,
 		taskDetails: {} as Record<string, DashboardTaskDetail | null>,
 		taskDetailErrors: {} as Record<string, string | null>,
 		taskDetailLoading: new Set<string>(),
@@ -79,10 +86,7 @@ describe("TaskList", () => {
 	})
 
 	it("renders task rows for each task", () => {
-		const tasks = [
-			makeTask({ taskId: "task-A", title: "Task A" }),
-			makeTask({ taskId: "task-B", title: "Task B" }),
-		]
+		const tasks = [makeTask({ taskId: "task-A", title: "Task A" }), makeTask({ taskId: "task-B", title: "Task B" })]
 		const { container } = render(<TaskList tasks={tasks} {...defaultProps} />)
 		expect(container.textContent).toContain("Task A")
 		expect(container.textContent).toContain("Task B")
@@ -96,9 +100,7 @@ describe("TaskList", () => {
 	it("calls onToggleTask when a task row is clicked", () => {
 		const onToggleTask = vi.fn()
 		const tasks = [makeTask({ taskId: "task-A", title: "Click me" })]
-		const { container } = render(
-			<TaskList tasks={tasks} {...defaultProps} onToggleTask={onToggleTask} />,
-		)
+		const { container } = render(<TaskList tasks={tasks} {...defaultProps} onToggleTask={onToggleTask} />)
 		const row = container.querySelector('[data-testid="dashboard-task-row"]')
 		expect(row).toBeTruthy()
 		fireEvent.click(row!)
@@ -111,7 +113,7 @@ describe("TaskList", () => {
 			<TaskList
 				tasks={tasks}
 				{...defaultProps}
-				expandedTaskId="task-A"
+				expandedDetailTaskId="task-A"
 				taskDetailLoading={new Set(["task-A"])}
 			/>,
 		)
@@ -124,7 +126,7 @@ describe("TaskList", () => {
 			<TaskList
 				tasks={tasks}
 				{...defaultProps}
-				expandedTaskId="task-A"
+				expandedDetailTaskId="task-A"
 				taskDetailErrors={{ "task-A": "Network error" }}
 			/>,
 		)
@@ -148,7 +150,7 @@ describe("TaskList", () => {
 			<TaskList
 				tasks={tasks}
 				{...defaultProps}
-				expandedTaskId="task-A"
+				expandedDetailTaskId="task-A"
 				taskDetails={{ "task-A": detail }}
 			/>,
 		)
@@ -191,5 +193,80 @@ describe("TaskList", () => {
 		const tasks = [makeTask({ taskId: "task-A" }), makeTask({ taskId: "task-B" })]
 		render(<TaskList tasks={tasks} {...defaultProps} onLoadMore={onLoadMore} />)
 		expect(onLoadMore).not.toHaveBeenCalled()
+	})
+
+	it("hides subtasks until the root row is expanded", () => {
+		const child = makeTask({ taskId: "child-1", rootTaskId: "root-1", parentTaskId: "root-1", title: "Child one" })
+		const root = makeTask({ taskId: "root-1", title: "Root one", childTaskIds: ["child-1"] })
+		const { container } = render(
+			<TaskList tasks={[root]} {...defaultProps} tasksById={toTasksById([root, child])} />,
+		)
+		expect(container.textContent).toContain("Root one")
+		expect(container.textContent).not.toContain("Child one")
+		expect(container.querySelector('[data-testid="dashboard-subtask-row"]')).toBeFalsy()
+	})
+
+	it("renders subtask rows when the root is expanded", () => {
+		const child = makeTask({ taskId: "child-1", rootTaskId: "root-1", parentTaskId: "root-1", title: "Child one" })
+		const root = makeTask({ taskId: "root-1", title: "Root one", childTaskIds: ["child-1"] })
+		const { container } = render(
+			<TaskList
+				tasks={[root]}
+				{...defaultProps}
+				tasksById={toTasksById([root, child])}
+				expandedRootId="root-1"
+			/>,
+		)
+		expect(container.querySelector('[data-testid="dashboard-subtask-list"]')).toBeTruthy()
+		expect(container.querySelector('[data-testid="dashboard-subtask-row"]')).toBeTruthy()
+		expect(container.textContent).toContain("Child one")
+		// A root with subtasks expands into the list, not into its own detail.
+		expect(container.querySelector('[data-testid="dashboard-session-detail-no-calls"]')).toBeFalsy()
+	})
+
+	it("calls onToggleTask with the subtask id when a subtask row is clicked", () => {
+		const onToggleTask = vi.fn()
+		const child = makeTask({ taskId: "child-1", rootTaskId: "root-1", parentTaskId: "root-1", title: "Child one" })
+		const root = makeTask({ taskId: "root-1", title: "Root one", childTaskIds: ["child-1"] })
+		const { container } = render(
+			<TaskList
+				tasks={[root]}
+				{...defaultProps}
+				tasksById={toTasksById([root, child])}
+				expandedRootId="root-1"
+				onToggleTask={onToggleTask}
+			/>,
+		)
+		const row = container.querySelector('[data-testid="dashboard-subtask-row"]')
+		expect(row).toBeTruthy()
+		fireEvent.click(row!)
+		expect(onToggleTask).toHaveBeenCalledWith("child-1")
+	})
+
+	it("shows a subtask detail under the subtask row when loaded", () => {
+		const child = makeTask({ taskId: "child-1", rootTaskId: "root-1", parentTaskId: "root-1", title: "Child one" })
+		const root = makeTask({ taskId: "root-1", title: "Root one", childTaskIds: ["child-1"] })
+		const detail: DashboardTaskDetail = {
+			taskId: "child-1",
+			title: "Child one",
+			taskTimestamp: Date.now(),
+			models: ["gpt-4"],
+			modes: ["code"],
+			totalTokens: 500,
+			totalCost: 0.02,
+			callCount: 1,
+			apiCalls: [],
+		}
+		const { container } = render(
+			<TaskList
+				tasks={[root]}
+				{...defaultProps}
+				tasksById={toTasksById([root, child])}
+				expandedRootId="root-1"
+				expandedDetailTaskId="child-1"
+				taskDetails={{ "child-1": detail }}
+			/>,
+		)
+		expect(container.querySelector('[data-testid="dashboard-session-detail-no-calls"]')).toBeTruthy()
 	})
 })

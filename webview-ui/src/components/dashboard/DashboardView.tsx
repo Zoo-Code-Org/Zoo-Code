@@ -66,10 +66,14 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	const [isResyncing, setIsResyncing] = useState(false)
 
 	// ── Task detail state ───────────────────────────────────────────────────
-	// Only one task is expanded at a time (accordion pattern). The detail is
-	// fetched on first expansion via `getDashboardTaskDetail` and cached in
-	// `taskDetails` so re-expanding does not refetch.
-	const [expandedTaskId, setExpandedTaskId] = useState<string | undefined>(undefined)
+	// Root tasks with subtasks expand into a subtask list (expandedRootId);
+	// childless roots and subtasks expand into their API-call detail
+	// (expandedDetailTaskId). The two are independent so opening a subtask's
+	// detail never collapses the root's subtask list. Details are fetched on
+	// first expansion via `getDashboardTaskDetail` and cached in `taskDetails`
+	// so re-expanding does not refetch.
+	const [expandedRootId, setExpandedRootId] = useState<string | undefined>(undefined)
+	const [expandedDetailTaskId, setExpandedDetailTaskId] = useState<string | undefined>(undefined)
 	const [taskDetails, setTaskDetails] = useState<Record<string, DashboardTaskDetail | null>>({})
 	const [taskDetailErrors, setTaskDetailErrors] = useState<Record<string, string | null>>({})
 	const [taskDetailLoading, setTaskDetailLoading] = useState<Set<string>>(new Set())
@@ -102,7 +106,8 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	// range change makes the per-task detail cache stale: drop it (and the
 	// expansion) so the next expand re-fetches against the new range.
 	const resetTaskDetails = useCallback(() => {
-		setExpandedTaskId(undefined)
+		setExpandedRootId(undefined)
+		setExpandedDetailTaskId(undefined)
 		setTaskDetails({})
 		setTaskDetailErrors({})
 		setTaskDetailLoading(new Set())
@@ -258,15 +263,22 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 	const handleToggleTask = useCallback(
 		(taskId: string) => {
-			setExpandedTaskId((current) => {
-				if (current === taskId) return undefined
-				return taskId
-			})
+			const hasChildren = (streamState.tasks[taskId]?.childTaskIds?.length ?? 0) > 0
+
+			if (hasChildren) {
+				// Roots with subtasks toggle the subtask list; close any open
+				// detail since its host row may unmount with the list.
+				setExpandedRootId((current) => (current === taskId ? undefined : taskId))
+				setExpandedDetailTaskId(undefined)
+				return
+			}
+
+			setExpandedDetailTaskId((current) => (current === taskId ? undefined : taskId))
 			if (taskDetails[taskId] === undefined && !taskDetailLoading.has(taskId)) {
 				fetchTaskDetail(taskId)
 			}
 		},
-		[taskDetails, taskDetailLoading, fetchTaskDetail],
+		[streamState.tasks, taskDetails, taskDetailLoading, fetchTaskDetail],
 	)
 
 	// ── Manual refresh = explicit background resync ────────────────────────
@@ -795,7 +807,9 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 						{/* Task list, virtualized and stream-controlled. */}
 						<TaskList
 							tasks={tasks}
-							expandedTaskId={expandedTaskId}
+							tasksById={streamState.tasks}
+							expandedRootId={expandedRootId}
+							expandedDetailTaskId={expandedDetailTaskId}
 							taskDetails={taskDetails}
 							taskDetailErrors={taskDetailErrors}
 							taskDetailLoading={taskDetailLoading}

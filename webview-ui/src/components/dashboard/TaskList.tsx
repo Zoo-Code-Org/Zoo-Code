@@ -81,96 +81,200 @@ TaskDetailError.displayName = "TaskDetailError"
 
 interface TaskRowProps {
 	task: DashboardTaskSummary
-	/** Whether this row is currently expanded. */
+	/** Chevron direction state (children list or detail slot open). */
 	isExpanded: boolean
+	/** Indent the row as a subtask of the expanded root above it. */
+	indent?: boolean
 	/** The loaded detail for this task, or undefined if not loaded/failed. */
 	detail?: DashboardTaskDetail | null
 	/** The error message if the detail fetch failed, or undefined. */
 	detailError?: string | null
 	/** Whether the detail fetch is currently in flight. */
 	detailLoading: boolean
+	/** Whether the detail slot renders below this row. */
+	showDetail: boolean
 	/** Called when the user clicks the row to toggle expansion. */
 	onToggle: (taskId: string) => void
 }
 
-const TaskRow = memo(({ task, isExpanded, detail, detailError, detailLoading, onToggle }: TaskRowProps) => {
-	const { t } = useAppTranslation()
-	const metadata = [formatRelativeTime(task.lastUsageAt ?? task.taskTimestamp), task.model, task.provider]
-		.filter(Boolean)
-		.join(" · ")
+const TaskRow = memo(
+	({ task, isExpanded, indent = false, detail, detailError, detailLoading, showDetail, onToggle }: TaskRowProps) => {
+		const { t } = useAppTranslation()
+		const metadata = [formatRelativeTime(task.lastUsageAt ?? task.taskTimestamp), task.model, task.provider]
+			.filter(Boolean)
+			.join(" · ")
 
-	const handleClick = useCallback(() => {
-		onToggle(task.taskId)
-	}, [onToggle, task.taskId])
+		const handleClick = useCallback(() => {
+			onToggle(task.taskId)
+		}, [onToggle, task.taskId])
 
-	const handleKeyDown = useCallback(
-		(e: React.KeyboardEvent) => {
-			if (e.key === "Enter" || e.key === " ") {
-				e.preventDefault()
-				onToggle(task.taskId)
-			}
-		},
-		[onToggle, task.taskId],
-	)
+		const handleKeyDown = useCallback(
+			(e: React.KeyboardEvent) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault()
+					onToggle(task.taskId)
+				}
+			},
+			[onToggle, task.taskId],
+		)
 
-	return (
-		<div data-testid="dashboard-task-row-container">
-			<div
-				className="flex items-center justify-between gap-2 border-b border-vscode-panel-border px-2 py-1.5 last:border-b-0 hover:bg-vscode-list-hoverBackground cursor-pointer"
-				data-testid="dashboard-task-row"
-				role="button"
-				tabIndex={0}
-				aria-expanded={isExpanded}
-				onClick={handleClick}
-				onKeyDown={handleKeyDown}>
-				<div className="flex min-w-0 flex-1 items-center gap-1">
-					{isExpanded ? (
-						<ChevronDown className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
-					) : (
-						<ChevronRight className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
-					)}
-					<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-						<span className="truncate text-xs font-medium text-vscode-foreground" title={task.title}>
-							{task.title}
+		return (
+			<div data-testid={indent ? "dashboard-subtask-row-container" : "dashboard-task-row-container"}>
+				<div
+					className={`flex items-center justify-between gap-2 border-b border-vscode-panel-border px-2 py-1.5 last:border-b-0 hover:bg-vscode-list-hoverBackground cursor-pointer${indent ? " pl-6" : ""}`}
+					data-testid={indent ? "dashboard-subtask-row" : "dashboard-task-row"}
+					role="button"
+					tabIndex={0}
+					aria-expanded={isExpanded}
+					onClick={handleClick}
+					onKeyDown={handleKeyDown}>
+					<div className="flex min-w-0 flex-1 items-center gap-1">
+						{isExpanded ? (
+							<ChevronDown className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
+						) : (
+							<ChevronRight className="size-3.5 shrink-0 text-vscode-descriptionForeground" />
+						)}
+						<div className="flex min-w-0 flex-1 flex-col gap-0.5">
+							<span className="truncate text-xs font-medium text-vscode-foreground" title={task.title}>
+								{task.title}
+							</span>
+							<span className="text-[10px] text-vscode-descriptionForeground">{metadata}</span>
+						</div>
+					</div>
+					<div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
+						<span className="text-xs font-medium text-vscode-foreground tabular-nums">
+							{formatCompact(task.totalTokens)}
 						</span>
-						<span className="text-[10px] text-vscode-descriptionForeground">{metadata}</span>
+						<span className="text-[10px] text-vscode-descriptionForeground tabular-nums">
+							{formatCost(task.totalCost)}
+							{" · "}
+							{t("dashboard:tasks.callCount", { count: task.eventCount })}
+						</span>
 					</div>
 				</div>
-				<div className="flex flex-col items-end gap-0.5 whitespace-nowrap">
-					<span className="text-xs font-medium text-vscode-foreground tabular-nums">
-						{formatCompact(task.totalTokens)}
-					</span>
-					<span className="text-[10px] text-vscode-descriptionForeground tabular-nums">
-						{formatCost(task.totalCost)}
-						{" \u00b7 "}
-						{t("dashboard:tasks.callCount", { count: task.eventCount })}
-					</span>
-				</div>
+				{showDetail && (
+					<>
+						{detailLoading ? (
+							<TaskDetailLoading />
+						) : detailError ? (
+							<TaskDetailError error={detailError} />
+						) : detail ? (
+							<SessionDetail detail={detail} />
+						) : null}
+					</>
+				)}
 			</div>
-			{isExpanded && (
-				<>
-					{detailLoading ? (
-						<TaskDetailLoading />
-					) : detailError ? (
-						<TaskDetailError error={detailError} />
-					) : detail ? (
-						<SessionDetail detail={detail} />
-					) : null}
-				</>
-			)}
-		</div>
-	)
-})
+		)
+	},
+)
 
 TaskRow.displayName = "TaskRow"
+
+// ── Root task item (row + expansion) ─────────────────────────────────────────
+
+interface RootTaskItemProps {
+	/** The root task summary. */
+	task: DashboardTaskSummary
+	/** Normalized summaries of roots AND subtasks (for resolving childTaskIds). */
+	tasksById: Record<string, DashboardTaskSummary>
+	/** Whether this root's subtask list is expanded. */
+	isRootExpanded: boolean
+	/** The task whose detail slot is open (a childless root or a subtask). */
+	expandedDetailTaskId?: string
+	/** Map of task ID -> loaded task detail (only populated for expanded rows). */
+	taskDetails: Record<string, DashboardTaskDetail | null>
+	/** Map of task ID -> detail fetch error message (only populated for failed fetches). */
+	taskDetailErrors: Record<string, string | null>
+	/** Set of task IDs whose detail is currently being fetched. */
+	taskDetailLoading: Set<string>
+	/** Called when the user clicks any row to toggle its expansion. */
+	onToggleTask: (taskId: string) => void
+}
+
+/**
+ * One root row plus its expansion area. Roots with subtasks expand into an
+ * indented subtask list (each subtask toggles its own detail); childless roots
+ * expand directly into the API-call detail as before.
+ */
+const RootTaskItem = memo(
+	({
+		task,
+		tasksById,
+		isRootExpanded,
+		expandedDetailTaskId,
+		taskDetails,
+		taskDetailErrors,
+		taskDetailLoading,
+		onToggleTask,
+	}: RootTaskItemProps) => {
+		// Tolerate legacy summaries that predate childTaskIds (older hosts).
+		const childTasks = (task.childTaskIds ?? []).map((id) => tasksById[id]).filter(Boolean)
+		const hasChildren = childTasks.length > 0
+
+		if (hasChildren) {
+			return (
+				<div data-testid="dashboard-task-row-container">
+					<TaskRow
+						task={task}
+						isExpanded={isRootExpanded}
+						detailLoading={false}
+						showDetail={false}
+						onToggle={onToggleTask}
+					/>
+					{isRootExpanded && (
+						<div data-testid="dashboard-subtask-list">
+							{childTasks.map((child) => {
+								const isDetailOpen = expandedDetailTaskId === child.taskId
+								return (
+									<TaskRow
+										key={child.taskId}
+										task={child}
+										indent
+										isExpanded={isDetailOpen}
+										detail={isDetailOpen ? taskDetails[child.taskId] : undefined}
+										detailError={
+											isDetailOpen ? (taskDetailErrors[child.taskId] ?? undefined) : undefined
+										}
+										detailLoading={isDetailOpen && taskDetailLoading.has(child.taskId)}
+										showDetail={isDetailOpen}
+										onToggle={onToggleTask}
+									/>
+								)
+							})}
+						</div>
+					)}
+				</div>
+			)
+		}
+
+		const isDetailOpen = expandedDetailTaskId === task.taskId
+		return (
+			<TaskRow
+				task={task}
+				isExpanded={isDetailOpen}
+				detail={isDetailOpen ? taskDetails[task.taskId] : undefined}
+				detailError={isDetailOpen ? (taskDetailErrors[task.taskId] ?? undefined) : undefined}
+				detailLoading={isDetailOpen && taskDetailLoading.has(task.taskId)}
+				showDetail={isDetailOpen}
+				onToggle={onToggleTask}
+			/>
+		)
+	},
+)
+
+RootTaskItem.displayName = "RootTaskItem"
 
 // ── TaskList ────────────────────────────────────────────────────────────────
 
 interface TaskListProps {
-	/** Ordered list of task summaries from the stream. */
+	/** Ordered list of ROOT task summaries from the stream. */
 	tasks: DashboardTaskSummary[]
-	/** The task ID of the currently expanded task, or undefined if none. */
-	expandedTaskId?: string
+	/** Normalized summaries of roots AND subtasks (keyed by task ID). */
+	tasksById: Record<string, DashboardTaskSummary>
+	/** The root task ID whose subtask list is expanded, or undefined if none. */
+	expandedRootId?: string
+	/** The task ID whose detail slot is open (a childless root or a subtask). */
+	expandedDetailTaskId?: string
 	/** Map of task ID -> loaded task detail (only populated for expanded rows). */
 	taskDetails: Record<string, DashboardTaskDetail | null>
 	/** Map of task ID -> detail fetch error message (only populated for failed fetches). */
@@ -192,7 +296,9 @@ interface TaskListProps {
 const TaskList = memo(
 	({
 		tasks,
-		expandedTaskId,
+		tasksById,
+		expandedRootId,
+		expandedDetailTaskId,
 		taskDetails,
 		taskDetailErrors,
 		taskDetailLoading,
@@ -238,22 +344,19 @@ const TaskList = memo(
 							initialItemCount={Math.min(5, tasks.length)}
 							style={{ height: Math.min(listHeight, 400) || undefined }}
 							totalListHeightChanged={setListHeight}
-							itemContent={(_index, task) => {
-								const isExpanded = expandedTaskId === task.taskId
-								return (
-									<TaskRow
-										key={task.taskId}
-										task={task}
-										isExpanded={isExpanded}
-										detail={isExpanded ? taskDetails[task.taskId] : undefined}
-										detailError={
-											isExpanded ? (taskDetailErrors[task.taskId] ?? undefined) : undefined
-										}
-										detailLoading={isExpanded && taskDetailLoading.has(task.taskId)}
-										onToggle={onToggleTask}
-									/>
-								)
-							}}
+							itemContent={(_index, task) => (
+								<RootTaskItem
+									key={task.taskId}
+									task={task}
+									tasksById={tasksById}
+									isRootExpanded={expandedRootId === task.taskId}
+									expandedDetailTaskId={expandedDetailTaskId}
+									taskDetails={taskDetails}
+									taskDetailErrors={taskDetailErrors}
+									taskDetailLoading={taskDetailLoading}
+									onToggleTask={onToggleTask}
+								/>
+							)}
 							endReached={() => {
 								if (taskCursor && !taskPageLoading) {
 									onLoadMore?.()

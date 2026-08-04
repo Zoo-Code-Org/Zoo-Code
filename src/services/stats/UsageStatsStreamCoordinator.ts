@@ -559,7 +559,9 @@ export class UsageStatsStreamCoordinator {
 							state.subscription.sessionPageSize,
 							resolveStatsQueryRangeMs(state.subscription.range),
 						)
-						state.visibleTaskIds = new Set(tasks.tasks.map((task) => task.taskId))
+						state.visibleTaskIds = new Set(
+							[...tasks.tasks, ...(tasks.childTasks ?? [])].map((task) => task.taskId),
+						)
 						return {
 							requestId: state.subscription.requestId,
 							generation,
@@ -678,7 +680,9 @@ export class UsageStatsStreamCoordinator {
 										state.subscription.sessionPageSize,
 										resolveStatsQueryRangeMs(state.subscription.range),
 									)
-									state.visibleTaskIds = new Set(tasks.tasks.map((task) => task.taskId))
+									state.visibleTaskIds = new Set(
+										[...tasks.tasks, ...(tasks.childTasks ?? [])].map((task) => task.taskId),
+									)
 									return {
 										requestId: state.subscription.requestId,
 										generation,

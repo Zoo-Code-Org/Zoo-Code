@@ -225,4 +225,70 @@ describe("DashboardTaskCatalog", () => {
 
 		catalog.dispose()
 	})
+
+	it("pages root tasks only, promoting orphans whose parent is absent", () => {
+		const source = createCatalogSource([
+			makeHistoryItem({ id: "root-b", ts: 500 }),
+			makeHistoryItem({ id: "child-of-b", ts: 450, parentTaskId: "root-b" }),
+			makeHistoryItem({ id: "root-a", ts: 400 }),
+			makeHistoryItem({ id: "grandchild-of-b", ts: 350, parentTaskId: "child-of-b" }),
+			makeHistoryItem({ id: "orphan", ts: 300, parentTaskId: "missing-parent" }),
+		])
+		const catalog = new DashboardTaskCatalog(source.source)
+
+		expect(catalog.orderedRootTaskIds).toEqual(["root-b", "root-a", "orphan"])
+
+		const page = catalog.getPage()
+		expect(page.tasks).toEqual(["root-b", "root-a", "orphan"])
+		expect(page.totalEstimate).toBe(3)
+
+		catalog.dispose()
+	})
+
+	it("pages roots with cursor continuity when subtasks share the root ordering", () => {
+		const source = createCatalogSource([
+			makeHistoryItem({ id: "root-c", ts: 300 }),
+			makeHistoryItem({ id: "child-c", ts: 250, parentTaskId: "root-c" }),
+			makeHistoryItem({ id: "root-b", ts: 200 }),
+			makeHistoryItem({ id: "child-b", ts: 150, parentTaskId: "root-b" }),
+			makeHistoryItem({ id: "root-a", ts: 100 }),
+		])
+		const catalog = new DashboardTaskCatalog(source.source)
+		const traversed: string[] = []
+		let cursor: string | undefined
+
+		do {
+			const page = catalog.getPage(cursor, 2)
+			traversed.push(...page.tasks)
+			cursor = page.cursor
+		} while (cursor)
+
+		expect(traversed).toEqual(["root-c", "root-b", "root-a"])
+
+		catalog.dispose()
+	})
+
+	it("includes a root in a bounded range when any descendant was created inside it", () => {
+		const source = createCatalogSource([
+			makeHistoryItem({ id: "old-root", ts: 100 }),
+			makeHistoryItem({ id: "new-child", ts: 500, parentTaskId: "old-root" }),
+			makeHistoryItem({ id: "new-grandchild", ts: 600, parentTaskId: "new-child" }),
+			makeHistoryItem({ id: "out-root", ts: 50 }),
+			makeHistoryItem({ id: "out-child", ts: 60, parentTaskId: "out-root" }),
+			makeHistoryItem({ id: "in-root", ts: 400 }),
+			makeHistoryItem({ id: "out-child-of-in-root", ts: 700, parentTaskId: "in-root" }),
+		])
+		const catalog = new DashboardTaskCatalog(source.source)
+		const rangeMs = { fromMs: 300, toMs: 550 }
+
+		const page = catalog.getPage(undefined, 50, rangeMs)
+		// old-root: descendant new-child (500) in range -> included.
+		// out-root: root (50) and child (60) both out of range -> excluded.
+		// in-root: root (400) in range -> included even though its child is not.
+		// new-grandchild (600) is out of range but is not a root anyway.
+		expect(page.tasks).toEqual(["in-root", "old-root"])
+		expect(page.totalEstimate).toBe(2)
+
+		catalog.dispose()
+	})
 })

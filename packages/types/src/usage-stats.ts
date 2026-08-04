@@ -294,6 +294,8 @@ export const DashboardTaskSummary = z.object({
 	model: z.string(),
 	provider: z.string(),
 	eventCount: z.number().int().nonnegative(),
+	/** Direct children in catalog order; empty for childless tasks. */
+	childTaskIds: z.array(z.string()),
 })
 export type DashboardTaskSummary = z.infer<typeof DashboardTaskSummary>
 
@@ -303,7 +305,10 @@ export const DashboardTaskPage = z.object({
 	requestId: z.string(),
 	/** Immutable History catalog revision used to produce this page. */
 	catalogRevision: z.number().int().nonnegative(),
+	/** Root tasks only, in catalog order. Subtasks appear in `childTasks`. */
 	tasks: z.array(DashboardTaskSummary),
+	/** Direct children of this page's root tasks, keyed via their `parentTaskId`. */
+	childTasks: z.array(DashboardTaskSummary).optional(),
 	/** Opaque host-issued cursor for the next page. */
 	cursor: z.string().optional(),
 	/** Exact catalog size for the current revision. */

@@ -158,6 +158,7 @@ function upsertToSummary(upsert: DashboardTaskUpsert): DashboardTaskSummary {
 		provider: upsert.provider,
 		lastUsageAt: upsert.lastUsageAt,
 		eventCount: upsert.eventCount,
+		childTaskIds: upsert.childTaskIds ?? [],
 	}
 }
 
@@ -167,8 +168,11 @@ function upsertToSummary(upsert: DashboardTaskUpsert): DashboardTaskSummary {
  * - If the task already exists, update its values in place WITHOUT
  *   reordering (architecture rule: "ordinary numeric updates do not reorder
  *   the visible page").
- * - A new task is inserted at the top until its next authoritative snapshot
- *   establishes catalog order.
+ * - A new ROOT task is inserted at the top until its next authoritative
+ *   snapshot establishes catalog order.
+ * - A new SUBTASK (has parentTaskId) never enters `taskOrder`: the visible
+ *   list contains roots only, and subtasks render through their parent's
+ *   `childTaskIds`.
  */
 function upsertTask(
 	tasks: Record<string, DashboardTaskSummary>,
@@ -185,7 +189,15 @@ function upsertTask(
 		}
 	}
 
-	// New task — insert at top until the next catalog snapshot establishes order.
+	if (upsert.parentTaskId) {
+		// New subtask — map only, never the visible root order.
+		return {
+			tasks: { ...tasks, [upsert.taskId]: summary },
+			order,
+		}
+	}
+
+	// New root task — insert at top until the next catalog snapshot establishes order.
 	return {
 		tasks: { ...tasks, [upsert.taskId]: summary },
 		order: [upsert.taskId, ...order],
@@ -275,6 +287,11 @@ export function dashboardStreamReducer(
 			for (const task of snapTasks.tasks) {
 				newTasks[task.taskId] = task
 				newTaskOrder.push(task.taskId)
+			}
+			// Direct children of the page's roots: stored for expansion
+			// rendering, but never part of the visible root order.
+			for (const child of snapTasks.childTasks ?? []) {
+				newTasks[child.taskId] = child
 			}
 
 			return {
@@ -407,6 +424,10 @@ export function dashboardStreamReducer(
 					newTaskOrder.push(task.taskId)
 				}
 				newTasks[task.taskId] = task
+			}
+			// Direct children of the page's roots: map only, never the order.
+			for (const child of action.page.childTasks ?? []) {
+				newTasks[child.taskId] = child
 			}
 
 			return {

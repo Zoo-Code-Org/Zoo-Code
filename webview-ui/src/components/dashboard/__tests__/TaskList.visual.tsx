@@ -5,6 +5,7 @@ import type { DashboardTaskSummary } from "@roo-code/types"
 import { expect, test } from "../../../../playwright/coverage-fixture"
 
 import TaskList from "../TaskList"
+import { HierarchyFixture } from "./TaskList.visual.fixture"
 
 // Regression tests for the "Tasks header shows a count but no rows render"
 // bug: with only `maxHeight` set, the Virtuoso scroller's `height: 100%`
@@ -25,13 +26,19 @@ function makeTasks(count: number): DashboardTaskSummary[] {
 		model: "claude-sonnet-4-20250514",
 		provider: "anthropic",
 		eventCount: i + 1,
+		childTaskIds: [],
 	}))
 }
 
-function renderTaskList(tasks: DashboardTaskSummary[]) {
+function toTasksById(tasks: DashboardTaskSummary[]): Record<string, DashboardTaskSummary> {
+	return Object.fromEntries(tasks.map((task) => [task.taskId, task]))
+}
+
+function renderTaskList(tasks: DashboardTaskSummary[], allTasks: DashboardTaskSummary[] = tasks) {
 	return (
 		<TaskList
 			tasks={tasks}
+			tasksById={toTasksById(allTasks)}
 			taskDetails={{}}
 			taskDetailErrors={{}}
 			taskDetailLoading={new Set()}
@@ -66,4 +73,23 @@ test("shrinks the scroller to the content height when only a few tasks exist", a
 	expect(height).toBeLessThan(400)
 
 	await expect(component.getByTestId("dashboard-task-row")).toHaveCount(3)
+})
+
+test("root rows expand into subtask rows, and subtask rows toggle their detail", async ({ mount }) => {
+	const component = await mount(<HierarchyFixture />)
+
+	// Initially only the root row is visible; subtask titles are not rendered.
+	await expect(component.getByTestId("dashboard-task-row")).toHaveCount(1)
+	await expect(component.getByText("Subtask A")).toHaveCount(0)
+
+	// Click the root row -> subtask rows appear (and the list grows).
+	await component.getByTestId("dashboard-task-row").click()
+	await expect(component.getByTestId("dashboard-subtask-row")).toHaveCount(2)
+	await expect(component.getByText("Subtask A")).toBeVisible()
+	await expect(component.getByText("Subtask B")).toBeVisible()
+
+	// Click a subtask -> its (loading) detail slot opens without collapsing the list.
+	await component.getByTestId("dashboard-subtask-row").first().click()
+	await expect(component.getByTestId("dashboard-task-detail-loading")).toBeVisible()
+	await expect(component.getByTestId("dashboard-subtask-row")).toHaveCount(2)
 })

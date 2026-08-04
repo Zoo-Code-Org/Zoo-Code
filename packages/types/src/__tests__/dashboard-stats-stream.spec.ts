@@ -76,6 +76,7 @@ const validTaskSummary: DashboardTaskSummary = {
 	model: "claude-sonnet-4-20250514",
 	provider: "anthropic",
 	eventCount: 5,
+	childTaskIds: [],
 }
 
 // ── DashboardSessionPageRequest ─────────────────────────────────────────────
@@ -283,6 +284,16 @@ describe("DashboardTaskSummary", () => {
 	it("should reject a negative event count", () => {
 		expect(() => DashboardTaskSummary.parse({ ...validTaskSummary, eventCount: -1 })).toThrow()
 	})
+
+	it("should carry direct child task ids", () => {
+		const result = DashboardTaskSummary.parse({ ...validTaskSummary, childTaskIds: ["child-1", "child-2"] })
+		expect(result.childTaskIds).toEqual(["child-1", "child-2"])
+	})
+
+	it("should reject a summary missing childTaskIds", () => {
+		const { childTaskIds: _childTaskIds, ...withoutChildTaskIds } = validTaskSummary
+		expect(() => DashboardTaskSummary.parse(withoutChildTaskIds)).toThrow()
+	})
 })
 
 describe("DashboardTaskPage", () => {
@@ -298,6 +309,13 @@ describe("DashboardTaskPage", () => {
 		const result = DashboardTaskPage.parse(validPage)
 		expect(result.catalogRevision).toBe(4)
 		expect(result.tasks).toHaveLength(1)
+	})
+
+	it("should accept direct children of the page's root tasks", () => {
+		const child = { ...validTaskSummary, taskId: "child-1", childTaskIds: [] }
+		const result = DashboardTaskPage.parse({ ...validPage, childTasks: [child] })
+		expect(result.childTasks).toHaveLength(1)
+		expect(result.childTasks?.[0]?.taskId).toBe("child-1")
 	})
 
 	it("should reject a negative catalog revision", () => {

@@ -18,6 +18,8 @@ export interface DashboardTaskCatalogSnapshot {
 	childrenByParentId: ReadonlyMap<string, readonly string[]>
 	ancestorsByTaskId: ReadonlyMap<string, readonly string[]>
 	orderedTaskIds: readonly string[]
+	/** Subset of `orderedTaskIds` holding only root tasks (no parent in the catalog). */
+	orderedRootTaskIds: readonly string[]
 }
 
 /** A deterministic page of task IDs from one catalog revision. */
@@ -112,6 +114,10 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 		return this.snapshot.orderedTaskIds
 	}
 
+	get orderedRootTaskIds(): readonly string[] {
+		return this.snapshot.orderedRootTaskIds
+	}
+
 	/**
 	 * Contains descendant calculations already requested for this revision. Use
 	 * getDescendantTaskIds() to populate this lazy index.
@@ -162,14 +168,17 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 	}
 
 	/**
+	 * Pages root tasks only (tasks whose parent is absent from the catalog);
+	 * subtasks reach the client through their root's `childTaskIds` instead.
+	 *
 	 * Uses a compound `(ts DESC, id DESC)` cursor. Cursors from older snapshots
 	 * are rejected so pages never combine task catalog revisions.
 	 *
-	 * When `rangeMs` is bounded, membership is filtered on the task's creation
-	 * timestamp (`HistoryItem.ts`) within the half-open `[fromMs, toMs)` range;
-	 * ordering, cursor semantics, and `totalEstimate` (now the filtered count)
-	 * are otherwise unchanged. An absent or unbounded range keeps the legacy
-	 * unfiltered behavior.
+	 * When `rangeMs` is bounded, membership is subtree-based: a root is included
+	 * when the root itself OR any of its descendants was created (HistoryItem.ts)
+	 * within the half-open `[fromMs, toMs)` range. Ordering, cursor semantics,
+	 * and `totalEstimate` (the filtered root count) are otherwise unchanged. An
+	 * absent or unbounded range keeps the legacy unfiltered behavior.
 	 */
 	getPage(
 		cursor?: string,
@@ -178,30 +187,29 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 	): DashboardTaskCatalogPage {
 		const pageLimit = normalizePageLimit(limit)
 		const startIndex = cursor ? this.findPageStartIndex(this.decodeCursor(cursor)) : 0
+		const orderedRootTaskIds = this.snapshot.orderedRootTaskIds
 
 		if (!isStatsQueryRangeBounded(rangeMs)) {
-			const tasks = this.snapshot.orderedTaskIds.slice(startIndex, startIndex + pageLimit)
+			const tasks = orderedRootTaskIds.slice(startIndex, startIndex + pageLimit)
 			const lastTaskId = tasks.at(-1)
 
 			return {
 				tasks: [...tasks],
 				cursor:
-					lastTaskId && startIndex + tasks.length < this.snapshot.orderedTaskIds.length
+					lastTaskId && startIndex + tasks.length < orderedRootTaskIds.length
 						? this.encodeCursor(lastTaskId)
 						: undefined,
-				totalEstimate: this.snapshot.orderedTaskIds.length,
+				totalEstimate: orderedRootTaskIds.length,
 			}
 		}
 
-		const orderedTaskIds = this.snapshot.orderedTaskIds
 		const tasks: string[] = []
 		let totalEstimate = 0
 		let hasMore = false
 
-		for (let index = 0; index < orderedTaskIds.length; index++) {
-			const taskId = orderedTaskIds[index]
-			const item = this.snapshot.byId.get(taskId)!
-			if (!isWithinStatsQueryRange(rangeMs, item.ts)) {
+		for (let index = 0; index < orderedRootTaskIds.length; index++) {
+			const taskId = orderedRootTaskIds[index]
+			if (!this.isSubtreeWithinRange(rangeMs, taskId)) {
 				continue
 			}
 			totalEstimate += 1
@@ -250,6 +258,25 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 		}, CATALOG_REBUILD_DEBOUNCE_MS)
 	}
 
+	/**
+	 * Subtree-based range membership for one catalog task: true when the task
+	 * itself or any of its descendants was created within the (bounded) range.
+	 * Used by both paging and summary upserts so membership rules never diverge.
+	 */
+	isSubtreeWithinRange(rangeMs: StatsQueryRangeMs | undefined, taskId: string): boolean {
+		const item = this.snapshot.byId.get(taskId)
+		if (item && isWithinStatsQueryRange(rangeMs, item.ts)) {
+			return true
+		}
+		for (const descendantId of this.getDescendantTaskIds(taskId)) {
+			const descendant = this.snapshot.byId.get(descendantId)
+			if (descendant && isWithinStatsQueryRange(rangeMs, descendant.ts)) {
+				return true
+			}
+		}
+		return false
+	}
+
 	private createSnapshot(revision: number): DashboardTaskCatalogSnapshot {
 		const latestItemsById = new Map<string, HistoryItem>()
 		for (const item of this.source.getAll()) {
@@ -266,6 +293,13 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 		}
 
 		const orderedTaskIds = [...byId.keys()].sort((leftId, rightId) => compareTaskIds(leftId, rightId, byId))
+		// Root = no parent task, or its parent is absent from the catalog (orphan).
+		// This mirrors the childrenByParentId link condition below so every
+		// non-root task is reachable from exactly one root's subtree.
+		const orderedRootTaskIds = orderedTaskIds.filter((taskId) => {
+			const item = byId.get(taskId)!
+			return !item.parentTaskId || !byId.has(item.parentTaskId)
+		})
 		const mutableChildrenByParentId = new Map<string, string[]>()
 		for (const [taskId, item] of byId) {
 			if (!item.parentTaskId || !byId.has(item.parentTaskId)) {
@@ -297,6 +331,7 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 			childrenByParentId: new ImmutableMap(childrenByParentId),
 			ancestorsByTaskId: new ImmutableMap(ancestorsByTaskId),
 			orderedTaskIds: Object.freeze(orderedTaskIds),
+			orderedRootTaskIds: Object.freeze(orderedRootTaskIds),
 		}
 		return Object.freeze(snapshot)
 	}
@@ -338,11 +373,12 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 				`Cursor revision ${cursor.r} does not match catalog revision ${this.snapshot.revision}`,
 			)
 		}
-		const index = this.snapshot.orderedTaskIds.findIndex((taskId) => {
+		const orderedRootTaskIds = this.snapshot.orderedRootTaskIds
+		const index = orderedRootTaskIds.findIndex((taskId) => {
 			const item = this.snapshot.byId.get(taskId)!
 			return item.ts < cursor.ts || (item.ts === cursor.ts && taskId < cursor.id)
 		})
-		return index === -1 ? this.snapshot.orderedTaskIds.length : index
+		return index === -1 ? orderedRootTaskIds.length : index
 	}
 
 	private encodeCursor(taskId: string): string {

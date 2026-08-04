@@ -9,7 +9,7 @@ import type {
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import type { TaskUsageRow } from "./UsageStatsDatabase"
 import { getEffectiveCost } from "./costRecalculation"
-import { isWithinStatsQueryRange, type StatsQueryRangeMs } from "./statsQueryRange"
+import { type StatsQueryRangeMs } from "./statsQueryRange"
 
 /** Error codes emitted by the History-first Dashboard task projection. */
 export type DashboardTaskProjectionErrorCode = "DASHBOARD_TASK_PROJECTION/computeTaskDetail/001"
@@ -41,12 +41,13 @@ export interface DashboardTaskUsageReader {
 }
 
 /**
- * Pages the immutable History task catalog, batch-loads direct task usage for
- * every required subtree, then composes one summary per catalog row.
+ * Pages the immutable History task catalog (root tasks only), batch-loads
+ * direct task usage for every required subtree, then composes one summary per
+ * catalog row plus one per direct child (`childTasks`).
  *
- * When `rangeMs` is bounded, the catalog pages only tasks whose creation
- * timestamp falls inside the range and per-task figures aggregate only
- * in-range usage events. An absent or unbounded range keeps all-time behavior.
+ * When `rangeMs` is bounded, the catalog pages only roots whose subtree has a
+ * task created inside the range, and per-task figures aggregate only in-range
+ * usage events. An absent or unbounded range keeps all-time behavior.
  */
 export function computeTaskPage(
 	catalog: DashboardTaskCatalog,
@@ -59,10 +60,16 @@ export function computeTaskPage(
 	const catalogPage = catalog.getPage(cursor, limit, rangeMs)
 	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, catalogPage.tasks), rangeMs)
 
+	// Direct children of this page's roots ride along so the client can render
+	// an expanded root without an extra round-trip. Their usage rows are
+	// already loaded (children are part of their root's subtree).
+	const childTaskIds = catalogPage.tasks.flatMap((taskId) => catalog.childrenByParentId.get(taskId) ?? [])
+
 	return {
 		requestId,
 		catalogRevision: catalog.catalogRevision,
 		tasks: catalogPage.tasks.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId)),
+		childTasks: childTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId)),
 		cursor: catalogPage.cursor,
 		totalEstimate: catalogPage.totalEstimate,
 	}
@@ -73,8 +80,8 @@ export function computeTaskPage(
  * Callers use this for stream upserts after usage mutations without changing
  * catalog membership or pagination order.
  *
- * When `rangeMs` is bounded, tasks whose creation timestamp falls outside the
- * range are dropped (matching page membership) and figures aggregate only
+ * When `rangeMs` is bounded, tasks whose subtree has no task created inside
+ * the range are dropped (matching page membership) and figures aggregate only
  * in-range usage events.
  */
 export function computeTaskSummaries(
@@ -83,10 +90,9 @@ export function computeTaskSummaries(
 	taskIds: readonly string[],
 	rangeMs?: StatsQueryRangeMs,
 ): DashboardTaskSummary[] {
-	const knownTaskIds = [...new Set(taskIds)].filter((taskId) => {
-		const item = catalog.byId.get(taskId)
-		return item !== undefined && isWithinStatsQueryRange(rangeMs, item.ts)
-	})
+	const knownTaskIds = [...new Set(taskIds)].filter(
+		(taskId) => catalog.byId.has(taskId) && catalog.isSubtreeWithinRange(rangeMs, taskId),
+	)
 	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, knownTaskIds), rangeMs)
 	return knownTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId))
 }
@@ -158,6 +164,7 @@ function computeTaskSummary(
 		model: subtreeUsage.model,
 		provider: subtreeUsage.provider,
 		eventCount: subtreeUsage.eventCount,
+		childTaskIds: [...(catalog.childrenByParentId.get(taskId) ?? [])],
 	}
 }
 

@@ -210,11 +210,13 @@ describe("DashboardTaskProjection", () => {
 		)
 
 		const page = computeTaskPage(catalog, reader, "request-3")
-		const summaries = new Map(page.tasks.map((task) => [task.taskId, task]))
 
-		const root = summaries.get("root")!
-		const child = summaries.get("child")!
-		const grandchild = summaries.get("grandchild")!
+		// Only the root is a page row; direct children ride along in childTasks.
+		expect(page.tasks.map((task) => task.taskId)).toEqual(["root"])
+		expect(page.childTasks?.map((task) => task.taskId)).toEqual(["child"])
+
+		const root = page.tasks[0]!
+		expect(root.childTaskIds).toEqual(["child"])
 		expect(root.totalCost).toBeCloseTo(0.6)
 		expect(root).toMatchObject({
 			totalTokens: 60,
@@ -223,10 +225,28 @@ describe("DashboardTaskProjection", () => {
 			model: "latest-model",
 			provider: "latest-provider",
 		})
+
+		const child = page.childTasks![0]!
+		expect(child.parentTaskId).toBe("root")
+		expect(child.childTaskIds).toEqual(["grandchild"])
 		expect(child.totalCost).toBeCloseTo(0.5)
 		expect(child).toMatchObject({ totalTokens: 50, eventCount: 5 })
-		expect(grandchild.totalCost).toBeCloseTo(0.3)
-		expect(grandchild).toMatchObject({ totalTokens: 30, eventCount: 3 })
+		catalog.dispose()
+	})
+
+	it("keeps upsert summaries for a root whose descendant was created inside the range", () => {
+		const catalog = createCatalog([
+			makeHistoryItem({ id: "old-root", ts: 50, task: "Old root" }),
+			makeHistoryItem({ id: "new-child", ts: 200, task: "New child", parentTaskId: "old-root" }),
+			makeHistoryItem({ id: "out-root", ts: 60, task: "Out root" }),
+		])
+		const reader = createUsageReader()
+		const rangeMs = { fromMs: 100, toMs: 300 }
+
+		const summaries = computeTaskSummaries(catalog, reader, ["old-root", "out-root", "new-child"], rangeMs)
+
+		// old-root stays (its child is in range); out-root's whole subtree is out.
+		expect(summaries.map((task) => task.taskId)).toEqual(["old-root", "new-child"])
 		catalog.dispose()
 	})
 

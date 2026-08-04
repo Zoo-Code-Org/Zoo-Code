@@ -75,6 +75,7 @@ function makeTask(overrides: Partial<DashboardTaskSummary> = {}): DashboardTaskS
 		model: "gpt-4",
 		provider: "openai",
 		eventCount: 1,
+		childTaskIds: [],
 		...overrides,
 	}
 }
@@ -389,6 +390,7 @@ describe("dashboardStreamReducer", () => {
 				model: "gpt-4",
 				provider: "openai",
 				eventCount: 2,
+				childTaskIds: [],
 			}
 			const delta = makeDelta({ taskUpsert: [upsert] })
 			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
@@ -410,6 +412,7 @@ describe("dashboardStreamReducer", () => {
 				model: "claude",
 				provider: "anthropic",
 				eventCount: 1,
+				childTaskIds: [],
 			}
 			const delta = makeDelta({ taskUpsert: [upsert] })
 			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
@@ -536,6 +539,69 @@ describe("dashboardStreamReducer", () => {
 			const newState = dashboardStreamReducer(state, { type: "TASK_PAGE", page })
 
 			expect(newState).toBe(state) // No change
+		})
+	})
+
+	describe("task hierarchy", () => {
+		it("keeps snapshot childTasks out of the visible root order", () => {
+			const state = connectedState({
+				tasks: {
+					requestId: "sub-001",
+					catalogRevision: 1,
+					tasks: [makeTask({ taskId: "root-a", rootTaskId: "root-a", childTaskIds: ["child-a"] })],
+					childTasks: [
+						makeTask({
+							taskId: "child-a",
+							rootTaskId: "root-a",
+							parentTaskId: "root-a",
+							title: "Child A",
+						}),
+					],
+					totalEstimate: 1,
+				},
+			})
+
+			expect(state.taskOrder).toEqual(["root-a"])
+			expect(state.tasks["root-a"]?.childTaskIds).toEqual(["child-a"])
+			expect(state.tasks["child-a"]?.title).toBe("Child A")
+		})
+
+		it("stores TASK_PAGE childTasks in the map without appending to the order", () => {
+			const state = connectedState()
+			const page = makeTaskPage({
+				tasks: [makeTask({ taskId: "root-b", rootTaskId: "root-b", childTaskIds: ["child-b"] })],
+				childTasks: [
+					makeTask({ taskId: "child-b", rootTaskId: "root-b", parentTaskId: "root-b", title: "Child B" }),
+				],
+				totalEstimate: 3,
+			})
+			const newState = dashboardStreamReducer(state, { type: "TASK_PAGE", page })
+
+			expect(newState.taskOrder).toEqual(["task-001", "root-b"])
+			expect(newState.tasks["child-b"]?.title).toBe("Child B")
+		})
+
+		it("does not insert new subtask upserts into the visible root order", () => {
+			const state = connectedState()
+			const delta = makeDelta({
+				taskUpsert: [
+					makeTask({ taskId: "child-x", rootTaskId: "task-001", parentTaskId: "task-001", title: "Sub" }),
+				],
+			})
+			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
+
+			expect(newState.taskOrder).toEqual(["task-001"])
+			expect(newState.tasks["child-x"]?.title).toBe("Sub")
+		})
+
+		it("still prepends brand-new root upserts to the order", () => {
+			const state = connectedState()
+			const delta = makeDelta({
+				taskUpsert: [makeTask({ taskId: "root-new", rootTaskId: "root-new", title: "New root" })],
+			})
+			const newState = dashboardStreamReducer(state, { type: "DELTA", delta })
+
+			expect(newState.taskOrder).toEqual(["root-new", "task-001"])
 		})
 	})
 
