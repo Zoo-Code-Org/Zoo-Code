@@ -32,7 +32,7 @@ export interface SafeWriteJsonOptions {
  * @returns {Promise<void>}
  */
 
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
@@ -46,7 +46,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
-	} catch (dirError: any) {
+	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
@@ -101,9 +101,9 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
 			)
 			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: any) {
+		} catch (accessError: unknown) {
 			// Explicitly type accessError
-			if (accessError.code !== "ENOENT") {
+			if (accessError instanceof Error && (accessError as NodeJS.ErrnoException).code !== "ENOENT") {
 				// An error other than "file not found" occurred during access check.
 				throw accessError
 			}
@@ -199,7 +199,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
 
@@ -220,4 +220,188 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 	})
 }
 
-export { safeWriteJson }
+/**
+ * Options for safeUpdateJson function.
+ */
+export interface SafeUpdateJsonOptions extends SafeWriteJsonOptions {
+	/**
+	 * If true, and the target file does not exist, the initial state passed to
+	 * the updater will be `undefined` and the updater must return the initial
+	 * data to write. When false (default), a missing file is treated as an error.
+	 * @default false
+	 */
+	allowCreate?: boolean
+}
+
+/**
+ * Atomically read-modify-write a JSON file under an advisory lock.
+ *
+ * - If the file does not exist and `options.allowCreate` is `true`, the
+ *   updater is called with `undefined` and must return the initial data.
+ * - If the file does not exist and `options.allowCreate` is `false` (default),
+ *   an error is thrown.
+ * - If the file exists but cannot be parsed as JSON, the updater is not called
+ *   and the original parse error is thrown.
+ * - The updater runs synchronously while the lock is held; it must not perform
+ *   I/O or acquire other locks.
+ *
+ * @param filePath - The absolute path to the target JSON file.
+ * @param updater - A function that receives the current parsed data and returns
+ *   the new data to write. If it throws, the file is left unchanged.
+ * @param options - Optional configuration for create behavior and JSON formatting.
+ * @returns A promise that resolves with the value returned by the updater.
+ */
+async function safeUpdateJson<T>(
+	filePath: string,
+	updater: (current: T | undefined) => T,
+	options?: SafeUpdateJsonOptions,
+): Promise<T> {
+	const absoluteFilePath = path.resolve(filePath)
+	let releaseLock = async () => {}
+
+	const dirPath = path.dirname(absoluteFilePath)
+
+	try {
+		await fs.mkdir(dirPath, { recursive: true })
+		await fs.access(dirPath)
+	} catch (dirError: unknown) {
+		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
+		throw dirError
+	}
+
+	try {
+		releaseLock = await lockfile.lock(absoluteFilePath, {
+			stale: 31000,
+			update: 10000,
+			realpath: false,
+			retries: {
+				retries: 5,
+				factor: 2,
+				minTimeout: 100,
+				maxTimeout: 1000,
+			},
+			onCompromised: (err) => {
+				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
+				throw err
+			},
+		})
+	} catch (lockError) {
+		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
+		throw lockError
+	}
+
+	try {
+		let current: T | undefined
+		let fileExisted = false
+
+		try {
+			const raw = await fs.readFile(absoluteFilePath, "utf8")
+			fileExisted = true
+			current = JSON.parse(raw) as T
+		} catch (readError: unknown) {
+			if (readError instanceof Error && (readError as NodeJS.ErrnoException).code !== "ENOENT") {
+				throw readError
+			}
+		}
+
+		if (!fileExisted && !options?.allowCreate) {
+			throw new Error(`safeUpdateJson: file does not exist and allowCreate is false: ${absoluteFilePath}`)
+		}
+
+		const updated = updater(current)
+
+		// Use the same atomic write path as safeWriteJson, but reuse the lock
+		// we already hold. safeWriteJson would try to acquire the lock again,
+		// so we inline the streaming write here.
+		let actualTempNewFilePath: string | null = null
+		let actualTempBackupFilePath: string | null = null
+
+		try {
+			actualTempNewFilePath = path.join(
+				path.dirname(absoluteFilePath),
+				`.${path.basename(absoluteFilePath)}.new_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+			)
+
+			await _streamDataToFile(actualTempNewFilePath, updated, options?.prettyPrint)
+
+			try {
+				await fs.access(absoluteFilePath)
+				actualTempBackupFilePath = path.join(
+					path.dirname(absoluteFilePath),
+					`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+				)
+				await fs.rename(absoluteFilePath, actualTempBackupFilePath)
+			} catch (accessError: unknown) {
+				if (accessError instanceof Error && (accessError as NodeJS.ErrnoException).code !== "ENOENT") {
+					throw accessError
+				}
+			}
+
+			await fs.rename(actualTempNewFilePath, absoluteFilePath)
+			actualTempNewFilePath = null
+
+			if (actualTempBackupFilePath) {
+				try {
+					await fs.unlink(actualTempBackupFilePath)
+					actualTempBackupFilePath = null
+				} catch (unlinkBackupError) {
+					console.error(
+						`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
+						unlinkBackupError,
+					)
+				}
+			}
+		} catch (writeError) {
+			console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, writeError)
+
+			const newFileToCleanupWithinCatch = actualTempNewFilePath
+			const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
+
+			if (backupFileToRollbackOrCleanupWithinCatch) {
+				try {
+					await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
+					actualTempBackupFilePath = null
+				} catch (rollbackError) {
+					console.error(
+						`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
+						rollbackError,
+					)
+				}
+			}
+
+			if (newFileToCleanupWithinCatch) {
+				try {
+					await fs.unlink(newFileToCleanupWithinCatch)
+				} catch (cleanupError) {
+					console.error(
+						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+						cleanupError,
+					)
+				}
+			}
+
+			if (actualTempBackupFilePath) {
+				try {
+					await fs.unlink(actualTempBackupFilePath)
+				} catch (cleanupError) {
+					console.error(
+						`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
+						cleanupError,
+					)
+				}
+			}
+
+			throw writeError
+		}
+
+		return updated
+	} finally {
+		try {
+			await releaseLock()
+		} catch (unlockError) {
+			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+		}
+	}
+}
+
+export { safeWriteJson, safeUpdateJson }
