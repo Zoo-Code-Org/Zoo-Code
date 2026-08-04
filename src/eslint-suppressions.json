@@ -186,7 +186,7 @@
   },
   "api/providers/__tests__/mimo.spec.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 29
+      "count": 18
     }
   },
   "api/providers/__tests__/minimax.spec.ts": {
@@ -241,7 +241,7 @@
   },
   "api/providers/__tests__/opencode-go.spec.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 11
+      "count": 3
     }
   },
   "api/providers/__tests__/openrouter.spec.ts": {
@@ -256,7 +256,7 @@
   },
   "api/providers/__tests__/qwen-code-native-tools.spec.ts": {
     "@typescript-eslint/no-explicit-any": {
-      "count": 5
+      "count": 2
     }
   },
   "api/providers/__tests__/sambanova.spec.ts": {
@@ -842,11 +842,6 @@
   "core/task/__tests__/Task.persistence.spec.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 8
-    }
-  },
-  "core/task/__tests__/Task.spec.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 31
     }
   },
   "core/task/__tests__/Task.sticky-profile-race.spec.ts": {
@@ -1487,11 +1482,6 @@
   "services/code-index/semble/semble-cli.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 3
-    }
-  },
-  "services/code-index/semble/semble-downloader.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 1
     }
   },
   "services/code-index/shared/__tests__/validation-helpers.spec.ts": {
