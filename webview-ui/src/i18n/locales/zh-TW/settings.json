@@ -992,8 +992,8 @@
 			"pricingDetails": "詳細資訊請參閱定價說明。",
 			"billingEstimate": "* 費用為估算值 - 實際費用取決於提示大小。"
 		},
-		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
+		"strictToolSchemas": "嚴格工具 Schema",
+		"strictToolSchemasDescription": "為函式工具 Schema 啟用嚴格模式，確保工具輸出與 Schema 完全匹配。部分 Provider 可能不支援嚴格模式。MCP 工具無論此設定如何始終保持非嚴格狀態。此設定依 Profile 儲存，同時也適用於同一 Profile 中使用 OpenAI 協定的其他 Provider。"
 	},
 	"modelPicker": {
 		"automaticFetch": "此擴充功能會自動從 <serviceLink>{{serviceName}}</serviceLink> 取得最新的可用模型清單。如果不確定要選哪個模型，建議使用 <defaultModelLink>{{defaultModelId}}</defaultModelLink>，這是與 Zoo Code 最佳搭配的模型。您也可以搜尋「free」來檢視目前可用的免費選項。",

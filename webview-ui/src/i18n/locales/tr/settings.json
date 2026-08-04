@@ -965,8 +965,8 @@
 			"pricingDetails": "Daha fazla bilgi için fiyatlandırma ayrıntılarına bakın.",
 			"billingEstimate": "* Ücretlendirme bir tahmindir - kesin maliyet istem boyutuna bağlıdır."
 		},
-		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
+		"strictToolSchemas": "Sıkı tool şemaları",
+		"strictToolSchemasDescription": "Fonksiyon tool şemaları için sıkı modu etkinleştirir, tool çıktılarının şemayla tam olarak eşleşmesini sağlar. Bazı sağlayıcılar sıkı modu desteklemeyebilir. MCP tool'ları bu ayar ne olursa olsun her zaman sıkı olmayan şekilde tutulur. Bu ayar profile göre kaydedilir ve aynı profilde OpenAI protokolünü kullanan diğer sağlayıcılara da uygulanır."
 	},
 	"modelPicker": {
 		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",

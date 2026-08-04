@@ -965,8 +965,8 @@
 			"pricingDetails": "Weitere Informationen finden Sie unter Preisdetails.",
 			"billingEstimate": "* Die Abrechnung ist eine Schätzung - die genauen Kosten hängen von der Prompt-Größe ab."
 		},
-		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
+		"strictToolSchemas": "Strikte Tool-Schemas",
+		"strictToolSchemasDescription": "Aktiviert den strikten Modus für Funktionstool-Schemas und stellt sicher, dass Tool-Ausgaben genau mit dem Schema übereinstimmen. Manche Provider unterstützen den strikten Modus möglicherweise nicht. MCP-Tools werden unabhängig von dieser Einstellung immer als nicht-strikt behandelt. Diese Einstellung wird pro Profil gespeichert und gilt auch für andere Provider, die das OpenAI-Protokoll im selben Profil verwenden."
 	},
 	"modelPicker": {
 		"automaticFetch": "Die Erweiterung ruft automatisch die neueste Liste der auf <serviceLink>{{serviceName}}</serviceLink> verfügbaren Modelle ab. Wenn du dir nicht sicher bist, welches Modell du wählen sollst, funktioniert Zoo Code am besten mit <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Du kannst auch versuchen, nach \"kostenlos\" zu suchen, um die derzeit verfügbaren kostenlosen Optionen zu finden.",

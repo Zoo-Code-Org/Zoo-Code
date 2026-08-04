@@ -965,8 +965,8 @@
 			"pricingDetails": "Подробнее о ценах.",
 			"billingEstimate": "* Счёт — приблизительный, точная стоимость зависит от размера подсказки."
 		},
-		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
+		"strictToolSchemas": "Строгие схемы инструментов",
+		"strictToolSchemasDescription": "Включает строгий режим для схем функций инструментов, гарантируя, что вывод инструментов точно соответствует схеме. Некоторые провайдеры могут не поддерживать строгий режим. Инструменты MCP всегда остаются нестрогими независимо от этой настройки. Эта настройка сохраняется для каждого профиля и также применяется к другим провайдерам, использующим протокол OpenAI в том же профиле."
 	},
 	"modelPicker": {
 		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Также попробуйте поискать \"free\" для бесплатных вариантов.",

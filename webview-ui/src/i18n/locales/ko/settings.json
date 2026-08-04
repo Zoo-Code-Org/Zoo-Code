@@ -965,8 +965,8 @@
 			"pricingDetails": "자세한 내용은 가격 정보를 참조하세요.",
 			"billingEstimate": "* 요금은 추정치입니다 - 정확한 비용은 프롬프트 크기에 따라 달라집니다."
 		},
-		"strictToolSchemas": "Strict tool schemas",
-		"strictToolSchemasDescription": "Enables strict mode for function tool schemas, ensuring tool outputs match the schema exactly. Some providers may not support strict mode. MCP tools are always kept non-strict regardless of this setting. (This setting is saved per profile and also applies to other providers that use the OpenAI protocol within the same profile.)"
+		"strictToolSchemas": "엄격한 도구 스키마",
+		"strictToolSchemasDescription": "함수 도구 스키마에 대한 엄격한 모드를 활성화하여 도구 출력이 스키마와 정확히 일치하도록 합니다. 일부 프로바이더는 엄격한 모드를 지원하지 않을 수 있습니다. MCP 도구는 이 설정에 관계없이 항상 non-strict로 유지됩니다. 이 설정은 프로필별로 저장되며 동일한 프로필 내에서 OpenAI 프로토콜을 사용하는 다른 프로바이더에도 적용됩니다."
 	},
 	"modelPicker": {
 		"automaticFetch": "확장 프로그램은 <serviceLink>{{serviceName}}</serviceLink>에서 사용 가능한 최신 모델 목록을 자동으로 가져옵니다. 어떤 모델을 선택해야 할지 확실하지 않다면, Zoo Code는 <defaultModelLink>{{defaultModelId}}</defaultModelLink>로 가장 잘 작동합니다. 현재 사용 가능한 무료 옵션을 찾으려면 \"free\"를 검색해 볼 수도 있습니다.",
