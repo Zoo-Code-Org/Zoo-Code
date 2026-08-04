@@ -17,7 +17,6 @@ import {
 	ExitCodeDetails,
 	RooTerminalCallbacks,
 	RooTerminalProvider,
-	RooTerminalProcess,
 	ShellIntegrationError,
 	ShellIntegrationErrorDetails,
 } from "../../integrations/terminal/types"
@@ -34,15 +33,6 @@ export { ShellIntegrationError } from "../../integrations/terminal/types"
 export function canRetryShellIntegrationError(error: unknown): error is ShellIntegrationError {
 	return error instanceof ShellIntegrationError && !error.commandSubmitted
 }
-
-/**
- * Grace period before a foreground command may trigger a `command_output` ask.
- * Short commands that emit output and exit within this window never prompt the
- * user; the ask only fires when the command is still running once the delay
- * elapses, so users can still interrupt or provide feedback on long-running
- * commands.
- */
-export const COMMAND_OUTPUT_ASK_DELAY_MS = 5_000
 
 export function getTerminalProviderForExecution(terminalShellIntegrationDisabled: boolean): {
 	terminalProvider: RooTerminalProvider
@@ -249,14 +239,12 @@ export async function executeCommandInTerminal(
 		return [false, `Working directory '${workingDir}' does not exist.`]
 	}
 
-	let message: { text?: string; images?: string[] } | undefined
 	let runInBackground = false
 	let completed = false
 	let result: string = ""
 	let persistedResult: PersistedCommandOutput | undefined
 	let exitDetails: ExitCodeDetails | undefined
 	let shellIntegrationError: ShellIntegrationError | undefined
-	let hasAskedForCommandOutput = false
 
 	const { terminalProvider, isCmdExeFallback } = getTerminalProviderForExecution(terminalShellIntegrationDisabled)
 	const provider = await task.providerRef.deref()
@@ -349,60 +337,8 @@ export async function executeCommandInTerminal(
 		resolveOnCompleted = resolve
 	})
 
-	// Delay the `command_output` ask so short foreground commands that emit
-	// output and exit normally never prompt the user. The ask only fires if the
-	// command is still running once COMMAND_OUTPUT_ASK_DELAY_MS has elapsed
-	// since execution started, preserving the interrupt/feedback path for
-	// long-running commands. The anchor is re-based to onShellExecutionStarted
-	// (falling back to the pre-runCommand timestamp when that event never
-	// fires) so shell-integration startup on cold terminals does not consume
-	// the grace period.
-	let commandStartedAt = 0
-	let commandOutputAskTimer: NodeJS.Timeout | undefined
-
-	const askForCommandOutput = async (process: RooTerminalProcess): Promise<void> => {
-		if (runInBackground || hasAskedForCommandOutput || completed) {
-			return
-		}
-
-		// Mark that we've asked to prevent multiple concurrent asks
-		hasAskedForCommandOutput = true
-
-		try {
-			const { response, text, images } = await task.ask("command_output", "")
-			runInBackground = true
-
-			if (response === "messageResponse") {
-				message = { text, images }
-			}
-
-			// Any answer means the command should keep running in the background;
-			// continue the process so the tool resolves now instead of blocking
-			// until the command actually completes.
-			process.continue()
-		} catch (_error) {
-			// Silently handle ask errors (e.g., "Current ask promise was ignored")
-		}
-	}
-
-	const scheduleCommandOutputAsk = (process: RooTerminalProcess): void => {
-		if (runInBackground || hasAskedForCommandOutput || completed || commandOutputAskTimer) {
-			return
-		}
-
-		const remainingDelay = COMMAND_OUTPUT_ASK_DELAY_MS - (Date.now() - commandStartedAt)
-
-		commandOutputAskTimer = setTimeout(
-			() => {
-				commandOutputAskTimer = undefined
-				void askForCommandOutput(process)
-			},
-			Math.max(remainingDelay, 0),
-		)
-	}
-
 	const callbacks: RooTerminalCallbacks = {
-		onLine: async (lines: string, process: RooTerminalProcess) => {
+		onLine: async (lines: string) => {
 			accumulatedOutput += lines
 
 			// Trim accumulated output to prevent unbounded memory growth
@@ -419,20 +355,8 @@ export async function executeCommandInTerminal(
 			const status: CommandExecutionStatus = { executionId, status: "output", output: compressedOutput }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 			schedulePartialCommandOutputUpdate()
-
-			scheduleCommandOutputAsk(process)
 		},
 		onCompleted: async (output: string | undefined) => {
-			clearTimeout(commandOutputAskTimer)
-			commandOutputAskTimer = undefined
-
-			// If an interactive command_output ask is still pending, supersede it
-			// so it resolves immediately instead of lingering until the next
-			// interactive message bumps lastMessageTs.
-			if (hasAskedForCommandOutput && !runInBackground) {
-				task.supersedePendingAsk()
-			}
-
 			clearTimeout(pendingCommandOutputEmitTimer)
 			pendingCommandOutputEmitTimer = undefined
 
@@ -466,21 +390,9 @@ export async function executeCommandInTerminal(
 					console.error("[ExecuteCommandTool] Failed to flush final command_output:", error)
 				})
 		},
-		onShellExecutionStarted: (pid: number | undefined, process: RooTerminalProcess) => {
+		onShellExecutionStarted: (pid: number | undefined) => {
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
-
-			// Re-anchor the ask delay to actual execution start so the shell
-			// integration startup wait does not count against the grace period.
-			commandStartedAt = Date.now()
-
-			// Output should not precede this event, but if it did, reschedule
-			// the pending ask against the corrected anchor.
-			if (commandOutputAskTimer) {
-				clearTimeout(commandOutputAskTimer)
-				commandOutputAskTimer = undefined
-				scheduleCommandOutputAsk(process)
-			}
 		},
 		onShellExecutionComplete: (details: ExitCodeDetails) => {
 			const status: CommandExecutionStatus = { executionId, status: "exited", exitCode: details.exitCode }
@@ -507,8 +419,6 @@ export async function executeCommandInTerminal(
 		workingDir = terminal.getCurrentWorkingDirectory()
 	}
 
-	// Fallback anchor for providers that never fire onShellExecutionStarted.
-	commandStartedAt = Date.now()
 	const process = terminal.runCommand(command, callbacks)
 	task.terminalProcess = process
 
@@ -530,8 +440,6 @@ export async function executeCommandInTerminal(
 				new Promise<void>((resolve) => {
 					agentTimeoutId = setTimeout(() => {
 						runInBackground = true
-						clearTimeout(commandOutputAskTimer)
-						commandOutputAskTimer = undefined
 						process.continue()
 						task.supersedePendingAsk()
 						resolve()
@@ -571,7 +479,6 @@ export async function executeCommandInTerminal(
 	} finally {
 		clearTimeout(agentTimeoutId)
 		clearTimeout(userTimeoutId)
-		clearTimeout(commandOutputAskTimer)
 		clearTimeout(pendingCommandOutputEmitTimer)
 		task.terminalProcess = undefined
 	}
@@ -596,22 +503,7 @@ export async function executeCommandInTerminal(
 		await onCompletedPromise
 	}
 
-	if (message) {
-		const { text, images } = message
-		await task.say("user_feedback", text, images)
-
-		return [
-			true,
-			formatResponse.toolResult(
-				[
-					`Command is still running in terminal from '${terminal.getCurrentWorkingDirectory().toPosix()}'.`,
-					result.length > 0 ? `Here's the output so far:\n${result}\n` : "\n",
-					`<user_message>\n${text}\n</user_message>`,
-				].join("\n"),
-				images,
-			),
-		]
-	} else if (completed || exitDetails) {
+	if (completed || exitDetails) {
 		const currentWorkingDir = terminal.getCurrentWorkingDirectory().toPosix()
 
 		// Use persisted output format when output was truncated and spilled to disk
