@@ -1,5 +1,28 @@
 {
 	"greeting": "欢迎使用 Zoo Code！",
+	"hooks": {
+		"phase": { "sessionStart": "Session start", "preToolUse": "Before tool use" },
+		"status": {
+			"running": "Running",
+			"succeeded": "Succeeded",
+			"blocked": "Blocked",
+			"failed": "Failed",
+			"timedOut": "Timed out",
+			"cancelled": "Cancelled",
+			"interrupted": "Interrupted"
+		},
+		"summary": {
+			"running": "Executing trusted local hook",
+			"succeeded": "Hook completed",
+			"blocked": "Hook blocked the operation",
+			"failed": "Hook failed; task execution continued",
+			"timedOut": "Hook timed out; task execution continued",
+			"cancelled": "Hook was cancelled",
+			"interrupted": "Hook was interrupted before completion"
+		},
+		"details": "Output details",
+		"openSettings": "Open Hooks settings"
+	},
 	"task": {
 		"title": "任务",
 		"expand": "展开任务",

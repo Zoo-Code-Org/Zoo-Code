@@ -52,7 +52,7 @@
 		"edit": "Edit hook",
 		"delete": "Delete hook",
 		"global": "Global hooks",
-		"empty": "No hooks configured. Session start hooks run at task start; before-tool hooks match exact tool names. Execution is unavailable until hook runner support is added.",
+		"empty": "No hooks configured. Session start hooks run at task start; before-tool hooks match exact tool names.",
 		"enabled": "Enabled",
 		"disabled": "Disabled",
 		"footer": "Commands use a fixed 10-second timeout. Executable and argument boundaries are preserved exactly.",

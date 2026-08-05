@@ -18,6 +18,10 @@ export interface UseMessageHandlersReturn {
 	firstTextMessageSkipped: React.MutableRefObject<boolean>
 }
 
+export function isHookSayMessage(say: ClineSay): boolean {
+	return say === "hook"
+}
+
 /**
  * Hook to handle messages from the extension.
  *
@@ -61,11 +65,7 @@ export function useMessageHandlers({ nonInteractive }: UseMessageHandlersOptions
 			const messageId = ts.toString()
 			const isResuming = useCLIStore.getState().isResumingTask
 
-			if (say === "checkpoint_saved") {
-				return
-			}
-
-			if (say === "api_req_started") {
+			if (say === "checkpoint_saved" || say === "api_req_started" || isHookSayMessage(say)) {
 				return
 			}
 

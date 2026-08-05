@@ -36,6 +36,9 @@ import {
 	type ModelInfo,
 	type ClineApiReqCancelReason,
 	type ClineApiReqInfo,
+	type HookDefinition,
+	type HookMessage,
+	type HookRunResult,
 	RooCodeEventName,
 	TelemetryEventName,
 	TaskStatus,
@@ -55,6 +58,7 @@ import {
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
+	getMatchingHooks,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -136,6 +140,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
+import { HookRunner } from "../hooks/HookRunner"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -273,6 +278,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private readonly globalStoragePath: string
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
+	private readonly taskLifetimeAbortController = new AbortController()
+	private readonly activeHookRuns = new Set<Promise<HookRunResult>>()
+	private readonly activeHookRows = new Map<string, number>()
+	private hookDefinitionsSnapshot?: HookDefinition[]
+	private sessionStartHooksRun = false
+	private readonly hookRunner = new HookRunner()
 	skipPrevResponseIdOnce: boolean = false
 
 	// TaskStatus
@@ -1076,7 +1087,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()
 
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
+		const shouldCaptureMessage = message.partial !== true && message.say !== "hook" && CloudService.isEnabled()
 
 		if (shouldCaptureMessage) {
 			CloudService.instance.captureEvent({
@@ -1109,7 +1120,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 
 		// Check if we should sync to cloud and haven't already synced this message
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
+		const shouldCaptureMessage = message.partial !== true && message.say !== "hook" && CloudService.isEnabled()
 		const hasNotBeenSynced = !this.cloudSyncedMessageTimestamps.has(message.ts)
 
 		if (shouldCaptureMessage && hasNotBeenSynced) {
@@ -1172,6 +1183,142 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		return undefined
+	}
+
+	private async addHookMessage(hook: HookMessage): Promise<number> {
+		const ts = Math.max(Date.now(), (this.clineMessages.at(-1)?.ts ?? 0) + 1)
+		this.activeHookRows.set(`${this.taskId}:${this.instanceId}:${hook.hookRunId}`, ts)
+		await this.addToClineMessages({ ts, type: "say", say: "hook", hook })
+		return ts
+	}
+
+	private async updateHookMessage(result: HookRunResult): Promise<void> {
+		const key = `${this.taskId}:${this.instanceId}:${result.hookRunId}`
+		const ts = this.activeHookRows.get(key)
+		if (ts === undefined) {
+			return
+		}
+
+		const currentTask = this.providerRef.deref()?.getCurrentTask()
+		const isCurrentTask = currentTask?.taskId === this.taskId && currentTask.instanceId === this.instanceId
+		if (!isCurrentTask) {
+			this.activeHookRows.delete(key)
+			return
+		}
+
+		const index = this.clineMessages.findIndex((message) => message.ts === ts)
+		const runningMessage = index === -1 ? undefined : this.clineMessages[index]
+		if (!runningMessage?.hook || runningMessage.hook.hookRunId !== result.hookRunId) {
+			this.activeHookRows.delete(key)
+			return
+		}
+
+		const message: ClineMessage = {
+			...runningMessage,
+			hook: {
+				...runningMessage.hook,
+				status: result.status,
+				outputSummary: result.stdoutSummary,
+				errorSummary: result.stderrSummary,
+				truncated: result.truncated,
+				completedAt: result.completedAt,
+			},
+		}
+		this.clineMessages[index] = message
+		this.activeHookRows.delete(key)
+		await this.saveClineMessages()
+		await this.updateClineMessage(message)
+	}
+
+	private interruptStaleHookMessages(messages: ClineMessage[]): ClineMessage[] {
+		const completedAt = Date.now()
+		return messages.map((message) =>
+			message.say === "hook" && message.hook?.status === "running"
+				? {
+						...message,
+						hook: {
+							...message.hook,
+							status: "interrupted",
+							completedAt,
+						},
+					}
+				: message,
+		)
+	}
+
+	private formatHookResultForModel(definition: HookDefinition, result: HookRunResult): string | undefined {
+		const escapeAttribute = (value: string) =>
+			value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;")
+		const content =
+			result.status === "succeeded"
+				? result.stdoutSummary?.trim()
+				: `The session start hook ${result.status}; task execution continued.`
+		if (!content) {
+			return undefined
+		}
+
+		return `<hook_result id="${escapeAttribute(definition.id)}" phase="sessionStart" status="${result.status}">\n${content}\n</hook_result>`
+	}
+
+	private async runSessionStartHooks(): Promise<Anthropic.TextBlockParam[]> {
+		if (this.sessionStartHooksRun || this.taskLifetimeAbortController.signal.aborted) {
+			return []
+		}
+		this.sessionStartHooksRun = true
+
+		this.hookDefinitionsSnapshot ??= structuredClone(
+			(await this.providerRef.deref()?.getState())?.hookDefinitions?.filter(({ enabled }) => enabled) ?? [],
+		)
+		const hooks = getMatchingHooks(this.hookDefinitionsSnapshot, "sessionStart")
+		const modelContent: Anthropic.TextBlockParam[] = []
+
+		for (const definition of hooks) {
+			if (this.taskLifetimeAbortController.signal.aborted) {
+				break
+			}
+
+			const hookRunId = crypto.randomUUID()
+			const startedAt = Date.now()
+			await this.addHookMessage({
+				hookRunId,
+				hookId: definition.id,
+				name: definition.name,
+				phase: "sessionStart",
+				status: "running",
+				startedAt,
+			})
+
+			const execution = this.hookRunner
+				.run(
+					definition,
+					{
+						version: 1,
+						hookRunId,
+						phase: "sessionStart",
+						taskId: this.taskId,
+						instanceId: this.instanceId,
+						workspacePath: this.cwd,
+					},
+					this.taskLifetimeAbortController.signal,
+				)
+				.then(async (result) => {
+					await this.updateHookMessage(result)
+					return result
+				})
+			this.activeHookRuns.add(execution)
+
+			try {
+				const result = await execution
+				const text = this.formatHookResultForModel(definition, result)
+				if (text && result.status !== "cancelled") {
+					modelContent.push({ type: "text", text })
+				}
+			} finally {
+				this.activeHookRuns.delete(execution)
+			}
+		}
+
+		return modelContent
 	}
 
 	// Note that `partial` has three valid states true (partial message),
@@ -1980,6 +2127,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.isInitialized = true
 
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
+			const hookContent = await this.runSessionStartHooks()
 
 			// Task starting
 			await this.initiateTaskLoop([
@@ -1988,6 +2136,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					text: `<user_message>\n${task}\n</user_message>`,
 				},
 				...imageBlocks,
+				...hookContent,
 			]).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
 				// during delegation or user cancellation to prevent unhandled rejections.
@@ -2008,7 +2157,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async resumeTaskFromHistory() {
 		try {
-			const modifiedClineMessages = await this.getSavedClineMessages()
+			const modifiedClineMessages = this.interruptStaleHookMessages(await this.getSavedClineMessages())
 
 			// Remove any resume messages that may have been added before.
 			const lastRelevantMessageIndex = findLastIndex(
@@ -2226,6 +2375,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+			newUserContent.push(...(await this.runSessionStartHooks()))
 
 			// Task resuming from history item.
 			await this.initiateTaskLoop(newUserContent)
@@ -2264,6 +2414,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public async abortTask(isAbandoned = false) {
 		// Aborting task
+		this.taskLifetimeAbortController.abort()
 
 		// Will stop any autonomously running promises.
 		if (isAbandoned) {
@@ -2271,6 +2422,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.abort = true
+		await Promise.allSettled([...this.activeHookRuns])
 
 		// Reset consecutive error counters on abort (manual intervention)
 		this.consecutiveNoToolUseCount = 0
@@ -2298,6 +2450,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		this.taskLifetimeAbortController.abort()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task

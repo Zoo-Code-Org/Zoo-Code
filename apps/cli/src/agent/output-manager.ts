@@ -242,6 +242,9 @@ export class OutputManager {
 		skipFirstUserMessage: boolean,
 	): void {
 		switch (say) {
+			case "hook":
+				// Structured hook lifecycle rows are rendered only by the webview.
+				break
 			case "text":
 				this.outputTextMessage(ts, text, isPartial, alreadyDisplayedComplete, skipFirstUserMessage)
 				break

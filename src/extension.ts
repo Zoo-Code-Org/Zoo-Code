@@ -387,6 +387,7 @@ export async function deactivate() {
 		}
 	}
 
+	await Promise.allSettled(ClineProvider.getAllInstances().map((provider) => provider.dispose()))
 	await McpServerManager.cleanup(extensionContext)
 
 	try {

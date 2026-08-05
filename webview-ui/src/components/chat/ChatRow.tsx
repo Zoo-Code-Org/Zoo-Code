@@ -78,6 +78,7 @@ import { cn } from "@/lib/utils"
 import { PathTooltip } from "../ui/PathTooltip"
 import { OpenMarkdownPreviewButton } from "./OpenMarkdownPreviewButton"
 import { SeeNewChangesButtons } from "./SeeNewChangesButtons"
+import { HookRow } from "./HookRow"
 
 // Helper function to get previous todos before a specific message
 function getPreviousTodos(messages: ClineMessage[], currentMessageTs: number): any[] {
@@ -1036,6 +1037,8 @@ export const ChatRowContent = ({
 	switch (message.type) {
 		case "say":
 			switch (message.say) {
+				case "hook":
+					return message.hook ? <HookRow hook={message.hook} /> : null
 				case "diff_error":
 					return (
 						<ErrorRow
