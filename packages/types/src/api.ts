@@ -26,6 +26,26 @@ export type RunOverrides = {
 	approval?: "interactive" | "safe" | "auto"
 }
 
+export type HeadlessApiErrorCode =
+	| "invalid_provider"
+	| "invalid_profile"
+	| "invalid_model"
+	| "invalid_mode"
+	| "invalid_session"
+	| "credentials_missing"
+	| "cancel_failed"
+
+export class HeadlessApiError extends Error {
+	constructor(
+		public readonly code: HeadlessApiErrorCode,
+		message: string,
+		public readonly kind: "configuration" | "provider" | "runtime" = "runtime",
+	) {
+		super(message)
+		this.name = "HeadlessApiError"
+	}
+}
+
 export type HeadlessTaskReference = { taskId: string; rootTaskId: string }
 
 export type HeadlessAskResponse =
@@ -42,8 +62,9 @@ export type HeadlessCancelSettlement = {
 export type HeadlessTaskResult = {
 	rootTaskId: string
 	currentTaskId: string
-	outcome: "completed" | "cancelled" | "failed"
+	outcome: "completed" | "needs_input" | "cancelled" | "failed"
 	resumable: boolean
+	cancellationReason?: "user" | "signal" | "timeout"
 	content?: string
 	error?: { code: "task_failed" | "cancel_failed" | "shutdown"; message: string }
 	tokenUsage?: TokenUsage
@@ -65,12 +86,15 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	}): Promise<HeadlessTaskReference>
 	resumeHeadlessTask(taskId: string, overrides?: RunOverrides): Promise<HeadlessTaskReference>
 	respondToHeadlessAsk(input: { taskId: string; askId: string; response: HeadlessAskResponse }): Promise<void>
+	submitHeadlessTaskInput(input: { taskId: string; text?: string; images?: string[] }): Promise<void>
+	settleHeadlessNeedsInput(input: { rootTaskId: string; taskId: string; content?: string }): Promise<void>
 	cancelHeadlessTask(input: {
 		rootTaskId: string
 		reason: "user" | "signal" | "timeout"
 	}): Promise<HeadlessCancelSettlement>
 	getHeadlessTaskResult(rootTaskId: string): Promise<HeadlessTaskResult | undefined>
 	waitForHeadlessTaskResult(rootTaskId: string): Promise<HeadlessTaskResult>
+	listHeadlessTaskHistory(workspace: string): Promise<HistoryItem[]>
 	shutdownHeadless(): Promise<HeadlessShutdownReport>
 	/**
 	 * Starts a new task with an optional initial message and images.

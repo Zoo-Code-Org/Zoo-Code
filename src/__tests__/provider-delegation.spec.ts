@@ -81,11 +81,18 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(removeClineFromStack).toHaveBeenCalledTimes(1)
 
 		// Child task created with startTask: false and initialStatus: "active"
-		expect(createTask).toHaveBeenCalledWith("Do something", undefined, parentTask, {
-			initialTodos: [],
-			initialStatus: "active",
-			startTask: false,
-		})
+		expect(createTask).toHaveBeenCalledWith(
+			"Do something",
+			undefined,
+			parentTask,
+			{
+				initialTodos: [],
+				initialStatus: "active",
+				startTask: false,
+			},
+			{},
+			undefined,
+		)
 
 		// Delegation metadata written via atomicReadAndUpdate with correct taskId
 		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)

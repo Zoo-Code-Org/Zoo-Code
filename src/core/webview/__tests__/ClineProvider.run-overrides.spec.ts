@@ -9,6 +9,7 @@ describe("ClineProvider run overrides", () => {
 		return {
 			providerSettingsManager: {
 				getProfile: vi.fn().mockResolvedValue(profile),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				activateProfile: vi.fn(),
 				saveConfig: vi.fn(),
 			},
@@ -102,5 +103,35 @@ describe("ClineProvider run overrides", () => {
 				{ mode: "code" },
 			),
 		).rejects.toThrow("Persistent configuration and run overrides cannot be combined")
+	})
+
+	it("uses a mode-associated profile in memory without activating it", async () => {
+		const host = createResolverHost({ apiProvider: "openrouter", openRouterModelId: "mode-model" })
+		host.providerSettingsManager.getModeConfigId.mockResolvedValue("mode-profile")
+		const result = await ClineProvider.prototype["resolveRunOverrides"].call(
+			host as unknown as ClineProvider,
+			{ mode: "code" },
+			{ apiProvider: "anthropic" },
+		)
+
+		expect(host.providerSettingsManager.getProfile).toHaveBeenCalledWith({ id: "mode-profile" })
+		expect(result.apiConfiguration).toMatchObject({ apiProvider: "openrouter", openRouterModelId: "mode-model" })
+		expect(host.providerSettingsManager.activateProfile).not.toHaveBeenCalled()
+	})
+
+	it("reports a missing profile through the public task resolver", async () => {
+		const host = createResolverHost()
+		host.providerSettingsManager.getProfile.mockRejectedValueOnce(new Error("not found"))
+		const provider = Object.assign(host, {
+			resolveRunOverrides: ClineProvider.prototype["resolveRunOverrides"],
+		})
+
+		await expect(
+			ClineProvider.prototype.resolveTaskRunOverrides.call(
+				provider as unknown as ClineProvider,
+				{ profile: "missing", mode: "code" },
+				{ apiProvider: "anthropic" },
+			),
+		).rejects.toMatchObject({ code: "invalid_profile", kind: "configuration" })
 	})
 })

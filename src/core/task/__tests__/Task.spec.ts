@@ -400,6 +400,21 @@ describe("Cline", () => {
 		expect(providerOn).not.toHaveBeenCalledWith(RooCodeEventName.ProviderProfileChanged, expect.any(Function))
 	})
 
+	it("clones isolated run overrides at construction", () => {
+		const runOverrides = { provider: "openrouter", model: "model-1", mode: "code", approval: "safe" } as const
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "isolated task",
+			startTask: false,
+			runMode: "code",
+			isolateRunConfiguration: true,
+			runOverrides,
+		})
+
+		expect(task.getDelegatedRunOverrides("debug")).toEqual({ ...runOverrides, mode: "debug" })
+	})
+
 	describe("empty-response retries", () => {
 		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
 			return (async function* () {

@@ -195,6 +195,34 @@ importers:
         specifier: workspace:^
         version: link:../../packages/build
 
+  apps/zoo:
+    dependencies:
+      '@roo-code/zoo-protocol':
+        specifier: workspace:^
+        version: link:../../packages/zoo-protocol
+      commander:
+        specifier: ^12.1.0
+        version: 12.1.0
+    devDependencies:
+      '@roo-code/config-eslint':
+        specifier: workspace:^
+        version: link:../../packages/config-eslint
+      '@roo-code/config-typescript':
+        specifier: workspace:^
+        version: link:../../packages/config-typescript
+      '@types/node':
+        specifier: 22.20.1
+        version: 22.20.1
+      rimraf:
+        specifier: 6.0.1
+        version: 6.0.1
+      tsup:
+        specifier: 8.5.1
+        version: 8.5.1(jiti@2.7.0)(postcss@8.5.15)(tsx@4.22.4)(typescript@5.9.3)(yaml@2.9.0)
+      vitest:
+        specifier: 4.1.9
+        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(jsdom@26.1.0)(vite@8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
+
   packages/build:
     dependencies:
       zod:

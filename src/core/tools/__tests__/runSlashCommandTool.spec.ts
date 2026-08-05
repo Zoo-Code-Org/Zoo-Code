@@ -21,6 +21,7 @@ describe("runSlashCommandTool", () => {
 		mockTask = {
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
+			switchMode: vi.fn(),
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
 			ask: vi.fn().mockResolvedValue({}),
 			cwd: "/test/project",
@@ -437,7 +438,7 @@ Deploy application to production`,
 	})
 
 	it("should switch mode when mode is specified in command", async () => {
-		const mockHandleModeSwitch = vi.fn()
+		const mockSwitchMode = vi.fn()
 		const block: ToolUse<"run_slash_command"> = {
 			type: "tool_use" as const,
 			name: "run_slash_command" as const,
@@ -464,14 +465,14 @@ Deploy application to production`,
 				},
 				customModes: undefined,
 			}),
-			handleModeSwitch: mockHandleModeSwitch,
 		})
+		mockTask.switchMode = mockSwitchMode
 
 		vi.mocked(getCommand).mockResolvedValue(mockCommand)
 
 		await runSlashCommandTool.handle(mockTask as Task, block, mockCallbacks)
 
-		expect(mockHandleModeSwitch).toHaveBeenCalledWith("debug")
+		expect(mockSwitchMode).toHaveBeenCalledWith("debug")
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
 			`Command: /debug-app
 Description: Debug the application
@@ -485,7 +486,6 @@ Start debugging the application`,
 	})
 
 	it("should not switch mode when mode is not specified in command", async () => {
-		const mockHandleModeSwitch = vi.fn()
 		const block: ToolUse<"run_slash_command"> = {
 			type: "tool_use" as const,
 			name: "run_slash_command" as const,
@@ -511,14 +511,13 @@ Start debugging the application`,
 				},
 				customModes: undefined,
 			}),
-			handleModeSwitch: mockHandleModeSwitch,
 		})
 
 		vi.mocked(getCommand).mockResolvedValue(mockCommand)
 
 		await runSlashCommandTool.handle(mockTask as Task, block, mockCallbacks)
 
-		expect(mockHandleModeSwitch).not.toHaveBeenCalled()
+		expect(mockTask.switchMode).not.toHaveBeenCalled()
 	})
 
 	it("should include mode in askApproval message when mode is specified", async () => {

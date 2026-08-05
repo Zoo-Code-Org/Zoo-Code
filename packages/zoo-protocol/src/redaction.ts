@@ -20,7 +20,7 @@ const unsafeTerminalEditing = new RegExp(
 	"i",
 )
 const secretPatterns: ReadonlyArray<RegExp> = [
-	/\b(?:Authorization|Proxy-Authorization|Cookie|Set-Cookie)\s*:\s*[^\r\n]+/gi,
+	/\b(?:Authorization|Proxy-Authorization|Cookie|Set-Cookie)\s*:\s*[^\r\n]+(?:\r?\n[ \t]+[^\r\n]*)*/gi,
 	new RegExp(`--${sensitiveKeyName}(?:\\s*=\\s*|\\s+)${cliSecretValue}`, "gi"),
 	new RegExp(`(?<!["'])\\b${sensitiveKeyName}\\s*:\\s*${secretValue}`, "gi"),
 	new RegExp(`(?<!["'])\\b${sensitiveKeyName}\\s*=\\s*${cliSecretValue}`, "gi"),
@@ -163,6 +163,59 @@ export function redactText(value: string): string {
 	const redacted = secretPatterns.reduce((text, pattern) => text.replace(pattern, REDACTED), assignments)
 	if (canonical !== value) return redacted === canonical ? value : REDACTED
 	return redacted
+}
+
+export function createTextRedactor(maxBufferedLength = 16 * 1024) {
+	let fragment = ""
+	let logicalLine = ""
+	let fragmentOverflowed = false
+	let logicalOverflowed = false
+	const flushLogicalLine = () => {
+		if (!logicalLine && !logicalOverflowed) return ""
+		const output = logicalOverflowed ? `${REDACTED}\n` : redactText(logicalLine)
+		logicalLine = ""
+		logicalOverflowed = false
+		return output
+	}
+	const consume = (value: string, flush: boolean): string => {
+		fragment += value
+		let output = ""
+		for (;;) {
+			const newline = fragment.indexOf("\n")
+			if (newline < 0) break
+			const line = fragment.slice(0, newline + 1)
+			fragment = fragment.slice(newline + 1)
+			if (fragmentOverflowed) {
+				output += flushLogicalLine()
+				output += `${REDACTED}\n`
+				fragmentOverflowed = false
+			} else if (/^[ \t]/.test(line) && (logicalLine || logicalOverflowed)) {
+				logicalLine += line
+			} else {
+				output += flushLogicalLine()
+				logicalLine = line
+			}
+			if (logicalLine.length > maxBufferedLength) {
+				logicalLine = ""
+				logicalOverflowed = true
+			}
+		}
+		if (fragment.length > maxBufferedLength) {
+			fragment = ""
+			fragmentOverflowed = true
+		}
+		if (flush) {
+			output += flushLogicalLine()
+			if (fragment || fragmentOverflowed) output += fragmentOverflowed ? REDACTED : redactText(fragment)
+			fragment = ""
+			fragmentOverflowed = false
+		}
+		return output
+	}
+	return {
+		push: (value: string) => consume(value, false),
+		flush: () => consume("", true),
+	}
 }
 
 export function redactValue(value: Record<string, JsonValue>): Record<string, JsonValue>

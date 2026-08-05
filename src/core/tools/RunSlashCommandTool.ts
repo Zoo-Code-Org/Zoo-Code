@@ -103,7 +103,7 @@ export class RunSlashCommandTool extends BaseTool<"run_slash_command"> {
 				const provider = task.providerRef.deref()
 				const targetMode = getModeBySlug(command.mode, (await provider?.getState())?.customModes)
 				if (targetMode) {
-					await provider?.handleModeSwitch(command.mode)
+					await task.switchMode(command.mode)
 				}
 			}
 

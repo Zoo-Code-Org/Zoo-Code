@@ -22,6 +22,7 @@ type FakeTask = EventEmitter & {
 	parentTaskId?: string
 	pendingAskId?: number
 	respondToAsk: ReturnType<typeof vi.fn>
+	submitUserMessage: ReturnType<typeof vi.fn>
 }
 
 function createTask(taskId: string, options: { rootTaskId?: string; parentTaskId?: string } = {}): FakeTask {
@@ -29,6 +30,7 @@ function createTask(taskId: string, options: { rootTaskId?: string; parentTaskId
 		taskId,
 		...options,
 		respondToAsk: vi.fn().mockReturnValue(true),
+		submitUserMessage: vi.fn().mockResolvedValue(undefined),
 	})
 }
 
@@ -40,6 +42,7 @@ describe("API headless facade", () => {
 	let rootTask: FakeTask
 	let currentTask: FakeTask | undefined
 	let createTaskMock: ReturnType<typeof vi.fn>
+	let getByWorkspace: ReturnType<typeof vi.fn>
 
 	beforeEach(() => {
 		providerEvents = new EventEmitter()
@@ -50,6 +53,7 @@ describe("API headless facade", () => {
 			providerEvents.emit(RooCodeEventName.TaskCreated, rootTask)
 			return rootTask
 		})
+		getByWorkspace = vi.fn().mockReturnValue([])
 
 		const fakeProvider = {
 			context: {},
@@ -62,7 +66,7 @@ describe("API headless facade", () => {
 			getCurrentTask: vi.fn(() => currentTask),
 			cancelTask: vi.fn().mockResolvedValue(undefined),
 			dispose: vi.fn().mockResolvedValue(undefined),
-			taskHistoryStore: { get: (taskId: string) => history.get(taskId) },
+			taskHistoryStore: { get: (taskId: string) => history.get(taskId), getByWorkspace },
 		}
 		// ClineProvider is concrete and has private state; this precise fake exercises only the API boundary above.
 		provider = fakeProvider as unknown as ClineProvider
@@ -206,6 +210,33 @@ describe("API headless facade", () => {
 		expect(failureListener).toHaveBeenCalledWith(
 			expect.objectContaining({ taskId: "root-1", rootTaskId: "root-1", code: "task_failed" }),
 		)
+	})
+
+	it("settles needs-input, clones workspace history, and routes active input", async () => {
+		const historyItems = [{ id: "root-1", task: "task" }]
+		getByWorkspace.mockReturnValue(historyItems)
+		await api.startHeadlessTask({ text: "input" })
+
+		await api.submitHeadlessTaskInput({ taskId: "root-1", text: "answer", images: ["image"] })
+		expect(rootTask.submitUserMessage).toHaveBeenCalledWith("answer", ["image"])
+		await api.settleHeadlessNeedsInput({ rootTaskId: "root-1", taskId: "root-1", content: "Need input" })
+		await expect(api.waitForHeadlessTaskResult("root-1")).resolves.toMatchObject({
+			outcome: "needs_input",
+			resumable: true,
+			content: "Need input",
+		})
+
+		const listed = await api.listHeadlessTaskHistory("/workspace")
+		expect(getByWorkspace).toHaveBeenCalledWith("/workspace")
+		expect(listed).toEqual(historyItems)
+		expect(listed).not.toBe(historyItems)
+	})
+
+	it("rejects headless input outside the active session", async () => {
+		await expect(api.submitHeadlessTaskInput({ taskId: "missing", text: "answer" })).rejects.toMatchObject({
+			code: "invalid_session",
+			kind: "configuration",
+		})
 	})
 
 	it("reports completion that was not persisted as a terminal failure", async () => {

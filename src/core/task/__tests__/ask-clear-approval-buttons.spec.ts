@@ -8,6 +8,8 @@ import { Task } from "../Task"
 type ProviderStub = {
 	getState: () => Promise<any>
 	postMessageToWebview: ReturnType<typeof vi.fn>
+	handleModeSwitch?: ReturnType<typeof vi.fn>
+	resolveTaskRunOverrides?: ReturnType<typeof vi.fn>
 }
 
 function buildTask(provider: ProviderStub | undefined) {
@@ -35,6 +37,59 @@ async function attachQueue(task: Task) {
 }
 
 describe("Task.ask auto-approval stamping", () => {
+	it("switches persistent and isolated task modes through their respective paths", async () => {
+		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+		const resolveTaskRunOverrides = vi.fn().mockResolvedValue({
+			apiConfiguration: { apiProvider: "openrouter", openRouterModelId: "new-model" },
+			profile: "ci",
+		})
+		const provider = {
+			postMessageToWebview: vi.fn(),
+			getState: async () => ({ mode: "code" }),
+			handleModeSwitch,
+			resolveTaskRunOverrides,
+		}
+		const task = buildTask(provider)
+		Object.defineProperties(task, {
+			taskId: { value: "task-1" },
+			isolateRunConfiguration: { value: false, configurable: true },
+			runOverrides: { value: { provider: "openrouter", model: "old-model", approval: "safe" } },
+		})
+
+		await task.switchMode("debug")
+		expect(handleModeSwitch).toHaveBeenCalledWith("debug")
+
+		Object.defineProperty(task, "isolateRunConfiguration", { value: true })
+		task["apiConfiguration"] = { apiProvider: "openrouter", openRouterModelId: "old-model" }
+		task["updateApiConfiguration"] = vi.fn()
+		await task.switchMode("architect")
+
+		expect(resolveTaskRunOverrides).toHaveBeenCalledWith(
+			{ provider: "openrouter", model: "old-model", approval: "safe", mode: "architect" },
+			{ apiProvider: "openrouter", openRouterModelId: "old-model" },
+		)
+		expect(task["updateApiConfiguration"]).toHaveBeenCalledWith({
+			apiProvider: "openrouter",
+			openRouterModelId: "new-model",
+		})
+		expect(task.taskMode).toBe("architect")
+	})
+
+	it("returns an independent delegated override set", () => {
+		const task = buildTask(undefined)
+		Object.defineProperty(task, "runOverrides", {
+			value: { provider: "openrouter", model: "model-1", mode: "code", approval: "safe" },
+		})
+
+		const delegated = task.getDelegatedRunOverrides("debug")
+		expect(delegated).toEqual({ provider: "openrouter", model: "model-1", mode: "debug", approval: "safe" })
+		if (delegated) delegated.model = "changed"
+		expect(task.getDelegatedRunOverrides("debug")?.model).toBe("model-1")
+
+		const plainTask = buildTask(undefined)
+		expect(plainTask.getDelegatedRunOverrides("debug")).toBeUndefined()
+	})
+
 	it.each([
 		["interactive", { autoApprovalEnabled: false }],
 		["safe", { autoApprovalEnabled: true, alwaysAllowReadOnly: true, alwaysAllowExecute: false }],

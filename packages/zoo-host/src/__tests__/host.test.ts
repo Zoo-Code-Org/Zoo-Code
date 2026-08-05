@@ -171,4 +171,26 @@ exports.deactivate = async () => {}
 			{ seq: 2, type: "command.error", error: { code: "task_failed" } },
 		])
 	})
+
+	it("lists canonical root sessions for only the pinned workspace", async () => {
+		const sent: unknown[] = []
+		const transport = new HostTransport("host-1", async (message) => void sent.push(message))
+		const api = {
+			listHeadlessTaskHistory: vi.fn().mockResolvedValue([
+				{ id: "root", rootTaskId: "root", workspace: "/workspace", status: "interrupted" },
+				{ id: "child", rootTaskId: "root", parentTaskId: "root", workspace: "/workspace", status: "completed" },
+			]),
+		} as never
+		const dispatcher = new HostCommandDispatcher(api, transport, "/workspace")
+		await dispatcher.dispatch({ v: 1, id: "cmd-1", type: "history.list", workspace: "/workspace" })
+
+		expect(sent).toMatchObject([
+			{ seq: 1, type: "command.ack" },
+			{
+				seq: 2,
+				type: "command.done",
+				data: { commandType: "history.list", tasks: [{ rootTaskId: "root", state: "interrupted" }] },
+			},
+		])
+	})
 })

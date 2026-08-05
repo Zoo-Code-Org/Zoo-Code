@@ -35,6 +35,7 @@ import {
 	type TokenUsage,
 	type ToolUsage,
 	type RunOverrides,
+	HeadlessApiError,
 	type ExtensionMessage,
 	type ExtensionState,
 	type MarketplaceInstalledMetadata,
@@ -1212,6 +1213,7 @@ export class ClineProvider
 			runApiConfigName: resolvedRun.profile,
 			runApprovalMode: options?.runOverrides?.approval,
 			isolateRunConfiguration: !!options?.runOverrides,
+			runOverrides: options?.runOverrides,
 		})
 
 		if (isRehydratingCurrentTask) {
@@ -3143,17 +3145,42 @@ export class ClineProvider
 	): Promise<{ apiConfiguration: ProviderSettings; mode?: string; profile?: string }> {
 		if (!overrides) return { apiConfiguration: baseline }
 		if (overrides.profile && overrides.provider)
-			throw new Error("profile and provider overrides are mutually exclusive")
+			throw new HeadlessApiError(
+				"invalid_profile",
+				"profile and provider overrides are mutually exclusive",
+				"configuration",
+			)
 
+		const mode = overrides.mode ?? history.mode ?? defaultModeSlug
+		if (!getModeBySlug(mode, await this.customModesManager.getCustomModes())) {
+			throw new HeadlessApiError("invalid_mode", `Unknown mode override: ${mode}`, "configuration")
+		}
 		let apiConfiguration = structuredClone(baseline)
+		const modeProfileId = await this.providerSettingsManager.getModeConfigId(mode)
+		if (modeProfileId) {
+			const modeProfile = await this.providerSettingsManager.getProfile({ id: modeProfileId })
+			if (modeProfile.apiProvider) apiConfiguration = modeProfile
+		}
 		let profile = history.profile
 		if (overrides.profile) {
-			apiConfiguration = await this.providerSettingsManager.getProfile({ name: overrides.profile })
+			try {
+				apiConfiguration = await this.providerSettingsManager.getProfile({ name: overrides.profile })
+			} catch {
+				throw new HeadlessApiError(
+					"invalid_profile",
+					`Unknown profile override: ${overrides.profile}`,
+					"configuration",
+				)
+			}
 			profile = overrides.profile
 		}
 		if (overrides.provider) {
 			if (!Object.values(providerIdentifiers).includes(overrides.provider as ProviderName)) {
-				throw new Error(`Unknown provider override: ${overrides.provider}`)
+				throw new HeadlessApiError(
+					"invalid_provider",
+					`Unknown provider override: ${overrides.provider}`,
+					"configuration",
+				)
 			}
 			apiConfiguration = { ...apiConfiguration, apiProvider: overrides.provider as ProviderName }
 			profile = undefined
@@ -3174,11 +3201,11 @@ export class ClineProvider
 				reasoningEffort: overrides.reasoningEffort === "disabled" ? undefined : overrides.reasoningEffort,
 			}
 		}
-		const mode = overrides.mode ?? history.mode ?? defaultModeSlug
-		if (!getModeBySlug(mode, await this.customModesManager.getCustomModes())) {
-			throw new Error(`Unknown mode override: ${mode}`)
-		}
 		return { apiConfiguration, mode, profile }
+	}
+
+	public resolveTaskRunOverrides(overrides: RunOverrides, baseline: ProviderSettings) {
+		return this.resolveRunOverrides(overrides, baseline)
 	}
 
 	// When initializing a new task, (not from history but from a tool command
@@ -3282,6 +3309,7 @@ export class ClineProvider
 			runApiConfigName: resolvedRun.profile,
 			runApprovalMode: runOverrides?.approval,
 			isolateRunConfiguration: !!runOverrides,
+			runOverrides,
 			...options,
 			rateLimitClock: this.rateLimitClock,
 		})
@@ -3685,14 +3713,17 @@ export class ClineProvider
 		//    This ensures the child's system prompt and configuration are based on the correct mode.
 		//    The mode switch must happen before createTask() because the Task constructor
 		//    initializes its mode from provider.getState() during initializeTaskMode().
-		try {
-			await this.handleModeSwitch(mode as any)
-		} catch (e) {
-			this.log(
-				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
-					(e as Error)?.message ?? String(e)
-				}`,
-			)
+		const delegatedRunOverrides = parent.getDelegatedRunOverrides(mode)
+		if (!delegatedRunOverrides) {
+			try {
+				await this.handleModeSwitch(mode as any)
+			} catch (e) {
+				this.log(
+					`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
+						(e as Error)?.message ?? String(e)
+					}`,
+				)
+			}
 		}
 
 		// 4) Create child as sole active (parent reference preserved for lineage)
@@ -3706,11 +3737,14 @@ export class ClineProvider
 		// Without this, the child's fire-and-forget startTask() races with step 5,
 		// and the last writer to globalState overwrites the other's changes—
 		// causing the parent's delegation fields to be lost.
-		const child = await this.createTask(message, undefined, parent as any, {
-			initialTodos,
-			initialStatus: "active",
-			startTask: false,
-		})
+		const child = await this.createTask(
+			message,
+			undefined,
+			parent as any,
+			{ initialTodos, initialStatus: "active", startTask: false },
+			{},
+			delegatedRunOverrides,
+		)
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a

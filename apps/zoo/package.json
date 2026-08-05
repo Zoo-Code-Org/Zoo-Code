@@ -1,0 +1,32 @@
+{
+	"name": "@zoo-code/cli",
+	"version": "0.1.0",
+	"description": "Zoo Code command-line interface",
+	"type": "module",
+	"main": "dist/index.js",
+	"bin": {
+		"zoo": "dist/index.js"
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup",
+		"check-types": "tsc --noEmit",
+		"lint": "eslint src --ext .ts --max-warnings=0",
+		"test": "pnpm build && vitest run",
+		"clean": "rimraf dist .turbo"
+	},
+	"dependencies": {
+		"@roo-code/zoo-protocol": "workspace:^",
+		"commander": "^12.1.0"
+	},
+	"devDependencies": {
+		"@roo-code/config-eslint": "workspace:^",
+		"@roo-code/config-typescript": "workspace:^",
+		"@types/node": "22.20.1",
+		"rimraf": "6.0.1",
+		"tsup": "8.5.1",
+		"vitest": "4.1.9"
+	}
+}

@@ -121,21 +121,19 @@ export async function checkAutoApproval({
 		}
 
 		if (state.alwaysAllowExecute === true) {
+			const decision = getCommandDecision(text, state.allowedCommands || [], state.deniedCommands || [])
+			if (decision === "auto_deny") return { decision: "deny" }
+
 			// Execute commands immediately when DCG allows them. ExecuteCommandTool
 			// marks commands blocked by DCG as protected before reaching this check,
 			// which keeps the explicit user approval prompt for those commands. When
-			// enabled, DCG is the authoritative command policy, so Zoo's allow and deny
-			// lists are intentionally bypassed for commands that DCG allows.
+			// enabled, DCG authorizes commands only after explicit denials are enforced.
 			if (state.destructiveCommandGuardEnabled === true) {
 				return { decision: "approve" }
 			}
 
-			const decision = getCommandDecision(text, state.allowedCommands || [], state.deniedCommands || [])
-
 			if (decision === "auto_approve") {
 				return { decision: "approve" }
-			} else if (decision === "auto_deny") {
-				return { decision: "deny" }
 			} else {
 				return { decision: "ask" }
 			}

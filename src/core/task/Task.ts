@@ -22,6 +22,7 @@ import {
 	type TaskMetadata,
 	type TaskEvents,
 	type ProviderSettings,
+	type RunOverrides,
 	type TokenUsage,
 	type ToolUsage,
 	type ToolName,
@@ -71,7 +72,7 @@ import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
 import { getApiMetrics, hasTokenUsageChanged, hasToolUsageChanged } from "../../shared/getApiMetrics"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
-import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
+import { type Mode, defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { DiffStrategy, type ToolUse, type ToolParamName, toolParamNames } from "../../shared/tools"
 import { getModelMaxOutputTokens } from "../../shared/api"
 
@@ -167,6 +168,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	runApiConfigName?: string
 	runApprovalMode?: "interactive" | "safe" | "auto"
 	isolateRunConfiguration?: boolean
+	runOverrides?: RunOverrides
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -213,6 +215,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private _taskMode: string | undefined
 	private readonly runApprovalMode: "interactive" | "safe" | "auto" | undefined
 	private readonly isolateRunConfiguration: boolean
+	private readonly runOverrides: RunOverrides | undefined
 
 	/**
 	 * Promise that resolves when the task mode has been initialized.
@@ -490,6 +493,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		runApiConfigName,
 		runApprovalMode,
 		isolateRunConfiguration,
+		runOverrides,
 	}: TaskOptions) {
 		super()
 
@@ -541,6 +545,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.apiConfiguration = apiConfiguration
 		this.runApprovalMode = runApprovalMode
 		this.isolateRunConfiguration = isolateRunConfiguration ?? false
+		this.runOverrides = runOverrides ? structuredClone(runOverrides) : undefined
 		this.api = buildApiHandler(this.apiConfiguration)
 		this.rateLimitClock = rateLimitClock ?? createRateLimitClock()
 		this.autoApprovalHandler = new AutoApprovalHandler()
@@ -775,6 +780,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							alwaysAllowModeSwitch: false,
 							alwaysAllowSubtasks: false,
 							alwaysAllowExecute: false,
+							alwaysAllowFollowupQuestions: false,
+							followupAutoApproveTimeoutMs: 0,
 						}
 					: this.runApprovalMode === "auto"
 						? {
@@ -819,6 +826,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	public async waitForModeInitialization(): Promise<void> {
 		return this.taskModeReady
+	}
+
+	public async switchMode(newMode: string): Promise<void> {
+		if (!this.isolateRunConfiguration) {
+			await this.providerRef.deref()?.handleModeSwitch(newMode as Mode)
+			return
+		}
+		const provider = this.providerRef.deref()
+		const resolved = await provider?.resolveTaskRunOverrides(
+			{ ...this.runOverrides, mode: newMode },
+			this.apiConfiguration,
+		)
+		if (resolved) {
+			this.updateApiConfiguration(resolved.apiConfiguration)
+			this._taskApiConfigName = resolved.profile
+		}
+		this._taskMode = newMode
+		this.emit(RooCodeEventName.TaskModeSwitched, this.taskId, newMode)
+	}
+
+	public getDelegatedRunOverrides(mode: string): RunOverrides | undefined {
+		return this.runOverrides ? { ...this.runOverrides, mode } : undefined
 	}
 
 	/**
@@ -2718,7 +2747,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const state = await this.getEffectiveState()
 					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
 					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode)
+						await this.switchMode(slashCommandMode)
 					}
 				}
 			}

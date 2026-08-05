@@ -44,6 +44,8 @@ describe("SwitchModeTool", () => {
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			didToolFailInCurrentTurn: false,
+			getTaskMode: vi.fn(async () => (await mockTask.providerRef.deref()?.getState())?.mode ?? "code"),
+			switchMode: mockHandleModeSwitch,
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
 			ask: vi.fn().mockResolvedValue({}),
 			providerRef: {

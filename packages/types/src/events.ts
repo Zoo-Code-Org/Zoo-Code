@@ -147,8 +147,9 @@ export const rooCodeEventsSchema = z.object({
 		z.object({
 			rootTaskId: z.string(),
 			currentTaskId: z.string(),
-			outcome: z.enum(["completed", "cancelled", "failed"]),
+			outcome: z.enum(["completed", "needs_input", "cancelled", "failed"]),
 			resumable: z.boolean(),
+			cancellationReason: z.enum(["user", "signal", "timeout"]).optional(),
 			content: z.string().optional(),
 			historyItem: historyItemSchema.optional(),
 		}),

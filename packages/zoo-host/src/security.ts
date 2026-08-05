@@ -46,7 +46,7 @@ export function createSystemVaultBackend(service = "Zoo Code CLI", platform = pr
 				}
 			},
 			async store(account, value) {
-				await execFile("security", ["add-generic-password", "-U", "-s", service, "-a", account, "-w", value])
+				await spawnWithInput("security", ["add-generic-password", "-U", "-s", service, "-a", account, "-w"], `${value}\n`)
 			},
 			async delete(account) {
 				try {

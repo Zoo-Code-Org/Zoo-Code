@@ -21,6 +21,7 @@ import {
 	type HeadlessTaskReference,
 	type HeadlessTaskResult,
 	type RunOverrides,
+	HeadlessApiError,
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
@@ -255,8 +256,29 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		if (!accepted) throw new Error(`Ask ${askId} is not pending on task ${taskId}`)
 	}
 
+	public async settleHeadlessNeedsInput({
+		rootTaskId,
+		taskId,
+		content,
+	}: {
+		rootTaskId: string
+		taskId: string
+		content?: string
+	}): Promise<void> {
+		const run = this.headlessRuns.get(rootTaskId)
+		if (!run || run.result) return
+		this.settleHeadlessRun(run, {
+			rootTaskId,
+			currentTaskId: taskId,
+			outcome: "needs_input",
+			resumable: true,
+			content,
+		})
+	}
+
 	public async cancelHeadlessTask({
 		rootTaskId,
+		reason,
 	}: {
 		rootTaskId: string
 		reason: "user" | "signal" | "timeout"
@@ -277,6 +299,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				currentTaskId: currentTask.taskId,
 				outcome: "cancelled",
 				resumable,
+				cancellationReason: reason,
 			})
 			return { rootTaskId, resumable, status: "interrupted" }
 		} catch (error) {
@@ -341,6 +364,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			currentTaskId: result.currentTaskId,
 			outcome: result.outcome,
 			resumable: result.resumable,
+			cancellationReason: result.cancellationReason,
 			content: result.content,
 			historyItem: this.sidebarProvider.taskHistoryStore.get(result.rootTaskId),
 		})
@@ -458,6 +482,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return item ? structuredClone(item) : undefined
 	}
 
+	public async listHeadlessTaskHistory(workspace: string) {
+		return structuredClone(this.sidebarProvider.taskHistoryStore.getByWorkspace(workspace))
+	}
+
 	public async getTaskApiConversationHistoryLength(taskId: string): Promise<number> {
 		try {
 			const { apiConversationHistory } = await this.sidebarProvider.getTaskWithId(taskId)
@@ -504,6 +532,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 
 		await this.sidebarProvider.postMessageToWebview({ type: "invoke", invoke: "sendMessage", text, images })
+	}
+
+	public async submitHeadlessTaskInput({
+		taskId,
+		text,
+		images,
+	}: {
+		taskId: string
+		text?: string
+		images?: string[]
+	}): Promise<void> {
+		const task = this.sidebarProvider.getTaskById(taskId)
+		if (!task || this.sidebarProvider.getCurrentTask()?.taskId !== taskId) {
+			throw new HeadlessApiError("invalid_session", `Task ${taskId} is not the active session`, "configuration")
+		}
+		await task.submitUserMessage(text ?? "", images)
 	}
 
 	public deleteQueuedMessage(messageId: string) {
