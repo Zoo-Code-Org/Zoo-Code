@@ -38,6 +38,7 @@ const makeParentTask = () =>
 	({
 		taskId: "parent-1",
 		emit: vi.fn(),
+		getDelegatedRunOverrides: vi.fn().mockReturnValue(undefined),
 		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
 		retrySaveApiConversationHistory: vi.fn(),
 	}) as any

@@ -52,7 +52,7 @@ export { WorkspaceAPI } from "./api/WorkspaceAPI.js"
 export { TabGroupsAPI, type Tab, type TabInputText, type TabGroup } from "./api/TabGroupsAPI.js"
 export { WindowAPI } from "./api/WindowAPI.js"
 export { CommandsAPI } from "./api/CommandsAPI.js"
-export { createVSCodeAPIMock } from "./api/create-vscode-api-mock.js"
+export { createVSCodeAPIMock, type VSCodeAPIMockOptions } from "./api/create-vscode-api-mock.js"
 
 // ============================================================================
 // Enums from ./types.ts
@@ -76,7 +76,15 @@ export {
 // ============================================================================
 // Types from ./types.ts
 // ============================================================================
-export type { Thenable, Memento, FileStat, TextEditorOptions, ConfigurationInspect } from "./types.js"
+export type {
+	Thenable,
+	Memento,
+	SecretStorage,
+	SecretStorageChangeEvent,
+	FileStat,
+	TextEditorOptions,
+	ConfigurationInspect,
+} from "./types.js"
 
 // ============================================================================
 // Interfaces from ./interfaces/
@@ -142,15 +150,3 @@ export type {
 	DiagnosticCollection,
 	IdentityInfo,
 } from "./interfaces/workspace.js"
-
-// ============================================================================
-// Secret Storage interface (backwards compatibility)
-// ============================================================================
-export interface SecretStorage {
-	get(key: string): Thenable<string | undefined>
-	store(key: string, value: string): Thenable<void>
-	delete(key: string): Thenable<void>
-}
-
-// Import Thenable for SecretStorage interface
-import type { Thenable } from "./types.js"

@@ -20,6 +20,7 @@ import {
 	type HeadlessShutdownReport,
 	type HeadlessTaskReference,
 	type HeadlessTaskResult,
+	type RunOverrides,
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
@@ -195,29 +196,32 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		text,
 		images,
 		configuration,
+		overrides,
 	}: {
 		text: string
 		images?: string[]
 		configuration?: RooCodeSettings
+		overrides?: RunOverrides
 	}): Promise<HeadlessTaskReference> {
 		await this.initializeHeadless()
 		if (!text.trim()) throw new Error("Headless task text must not be blank")
 		if ([...this.headlessRuns.values()].some((run) => !run.result)) {
 			throw new Error("A headless root task is already active")
 		}
-		const task = await this.sidebarProvider.createTask(text, images, undefined, {}, configuration)
+		if (configuration && overrides) throw new Error("Persistent configuration and run overrides cannot be combined")
+		const task = await this.sidebarProvider.createTask(text, images, undefined, {}, configuration, overrides)
 		const rootTaskId = task.rootTaskId ?? task.taskId
 		this.createHeadlessRun(rootTaskId, task.taskId)
 		return { taskId: task.taskId, rootTaskId }
 	}
 
-	public async resumeHeadlessTask(taskId: string): Promise<HeadlessTaskReference> {
+	public async resumeHeadlessTask(taskId: string, overrides?: RunOverrides): Promise<HeadlessTaskReference> {
 		await this.initializeHeadless()
 		if ([...this.headlessRuns.values()].some((run) => !run.result)) {
 			throw new Error("A headless root task is already active")
 		}
 		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId)
-		const task = await this.sidebarProvider.createTaskWithHistoryItem(historyItem)
+		const task = await this.sidebarProvider.createTaskWithHistoryItem(historyItem, { runOverrides: overrides })
 		const rootTaskId = historyItem.rootTaskId ?? historyItem.id
 		this.createHeadlessRun(rootTaskId, task.taskId)
 		return { taskId: task.taskId, rootTaskId }

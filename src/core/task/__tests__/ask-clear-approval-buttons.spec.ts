@@ -35,6 +35,22 @@ async function attachQueue(task: Task) {
 }
 
 describe("Task.ask auto-approval stamping", () => {
+	it.each([
+		["interactive", { autoApprovalEnabled: false }],
+		["safe", { autoApprovalEnabled: true, alwaysAllowReadOnly: true, alwaysAllowExecute: false }],
+		["auto", { autoApprovalEnabled: true, alwaysAllowWrite: true, allowedCommands: ["*"] }],
+	] as const)("applies the %s isolated approval policy", async (approval, expected) => {
+		const task = buildTask({ postMessageToWebview: vi.fn(), getState: async () => ({ mode: "code" }) })
+		Object.defineProperties(task, {
+			isolateRunConfiguration: { value: true },
+			runApprovalMode: { value: approval },
+		})
+		task["apiConfiguration"] = { apiProvider: "anthropic" }
+		task.getTaskMode = vi.fn().mockResolvedValue("code")
+
+		await expect(task["getEffectiveState"]()).resolves.toMatchObject(expected)
+	})
+
 	it("accepts a response only for the exact pending headless ask", () => {
 		const task = buildTask(undefined)
 		const handleWebviewAskResponse = vi.fn()

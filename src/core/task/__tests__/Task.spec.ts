@@ -9,6 +9,7 @@ import type { Mock } from "vitest"
 
 import {
 	providerIdentifiers,
+	RooCodeEventName,
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
@@ -379,6 +380,24 @@ describe("Cline", () => {
 				},
 			],
 		}))
+	})
+
+	it("initializes an isolated run with its explicit mode and profile", async () => {
+		const providerOn = vi.spyOn(mockProvider, "on")
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "isolated task",
+			startTask: false,
+			runMode: "debug",
+			runApiConfigName: "ci",
+			isolateRunConfiguration: true,
+		})
+
+		await task.waitForModeInitialization()
+		expect(task.taskMode).toBe("debug")
+		expect(task.taskApiConfigName).toBe("ci")
+		expect(providerOn).not.toHaveBeenCalledWith(RooCodeEventName.ProviderProfileChanged, expect.any(Function))
 	})
 
 	describe("empty-response retries", () => {

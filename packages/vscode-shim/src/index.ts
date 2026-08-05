@@ -12,6 +12,7 @@
 export {
 	// Main factory function
 	createVSCodeAPIMock,
+	type VSCodeAPIMockOptions,
 
 	// Classes
 	Uri,
@@ -77,6 +78,7 @@ export {
 	type WorkspaceConfiguration,
 	type Memento,
 	type SecretStorage,
+	type SecretStorageChangeEvent,
 	type FileStat,
 	type Terminal,
 	type CancellationToken,

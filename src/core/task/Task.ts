@@ -163,6 +163,10 @@ export interface TaskOptions extends CreateTaskOptions {
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 	rateLimitClock?: RateLimitClock
 	diffFuzzyThreshold?: number
+	runMode?: string
+	runApiConfigName?: string
+	runApprovalMode?: "interactive" | "safe" | "auto"
+	isolateRunConfiguration?: boolean
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -207,6 +211,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * @see {@link waitForModeInitialization} - To ensure initialization is complete
 	 */
 	private _taskMode: string | undefined
+	private readonly runApprovalMode: "interactive" | "safe" | "auto" | undefined
+	private readonly isolateRunConfiguration: boolean
 
 	/**
 	 * Promise that resolves when the task mode has been initialized.
@@ -480,6 +486,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		initialStatus,
 		rateLimitClock,
 		diffFuzzyThreshold,
+		runMode,
+		runApiConfigName,
+		runApprovalMode,
+		isolateRunConfiguration,
 	}: TaskOptions) {
 		super()
 
@@ -529,6 +539,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		})
 
 		this.apiConfiguration = apiConfiguration
+		this.runApprovalMode = runApprovalMode
+		this.isolateRunConfiguration = isolateRunConfiguration ?? false
 		this.api = buildApiHandler(this.apiConfiguration)
 		this.rateLimitClock = rateLimitClock ?? createRateLimitClock()
 		this.autoApprovalHandler = new AutoApprovalHandler()
@@ -547,7 +559,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Store the task's mode and API config name when it's created.
 		// For history items, use the stored values; for new tasks, we'll set them
 		// after getting state.
-		if (historyItem) {
+		if (runMode) {
+			this._taskMode = runMode
+			this._taskApiConfigName = runApiConfigName
+			this.taskModeReady = Promise.resolve()
+			this.taskApiConfigReady = Promise.resolve()
+		} else if (historyItem) {
 			this._taskMode = historyItem.mode || defaultModeSlug
 			this._taskApiConfigName = historyItem.apiConfigName
 			this.taskModeReady = Promise.resolve()
@@ -583,7 +600,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.messageQueueService.on("stateChanged", this.messageQueueStateChangedHandler)
 
 		// Listen for provider profile changes to update parser state
-		this.setupProviderProfileChangeListener(provider)
+		if (!this.isolateRunConfiguration) this.setupProviderProfileChangeListener(provider)
 
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
@@ -738,6 +755,43 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		provider.on(RooCodeEventName.ProviderProfileChanged, this.providerProfileChangeListener)
+	}
+
+	private async getEffectiveState() {
+		const state = await this.providerRef.deref()?.getState()
+		if (!state || !this.isolateRunConfiguration) return state
+		const approval =
+			this.runApprovalMode === "interactive"
+				? { autoApprovalEnabled: false }
+				: this.runApprovalMode === "safe"
+					? {
+							autoApprovalEnabled: true,
+							alwaysAllowReadOnly: true,
+							alwaysAllowReadOnlyOutsideWorkspace: false,
+							alwaysAllowWrite: false,
+							alwaysAllowWriteOutsideWorkspace: false,
+							alwaysAllowWriteProtected: false,
+							alwaysAllowMcp: false,
+							alwaysAllowModeSwitch: false,
+							alwaysAllowSubtasks: false,
+							alwaysAllowExecute: false,
+						}
+					: this.runApprovalMode === "auto"
+						? {
+								autoApprovalEnabled: true,
+								alwaysAllowReadOnly: true,
+								alwaysAllowReadOnlyOutsideWorkspace: true,
+								alwaysAllowWrite: true,
+								alwaysAllowWriteOutsideWorkspace: true,
+								alwaysAllowWriteProtected: true,
+								alwaysAllowMcp: true,
+								alwaysAllowModeSwitch: true,
+								alwaysAllowSubtasks: true,
+								alwaysAllowExecute: true,
+								allowedCommands: ["*"],
+							}
+						: {}
+		return { ...state, mode: await this.getTaskMode(), apiConfiguration: this.apiConfiguration, ...approval }
 	}
 
 	/**
@@ -1205,7 +1259,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// clearApprovalButtons message (which could arrive before buttons were
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
-		const state = provider ? await provider.getState() : undefined
+		const state = provider ? await this.getEffectiveState() : undefined
 		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
@@ -1638,7 +1692,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const systemPrompt = await this.getSystemPrompt()
 
 		// Get condensing configuration
-		const state = await this.providerRef.deref()?.getState()
+		const state = await this.getEffectiveState()
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
 		const { mode, apiConfiguration } = state ?? {}
 
@@ -1896,7 +1950,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				return { enabledToolCount: 0, enabledServerCount: 0 }
 			}
 
-			const { mcpEnabled } = (await provider.getState()) ?? {}
+			const { mcpEnabled } = (await this.getEffectiveState()) ?? {}
 			if (!(mcpEnabled ?? true)) {
 				return { enabledToolCount: 0, enabledServerCount: 0 }
 			}
@@ -2638,7 +2692,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			)
 
 			const provider = this.providerRef.deref()
-			const state = provider ? await provider.getState() : undefined
+			const state = provider ? await this.getEffectiveState() : undefined
 
 			const showRooIgnoredFiles = state?.showRooIgnoredFiles ?? false
 			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
@@ -2661,7 +2715,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (slashCommandMode) {
 				const provider = this.providerRef.deref()
 				if (provider) {
-					const state = await provider.getState()
+					const state = await this.getEffectiveState()
 					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
 					if (targetMode) {
 						await provider.handleModeSwitch(slashCommandMode)
@@ -3334,7 +3388,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							)
 
 							// Apply exponential backoff similar to first-chunk errors when auto-resubmit is enabled
-							const stateForBackoff = await this.providerRef.deref()?.getState()
+							const stateForBackoff = await this.getEffectiveState()
 							if (stateForBackoff?.autoApprovalEnabled) {
 								await this.backoffAndAnnounce(currentItem.retryAttempt ?? 0, error)
 
@@ -3719,7 +3773,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// apiConversationHistory at line 1876. Since the assistant failed to respond,
 					// we need to remove that message before retrying to avoid having two consecutive
 					// user messages (which would cause tool_result validation errors).
-					const state = await this.providerRef.deref()?.getState()
+					const state = await this.getEffectiveState()
 					// Only pop the user message that this iteration added. When
 					// shouldAddUserMessage is false (empty continuation, resumed history,
 					// or flushPendingToolResultsToHistory message) there is nothing to
@@ -3832,7 +3886,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private async getSystemPrompt(): Promise<string> {
-		const { mcpEnabled } = (await this.providerRef.deref()?.getState()) ?? {}
+		const { mcpEnabled } = (await this.getEffectiveState()) ?? {}
 		let mcpHub: McpHub | undefined
 		if (mcpEnabled ?? true) {
 			const provider = this.providerRef.deref()
@@ -3856,7 +3910,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const rooIgnoreInstructions = this.rooIgnoreController?.getInstructions()
 
-		const state = await this.providerRef.deref()?.getState()
+		const state = await this.getEffectiveState()
 
 		const {
 			mode,
@@ -3932,7 +3986,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private async handleContextWindowExceededError(): Promise<void> {
-		const state = await this.providerRef.deref()?.getState()
+		const state = await this.getEffectiveState()
 		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
 
 		const { contextTokens } = this.getTokenUsage()
@@ -4073,7 +4127,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * the `api_req_rate_limit_wait` say type (not an error).
 	 */
 	private async maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void> {
-		const state = await this.providerRef.deref()?.getState()
+		const state = await this.getEffectiveState()
 		const rateLimitSeconds =
 			state?.apiConfiguration?.rateLimitSeconds ?? this.apiConfiguration?.rateLimitSeconds ?? 0
 
@@ -4105,7 +4159,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		retryAttempt: number = 0,
 		options: { skipProviderRateLimit?: boolean } = {},
 	): ApiStream {
-		const state = await this.providerRef.deref()?.getState()
+		const state = await this.getEffectiveState()
 
 		const {
 			apiConfiguration,
@@ -4518,7 +4572,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Shared exponential backoff for retries (first-chunk and mid-stream)
 	private async backoffAndAnnounce(retryAttempt: number, error: any): Promise<void> {
 		try {
-			const state = await this.providerRef.deref()?.getState()
+			const state = await this.getEffectiveState()
 			const baseDelay = state?.requestDelaySeconds || 5
 
 			let exponentialDelay = Math.min(

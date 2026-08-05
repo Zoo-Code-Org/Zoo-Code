@@ -1,0 +1,27 @@
+{
+	"name": "@roo-code/zoo-host",
+	"description": "Private supervised extension host for the Zoo CLI.",
+	"private": true,
+	"type": "module",
+	"main": "./dist/child.js",
+	"types": "./src/index.ts",
+	"scripts": {
+		"lint": "eslint src --ext=ts --max-warnings=0",
+		"check-types": "tsc --noEmit",
+		"test": "vitest run",
+		"build": "tsc",
+		"clean": "rimraf dist .turbo"
+	},
+	"dependencies": {
+		"@roo-code/types": "workspace:^",
+		"@roo-code/vscode-shim": "workspace:^",
+		"@roo-code/zoo-protocol": "workspace:^"
+	},
+	"devDependencies": {
+		"@roo-code/config-eslint": "workspace:^",
+		"@roo-code/config-typescript": "workspace:^",
+		"@types/node": "22.20.1",
+		"tsx": "4.22.4",
+		"vitest": "4.1.9"
+	}
+}

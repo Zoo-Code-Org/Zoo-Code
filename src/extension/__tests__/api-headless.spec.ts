@@ -74,12 +74,22 @@ describe("API headless facade", () => {
 			taskId: "root-1",
 			rootTaskId: "root-1",
 		})
-		expect(createTaskMock).toHaveBeenCalledWith("  preserve whitespace  ", undefined, undefined, {}, undefined)
+		expect(createTaskMock).toHaveBeenCalledWith(
+			"  preserve whitespace  ",
+			undefined,
+			undefined,
+			{},
+			undefined,
+			undefined,
+		)
 		expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
 	})
 
 	it("validates initialization and active-run boundaries", async () => {
 		await expect(api.startHeadlessTask({ text: "   " })).rejects.toThrow("must not be blank")
+		await expect(
+			api.startHeadlessTask({ text: "conflict", configuration: {}, overrides: { mode: "code" } }),
+		).rejects.toThrow("Persistent configuration and run overrides cannot be combined")
 		await api.startHeadlessTask({ text: "active" })
 		await expect(api.startHeadlessTask({ text: "second" })).rejects.toThrow("already active")
 		await expect(api.resumeHeadlessTask("other")).rejects.toThrow("already active")
@@ -98,7 +108,19 @@ describe("API headless facade", () => {
 			taskId: "child-1",
 			rootTaskId: "root-1",
 		})
-		expect(provider.createTaskWithHistoryItem).toHaveBeenCalledWith(historyItem)
+		expect(provider.createTaskWithHistoryItem).toHaveBeenCalledWith(historyItem, { runOverrides: undefined })
+	})
+
+	it("forwards run overrides separately from persistent configuration", async () => {
+		await api.startHeadlessTask({
+			text: "task",
+			overrides: { provider: "openrouter", model: "model-1", approval: "safe" },
+		})
+		expect(createTaskMock).toHaveBeenCalledWith("task", undefined, undefined, {}, undefined, {
+			provider: "openrouter",
+			model: "model-1",
+			approval: "safe",
+		})
 	})
 
 	it("routes a response only to the matching task and ask", async () => {

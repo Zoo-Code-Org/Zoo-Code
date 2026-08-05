@@ -2,6 +2,7 @@ import { ExtensionContextImpl } from "../context/ExtensionContext.js"
 import * as fs from "fs"
 import * as path from "path"
 import { tmpdir } from "os"
+import type { SecretStorage } from "../types.js"
 
 describe("ExtensionContextImpl", () => {
 	let tempDir: string
@@ -68,6 +69,19 @@ describe("ExtensionContextImpl", () => {
 			})
 
 			expect(context.environmentVariableCollection).toEqual({})
+		})
+
+		it("uses an injected secure SecretStorage without creating a plaintext file", () => {
+			const secretStorage: SecretStorage = {
+				get: async () => undefined,
+				store: async () => undefined,
+				delete: async () => undefined,
+				onDidChange: () => ({ dispose() {} }),
+			}
+			const storageDir = path.join(tempDir, "secure-storage")
+			const context = new ExtensionContextImpl({ extensionPath, workspacePath, storageDir, secretStorage })
+			expect(context.secrets).toBe(secretStorage)
+			expect(fs.existsSync(path.join(storageDir, "global-storage", "secrets.json"))).toBe(false)
 		})
 	})
 

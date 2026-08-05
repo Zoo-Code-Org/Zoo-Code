@@ -34,6 +34,7 @@ import {
 	type CreateTaskOptions,
 	type TokenUsage,
 	type ToolUsage,
+	type RunOverrides,
 	type ExtensionMessage,
 	type ExtensionState,
 	type MarketplaceInstalledMetadata,
@@ -51,6 +52,8 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
+	isTypicalProvider,
+	modelIdKeysByProvider,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -1060,7 +1063,7 @@ export class ClineProvider
 
 	public async createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
-		options?: { startTask?: boolean },
+		options?: { startTask?: boolean; runOverrides?: RunOverrides },
 	) {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
@@ -1076,8 +1079,8 @@ export class ClineProvider
 			await this.evictCurrentTask()
 		}
 
-		// If the history item has a saved mode, restore it and its associated API configuration.
-		if (historyItem.mode) {
+		// Run overrides resolve history state in memory and must not restore it globally.
+		if (historyItem.mode && !options?.runOverrides) {
 			// Validate that the mode still exists
 			const customModes = await this.customModesManager.getCustomModes()
 			const modeExists = getModeBySlug(historyItem.mode, customModes) !== undefined
@@ -1139,7 +1142,7 @@ export class ClineProvider
 		// If the history item has a saved API config name (provider profile), restore it.
 		// This overrides any mode-based config restoration above, because the task's
 		// specific provider profile takes precedence over mode defaults.
-		if (historyItem.apiConfigName && !skipProfileRestoreFromHistory) {
+		if (historyItem.apiConfigName && !skipProfileRestoreFromHistory && !options?.runOverrides) {
 			const listApiConfig = await this.providerSettingsManager.listConfig()
 			// Keep global state/UI in sync with latest profiles for parity with mode restoration above.
 			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
@@ -1174,7 +1177,7 @@ export class ClineProvider
 		}
 
 		const {
-			apiConfiguration,
+			apiConfiguration: persistedApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
 			experiments,
@@ -1183,12 +1186,16 @@ export class ClineProvider
 			diffFuzzyThreshold,
 		} = await this.getState()
 
+		const resolvedRun = await this.resolveRunOverrides(options?.runOverrides, persistedApiConfiguration, {
+			mode: historyItem.mode,
+			profile: historyItem.apiConfigName,
+		})
 		const task = new Task({
 			provider: this,
-			apiConfiguration,
+			apiConfiguration: resolvedRun.apiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
-			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
+			consecutiveMistakeLimit: resolvedRun.apiConfiguration.consecutiveMistakeLimit,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -1201,6 +1208,10 @@ export class ClineProvider
 			initialStatus: historyItem.status,
 			rateLimitClock: this.rateLimitClock,
 			diffFuzzyThreshold,
+			runMode: resolvedRun.mode,
+			runApiConfigName: resolvedRun.profile,
+			runApprovalMode: options?.runOverrides?.approval,
+			isolateRunConfiguration: !!options?.runOverrides,
 		})
 
 		if (isRehydratingCurrentTask) {
@@ -3125,6 +3136,51 @@ export class ClineProvider
 		return this.recentTasksCache
 	}
 
+	private async resolveRunOverrides(
+		overrides: RunOverrides | undefined,
+		baseline: ProviderSettings,
+		history: { mode?: string; profile?: string } = {},
+	): Promise<{ apiConfiguration: ProviderSettings; mode?: string; profile?: string }> {
+		if (!overrides) return { apiConfiguration: baseline }
+		if (overrides.profile && overrides.provider)
+			throw new Error("profile and provider overrides are mutually exclusive")
+
+		let apiConfiguration = structuredClone(baseline)
+		let profile = history.profile
+		if (overrides.profile) {
+			apiConfiguration = await this.providerSettingsManager.getProfile({ name: overrides.profile })
+			profile = overrides.profile
+		}
+		if (overrides.provider) {
+			if (!Object.values(providerIdentifiers).includes(overrides.provider as ProviderName)) {
+				throw new Error(`Unknown provider override: ${overrides.provider}`)
+			}
+			apiConfiguration = { ...apiConfiguration, apiProvider: overrides.provider as ProviderName }
+			profile = undefined
+		}
+		if (overrides.model) {
+			const provider = apiConfiguration.apiProvider
+			if (isTypicalProvider(provider)) {
+				const key = modelIdKeysByProvider[provider]
+				apiConfiguration = { ...apiConfiguration, [key]: overrides.model }
+			} else {
+				apiConfiguration = { ...apiConfiguration, apiModelId: overrides.model }
+			}
+		}
+		if (overrides.reasoningEffort) {
+			apiConfiguration = {
+				...apiConfiguration,
+				enableReasoningEffort: overrides.reasoningEffort !== "disabled",
+				reasoningEffort: overrides.reasoningEffort === "disabled" ? undefined : overrides.reasoningEffort,
+			}
+		}
+		const mode = overrides.mode ?? history.mode ?? defaultModeSlug
+		if (!getModeBySlug(mode, await this.customModesManager.getCustomModes())) {
+			throw new Error(`Unknown mode override: ${mode}`)
+		}
+		return { apiConfiguration, mode, profile }
+	}
+
 	// When initializing a new task, (not from history but from a tool command
 	// new_task) there is no need to remove the previous task since the new
 	// task is a subtask of the previous one, and when it finishes it is removed
@@ -3137,8 +3193,12 @@ export class ClineProvider
 		parentTask?: Task,
 		options: CreateTaskOptions = {},
 		configuration: RooCodeSettings = {},
+		runOverrides?: RunOverrides,
 	): Promise<Task> {
-		if (configuration) {
+		if (runOverrides && Object.keys(configuration).length > 0) {
+			throw new Error("Persistent configuration and run overrides cannot be combined")
+		}
+		if (!runOverrides && configuration) {
 			await this.setValues(configuration)
 
 			if (configuration.allowedCommands) {
@@ -3179,23 +3239,25 @@ export class ClineProvider
 		}
 
 		const {
-			apiConfiguration,
+			apiConfiguration: persistedApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
 			experiments,
 			organizationAllowList,
 			diffFuzzyThreshold,
 		} = await this.getState()
+		const resolvedRun = await this.resolveRunOverrides(runOverrides, persistedApiConfiguration)
+		const apiConfiguration = resolvedRun.apiConfiguration
+
+		if (!ProfileValidator.isProfileAllowed(apiConfiguration, organizationAllowList)) {
+			throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
+		}
 
 		// Single-open-task invariant: always enforce for user-initiated top-level tasks.
 		if (!parentTask) {
 			await this.evictCurrentTask().catch(() => {
 				// Non-fatal
 			})
-		}
-
-		if (!ProfileValidator.isProfileAllowed(apiConfiguration, organizationAllowList)) {
-			throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
 		}
 
 		const task = new Task({
@@ -3216,6 +3278,10 @@ export class ClineProvider
 			// its initial state update, so state.currentTaskId is available ASAP.
 			startTask: false,
 			diffFuzzyThreshold,
+			runMode: resolvedRun.mode,
+			runApiConfigName: resolvedRun.profile,
+			runApprovalMode: runOverrides?.approval,
+			isolateRunConfiguration: !!runOverrides,
 			...options,
 			rateLimitClock: this.rateLimitClock,
 		})

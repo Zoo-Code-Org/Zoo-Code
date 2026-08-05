@@ -17,6 +17,15 @@ export type HeadlessCapabilities = {
 	rootTaskResults: true
 }
 
+export type RunOverrides = {
+	provider?: string
+	profile?: string
+	model?: string
+	mode?: string
+	reasoningEffort?: "disabled" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+	approval?: "interactive" | "safe" | "auto"
+}
+
 export type HeadlessTaskReference = { taskId: string; rootTaskId: string }
 
 export type HeadlessAskResponse =
@@ -52,8 +61,9 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 		text: string
 		images?: string[]
 		configuration?: RooCodeSettings
+		overrides?: RunOverrides
 	}): Promise<HeadlessTaskReference>
-	resumeHeadlessTask(taskId: string): Promise<HeadlessTaskReference>
+	resumeHeadlessTask(taskId: string, overrides?: RunOverrides): Promise<HeadlessTaskReference>
 	respondToHeadlessAsk(input: { taskId: string; askId: string; response: HeadlessAskResponse }): Promise<void>
 	cancelHeadlessTask(input: {
 		rootTaskId: string

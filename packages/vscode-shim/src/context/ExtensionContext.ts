@@ -37,6 +37,9 @@ export interface ExtensionContextOptions {
 	 * Extension mode (Production, Development, or Test)
 	 */
 	extensionMode?: ExtensionMode
+
+	/** Secure storage supplied by the embedding host. */
+	secretStorage?: SecretStorage
 }
 
 /**
@@ -108,7 +111,7 @@ export class ExtensionContextImpl implements ExtensionContext {
 			},
 		})
 
-		this.secrets = new FileSecretStorage(this.globalStoragePath)
+		this.secrets = options.secretStorage ?? new FileSecretStorage(this.globalStoragePath)
 
 		// Load extension metadata (packageJSON)
 		this.extension = this.loadExtensionMetadata()

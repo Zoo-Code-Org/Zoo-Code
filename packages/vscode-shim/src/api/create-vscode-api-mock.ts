@@ -55,6 +55,7 @@ import type { CancellationToken } from "../interfaces/document.js"
 import type { Disposable, DiagnosticCollection, IdentityInfo } from "../interfaces/workspace.js"
 import type { RelativePattern } from "../interfaces/document.js"
 import type { UriHandler } from "../interfaces/webview.js"
+import type { SecretStorage } from "../types.js"
 
 // Package version constant
 const Package = { version: "1.0.0" }
@@ -75,6 +76,9 @@ export interface VSCodeAPIMockOptions {
 	 * Set to a temp directory for ephemeral/no-persist mode.
 	 */
 	storageDir?: string
+
+	/** Secure storage supplied by the embedding host. */
+	secretStorage?: SecretStorage
 }
 
 /**
@@ -90,6 +94,7 @@ export function createVSCodeAPIMock(
 		extensionPath: extensionRootPath,
 		workspacePath: workspacePath,
 		storageDir: options?.storageDir,
+		secretStorage: options?.secretStorage,
 	})
 	const workspace = new WorkspaceAPI(workspacePath, context)
 	const window = new WindowAPI()

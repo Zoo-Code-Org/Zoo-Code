@@ -25,6 +25,7 @@ type PrivateClineProviderMethods = {
 }
 
 const privateClineProvider = ClineProvider.prototype as unknown as PrivateClineProviderMethods
+const resolveRunOverrides = vi.fn(async (_overrides: unknown, apiConfiguration: unknown) => ({ apiConfiguration }))
 
 // Mock Task class used by ClineProvider to avoid heavy startup
 vi.mock("../core/task/Task", () => {
@@ -73,6 +74,7 @@ describe("Single-open-task invariant", () => {
 		const registry = new TaskRegistry()
 		registry.push(existingTask as unknown as Task)
 		const provider = {
+			resolveRunOverrides,
 			taskRegistry: registry,
 			taskScheduler: { schedule: schedulespy },
 			getCurrentTask: vi.fn(() => existingTask),
@@ -123,6 +125,7 @@ describe("Single-open-task invariant", () => {
 		registry2.push(parentTask as unknown as Task)
 
 		const provider = {
+			resolveRunOverrides,
 			taskRegistry: registry2,
 			taskScheduler: new TaskScheduler(),
 			setValues: vi.fn(),
@@ -163,6 +166,7 @@ describe("Single-open-task invariant", () => {
 		const schedulespy = vi.fn().mockResolvedValue(undefined)
 
 		const provider = {
+			resolveRunOverrides,
 			getCurrentTask: vi.fn(() => undefined), // ensure not rehydrating
 			taskHistoryStore: { get: vi.fn(() => undefined) },
 			markDelegatedChildInterrupted: vi.fn().mockResolvedValue(undefined),
@@ -237,6 +241,7 @@ describe("Single-open-task invariant", () => {
 		registry.push(existingTask as unknown as Task)
 
 		const provider = {
+			resolveRunOverrides,
 			getCurrentTask: vi.fn(() => existingTask),
 			taskRegistry: registry,
 			taskHistoryStore: { get: vi.fn(() => undefined) },
