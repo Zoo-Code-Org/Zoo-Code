@@ -89,9 +89,30 @@ describe("UsageAggregator", () => {
 
 		it("should aggregate multiple events into totals", () => {
 			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", usage: { inputTokens: { value: 1000, source: "provider" }, outputTokens: { value: 500, source: "provider" } } }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", usage: { inputTokens: { value: 2000, source: "provider" }, outputTokens: { value: 1000, source: "provider" } } }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", usage: { inputTokens: { value: 3000, source: "provider" }, outputTokens: { value: 1500, source: "provider" } } }),
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					usage: {
+						inputTokens: { value: 2000, source: "provider" },
+						outputTokens: { value: 1000, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-3",
+					idempotencyKey: "idem-3",
+					usage: {
+						inputTokens: { value: 3000, source: "provider" },
+						outputTokens: { value: 1500, source: "provider" },
+					},
+				}),
 			]
 			const query = makeQuery({ groupBy: [] })
 
@@ -214,9 +235,24 @@ describe("UsageAggregator", () => {
 	describe("query - multi-axis grouping", () => {
 		it("should group by day + provider (2 axes)", () => {
 			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-19T10:00:00.000Z", provider: "anthropic" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-19T10:00:00.000Z", provider: "openai" }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-07-20T10:00:00.000Z", provider: "anthropic" }),
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					provider: "anthropic",
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					provider: "openai",
+				}),
+				makeEvent({
+					eventId: "evt-3",
+					idempotencyKey: "idem-3",
+					occurredAt: "2026-07-20T10:00:00.000Z",
+					provider: "anthropic",
+				}),
 			]
 			const query = makeQuery({ groupBy: ["day", "provider"] })
 
@@ -227,9 +263,27 @@ describe("UsageAggregator", () => {
 
 		it("should group by day + provider + model (3 axes)", () => {
 			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-19T10:00:00.000Z", provider: "anthropic", model: "claude-sonnet-4-20250514" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-19T10:00:00.000Z", provider: "anthropic", model: "claude-opus-4-20250514" }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-07-19T10:00:00.000Z", provider: "openai", model: "gpt-4o" }),
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					provider: "anthropic",
+					model: "claude-opus-4-20250514",
+				}),
+				makeEvent({
+					eventId: "evt-3",
+					idempotencyKey: "idem-3",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					provider: "openai",
+					model: "gpt-4o",
+				}),
 			]
 			const query = makeQuery({ groupBy: ["day", "provider", "model"] })
 
@@ -435,9 +489,24 @@ describe("UsageAggregator", () => {
 	describe("query - sorting", () => {
 		it("should sort category buckets by totalTokens descending then name ascending", () => {
 			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: "openai", usage: { inputTokens: { value: 1000, source: "provider" } } }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: "anthropic", usage: { inputTokens: { value: 3000, source: "provider" } } }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: "google", usage: { inputTokens: { value: 2000, source: "provider" } } }),
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					provider: "openai",
+					usage: { inputTokens: { value: 1000, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					provider: "anthropic",
+					usage: { inputTokens: { value: 3000, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-3",
+					idempotencyKey: "idem-3",
+					provider: "google",
+					usage: { inputTokens: { value: 2000, source: "provider" } },
+				}),
 			]
 			const query = makeQuery({ groupBy: ["provider"] })
 
@@ -468,6 +537,259 @@ describe("UsageAggregator", () => {
 			expect(result.totals.inputTokens).toBe(0)
 			expect(result.totals.outputTokens).toBe(0)
 			expect(result.totals.costUsd).toBe(0)
+		})
+	})
+
+	describe("query - 30d preset", () => {
+		it("should filter events by preset '30d'", () => {
+			const now = new Date()
+			const recentIso = new Date(now.getTime() - 15 * 24 * 60 * 60 * 1000).toISOString()
+			const oldIso = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000).toISOString()
+
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: recentIso }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: oldIso }),
+			]
+			const query = makeQuery({ preset: "30d", groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.events).toBe(1)
+		})
+	})
+
+	describe("query - week/month grouping", () => {
+		it("should group events by week bucket", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-13T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-15T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-07-20T10:00:00.000Z" }),
+			]
+			const query = makeQuery({ groupBy: ["week"] })
+
+			const result = aggregator.query(events, query)
+
+			// 2026-07-13 and 2026-07-15 should be in the same ISO week
+			// 2026-07-20 should be in the next week
+			expect(result.buckets.length).toBeGreaterThanOrEqual(2)
+			const weekKeys = result.buckets.map((b) => b.key.week).filter(Boolean)
+			expect(weekKeys.length).toBeGreaterThan(0)
+		})
+
+		it("should group events by month bucket", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", occurredAt: "2026-07-19T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", occurredAt: "2026-07-20T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", occurredAt: "2026-08-01T10:00:00.000Z" }),
+			]
+			const query = makeQuery({ groupBy: ["month"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(2)
+			const monthKeys = result.buckets.map((b) => b.key.month).sort()
+			expect(monthKeys).toContain("2026-07")
+			expect(monthKeys).toContain("2026-08")
+		})
+	})
+
+	describe("query - status grouping", () => {
+		it("should group events by status", () => {
+			const events = [
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", status: "completed" }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", status: "completed" }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", status: "failed" }),
+				makeEvent({ eventId: "evt-4", idempotencyKey: "idem-4", status: "cancelled" }),
+			]
+			const query = makeQuery({ groupBy: ["status"], includeCancelled: true })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(3)
+			const statuses = result.buckets.map((b) => b.key.status).sort()
+			expect(statuses).toEqual(["cancelled", "completed", "failed"])
+		})
+	})
+
+	describe("query - source axis with token sources", () => {
+		it("should separate events by inputTokens source", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: { inputTokens: { value: 1000, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					usage: { inputTokens: { value: 2000, source: "estimated" } },
+				}),
+			]
+			const query = makeQuery({ groupBy: ["source"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(2)
+			const sources = result.buckets.map((b) => b.key.source).sort()
+			expect(sources).toEqual(["estimated", "provider"])
+		})
+
+		it("should separate events by outputTokens source", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: { outputTokens: { value: 500, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					usage: { outputTokens: { value: 600, source: "backfilled" } },
+				}),
+			]
+			const query = makeQuery({ groupBy: ["source"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(2)
+			const sources = result.buckets.map((b) => b.key.source).sort()
+			expect(sources).toEqual(["backfilled", "provider"])
+		})
+
+		it("should use 'unknown' source for events with no costUsd and no input/output tokens", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {},
+				}),
+			]
+			const query = makeQuery({ groupBy: ["source"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(1)
+			expect(result.buckets[0].key.source).toBe("unknown")
+		})
+	})
+
+	describe("query - inclusion semantics branches", () => {
+		it("should handle cacheWriteInInput 'included' semantics", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: { cacheWriteTokens: { value: 200, source: "provider" } },
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "included",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.cacheWriteTokens).toBe(200)
+			expect(result.totals.unknownEventCount).toBe(0)
+		})
+
+		it("should handle cacheWriteInInput 'unknown' semantics", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: { cacheWriteTokens: { value: 200, source: "provider" } },
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "unknown",
+						reasoningInOutput: "excluded",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.cacheWriteTokens).toBe(200)
+			expect(result.totals.unknownEventCount).toBe(1)
+		})
+
+		it("should handle reasoningInOutput 'included' semantics", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: { reasoningTokens: { value: 50, source: "provider" } },
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "excluded",
+						reasoningInOutput: "included",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.reasoningTokens).toBe(50)
+			expect(result.totals.unknownEventCount).toBe(0)
+		})
+
+		it("should handle reasoningInOutput 'unknown' semantics", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: { reasoningTokens: { value: 50, source: "provider" } },
+					semantics: {
+						cacheReadInInput: "excluded",
+						cacheWriteInInput: "excluded",
+						reasoningInOutput: "unknown",
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: [] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.totals.reasoningTokens).toBe(50)
+			expect(result.totals.unknownEventCount).toBe(1)
+		})
+	})
+
+	describe("query - sort tiebreaker", () => {
+		it("should sort by name ascending when totalTokens are equal", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					provider: "zeta",
+					usage: { inputTokens: { value: 1000, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					provider: "alpha",
+					usage: { inputTokens: { value: 1000, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-3",
+					idempotencyKey: "idem-3",
+					provider: "mid",
+					usage: { inputTokens: { value: 1000, source: "provider" } },
+				}),
+			]
+			const query = makeQuery({ groupBy: ["provider"] })
+
+			const result = aggregator.query(events, query)
+
+			expect(result.buckets).toHaveLength(3)
+			// All have same totalTokens (1000), so sort by name ascending
+			expect(result.buckets[0].key.provider).toBe("alpha")
+			expect(result.buckets[1].key.provider).toBe("mid")
+			expect(result.buckets[2].key.provider).toBe("zeta")
 		})
 	})
 })

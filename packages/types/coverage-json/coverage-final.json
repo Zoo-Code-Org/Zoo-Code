@@ -1,0 +1,4643 @@
+{
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\api.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\api.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\cli.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\cli.ts",
+		"statementMap": {
+			"0": { "start": { "line": 9, "column": 34 }, "end": { "line": 9, "column": null } },
+			"1": { "start": { "line": 11, "column": 39 }, "end": { "line": 11, "column": null } },
+			"2": { "start": { "line": 15, "column": 39 }, "end": { "line": 18, "column": null } },
+			"3": { "start": { "line": 22, "column": 30 }, "end": { "line": 25, "column": null } },
+			"4": { "start": { "line": 27, "column": 40 }, "end": { "line": 33, "column": null } },
+			"5": { "start": { "line": 37, "column": 42 }, "end": { "line": 41, "column": null } },
+			"6": { "start": { "line": 45, "column": 41 }, "end": { "line": 47, "column": null } },
+			"7": { "start": { "line": 51, "column": 39 }, "end": { "line": 53, "column": null } },
+			"8": { "start": { "line": 57, "column": 43 }, "end": { "line": 59, "column": null } },
+			"9": { "start": { "line": 63, "column": 40 }, "end": { "line": 69, "column": null } },
+			"10": { "start": { "line": 77, "column": 35 }, "end": { "line": 77, "column": null } },
+			"11": { "start": { "line": 79, "column": 40 }, "end": { "line": 79, "column": null } },
+			"12": { "start": { "line": 83, "column": 32 }, "end": { "line": 94, "column": null } },
+			"13": { "start": { "line": 96, "column": 37 }, "end": { "line": 96, "column": null } },
+			"14": { "start": { "line": 100, "column": 37 }, "end": { "line": 100, "column": null } },
+			"15": { "start": { "line": 102, "column": 42 }, "end": { "line": 102, "column": null } },
+			"16": { "start": { "line": 106, "column": 37 }, "end": { "line": 111, "column": null } },
+			"17": { "start": { "line": 115, "column": 35 }, "end": { "line": 118, "column": null } },
+			"18": { "start": { "line": 122, "column": 38 }, "end": { "line": 127, "column": null } },
+			"19": { "start": { "line": 131, "column": 32 }, "end": { "line": 137, "column": null } },
+			"20": { "start": { "line": 141, "column": 39 }, "end": { "line": 162, "column": null } },
+			"21": { "start": { "line": 166, "column": 40 }, "end": { "line": 170, "column": null } },
+			"22": { "start": { "line": 174, "column": 39 }, "end": { "line": 180, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {
+			"0": 5,
+			"1": 5,
+			"2": 5,
+			"3": 5,
+			"4": 5,
+			"5": 5,
+			"6": 5,
+			"7": 5,
+			"8": 5,
+			"9": 5,
+			"10": 5,
+			"11": 5,
+			"12": 5,
+			"13": 5,
+			"14": 5,
+			"15": 5,
+			"16": 5,
+			"17": 5,
+			"18": 5,
+			"19": 5,
+			"20": 5,
+			"21": 5,
+			"22": 5
+		},
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 23,
+			"seen": {
+				"s:9:34:9:Infinity": 0,
+				"s:11:39:11:Infinity": 1,
+				"s:15:39:18:Infinity": 2,
+				"s:22:30:25:Infinity": 3,
+				"s:27:40:33:Infinity": 4,
+				"s:37:42:41:Infinity": 5,
+				"s:45:41:47:Infinity": 6,
+				"s:51:39:53:Infinity": 7,
+				"s:57:43:59:Infinity": 8,
+				"s:63:40:69:Infinity": 9,
+				"s:77:35:77:Infinity": 10,
+				"s:79:40:79:Infinity": 11,
+				"s:83:32:94:Infinity": 12,
+				"s:96:37:96:Infinity": 13,
+				"s:100:37:100:Infinity": 14,
+				"s:102:42:102:Infinity": 15,
+				"s:106:37:111:Infinity": 16,
+				"s:115:35:118:Infinity": 17,
+				"s:122:38:127:Infinity": 18,
+				"s:131:32:137:Infinity": 19,
+				"s:141:39:162:Infinity": 20,
+				"s:166:40:170:Infinity": 21,
+				"s:174:39:180:Infinity": 22
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\cloud.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\cloud.ts",
+		"statementMap": {
+			"0": { "start": { "line": 77, "column": 43 }, "end": { "line": 85, "column": null } },
+			"1": { "start": { "line": 93, "column": 49 }, "end": { "line": 113, "column": null } },
+			"2": { "start": { "line": 121, "column": 38 }, "end": { "line": 121, "column": null } },
+			"3": { "start": { "line": 129, "column": 47 }, "end": { "line": 137, "column": null } },
+			"4": { "start": { "line": 145, "column": 42 }, "end": { "line": 145, "column": null } },
+			"5": { "start": { "line": 153, "column": 42 }, "end": { "line": 163, "column": null } },
+			"6": { "start": { "line": 171, "column": 34 }, "end": { "line": 171, "column": null } },
+			"7": { "start": { "line": 175, "column": 40 }, "end": { "line": 178, "column": null } },
+			"8": { "start": { "line": 182, "column": 38 }, "end": { "line": 186, "column": null } },
+			"9": { "start": { "line": 194, "column": 61 }, "end": { "line": 197, "column": null } },
+			"10": { "start": { "line": 199, "column": 58 }, "end": { "line": 211, "column": null } },
+			"11": { "start": { "line": 223, "column": 35 }, "end": { "line": 229, "column": null } },
+			"12": { "start": { "line": 361, "column": 7 }, "end": { "line": 367, "column": null } },
+			"13": { "start": { "line": 362, "column": 1 }, "end": { "line": 362, "column": null } },
+			"14": { "start": { "line": 363, "column": 1 }, "end": { "line": 363, "column": null } },
+			"15": { "start": { "line": 364, "column": 1 }, "end": { "line": 364, "column": null } },
+			"16": { "start": { "line": 365, "column": 1 }, "end": { "line": 365, "column": null } },
+			"17": { "start": { "line": 366, "column": 1 }, "end": { "line": 366, "column": null } },
+			"18": { "start": { "line": 384, "column": 37 }, "end": { "line": 384, "column": null } },
+			"19": { "start": { "line": 385, "column": 36 }, "end": { "line": 385, "column": null } },
+			"20": { "start": { "line": 391, "column": 28 }, "end": { "line": 400, "column": null } },
+			"21": { "start": { "line": 408, "column": 39 }, "end": { "line": 423, "column": null } },
+			"22": { "start": { "line": 431, "column": 7 }, "end": { "line": 435, "column": null } },
+			"23": { "start": { "line": 432, "column": 1 }, "end": { "line": 432, "column": null } },
+			"24": { "start": { "line": 433, "column": 1 }, "end": { "line": 433, "column": null } },
+			"25": { "start": { "line": 434, "column": 1 }, "end": { "line": 434, "column": null } },
+			"26": { "start": { "line": 437, "column": 37 }, "end": { "line": 453, "column": null } },
+			"27": { "start": { "line": 461, "column": 7 }, "end": { "line": 465, "column": null } },
+			"28": { "start": { "line": 462, "column": 1 }, "end": { "line": 462, "column": null } },
+			"29": { "start": { "line": 463, "column": 1 }, "end": { "line": 463, "column": null } },
+			"30": { "start": { "line": 464, "column": 1 }, "end": { "line": 464, "column": null } },
+			"31": { "start": { "line": 467, "column": 39 }, "end": { "line": 497, "column": null } },
+			"32": { "start": { "line": 505, "column": 7 }, "end": { "line": 518, "column": null } },
+			"33": { "start": { "line": 506, "column": 1 }, "end": { "line": 506, "column": null } },
+			"34": { "start": { "line": 508, "column": 1 }, "end": { "line": 508, "column": null } },
+			"35": { "start": { "line": 509, "column": 1 }, "end": { "line": 509, "column": null } },
+			"36": { "start": { "line": 511, "column": 1 }, "end": { "line": 511, "column": null } },
+			"37": { "start": { "line": 513, "column": 1 }, "end": { "line": 513, "column": null } },
+			"38": { "start": { "line": 514, "column": 1 }, "end": { "line": 514, "column": null } },
+			"39": { "start": { "line": 516, "column": 1 }, "end": { "line": 516, "column": null } },
+			"40": { "start": { "line": 517, "column": 1 }, "end": { "line": 517, "column": null } },
+			"41": { "start": { "line": 524, "column": 7 }, "end": { "line": 533, "column": null } },
+			"42": { "start": { "line": 525, "column": 1 }, "end": { "line": 525, "column": null } },
+			"43": { "start": { "line": 526, "column": 1 }, "end": { "line": 526, "column": null } },
+			"44": { "start": { "line": 528, "column": 1 }, "end": { "line": 528, "column": null } },
+			"45": { "start": { "line": 529, "column": 1 }, "end": { "line": 529, "column": null } },
+			"46": { "start": { "line": 531, "column": 1 }, "end": { "line": 531, "column": null } },
+			"47": { "start": { "line": 532, "column": 1 }, "end": { "line": 532, "column": null } },
+			"48": { "start": { "line": 556, "column": 32 }, "end": { "line": 570, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 361, "column": 7 }, "end": { "line": 361, "column": 12 } },
+				"loc": { "start": { "line": 361, "column": 7 }, "end": { "line": 367, "column": null } },
+				"line": 361
+			},
+			"1": {
+				"name": "(anonymous_1)",
+				"decl": { "start": { "line": 431, "column": 7 }, "end": { "line": 431, "column": 12 } },
+				"loc": { "start": { "line": 431, "column": 7 }, "end": { "line": 435, "column": null } },
+				"line": 431
+			},
+			"2": {
+				"name": "(anonymous_2)",
+				"decl": { "start": { "line": 461, "column": 7 }, "end": { "line": 461, "column": 12 } },
+				"loc": { "start": { "line": 461, "column": 7 }, "end": { "line": 465, "column": null } },
+				"line": 461
+			},
+			"3": {
+				"name": "(anonymous_3)",
+				"decl": { "start": { "line": 505, "column": 7 }, "end": { "line": 505, "column": 12 } },
+				"loc": { "start": { "line": 505, "column": 7 }, "end": { "line": 518, "column": null } },
+				"line": 505
+			},
+			"4": {
+				"name": "(anonymous_4)",
+				"decl": { "start": { "line": 524, "column": 7 }, "end": { "line": 524, "column": 12 } },
+				"loc": { "start": { "line": 524, "column": 7 }, "end": { "line": 533, "column": null } },
+				"line": 524
+			}
+		},
+		"branchMap": {},
+		"s": {
+			"0": 5,
+			"1": 5,
+			"2": 5,
+			"3": 5,
+			"4": 5,
+			"5": 5,
+			"6": 5,
+			"7": 5,
+			"8": 5,
+			"9": 5,
+			"10": 5,
+			"11": 5,
+			"12": 5,
+			"13": 5,
+			"14": 5,
+			"15": 5,
+			"16": 5,
+			"17": 5,
+			"18": 5,
+			"19": 5,
+			"20": 5,
+			"21": 5,
+			"22": 5,
+			"23": 5,
+			"24": 5,
+			"25": 5,
+			"26": 5,
+			"27": 5,
+			"28": 5,
+			"29": 5,
+			"30": 5,
+			"31": 5,
+			"32": 5,
+			"33": 5,
+			"34": 5,
+			"35": 5,
+			"36": 5,
+			"37": 5,
+			"38": 5,
+			"39": 5,
+			"40": 5,
+			"41": 5,
+			"42": 5,
+			"43": 5,
+			"44": 5,
+			"45": 5,
+			"46": 5,
+			"47": 5,
+			"48": 5
+		},
+		"f": { "0": 5, "1": 5, "2": 5, "3": 5, "4": 5 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 5,
+			"lastStatement": 49,
+			"seen": {
+				"s:77:43:85:Infinity": 0,
+				"s:93:49:113:Infinity": 1,
+				"s:121:38:121:Infinity": 2,
+				"s:129:47:137:Infinity": 3,
+				"s:145:42:145:Infinity": 4,
+				"s:153:42:163:Infinity": 5,
+				"s:171:34:171:Infinity": 6,
+				"s:175:40:178:Infinity": 7,
+				"s:182:38:186:Infinity": 8,
+				"s:194:61:197:Infinity": 9,
+				"s:199:58:211:Infinity": 10,
+				"s:223:35:229:Infinity": 11,
+				"s:361:7:367:Infinity": 12,
+				"f:361:7:361:12": 0,
+				"s:362:1:362:Infinity": 13,
+				"s:363:1:363:Infinity": 14,
+				"s:364:1:364:Infinity": 15,
+				"s:365:1:365:Infinity": 16,
+				"s:366:1:366:Infinity": 17,
+				"s:384:37:384:Infinity": 18,
+				"s:385:36:385:Infinity": 19,
+				"s:391:28:400:Infinity": 20,
+				"s:408:39:423:Infinity": 21,
+				"s:431:7:435:Infinity": 22,
+				"f:431:7:431:12": 1,
+				"s:432:1:432:Infinity": 23,
+				"s:433:1:433:Infinity": 24,
+				"s:434:1:434:Infinity": 25,
+				"s:437:37:453:Infinity": 26,
+				"s:461:7:465:Infinity": 27,
+				"f:461:7:461:12": 2,
+				"s:462:1:462:Infinity": 28,
+				"s:463:1:463:Infinity": 29,
+				"s:464:1:464:Infinity": 30,
+				"s:467:39:497:Infinity": 31,
+				"s:505:7:518:Infinity": 32,
+				"f:505:7:505:12": 3,
+				"s:506:1:506:Infinity": 33,
+				"s:508:1:508:Infinity": 34,
+				"s:509:1:509:Infinity": 35,
+				"s:511:1:511:Infinity": 36,
+				"s:513:1:513:Infinity": 37,
+				"s:514:1:514:Infinity": 38,
+				"s:516:1:516:Infinity": 39,
+				"s:517:1:517:Infinity": 40,
+				"s:524:7:533:Infinity": 41,
+				"f:524:7:524:12": 4,
+				"s:525:1:525:Infinity": 42,
+				"s:526:1:526:Infinity": 43,
+				"s:528:1:528:Infinity": 44,
+				"s:529:1:529:Infinity": 45,
+				"s:531:1:531:Infinity": 46,
+				"s:532:1:532:Infinity": 47,
+				"s:556:32:570:Infinity": 48
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\codebase-index.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\codebase-index.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 39 }, "end": { "line": 15, "column": null } },
+			"1": { "start": { "line": 21, "column": 41 }, "end": { "line": 54, "column": null } },
+			"2": { "start": { "line": 62, "column": 41 }, "end": { "line": 72, "column": null } },
+			"3": { "start": { "line": 80, "column": 43 }, "end": { "line": 90, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 8, "1": 8, "2": 8, "3": 8 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 4,
+			"seen": {
+				"s:6:39:15:Infinity": 0,
+				"s:21:41:54:Infinity": 1,
+				"s:62:41:72:Infinity": 2,
+				"s:80:43:90:Infinity": 3
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\context-management.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\context-management.ts",
+		"statementMap": {
+			"0": { "start": { "line": 18, "column": 41 }, "end": { "line": 22, "column": null } },
+			"1": { "start": { "line": 33, "column": 1 }, "end": { "line": 33, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "isContextManagementEvent",
+				"decl": { "start": { "line": 32, "column": 16 }, "end": { "line": 32, "column": 41 } },
+				"loc": { "start": { "line": 32, "column": 90 }, "end": { "line": 34, "column": null } },
+				"line": 32
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 33, "column": 8 }, "end": { "line": 33, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 33, "column": 8 }, "end": { "line": 33, "column": 38 } },
+					{ "start": { "line": 33, "column": 38 }, "end": { "line": 33, "column": null } }
+				],
+				"line": 33
+			}
+		},
+		"s": { "0": 5, "1": 7 },
+		"f": { "0": 7 },
+		"b": { "0": [7, 5] },
+		"meta": {
+			"lastBranch": 1,
+			"lastFunction": 1,
+			"lastStatement": 2,
+			"seen": {
+				"s:18:41:22:Infinity": 0,
+				"f:32:16:32:41": 0,
+				"s:33:1:33:Infinity": 1,
+				"b:33:8:33:38:33:38:33:Infinity": 0
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\cookie-consent.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\cookie-consent.ts",
+		"statementMap": {
+			"0": { "start": { "line": 10, "column": 35 }, "end": { "line": 10, "column": null } },
+			"1": { "start": { "line": 20, "column": 37 }, "end": { "line": 22, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 4, "1": 4 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:10:35:10:Infinity": 0, "s:20:37:22:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\custom-tool.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\custom-tool.ts",
+		"statementMap": { "0": { "start": { "line": 103, "column": 1 }, "end": { "line": 103, "column": null } } },
+		"fnMap": {
+			"0": {
+				"name": "defineCustomTool",
+				"decl": { "start": { "line": 100, "column": 16 }, "end": { "line": 100, "column": null } },
+				"loc": { "start": { "line": 102, "column": 32 }, "end": { "line": 104, "column": null } },
+				"line": 102
+			}
+		},
+		"branchMap": {},
+		"s": { "0": 3 },
+		"f": { "0": 3 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 1,
+			"seen": { "f:100:16:100:Infinity": 0, "s:103:1:103:Infinity": 0 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\embedding.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\embedding.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\events.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\events.ts",
+		"statementMap": {
+			"0": { "start": { "line": 11, "column": 7 }, "end": { "line": 53, "column": null } },
+			"1": { "start": { "line": 13, "column": 1 }, "end": { "line": 13, "column": null } },
+			"2": { "start": { "line": 16, "column": 1 }, "end": { "line": 16, "column": null } },
+			"3": { "start": { "line": 17, "column": 1 }, "end": { "line": 17, "column": null } },
+			"4": { "start": { "line": 18, "column": 1 }, "end": { "line": 18, "column": null } },
+			"5": { "start": { "line": 19, "column": 1 }, "end": { "line": 19, "column": null } },
+			"6": { "start": { "line": 20, "column": 1 }, "end": { "line": 20, "column": null } },
+			"7": { "start": { "line": 21, "column": 1 }, "end": { "line": 21, "column": null } },
+			"8": { "start": { "line": 22, "column": 1 }, "end": { "line": 22, "column": null } },
+			"9": { "start": { "line": 23, "column": 1 }, "end": { "line": 23, "column": null } },
+			"10": { "start": { "line": 24, "column": 1 }, "end": { "line": 24, "column": null } },
+			"11": { "start": { "line": 27, "column": 1 }, "end": { "line": 27, "column": null } },
+			"12": { "start": { "line": 28, "column": 1 }, "end": { "line": 28, "column": null } },
+			"13": { "start": { "line": 29, "column": 1 }, "end": { "line": 29, "column": null } },
+			"14": { "start": { "line": 30, "column": 1 }, "end": { "line": 30, "column": null } },
+			"15": { "start": { "line": 31, "column": 1 }, "end": { "line": 31, "column": null } },
+			"16": { "start": { "line": 32, "column": 1 }, "end": { "line": 32, "column": null } },
+			"17": { "start": { "line": 35, "column": 1 }, "end": { "line": 35, "column": null } },
+			"18": { "start": { "line": 36, "column": 1 }, "end": { "line": 36, "column": null } },
+			"19": { "start": { "line": 37, "column": 1 }, "end": { "line": 37, "column": null } },
+			"20": { "start": { "line": 38, "column": 1 }, "end": { "line": 38, "column": null } },
+			"21": { "start": { "line": 39, "column": 1 }, "end": { "line": 39, "column": null } },
+			"22": { "start": { "line": 42, "column": 1 }, "end": { "line": 42, "column": null } },
+			"23": { "start": { "line": 43, "column": 1 }, "end": { "line": 43, "column": null } },
+			"24": { "start": { "line": 46, "column": 1 }, "end": { "line": 46, "column": null } },
+			"25": { "start": { "line": 47, "column": 1 }, "end": { "line": 47, "column": null } },
+			"26": { "start": { "line": 50, "column": 1 }, "end": { "line": 50, "column": null } },
+			"27": { "start": { "line": 51, "column": 1 }, "end": { "line": 51, "column": null } },
+			"28": { "start": { "line": 52, "column": 1 }, "end": { "line": 52, "column": null } },
+			"29": { "start": { "line": 59, "column": 35 }, "end": { "line": 127, "column": null } },
+			"30": { "start": { "line": 135, "column": 31 }, "end": { "line": 272, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 11, "column": 7 }, "end": { "line": 11, "column": 12 } },
+				"loc": { "start": { "line": 11, "column": 7 }, "end": { "line": 53, "column": null } },
+				"line": 11
+			}
+		},
+		"branchMap": {},
+		"s": {
+			"0": 6,
+			"1": 6,
+			"2": 6,
+			"3": 6,
+			"4": 6,
+			"5": 6,
+			"6": 6,
+			"7": 6,
+			"8": 6,
+			"9": 6,
+			"10": 6,
+			"11": 6,
+			"12": 6,
+			"13": 6,
+			"14": 6,
+			"15": 6,
+			"16": 6,
+			"17": 6,
+			"18": 6,
+			"19": 6,
+			"20": 6,
+			"21": 6,
+			"22": 6,
+			"23": 6,
+			"24": 6,
+			"25": 6,
+			"26": 6,
+			"27": 6,
+			"28": 6,
+			"29": 6,
+			"30": 6
+		},
+		"f": { "0": 6 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 31,
+			"seen": {
+				"s:11:7:53:Infinity": 0,
+				"f:11:7:11:12": 0,
+				"s:13:1:13:Infinity": 1,
+				"s:16:1:16:Infinity": 2,
+				"s:17:1:17:Infinity": 3,
+				"s:18:1:18:Infinity": 4,
+				"s:19:1:19:Infinity": 5,
+				"s:20:1:20:Infinity": 6,
+				"s:21:1:21:Infinity": 7,
+				"s:22:1:22:Infinity": 8,
+				"s:23:1:23:Infinity": 9,
+				"s:24:1:24:Infinity": 10,
+				"s:27:1:27:Infinity": 11,
+				"s:28:1:28:Infinity": 12,
+				"s:29:1:29:Infinity": 13,
+				"s:30:1:30:Infinity": 14,
+				"s:31:1:31:Infinity": 15,
+				"s:32:1:32:Infinity": 16,
+				"s:35:1:35:Infinity": 17,
+				"s:36:1:36:Infinity": 18,
+				"s:37:1:37:Infinity": 19,
+				"s:38:1:38:Infinity": 20,
+				"s:39:1:39:Infinity": 21,
+				"s:42:1:42:Infinity": 22,
+				"s:43:1:43:Infinity": 23,
+				"s:46:1:46:Infinity": 24,
+				"s:47:1:47:Infinity": 25,
+				"s:50:1:50:Infinity": 26,
+				"s:51:1:51:Infinity": 27,
+				"s:52:1:52:Infinity": 28,
+				"s:59:35:127:Infinity": 29,
+				"s:135:31:272:Infinity": 30
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\experiment.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\experiment.ts",
+		"statementMap": {
+			"0": { "start": { "line": 9, "column": 29 }, "end": { "line": 15, "column": null } },
+			"1": { "start": { "line": 17, "column": 35 }, "end": { "line": 17, "column": null } },
+			"2": { "start": { "line": 25, "column": 33 }, "end": { "line": 31, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 7, "1": 7, "2": 7 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 3,
+			"seen": { "s:9:29:15:Infinity": 0, "s:17:35:17:Infinity": 1, "s:25:33:31:Infinity": 2 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\followup.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\followup.ts",
+		"statementMap": {
+			"0": { "start": { "line": 25, "column": 13 }, "end": { "line": 36, "column": null } },
+			"1": { "start": { "line": 26, "column": 1 }, "end": { "line": 28, "column": null } },
+			"2": { "start": { "line": 27, "column": 2 }, "end": { "line": 27, "column": null } },
+			"3": { "start": { "line": 30, "column": 1 }, "end": { "line": 33, "column": null } },
+			"4": { "start": { "line": 31, "column": 20 }, "end": { "line": 31, "column": null } },
+			"5": { "start": { "line": 32, "column": 2 }, "end": { "line": 32, "column": null } },
+			"6": { "start": { "line": 35, "column": 1 }, "end": { "line": 35, "column": null } },
+			"7": { "start": { "line": 41, "column": 36 }, "end": { "line": 44, "column": null } },
+			"8": { "start": { "line": 49, "column": 34 }, "end": { "line": 52, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 25, "column": 13 }, "end": { "line": 25, "column": 34 } },
+				"loc": { "start": { "line": 25, "column": 72 }, "end": { "line": 36, "column": null } },
+				"line": 25
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 26, "column": 1 }, "end": { "line": 28, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 26, "column": 1 }, "end": { "line": 28, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 26
+			},
+			"1": {
+				"loc": { "start": { "line": 26, "column": 5 }, "end": { "line": 26, "column": 57 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 26, "column": 5 }, "end": { "line": 26, "column": 33 } },
+					{ "start": { "line": 26, "column": 33 }, "end": { "line": 26, "column": 57 } }
+				],
+				"line": 26
+			},
+			"2": {
+				"loc": { "start": { "line": 30, "column": 1 }, "end": { "line": 33, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 30, "column": 1 }, "end": { "line": 33, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 30
+			},
+			"3": {
+				"loc": { "start": { "line": 30, "column": 5 }, "end": { "line": 30, "column": 62 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 30, "column": 5 }, "end": { "line": 30, "column": 13 } },
+					{ "start": { "line": 30, "column": 13 }, "end": { "line": 30, "column": 41 } },
+					{ "start": { "line": 30, "column": 41 }, "end": { "line": 30, "column": 62 } }
+				],
+				"line": 30
+			},
+			"4": {
+				"loc": { "start": { "line": 32, "column": 9 }, "end": { "line": 32, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 32, "column": 70 }, "end": { "line": 32, "column": 88 } },
+					{ "start": { "line": 32, "column": 88 }, "end": { "line": 32, "column": null } }
+				],
+				"line": 32
+			},
+			"5": {
+				"loc": { "start": { "line": 32, "column": 9 }, "end": { "line": 32, "column": 70 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 32, "column": 9 }, "end": { "line": 32, "column": 41 } },
+					{ "start": { "line": 32, "column": 41 }, "end": { "line": 32, "column": 70 } }
+				],
+				"line": 32
+			}
+		},
+		"s": { "0": 4, "1": 0, "2": 0, "3": 0, "4": 0, "5": 0, "6": 0, "7": 4, "8": 4 },
+		"f": { "0": 0 },
+		"b": { "0": [0, 0], "1": [0, 0], "2": [0, 0], "3": [0, 0, 0], "4": [0, 0], "5": [0, 0] },
+		"meta": {
+			"lastBranch": 6,
+			"lastFunction": 1,
+			"lastStatement": 9,
+			"seen": {
+				"s:25:13:36:Infinity": 0,
+				"f:25:13:25:34": 0,
+				"b:26:1:28:Infinity:undefined:undefined:undefined:undefined": 0,
+				"s:26:1:28:Infinity": 1,
+				"b:26:5:26:33:26:33:26:57": 1,
+				"s:27:2:27:Infinity": 2,
+				"b:30:1:33:Infinity:undefined:undefined:undefined:undefined": 2,
+				"s:30:1:33:Infinity": 3,
+				"b:30:5:30:13:30:13:30:41:30:41:30:62": 3,
+				"s:31:20:31:Infinity": 4,
+				"s:32:2:32:Infinity": 5,
+				"b:32:70:32:88:32:88:32:Infinity": 4,
+				"b:32:9:32:41:32:41:32:70": 5,
+				"s:35:1:35:Infinity": 6,
+				"s:41:36:44:Infinity": 7,
+				"s:49:34:52:Infinity": 8
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\git.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\git.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\global-settings.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\global-settings.ts",
+		"statementMap": {
+			"0": { "start": { "line": 23, "column": 38 }, "end": { "line": 23, "column": null } },
+			"1": { "start": { "line": 35, "column": 51 }, "end": { "line": 35, "column": null } },
+			"2": { "start": { "line": 36, "column": 69 }, "end": { "line": 36, "column": null } },
+			"3": { "start": { "line": 37, "column": 55 }, "end": { "line": 37, "column": null } },
+			"4": { "start": { "line": 47, "column": 44 }, "end": { "line": 47, "column": null } },
+			"5": { "start": { "line": 72, "column": 81 }, "end": { "line": 76, "column": null } },
+			"6": { "start": { "line": 83, "column": 79 }, "end": { "line": 83, "column": null } },
+			"7": { "start": { "line": 88, "column": 46 }, "end": { "line": 88, "column": null } },
+			"8": { "start": { "line": 93, "column": 46 }, "end": { "line": 93, "column": null } },
+			"9": { "start": { "line": 98, "column": 50 }, "end": { "line": 98, "column": null } },
+			"10": { "start": { "line": 104, "column": 36 }, "end": { "line": 273, "column": null } },
+			"11": { "start": { "line": 277, "column": 36 }, "end": { "line": 277, "column": null } },
+			"12": { "start": { "line": 283, "column": 37 }, "end": { "line": 283, "column": null } },
+			"13": { "start": { "line": 290, "column": 33 }, "end": { "line": 325, "column": null } },
+			"14": { "start": { "line": 328, "column": 34 }, "end": { "line": 330, "column": null } },
+			"15": { "start": { "line": 341, "column": 13 }, "end": { "line": 342, "column": null } },
+			"16": { "start": { "line": 342, "column": 1 }, "end": { "line": 342, "column": null } },
+			"17": { "start": { "line": 350, "column": 33 }, "end": { "line": 352, "column": null } },
+			"18": { "start": { "line": 351, "column": 33 }, "end": { "line": 351, "column": null } },
+			"19": { "start": { "line": 354, "column": 13 }, "end": { "line": 355, "column": null } },
+			"20": { "start": { "line": 355, "column": 1 }, "end": { "line": 355, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 341, "column": 13 }, "end": { "line": 341, "column": 33 } },
+				"loc": { "start": { "line": 342, "column": 1 }, "end": { "line": 342, "column": null } },
+				"line": 342
+			},
+			"1": {
+				"name": "(anonymous_1)",
+				"decl": { "start": { "line": 350, "column": 86 }, "end": { "line": 350, "column": null } },
+				"loc": { "start": { "line": 351, "column": 33 }, "end": { "line": 351, "column": null } },
+				"line": 351
+			},
+			"2": {
+				"name": "(anonymous_2)",
+				"decl": { "start": { "line": 354, "column": 13 }, "end": { "line": 354, "column": 33 } },
+				"loc": { "start": { "line": 355, "column": 1 }, "end": { "line": 355, "column": null } },
+				"line": 355
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 342, "column": 1 }, "end": { "line": 342, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 342, "column": 1 }, "end": { "line": 342, "column": 57 } },
+					{ "start": { "line": 342, "column": 57 }, "end": { "line": 342, "column": null } }
+				],
+				"line": 342
+			}
+		},
+		"s": {
+			"0": 7,
+			"1": 7,
+			"2": 7,
+			"3": 7,
+			"4": 7,
+			"5": 7,
+			"6": 7,
+			"7": 7,
+			"8": 7,
+			"9": 7,
+			"10": 7,
+			"11": 7,
+			"12": 7,
+			"13": 7,
+			"14": 7,
+			"15": 7,
+			"16": 1498,
+			"17": 7,
+			"18": 1498,
+			"19": 7,
+			"20": 0
+		},
+		"f": { "0": 1498, "1": 1498, "2": 0 },
+		"b": { "0": [1498, 1260] },
+		"meta": {
+			"lastBranch": 1,
+			"lastFunction": 3,
+			"lastStatement": 21,
+			"seen": {
+				"s:23:38:23:Infinity": 0,
+				"s:35:51:35:Infinity": 1,
+				"s:36:69:36:Infinity": 2,
+				"s:37:55:37:Infinity": 3,
+				"s:47:44:47:Infinity": 4,
+				"s:72:81:76:Infinity": 5,
+				"s:83:79:83:Infinity": 6,
+				"s:88:46:88:Infinity": 7,
+				"s:93:46:93:Infinity": 8,
+				"s:98:50:98:Infinity": 9,
+				"s:104:36:273:Infinity": 10,
+				"s:277:36:277:Infinity": 11,
+				"s:283:37:283:Infinity": 12,
+				"s:290:33:325:Infinity": 13,
+				"s:328:34:330:Infinity": 14,
+				"s:341:13:342:Infinity": 15,
+				"f:341:13:341:33": 0,
+				"s:342:1:342:Infinity": 16,
+				"b:342:1:342:57:342:57:342:Infinity": 0,
+				"s:350:33:352:Infinity": 17,
+				"f:350:86:350:Infinity": 1,
+				"s:351:33:351:Infinity": 18,
+				"s:354:13:355:Infinity": 19,
+				"f:354:13:354:33": 2,
+				"s:355:1:355:Infinity": 20
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\history.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\history.ts",
+		"statementMap": { "0": { "start": { "line": 7, "column": 33 }, "end": { "line": 29, "column": null } } },
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 7 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 1,
+			"seen": { "s:7:33:29:Infinity": 0 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\image-generation.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\image-generation.ts",
+		"statementMap": {
+			"0": { "start": { "line": 17, "column": 63 }, "end": { "line": 25, "column": null } },
+			"1": { "start": { "line": 30, "column": 42 }, "end": { "line": 30, "column": null } },
+			"2": { "start": { "line": 30, "column": 77 }, "end": { "line": 30, "column": 84 } },
+			"3": { "start": { "line": 47, "column": 1 }, "end": { "line": 47, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 30, "column": 66 }, "end": { "line": 30, "column": 71 } },
+				"loc": { "start": { "line": 30, "column": 77 }, "end": { "line": 30, "column": 84 } },
+				"line": 30
+			},
+			"1": {
+				"name": "getImageGenerationProvider",
+				"decl": { "start": { "line": 43, "column": 16 }, "end": { "line": 43, "column": null } },
+				"loc": { "start": { "line": 46, "column": 27 }, "end": { "line": 48, "column": null } },
+				"line": 46
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 47, "column": 8 }, "end": { "line": 47, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 47, "column": 41 }, "end": { "line": 47, "column": 60 } },
+					{ "start": { "line": 47, "column": 60 }, "end": { "line": 47, "column": null } }
+				],
+				"line": 47
+			}
+		},
+		"s": { "0": 4, "1": 4, "2": 24, "3": 0 },
+		"f": { "0": 24, "1": 0 },
+		"b": { "0": [0, 0] },
+		"meta": {
+			"lastBranch": 1,
+			"lastFunction": 2,
+			"lastStatement": 4,
+			"seen": {
+				"s:17:63:25:Infinity": 0,
+				"s:30:42:30:Infinity": 1,
+				"f:30:66:30:71": 0,
+				"s:30:77:30:84": 2,
+				"f:43:16:43:Infinity": 1,
+				"s:47:1:47:Infinity": 3,
+				"b:47:41:47:60:47:60:47:Infinity": 0
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\index.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\index.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\ipc.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\ipc.ts",
+		"statementMap": {
+			"0": { "start": { "line": 10, "column": 7 }, "end": { "line": 16, "column": null } },
+			"1": { "start": { "line": 11, "column": 1 }, "end": { "line": 11, "column": null } },
+			"2": { "start": { "line": 12, "column": 1 }, "end": { "line": 12, "column": null } },
+			"3": { "start": { "line": 13, "column": 1 }, "end": { "line": 13, "column": null } },
+			"4": { "start": { "line": 14, "column": 1 }, "end": { "line": 14, "column": null } },
+			"5": { "start": { "line": 15, "column": 1 }, "end": { "line": 15, "column": null } },
+			"6": { "start": { "line": 22, "column": 7 }, "end": { "line": 25, "column": null } },
+			"7": { "start": { "line": 23, "column": 1 }, "end": { "line": 23, "column": null } },
+			"8": { "start": { "line": 24, "column": 1 }, "end": { "line": 24, "column": null } },
+			"9": { "start": { "line": 31, "column": 25 }, "end": { "line": 35, "column": null } },
+			"10": { "start": { "line": 43, "column": 7 }, "end": { "line": 53, "column": null } },
+			"11": { "start": { "line": 44, "column": 1 }, "end": { "line": 44, "column": null } },
+			"12": { "start": { "line": 45, "column": 1 }, "end": { "line": 45, "column": null } },
+			"13": { "start": { "line": 46, "column": 1 }, "end": { "line": 46, "column": null } },
+			"14": { "start": { "line": 47, "column": 1 }, "end": { "line": 47, "column": null } },
+			"15": { "start": { "line": 48, "column": 1 }, "end": { "line": 48, "column": null } },
+			"16": { "start": { "line": 49, "column": 1 }, "end": { "line": 49, "column": null } },
+			"17": { "start": { "line": 50, "column": 1 }, "end": { "line": 50, "column": null } },
+			"18": { "start": { "line": 51, "column": 1 }, "end": { "line": 51, "column": null } },
+			"19": { "start": { "line": 52, "column": 1 }, "end": { "line": 52, "column": null } },
+			"20": { "start": { "line": 59, "column": 33 }, "end": { "line": 99, "column": null } },
+			"21": { "start": { "line": 107, "column": 32 }, "end": { "line": 125, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 10, "column": 7 }, "end": { "line": 10, "column": 12 } },
+				"loc": { "start": { "line": 10, "column": 7 }, "end": { "line": 16, "column": null } },
+				"line": 10
+			},
+			"1": {
+				"name": "(anonymous_1)",
+				"decl": { "start": { "line": 22, "column": 7 }, "end": { "line": 22, "column": 12 } },
+				"loc": { "start": { "line": 22, "column": 7 }, "end": { "line": 25, "column": null } },
+				"line": 22
+			},
+			"2": {
+				"name": "(anonymous_2)",
+				"decl": { "start": { "line": 43, "column": 7 }, "end": { "line": 43, "column": 12 } },
+				"loc": { "start": { "line": 43, "column": 7 }, "end": { "line": 53, "column": null } },
+				"line": 43
+			}
+		},
+		"branchMap": {},
+		"s": {
+			"0": 5,
+			"1": 5,
+			"2": 5,
+			"3": 5,
+			"4": 5,
+			"5": 5,
+			"6": 5,
+			"7": 5,
+			"8": 5,
+			"9": 5,
+			"10": 5,
+			"11": 5,
+			"12": 5,
+			"13": 5,
+			"14": 5,
+			"15": 5,
+			"16": 5,
+			"17": 5,
+			"18": 5,
+			"19": 5,
+			"20": 5,
+			"21": 5
+		},
+		"f": { "0": 5, "1": 5, "2": 5 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 3,
+			"lastStatement": 22,
+			"seen": {
+				"s:10:7:16:Infinity": 0,
+				"f:10:7:10:12": 0,
+				"s:11:1:11:Infinity": 1,
+				"s:12:1:12:Infinity": 2,
+				"s:13:1:13:Infinity": 3,
+				"s:14:1:14:Infinity": 4,
+				"s:15:1:15:Infinity": 5,
+				"s:22:7:25:Infinity": 6,
+				"f:22:7:22:12": 1,
+				"s:23:1:23:Infinity": 7,
+				"s:24:1:24:Infinity": 8,
+				"s:31:25:35:Infinity": 9,
+				"s:43:7:53:Infinity": 10,
+				"f:43:7:43:12": 2,
+				"s:44:1:44:Infinity": 11,
+				"s:45:1:45:Infinity": 12,
+				"s:46:1:46:Infinity": 13,
+				"s:47:1:47:Infinity": 14,
+				"s:48:1:48:Infinity": 15,
+				"s:49:1:49:Infinity": 16,
+				"s:50:1:50:Infinity": 17,
+				"s:51:1:51:Infinity": 18,
+				"s:52:1:52:Infinity": 19,
+				"s:59:33:99:Infinity": 20,
+				"s:107:32:125:Infinity": 21
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\marketplace.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\marketplace.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 34 }, "end": { "line": 11, "column": null } },
+			"1": { "start": { "line": 18, "column": 43 }, "end": { "line": 23, "column": null } },
+			"2": { "start": { "line": 30, "column": 41 }, "end": { "line": 30, "column": null } },
+			"3": { "start": { "line": 37, "column": 34 }, "end": { "line": 45, "column": null } },
+			"4": { "start": { "line": 50, "column": 41 }, "end": { "line": 52, "column": null } },
+			"5": { "start": { "line": 56, "column": 40 }, "end": { "line": 60, "column": null } },
+			"6": { "start": { "line": 67, "column": 37 }, "end": { "line": 76, "column": null } },
+			"7": { "start": { "line": 83, "column": 51 }, "end": { "line": 86, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 5, "1": 5, "2": 5, "3": 5, "4": 5, "5": 5, "6": 5, "7": 5 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 8,
+			"seen": {
+				"s:6:34:11:Infinity": 0,
+				"s:18:43:23:Infinity": 1,
+				"s:30:41:30:Infinity": 2,
+				"s:37:34:45:Infinity": 3,
+				"s:50:41:52:Infinity": 4,
+				"s:56:40:60:Infinity": 5,
+				"s:67:37:76:Infinity": 6,
+				"s:83:51:86:Infinity": 7
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\mcp.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\mcp.ts",
+		"statementMap": {
+			"0": { "start": { "line": 7, "column": 39 }, "end": { "line": 7, "column": null } },
+			"1": { "start": { "line": 24, "column": 40 }, "end": { "line": 46, "column": null } },
+			"2": { "start": { "line": 162, "column": 19 }, "end": { "line": 162, "column": null } },
+			"3": { "start": { "line": 163, "column": 17 }, "end": { "line": 163, "column": null } },
+			"4": { "start": { "line": 165, "column": 1 }, "end": { "line": 183, "column": null } },
+			"5": { "start": { "line": 167, "column": 2 }, "end": { "line": 167, "column": null } },
+			"6": { "start": { "line": 167, "column": 23 }, "end": { "line": 167, "column": null } },
+			"7": { "start": { "line": 170, "column": 2 }, "end": { "line": 170, "column": null } },
+			"8": { "start": { "line": 170, "column": 37 }, "end": { "line": 170, "column": null } },
+			"9": { "start": { "line": 172, "column": 2 }, "end": { "line": 172, "column": null } },
+			"10": { "start": { "line": 175, "column": 2 }, "end": { "line": 182, "column": null } },
+			"11": { "start": { "line": 176, "column": 3 }, "end": { "line": 181, "column": null } },
+			"12": { "start": { "line": 178, "column": 4 }, "end": { "line": 180, "column": null } },
+			"13": { "start": { "line": 179, "column": 5 }, "end": { "line": 179, "column": null } },
+			"14": { "start": { "line": 185, "column": 1 }, "end": { "line": 185, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "countEnabledMcpTools",
+				"decl": { "start": { "line": 161, "column": 16 }, "end": { "line": 161, "column": 37 } },
+				"loc": { "start": { "line": 161, "column": 81 }, "end": { "line": 186, "column": null } },
+				"line": 161
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 167, "column": 2 }, "end": { "line": 167, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 167, "column": 2 }, "end": { "line": 167, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 167
+			},
+			"1": {
+				"loc": { "start": { "line": 170, "column": 2 }, "end": { "line": 170, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 170, "column": 2 }, "end": { "line": 170, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 170
+			},
+			"2": {
+				"loc": { "start": { "line": 175, "column": 2 }, "end": { "line": 182, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 175, "column": 2 }, "end": { "line": 182, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 175
+			},
+			"3": {
+				"loc": { "start": { "line": 178, "column": 4 }, "end": { "line": 180, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 178, "column": 4 }, "end": { "line": 180, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 178
+			}
+		},
+		"s": {
+			"0": 4,
+			"1": 4,
+			"2": 0,
+			"3": 0,
+			"4": 0,
+			"5": 0,
+			"6": 0,
+			"7": 0,
+			"8": 0,
+			"9": 0,
+			"10": 0,
+			"11": 0,
+			"12": 0,
+			"13": 0,
+			"14": 0
+		},
+		"f": { "0": 0 },
+		"b": { "0": [0, 0], "1": [0, 0], "2": [0, 0], "3": [0, 0] },
+		"meta": {
+			"lastBranch": 4,
+			"lastFunction": 1,
+			"lastStatement": 15,
+			"seen": {
+				"s:7:39:7:Infinity": 0,
+				"s:24:40:46:Infinity": 1,
+				"f:161:16:161:37": 0,
+				"s:162:19:162:Infinity": 2,
+				"s:163:17:163:Infinity": 3,
+				"s:165:1:183:Infinity": 4,
+				"b:167:2:167:Infinity:undefined:undefined:undefined:undefined": 0,
+				"s:167:2:167:Infinity": 5,
+				"s:167:23:167:Infinity": 6,
+				"b:170:2:170:Infinity:undefined:undefined:undefined:undefined": 1,
+				"s:170:2:170:Infinity": 7,
+				"s:170:37:170:Infinity": 8,
+				"s:172:2:172:Infinity": 9,
+				"b:175:2:182:Infinity:undefined:undefined:undefined:undefined": 2,
+				"s:175:2:182:Infinity": 10,
+				"s:176:3:181:Infinity": 11,
+				"b:178:4:180:Infinity:undefined:undefined:undefined:undefined": 3,
+				"s:178:4:180:Infinity": 12,
+				"s:179:5:179:Infinity": 13,
+				"s:185:1:185:Infinity": 14
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\message.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\message.ts",
+		"statementMap": {
+			"0": { "start": { "line": 27, "column": 25 }, "end": { "line": 39, "column": null } },
+			"1": { "start": { "line": 41, "column": 30 }, "end": { "line": 41, "column": null } },
+			"2": { "start": { "line": 50, "column": 24 }, "end": { "line": 56, "column": null } },
+			"3": { "start": { "line": 61, "column": 1 }, "end": { "line": 61, "column": null } },
+			"4": { "start": { "line": 70, "column": 29 }, "end": { "line": 70, "column": null } },
+			"5": { "start": { "line": 75, "column": 1 }, "end": { "line": 75, "column": null } },
+			"6": { "start": { "line": 84, "column": 31 }, "end": { "line": 84, "column": null } },
+			"7": { "start": { "line": 89, "column": 1 }, "end": { "line": 89, "column": null } },
+			"8": { "start": { "line": 99, "column": 31 }, "end": { "line": 99, "column": null } },
+			"9": { "start": { "line": 104, "column": 1 }, "end": { "line": 104, "column": null } },
+			"10": { "start": { "line": 144, "column": 25 }, "end": { "line": 174, "column": null } },
+			"11": { "start": { "line": 176, "column": 30 }, "end": { "line": 176, "column": null } },
+			"12": { "start": { "line": 184, "column": 40 }, "end": { "line": 187, "column": null } },
+			"13": { "start": { "line": 204, "column": 37 }, "end": { "line": 210, "column": null } },
+			"14": { "start": { "line": 229, "column": 39 }, "end": { "line": 234, "column": null } },
+			"15": { "start": { "line": 250, "column": 34 }, "end": { "line": 275, "column": null } },
+			"16": { "start": { "line": 284, "column": 6 }, "end": { "line": 286, "column": null } },
+			"17": { "start": { "line": 285, "column": 1 }, "end": { "line": 285, "column": null } },
+			"18": { "start": { "line": 288, "column": 6 }, "end": { "line": 290, "column": null } },
+			"19": { "start": { "line": 289, "column": 1 }, "end": { "line": 289, "column": null } },
+			"20": { "start": { "line": 292, "column": 6 }, "end": { "line": 297, "column": null } },
+			"21": { "start": { "line": 293, "column": 1 }, "end": { "line": 295, "column": null } },
+			"22": { "start": { "line": 299, "column": 6 }, "end": { "line": 301, "column": null } },
+			"23": { "start": { "line": 300, "column": 1 }, "end": { "line": 300, "column": null } },
+			"24": { "start": { "line": 308, "column": 1 }, "end": { "line": 314, "column": null } },
+			"25": { "start": { "line": 308, "column": 14 }, "end": { "line": 308, "column": 31 } },
+			"26": { "start": { "line": 309, "column": 18 }, "end": { "line": 309, "column": null } },
+			"27": { "start": { "line": 311, "column": 2 }, "end": { "line": 313, "column": null } },
+			"28": { "start": { "line": 312, "column": 3 }, "end": { "line": 312, "column": null } },
+			"29": { "start": { "line": 316, "column": 1 }, "end": { "line": 316, "column": null } },
+			"30": { "start": { "line": 328, "column": 25 }, "end": { "line": 328, "column": null } },
+			"31": { "start": { "line": 329, "column": 19 }, "end": { "line": 329, "column": null } },
+			"32": { "start": { "line": 330, "column": 33 }, "end": { "line": 330, "column": null } },
+			"33": { "start": { "line": 332, "column": 2 }, "end": { "line": 332, "column": null } },
+			"34": { "start": { "line": 334, "column": 1 }, "end": { "line": 336, "column": null } },
+			"35": { "start": { "line": 335, "column": 2 }, "end": { "line": 335, "column": null } },
+			"36": { "start": { "line": 338, "column": 1 }, "end": { "line": 344, "column": null } },
+			"37": { "start": { "line": 338, "column": 14 }, "end": { "line": 338, "column": 41 } },
+			"38": { "start": { "line": 339, "column": 18 }, "end": { "line": 339, "column": null } },
+			"39": { "start": { "line": 341, "column": 2 }, "end": { "line": 343, "column": null } },
+			"40": { "start": { "line": 342, "column": 3 }, "end": { "line": 342, "column": null } },
+			"41": { "start": { "line": 346, "column": 1 }, "end": { "line": 346, "column": null } },
+			"42": { "start": { "line": 353, "column": 32 }, "end": { "line": 360, "column": null } },
+			"43": { "start": { "line": 368, "column": 35 }, "end": { "line": 373, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "isIdleAsk",
+				"decl": { "start": { "line": 60, "column": 16 }, "end": { "line": 60, "column": 26 } },
+				"loc": { "start": { "line": 60, "column": 57 }, "end": { "line": 62, "column": null } },
+				"line": 60
+			},
+			"1": {
+				"name": "isResumableAsk",
+				"decl": { "start": { "line": 74, "column": 16 }, "end": { "line": 74, "column": 31 } },
+				"loc": { "start": { "line": 74, "column": 67 }, "end": { "line": 76, "column": null } },
+				"line": 74
+			},
+			"2": {
+				"name": "isInteractiveAsk",
+				"decl": { "start": { "line": 88, "column": 16 }, "end": { "line": 88, "column": 33 } },
+				"loc": { "start": { "line": 88, "column": 71 }, "end": { "line": 90, "column": null } },
+				"line": 88
+			},
+			"3": {
+				"name": "isNonBlockingAsk",
+				"decl": { "start": { "line": 103, "column": 16 }, "end": { "line": 103, "column": 33 } },
+				"loc": { "start": { "line": 103, "column": 71 }, "end": { "line": 105, "column": null } },
+				"line": 103
+			},
+			"4": {
+				"name": "(anonymous_4)",
+				"decl": { "start": { "line": 284, "column": 6 }, "end": { "line": 284, "column": 30 } },
+				"loc": { "start": { "line": 284, "column": 77 }, "end": { "line": 286, "column": null } },
+				"line": 284
+			},
+			"5": {
+				"name": "(anonymous_5)",
+				"decl": { "start": { "line": 288, "column": 6 }, "end": { "line": 288, "column": 31 } },
+				"loc": { "start": { "line": 288, "column": 66 }, "end": { "line": 290, "column": null } },
+				"line": 288
+			},
+			"6": {
+				"name": "(anonymous_6)",
+				"decl": { "start": { "line": 292, "column": 6 }, "end": { "line": 292, "column": 29 } },
+				"loc": { "start": { "line": 292, "column": 64 }, "end": { "line": 297, "column": null } },
+				"line": 292
+			},
+			"7": {
+				"name": "(anonymous_7)",
+				"decl": { "start": { "line": 299, "column": 6 }, "end": { "line": 299, "column": 29 } },
+				"loc": { "start": { "line": 299, "column": 64 }, "end": { "line": 301, "column": null } },
+				"line": 299
+			},
+			"8": {
+				"name": "findLastIndexBefore",
+				"decl": { "start": { "line": 303, "column": 9 }, "end": { "line": 303, "column": null } },
+				"loc": { "start": { "line": 307, "column": 10 }, "end": { "line": 317, "column": null } },
+				"line": 307
+			},
+			"9": {
+				"name": "getCompletionCheckpoint",
+				"decl": { "start": { "line": 327, "column": 16 }, "end": { "line": 327, "column": 40 } },
+				"loc": { "start": { "line": 327, "column": 100 }, "end": { "line": 347, "column": null } },
+				"line": 327
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 285, "column": 8 }, "end": { "line": 285, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 285, "column": 8 }, "end": { "line": 285, "column": 36 } },
+					{ "start": { "line": 285, "column": 36 }, "end": { "line": 285, "column": 62 } },
+					{ "start": { "line": 285, "column": 62 }, "end": { "line": 285, "column": null } }
+				],
+				"line": 285
+			},
+			"1": {
+				"loc": { "start": { "line": 289, "column": 8 }, "end": { "line": 289, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 289, "column": 8 }, "end": { "line": 289, "column": 34 } },
+					{ "start": { "line": 289, "column": 34 }, "end": { "line": 289, "column": null } }
+				],
+				"line": 289
+			},
+			"2": {
+				"loc": { "start": { "line": 294, "column": 3 }, "end": { "line": 295, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 294, "column": 3 }, "end": { "line": 294, "column": 29 } },
+					{ "start": { "line": 294, "column": 29 }, "end": { "line": 294, "column": null } },
+					{ "start": { "line": 295, "column": 3 }, "end": { "line": 295, "column": 29 } },
+					{ "start": { "line": 295, "column": 29 }, "end": { "line": 295, "column": null } }
+				],
+				"line": 294
+			},
+			"3": {
+				"loc": { "start": { "line": 300, "column": 8 }, "end": { "line": 300, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 300, "column": 8 }, "end": { "line": 300, "column": 34 } },
+					{ "start": { "line": 300, "column": 34 }, "end": { "line": 300, "column": 72 } },
+					{ "start": { "line": 300, "column": 72 }, "end": { "line": 300, "column": null } }
+				],
+				"line": 300
+			},
+			"4": {
+				"loc": { "start": { "line": 311, "column": 2 }, "end": { "line": 313, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 311, "column": 2 }, "end": { "line": 313, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 311
+			},
+			"5": {
+				"loc": { "start": { "line": 311, "column": 6 }, "end": { "line": 311, "column": 37 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 311, "column": 6 }, "end": { "line": 311, "column": 17 } },
+					{ "start": { "line": 311, "column": 17 }, "end": { "line": 311, "column": 37 } }
+				],
+				"line": 311
+			},
+			"6": {
+				"loc": { "start": { "line": 329, "column": 19 }, "end": { "line": 329, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 329, "column": 44 }, "end": { "line": 329, "column": 62 } },
+					{ "start": { "line": 329, "column": 62 }, "end": { "line": 329, "column": null } }
+				],
+				"line": 329
+			},
+			"7": {
+				"loc": { "start": { "line": 332, "column": 2 }, "end": { "line": 332, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 332, "column": 35 }, "end": { "line": 332, "column": 61 } },
+					{ "start": { "line": 332, "column": 61 }, "end": { "line": 332, "column": null } }
+				],
+				"line": 332
+			},
+			"8": {
+				"loc": { "start": { "line": 332, "column": 61 }, "end": { "line": 332, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 332, "column": 97 }, "end": { "line": 332, "column": 101 } },
+					{ "start": { "line": 332, "column": 101 }, "end": { "line": 332, "column": null } }
+				],
+				"line": 332
+			},
+			"9": {
+				"loc": { "start": { "line": 334, "column": 1 }, "end": { "line": 336, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 334, "column": 1 }, "end": { "line": 336, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 334
+			},
+			"10": {
+				"loc": { "start": { "line": 341, "column": 2 }, "end": { "line": 343, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 341, "column": 2 }, "end": { "line": 343, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 341
+			},
+			"11": {
+				"loc": { "start": { "line": 341, "column": 6 }, "end": { "line": 341, "column": 47 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 341, "column": 6 }, "end": { "line": 341, "column": 17 } },
+					{ "start": { "line": 341, "column": 17 }, "end": { "line": 341, "column": 47 } }
+				],
+				"line": 341
+			}
+		},
+		"s": {
+			"0": 9,
+			"1": 9,
+			"2": 9,
+			"3": 11,
+			"4": 9,
+			"5": 2,
+			"6": 9,
+			"7": 6,
+			"8": 9,
+			"9": 1,
+			"10": 9,
+			"11": 9,
+			"12": 9,
+			"13": 9,
+			"14": 9,
+			"15": 9,
+			"16": 9,
+			"17": 1,
+			"18": 9,
+			"19": 6,
+			"20": 9,
+			"21": 3,
+			"22": 9,
+			"23": 2,
+			"24": 6,
+			"25": 6,
+			"26": 9,
+			"27": 9,
+			"28": 5,
+			"29": 1,
+			"30": 3,
+			"31": 3,
+			"32": 3,
+			"33": 3,
+			"34": 3,
+			"35": 0,
+			"36": 3,
+			"37": 3,
+			"38": 2,
+			"39": 2,
+			"40": 2,
+			"41": 1,
+			"42": 9,
+			"43": 9
+		},
+		"f": { "0": 11, "1": 2, "2": 6, "3": 1, "4": 1, "5": 6, "6": 3, "7": 2, "8": 6, "9": 3 },
+		"b": {
+			"0": [1, 1, 1],
+			"1": [6, 6],
+			"2": [3, 3, 0, 0],
+			"3": [2, 2, 2],
+			"4": [5, 4],
+			"5": [9, 9],
+			"6": [0, 3],
+			"7": [2, 1],
+			"8": [1, 0],
+			"9": [0, 3],
+			"10": [2, 0],
+			"11": [2, 2]
+		},
+		"meta": {
+			"lastBranch": 12,
+			"lastFunction": 10,
+			"lastStatement": 44,
+			"seen": {
+				"s:27:25:39:Infinity": 0,
+				"s:41:30:41:Infinity": 1,
+				"s:50:24:56:Infinity": 2,
+				"f:60:16:60:26": 0,
+				"s:61:1:61:Infinity": 3,
+				"s:70:29:70:Infinity": 4,
+				"f:74:16:74:31": 1,
+				"s:75:1:75:Infinity": 5,
+				"s:84:31:84:Infinity": 6,
+				"f:88:16:88:33": 2,
+				"s:89:1:89:Infinity": 7,
+				"s:99:31:99:Infinity": 8,
+				"f:103:16:103:33": 3,
+				"s:104:1:104:Infinity": 9,
+				"s:144:25:174:Infinity": 10,
+				"s:176:30:176:Infinity": 11,
+				"s:184:40:187:Infinity": 12,
+				"s:204:37:210:Infinity": 13,
+				"s:229:39:234:Infinity": 14,
+				"s:250:34:275:Infinity": 15,
+				"s:284:6:286:Infinity": 16,
+				"f:284:6:284:30": 4,
+				"s:285:1:285:Infinity": 17,
+				"b:285:8:285:36:285:36:285:62:285:62:285:Infinity": 0,
+				"s:288:6:290:Infinity": 18,
+				"f:288:6:288:31": 5,
+				"s:289:1:289:Infinity": 19,
+				"b:289:8:289:34:289:34:289:Infinity": 1,
+				"s:292:6:297:Infinity": 20,
+				"f:292:6:292:29": 6,
+				"s:293:1:295:Infinity": 21,
+				"b:294:3:294:29:294:29:294:Infinity:295:3:295:29:295:29:295:Infinity": 2,
+				"s:299:6:301:Infinity": 22,
+				"f:299:6:299:29": 7,
+				"s:300:1:300:Infinity": 23,
+				"b:300:8:300:34:300:34:300:72:300:72:300:Infinity": 3,
+				"f:303:9:303:Infinity": 8,
+				"s:308:1:314:Infinity": 24,
+				"s:308:14:308:31": 25,
+				"s:309:18:309:Infinity": 26,
+				"b:311:2:313:Infinity:undefined:undefined:undefined:undefined": 4,
+				"s:311:2:313:Infinity": 27,
+				"b:311:6:311:17:311:17:311:37": 5,
+				"s:312:3:312:Infinity": 28,
+				"s:316:1:316:Infinity": 29,
+				"f:327:16:327:40": 9,
+				"s:328:25:328:Infinity": 30,
+				"s:329:19:329:Infinity": 31,
+				"b:329:44:329:62:329:62:329:Infinity": 6,
+				"s:330:33:330:Infinity": 32,
+				"s:332:2:332:Infinity": 33,
+				"b:332:35:332:61:332:61:332:Infinity": 7,
+				"b:332:97:332:101:332:101:332:Infinity": 8,
+				"b:334:1:336:Infinity:undefined:undefined:undefined:undefined": 9,
+				"s:334:1:336:Infinity": 34,
+				"s:335:2:335:Infinity": 35,
+				"s:338:1:344:Infinity": 36,
+				"s:338:14:338:41": 37,
+				"s:339:18:339:Infinity": 38,
+				"b:341:2:343:Infinity:undefined:undefined:undefined:undefined": 10,
+				"s:341:2:343:Infinity": 39,
+				"b:341:6:341:17:341:17:341:47": 11,
+				"s:342:3:342:Infinity": 40,
+				"s:346:1:346:Infinity": 41,
+				"s:353:32:360:Infinity": 42,
+				"s:368:35:373:Infinity": 43
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\mode.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\mode.ts",
+		"statementMap": {
+			"0": { "start": { "line": 9, "column": 34 }, "end": { "line": 29, "column": null } },
+			"1": { "start": { "line": 15, "column": 4 }, "end": { "line": 17, "column": null } },
+			"2": { "start": { "line": 16, "column": 5 }, "end": { "line": 16, "column": null } },
+			"3": { "start": { "line": 19, "column": 4 }, "end": { "line": 24, "column": null } },
+			"4": { "start": { "line": 20, "column": 5 }, "end": { "line": 20, "column": null } },
+			"5": { "start": { "line": 21, "column": 5 }, "end": { "line": 21, "column": null } },
+			"6": { "start": { "line": 23, "column": 5 }, "end": { "line": 23, "column": null } },
+			"7": { "start": { "line": 37, "column": 32 }, "end": { "line": 37, "column": null } },
+			"8": { "start": { "line": 50, "column": 1 }, "end": { "line": 52, "column": null } },
+			"9": { "start": { "line": 51, "column": 2 }, "end": { "line": 51, "column": null } },
+			"10": { "start": { "line": 53, "column": 1 }, "end": { "line": 55, "column": null } },
+			"11": { "start": { "line": 54, "column": 2 }, "end": { "line": 54, "column": null } },
+			"12": { "start": { "line": 56, "column": 1 }, "end": { "line": 56, "column": null } },
+			"13": { "start": { "line": 62, "column": 33 }, "end": { "line": 79, "column": null } },
+			"14": { "start": { "line": 64, "column": 15 }, "end": { "line": 64, "column": null } },
+			"15": { "start": { "line": 66, "column": 2 }, "end": { "line": 76, "column": null } },
+			"16": { "start": { "line": 68, "column": 21 }, "end": { "line": 68, "column": null } },
+			"17": { "start": { "line": 70, "column": 3 }, "end": { "line": 72, "column": null } },
+			"18": { "start": { "line": 71, "column": 4 }, "end": { "line": 71, "column": null } },
+			"19": { "start": { "line": 74, "column": 3 }, "end": { "line": 74, "column": null } },
+			"20": { "start": { "line": 75, "column": 3 }, "end": { "line": 75, "column": null } },
+			"21": { "start": { "line": 91, "column": 37 }, "end": { "line": 94, "column": null } },
+			"22": { "start": { "line": 92, "column": 1 }, "end": { "line": 92, "column": null } },
+			"23": { "start": { "line": 92, "column": 26 }, "end": { "line": 92, "column": null } },
+			"24": { "start": { "line": 93, "column": 1 }, "end": { "line": 93, "column": null } },
+			"25": { "start": { "line": 93, "column": 30 }, "end": { "line": 93, "column": 60 } },
+			"26": { "start": { "line": 96, "column": 32 }, "end": { "line": 111, "column": null } },
+			"27": { "start": { "line": 119, "column": 41 }, "end": { "line": 137, "column": null } },
+			"28": { "start": { "line": 122, "column": 17 }, "end": { "line": 122, "column": null } },
+			"29": { "start": { "line": 124, "column": 3 }, "end": { "line": 131, "column": null } },
+			"30": { "start": { "line": 125, "column": 4 }, "end": { "line": 127, "column": null } },
+			"31": { "start": { "line": 126, "column": 5 }, "end": { "line": 126, "column": null } },
+			"32": { "start": { "line": 129, "column": 4 }, "end": { "line": 129, "column": null } },
+			"33": { "start": { "line": 130, "column": 4 }, "end": { "line": 130, "column": null } },
+			"34": { "start": { "line": 145, "column": 37 }, "end": { "line": 150, "column": null } },
+			"35": { "start": { "line": 158, "column": 39 }, "end": { "line": 158, "column": null } },
+			"36": { "start": { "line": 166, "column": 42 }, "end": { "line": 166, "column": null } },
+			"37": { "start": { "line": 174, "column": 52 }, "end": { "line": 233, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 13, "column": 3 }, "end": { "line": 13, "column": null } },
+				"loc": { "start": { "line": 14, "column": 16 }, "end": { "line": 25, "column": null } },
+				"line": 14
+			},
+			"1": {
+				"name": "isDeprecatedGroupEntry",
+				"decl": { "start": { "line": 49, "column": 9 }, "end": { "line": 49, "column": 32 } },
+				"loc": { "start": { "line": 49, "column": 57 }, "end": { "line": 57, "column": null } },
+				"line": 49
+			},
+			"2": {
+				"name": "(anonymous_2)",
+				"decl": { "start": { "line": 62, "column": 59 }, "end": { "line": 62, "column": null } },
+				"loc": { "start": { "line": 63, "column": 13 }, "end": { "line": 77, "column": null } },
+				"line": 63
+			},
+			"3": {
+				"name": "(anonymous_3)",
+				"decl": { "start": { "line": 66, "column": 16 }, "end": { "line": 66, "column": 23 } },
+				"loc": { "start": { "line": 66, "column": 33 }, "end": { "line": 76, "column": 3 } },
+				"line": 66
+			},
+			"4": {
+				"name": "(anonymous_4)",
+				"decl": { "start": { "line": 91, "column": 39 }, "end": { "line": 91, "column": 51 } },
+				"loc": { "start": { "line": 91, "column": 59 }, "end": { "line": 94, "column": 3 } },
+				"line": 91
+			},
+			"5": {
+				"name": "(anonymous_5)",
+				"decl": { "start": { "line": 93, "column": 12 }, "end": { "line": 93, "column": 20 } },
+				"loc": { "start": { "line": 93, "column": 30 }, "end": { "line": 93, "column": 60 } },
+				"line": 93
+			},
+			"6": {
+				"name": "(anonymous_6)",
+				"decl": { "start": { "line": 120, "column": 40 }, "end": { "line": 120, "column": null } },
+				"loc": { "start": { "line": 121, "column": 13 }, "end": { "line": 132, "column": null } },
+				"line": 121
+			},
+			"7": {
+				"name": "(anonymous_7)",
+				"decl": { "start": { "line": 124, "column": 16 }, "end": { "line": 124, "column": 23 } },
+				"loc": { "start": { "line": 124, "column": 32 }, "end": { "line": 131, "column": 4 } },
+				"line": 124
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 15, "column": 4 }, "end": { "line": 17, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 15, "column": 4 }, "end": { "line": 17, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 15
+			},
+			"1": {
+				"loc": { "start": { "line": 50, "column": 1 }, "end": { "line": 52, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 50, "column": 1 }, "end": { "line": 52, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 50
+			},
+			"2": {
+				"loc": { "start": { "line": 53, "column": 1 }, "end": { "line": 55, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 53, "column": 1 }, "end": { "line": 55, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 53
+			},
+			"3": {
+				"loc": { "start": { "line": 53, "column": 5 }, "end": { "line": 53, "column": 80 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 53, "column": 5 }, "end": { "line": 53, "column": 29 } },
+					{ "start": { "line": 53, "column": 29 }, "end": { "line": 53, "column": 50 } },
+					{ "start": { "line": 53, "column": 50 }, "end": { "line": 53, "column": 80 } }
+				],
+				"line": 53
+			},
+			"4": {
+				"loc": { "start": { "line": 68, "column": 21 }, "end": { "line": 68, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 68, "column": 44 }, "end": { "line": 68, "column": 55 } },
+					{ "start": { "line": 68, "column": 55 }, "end": { "line": 68, "column": null } }
+				],
+				"line": 68
+			},
+			"5": {
+				"loc": { "start": { "line": 70, "column": 3 }, "end": { "line": 72, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 70, "column": 3 }, "end": { "line": 72, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 70
+			},
+			"6": {
+				"loc": { "start": { "line": 92, "column": 1 }, "end": { "line": 92, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 92, "column": 1 }, "end": { "line": 92, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 92
+			},
+			"7": {
+				"loc": { "start": { "line": 125, "column": 4 }, "end": { "line": 127, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 125, "column": 4 }, "end": { "line": 127, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 125
+			}
+		},
+		"s": {
+			"0": 9,
+			"1": 1,
+			"2": 1,
+			"3": 0,
+			"4": 0,
+			"5": 0,
+			"6": 0,
+			"7": 9,
+			"8": 5,
+			"9": 5,
+			"10": 0,
+			"11": 0,
+			"12": 0,
+			"13": 9,
+			"14": 5,
+			"15": 5,
+			"16": 5,
+			"17": 5,
+			"18": 0,
+			"19": 5,
+			"20": 5,
+			"21": 9,
+			"22": 5,
+			"23": 0,
+			"24": 5,
+			"25": 5,
+			"26": 9,
+			"27": 9,
+			"28": 0,
+			"29": 0,
+			"30": 0,
+			"31": 0,
+			"32": 0,
+			"33": 0,
+			"34": 9,
+			"35": 9,
+			"36": 9,
+			"37": 9
+		},
+		"f": { "0": 1, "1": 5, "2": 5, "3": 5, "4": 5, "5": 5, "6": 0, "7": 0 },
+		"b": {
+			"0": [1, 0],
+			"1": [5, 0],
+			"2": [0, 0],
+			"3": [0, 0, 0],
+			"4": [0, 5],
+			"5": [0, 5],
+			"6": [0, 5],
+			"7": [0, 0]
+		},
+		"meta": {
+			"lastBranch": 8,
+			"lastFunction": 8,
+			"lastStatement": 38,
+			"seen": {
+				"s:9:34:29:Infinity": 0,
+				"f:13:3:13:Infinity": 0,
+				"b:15:4:17:Infinity:undefined:undefined:undefined:undefined": 0,
+				"s:15:4:17:Infinity": 1,
+				"s:16:5:16:Infinity": 2,
+				"s:19:4:24:Infinity": 3,
+				"s:20:5:20:Infinity": 4,
+				"s:21:5:21:Infinity": 5,
+				"s:23:5:23:Infinity": 6,
+				"s:37:32:37:Infinity": 7,
+				"f:49:9:49:32": 1,
+				"b:50:1:52:Infinity:undefined:undefined:undefined:undefined": 1,
+				"s:50:1:52:Infinity": 8,
+				"s:51:2:51:Infinity": 9,
+				"b:53:1:55:Infinity:undefined:undefined:undefined:undefined": 2,
+				"s:53:1:55:Infinity": 10,
+				"b:53:5:53:29:53:29:53:50:53:50:53:80": 3,
+				"s:54:2:54:Infinity": 11,
+				"s:56:1:56:Infinity": 12,
+				"s:62:33:79:Infinity": 13,
+				"f:62:59:62:Infinity": 2,
+				"s:64:15:64:Infinity": 14,
+				"s:66:2:76:Infinity": 15,
+				"f:66:16:66:23": 3,
+				"s:68:21:68:Infinity": 16,
+				"b:68:44:68:55:68:55:68:Infinity": 4,
+				"b:70:3:72:Infinity:undefined:undefined:undefined:undefined": 5,
+				"s:70:3:72:Infinity": 17,
+				"s:71:4:71:Infinity": 18,
+				"s:74:3:74:Infinity": 19,
+				"s:75:3:75:Infinity": 20,
+				"s:91:37:94:Infinity": 21,
+				"f:91:39:91:51": 4,
+				"b:92:1:92:Infinity:undefined:undefined:undefined:undefined": 6,
+				"s:92:1:92:Infinity": 22,
+				"s:92:26:92:Infinity": 23,
+				"s:93:1:93:Infinity": 24,
+				"f:93:12:93:20": 5,
+				"s:93:30:93:60": 25,
+				"s:96:32:111:Infinity": 26,
+				"s:119:41:137:Infinity": 27,
+				"f:120:40:120:Infinity": 6,
+				"s:122:17:122:Infinity": 28,
+				"s:124:3:131:Infinity": 29,
+				"f:124:16:124:23": 7,
+				"b:125:4:127:Infinity:undefined:undefined:undefined:undefined": 7,
+				"s:125:4:127:Infinity": 30,
+				"s:126:5:126:Infinity": 31,
+				"s:129:4:129:Infinity": 32,
+				"s:130:4:130:Infinity": 33,
+				"s:145:37:150:Infinity": 34,
+				"s:158:39:158:Infinity": 35,
+				"s:166:42:166:Infinity": 36,
+				"s:174:52:233:Infinity": 37
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\model.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\model.ts",
+		"statementMap": {
+			"0": { "start": { "line": 8, "column": 32 }, "end": { "line": 8, "column": null } },
+			"1": { "start": { "line": 10, "column": 38 }, "end": { "line": 10, "column": null } },
+			"2": { "start": { "line": 18, "column": 48 }, "end": { "line": 18, "column": null } },
+			"3": { "start": { "line": 26, "column": 40 }, "end": { "line": 26, "column": null } },
+			"4": { "start": { "line": 28, "column": 45 }, "end": { "line": 28, "column": null } },
+			"5": { "start": { "line": 35, "column": 44 }, "end": { "line": 44, "column": null } },
+			"6": { "start": { "line": 45, "column": 44 }, "end": { "line": 45, "column": null } },
+			"7": { "start": { "line": 51, "column": 31 }, "end": { "line": 51, "column": null } },
+			"8": { "start": { "line": 53, "column": 37 }, "end": { "line": 53, "column": null } },
+			"9": { "start": { "line": 58, "column": 32 }, "end": { "line": 58, "column": null } },
+			"10": { "start": { "line": 63, "column": 33 }, "end": { "line": 67, "column": null } },
+			"11": { "start": { "line": 69, "column": 28 }, "end": { "line": 69, "column": null } },
+			"12": { "start": { "line": 70, "column": 33 }, "end": { "line": 70, "column": null } },
+			"13": { "start": { "line": 76, "column": 38 }, "end": { "line": 79, "column": null } },
+			"14": { "start": { "line": 81, "column": 39 }, "end": { "line": 81, "column": null } },
+			"15": { "start": { "line": 82, "column": 44 }, "end": { "line": 82, "column": null } },
+			"16": { "start": { "line": 89, "column": 31 }, "end": { "line": 89, "column": null } },
+			"17": { "start": { "line": 91, "column": 37 }, "end": { "line": 91, "column": null } },
+			"18": { "start": { "line": 95, "column": 13 }, "end": { "line": 96, "column": null } },
+			"19": { "start": { "line": 96, "column": 1 }, "end": { "line": 96, "column": null } },
+			"20": { "start": { "line": 102, "column": 31 }, "end": { "line": 182, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 95, "column": 13 }, "end": { "line": 95, "column": 33 } },
+				"loc": { "start": { "line": 96, "column": 1 }, "end": { "line": 96, "column": null } },
+				"line": 96
+			}
+		},
+		"branchMap": {},
+		"s": {
+			"0": 8,
+			"1": 8,
+			"2": 8,
+			"3": 8,
+			"4": 8,
+			"5": 8,
+			"6": 8,
+			"7": 8,
+			"8": 8,
+			"9": 8,
+			"10": 8,
+			"11": 8,
+			"12": 8,
+			"13": 8,
+			"14": 8,
+			"15": 8,
+			"16": 8,
+			"17": 8,
+			"18": 8,
+			"19": 0,
+			"20": 8
+		},
+		"f": { "0": 0 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 21,
+			"seen": {
+				"s:8:32:8:Infinity": 0,
+				"s:10:38:10:Infinity": 1,
+				"s:18:48:18:Infinity": 2,
+				"s:26:40:26:Infinity": 3,
+				"s:28:45:28:Infinity": 4,
+				"s:35:44:44:Infinity": 5,
+				"s:45:44:45:Infinity": 6,
+				"s:51:31:51:Infinity": 7,
+				"s:53:37:53:Infinity": 8,
+				"s:58:32:58:Infinity": 9,
+				"s:63:33:67:Infinity": 10,
+				"s:69:28:69:Infinity": 11,
+				"s:70:33:70:Infinity": 12,
+				"s:76:38:79:Infinity": 13,
+				"s:81:39:81:Infinity": 14,
+				"s:82:44:82:Infinity": 15,
+				"s:89:31:89:Infinity": 16,
+				"s:91:37:91:Infinity": 17,
+				"s:95:13:96:Infinity": 18,
+				"f:95:13:95:33": 0,
+				"s:96:1:96:Infinity": 19,
+				"s:102:31:182:Infinity": 20
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\provider-identifiers.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\provider-identifiers.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 35 }, "end": { "line": 41, "column": null } },
+			"1": { "start": { "line": 46, "column": 42 }, "end": { "line": 56, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:6:35:41:Infinity": 0, "s:46:42:56:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\provider-settings.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\provider-settings.ts",
+		"statementMap": {
+			"0": { "start": { "line": 46, "column": 49 }, "end": { "line": 46, "column": null } },
+			"1": { "start": { "line": 47, "column": 46 }, "end": { "line": 47, "column": null } },
+			"2": { "start": { "line": 55, "column": 32 }, "end": { "line": 68, "column": null } },
+			"3": { "start": { "line": 72, "column": 13 }, "end": { "line": 73, "column": null } },
+			"4": { "start": { "line": 73, "column": 1 }, "end": { "line": 73, "column": null } },
+			"5": { "start": { "line": 81, "column": 30 }, "end": { "line": 81, "column": null } },
+			"6": { "start": { "line": 85, "column": 13 }, "end": { "line": 85, "column": null } },
+			"7": { "start": { "line": 85, "column": 70 }, "end": { "line": 85, "column": null } },
+			"8": { "start": { "line": 94, "column": 33 }, "end": { "line": 94, "column": null } },
+			"9": { "start": { "line": 98, "column": 13 }, "end": { "line": 99, "column": null } },
+			"10": { "start": { "line": 99, "column": 1 }, "end": { "line": 99, "column": null } },
+			"11": { "start": { "line": 107, "column": 31 }, "end": { "line": 107, "column": null } },
+			"12": { "start": { "line": 111, "column": 13 }, "end": { "line": 111, "column": null } },
+			"13": { "start": { "line": 111, "column": 72 }, "end": { "line": 111, "column": null } },
+			"14": { "start": { "line": 120, "column": 29 }, "end": { "line": 120, "column": null } },
+			"15": { "start": { "line": 124, "column": 13 }, "end": { "line": 124, "column": null } },
+			"16": { "start": { "line": 124, "column": 68 }, "end": { "line": 124, "column": null } },
+			"17": { "start": { "line": 130, "column": 29 }, "end": { "line": 130, "column": null } },
+			"18": { "start": { "line": 132, "column": 35 }, "end": { "line": 132, "column": null } },
+			"19": { "start": { "line": 136, "column": 13 }, "end": { "line": 137, "column": null } },
+			"20": { "start": { "line": 137, "column": 1 }, "end": { "line": 137, "column": null } },
+			"21": { "start": { "line": 143, "column": 36 }, "end": { "line": 143, "column": null } },
+			"22": { "start": { "line": 148, "column": 42 }, "end": { "line": 148, "column": null } },
+			"23": { "start": { "line": 152, "column": 13 }, "end": { "line": 153, "column": null } },
+			"24": { "start": { "line": 153, "column": 1 }, "end": { "line": 153, "column": null } },
+			"25": { "start": { "line": 155, "column": 46 }, "end": { "line": 155, "column": null } },
+			"26": { "start": { "line": 163, "column": 43 }, "end": { "line": 168, "column": null } },
+			"27": { "start": { "line": 176, "column": 35 }, "end": { "line": 191, "column": null } },
+			"28": { "start": { "line": 194, "column": 38 }, "end": { "line": 196, "column": null } },
+			"29": { "start": { "line": 198, "column": 24 }, "end": { "line": 203, "column": null } },
+			"30": { "start": { "line": 205, "column": 25 }, "end": { "line": 210, "column": null } },
+			"31": { "start": { "line": 212, "column": 22 }, "end": { "line": 230, "column": null } },
+			"32": { "start": { "line": 232, "column": 21 }, "end": { "line": 238, "column": null } },
+			"33": { "start": { "line": 240, "column": 21 }, "end": { "line": 251, "column": null } },
+			"34": { "start": { "line": 253, "column": 21 }, "end": { "line": 258, "column": null } },
+			"35": { "start": { "line": 260, "column": 23 }, "end": { "line": 269, "column": null } },
+			"36": { "start": { "line": 271, "column": 23 }, "end": { "line": 276, "column": null } },
+			"37": { "start": { "line": 278, "column": 21 }, "end": { "line": 281, "column": null } },
+			"38": { "start": { "line": 283, "column": 24 }, "end": { "line": 286, "column": null } },
+			"39": { "start": { "line": 288, "column": 26 }, "end": { "line": 291, "column": null } },
+			"40": { "start": { "line": 293, "column": 27 }, "end": { "line": 299, "column": null } },
+			"41": { "start": { "line": 301, "column": 22 }, "end": { "line": 304, "column": null } },
+			"42": { "start": { "line": 306, "column": 23 }, "end": { "line": 309, "column": null } },
+			"43": { "start": { "line": 311, "column": 18 }, "end": { "line": 314, "column": null } },
+			"44": { "start": { "line": 316, "column": 23 }, "end": { "line": 321, "column": null } },
+			"45": { "start": { "line": 323, "column": 40 }, "end": { "line": 323, "column": null } },
+			"46": { "start": { "line": 326, "column": 23 }, "end": { "line": 329, "column": null } },
+			"47": { "start": { "line": 331, "column": 22 }, "end": { "line": 336, "column": null } },
+			"48": { "start": { "line": 338, "column": 19 }, "end": { "line": 348, "column": null } },
+			"49": { "start": { "line": 350, "column": 23 }, "end": { "line": 354, "column": null } },
+			"50": { "start": { "line": 356, "column": 22 }, "end": { "line": 359, "column": null } },
+			"51": { "start": { "line": 361, "column": 21 }, "end": { "line": 363, "column": null } },
+			"52": { "start": { "line": 365, "column": 18 }, "end": { "line": 367, "column": null } },
+			"53": { "start": { "line": 369, "column": 22 }, "end": { "line": 374, "column": null } },
+			"54": { "start": { "line": 376, "column": 24 }, "end": { "line": 378, "column": null } },
+			"55": { "start": { "line": 380, "column": 32 }, "end": { "line": 380, "column": null } },
+			"56": { "start": { "line": 384, "column": 18 }, "end": { "line": 387, "column": null } },
+			"57": { "start": { "line": 389, "column": 24 }, "end": { "line": 391, "column": null } },
+			"58": { "start": { "line": 393, "column": 23 }, "end": { "line": 395, "column": null } },
+			"59": { "start": { "line": 397, "column": 23 }, "end": { "line": 399, "column": null } },
+			"60": { "start": { "line": 401, "column": 30 }, "end": { "line": 404, "column": null } },
+			"61": { "start": { "line": 406, "column": 25 }, "end": { "line": 409, "column": null } },
+			"62": { "start": { "line": 411, "column": 21 }, "end": { "line": 414, "column": null } },
+			"63": { "start": { "line": 416, "column": 25 }, "end": { "line": 420, "column": null } },
+			"64": { "start": { "line": 422, "column": 22 }, "end": { "line": 424, "column": null } },
+			"65": { "start": { "line": 426, "column": 22 }, "end": { "line": 428, "column": null } },
+			"66": { "start": { "line": 430, "column": 51 }, "end": { "line": 466, "column": null } },
+			"67": { "start": { "line": 468, "column": 38 }, "end": { "line": 505, "column": null } },
+			"68": { "start": { "line": 509, "column": 44 }, "end": { "line": 509, "column": null } },
+			"69": { "start": { "line": 511, "column": 57 }, "end": { "line": 513, "column": null } },
+			"70": { "start": { "line": 517, "column": 38 }, "end": { "line": 517, "column": null } },
+			"71": { "start": { "line": 523, "column": 27 }, "end": { "line": 537, "column": null } },
+			"72": { "start": { "line": 541, "column": 13 }, "end": { "line": 544, "column": null } },
+			"73": { "start": { "line": 542, "column": 20 }, "end": { "line": 542, "column": null } },
+			"74": { "start": { "line": 542, "column": 46 }, "end": { "line": 542, "column": 59 } },
+			"75": { "start": { "line": 543, "column": 1 }, "end": { "line": 543, "column": null } },
+			"76": { "start": { "line": 552, "column": 13 }, "end": { "line": 553, "column": null } },
+			"77": { "start": { "line": 553, "column": 1 }, "end": { "line": 553, "column": null } },
+			"78": { "start": { "line": 555, "column": 74 }, "end": { "line": 587, "column": null } },
+			"79": { "start": { "line": 594, "column": 57 }, "end": { "line": 598, "column": null } },
+			"80": { "start": { "line": 600, "column": 58 }, "end": { "line": 603, "column": null } },
+			"81": { "start": { "line": 605, "column": 34 }, "end": { "line": 605, "column": null } },
+			"82": { "start": { "line": 606, "column": 33 }, "end": { "line": 606, "column": null } },
+			"83": { "start": { "line": 608, "column": 13 }, "end": { "line": 649, "column": null } },
+			"84": { "start": { "line": 609, "column": 1 }, "end": { "line": 611, "column": null } },
+			"85": { "start": { "line": 610, "column": 2 }, "end": { "line": 610, "column": null } },
+			"86": { "start": { "line": 613, "column": 1 }, "end": { "line": 620, "column": null } },
+			"87": { "start": { "line": 619, "column": 2 }, "end": { "line": 619, "column": null } },
+			"88": { "start": { "line": 623, "column": 1 }, "end": { "line": 630, "column": null } },
+			"89": { "start": { "line": 629, "column": 2 }, "end": { "line": 629, "column": null } },
+			"90": { "start": { "line": 639, "column": 1 }, "end": { "line": 646, "column": null } },
+			"91": { "start": { "line": 645, "column": 2 }, "end": { "line": 645, "column": null } },
+			"92": { "start": { "line": 648, "column": 1 }, "end": { "line": 648, "column": null } },
+			"93": { "start": { "line": 658, "column": 4 }, "end": { "line": 758, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 72, "column": 13 }, "end": { "line": 72, "column": 34 } },
+				"loc": { "start": { "line": 73, "column": 1 }, "end": { "line": 73, "column": null } },
+				"line": 73
+			},
+			"1": {
+				"name": "(anonymous_1)",
+				"decl": { "start": { "line": 85, "column": 13 }, "end": { "line": 85, "column": 32 } },
+				"loc": { "start": { "line": 85, "column": 70 }, "end": { "line": 85, "column": null } },
+				"line": 85
+			},
+			"2": {
+				"name": "(anonymous_2)",
+				"decl": { "start": { "line": 98, "column": 13 }, "end": { "line": 98, "column": 35 } },
+				"loc": { "start": { "line": 99, "column": 1 }, "end": { "line": 99, "column": null } },
+				"line": 99
+			},
+			"3": {
+				"name": "(anonymous_3)",
+				"decl": { "start": { "line": 111, "column": 13 }, "end": { "line": 111, "column": 33 } },
+				"loc": { "start": { "line": 111, "column": 72 }, "end": { "line": 111, "column": null } },
+				"line": 111
+			},
+			"4": {
+				"name": "(anonymous_4)",
+				"decl": { "start": { "line": 124, "column": 13 }, "end": { "line": 124, "column": 31 } },
+				"loc": { "start": { "line": 124, "column": 68 }, "end": { "line": 124, "column": null } },
+				"line": 124
+			},
+			"5": {
+				"name": "(anonymous_5)",
+				"decl": { "start": { "line": 136, "column": 13 }, "end": { "line": 136, "column": 31 } },
+				"loc": { "start": { "line": 137, "column": 1 }, "end": { "line": 137, "column": null } },
+				"line": 137
+			},
+			"6": {
+				"name": "(anonymous_6)",
+				"decl": { "start": { "line": 152, "column": 13 }, "end": { "line": 152, "column": 34 } },
+				"loc": { "start": { "line": 153, "column": 1 }, "end": { "line": 153, "column": null } },
+				"line": 153
+			},
+			"7": {
+				"name": "(anonymous_7)",
+				"decl": { "start": { "line": 541, "column": 13 }, "end": { "line": 541, "column": 27 } },
+				"loc": { "start": { "line": 541, "column": 78 }, "end": { "line": 544, "column": null } },
+				"line": 541
+			},
+			"8": {
+				"name": "(anonymous_8)",
+				"decl": { "start": { "line": 542, "column": 32 }, "end": { "line": 542, "column": 38 } },
+				"loc": { "start": { "line": 542, "column": 46 }, "end": { "line": 542, "column": 59 } },
+				"line": 542
+			},
+			"9": {
+				"name": "(anonymous_9)",
+				"decl": { "start": { "line": 552, "column": 13 }, "end": { "line": 552, "column": 34 } },
+				"loc": { "start": { "line": 553, "column": 1 }, "end": { "line": 553, "column": null } },
+				"line": 553
+			},
+			"10": {
+				"name": "(anonymous_10)",
+				"decl": { "start": { "line": 608, "column": 13 }, "end": { "line": 608, "column": 31 } },
+				"loc": { "start": { "line": 608, "column": 112 }, "end": { "line": 649, "column": null } },
+				"line": 608
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 137, "column": 1 }, "end": { "line": 137, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 137, "column": 1 }, "end": { "line": 137, "column": 28 } },
+					{ "start": { "line": 137, "column": 28 }, "end": { "line": 137, "column": null } }
+				],
+				"line": 137
+			},
+			"1": {
+				"loc": { "start": { "line": 543, "column": 8 }, "end": { "line": 543, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 543, "column": 21 }, "end": { "line": 543, "column": 44 } },
+					{ "start": { "line": 543, "column": 44 }, "end": { "line": 543, "column": null } }
+				],
+				"line": 543
+			},
+			"2": {
+				"loc": { "start": { "line": 553, "column": 1 }, "end": { "line": 553, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 553, "column": 1 }, "end": { "line": 553, "column": 24 } },
+					{ "start": { "line": 553, "column": 24 }, "end": { "line": 553, "column": 52 } },
+					{ "start": { "line": 553, "column": 52 }, "end": { "line": 553, "column": 78 } },
+					{ "start": { "line": 553, "column": 78 }, "end": { "line": 553, "column": null } }
+				],
+				"line": 553
+			},
+			"3": {
+				"loc": { "start": { "line": 609, "column": 1 }, "end": { "line": 611, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 609, "column": 1 }, "end": { "line": 611, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 609
+			},
+			"4": {
+				"loc": { "start": { "line": 609, "column": 5 }, "end": { "line": 609, "column": 63 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 609, "column": 5 }, "end": { "line": 609, "column": 17 } },
+					{ "start": { "line": 609, "column": 17 }, "end": { "line": 609, "column": 63 } }
+				],
+				"line": 609
+			},
+			"5": {
+				"loc": { "start": { "line": 613, "column": 1 }, "end": { "line": 620, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 613, "column": 1 }, "end": { "line": 620, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 613
+			},
+			"6": {
+				"loc": { "start": { "line": 614, "column": 2 }, "end": { "line": 617, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 614, "column": 2 }, "end": { "line": 614, "column": null } },
+					{ "start": { "line": 615, "column": 2 }, "end": { "line": 615, "column": null } },
+					{ "start": { "line": 616, "column": 2 }, "end": { "line": 616, "column": null } },
+					{ "start": { "line": 617, "column": 2 }, "end": { "line": 617, "column": null } }
+				],
+				"line": 614
+			},
+			"7": {
+				"loc": { "start": { "line": 623, "column": 1 }, "end": { "line": 630, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 623, "column": 1 }, "end": { "line": 630, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 623
+			},
+			"8": {
+				"loc": { "start": { "line": 624, "column": 2 }, "end": { "line": 627, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 624, "column": 2 }, "end": { "line": 624, "column": null } },
+					{ "start": { "line": 625, "column": 2 }, "end": { "line": 625, "column": null } },
+					{ "start": { "line": 626, "column": 2 }, "end": { "line": 626, "column": null } },
+					{ "start": { "line": 627, "column": 2 }, "end": { "line": 627, "column": null } }
+				],
+				"line": 624
+			},
+			"9": {
+				"loc": { "start": { "line": 639, "column": 1 }, "end": { "line": 646, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 639, "column": 1 }, "end": { "line": 646, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 639
+			},
+			"10": {
+				"loc": { "start": { "line": 640, "column": 2 }, "end": { "line": 643, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 640, "column": 2 }, "end": { "line": 640, "column": null } },
+					{ "start": { "line": 641, "column": 2 }, "end": { "line": 641, "column": null } },
+					{ "start": { "line": 642, "column": 2 }, "end": { "line": 642, "column": null } },
+					{ "start": { "line": 642, "column": 2 }, "end": { "line": 643, "column": null } }
+				],
+				"line": 640
+			}
+		},
+		"s": {
+			"0": 8,
+			"1": 8,
+			"2": 8,
+			"3": 8,
+			"4": 18,
+			"5": 8,
+			"6": 8,
+			"7": 8,
+			"8": 8,
+			"9": 8,
+			"10": 7,
+			"11": 8,
+			"12": 8,
+			"13": 7,
+			"14": 8,
+			"15": 8,
+			"16": 7,
+			"17": 8,
+			"18": 8,
+			"19": 8,
+			"20": 45,
+			"21": 8,
+			"22": 8,
+			"23": 8,
+			"24": 44,
+			"25": 8,
+			"26": 8,
+			"27": 8,
+			"28": 8,
+			"29": 8,
+			"30": 8,
+			"31": 8,
+			"32": 8,
+			"33": 8,
+			"34": 8,
+			"35": 8,
+			"36": 8,
+			"37": 8,
+			"38": 8,
+			"39": 8,
+			"40": 8,
+			"41": 8,
+			"42": 8,
+			"43": 8,
+			"44": 8,
+			"45": 8,
+			"46": 8,
+			"47": 8,
+			"48": 8,
+			"49": 8,
+			"50": 8,
+			"51": 8,
+			"52": 8,
+			"53": 8,
+			"54": 8,
+			"55": 8,
+			"56": 8,
+			"57": 8,
+			"58": 8,
+			"59": 8,
+			"60": 8,
+			"61": 8,
+			"62": 8,
+			"63": 8,
+			"64": 8,
+			"65": 8,
+			"66": 8,
+			"67": 8,
+			"68": 8,
+			"69": 8,
+			"70": 8,
+			"71": 8,
+			"72": 8,
+			"73": 0,
+			"74": 0,
+			"75": 0,
+			"76": 8,
+			"77": 0,
+			"78": 8,
+			"79": 8,
+			"80": 8,
+			"81": 8,
+			"82": 8,
+			"83": 8,
+			"84": 46,
+			"85": 6,
+			"86": 40,
+			"87": 7,
+			"88": 33,
+			"89": 5,
+			"90": 28,
+			"91": 6,
+			"92": 22,
+			"93": 8
+		},
+		"f": { "0": 18, "1": 8, "2": 7, "3": 7, "4": 7, "5": 45, "6": 44, "7": 0, "8": 0, "9": 0, "10": 46 },
+		"b": {
+			"0": [45, 44],
+			"1": [0, 0],
+			"2": [0, 0, 0, 0],
+			"3": [6, 40],
+			"4": [46, 44],
+			"5": [7, 33],
+			"6": [40, 38, 12, 10],
+			"7": [5, 28],
+			"8": [33, 31, 10, 9],
+			"9": [6, 22],
+			"10": [28, 26, 12, 11]
+		},
+		"meta": {
+			"lastBranch": 11,
+			"lastFunction": 11,
+			"lastStatement": 94,
+			"seen": {
+				"s:46:49:46:Infinity": 0,
+				"s:47:46:47:Infinity": 1,
+				"s:55:32:68:Infinity": 2,
+				"s:72:13:73:Infinity": 3,
+				"f:72:13:72:34": 0,
+				"s:73:1:73:Infinity": 4,
+				"s:81:30:81:Infinity": 5,
+				"s:85:13:85:Infinity": 6,
+				"f:85:13:85:32": 1,
+				"s:85:70:85:Infinity": 7,
+				"s:94:33:94:Infinity": 8,
+				"s:98:13:99:Infinity": 9,
+				"f:98:13:98:35": 2,
+				"s:99:1:99:Infinity": 10,
+				"s:107:31:107:Infinity": 11,
+				"s:111:13:111:Infinity": 12,
+				"f:111:13:111:33": 3,
+				"s:111:72:111:Infinity": 13,
+				"s:120:29:120:Infinity": 14,
+				"s:124:13:124:Infinity": 15,
+				"f:124:13:124:31": 4,
+				"s:124:68:124:Infinity": 16,
+				"s:130:29:130:Infinity": 17,
+				"s:132:35:132:Infinity": 18,
+				"s:136:13:137:Infinity": 19,
+				"f:136:13:136:31": 5,
+				"s:137:1:137:Infinity": 20,
+				"b:137:1:137:28:137:28:137:Infinity": 0,
+				"s:143:36:143:Infinity": 21,
+				"s:148:42:148:Infinity": 22,
+				"s:152:13:153:Infinity": 23,
+				"f:152:13:152:34": 6,
+				"s:153:1:153:Infinity": 24,
+				"s:155:46:155:Infinity": 25,
+				"s:163:43:168:Infinity": 26,
+				"s:176:35:191:Infinity": 27,
+				"s:194:38:196:Infinity": 28,
+				"s:198:24:203:Infinity": 29,
+				"s:205:25:210:Infinity": 30,
+				"s:212:22:230:Infinity": 31,
+				"s:232:21:238:Infinity": 32,
+				"s:240:21:251:Infinity": 33,
+				"s:253:21:258:Infinity": 34,
+				"s:260:23:269:Infinity": 35,
+				"s:271:23:276:Infinity": 36,
+				"s:278:21:281:Infinity": 37,
+				"s:283:24:286:Infinity": 38,
+				"s:288:26:291:Infinity": 39,
+				"s:293:27:299:Infinity": 40,
+				"s:301:22:304:Infinity": 41,
+				"s:306:23:309:Infinity": 42,
+				"s:311:18:314:Infinity": 43,
+				"s:316:23:321:Infinity": 44,
+				"s:323:40:323:Infinity": 45,
+				"s:326:23:329:Infinity": 46,
+				"s:331:22:336:Infinity": 47,
+				"s:338:19:348:Infinity": 48,
+				"s:350:23:354:Infinity": 49,
+				"s:356:22:359:Infinity": 50,
+				"s:361:21:363:Infinity": 51,
+				"s:365:18:367:Infinity": 52,
+				"s:369:22:374:Infinity": 53,
+				"s:376:24:378:Infinity": 54,
+				"s:380:32:380:Infinity": 55,
+				"s:384:18:387:Infinity": 56,
+				"s:389:24:391:Infinity": 57,
+				"s:393:23:395:Infinity": 58,
+				"s:397:23:399:Infinity": 59,
+				"s:401:30:404:Infinity": 60,
+				"s:406:25:409:Infinity": 61,
+				"s:411:21:414:Infinity": 62,
+				"s:416:25:420:Infinity": 63,
+				"s:422:22:424:Infinity": 64,
+				"s:426:22:428:Infinity": 65,
+				"s:430:51:466:Infinity": 66,
+				"s:468:38:505:Infinity": 67,
+				"s:509:44:509:Infinity": 68,
+				"s:511:57:513:Infinity": 69,
+				"s:517:38:517:Infinity": 70,
+				"s:523:27:537:Infinity": 71,
+				"s:541:13:544:Infinity": 72,
+				"f:541:13:541:27": 7,
+				"s:542:20:542:Infinity": 73,
+				"f:542:32:542:38": 8,
+				"s:542:46:542:59": 74,
+				"s:543:1:543:Infinity": 75,
+				"b:543:21:543:44:543:44:543:Infinity": 1,
+				"s:552:13:553:Infinity": 76,
+				"f:552:13:552:34": 9,
+				"s:553:1:553:Infinity": 77,
+				"b:553:1:553:24:553:24:553:52:553:52:553:78:553:78:553:Infinity": 2,
+				"s:555:74:587:Infinity": 78,
+				"s:594:57:598:Infinity": 79,
+				"s:600:58:603:Infinity": 80,
+				"s:605:34:605:Infinity": 81,
+				"s:606:33:606:Infinity": 82,
+				"s:608:13:649:Infinity": 83,
+				"f:608:13:608:31": 10,
+				"b:609:1:611:Infinity:undefined:undefined:undefined:undefined": 3,
+				"s:609:1:611:Infinity": 84,
+				"b:609:5:609:17:609:17:609:63": 4,
+				"s:610:2:610:Infinity": 85,
+				"b:613:1:620:Infinity:undefined:undefined:undefined:undefined": 5,
+				"s:613:1:620:Infinity": 86,
+				"b:614:2:614:Infinity:615:2:615:Infinity:616:2:616:Infinity:617:2:617:Infinity": 6,
+				"s:619:2:619:Infinity": 87,
+				"b:623:1:630:Infinity:undefined:undefined:undefined:undefined": 7,
+				"s:623:1:630:Infinity": 88,
+				"b:624:2:624:Infinity:625:2:625:Infinity:626:2:626:Infinity:627:2:627:Infinity": 8,
+				"s:629:2:629:Infinity": 89,
+				"b:639:1:646:Infinity:undefined:undefined:undefined:undefined": 9,
+				"s:639:1:646:Infinity": 90,
+				"b:640:2:640:Infinity:641:2:641:Infinity:642:2:642:Infinity:642:2:643:Infinity": 10,
+				"s:645:2:645:Infinity": 91,
+				"s:648:1:648:Infinity": 92,
+				"s:658:4:758:Infinity": 93
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\roomodes-schema.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\roomodes-schema.ts",
+		"statementMap": {
+			"0": { "start": { "line": 16, "column": 22 }, "end": { "line": 16, "column": null } },
+			"1": { "start": { "line": 17, "column": 28 }, "end": { "line": 17, "column": null } },
+			"2": { "start": { "line": 20, "column": 25 }, "end": { "line": 20, "column": null } },
+			"3": { "start": { "line": 24, "column": 23 }, "end": { "line": 27, "column": null } },
+			"4": { "start": { "line": 31, "column": 33 }, "end": { "line": 34, "column": null } },
+			"5": { "start": { "line": 37, "column": 26 }, "end": { "line": 41, "column": null } },
+			"6": { "start": { "line": 48, "column": 7 }, "end": { "line": 51, "column": null } },
+			"7": { "start": { "line": 53, "column": 1 }, "end": { "line": 53, "column": null } },
+			"8": { "start": { "line": 54, "column": 1 }, "end": { "line": 54, "column": null } },
+			"9": { "start": { "line": 55, "column": 1 }, "end": { "line": 55, "column": null } },
+			"10": { "start": { "line": 57, "column": 1 }, "end": { "line": 57, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "generateRoomodesJsonSchema",
+				"decl": { "start": { "line": 47, "column": 16 }, "end": { "line": 47, "column": 70 } },
+				"loc": { "start": { "line": 47, "column": 70 }, "end": { "line": 58, "column": null } },
+				"line": 47
+			}
+		},
+		"branchMap": {},
+		"s": { "0": 1, "1": 1, "2": 1, "3": 1, "4": 1, "5": 1, "6": 1, "7": 1, "8": 1, "9": 1, "10": 1 },
+		"f": { "0": 1 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 11,
+			"seen": {
+				"s:16:22:16:Infinity": 0,
+				"s:17:28:17:Infinity": 1,
+				"s:20:25:20:Infinity": 2,
+				"s:24:23:27:Infinity": 3,
+				"s:31:33:34:Infinity": 4,
+				"s:37:26:41:Infinity": 5,
+				"f:47:16:47:70": 0,
+				"s:48:7:51:Infinity": 6,
+				"s:53:1:53:Infinity": 7,
+				"s:54:1:54:Infinity": 8,
+				"s:55:1:55:Infinity": 9,
+				"s:57:1:57:Infinity": 10
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\rules.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\rules.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\skills.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\skills.ts",
+		"statementMap": {
+			"0": { "start": { "line": 33, "column": 37 }, "end": { "line": 33, "column": null } },
+			"1": { "start": { "line": 34, "column": 37 }, "end": { "line": 34, "column": null } },
+			"2": { "start": { "line": 41, "column": 32 }, "end": { "line": 41, "column": null } },
+			"3": { "start": { "line": 47, "column": 7 }, "end": { "line": 51, "column": null } },
+			"4": { "start": { "line": 48, "column": 1 }, "end": { "line": 48, "column": null } },
+			"5": { "start": { "line": 49, "column": 1 }, "end": { "line": 49, "column": null } },
+			"6": { "start": { "line": 50, "column": 1 }, "end": { "line": 50, "column": null } },
+			"7": { "start": { "line": 68, "column": 1 }, "end": { "line": 70, "column": null } },
+			"8": { "start": { "line": 69, "column": 2 }, "end": { "line": 69, "column": null } },
+			"9": { "start": { "line": 72, "column": 1 }, "end": { "line": 74, "column": null } },
+			"10": { "start": { "line": 73, "column": 2 }, "end": { "line": 73, "column": null } },
+			"11": { "start": { "line": 76, "column": 1 }, "end": { "line": 78, "column": null } },
+			"12": { "start": { "line": 77, "column": 2 }, "end": { "line": 77, "column": null } },
+			"13": { "start": { "line": 80, "column": 1 }, "end": { "line": 80, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 47, "column": 7 }, "end": { "line": 47, "column": 12 } },
+				"loc": { "start": { "line": 47, "column": 7 }, "end": { "line": 51, "column": null } },
+				"line": 47
+			},
+			"1": {
+				"name": "validateSkillName",
+				"decl": { "start": { "line": 67, "column": 16 }, "end": { "line": 67, "column": 34 } },
+				"loc": { "start": { "line": 67, "column": 75 }, "end": { "line": 81, "column": null } },
+				"line": 67
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 68, "column": 1 }, "end": { "line": 70, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 68, "column": 1 }, "end": { "line": 70, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 68
+			},
+			"1": {
+				"loc": { "start": { "line": 68, "column": 5 }, "end": { "line": 68, "column": 51 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 68, "column": 5 }, "end": { "line": 68, "column": 14 } },
+					{ "start": { "line": 68, "column": 14 }, "end": { "line": 68, "column": 51 } }
+				],
+				"line": 68
+			},
+			"2": {
+				"loc": { "start": { "line": 72, "column": 1 }, "end": { "line": 74, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 72, "column": 1 }, "end": { "line": 74, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 72
+			},
+			"3": {
+				"loc": { "start": { "line": 76, "column": 1 }, "end": { "line": 78, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 76, "column": 1 }, "end": { "line": 78, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 76
+			}
+		},
+		"s": {
+			"0": 4,
+			"1": 4,
+			"2": 4,
+			"3": 4,
+			"4": 4,
+			"5": 4,
+			"6": 4,
+			"7": 0,
+			"8": 0,
+			"9": 0,
+			"10": 0,
+			"11": 0,
+			"12": 0,
+			"13": 0
+		},
+		"f": { "0": 4, "1": 0 },
+		"b": { "0": [0, 0], "1": [0, 0], "2": [0, 0], "3": [0, 0] },
+		"meta": {
+			"lastBranch": 4,
+			"lastFunction": 2,
+			"lastStatement": 14,
+			"seen": {
+				"s:33:37:33:Infinity": 0,
+				"s:34:37:34:Infinity": 1,
+				"s:41:32:41:Infinity": 2,
+				"s:47:7:51:Infinity": 3,
+				"f:47:7:47:12": 0,
+				"s:48:1:48:Infinity": 4,
+				"s:49:1:49:Infinity": 5,
+				"s:50:1:50:Infinity": 6,
+				"f:67:16:67:34": 1,
+				"b:68:1:70:Infinity:undefined:undefined:undefined:undefined": 0,
+				"s:68:1:70:Infinity": 7,
+				"b:68:5:68:14:68:14:68:51": 1,
+				"s:69:2:69:Infinity": 8,
+				"b:72:1:74:Infinity:undefined:undefined:undefined:undefined": 2,
+				"s:72:1:74:Infinity": 9,
+				"s:73:2:73:Infinity": 10,
+				"b:76:1:78:Infinity:undefined:undefined:undefined:undefined": 3,
+				"s:76:1:78:Infinity": 11,
+				"s:77:2:77:Infinity": 12,
+				"s:80:1:80:Infinity": 13
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\task.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\task.ts",
+		"statementMap": {
+			"0": { "start": { "line": 99, "column": 7 }, "end": { "line": 105, "column": null } },
+			"1": { "start": { "line": 100, "column": 1 }, "end": { "line": 100, "column": null } },
+			"2": { "start": { "line": 101, "column": 1 }, "end": { "line": 101, "column": null } },
+			"3": { "start": { "line": 102, "column": 1 }, "end": { "line": 102, "column": null } },
+			"4": { "start": { "line": 103, "column": 1 }, "end": { "line": 103, "column": null } },
+			"5": { "start": { "line": 104, "column": 1 }, "end": { "line": 104, "column": null } },
+			"6": { "start": { "line": 107, "column": 34 }, "end": { "line": 110, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 99, "column": 7 }, "end": { "line": 99, "column": 12 } },
+				"loc": { "start": { "line": 99, "column": 7 }, "end": { "line": 105, "column": null } },
+				"line": 99
+			}
+		},
+		"branchMap": {},
+		"s": { "0": 5, "1": 5, "2": 5, "3": 5, "4": 5, "5": 5, "6": 5 },
+		"f": { "0": 5 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 7,
+			"seen": {
+				"s:99:7:105:Infinity": 0,
+				"f:99:7:99:12": 0,
+				"s:100:1:100:Infinity": 1,
+				"s:101:1:101:Infinity": 2,
+				"s:102:1:102:Infinity": 3,
+				"s:103:1:103:Infinity": 4,
+				"s:104:1:104:Infinity": 5,
+				"s:107:34:110:Infinity": 6
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\telemetry.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\telemetry.ts",
+		"statementMap": {
+			"0": { "start": { "line": 10, "column": 33 }, "end": { "line": 10, "column": null } },
+			"1": { "start": { "line": 12, "column": 39 }, "end": { "line": 12, "column": null } },
+			"2": { "start": { "line": 20, "column": 7 }, "end": { "line": 77, "column": null } },
+			"3": { "start": { "line": 21, "column": 1 }, "end": { "line": 21, "column": null } },
+			"4": { "start": { "line": 22, "column": 1 }, "end": { "line": 22, "column": null } },
+			"5": { "start": { "line": 23, "column": 1 }, "end": { "line": 23, "column": null } },
+			"6": { "start": { "line": 24, "column": 1 }, "end": { "line": 24, "column": null } },
+			"7": { "start": { "line": 25, "column": 1 }, "end": { "line": 25, "column": null } },
+			"8": { "start": { "line": 26, "column": 1 }, "end": { "line": 26, "column": null } },
+			"9": { "start": { "line": 27, "column": 1 }, "end": { "line": 27, "column": null } },
+			"10": { "start": { "line": 28, "column": 1 }, "end": { "line": 28, "column": null } },
+			"11": { "start": { "line": 29, "column": 1 }, "end": { "line": 29, "column": null } },
+			"12": { "start": { "line": 31, "column": 1 }, "end": { "line": 31, "column": null } },
+			"13": { "start": { "line": 32, "column": 1 }, "end": { "line": 32, "column": null } },
+			"14": { "start": { "line": 33, "column": 1 }, "end": { "line": 33, "column": null } },
+			"15": { "start": { "line": 35, "column": 1 }, "end": { "line": 35, "column": null } },
+			"16": { "start": { "line": 36, "column": 1 }, "end": { "line": 36, "column": null } },
+			"17": { "start": { "line": 37, "column": 1 }, "end": { "line": 37, "column": null } },
+			"18": { "start": { "line": 39, "column": 1 }, "end": { "line": 39, "column": null } },
+			"19": { "start": { "line": 40, "column": 1 }, "end": { "line": 40, "column": null } },
+			"20": { "start": { "line": 42, "column": 1 }, "end": { "line": 42, "column": null } },
+			"21": { "start": { "line": 43, "column": 1 }, "end": { "line": 43, "column": null } },
+			"22": { "start": { "line": 45, "column": 1 }, "end": { "line": 45, "column": null } },
+			"23": { "start": { "line": 47, "column": 1 }, "end": { "line": 47, "column": null } },
+			"24": { "start": { "line": 49, "column": 1 }, "end": { "line": 49, "column": null } },
+			"25": { "start": { "line": 50, "column": 1 }, "end": { "line": 50, "column": null } },
+			"26": { "start": { "line": 51, "column": 1 }, "end": { "line": 51, "column": null } },
+			"27": { "start": { "line": 52, "column": 1 }, "end": { "line": 52, "column": null } },
+			"28": { "start": { "line": 54, "column": 1 }, "end": { "line": 54, "column": null } },
+			"29": { "start": { "line": 55, "column": 1 }, "end": { "line": 55, "column": null } },
+			"30": { "start": { "line": 56, "column": 1 }, "end": { "line": 56, "column": null } },
+			"31": { "start": { "line": 57, "column": 1 }, "end": { "line": 57, "column": null } },
+			"32": { "start": { "line": 59, "column": 1 }, "end": { "line": 59, "column": null } },
+			"33": { "start": { "line": 60, "column": 1 }, "end": { "line": 60, "column": null } },
+			"34": { "start": { "line": 61, "column": 1 }, "end": { "line": 61, "column": null } },
+			"35": { "start": { "line": 62, "column": 1 }, "end": { "line": 62, "column": null } },
+			"36": { "start": { "line": 64, "column": 1 }, "end": { "line": 64, "column": null } },
+			"37": { "start": { "line": 66, "column": 1 }, "end": { "line": 66, "column": null } },
+			"38": { "start": { "line": 67, "column": 1 }, "end": { "line": 67, "column": null } },
+			"39": { "start": { "line": 69, "column": 1 }, "end": { "line": 69, "column": null } },
+			"40": { "start": { "line": 70, "column": 1 }, "end": { "line": 70, "column": null } },
+			"41": { "start": { "line": 71, "column": 1 }, "end": { "line": 71, "column": null } },
+			"42": { "start": { "line": 72, "column": 1 }, "end": { "line": 72, "column": null } },
+			"43": { "start": { "line": 73, "column": 1 }, "end": { "line": 73, "column": null } },
+			"44": { "start": { "line": 74, "column": 1 }, "end": { "line": 74, "column": null } },
+			"45": { "start": { "line": 75, "column": 1 }, "end": { "line": 75, "column": null } },
+			"46": { "start": { "line": 76, "column": 1 }, "end": { "line": 76, "column": null } },
+			"47": { "start": { "line": 83, "column": 41 }, "end": { "line": 91, "column": null } },
+			"48": { "start": { "line": 95, "column": 42 }, "end": { "line": 98, "column": null } },
+			"49": { "start": { "line": 102, "column": 40 }, "end": { "line": 104, "column": null } },
+			"50": { "start": { "line": 108, "column": 35 }, "end": { "line": 112, "column": null } },
+			"51": { "start": { "line": 116, "column": 36 }, "end": { "line": 131, "column": null } },
+			"52": { "start": { "line": 135, "column": 35 }, "end": { "line": 139, "column": null } },
+			"53": { "start": { "line": 143, "column": 41 }, "end": { "line": 147, "column": null } },
+			"54": { "start": { "line": 165, "column": 43 }, "end": { "line": 239, "column": null } },
+			"55": { "start": { "line": 278, "column": 40 }, "end": { "line": 281, "column": null } },
+			"56": { "start": { "line": 287, "column": 40 }, "end": { "line": 290, "column": null } },
+			"57": { "start": { "line": 321, "column": 1 }, "end": { "line": 325, "column": null } },
+			"58": { "start": { "line": 336, "column": 1 }, "end": { "line": 338, "column": null } },
+			"59": { "start": { "line": 337, "column": 2 }, "end": { "line": 337, "column": null } },
+			"60": { "start": { "line": 339, "column": 1 }, "end": { "line": 339, "column": null } },
+			"61": { "start": { "line": 352, "column": 24 }, "end": { "line": 352, "column": null } },
+			"62": { "start": { "line": 353, "column": 1 }, "end": { "line": 355, "column": null } },
+			"63": { "start": { "line": 354, "column": 2 }, "end": { "line": 354, "column": null } },
+			"64": { "start": { "line": 357, "column": 23 }, "end": { "line": 357, "column": null } },
+			"65": { "start": { "line": 359, "column": 1 }, "end": { "line": 373, "column": null } },
+			"66": { "start": { "line": 360, "column": 17 }, "end": { "line": 360, "column": null } },
+			"67": { "start": { "line": 363, "column": 2 }, "end": { "line": 365, "column": null } },
+			"68": { "start": { "line": 364, "column": 3 }, "end": { "line": 364, "column": null } },
+			"69": { "start": { "line": 368, "column": 2 }, "end": { "line": 370, "column": null } },
+			"70": { "start": { "line": 369, "column": 3 }, "end": { "line": 369, "column": null } },
+			"71": { "start": { "line": 375, "column": 1 }, "end": { "line": 375, "column": null } },
+			"72": { "start": { "line": 388, "column": 1 }, "end": { "line": 400, "column": null } },
+			"73": { "start": { "line": 390, "column": 2 }, "end": { "line": 390, "column": null } },
+			"74": { "start": { "line": 391, "column": 8 }, "end": { "line": 400, "column": null } },
+			"75": { "start": { "line": 393, "column": 2 }, "end": { "line": 393, "column": null } },
+			"76": { "start": { "line": 394, "column": 8 }, "end": { "line": 400, "column": null } },
+			"77": { "start": { "line": 396, "column": 20 }, "end": { "line": 396, "column": null } },
+			"78": { "start": { "line": 397, "column": 2 }, "end": { "line": 399, "column": null } },
+			"79": { "start": { "line": 398, "column": 3 }, "end": { "line": 398, "column": null } },
+			"80": { "start": { "line": 402, "column": 1 }, "end": { "line": 404, "column": null } },
+			"81": { "start": { "line": 403, "column": 2 }, "end": { "line": 403, "column": null } },
+			"82": { "start": { "line": 407, "column": 26 }, "end": { "line": 407, "column": null } },
+			"83": { "start": { "line": 408, "column": 1 }, "end": { "line": 410, "column": null } },
+			"84": { "start": { "line": 409, "column": 2 }, "end": { "line": 409, "column": null } },
+			"85": { "start": { "line": 412, "column": 1 }, "end": { "line": 412, "column": null } },
+			"86": { "start": { "line": 424, "column": 1 }, "end": { "line": 426, "column": null } },
+			"87": { "start": { "line": 425, "column": 2 }, "end": { "line": 425, "column": null } },
+			"88": { "start": { "line": 429, "column": 1 }, "end": { "line": 435, "column": null } },
+			"89": { "start": { "line": 430, "column": 2 }, "end": { "line": 434, "column": null } },
+			"90": { "start": { "line": 431, "column": 3 }, "end": { "line": 433, "column": null } },
+			"91": { "start": { "line": 432, "column": 4 }, "end": { "line": 432, "column": null } },
+			"92": { "start": { "line": 437, "column": 1 }, "end": { "line": 437, "column": null } },
+			"93": { "start": { "line": 452, "column": 2 }, "end": { "line": 452, "column": null } },
+			"94": { "start": { "line": 447, "column": 18 }, "end": { "line": 447, "column": null } },
+			"95": { "start": { "line": 448, "column": 18 }, "end": { "line": 448, "column": null } },
+			"96": { "start": { "line": 449, "column": 18 }, "end": { "line": 449, "column": null } },
+			"97": { "start": { "line": 450, "column": 18 }, "end": { "line": 450, "column": null } },
+			"98": { "start": { "line": 453, "column": 2 }, "end": { "line": 453, "column": null } },
+			"99": { "start": { "line": 462, "column": 1 }, "end": { "line": 467, "column": null } },
+			"100": { "start": { "line": 476, "column": 1 }, "end": { "line": 481, "column": null } },
+			"101": { "start": { "line": 504, "column": 2 }, "end": { "line": 504, "column": null } },
+			"102": { "start": { "line": 497, "column": 18 }, "end": { "line": 497, "column": null } },
+			"103": { "start": { "line": 498, "column": 18 }, "end": { "line": 498, "column": null } },
+			"104": { "start": { "line": 499, "column": 18 }, "end": { "line": 499, "column": null } },
+			"105": { "start": { "line": 500, "column": 18 }, "end": { "line": 500, "column": 53 } },
+			"106": { "start": { "line": 501, "column": 18 }, "end": { "line": 501, "column": null } },
+			"107": { "start": { "line": 502, "column": 18 }, "end": { "line": 502, "column": null } },
+			"108": { "start": { "line": 505, "column": 2 }, "end": { "line": 505, "column": null } },
+			"109": { "start": { "line": 514, "column": 1 }, "end": { "line": 519, "column": null } },
+			"110": { "start": { "line": 528, "column": 1 }, "end": { "line": 535, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 20, "column": 7 }, "end": { "line": 20, "column": 12 } },
+				"loc": { "start": { "line": 20, "column": 7 }, "end": { "line": 77, "column": null } },
+				"line": 20
+			},
+			"1": {
+				"name": "isOpenAISdkError",
+				"decl": { "start": { "line": 320, "column": 9 }, "end": { "line": 320, "column": 26 } },
+				"loc": { "start": { "line": 320, "column": 67 }, "end": { "line": 327, "column": null } },
+				"line": 320
+			},
+			"2": {
+				"name": "getErrorStatusCode",
+				"decl": { "start": { "line": 335, "column": 16 }, "end": { "line": 335, "column": 35 } },
+				"loc": { "start": { "line": 335, "column": 71 }, "end": { "line": 340, "column": null } },
+				"line": 335
+			},
+			"3": {
+				"name": "extractMessageFromJsonPayload",
+				"decl": { "start": { "line": 350, "column": 16 }, "end": { "line": 350, "column": 46 } },
+				"loc": { "start": { "line": 350, "column": 83 }, "end": { "line": 376, "column": null } },
+				"line": 350
+			},
+			"4": {
+				"name": "getErrorMessage",
+				"decl": { "start": { "line": 385, "column": 16 }, "end": { "line": 385, "column": 32 } },
+				"loc": { "start": { "line": 385, "column": 68 }, "end": { "line": 413, "column": null } },
+				"line": 385
+			},
+			"5": {
+				"name": "shouldReportApiErrorToTelemetry",
+				"decl": { "start": { "line": 422, "column": 16 }, "end": { "line": 422, "column": 48 } },
+				"loc": { "start": { "line": 422, "column": 100 }, "end": { "line": 438, "column": null } },
+				"line": 422
+			},
+			"6": {
+				"name": "constructor",
+				"decl": { "start": { "line": 445, "column": 1 }, "end": { "line": 445, "column": null } },
+				"loc": { "start": { "line": 451, "column": 3 }, "end": { "line": 454, "column": null } },
+				"line": 451
+			},
+			"7": {
+				"name": "isApiProviderError",
+				"decl": { "start": { "line": 461, "column": 16 }, "end": { "line": 461, "column": 35 } },
+				"loc": { "start": { "line": 461, "column": 78 }, "end": { "line": 469, "column": null } },
+				"line": 461
+			},
+			"8": {
+				"name": "extractApiProviderErrorProperties",
+				"decl": { "start": { "line": 475, "column": 16 }, "end": { "line": 475, "column": 50 } },
+				"loc": { "start": { "line": 475, "column": 100 }, "end": { "line": 482, "column": null } },
+				"line": 475
+			},
+			"9": {
+				"name": "constructor_2",
+				"decl": { "start": { "line": 495, "column": 1 }, "end": { "line": 495, "column": null } },
+				"loc": { "start": { "line": 503, "column": 3 }, "end": { "line": 506, "column": null } },
+				"line": 503
+			},
+			"10": {
+				"name": "isConsecutiveMistakeError",
+				"decl": { "start": { "line": 513, "column": 16 }, "end": { "line": 513, "column": 42 } },
+				"loc": { "start": { "line": 513, "column": 92 }, "end": { "line": 521, "column": null } },
+				"line": 513
+			},
+			"11": {
+				"name": "extractConsecutiveMistakeErrorProperties",
+				"decl": { "start": { "line": 527, "column": 16 }, "end": { "line": 527, "column": 57 } },
+				"loc": { "start": { "line": 527, "column": 114 }, "end": { "line": 536, "column": null } },
+				"line": 527
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 322, "column": 2 }, "end": { "line": 325, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 322, "column": 2 }, "end": { "line": 322, "column": null } },
+					{ "start": { "line": 323, "column": 2 }, "end": { "line": 323, "column": null } },
+					{ "start": { "line": 324, "column": 2 }, "end": { "line": 324, "column": null } },
+					{ "start": { "line": 325, "column": 2 }, "end": { "line": 325, "column": null } }
+				],
+				"line": 322
+			},
+			"1": {
+				"loc": { "start": { "line": 336, "column": 1 }, "end": { "line": 338, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 336, "column": 1 }, "end": { "line": 338, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 336
+			},
+			"2": {
+				"loc": { "start": { "line": 353, "column": 1 }, "end": { "line": 355, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 353, "column": 1 }, "end": { "line": 355, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 353
+			},
+			"3": {
+				"loc": { "start": { "line": 363, "column": 2 }, "end": { "line": 365, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 363, "column": 2 }, "end": { "line": 365, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 363
+			},
+			"4": {
+				"loc": { "start": { "line": 363, "column": 6 }, "end": { "line": 363, "column": 74 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 363, "column": 6 }, "end": { "line": 363, "column": 32 } },
+					{ "start": { "line": 363, "column": 32 }, "end": { "line": 363, "column": 74 } }
+				],
+				"line": 363
+			},
+			"5": {
+				"loc": { "start": { "line": 368, "column": 2 }, "end": { "line": 370, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 368, "column": 2 }, "end": { "line": 370, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 368
+			},
+			"6": {
+				"loc": { "start": { "line": 368, "column": 6 }, "end": { "line": 368, "column": 61 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 368, "column": 6 }, "end": { "line": 368, "column": 25 } },
+					{ "start": { "line": 368, "column": 25 }, "end": { "line": 368, "column": 61 } }
+				],
+				"line": 368
+			},
+			"7": {
+				"loc": { "start": { "line": 388, "column": 1 }, "end": { "line": 400, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 388, "column": 1 }, "end": { "line": 400, "column": null } },
+					{ "start": { "line": 391, "column": 8 }, "end": { "line": 400, "column": null } }
+				],
+				"line": 388
+			},
+			"8": {
+				"loc": { "start": { "line": 390, "column": 12 }, "end": { "line": 390, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 390, "column": 12 }, "end": { "line": 390, "column": 42 } },
+					{ "start": { "line": 390, "column": 42 }, "end": { "line": 390, "column": 66 } },
+					{ "start": { "line": 390, "column": 66 }, "end": { "line": 390, "column": null } }
+				],
+				"line": 390
+			},
+			"9": {
+				"loc": { "start": { "line": 391, "column": 8 }, "end": { "line": 400, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 391, "column": 8 }, "end": { "line": 400, "column": null } },
+					{ "start": { "line": 394, "column": 8 }, "end": { "line": 400, "column": null } }
+				],
+				"line": 391
+			},
+			"10": {
+				"loc": { "start": { "line": 394, "column": 8 }, "end": { "line": 400, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 394, "column": 8 }, "end": { "line": 400, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 394
+			},
+			"11": {
+				"loc": { "start": { "line": 394, "column": 12 }, "end": { "line": 394, "column": 79 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 394, "column": 12 }, "end": { "line": 394, "column": 41 } },
+					{ "start": { "line": 394, "column": 41 }, "end": { "line": 394, "column": 59 } },
+					{ "start": { "line": 394, "column": 59 }, "end": { "line": 394, "column": 79 } }
+				],
+				"line": 394
+			},
+			"12": {
+				"loc": { "start": { "line": 397, "column": 2 }, "end": { "line": 399, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 397, "column": 2 }, "end": { "line": 399, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 397
+			},
+			"13": {
+				"loc": { "start": { "line": 402, "column": 1 }, "end": { "line": 404, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 402, "column": 1 }, "end": { "line": 404, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 402
+			},
+			"14": {
+				"loc": { "start": { "line": 408, "column": 1 }, "end": { "line": 410, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 408, "column": 1 }, "end": { "line": 410, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 408
+			},
+			"15": {
+				"loc": { "start": { "line": 424, "column": 1 }, "end": { "line": 426, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 424, "column": 1 }, "end": { "line": 426, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 424
+			},
+			"16": {
+				"loc": { "start": { "line": 424, "column": 5 }, "end": { "line": 424, "column": 73 } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 424, "column": 5 }, "end": { "line": 424, "column": 32 } },
+					{ "start": { "line": 424, "column": 32 }, "end": { "line": 424, "column": 73 } }
+				],
+				"line": 424
+			},
+			"17": {
+				"loc": { "start": { "line": 429, "column": 1 }, "end": { "line": 435, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 429, "column": 1 }, "end": { "line": 435, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 429
+			},
+			"18": {
+				"loc": { "start": { "line": 431, "column": 3 }, "end": { "line": 433, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 431, "column": 3 }, "end": { "line": 433, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 431
+			},
+			"19": {
+				"loc": { "start": { "line": 463, "column": 2 }, "end": { "line": 467, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 463, "column": 2 }, "end": { "line": 463, "column": null } },
+					{ "start": { "line": 464, "column": 2 }, "end": { "line": 464, "column": null } },
+					{ "start": { "line": 465, "column": 2 }, "end": { "line": 465, "column": null } },
+					{ "start": { "line": 466, "column": 2 }, "end": { "line": 466, "column": null } },
+					{ "start": { "line": 467, "column": 2 }, "end": { "line": 467, "column": null } }
+				],
+				"line": 463
+			},
+			"20": {
+				"loc": { "start": { "line": 480, "column": 6 }, "end": { "line": 480, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 480, "column": 6 }, "end": { "line": 480, "column": 39 } },
+					{ "start": { "line": 480, "column": 39 }, "end": { "line": 480, "column": null } }
+				],
+				"line": 480
+			},
+			"21": {
+				"loc": { "start": { "line": 500, "column": 2 }, "end": { "line": 500, "column": null } },
+				"type": "default-arg",
+				"locations": [{ "start": { "line": 500, "column": 53 }, "end": { "line": 500, "column": null } }],
+				"line": 500
+			},
+			"22": {
+				"loc": { "start": { "line": 515, "column": 2 }, "end": { "line": 519, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 515, "column": 2 }, "end": { "line": 515, "column": null } },
+					{ "start": { "line": 516, "column": 2 }, "end": { "line": 516, "column": null } },
+					{ "start": { "line": 517, "column": 2 }, "end": { "line": 517, "column": null } },
+					{ "start": { "line": 518, "column": 2 }, "end": { "line": 518, "column": null } },
+					{ "start": { "line": 519, "column": 2 }, "end": { "line": 519, "column": null } }
+				],
+				"line": 515
+			},
+			"23": {
+				"loc": { "start": { "line": 533, "column": 6 }, "end": { "line": 533, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 533, "column": 6 }, "end": { "line": 533, "column": 38 } },
+					{ "start": { "line": 533, "column": 38 }, "end": { "line": 533, "column": null } }
+				],
+				"line": 533
+			},
+			"24": {
+				"loc": { "start": { "line": 534, "column": 6 }, "end": { "line": 534, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 534, "column": 6 }, "end": { "line": 534, "column": 37 } },
+					{ "start": { "line": 534, "column": 37 }, "end": { "line": 534, "column": null } }
+				],
+				"line": 534
+			}
+		},
+		"s": {
+			"0": 8,
+			"1": 8,
+			"2": 8,
+			"3": 8,
+			"4": 8,
+			"5": 8,
+			"6": 8,
+			"7": 8,
+			"8": 8,
+			"9": 8,
+			"10": 8,
+			"11": 8,
+			"12": 8,
+			"13": 8,
+			"14": 8,
+			"15": 8,
+			"16": 8,
+			"17": 8,
+			"18": 8,
+			"19": 8,
+			"20": 8,
+			"21": 8,
+			"22": 8,
+			"23": 8,
+			"24": 8,
+			"25": 8,
+			"26": 8,
+			"27": 8,
+			"28": 8,
+			"29": 8,
+			"30": 8,
+			"31": 8,
+			"32": 8,
+			"33": 8,
+			"34": 8,
+			"35": 8,
+			"36": 8,
+			"37": 8,
+			"38": 8,
+			"39": 8,
+			"40": 8,
+			"41": 8,
+			"42": 8,
+			"43": 8,
+			"44": 8,
+			"45": 8,
+			"46": 8,
+			"47": 8,
+			"48": 8,
+			"49": 8,
+			"50": 8,
+			"51": 8,
+			"52": 8,
+			"53": 8,
+			"54": 8,
+			"55": 8,
+			"56": 8,
+			"57": 32,
+			"58": 12,
+			"59": 2,
+			"60": 10,
+			"61": 29,
+			"62": 29,
+			"63": 12,
+			"64": 17,
+			"65": 17,
+			"66": 17,
+			"67": 17,
+			"68": 10,
+			"69": 4,
+			"70": 1,
+			"71": 6,
+			"72": 20,
+			"73": 10,
+			"74": 10,
+			"75": 5,
+			"76": 5,
+			"77": 1,
+			"78": 1,
+			"79": 1,
+			"80": 20,
+			"81": 4,
+			"82": 16,
+			"83": 16,
+			"84": 5,
+			"85": 11,
+			"86": 18,
+			"87": 6,
+			"88": 12,
+			"89": 9,
+			"90": 16,
+			"91": 5,
+			"92": 7,
+			"93": 12,
+			"94": 12,
+			"95": 12,
+			"96": 12,
+			"97": 12,
+			"98": 12,
+			"99": 8,
+			"100": 3,
+			"101": 14,
+			"102": 14,
+			"103": 14,
+			"104": 14,
+			"105": 14,
+			"106": 14,
+			"107": 14,
+			"108": 14,
+			"109": 8,
+			"110": 5
+		},
+		"f": {
+			"0": 8,
+			"1": 32,
+			"2": 12,
+			"3": 29,
+			"4": 20,
+			"5": 18,
+			"6": 12,
+			"7": 8,
+			"8": 3,
+			"9": 14,
+			"10": 8,
+			"11": 5
+		},
+		"b": {
+			"0": [32, 28, 26, 15],
+			"1": [2, 10],
+			"2": [12, 17],
+			"3": [10, 7],
+			"4": [17, 11],
+			"5": [1, 3],
+			"6": [4, 1],
+			"7": [10, 10],
+			"8": [10, 9, 6],
+			"9": [5, 5],
+			"10": [1, 4],
+			"11": [5, 4, 3],
+			"12": [1, 0],
+			"13": [4, 16],
+			"14": [5, 11],
+			"15": [6, 12],
+			"16": [18, 9],
+			"17": [9, 3],
+			"18": [5, 11],
+			"19": [8, 4, 2, 2, 2],
+			"20": [3, 2],
+			"21": [14],
+			"22": [8, 4, 1, 1, 1],
+			"23": [5, 1],
+			"24": [5, 1]
+		},
+		"meta": {
+			"lastBranch": 25,
+			"lastFunction": 12,
+			"lastStatement": 111,
+			"seen": {
+				"s:10:33:10:Infinity": 0,
+				"s:12:39:12:Infinity": 1,
+				"s:20:7:77:Infinity": 2,
+				"f:20:7:20:12": 0,
+				"s:21:1:21:Infinity": 3,
+				"s:22:1:22:Infinity": 4,
+				"s:23:1:23:Infinity": 5,
+				"s:24:1:24:Infinity": 6,
+				"s:25:1:25:Infinity": 7,
+				"s:26:1:26:Infinity": 8,
+				"s:27:1:27:Infinity": 9,
+				"s:28:1:28:Infinity": 10,
+				"s:29:1:29:Infinity": 11,
+				"s:31:1:31:Infinity": 12,
+				"s:32:1:32:Infinity": 13,
+				"s:33:1:33:Infinity": 14,
+				"s:35:1:35:Infinity": 15,
+				"s:36:1:36:Infinity": 16,
+				"s:37:1:37:Infinity": 17,
+				"s:39:1:39:Infinity": 18,
+				"s:40:1:40:Infinity": 19,
+				"s:42:1:42:Infinity": 20,
+				"s:43:1:43:Infinity": 21,
+				"s:45:1:45:Infinity": 22,
+				"s:47:1:47:Infinity": 23,
+				"s:49:1:49:Infinity": 24,
+				"s:50:1:50:Infinity": 25,
+				"s:51:1:51:Infinity": 26,
+				"s:52:1:52:Infinity": 27,
+				"s:54:1:54:Infinity": 28,
+				"s:55:1:55:Infinity": 29,
+				"s:56:1:56:Infinity": 30,
+				"s:57:1:57:Infinity": 31,
+				"s:59:1:59:Infinity": 32,
+				"s:60:1:60:Infinity": 33,
+				"s:61:1:61:Infinity": 34,
+				"s:62:1:62:Infinity": 35,
+				"s:64:1:64:Infinity": 36,
+				"s:66:1:66:Infinity": 37,
+				"s:67:1:67:Infinity": 38,
+				"s:69:1:69:Infinity": 39,
+				"s:70:1:70:Infinity": 40,
+				"s:71:1:71:Infinity": 41,
+				"s:72:1:72:Infinity": 42,
+				"s:73:1:73:Infinity": 43,
+				"s:74:1:74:Infinity": 44,
+				"s:75:1:75:Infinity": 45,
+				"s:76:1:76:Infinity": 46,
+				"s:83:41:91:Infinity": 47,
+				"s:95:42:98:Infinity": 48,
+				"s:102:40:104:Infinity": 49,
+				"s:108:35:112:Infinity": 50,
+				"s:116:36:131:Infinity": 51,
+				"s:135:35:139:Infinity": 52,
+				"s:143:41:147:Infinity": 53,
+				"s:165:43:239:Infinity": 54,
+				"s:278:40:281:Infinity": 55,
+				"s:287:40:290:Infinity": 56,
+				"f:320:9:320:26": 1,
+				"s:321:1:325:Infinity": 57,
+				"b:322:2:322:Infinity:323:2:323:Infinity:324:2:324:Infinity:325:2:325:Infinity": 0,
+				"f:335:16:335:35": 2,
+				"b:336:1:338:Infinity:undefined:undefined:undefined:undefined": 1,
+				"s:336:1:338:Infinity": 58,
+				"s:337:2:337:Infinity": 59,
+				"s:339:1:339:Infinity": 60,
+				"f:350:16:350:46": 3,
+				"s:352:24:352:Infinity": 61,
+				"b:353:1:355:Infinity:undefined:undefined:undefined:undefined": 2,
+				"s:353:1:355:Infinity": 62,
+				"s:354:2:354:Infinity": 63,
+				"s:357:23:357:Infinity": 64,
+				"s:359:1:373:Infinity": 65,
+				"s:360:17:360:Infinity": 66,
+				"b:363:2:365:Infinity:undefined:undefined:undefined:undefined": 3,
+				"s:363:2:365:Infinity": 67,
+				"b:363:6:363:32:363:32:363:74": 4,
+				"s:364:3:364:Infinity": 68,
+				"b:368:2:370:Infinity:undefined:undefined:undefined:undefined": 5,
+				"s:368:2:370:Infinity": 69,
+				"b:368:6:368:25:368:25:368:61": 6,
+				"s:369:3:369:Infinity": 70,
+				"s:375:1:375:Infinity": 71,
+				"f:385:16:385:32": 4,
+				"b:388:1:400:Infinity:391:8:400:Infinity": 7,
+				"s:388:1:400:Infinity": 72,
+				"s:390:2:390:Infinity": 73,
+				"b:390:12:390:42:390:42:390:66:390:66:390:Infinity": 8,
+				"b:391:8:400:Infinity:394:8:400:Infinity": 9,
+				"s:391:8:400:Infinity": 74,
+				"s:393:2:393:Infinity": 75,
+				"b:394:8:400:Infinity:undefined:undefined:undefined:undefined": 10,
+				"s:394:8:400:Infinity": 76,
+				"b:394:12:394:41:394:41:394:59:394:59:394:79": 11,
+				"s:396:20:396:Infinity": 77,
+				"b:397:2:399:Infinity:undefined:undefined:undefined:undefined": 12,
+				"s:397:2:399:Infinity": 78,
+				"s:398:3:398:Infinity": 79,
+				"b:402:1:404:Infinity:undefined:undefined:undefined:undefined": 13,
+				"s:402:1:404:Infinity": 80,
+				"s:403:2:403:Infinity": 81,
+				"s:407:26:407:Infinity": 82,
+				"b:408:1:410:Infinity:undefined:undefined:undefined:undefined": 14,
+				"s:408:1:410:Infinity": 83,
+				"s:409:2:409:Infinity": 84,
+				"s:412:1:412:Infinity": 85,
+				"f:422:16:422:48": 5,
+				"b:424:1:426:Infinity:undefined:undefined:undefined:undefined": 15,
+				"s:424:1:426:Infinity": 86,
+				"b:424:5:424:32:424:32:424:73": 16,
+				"s:425:2:425:Infinity": 87,
+				"b:429:1:435:Infinity:undefined:undefined:undefined:undefined": 17,
+				"s:429:1:435:Infinity": 88,
+				"s:430:2:434:Infinity": 89,
+				"b:431:3:433:Infinity:undefined:undefined:undefined:undefined": 18,
+				"s:431:3:433:Infinity": 90,
+				"s:432:4:432:Infinity": 91,
+				"s:437:1:437:Infinity": 92,
+				"f:445:1:445:Infinity": 6,
+				"s:452:2:452:Infinity": 93,
+				"s:447:18:447:Infinity": 94,
+				"s:448:18:448:Infinity": 95,
+				"s:449:18:449:Infinity": 96,
+				"s:450:18:450:Infinity": 97,
+				"s:453:2:453:Infinity": 98,
+				"f:461:16:461:35": 7,
+				"s:462:1:467:Infinity": 99,
+				"b:463:2:463:Infinity:464:2:464:Infinity:465:2:465:Infinity:466:2:466:Infinity:467:2:467:Infinity": 19,
+				"f:475:16:475:50": 8,
+				"s:476:1:481:Infinity": 100,
+				"b:480:6:480:39:480:39:480:Infinity": 20,
+				"f:495:1:495:Infinity": 9,
+				"b:500:53:500:Infinity": 21,
+				"s:504:2:504:Infinity": 101,
+				"s:497:18:497:Infinity": 102,
+				"s:498:18:498:Infinity": 103,
+				"s:499:18:499:Infinity": 104,
+				"s:500:18:500:53": 105,
+				"s:501:18:501:Infinity": 106,
+				"s:502:18:502:Infinity": 107,
+				"s:505:2:505:Infinity": 108,
+				"f:513:16:513:42": 10,
+				"s:514:1:519:Infinity": 109,
+				"b:515:2:515:Infinity:516:2:516:Infinity:517:2:517:Infinity:518:2:518:Infinity:519:2:519:Infinity": 22,
+				"f:527:16:527:57": 11,
+				"s:528:1:535:Infinity": 110,
+				"b:533:6:533:38:533:38:533:Infinity": 23,
+				"b:534:6:534:37:534:37:534:Infinity": 24
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\terminal.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\terminal.ts",
+		"statementMap": { "0": { "start": { "line": 7, "column": 44 }, "end": { "line": 37, "column": null } } },
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 4 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 1,
+			"seen": { "s:7:44:37:Infinity": 0 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\todo.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\todo.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 32 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 13, "column": 30 }, "end": { "line": 17, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 4, "1": 4 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:6:32:6:Infinity": 0, "s:13:30:17:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\tool-params.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\tool-params.ts",
+		"statementMap": {
+			"0": { "start": { "line": 97, "column": 23 }, "end": { "line": 97, "column": null } },
+			"1": { "start": { "line": 98, "column": 23 }, "end": { "line": 98, "column": null } },
+			"2": { "start": { "line": 99, "column": 1 }, "end": { "line": 99, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "isLegacyReadFileParams",
+				"decl": { "start": { "line": 91, "column": 16 }, "end": { "line": 91, "column": 39 } },
+				"loc": { "start": { "line": 91, "column": 99 }, "end": { "line": 100, "column": null } },
+				"line": 91
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 97, "column": 23 }, "end": { "line": 97, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 97, "column": 23 }, "end": { "line": 97, "column": 52 } },
+					{ "start": { "line": 97, "column": 52 }, "end": { "line": 97, "column": null } }
+				],
+				"line": 97
+			},
+			"1": {
+				"loc": { "start": { "line": 98, "column": 23 }, "end": { "line": 98, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 98, "column": 23 }, "end": { "line": 98, "column": 44 } },
+					{ "start": { "line": 98, "column": 44 }, "end": { "line": 98, "column": null } }
+				],
+				"line": 98
+			},
+			"2": {
+				"loc": { "start": { "line": 99, "column": 8 }, "end": { "line": 99, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 99, "column": 8 }, "end": { "line": 99, "column": 25 } },
+					{ "start": { "line": 99, "column": 25 }, "end": { "line": 99, "column": null } }
+				],
+				"line": 99
+			}
+		},
+		"s": { "0": 0, "1": 0, "2": 0 },
+		"f": { "0": 0 },
+		"b": { "0": [0, 0], "1": [0, 0], "2": [0, 0] },
+		"meta": {
+			"lastBranch": 3,
+			"lastFunction": 1,
+			"lastStatement": 3,
+			"seen": {
+				"f:91:16:91:39": 0,
+				"s:97:23:97:Infinity": 0,
+				"b:97:23:97:52:97:52:97:Infinity": 0,
+				"s:98:23:98:Infinity": 1,
+				"b:98:23:98:44:98:44:98:Infinity": 1,
+				"s:99:1:99:Infinity": 2,
+				"b:99:8:99:25:99:25:99:Infinity": 2
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\tool.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\tool.ts",
+		"statementMap": {
+			"0": { "start": { "line": 7, "column": 26 }, "end": { "line": 7, "column": null } },
+			"1": { "start": { "line": 9, "column": 32 }, "end": { "line": 9, "column": null } },
+			"2": { "start": { "line": 16, "column": 55 }, "end": { "line": 16, "column": null } },
+			"3": { "start": { "line": 24, "column": 25 }, "end": { "line": 49, "column": null } },
+			"4": { "start": { "line": 51, "column": 31 }, "end": { "line": 51, "column": null } },
+			"5": { "start": { "line": 59, "column": 31 }, "end": { "line": 65, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9, "5": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 6,
+			"seen": {
+				"s:7:26:7:Infinity": 0,
+				"s:9:32:9:Infinity": 1,
+				"s:16:55:16:Infinity": 2,
+				"s:24:25:49:Infinity": 3,
+				"s:51:31:51:Infinity": 4,
+				"s:59:31:65:Infinity": 5
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\type-fu.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\type-fu.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\usage-stats.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\usage-stats.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 32 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 10, "column": 32 }, "end": { "line": 10, "column": null } },
+			"2": { "start": { "line": 14, "column": 29 }, "end": { "line": 14, "column": null } },
+			"3": { "start": { "line": 20, "column": 29 }, "end": { "line": 23, "column": null } },
+			"4": { "start": { "line": 35, "column": 28 }, "end": { "line": 63, "column": null } },
+			"5": { "start": { "line": 69, "column": 26 }, "end": { "line": 76, "column": null } },
+			"6": { "start": { "line": 82, "column": 27 }, "end": { "line": 96, "column": null } },
+			"7": { "start": { "line": 102, "column": 29 }, "end": { "line": 113, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 5, "1": 5, "2": 5, "3": 5, "4": 5, "5": 5, "6": 5, "7": 5 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 8,
+			"seen": {
+				"s:6:32:6:Infinity": 0,
+				"s:10:32:10:Infinity": 1,
+				"s:14:29:14:Infinity": 2,
+				"s:20:29:23:Infinity": 3,
+				"s:35:28:63:Infinity": 4,
+				"s:69:26:76:Infinity": 5,
+				"s:82:27:96:Infinity": 6,
+				"s:102:29:113:Infinity": 7
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\vscode-extension-host.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\vscode-extension-host.ts",
+		"statementMap": {
+			"0": { "start": { "line": 768, "column": 41 }, "end": { "line": 773, "column": null } },
+			"1": { "start": { "line": 777, "column": 44 }, "end": { "line": 781, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 4, "1": 4 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:768:41:773:Infinity": 0, "s:777:44:781:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\vscode.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\vscode.ts",
+		"statementMap": {
+			"0": { "start": { "line": 7, "column": 29 }, "end": { "line": 7, "column": null } },
+			"1": { "start": { "line": 17, "column": 33 }, "end": { "line": 17, "column": null } },
+			"2": { "start": { "line": 29, "column": 26 }, "end": { "line": 51, "column": null } },
+			"3": { "start": { "line": 59, "column": 25 }, "end": { "line": 78, "column": null } },
+			"4": { "start": { "line": 80, "column": 31 }, "end": { "line": 80, "column": null } },
+			"5": { "start": { "line": 84, "column": 13 }, "end": { "line": 84, "column": null } },
+			"6": { "start": { "line": 84, "column": 64 }, "end": { "line": 84, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 84, "column": 13 }, "end": { "line": 84, "column": 27 } },
+				"loc": { "start": { "line": 84, "column": 64 }, "end": { "line": 84, "column": null } },
+				"line": 84
+			}
+		},
+		"branchMap": {},
+		"s": { "0": 7, "1": 7, "2": 7, "3": 7, "4": 7, "5": 7, "6": 0 },
+		"f": { "0": 0 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 7,
+			"seen": {
+				"s:7:29:7:Infinity": 0,
+				"s:17:33:17:Infinity": 1,
+				"s:29:26:51:Infinity": 2,
+				"s:59:25:78:Infinity": 3,
+				"s:80:31:80:Infinity": 4,
+				"s:84:13:84:Infinity": 5,
+				"f:84:13:84:27": 0,
+				"s:84:64:84:Infinity": 6
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\worktree.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\worktree.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\anthropic.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\anthropic.ts",
+		"statementMap": {
+			"0": { "start": { "line": 7, "column": 57 }, "end": { "line": 7, "column": null } },
+			"1": { "start": { "line": 8, "column": 38 }, "end": { "line": 8, "column": null } },
+			"2": { "start": { "line": 10, "column": 31 }, "end": { "line": 292, "column": null } },
+			"3": { "start": { "line": 294, "column": 44 }, "end": { "line": 294, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 4,
+			"seen": {
+				"s:7:57:7:Infinity": 0,
+				"s:8:38:8:Infinity": 1,
+				"s:10:31:292:Infinity": 2,
+				"s:294:44:294:Infinity": 3
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\baseten.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\baseten.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 29 }, "end": { "line": 130, "column": null } },
+			"1": { "start": { "line": 134, "column": 37 }, "end": { "line": 134, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:6:29:130:Infinity": 0, "s:134:37:134:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\bedrock.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\bedrock.ts",
+		"statementMap": {
+			"0": { "start": { "line": 7, "column": 53 }, "end": { "line": 7, "column": null } },
+			"1": { "start": { "line": 9, "column": 65 }, "end": { "line": 9, "column": null } },
+			"2": { "start": { "line": 15, "column": 29 }, "end": { "line": 566, "column": null } },
+			"3": { "start": { "line": 568, "column": 43 }, "end": { "line": 568, "column": null } },
+			"4": { "start": { "line": 570, "column": 34 }, "end": { "line": 570, "column": null } },
+			"5": { "start": { "line": 572, "column": 39 }, "end": { "line": 572, "column": null } },
+			"6": { "start": { "line": 577, "column": 70 }, "end": { "line": 595, "column": null } },
+			"7": { "start": { "line": 599, "column": 31 }, "end": { "line": 624, "column": null } },
+			"8": { "start": { "line": 624, "column": 17 }, "end": { "line": 624, "column": 47 } },
+			"9": { "start": { "line": 626, "column": 44 }, "end": { "line": 633, "column": null } },
+			"10": { "start": { "line": 647, "column": 50 }, "end": { "line": 659, "column": null } },
+			"11": { "start": { "line": 666, "column": 46 }, "end": { "line": 680, "column": null } },
+			"12": { "start": { "line": 683, "column": 44 }, "end": { "line": 687, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "(anonymous_0)",
+				"decl": { "start": { "line": 624, "column": 2 }, "end": { "line": 624, "column": 8 } },
+				"loc": { "start": { "line": 624, "column": 17 }, "end": { "line": 624, "column": 47 } },
+				"line": 624
+			}
+		},
+		"branchMap": {},
+		"s": {
+			"0": 9,
+			"1": 9,
+			"2": 9,
+			"3": 9,
+			"4": 9,
+			"5": 9,
+			"6": 9,
+			"7": 9,
+			"8": 747,
+			"9": 9,
+			"10": 9,
+			"11": 9,
+			"12": 9
+		},
+		"f": { "0": 747 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 1,
+			"lastStatement": 13,
+			"seen": {
+				"s:7:53:7:Infinity": 0,
+				"s:9:65:9:Infinity": 1,
+				"s:15:29:566:Infinity": 2,
+				"s:568:43:568:Infinity": 3,
+				"s:570:34:570:Infinity": 4,
+				"s:572:39:572:Infinity": 5,
+				"s:577:70:595:Infinity": 6,
+				"s:599:31:624:Infinity": 7,
+				"f:624:2:624:8": 0,
+				"s:624:17:624:47": 8,
+				"s:626:44:633:Infinity": 9,
+				"s:647:50:659:Infinity": 10,
+				"s:666:46:680:Infinity": 11,
+				"s:683:44:687:Infinity": 12
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\deepseek.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\deepseek.ts",
+		"statementMap": {
+			"0": { "start": { "line": 9, "column": 55 }, "end": { "line": 9, "column": null } },
+			"1": { "start": { "line": 11, "column": 30 }, "end": { "line": 66, "column": null } },
+			"2": { "start": { "line": 69, "column": 45 }, "end": { "line": 69, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 3,
+			"seen": { "s:9:55:9:Infinity": 0, "s:11:30:66:Infinity": 1, "s:69:45:69:Infinity": 2 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\fireworks.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\fireworks.ts",
+		"statementMap": {
+			"0": { "start": { "line": 30, "column": 57 }, "end": { "line": 30, "column": null } },
+			"1": { "start": { "line": 32, "column": 31 }, "end": { "line": 294, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:30:57:30:Infinity": 0, "s:32:31:294:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\friendli.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\friendli.ts",
+		"statementMap": {
+			"0": { "start": { "line": 9, "column": 55 }, "end": { "line": 9, "column": null } },
+			"1": { "start": { "line": 12, "column": 30 }, "end": { "line": 67, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:9:55:9:Infinity": 0, "s:12:30:67:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\gemini.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\gemini.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 51 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 8, "column": 28 }, "end": { "line": 312, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:6:51:6:Infinity": 0, "s:8:28:312:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\index.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\index.ts",
+		"statementMap": {
+			"0": { "start": { "line": 67, "column": 28 }, "end": { "line": 67, "column": null } },
+			"1": { "start": { "line": 78, "column": 1 }, "end": { "line": 145, "column": null } },
+			"2": { "start": { "line": 80, "column": 3 }, "end": { "line": 80, "column": null } },
+			"3": { "start": { "line": 82, "column": 3 }, "end": { "line": 82, "column": null } },
+			"4": { "start": { "line": 84, "column": 3 }, "end": { "line": 84, "column": null } },
+			"5": { "start": { "line": 86, "column": 3 }, "end": { "line": 86, "column": null } },
+			"6": { "start": { "line": 88, "column": 3 }, "end": { "line": 88, "column": null } },
+			"7": { "start": { "line": 90, "column": 3 }, "end": { "line": 90, "column": null } },
+			"8": { "start": { "line": 92, "column": 3 }, "end": { "line": 92, "column": null } },
+			"9": { "start": { "line": 94, "column": 3 }, "end": { "line": 94, "column": null } },
+			"10": { "start": { "line": 96, "column": 3 }, "end": { "line": 96, "column": null } },
+			"11": { "start": { "line": 98, "column": 3 }, "end": { "line": 98, "column": null } },
+			"12": { "start": { "line": 100, "column": 3 }, "end": { "line": 100, "column": null } },
+			"13": { "start": { "line": 102, "column": 3 }, "end": { "line": 102, "column": null } },
+			"14": { "start": { "line": 104, "column": 3 }, "end": { "line": 104, "column": null } },
+			"15": { "start": { "line": 107, "column": 3 }, "end": { "line": 107, "column": null } },
+			"16": { "start": { "line": 109, "column": 3 }, "end": { "line": 109, "column": null } },
+			"17": { "start": { "line": 111, "column": 3 }, "end": { "line": 111, "column": null } },
+			"18": { "start": { "line": 115, "column": 3 }, "end": { "line": 115, "column": null } },
+			"19": { "start": { "line": 117, "column": 3 }, "end": { "line": 117, "column": null } },
+			"20": { "start": { "line": 119, "column": 3 }, "end": { "line": 119, "column": null } },
+			"21": { "start": { "line": 121, "column": 3 }, "end": { "line": 121, "column": null } },
+			"22": { "start": { "line": 123, "column": 3 }, "end": { "line": 123, "column": null } },
+			"23": { "start": { "line": 125, "column": 3 }, "end": { "line": 125, "column": null } },
+			"24": { "start": { "line": 127, "column": 3 }, "end": { "line": 127, "column": null } },
+			"25": { "start": { "line": 129, "column": 3 }, "end": { "line": 129, "column": null } },
+			"26": { "start": { "line": 131, "column": 3 }, "end": { "line": 131, "column": null } },
+			"27": { "start": { "line": 133, "column": 3 }, "end": { "line": 133, "column": null } },
+			"28": { "start": { "line": 135, "column": 3 }, "end": { "line": 135, "column": null } },
+			"29": { "start": { "line": 137, "column": 3 }, "end": { "line": 137, "column": null } },
+			"30": { "start": { "line": 139, "column": 3 }, "end": { "line": 139, "column": null } },
+			"31": { "start": { "line": 144, "column": 3 }, "end": { "line": 144, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "getProviderDefaultModelId",
+				"decl": { "start": { "line": 74, "column": 16 }, "end": { "line": 74, "column": null } },
+				"loc": { "start": { "line": 77, "column": 10 }, "end": { "line": 146, "column": null } },
+				"line": 77
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 76, "column": 1 }, "end": { "line": 76, "column": null } },
+				"type": "default-arg",
+				"locations": [{ "start": { "line": 76, "column": 34 }, "end": { "line": 76, "column": null } }],
+				"line": 76
+			},
+			"1": {
+				"loc": { "start": { "line": 78, "column": 1 }, "end": { "line": 145, "column": null } },
+				"type": "switch",
+				"locations": [
+					{ "start": { "line": 79, "column": 2 }, "end": { "line": 80, "column": null } },
+					{ "start": { "line": 81, "column": 2 }, "end": { "line": 82, "column": null } },
+					{ "start": { "line": 83, "column": 2 }, "end": { "line": 84, "column": null } },
+					{ "start": { "line": 85, "column": 2 }, "end": { "line": 86, "column": null } },
+					{ "start": { "line": 87, "column": 2 }, "end": { "line": 88, "column": null } },
+					{ "start": { "line": 89, "column": 2 }, "end": { "line": 90, "column": null } },
+					{ "start": { "line": 91, "column": 2 }, "end": { "line": 92, "column": null } },
+					{ "start": { "line": 93, "column": 2 }, "end": { "line": 94, "column": null } },
+					{ "start": { "line": 95, "column": 2 }, "end": { "line": 96, "column": null } },
+					{ "start": { "line": 97, "column": 2 }, "end": { "line": 98, "column": null } },
+					{ "start": { "line": 99, "column": 2 }, "end": { "line": 100, "column": null } },
+					{ "start": { "line": 101, "column": 2 }, "end": { "line": 102, "column": null } },
+					{ "start": { "line": 103, "column": 2 }, "end": { "line": 104, "column": null } },
+					{ "start": { "line": 105, "column": 2 }, "end": { "line": 107, "column": null } },
+					{ "start": { "line": 108, "column": 2 }, "end": { "line": 109, "column": null } },
+					{ "start": { "line": 110, "column": 2 }, "end": { "line": 111, "column": null } },
+					{ "start": { "line": 112, "column": 2 }, "end": { "line": 112, "column": null } },
+					{ "start": { "line": 113, "column": 2 }, "end": { "line": 113, "column": null } },
+					{ "start": { "line": 114, "column": 2 }, "end": { "line": 115, "column": null } },
+					{ "start": { "line": 116, "column": 2 }, "end": { "line": 117, "column": null } },
+					{ "start": { "line": 118, "column": 2 }, "end": { "line": 119, "column": null } },
+					{ "start": { "line": 120, "column": 2 }, "end": { "line": 121, "column": null } },
+					{ "start": { "line": 122, "column": 2 }, "end": { "line": 123, "column": null } },
+					{ "start": { "line": 124, "column": 2 }, "end": { "line": 125, "column": null } },
+					{ "start": { "line": 126, "column": 2 }, "end": { "line": 127, "column": null } },
+					{ "start": { "line": 128, "column": 2 }, "end": { "line": 129, "column": null } },
+					{ "start": { "line": 130, "column": 2 }, "end": { "line": 131, "column": null } },
+					{ "start": { "line": 132, "column": 2 }, "end": { "line": 133, "column": null } },
+					{ "start": { "line": 134, "column": 2 }, "end": { "line": 135, "column": null } },
+					{ "start": { "line": 136, "column": 2 }, "end": { "line": 137, "column": null } },
+					{ "start": { "line": 138, "column": 2 }, "end": { "line": 139, "column": null } },
+					{ "start": { "line": 140, "column": 2 }, "end": { "line": 140, "column": null } },
+					{ "start": { "line": 141, "column": 2 }, "end": { "line": 141, "column": null } },
+					{ "start": { "line": 142, "column": 2 }, "end": { "line": 142, "column": null } },
+					{ "start": { "line": 143, "column": 2 }, "end": { "line": 144, "column": null } }
+				],
+				"line": 78
+			},
+			"2": {
+				"loc": { "start": { "line": 104, "column": 10 }, "end": { "line": 104, "column": null } },
+				"type": "cond-expr",
+				"locations": [
+					{ "start": { "line": 104, "column": 29 }, "end": { "line": 104, "column": 57 } },
+					{ "start": { "line": 104, "column": 57 }, "end": { "line": 104, "column": null } }
+				],
+				"line": 104
+			}
+		},
+		"s": {
+			"0": 9,
+			"1": 12,
+			"2": 1,
+			"3": 0,
+			"4": 0,
+			"5": 0,
+			"6": 0,
+			"7": 0,
+			"8": 0,
+			"9": 0,
+			"10": 0,
+			"11": 0,
+			"12": 0,
+			"13": 0,
+			"14": 2,
+			"15": 0,
+			"16": 0,
+			"17": 0,
+			"18": 3,
+			"19": 1,
+			"20": 0,
+			"21": 0,
+			"22": 0,
+			"23": 0,
+			"24": 0,
+			"25": 0,
+			"26": 0,
+			"27": 0,
+			"28": 0,
+			"29": 1,
+			"30": 1,
+			"31": 3
+		},
+		"f": { "0": 12 },
+		"b": {
+			"0": [12],
+			"1": [
+				1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 1, 2, 3, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 2, 3, 3
+			],
+			"2": [1, 1]
+		},
+		"meta": {
+			"lastBranch": 3,
+			"lastFunction": 1,
+			"lastStatement": 32,
+			"seen": {
+				"s:67:28:67:Infinity": 0,
+				"f:74:16:74:Infinity": 0,
+				"b:76:34:76:Infinity": 0,
+				"b:79:2:80:Infinity:81:2:82:Infinity:83:2:84:Infinity:85:2:86:Infinity:87:2:88:Infinity:89:2:90:Infinity:91:2:92:Infinity:93:2:94:Infinity:95:2:96:Infinity:97:2:98:Infinity:99:2:100:Infinity:101:2:102:Infinity:103:2:104:Infinity:105:2:107:Infinity:108:2:109:Infinity:110:2:111:Infinity:112:2:112:Infinity:113:2:113:Infinity:114:2:115:Infinity:116:2:117:Infinity:118:2:119:Infinity:120:2:121:Infinity:122:2:123:Infinity:124:2:125:Infinity:126:2:127:Infinity:128:2:129:Infinity:130:2:131:Infinity:132:2:133:Infinity:134:2:135:Infinity:136:2:137:Infinity:138:2:139:Infinity:140:2:140:Infinity:141:2:141:Infinity:142:2:142:Infinity:143:2:144:Infinity": 1,
+				"s:78:1:145:Infinity": 1,
+				"s:80:3:80:Infinity": 2,
+				"s:82:3:82:Infinity": 3,
+				"s:84:3:84:Infinity": 4,
+				"s:86:3:86:Infinity": 5,
+				"s:88:3:88:Infinity": 6,
+				"s:90:3:90:Infinity": 7,
+				"s:92:3:92:Infinity": 8,
+				"s:94:3:94:Infinity": 9,
+				"s:96:3:96:Infinity": 10,
+				"s:98:3:98:Infinity": 11,
+				"s:100:3:100:Infinity": 12,
+				"s:102:3:102:Infinity": 13,
+				"s:104:3:104:Infinity": 14,
+				"b:104:29:104:57:104:57:104:Infinity": 2,
+				"s:107:3:107:Infinity": 15,
+				"s:109:3:109:Infinity": 16,
+				"s:111:3:111:Infinity": 17,
+				"s:115:3:115:Infinity": 18,
+				"s:117:3:117:Infinity": 19,
+				"s:119:3:119:Infinity": 20,
+				"s:121:3:121:Infinity": 21,
+				"s:123:3:123:Infinity": 22,
+				"s:125:3:125:Infinity": 23,
+				"s:127:3:127:Infinity": 24,
+				"s:129:3:129:Infinity": 25,
+				"s:131:3:131:Infinity": 26,
+				"s:133:3:133:Infinity": 27,
+				"s:135:3:135:Infinity": 28,
+				"s:137:3:137:Infinity": 29,
+				"s:139:3:139:Infinity": 30,
+				"s:144:3:144:Infinity": 31
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\kenari.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\kenari.ts",
+		"statementMap": {
+			"0": { "start": { "line": 12, "column": 31 }, "end": { "line": 12, "column": null } },
+			"1": { "start": { "line": 14, "column": 36 }, "end": { "line": 14, "column": null } },
+			"2": { "start": { "line": 16, "column": 49 }, "end": { "line": 24, "column": null } },
+			"3": { "start": { "line": 26, "column": 42 }, "end": { "line": 26, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 4,
+			"seen": {
+				"s:12:31:12:Infinity": 0,
+				"s:14:36:14:Infinity": 1,
+				"s:16:49:24:Infinity": 2,
+				"s:26:42:26:Infinity": 3
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\kimi-code.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\kimi-code.ts",
+		"statementMap": {
+			"0": { "start": { "line": 3, "column": 34 }, "end": { "line": 3, "column": null } },
+			"1": { "start": { "line": 4, "column": 38 }, "end": { "line": 4, "column": null } },
+			"2": { "start": { "line": 6, "column": 40 }, "end": { "line": 6, "column": null } },
+			"3": { "start": { "line": 8, "column": 51 }, "end": { "line": 17, "column": null } },
+			"4": { "start": { "line": 19, "column": 30 }, "end": { "line": 21, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 5,
+			"seen": {
+				"s:3:34:3:Infinity": 0,
+				"s:4:38:4:Infinity": 1,
+				"s:6:40:6:Infinity": 2,
+				"s:8:51:17:Infinity": 3,
+				"s:19:30:21:Infinity": 4
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\lite-llm.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\lite-llm.ts",
+		"statementMap": {
+			"0": { "start": { "line": 4, "column": 37 }, "end": { "line": 4, "column": null } },
+			"1": { "start": { "line": 6, "column": 50 }, "end": { "line": 15, "column": null } },
+			"2": { "start": { "line": 36, "column": 52 }, "end": { "line": 77, "column": null } },
+			"3": { "start": { "line": 79, "column": 48 }, "end": { "line": 79, "column": null } },
+			"4": { "start": { "line": 89, "column": 20 }, "end": { "line": 89, "column": null } },
+			"5": { "start": { "line": 91, "column": 1 }, "end": { "line": 93, "column": null } },
+			"6": { "start": { "line": 92, "column": 2 }, "end": { "line": 92, "column": null } },
+			"7": { "start": { "line": 95, "column": 17 }, "end": { "line": 95, "column": null } },
+			"8": { "start": { "line": 97, "column": 1 }, "end": { "line": 97, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "isLiteLLMPreserveReasoningModel",
+				"decl": { "start": { "line": 88, "column": 16 }, "end": { "line": 88, "column": 48 } },
+				"loc": { "start": { "line": 88, "column": 88 }, "end": { "line": 98, "column": null } },
+				"line": 88
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 91, "column": 1 }, "end": { "line": 93, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 91, "column": 1 }, "end": { "line": 93, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 91
+			},
+			"1": {
+				"loc": { "start": { "line": 97, "column": 8 }, "end": { "line": 97, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 97, "column": 8 }, "end": { "line": 97, "column": 33 } },
+					{ "start": { "line": 97, "column": 33 }, "end": { "line": 97, "column": null } }
+				],
+				"line": 97
+			}
+		},
+		"s": { "0": 10, "1": 10, "2": 10, "3": 10, "4": 50, "5": 50, "6": 2, "7": 48, "8": 48 },
+		"f": { "0": 50 },
+		"b": { "0": [2, 48], "1": [48, 48] },
+		"meta": {
+			"lastBranch": 2,
+			"lastFunction": 1,
+			"lastStatement": 9,
+			"seen": {
+				"s:4:37:4:Infinity": 0,
+				"s:6:50:15:Infinity": 1,
+				"s:36:52:77:Infinity": 2,
+				"s:79:48:79:Infinity": 3,
+				"f:88:16:88:48": 0,
+				"s:89:20:89:Infinity": 4,
+				"b:91:1:93:Infinity:undefined:undefined:undefined:undefined": 0,
+				"s:91:1:93:Infinity": 5,
+				"s:92:2:92:Infinity": 6,
+				"s:95:17:95:Infinity": 7,
+				"s:97:1:97:Infinity": 8,
+				"b:97:8:97:33:97:33:97:Infinity": 1
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\lm-studio.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\lm-studio.ts",
+		"statementMap": {
+			"0": { "start": { "line": 3, "column": 44 }, "end": { "line": 3, "column": null } },
+			"1": { "start": { "line": 7, "column": 38 }, "end": { "line": 7, "column": null } },
+			"2": { "start": { "line": 8, "column": 51 }, "end": { "line": 18, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 3,
+			"seen": { "s:3:44:3:Infinity": 0, "s:7:38:7:Infinity": 1, "s:8:51:18:Infinity": 2 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\mimo.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\mimo.ts",
+		"statementMap": {
+			"0": { "start": { "line": 15, "column": 47 }, "end": { "line": 15, "column": null } },
+			"1": { "start": { "line": 17, "column": 26 }, "end": { "line": 58, "column": null } },
+			"2": { "start": { "line": 60, "column": 47 }, "end": { "line": 60, "column": null } },
+			"3": { "start": { "line": 62, "column": 40 }, "end": { "line": 62, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 4,
+			"seen": {
+				"s:15:47:15:Infinity": 0,
+				"s:17:26:58:Infinity": 1,
+				"s:60:47:60:Infinity": 2,
+				"s:62:40:62:Infinity": 3
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\minimax.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\minimax.ts",
+		"statementMap": {
+			"0": { "start": { "line": 8, "column": 53 }, "end": { "line": 8, "column": null } },
+			"1": { "start": { "line": 10, "column": 29 }, "end": { "line": 146, "column": null } },
+			"2": { "start": { "line": 148, "column": 50 }, "end": { "line": 148, "column": null } },
+			"3": { "start": { "line": 150, "column": 42 }, "end": { "line": 150, "column": null } },
+			"4": { "start": { "line": 151, "column": 43 }, "end": { "line": 151, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 5,
+			"seen": {
+				"s:8:53:8:Infinity": 0,
+				"s:10:29:146:Infinity": 1,
+				"s:148:50:148:Infinity": 2,
+				"s:150:42:150:Infinity": 3,
+				"s:151:43:151:Infinity": 4
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\mistral.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\mistral.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 53 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 8, "column": 29 }, "end": { "line": 81, "column": null } },
+			"2": { "start": { "line": 83, "column": 43 }, "end": { "line": 83, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 3,
+			"seen": { "s:6:53:6:Infinity": 0, "s:8:29:81:Infinity": 1, "s:83:43:83:Infinity": 2 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\moonshot.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\moonshot.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 55 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 8, "column": 30 }, "end": { "line": 120, "column": null } },
+			"2": { "start": { "line": 122, "column": 44 }, "end": { "line": 122, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 10, "1": 10, "2": 10 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 3,
+			"seen": { "s:6:55:6:Infinity": 0, "s:8:30:120:Infinity": 1, "s:122:44:122:Infinity": 2 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\ollama.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\ollama.ts",
+		"statementMap": {
+			"0": { "start": { "line": 5, "column": 36 }, "end": { "line": 5, "column": null } },
+			"1": { "start": { "line": 6, "column": 49 }, "end": { "line": 16, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:5:36:5:Infinity": 0, "s:6:49:16:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openai-codex-rate-limits.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openai-codex-rate-limits.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openai-codex.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openai-codex.ts",
+		"statementMap": {
+			"0": { "start": { "line": 19, "column": 61 }, "end": { "line": 19, "column": null } },
+			"1": { "start": { "line": 26, "column": 33 }, "end": { "line": 284, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:19:61:19:Infinity": 0, "s:26:33:284:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openai.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openai.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 35 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 7, "column": 63 }, "end": { "line": 7, "column": null } },
+			"2": { "start": { "line": 9, "column": 34 }, "end": { "line": 690, "column": null } },
+			"3": { "start": { "line": 692, "column": 54 }, "end": { "line": 699, "column": null } },
+			"4": { "start": { "line": 703, "column": 44 }, "end": { "line": 703, "column": null } },
+			"5": { "start": { "line": 705, "column": 49 }, "end": { "line": 705, "column": null } },
+			"6": { "start": { "line": 707, "column": 46 }, "end": { "line": 707, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9, "5": 9, "6": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 7,
+			"seen": {
+				"s:6:35:6:Infinity": 0,
+				"s:7:63:7:Infinity": 1,
+				"s:9:34:690:Infinity": 2,
+				"s:692:54:699:Infinity": 3,
+				"s:703:44:703:Infinity": 4,
+				"s:705:49:705:Infinity": 5,
+				"s:707:46:707:Infinity": 6
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\opencode-go.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\opencode-go.ts",
+		"statementMap": {
+			"0": { "start": { "line": 9, "column": 40 }, "end": { "line": 9, "column": null } },
+			"1": { "start": { "line": 11, "column": 53 }, "end": { "line": 20, "column": null } },
+			"2": { "start": { "line": 22, "column": 47 }, "end": { "line": 22, "column": null } },
+			"3": { "start": { "line": 58, "column": 59 }, "end": { "line": 332, "column": null } },
+			"4": { "start": { "line": 350, "column": 51 }, "end": { "line": 359, "column": null } },
+			"5": { "start": { "line": 368, "column": 1 }, "end": { "line": 368, "column": null } },
+			"6": { "start": { "line": 377, "column": 1 }, "end": { "line": 377, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "isOpencodeGoAnthropicFormatModel",
+				"decl": { "start": { "line": 367, "column": 16 }, "end": { "line": 367, "column": 49 } },
+				"loc": { "start": { "line": 367, "column": 75 }, "end": { "line": 369, "column": null } },
+				"line": 367
+			},
+			"1": {
+				"name": "getOpencodeGoModelInfo",
+				"decl": { "start": { "line": 376, "column": 16 }, "end": { "line": 376, "column": 39 } },
+				"loc": { "start": { "line": 376, "column": 79 }, "end": { "line": 378, "column": null } },
+				"line": 376
+			}
+		},
+		"branchMap": {},
+		"s": { "0": 10, "1": 10, "2": 10, "3": 10, "4": 10, "5": 30, "6": 11 },
+		"f": { "0": 30, "1": 11 },
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 2,
+			"lastStatement": 7,
+			"seen": {
+				"s:9:40:9:Infinity": 0,
+				"s:11:53:20:Infinity": 1,
+				"s:22:47:22:Infinity": 2,
+				"s:58:59:332:Infinity": 3,
+				"s:350:51:359:Infinity": 4,
+				"f:367:16:367:49": 0,
+				"s:368:1:368:Infinity": 5,
+				"f:376:16:376:39": 1,
+				"s:377:1:377:Infinity": 6
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openrouter.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\openrouter.ts",
+		"statementMap": {
+			"0": { "start": { "line": 4, "column": 40 }, "end": { "line": 4, "column": null } },
+			"1": { "start": { "line": 6, "column": 53 }, "end": { "line": 17, "column": null } },
+			"2": { "start": { "line": 19, "column": 48 }, "end": { "line": 19, "column": null } },
+			"3": { "start": { "line": 21, "column": 49 }, "end": { "line": 59, "column": null } },
+			"4": { "start": { "line": 68, "column": 60 }, "end": { "line": 72, "column": null } },
+			"5": { "start": { "line": 74, "column": 51 }, "end": { "line": 96, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9, "5": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 6,
+			"seen": {
+				"s:4:40:4:Infinity": 0,
+				"s:6:53:17:Infinity": 1,
+				"s:19:48:19:Infinity": 2,
+				"s:21:49:59:Infinity": 3,
+				"s:68:60:72:Infinity": 4,
+				"s:74:51:96:Infinity": 5
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\poe.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\poe.ts",
+		"statementMap": {},
+		"fnMap": {},
+		"branchMap": {},
+		"s": {},
+		"f": {},
+		"b": {},
+		"meta": { "lastBranch": 0, "lastFunction": 0, "lastStatement": 0, "seen": {}, "fnNames": {} }
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\qwen-code.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\qwen-code.ts",
+		"statementMap": {
+			"0": { "start": { "line": 5, "column": 55 }, "end": { "line": 5, "column": null } },
+			"1": { "start": { "line": 7, "column": 30 }, "end": { "line": 30, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:5:55:5:Infinity": 0, "s:7:30:30:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\requesty.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\requesty.ts",
+		"statementMap": {
+			"0": { "start": { "line": 5, "column": 38 }, "end": { "line": 5, "column": null } },
+			"1": { "start": { "line": 7, "column": 51 }, "end": { "line": 18, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:5:38:5:Infinity": 0, "s:7:51:18:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\sambanova.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\sambanova.ts",
+		"statementMap": {
+			"0": { "start": { "line": 14, "column": 57 }, "end": { "line": 14, "column": null } },
+			"1": { "start": { "line": 16, "column": 31 }, "end": { "line": 90, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:14:57:14:Infinity": 0, "s:16:31:90:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\unbound.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\unbound.ts",
+		"statementMap": {
+			"0": { "start": { "line": 5, "column": 37 }, "end": { "line": 5, "column": null } },
+			"1": { "start": { "line": 7, "column": 50 }, "end": { "line": 16, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:5:37:5:Infinity": 0, "s:7:50:16:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\vercel-ai-gateway.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\vercel-ai-gateway.ts",
+		"statementMap": {
+			"0": { "start": { "line": 4, "column": 45 }, "end": { "line": 4, "column": null } },
+			"1": { "start": { "line": 6, "column": 55 }, "end": { "line": 33, "column": null } },
+			"2": { "start": { "line": 35, "column": 52 }, "end": { "line": 48, "column": null } },
+			"3": { "start": { "line": 50, "column": 57 }, "end": { "line": 103, "column": null } },
+			"4": { "start": { "line": 105, "column": 58 }, "end": { "line": 116, "column": null } },
+			"5": { "start": { "line": 118, "column": 53 }, "end": { "line": 118, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9, "5": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 6,
+			"seen": {
+				"s:4:45:4:Infinity": 0,
+				"s:6:55:33:Infinity": 1,
+				"s:35:52:48:Infinity": 2,
+				"s:50:57:103:Infinity": 3,
+				"s:105:58:116:Infinity": 4,
+				"s:118:53:118:Infinity": 5
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\vertex.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\vertex.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 51 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 8, "column": 28 }, "end": { "line": 683, "column": null } },
+			"2": { "start": { "line": 687, "column": 43 }, "end": { "line": 694, "column": null } },
+			"3": { "start": { "line": 696, "column": 30 }, "end": { "line": 732, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 4,
+			"seen": {
+				"s:6:51:6:Infinity": 0,
+				"s:8:28:683:Infinity": 1,
+				"s:687:43:694:Infinity": 2,
+				"s:696:30:732:Infinity": 3
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\vscode-llm.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\vscode-llm.ts",
+		"statementMap": {
+			"0": { "start": { "line": 5, "column": 57 }, "end": { "line": 5, "column": null } },
+			"1": { "start": { "line": 10, "column": 31 }, "end": { "line": 215, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 10, "1": 10 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:5:57:5:Infinity": 0, "s:10:31:215:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\xai.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\xai.ts",
+		"statementMap": {
+			"0": { "start": { "line": 6, "column": 45 }, "end": { "line": 6, "column": null } },
+			"1": { "start": { "line": 8, "column": 25 }, "end": { "line": 148, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 2,
+			"seen": { "s:6:45:6:Infinity": 0, "s:8:25:148:Infinity": 1 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\zai.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\zai.ts",
+		"statementMap": {
+			"0": { "start": { "line": 14, "column": 71 }, "end": { "line": 14, "column": null } },
+			"1": { "start": { "line": 15, "column": 38 }, "end": { "line": 248, "column": null } },
+			"2": { "start": { "line": 251, "column": 61 }, "end": { "line": 251, "column": null } },
+			"3": { "start": { "line": 252, "column": 33 }, "end": { "line": 474, "column": null } },
+			"4": { "start": { "line": 476, "column": 39 }, "end": { "line": 476, "column": null } },
+			"5": { "start": { "line": 478, "column": 33 }, "end": { "line": 499, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9, "3": 9, "4": 9, "5": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 6,
+			"seen": {
+				"s:14:71:14:Infinity": 0,
+				"s:15:38:248:Infinity": 1,
+				"s:251:61:251:Infinity": 2,
+				"s:252:33:474:Infinity": 3,
+				"s:476:39:476:Infinity": 4,
+				"s:478:33:499:Infinity": 5
+			},
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\zoo-gateway.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\providers\\zoo-gateway.ts",
+		"statementMap": {
+			"0": { "start": { "line": 4, "column": 40 }, "end": { "line": 4, "column": null } },
+			"1": { "start": { "line": 11, "column": 53 }, "end": { "line": 22, "column": null } },
+			"2": { "start": { "line": 24, "column": 47 }, "end": { "line": 24, "column": null } }
+		},
+		"fnMap": {},
+		"branchMap": {},
+		"s": { "0": 9, "1": 9, "2": 9 },
+		"f": {},
+		"b": {},
+		"meta": {
+			"lastBranch": 0,
+			"lastFunction": 0,
+			"lastStatement": 3,
+			"seen": { "s:4:40:4:Infinity": 0, "s:11:53:22:Infinity": 1, "s:24:47:24:Infinity": 2 },
+			"fnNames": {}
+		}
+	},
+	"C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\utils\\looksLikeFilePath.ts": {
+		"path": "C:\\Users\\k1yt\\OneDrive\\Projects\\ZooCode\\packages\\types\\src\\utils\\looksLikeFilePath.ts",
+		"statementMap": {
+			"0": { "start": { "line": 11, "column": 1 }, "end": { "line": 13, "column": null } },
+			"1": { "start": { "line": 12, "column": 2 }, "end": { "line": 12, "column": null } },
+			"2": { "start": { "line": 14, "column": 17 }, "end": { "line": 14, "column": null } },
+			"3": { "start": { "line": 15, "column": 1 }, "end": { "line": 17, "column": null } },
+			"4": { "start": { "line": 16, "column": 2 }, "end": { "line": 16, "column": null } },
+			"5": { "start": { "line": 18, "column": 1 }, "end": { "line": 22, "column": null } }
+		},
+		"fnMap": {
+			"0": {
+				"name": "looksLikeFilePath",
+				"decl": { "start": { "line": 10, "column": 16 }, "end": { "line": 10, "column": 34 } },
+				"loc": { "start": { "line": 10, "column": 77 }, "end": { "line": 24, "column": null } },
+				"line": 10
+			}
+		},
+		"branchMap": {
+			"0": {
+				"loc": { "start": { "line": 11, "column": 1 }, "end": { "line": 13, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 11, "column": 1 }, "end": { "line": 13, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 11
+			},
+			"1": {
+				"loc": { "start": { "line": 15, "column": 1 }, "end": { "line": 17, "column": null } },
+				"type": "if",
+				"locations": [
+					{ "start": { "line": 15, "column": 1 }, "end": { "line": 17, "column": null } },
+					{ "start": {}, "end": {} }
+				],
+				"line": 15
+			},
+			"2": {
+				"loc": { "start": { "line": 19, "column": 2 }, "end": { "line": 22, "column": null } },
+				"type": "binary-expr",
+				"locations": [
+					{ "start": { "line": 19, "column": 2 }, "end": { "line": 19, "column": null } },
+					{ "start": { "line": 20, "column": 2 }, "end": { "line": 20, "column": null } },
+					{ "start": { "line": 21, "column": 2 }, "end": { "line": 21, "column": null } },
+					{ "start": { "line": 22, "column": 2 }, "end": { "line": 22, "column": null } }
+				],
+				"line": 19
+			}
+		},
+		"s": { "0": 19, "1": 2, "2": 17, "3": 17, "4": 2, "5": 15 },
+		"f": { "0": 19 },
+		"b": { "0": [2, 17], "1": [2, 15], "2": [15, 11, 8, 7] },
+		"meta": {
+			"lastBranch": 3,
+			"lastFunction": 1,
+			"lastStatement": 6,
+			"seen": {
+				"f:10:16:10:34": 0,
+				"b:11:1:13:Infinity:undefined:undefined:undefined:undefined": 0,
+				"s:11:1:13:Infinity": 0,
+				"s:12:2:12:Infinity": 1,
+				"s:14:17:14:Infinity": 2,
+				"b:15:1:17:Infinity:undefined:undefined:undefined:undefined": 1,
+				"s:15:1:17:Infinity": 3,
+				"s:16:2:16:Infinity": 4,
+				"s:18:1:22:Infinity": 5,
+				"b:19:2:19:Infinity:20:2:20:Infinity:21:2:21:Infinity:22:2:22:Infinity": 2
+			},
+			"fnNames": {}
+		}
+	}
+}
