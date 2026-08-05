@@ -48,6 +48,8 @@ function normalized(options: SharedOptions & { format: OutputFormat; quiet: bool
 	return { ...options, workspace: resolveWorkspace(options.cwd), timeout: parseDuration(options.timeout) }
 }
 
+program.argument("[prompt...]")
+
 automation(program.command("run [prompt...]").description("run one task without an interactive UI")).action(
 	async (words: string[] | undefined, options: SharedOptions & { format: OutputFormat; quiet: boolean }) => {
 		const positional = words?.join(" ").trim()
@@ -72,9 +74,13 @@ shared(
 	await listSessions({ ...options, workspace: resolveWorkspace(options.cwd) })
 })
 
-program.action(() => {
+program.action(async (words: string[] | undefined, options: SharedOptions) => {
 	if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error("Interactive Zoo requires TTY stdin and stdout")
-	throw new Error("Interactive Zoo is not available in this build")
+	const { runInteractive } = await import("./interactive.js")
+	process.exitCode = await runInteractive(words?.join(" ").trim(), {
+		...options,
+		workspace: resolveWorkspace(options.cwd ?? process.cwd()),
+	})
 })
 
 program.showSuggestionAfterError().showHelpAfterError()

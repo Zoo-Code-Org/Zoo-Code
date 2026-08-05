@@ -203,6 +203,12 @@ importers:
       commander:
         specifier: ^12.1.0
         version: 12.1.0
+      ink:
+        specifier: ^6.6.0
+        version: 6.6.0(@types/react@18.3.31)(react@19.2.7)
+      react:
+        specifier: ^19.1.0
+        version: 19.2.7
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -213,6 +219,12 @@ importers:
       '@types/node':
         specifier: 22.20.1
         version: 22.20.1
+      '@types/react':
+        specifier: 18.3.31
+        version: 18.3.31
+      ink-testing-library:
+        specifier: 4.0.0
+        version: 4.0.0(@types/react@18.3.31)
       rimraf:
         specifier: 6.0.1
         version: 6.0.1

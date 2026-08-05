@@ -1,6 +1,6 @@
 {
 	"extends": "@roo-code/config-typescript/base.json",
-	"compilerOptions": { "outDir": "dist" },
+	"compilerOptions": { "outDir": "dist", "jsx": "react-jsx" },
 	"include": ["src", "*.config.ts"],
 	"exclude": ["node_modules"]
 }

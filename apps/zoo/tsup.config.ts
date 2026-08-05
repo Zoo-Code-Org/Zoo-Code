@@ -9,4 +9,9 @@ export default defineConfig({
 	platform: "node",
 	banner: { js: "#!/usr/bin/env node" },
 	noExternal: ["@roo-code/zoo-protocol"],
+	external: ["react-devtools-core"],
+	esbuildOptions(options) {
+		options.jsx = "automatic"
+		options.jsxImportSource = "react"
+	},
 })
