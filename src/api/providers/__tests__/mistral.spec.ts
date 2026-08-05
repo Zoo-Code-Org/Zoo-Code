@@ -53,7 +53,14 @@ import type OpenAI from "openai"
 import { MistralHandler } from "../mistral"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
-import type { ApiStreamTextChunk, ApiStreamReasoningChunk, ApiStreamToolCallPartialChunk } from "../../transform/stream"
+import type {
+	ApiStreamTextChunk,
+	ApiStreamReasoningChunk,
+	ApiStreamToolCallPartialChunk,
+	ApiStreamUsageChunk,
+} from "../../transform/stream"
+import { calculateApiCostOpenAI } from "../../../shared/cost"
+import { mistralModels, type ModelInfo } from "@roo-code/types"
 
 describe("MistralHandler", () => {
 	let handler: MistralHandler
@@ -232,6 +239,128 @@ describe("MistralHandler", () => {
 			expect(results[0]).toEqual({ type: "text", text: "First text" })
 			expect(results[1]).toEqual({ type: "reasoning", text: "Some reasoning" })
 			expect(results[2]).toEqual({ type: "text", text: "Second text" })
+		})
+
+		it("should yield usage event with totalCost when stream contains usage data", async () => {
+			// Mock stream with usage data in Mistral SSE format
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: { content: "Hello" },
+									index: 0,
+								},
+							],
+							usage: {
+								promptTokens: 100,
+								completionTokens: 50,
+							},
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: ApiStreamUsageChunk[] = []
+
+			for await (const chunk of iterator) {
+				if (chunk.type === "usage") {
+					results.push(chunk as ApiStreamUsageChunk)
+				}
+			}
+
+			expect(results).toHaveLength(1)
+
+			const modelInfo = mistralModels["codestral-latest"]
+			const expectedCost = calculateApiCostOpenAI(modelInfo, 100, 50, 0, 0).totalCost
+
+			expect(results[0]).toEqual({
+				type: "usage",
+				inputTokens: 100,
+				outputTokens: 50,
+				totalCost: expectedCost,
+			})
+		})
+
+		it("should yield totalCost: 0 when modelInfo is not available", async () => {
+			// Mock stream with usage data but no model info available
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: { content: "Hello" },
+									index: 0,
+								},
+							],
+							usage: {
+								promptTokens: 100,
+								completionTokens: 50,
+							},
+						},
+					},
+				]),
+			)
+
+			// Spy on getModel to return undefined info.
+			// maxTokens must be provided so that line 94 (`maxTokens ?? info.maxTokens`)
+			// short-circuits before accessing info.maxTokens (which would crash).
+			vi.spyOn(handler, "getModel").mockReturnValueOnce({
+				id: "codestral-latest",
+				// Intentionally undefined to test error handling when model info is missing
+				info: undefined as unknown as ModelInfo,
+				maxTokens: 8192,
+				temperature: 0,
+			} as ReturnType<typeof handler.getModel>)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: ApiStreamUsageChunk[] = []
+
+			for await (const chunk of iterator) {
+				if (chunk.type === "usage") {
+					results.push(chunk as ApiStreamUsageChunk)
+				}
+			}
+
+			expect(results).toHaveLength(1)
+			expect(results[0]).toEqual({
+				type: "usage",
+				inputTokens: 100,
+				outputTokens: 50,
+				totalCost: 0,
+			})
+		})
+
+		it("should not yield usage event when stream has no usage data", async () => {
+			// Mock stream without usage field
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: { content: "Hello" },
+									index: 0,
+								},
+							],
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: ApiStreamUsageChunk[] = []
+
+			for await (const chunk of iterator) {
+				if (chunk.type === "usage") {
+					results.push(chunk as ApiStreamUsageChunk)
+				}
+			}
+
+			expect(results).toHaveLength(0)
 		})
 	})
 
