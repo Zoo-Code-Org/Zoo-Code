@@ -28,7 +28,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	readonly name = "use_mcp_tool" as const
 
 	async execute(params: UseMcpToolParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { askApproval, handleError, pushToolResult } = callbacks
+		const { askApproval, beforeMcpExecution, handleError, pushToolResult } = callbacks
 
 		try {
 			// Validate parameters
@@ -62,6 +62,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// Use the resolved tool name (original name from the server) for MCP calls
 			// This handles cases where models mangle hyphens to underscores
 			const resolvedToolName = toolValidation.resolvedToolName ?? toolName
+
+			if (beforeMcpExecution && !(await beforeMcpExecution())) {
+				return
+			}
 
 			// Reset mistake count on successful validation
 			task.consecutiveMistakeCount = 0

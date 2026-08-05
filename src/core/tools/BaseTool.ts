@@ -11,6 +11,7 @@ export interface ToolCallbacks {
 	handleError: HandleError
 	pushToolResult: PushToolResult
 	toolCallId?: string
+	beforeMcpExecution?: () => Promise<boolean>
 }
 
 /**

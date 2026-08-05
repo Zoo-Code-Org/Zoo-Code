@@ -57,7 +57,14 @@ describe("hook definition contracts", () => {
 	it("enforces phase-specific exact tool matchers", () => {
 		expect(hookDefinitionSchema.safeParse({ ...sessionHook, toolMatcher: ["read_file"] }).success).toBe(false)
 		expect(hookDefinitionSchema.safeParse({ ...preToolHook, toolMatcher: [] }).success).toBe(false)
-		expect(hookDefinitionSchema.safeParse({ ...preToolHook, toolMatcher: ["read"] }).success).toBe(false)
+		expect(hookDefinitionSchema.safeParse({ ...preToolHook, toolMatcher: [""] }).success).toBe(false)
+		expect(hookDefinitionSchema.safeParse({ ...preToolHook, toolMatcher: ["bad\0tool"] }).success).toBe(false)
+		expect(
+			hookDefinitionSchema.safeParse({
+				...preToolHook,
+				toolMatcher: ["my_custom_tool", "mcp_local_server-search"],
+			}).success,
+		).toBe(true)
 	})
 
 	it("rejects NUL characters in executables and arguments", () => {
@@ -106,6 +113,17 @@ describe("hook matching", () => {
 		expect(getMatchingHooks(definitions, "sessionStart")).toEqual([sessionHook])
 		expect(getMatchingHooks(definitions, "preToolUse", "read_file")).toEqual([later, preToolHook])
 		expect(getMatchingHooks(definitions, "preToolUse", "write_to_file")).toEqual([])
+	})
+
+	it("matches dynamic custom and native MCP names exactly without patterns", () => {
+		const dynamic = {
+			...preToolHook,
+			toolMatcher: ["my_custom_tool", "mcp_local_search"],
+		}
+
+		expect(getMatchingHooks([dynamic], "preToolUse", "my_custom_tool")).toEqual([dynamic])
+		expect(getMatchingHooks([dynamic], "preToolUse", "mcp_local_search")).toEqual([dynamic])
+		expect(getMatchingHooks([dynamic], "preToolUse", "mcp_local_other")).toEqual([])
 	})
 })
 

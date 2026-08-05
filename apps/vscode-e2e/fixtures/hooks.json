@@ -1,0 +1,19 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "HOOKS_PRE_TOOL_BLOCK_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "read_file",
+						"arguments": "{\"path\":\"hooks-block-target.txt\",\"mode\":\"slice\",\"offset\":1,\"limit\":20}",
+						"id": "call_hooks_block_read_001"
+					}
+				]
+			}
+		}
+	]
+}

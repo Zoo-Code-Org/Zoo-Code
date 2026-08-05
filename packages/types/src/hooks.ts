@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { toolNamesSchema, type ToolName } from "./tool.js"
+import { toolNames } from "./tool.js"
 
 export const HOOK_TIMEOUT_MS = 10_000
 export const HOOK_CAPTURE_MAX_BYTES = 64 * 1024
@@ -22,6 +22,15 @@ const nulFreeString = (max: number, field: string) =>
 		.max(max)
 		.refine((value) => !value.includes("\0"), `${field} must not contain NUL characters`)
 
+export const hookToolNameSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(256)
+	.refine((value) => !value.includes("\0"), "Tool name must not contain NUL characters")
+export type HookToolName = z.infer<typeof hookToolNameSchema>
+export const hookStaticToolNames = toolNames.filter((name) => name !== "custom_tool")
+
 const hookDefinitionBaseSchema = z.object({
 	id: z.string().min(1).max(64),
 	name: z.string().trim().min(1).max(80),
@@ -42,7 +51,7 @@ export const sessionStartHookDefinitionSchema = hookDefinitionBaseSchema.extend(
 
 export const preToolUseHookDefinitionSchema = hookDefinitionBaseSchema.extend({
 	phase: z.literal("preToolUse"),
-	toolMatcher: z.array(toolNamesSchema).min(1).max(MAX_HOOK_TOOL_MATCHERS),
+	toolMatcher: z.array(hookToolNameSchema).min(1).max(MAX_HOOK_TOOL_MATCHERS),
 })
 
 export const hookDefinitionSchema = z.discriminatedUnion("phase", [
@@ -96,7 +105,7 @@ export const hookInvocationSchema = z.discriminatedUnion("phase", [
 		taskId: z.string().min(1).max(128),
 		instanceId: z.string().min(1).max(128),
 		workspacePath: z.string().min(1).max(4096),
-		tool: z.object({ name: toolNamesSchema }),
+		tool: z.object({ name: hookToolNameSchema }),
 	}),
 ])
 export type HookInvocation = z.infer<typeof hookInvocationSchema>
@@ -128,7 +137,7 @@ export const hookMessageSchema = z.object({
 	name: z.string().min(1).max(80),
 	phase: hookPhaseSchema,
 	status: hookMessageStatusSchema,
-	matchedTool: toolNamesSchema.optional(),
+	matchedTool: hookToolNameSchema.optional(),
 	outputSummary: z.string().optional(),
 	errorSummary: z.string().optional(),
 	truncated: z.boolean().optional(),
@@ -138,8 +147,8 @@ export const hookMessageSchema = z.object({
 export type HookMessage = z.infer<typeof hookMessageSchema>
 
 export function hookMatches(definition: HookDefinition, phase: "sessionStart"): boolean
-export function hookMatches(definition: HookDefinition, phase: "preToolUse", toolName: ToolName): boolean
-export function hookMatches(definition: HookDefinition, phase: HookPhase, toolName?: ToolName): boolean {
+export function hookMatches(definition: HookDefinition, phase: "preToolUse", toolName: HookToolName): boolean
+export function hookMatches(definition: HookDefinition, phase: HookPhase, toolName?: HookToolName): boolean {
 	if (definition.phase !== phase) {
 		return false
 	}
@@ -154,17 +163,17 @@ export function getMatchingHooks(definitions: readonly HookDefinition[], phase: 
 export function getMatchingHooks(
 	definitions: readonly HookDefinition[],
 	phase: "preToolUse",
-	toolName: ToolName,
+	toolName: HookToolName,
 ): HookDefinition[]
 export function getMatchingHooks(
 	definitions: readonly HookDefinition[],
 	phase: HookPhase,
-	toolName?: ToolName,
+	toolName?: HookToolName,
 ): HookDefinition[] {
 	return definitions.filter((definition) => definition.enabled && hookMatchesDefinition(definition, phase, toolName))
 }
 
-function hookMatchesDefinition(definition: HookDefinition, phase: HookPhase, toolName?: ToolName): boolean {
+function hookMatchesDefinition(definition: HookDefinition, phase: HookPhase, toolName?: HookToolName): boolean {
 	if (phase === "sessionStart") {
 		return hookMatches(definition, phase)
 	}

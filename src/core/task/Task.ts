@@ -37,6 +37,7 @@ import {
 	type ClineApiReqCancelReason,
 	type ClineApiReqInfo,
 	type HookDefinition,
+	type HookRunStatus,
 	type HookMessage,
 	type HookRunResult,
 	RooCodeEventName,
@@ -281,7 +282,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private readonly taskLifetimeAbortController = new AbortController()
 	private readonly activeHookRuns = new Set<Promise<HookRunResult>>()
 	private readonly activeHookRows = new Map<string, number>()
-	private hookDefinitionsSnapshot?: HookDefinition[]
+	private readonly hookDefinitionsSnapshot: Promise<readonly HookDefinition[]>
 	private sessionStartHooksRun = false
 	private readonly hookRunner = new HookRunner()
 	skipPrevResponseIdOnce: boolean = false
@@ -546,6 +547,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 		this.providerRef = new WeakRef(provider)
+		const initialProviderState =
+			typeof provider.getState === "function" ? provider.getState() : Promise.resolve(undefined)
+		this.hookDefinitionsSnapshot = initialProviderState
+			.then((state) => {
+				const snapshot: HookDefinition[] = structuredClone(
+					state?.hookDefinitions?.filter(({ enabled }) => enabled) ?? [],
+				)
+				for (const definition of snapshot) {
+					Object.freeze(definition.argv)
+					if (definition.phase === "preToolUse") {
+						Object.freeze(definition.toolMatcher)
+					}
+					Object.freeze(definition)
+				}
+				return Object.freeze(snapshot)
+			})
+			.catch(() => Object.freeze([]))
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
@@ -1230,6 +1248,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		await this.updateClineMessage(message)
 	}
 
+	private isCurrentTaskInstance(): boolean {
+		const currentTask = this.providerRef.deref()?.getCurrentTask()
+		return currentTask?.taskId === this.taskId && currentTask.instanceId === this.instanceId
+	}
+
 	private interruptStaleHookMessages(messages: ClineMessage[]): ClineMessage[] {
 		const completedAt = Date.now()
 		return messages.map((message) =>
@@ -1249,15 +1272,82 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private formatHookResultForModel(definition: HookDefinition, result: HookRunResult): string | undefined {
 		const escapeAttribute = (value: string) =>
 			value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;")
-		const content =
-			result.status === "succeeded"
-				? result.stdoutSummary?.trim()
-				: `The session start hook ${result.status}; task execution continued.`
+		const content = result.status === "succeeded" ? result.stdoutSummary?.trim() : undefined
 		if (!content) {
 			return undefined
 		}
 
-		return `<hook_result id="${escapeAttribute(definition.id)}" phase="sessionStart" status="${result.status}">\n${content}\n</hook_result>`
+		return `<hook_result id="${escapeAttribute(definition.id)}" phase="${definition.phase}" status="${result.status}">\n${content}\n</hook_result>`
+	}
+
+	async runPreToolUseHooks(
+		toolName: string,
+	): Promise<
+		| { decision: "allow"; context: Anthropic.TextBlockParam[] }
+		| { decision: "block"; context: Anthropic.TextBlockParam[]; status: HookRunStatus; reason: string }
+	> {
+		const hooks = getMatchingHooks(await this.hookDefinitionsSnapshot, "preToolUse", toolName)
+		const context: Anthropic.TextBlockParam[] = []
+
+		for (const definition of hooks) {
+			if (this.taskLifetimeAbortController.signal.aborted || !this.isCurrentTaskInstance()) {
+				return { decision: "block", context: [], status: "cancelled", reason: "The task was cancelled." }
+			}
+
+			const hookRunId = crypto.randomUUID()
+			const startedAt = Date.now()
+			await this.addHookMessage({
+				hookRunId,
+				hookId: definition.id,
+				name: definition.name,
+				phase: "preToolUse",
+				status: "running",
+				matchedTool: toolName,
+				startedAt,
+			})
+
+			const execution = this.hookRunner
+				.run(
+					definition,
+					{
+						version: 1,
+						hookRunId,
+						phase: "preToolUse",
+						taskId: this.taskId,
+						instanceId: this.instanceId,
+						workspacePath: this.cwd,
+						tool: { name: toolName },
+					},
+					this.taskLifetimeAbortController.signal,
+				)
+				.then(async (result) => {
+					await this.updateHookMessage(result)
+					return result
+				})
+			this.activeHookRuns.add(execution)
+
+			try {
+				const result = await execution
+				if (this.taskLifetimeAbortController.signal.aborted || !this.isCurrentTaskInstance()) {
+					return { decision: "block", context: [], status: "cancelled", reason: "The task was cancelled." }
+				}
+				const text = this.formatHookResultForModel(definition, result)
+				if (text) {
+					context.push({ type: "text", text })
+				}
+				if (result.status !== "succeeded") {
+					const reason =
+						result.status === "blocked"
+							? `Pre-tool hook "${definition.name}" blocked ${toolName}.`
+							: `Pre-tool hook "${definition.name}" failed closed (${result.status}).`
+					return { decision: "block", context, status: result.status, reason }
+				}
+			} finally {
+				this.activeHookRuns.delete(execution)
+			}
+		}
+
+		return { decision: "allow", context }
 	}
 
 	private async runSessionStartHooks(): Promise<Anthropic.TextBlockParam[]> {
@@ -1266,10 +1356,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.sessionStartHooksRun = true
 
-		this.hookDefinitionsSnapshot ??= structuredClone(
-			(await this.providerRef.deref()?.getState())?.hookDefinitions?.filter(({ enabled }) => enabled) ?? [],
-		)
-		const hooks = getMatchingHooks(this.hookDefinitionsSnapshot, "sessionStart")
+		const hooks = getMatchingHooks(await this.hookDefinitionsSnapshot, "sessionStart")
 		const modelContent: Anthropic.TextBlockParam[] = []
 
 		for (const definition of hooks) {

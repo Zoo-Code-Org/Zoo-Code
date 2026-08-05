@@ -210,6 +210,104 @@ describe("useMcpToolTool", () => {
 	})
 
 	describe("successful execution", () => {
+		it("runs the pre-execution boundary after validation and skips approval when it blocks", async () => {
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: { server_name: "test_server", tool_name: "test_tool" },
+				nativeArgs: { server_name: "test_server", tool_name: "test_tool", arguments: {} },
+				partial: false,
+			}
+			const callTool = vi.fn()
+			const beforeMcpExecution = vi.fn().mockResolvedValue(false)
+			mockProviderRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
+				getMcpHub: () => ({
+					getAllServers: () => [{ name: "test_server", tools: [{ name: "test_tool" }] }],
+					callTool,
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				beforeMcpExecution,
+			})
+
+			expect(beforeMcpExecution).toHaveBeenCalledOnce()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(callTool).not.toHaveBeenCalled()
+		})
+
+		it("does not run the pre-execution boundary for an unknown MCP tool", async () => {
+			const beforeMcpExecution = vi.fn()
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: { server_name: "test_server", tool_name: "missing" },
+				nativeArgs: { server_name: "test_server", tool_name: "missing", arguments: {} },
+				partial: false,
+			}
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: () => [{ name: "test_server", tools: [{ name: "different_tool" }] }],
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				beforeMcpExecution,
+			})
+
+			expect(beforeMcpExecution).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+		})
+
+		it("does not run the pre-execution boundary for a mode-disallowed MCP server", async () => {
+			const beforeMcpExecution = vi.fn()
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: { server_name: "blocked_server", tool_name: "test_tool" },
+				nativeArgs: { server_name: "blocked_server", tool_name: "test_tool", arguments: {} },
+				partial: false,
+			}
+			mockProviderRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					mode: "restricted",
+					customModes: [
+						{
+							slug: "restricted",
+							name: "Restricted",
+							roleDefinition: "Restricted",
+							groups: ["mcp"],
+							allowedMcpServers: ["allowed_server"],
+						},
+					],
+				}),
+				getMcpHub: () => ({
+					getAllServers: () => [{ name: "blocked_server", tools: [{ name: "test_tool" }] }],
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				beforeMcpExecution,
+			})
+
+			expect(beforeMcpExecution).not.toHaveBeenCalled()
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockPushToolResult).toHaveBeenCalledOnce()
+		})
+
 		it("should execute tool successfully with valid parameters", async () => {
 			const block: ToolUse = {
 				type: "tool_use",

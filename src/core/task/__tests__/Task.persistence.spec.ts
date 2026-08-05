@@ -4,7 +4,7 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
-import type { GlobalState, HookDefinition, ProviderSettings } from "@roo-code/types"
+import type { GlobalState, HookDefinition, HookRunResult, ProviderSettings } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../Task"
@@ -686,6 +686,180 @@ describe("Task persistence", () => {
 			])
 			expect(first[0]).not.toHaveProperty("tool_use_id")
 			expect(second).toEqual([])
+		})
+
+		it("captures pre-tool definitions even without session hooks and ignores later settings changes", async () => {
+			const definition = {
+				id: "pre-read",
+				name: "Read policy",
+				enabled: true,
+				phase: "preToolUse" as const,
+				toolMatcher: ["read_file"],
+				executable: process.execPath,
+				argv: [],
+			}
+			await mockHookDefinitions([definition])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(task)
+			await Promise.resolve()
+			definition.enabled = false
+			definition.toolMatcher[0] = "write_to_file"
+			const run = vi.fn<HookRunner["run"]>().mockImplementation(async (_definition, invocation) => ({
+				hookRunId: invocation.hookRunId,
+				hookId: "pre-read",
+				phase: "preToolUse",
+				status: "succeeded",
+				stdoutSummary: "read context",
+				truncated: false,
+				startedAt: 1,
+				completedAt: 2,
+			}))
+			task["hookRunner"].run = run
+
+			const result = await task.runPreToolUseHooks("read_file")
+
+			expect(run).toHaveBeenCalledOnce()
+			expect(result).toEqual({
+				decision: "allow",
+				context: [
+					{
+						type: "text",
+						text: '<hook_result id="pre-read" phase="preToolUse" status="succeeded">\nread context\n</hook_result>',
+					},
+				],
+			})
+		})
+
+		it("runs matching pre-tool hooks sequentially and stops at the first block", async () => {
+			const definitions = ["first", "block", "never"].map((id) => ({
+				id,
+				name: id,
+				enabled: true,
+				phase: "preToolUse" as const,
+				toolMatcher: ["my_custom_tool"],
+				executable: process.execPath,
+				argv: [],
+			}))
+			await mockHookDefinitions(definitions)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(task)
+			const run = vi.fn<HookRunner["run"]>().mockImplementation(async (definition, invocation) => ({
+				hookRunId: invocation.hookRunId,
+				hookId: definition.id,
+				phase: "preToolUse",
+				status: definition.id === "block" ? "blocked" : "succeeded",
+				stdoutSummary: definition.id === "first" ? "first context" : "must not leak",
+				stderrSummary: definition.id === "block" ? "private stderr" : undefined,
+				truncated: false,
+				startedAt: 1,
+				completedAt: 2,
+			}))
+			task["hookRunner"].run = run
+
+			const result = await task.runPreToolUseHooks("my_custom_tool")
+
+			expect(run.mock.calls.map(([definition]) => definition.id)).toEqual(["first", "block"])
+			expect(result).toMatchObject({ decision: "block", status: "blocked" })
+			expect(JSON.stringify(result.context)).toContain("first context")
+			expect(JSON.stringify(result.context)).not.toContain("must not leak")
+			expect(JSON.stringify(result)).not.toContain("private stderr")
+			expect(task.clineMessages.filter((message) => message.say === "hook")).toHaveLength(2)
+		})
+
+		it("discards late pre-tool context after task-instance replacement", async () => {
+			const definition = {
+				id: "late",
+				name: "Late hook",
+				enabled: true,
+				phase: "preToolUse" as const,
+				toolMatcher: ["read_file"],
+				executable: process.execPath,
+				argv: [],
+			}
+			await mockHookDefinitions([definition])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(task)
+			let finish!: (result: Omit<HookRunResult, "hookRunId">) => void
+			const run = vi.fn<HookRunner["run"]>().mockImplementation(
+				(_definition, invocation) =>
+					new Promise<HookRunResult>((resolve) => {
+						finish = (result) => resolve({ ...result, hookRunId: invocation.hookRunId })
+					}),
+			)
+			task["hookRunner"].run = run
+			const pending = task.runPreToolUseHooks("read_file")
+			await vi.waitFor(() => expect(run).toHaveBeenCalledOnce())
+			vi.mocked(mockProvider.getCurrentTask).mockReturnValue({
+				taskId: task.taskId,
+				instanceId: "replacement",
+			} as Task)
+			finish({
+				hookId: "late",
+				phase: "preToolUse",
+				status: "succeeded",
+				stdoutSummary: "must not be appended",
+				truncated: false,
+				startedAt: 1,
+				completedAt: 2,
+			})
+
+			await expect(pending).resolves.toEqual({
+				decision: "block",
+				context: [],
+				status: "cancelled",
+				reason: "The task was cancelled.",
+			})
+			expect(task.clineMessages.at(-1)?.hook?.status).toBe("running")
+		})
+
+		it.each(["failed", "timedOut"] as const)("fails closed on %s without model stderr leakage", async (status) => {
+			const definition = {
+				id: "failure",
+				name: "Failure policy",
+				enabled: true,
+				phase: "preToolUse" as const,
+				toolMatcher: ["read_file"],
+				executable: process.execPath,
+				argv: [],
+			}
+			await mockHookDefinitions([definition])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(task)
+			task["hookRunner"].run = vi.fn<HookRunner["run"]>().mockImplementation(async (_definition, invocation) => ({
+				hookRunId: invocation.hookRunId,
+				hookId: "failure",
+				phase: "preToolUse",
+				status,
+				stderrSummary: "raw private stderr",
+				truncated: false,
+				startedAt: 1,
+				completedAt: 2,
+			}))
+
+			const result = await task.runPreToolUseHooks("read_file")
+
+			expect(result).toMatchObject({ decision: "block", status, context: [] })
+			expect(JSON.stringify(result)).not.toContain("raw private stderr")
 		})
 
 		it("runs session hooks after the visible new-task row and before the first model turn", async () => {

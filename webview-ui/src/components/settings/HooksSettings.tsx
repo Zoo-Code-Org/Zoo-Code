@@ -4,9 +4,10 @@ import { Cable, Edit, Globe, Plus, Trash2, TriangleAlert, X } from "lucide-react
 import {
 	hookDefinitionSchema,
 	hookDefinitionsSchema,
-	toolNames,
+	hookStaticToolNames,
 	type HookDefinition,
 	type HookPhase,
+	type HookToolName,
 	type ToolName,
 } from "@roo-code/types"
 
@@ -45,7 +46,7 @@ type HookDraft = {
 	name: string
 	enabled: boolean
 	phase: HookPhase
-	toolMatcher: ToolName[]
+	toolMatcher: HookToolName[]
 	executable: string
 	argv: string[]
 }
@@ -148,6 +149,10 @@ export const HooksSettings: React.FC<HooksSettingsProps> = ({ hookDefinitions, o
 			toolMatcher: checked ? [...current.toolMatcher, tool] : current.toolMatcher.filter((item) => item !== tool),
 		}))
 	}
+
+	const customToolMatchers = draft.toolMatcher.filter(
+		(tool) => !(hookStaticToolNames as readonly string[]).includes(tool),
+	)
 
 	return (
 		<div className="flex flex-col h-full overflow-hidden">
@@ -284,7 +289,7 @@ export const HooksSettings: React.FC<HooksSettingsProps> = ({ hookDefinitions, o
 									{t("settings:hooks.fields.toolsHint")}
 								</p>
 								<div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto">
-									{toolNames.map((tool) => (
+									{hookStaticToolNames.map((tool) => (
 										<label key={tool} className="flex items-center gap-2 font-mono text-xs">
 											<Checkbox
 												checked={draft.toolMatcher.includes(tool)}
@@ -294,6 +299,21 @@ export const HooksSettings: React.FC<HooksSettingsProps> = ({ hookDefinitions, o
 										</label>
 									))}
 								</div>
+								<Input
+									data-testid="hook-dynamic-tools"
+									value={customToolMatchers.join(", ")}
+									placeholder={t("settings:hooks.fields.toolsHint")}
+									onChange={(event) => {
+										const staticMatchers = draft.toolMatcher.filter((tool) =>
+											(hookStaticToolNames as readonly string[]).includes(tool),
+										)
+										const dynamicMatchers = event.target.value
+											.split(",")
+											.map((tool) => tool.trim())
+											.filter(Boolean)
+										setDraft({ ...draft, toolMatcher: [...staticMatchers, ...dynamicMatchers] })
+									}}
+								/>
 							</fieldset>
 						)}
 						<label className="flex flex-col gap-1">

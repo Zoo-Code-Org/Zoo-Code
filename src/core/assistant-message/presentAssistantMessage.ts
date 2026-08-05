@@ -2,7 +2,7 @@ import { serializeError } from "serialize-error"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import type { ToolName, ClineAsk, ToolProgressStatus } from "@roo-code/types"
-import { ConsecutiveMistakeError, TelemetryEventName } from "@roo-code/types"
+import { ConsecutiveMistakeError, TelemetryEventName, hookStaticToolNames } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { customToolRegistry } from "@roo-code/core"
 
@@ -40,6 +40,64 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
+
+async function checkToolRepetition(
+	cline: Task,
+	block: ToolUse,
+	pushToolResult: (content: ToolResponse) => void,
+): Promise<boolean> {
+	const repetitionCheck = cline.toolRepetitionDetector.check(block)
+	if (repetitionCheck.allowExecution || !repetitionCheck.askUser) {
+		return true
+	}
+
+	const { response, text, images } = await cline.ask(
+		repetitionCheck.askUser.messageKey as ClineAsk,
+		repetitionCheck.askUser.messageDetail.replace("{toolName}", block.name),
+	)
+	if (response === "messageResponse") {
+		cline.userMessageContent.push(
+			{ type: "text" as const, text: `Tool repetition limit reached. User feedback: ${text}` },
+			...formatResponse.imageBlocks(images),
+		)
+		await cline.say("user_feedback", text, images)
+	}
+
+	TelemetryService.instance.captureConsecutiveMistakeError(cline.taskId)
+	TelemetryService.instance.captureException(
+		new ConsecutiveMistakeError(
+			`Tool repetition limit reached for ${block.name}`,
+			cline.taskId,
+			cline.consecutiveMistakeCount,
+			cline.consecutiveMistakeLimit,
+			"tool_repetition",
+			cline.apiConfiguration.apiProvider,
+			cline.api.getModel().id,
+		),
+	)
+	pushToolResult(
+		formatResponse.toolError(
+			`Tool call repetition limit reached for ${block.name}. Please try a different approach.`,
+		),
+	)
+	return false
+}
+
+async function runPreToolHooks(
+	cline: Task,
+	toolName: string,
+	pushToolResult: (content: ToolResponse) => void,
+): Promise<boolean> {
+	const result = await cline.runPreToolUseHooks(toolName)
+	cline.userMessageContent.push(...result.context)
+	if (result.decision === "allow") {
+		return true
+	}
+	if (!cline.abort && result.status !== "cancelled") {
+		pushToolResult(formatResponse.toolError(result.reason))
+	}
+	return false
+}
 
 /**
  * Processes and presents assistant message content to the user interface.
@@ -272,6 +330,9 @@ export async function presentAssistantMessage(cline: Task) {
 				askApproval,
 				handleError,
 				pushToolResult,
+				beforeMcpExecution: async () =>
+					(await checkToolRepetition(cline, syntheticToolUse, pushToolResult)) &&
+					(await runPreToolHooks(cline, mcpBlock.name, pushToolResult)),
 			})
 			break
 		}
@@ -621,54 +682,18 @@ export async function presentAssistantMessage(cline: Task) {
 				}
 			}
 
-			// Check for identical consecutive tool calls.
-			if (!block.partial) {
-				// Use the detector to check for repetition, passing the ToolUse
-				// block directly.
-				const repetitionCheck = cline.toolRepetitionDetector.check(block)
+			// MCP performs existence and server authorization inside its handler, so its
+			// repetition and hook boundary is deferred until those checks have passed.
+			if (!block.partial && block.name !== "use_mcp_tool") {
+				if (!(await checkToolRepetition(cline, block, pushToolResult))) {
+					break
+				}
+			}
 
-				// If execution is not allowed, notify user and break.
-				if (!repetitionCheck.allowExecution && repetitionCheck.askUser) {
-					// Handle repetition similar to mistake_limit_reached pattern.
-					const { response, text, images } = await cline.ask(
-						repetitionCheck.askUser.messageKey as ClineAsk,
-						repetitionCheck.askUser.messageDetail.replace("{toolName}", block.name),
-					)
-
-					if (response === "messageResponse") {
-						// Add user feedback to userContent.
-						cline.userMessageContent.push(
-							{
-								type: "text" as const,
-								text: `Tool repetition limit reached. User feedback: ${text}`,
-							},
-							...formatResponse.imageBlocks(images),
-						)
-
-						// Add user feedback to chat.
-						await cline.say("user_feedback", text, images)
-					}
-
-					// Track tool repetition in telemetry via PostHog exception tracking and event.
-					TelemetryService.instance.captureConsecutiveMistakeError(cline.taskId)
-					TelemetryService.instance.captureException(
-						new ConsecutiveMistakeError(
-							`Tool repetition limit reached for ${block.name}`,
-							cline.taskId,
-							cline.consecutiveMistakeCount,
-							cline.consecutiveMistakeLimit,
-							"tool_repetition",
-							cline.apiConfiguration.apiProvider,
-							cline.api.getModel().id,
-						),
-					)
-
-					// Return tool result message about the repetition
-					pushToolResult(
-						formatResponse.toolError(
-							`Tool call repetition limit reached for ${block.name}. Please try a different approach.`,
-						),
-					)
+			const customTool = stateExperiments?.customTools ? customToolRegistry.get(block.name) : undefined
+			const isStaticTool = (hookStaticToolNames as readonly string[]).includes(block.name)
+			if (!block.partial && block.name !== "use_mcp_tool" && !customTool && isStaticTool) {
+				if (!(await runPreToolHooks(cline, block.name, pushToolResult))) {
 					break
 				}
 			}
@@ -778,6 +803,9 @@ export async function presentAssistantMessage(cline: Task) {
 						askApproval,
 						handleError,
 						pushToolResult,
+						beforeMcpExecution: async () =>
+							(await checkToolRepetition(cline, block, pushToolResult)) &&
+							(await runPreToolHooks(cline, "use_mcp_tool", pushToolResult)),
 					})
 					break
 				case "access_mcp_resource":
@@ -858,8 +886,6 @@ export async function presentAssistantMessage(cline: Task) {
 						break
 					}
 
-					const customTool = stateExperiments?.customTools ? customToolRegistry.get(block.name) : undefined
-
 					if (customTool) {
 						try {
 							let customToolArgs
@@ -875,6 +901,10 @@ export async function presentAssistantMessage(cline: Task) {
 									pushToolResult(formatResponse.toolError(message))
 									break
 								}
+							}
+
+							if (!(await runPreToolHooks(cline, block.name, pushToolResult))) {
+								break
 							}
 
 							const result = await customTool.execute(customToolArgs, {

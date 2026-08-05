@@ -46,6 +46,8 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 				getModel: () => ({ id: "test-model", info: {} }),
 			},
 			recordToolUsage: vi.fn(),
+			recordToolError: vi.fn(),
+			runPreToolUseHooks: vi.fn().mockResolvedValue({ decision: "allow", context: [] }),
 			toolRepetitionDetector: {
 				check: vi.fn().mockReturnValue({ allowExecution: true }),
 			},
@@ -213,6 +215,84 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 		expect(toolResult).toBeDefined()
 		// Should have fallback text
 		expect(toolResult.content).toBeTruthy()
+	})
+
+	describe("native MCP preToolUse dispatch", () => {
+		it("matches the canonical native name after MCP validation and before approval", async () => {
+			const callTool = vi.fn().mockResolvedValue({ content: [{ type: "text", text: "native result" }] })
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "local server",
+						getAllServers: () => [{ name: "local server", tools: [{ name: "search-docs" }] }],
+						callTool,
+					}),
+					postMessageToWebview: vi.fn(),
+				}),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "native-mcp",
+					name: "mcp_local_server_search-docs",
+					serverName: "local_server",
+					toolName: "search-docs",
+					arguments: { query: "safe" },
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask)
+
+			expect(mockTask.toolRepetitionDetector.check).toHaveBeenCalled()
+			expect(mockTask.runPreToolUseHooks).toHaveBeenCalledWith("mcp_local_server_search-docs")
+			expect(mockTask.runPreToolUseHooks).toHaveBeenCalledBefore(mockTask.ask)
+			expect(callTool).toHaveBeenCalledOnce()
+		})
+
+		it("publishes one native result and skips approval/execution when blocked", async () => {
+			const callTool = vi.fn()
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
+					getMcpHub: () => ({
+						findServerNameBySanitizedName: () => "local",
+						getAllServers: () => [{ name: "local", tools: [{ name: "search" }] }],
+						callTool,
+					}),
+					postMessageToWebview: vi.fn(),
+				}),
+			}
+			mockTask.runPreToolUseHooks.mockResolvedValue({
+				decision: "block",
+				context: [],
+				status: "timedOut",
+				reason: "Pre-tool hook failed closed (timedOut).",
+			})
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "native-block",
+					name: "mcp_local_search",
+					serverName: "local",
+					toolName: "search",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentAssistantMessage(mockTask)
+
+			expect(mockTask.ask).not.toHaveBeenCalled()
+			expect(callTool).not.toHaveBeenCalled()
+			expect(
+				mockTask.userMessageContent.filter((item: { type?: string }) => item.type === "tool_result"),
+			).toHaveLength(1)
+			expect(mockTask.userMessageContent).not.toContainEqual(
+				expect.objectContaining({ tool_use_id: expect.stringContaining("hook") }),
+			)
+		})
 	})
 
 	describe("Multiple tool calls handling", () => {
