@@ -233,6 +233,7 @@
 		"exitStatus": "Terminé avec le statut {{exitCode}}",
 		"malformedCommand": "Commande mal formée : erreur de syntaxe shell",
 		"manageCommands": "Commandes approuvées automatiquement",
+		"denied": "Commande refusée",
 		"addToAllowed": "Ajouter à la liste autorisée",
 		"removeFromAllowed": "Retirer de la liste autorisée",
 		"addToDenied": "Ajouter à la liste refusée",

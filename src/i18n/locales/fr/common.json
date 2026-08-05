@@ -72,6 +72,10 @@
 		"url_fetch_failed": "Échec de récupération du contenu de l'URL : {{error}}",
 		"url_fetch_error_with_url": "Erreur lors de la récupération du contenu pour {{url}} : {{error}}",
 		"command_timeout": "L'exécution de la commande a expiré après {{seconds}} secondes",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard est activé, mais n'est pas disponible pour cette plateforme",
+			"enableFailed": "Impossible d'activer Destructive Command Guard : {{error}}"
+		},
 		"share_task_failed": "Échec du partage de la tâche. Veuillez réessayer.",
 		"share_no_active_task": "Aucune tâche active à partager",
 		"share_auth_required": "Authentification requise. Veuillez vous connecter pour partager des tâches.",

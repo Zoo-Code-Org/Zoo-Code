@@ -72,6 +72,10 @@
 		"url_fetch_failed": "URLコンテンツの取得に失敗しました：{{error}}",
 		"url_fetch_error_with_url": "{{url}} のコンテンツ取得エラー：{{error}}",
 		"command_timeout": "コマンドの実行が{{seconds}}秒後にタイムアウトしました",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard は有効ですが、このプラットフォームでは利用できません",
+			"enableFailed": "Destructive Command Guard を有効にできませんでした: {{error}}"
+		},
 		"share_task_failed": "タスクの共有に失敗しました",
 		"share_no_active_task": "共有するアクティブなタスクがありません",
 		"share_auth_required": "認証が必要です。タスクを共有するにはサインインしてください。",

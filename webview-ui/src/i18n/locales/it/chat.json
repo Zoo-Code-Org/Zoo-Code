@@ -233,6 +233,7 @@
 		"exitStatus": "Uscito con stato {{exitCode}}",
 		"malformedCommand": "Comando non valido: errore di sintassi della shell",
 		"manageCommands": "Comandi approvati automaticamente",
+		"denied": "Comando negato",
 		"addToAllowed": "Aggiungi alla lista dei permessi",
 		"removeFromAllowed": "Rimuovi dalla lista dei permessi",
 		"addToDenied": "Aggiungi alla lista dei negati",

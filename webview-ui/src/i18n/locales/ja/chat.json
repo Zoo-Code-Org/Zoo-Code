@@ -233,6 +233,7 @@
 		"exitStatus": "ステータス {{exitCode}} で終了しました",
 		"malformedCommand": "不正なコマンド: シェル構文エラー",
 		"manageCommands": "自動承認されたコマンド",
+		"denied": "コマンドが拒否されました",
 		"addToAllowed": "許可リストに追加",
 		"removeFromAllowed": "許可リストから削除",
 		"addToDenied": "拒否リストに追加",

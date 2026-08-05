@@ -406,6 +406,10 @@
 		"execute": {
 			"label": "Execute",
 			"description": "Automatically execute allowed terminal commands without requiring approval",
+			"destructiveCommandGuard": {
+				"label": "Enable destructive command guard",
+				"description": "Download and use Destructive Command Guard (DCG) for this platform. Commands allowed by DCG run automatically. Commands blocked by DCG require your approval. Zoo's command lists are disabled while this is enabled. The downloaded executable is retained if you turn this off."
+			},
 			"allowedCommands": "Allowed Auto-Execute Commands",
 			"allowedCommandsDescription": "Command prefixes that can be auto-executed when \"Always approve execute operations\" is enabled. Add * to allow all commands (use with caution).",
 			"deniedCommands": "Denied Commands",
