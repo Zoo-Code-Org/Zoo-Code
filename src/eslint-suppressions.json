@@ -184,11 +184,6 @@
 			"count": 1
 		}
 	},
-	"api/providers/__tests__/mimo.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
 	"api/providers/__tests__/minimax.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2

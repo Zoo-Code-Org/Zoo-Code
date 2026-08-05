@@ -91,7 +91,7 @@ function handleStreamingToolCallEnd(
 		}
 		streamingToolCallState.delete(event.id)
 
-		const ghostPolicy1 = resolveToolCallPolicy(telemetryContext.modelInfo, telemetryContext.provider as any)
+		const ghostPolicy1 = resolveToolCallPolicy(telemetryContext.modelInfo, telemetryContext.provider)
 		telemetryLog.push({
 			taskId: telemetryContext.taskId,
 			provider: telemetryContext.provider,
@@ -132,7 +132,7 @@ function handleLegacyToolCall(
 	})
 
 	if (isProvablyEmptyGhost(legacyDisposition)) {
-		const ghostPolicy2 = resolveToolCallPolicy(telemetryContext.modelInfo, telemetryContext.provider as any)
+		const ghostPolicy2 = resolveToolCallPolicy(telemetryContext.modelInfo, telemetryContext.provider)
 		telemetryLog.push({
 			taskId: telemetryContext.taskId,
 			provider: telemetryContext.provider,
@@ -195,7 +195,7 @@ function handleFinalizeRawChunks(
 				}
 				streamingToolCallState.delete(event.id)
 
-				const ghostPolicy3 = resolveToolCallPolicy(telemetryContext.modelInfo, telemetryContext.provider as any)
+				const ghostPolicy3 = resolveToolCallPolicy(telemetryContext.modelInfo, telemetryContext.provider)
 				telemetryLog.push({
 					taskId: telemetryContext.taskId,
 					provider: telemetryContext.provider,
