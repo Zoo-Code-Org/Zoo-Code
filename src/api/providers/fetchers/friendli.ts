@@ -88,18 +88,11 @@ export const friendliModelsResponseSchema = z.object({
 type FriendliModelsResponse = z.infer<typeof friendliModelsResponseSchema>
 
 /**
- * Friendli reasoning effort values exposed by the Friendli handler.
- * The Friendli API returns an "effort" option with a `values` array (e.g.
- * ["low", "medium", "high", "default"]). The Roo Code reasoning controls and
- * the FriendliHandler's reasoning param builder operate on the extended set
- * ["minimal", "low", "medium", "high", "xhigh", "max"], so we extend the
- * API-provided values with the extras the handler knows about. This mirrors
- * what the static `friendliModels` entries declare for GLM-5.x.
+ * Reasoning effort levels Zoo Code knows how to send. The Friendli API may
+ * return additional values (e.g. "default", "ultracode"); those are dropped.
  */
-const FRIENDLI_EXTRA_EFFORTS = ["minimal", "xhigh", "max"] as const
-
-const REASONING_EFFORT_LEVELS = ["disable", "none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
-type ReasoningEffortLevel = (typeof REASONING_EFFORT_LEVELS)[number]
+const KNOWN_REASONING_EFFORTS = ["disable", "none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
+type KnownReasoningEffort = (typeof KNOWN_REASONING_EFFORTS)[number]
 
 function buildSupportsReasoningEffort(
 	reasoning: boolean | undefined,
@@ -112,24 +105,21 @@ function buildSupportsReasoningEffort(
 
 	const effortOption = reasoningOptions?.find((opt) => opt.type === "effort")
 	if (effortOption && Array.isArray(effortOption.values) && effortOption.values.length > 0) {
-		// Controllable reasoning model with a discrete effort enum. Extend the
-		// API-provided values with the extra efforts the FriendliHandler uses
-		// (minimal/xhigh/max), preserving API order and de-duplicating.
-		const merged: string[] = []
+		// Controllable reasoning model with a discrete effort enum. Preserve
+		// the API-provided values that Zoo Code knows how to send, de-duplicated
+		// and in API order. Drop "default" (a placeholder meaning "use the model
+		// default" that the Friendli API rejects as a real effort value) and any
+		// values not in KNOWN_REASONING_EFFORTS (e.g. "ultracode").
+		const seen = new Set<string>()
+		const filtered: KnownReasoningEffort[] = []
 		for (const v of effortOption.values) {
-			if (!merged.includes(v)) merged.push(v)
+			if (v === "default" || seen.has(v)) continue
+			seen.add(v)
+			if ((KNOWN_REASONING_EFFORTS as readonly string[]).includes(v)) {
+				filtered.push(v as KnownReasoningEffort)
+			}
 		}
-		for (const v of FRIENDLI_EXTRA_EFFORTS) {
-			if (!merged.includes(v)) merged.push(v)
-		}
-		// Drop "default" — it's not a real effort level the handler sends; it's
-		// a placeholder the API uses to mean "use the model default". Keeping
-		// it in the capability array would let shouldUseReasoningEffort match a
-		// settings value of "default" that the Friendli API rejects.
-		const filtered = merged.filter((v) => v !== "default")
-		return filtered.filter((v): v is ReasoningEffortLevel =>
-			(REASONING_EFFORT_LEVELS as readonly string[]).includes(v),
-		)
+		return filtered
 	}
 
 	// Reasoning-capable model without a discrete effort enum — the handler can
@@ -155,9 +145,9 @@ export async function getFriendliModels(_options?: ApiHandlerOptions): Promise<R
 	const baseURL = "https://api.friendli.ai/serverless/v1"
 
 	try {
-		const response = await axios.get<FriendliModelsResponse>(`${baseURL}/models`)
+		const response = await axios.get<FriendliModelsResponse>(`${baseURL}/models`, { timeout: 10_000 })
 		const result = friendliModelsResponseSchema.safeParse(response.data)
-		const data = result.success ? result.data.data : (response.data?.data ?? [])
+		const data = result.success ? result.data.data : []
 
 		if (!result.success) {
 			console.error(`Friendli models response is invalid ${JSON.stringify(result.error.format())}`)

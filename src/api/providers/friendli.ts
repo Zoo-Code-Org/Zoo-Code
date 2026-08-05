@@ -74,6 +74,16 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	private dynamicModels: ModelRecord = {}
 
 	/**
+	 * Tracks whether the background `getModels()` fetch has settled. Until it
+	 * does, `getModel()` preserves a configured `requestedId` even when it is
+	 * absent from the static `friendliModels` map — dynamic-only models selected
+	 * in the webview would otherwise silently fall back to the default model on
+	 * the first request after handler construction. After loading completes, the
+	 * normal fallback applies.
+	 */
+	private dynamicModelsLoaded = false
+
+	/**
 	 * @param options  Provider settings; `friendliApiKey` is required.
 	 */
 	constructor(options: ApiHandlerOptions) {
@@ -93,8 +103,10 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		getModels({ provider: "friendli" })
 			.then((models) => {
 				this.dynamicModels = models
+				this.dynamicModelsLoaded = true
 			})
 			.catch((error) => {
+				this.dynamicModelsLoaded = true
 				console.error("[FriendliHandler] Failed to load dynamic models:", error)
 			})
 	}
@@ -121,11 +133,15 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		} else if (requestedId && requestedId in this.providerModels) {
 			id = requestedId as FriendliModelId
 			info = staticInfo
-		} else if (requestedId && this.dynamicModels[requestedId]) {
-			// Edge case: requestedId is dynamic but dynamicModels lookup above
-			// was undefined — shouldn't happen, but keep this branch for safety.
+		} else if (!this.dynamicModelsLoaded && requestedId) {
+			// Dynamic load still in-flight and the requested id is dynamic-only
+			// (not in the static map). Preserve the requested id so the first
+			// request after construction goes to the model the user selected, not
+			// the default; use the default model's static metadata temporarily so
+			// capability checks (context window, pricing) have something to work
+			// with until the dynamic list arrives.
 			id = requestedId as FriendliModelId
-			info = this.dynamicModels[requestedId]
+			info = this.providerModels[this.defaultProviderModelId]
 		} else {
 			id = staticId
 			info = staticInfo

@@ -84,7 +84,9 @@ describe("Friendli Fetchers", () => {
 
 			const models = await getFriendliModels()
 
-			expect(mockedAxios.get).toHaveBeenCalledWith("https://api.friendli.ai/serverless/v1/models")
+			expect(mockedAxios.get).toHaveBeenCalledWith("https://api.friendli.ai/serverless/v1/models", {
+				timeout: 10_000,
+			})
 			// Two chat models, embedding model filtered out
 			expect(Object.keys(models)).toHaveLength(2)
 			expect(models["zai-org/GLM-5.2"]).toBeDefined()
@@ -234,10 +236,9 @@ describe("Friendli Fetchers", () => {
 
 			const result = parseFriendliModel({ id: "test/model", model })
 
-			expect(result.supportsReasoningEffort).toEqual(
-				expect.arrayContaining(["low", "medium", "high", "minimal", "xhigh", "max"]),
-			)
-			// "default" should be filtered out
+			// Only API-provided known values are preserved; "default" and unknown
+			// values (e.g. "ultracode") are dropped.
+			expect(result.supportsReasoningEffort).toEqual(["low", "medium", "high"])
 			expect(result.supportsReasoningEffort).not.toContain("default")
 			expect(result.reasoningEffort).toBe("high")
 			expect(result.supportsMaxTokens).toBe(true)

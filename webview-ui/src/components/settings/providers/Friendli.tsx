@@ -6,6 +6,7 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	friendliDefaultModelId,
+	friendliModels,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -72,7 +73,7 @@ export const Friendli = ({
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
 				defaultModelId={friendliDefaultModelId}
-				models={routerModels?.["friendli"] ?? {}}
+				models={routerModels?.["friendli"] ?? friendliModels}
 				modelIdKey="apiModelId"
 				serviceName="Friendli"
 				serviceUrl="https://friendli.ai"
