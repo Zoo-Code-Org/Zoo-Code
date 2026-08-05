@@ -1178,4 +1178,438 @@ describe("MimoHandler", () => {
 			expect(params.model).toBe("mimo-v2.5")
 		})
 	})
+
+	describe("error retry edge cases", () => {
+		it("should not retry when error is not an Error instance (parallel_tool_calls path)", async () => {
+			// A non-Error throw (e.g. a string or plain object) should hit the
+			// `return false` branch of isParallelToolCallsRejected and fall
+			// through to handleProviderError.
+			mockCreate.mockRejectedValueOnce("string error, not an Error instance")
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, {
+					taskId: "test-task",
+					parallelToolCalls: false,
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("should not retry strict schema fallback when error is not an Error instance", async () => {
+			// A non-Error throw should hit the `return false` branch of
+			// isStrictToolSchemaRejected and fall through to handleProviderError.
+			mockCreate.mockRejectedValueOnce({ notAnError: true })
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, {
+					taskId: "test-task",
+					tools,
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("should not retry strict schema fallback when status is not 400", async () => {
+			// A 500 error mentioning "strict" should NOT trigger the strict
+			// schema fallback because isStrictToolSchemaRejected checks
+			// status === 400.
+			const rejectionError = Object.assign(new Error("500 - Internal server error: strict mode not supported"), {
+				status: 500,
+			})
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, {
+					taskId: "test-task",
+					tools,
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("should retry when error message contains 'parallel_tool_calls' without status 400", async () => {
+			// isParallelToolCallsRejected also returns true when the message
+			// contains "parallel_tool_calls" regardless of status code.
+			const rejectionError = Object.assign(new Error("400 - Unrecognized parameter: parallel_tool_calls"), {
+				status: 400,
+			})
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				parallelToolCalls: true,
+			})
+
+			const chunks: ApiStreamChunk[] = []
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.parallel_tool_calls).toBeUndefined()
+		})
+
+		it("should retry when error message contains 'unrecognized' with status 400", async () => {
+			// isParallelToolCallsRejected returns true when status === 400
+			// and message includes "unrecognized" (without "parallel_tool_calls").
+			const rejectionError = Object.assign(new Error("400 - Unrecognized request parameter: unknown_field"), {
+				status: 400,
+			})
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				parallelToolCalls: false,
+			})
+
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.parallel_tool_calls).toBeUndefined()
+		})
+
+		it("should retry strict schema when error mentions 'additional_properties' with tool context", async () => {
+			// isStrictToolSchemaRejected also checks for "additional_properties"
+			// (with underscore) when "tool" is in the message.
+			const rejectionError = Object.assign(
+				new Error("400 - tool function has invalid additional_properties field"),
+				{ status: 400 },
+			)
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				tools,
+			})
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.tools[0].function).not.toHaveProperty("strict")
+		})
+
+		it("should retry strict schema when error mentions 'function' + 'additionalProperties'", async () => {
+			// isStrictToolSchemaRejected checks for "function" + "additionalproperties"
+			// (no underscore, concatenated).
+			const rejectionError = Object.assign(
+				new Error("400 - function definition has unsupported additionalProperties"),
+				{ status: 400 },
+			)
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Retried" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, {
+				taskId: "test-task",
+				tools,
+			})
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			expect(retryCallParams.tools[0].function).not.toHaveProperty("strict")
+		})
+
+		it("should not retry strict schema when 400 mentions 'strict' but no tools were sent", async () => {
+			// When params.tools is undefined, the strict schema fallback
+			// branch is not taken even if isStrictToolSchemaRejected returns true.
+			const rejectionError = Object.assign(new Error("400 - strict mode is not supported on this endpoint"), {
+				status: 400,
+			})
+			mockCreate.mockRejectedValueOnce(rejectionError)
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages)
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	describe("filterToFirstToolCall edge cases", () => {
+		it("should pass through delta with no tool_calls unchanged", async () => {
+			// When delta has no tool_calls array, filterToFirstToolCall returns
+			// the delta as-is (line 103-105).
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { content: "Hello" }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: ApiStreamChunk[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const textChunks = chunks.filter((c) => c.type === "text")
+			expect(textChunks).toHaveLength(1)
+			expect(textChunks[0].text).toBe("Hello")
+		})
+
+		it("should pass through delta with empty tool_calls array unchanged", async () => {
+			// When delta.tool_calls is an empty array, filterToFirstToolCall
+			// returns the delta as-is (line 103-105).
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [{ delta: { tool_calls: [] }, index: 0 }],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: ApiStreamChunk[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// No tool call chunks should be emitted
+			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
+			expect(toolChunks).toHaveLength(0)
+		})
+
+		it("should strip tool_calls entirely when all are dropped (kept.length === 0)", async () => {
+			// When all tool calls are dropped, filterToFirstToolCall returns
+			// a delta without the tool_calls property (lines 136-139).
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					// Only a parallel call at index 1 — no index 0 at all
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 1,
+											id: "call_parallel",
+											function: { name: "list_files", arguments: "{}" },
+										},
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: ApiStreamChunk[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			// No tool call chunks should be emitted since the only call was dropped
+			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
+			expect(toolChunks).toHaveLength(0)
+		})
+
+		it("should handle tool_call with undefined index as index 0", async () => {
+			// When toolCall.index is undefined, filterToFirstToolCall treats
+			// it as index 0 (line 108: `const index = toolCall.index ?? 0`).
+			mockCreate.mockImplementationOnce(async () => ({
+				[Symbol.asyncIterator]: async function* () {
+					yield {
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											id: "call_undef_idx",
+											function: { name: "read_file", arguments: "{}" },
+										},
+									],
+								},
+								index: 0,
+							},
+						],
+						usage: null,
+					}
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "tool_calls" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const chunks: ApiStreamChunk[] = []
+			const stream = handler.createMessage("System prompt", messages)
+			for await (const chunk of stream) {
+				chunks.push(chunk)
+			}
+
+			const toolChunks = chunks.filter(
+				(c): c is Extract<ApiStreamChunk, { type: "tool_call_partial" }> => c.type === "tool_call_partial",
+			)
+			expect(toolChunks).toHaveLength(1)
+			expect(toolChunks[0].name).toBe("read_file")
+		})
+	})
 })
