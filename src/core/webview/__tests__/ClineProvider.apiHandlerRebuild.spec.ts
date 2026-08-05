@@ -474,9 +474,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out provider profile mutations retain the queue boundary until they settle", async () => {
+		test("timed-out mutations abort before writing state and advance the queue", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
 			let resolveFirst!: () => void
 			const firstActivation = new Promise<void>((resolve) => {
 				resolveFirst = resolve
@@ -505,15 +506,20 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
+				// Queue advanced immediately on timeout — second enqueues now.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
+				// activateProfile not yet called for second (it runs in the next microtask).
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 
+				// Resolve the first activation's inner promise so its in-flight mock can return.
+				// The aborted signal prevents it from writing any state.
 				resolveFirst()
 				await expect(second).resolves.toBeUndefined()
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
-				expect(logSpy).toHaveBeenCalledWith(
-					"Provider profile mutation timed out; waiting for the in-flight mutation to settle",
-				)
+				// Aborted first activation wrote nothing; only second profile is set.
+				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
+				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
+				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
 			} finally {
 				vi.useRealTimers()
 			}
