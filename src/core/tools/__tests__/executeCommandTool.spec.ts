@@ -578,6 +578,7 @@ describe("executeCommandTool", () => {
 		it("waits for shell-integrated terminal completion after output", async () => {
 			vitest.useFakeTimers()
 			mockCline.providerRef.deref.mockResolvedValue({
+				contextProxy: { getValue: vitest.fn().mockReturnValue(false) },
 				getState: vitest.fn().mockResolvedValue({ terminalShellIntegrationDisabled: false }),
 				postMessageToWebview: vitest.fn(),
 			})
