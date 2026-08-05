@@ -15,6 +15,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 import { handleProviderError } from "./utils/error-handler"
 
 import { BaseProvider } from "./base-provider"
@@ -155,10 +156,17 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			}
 
 			if (event.data.usage) {
+				const inputTokens = event.data.usage.promptTokens || 0
+				const outputTokens = event.data.usage.completionTokens || 0
+				const { totalCost } = info
+					? calculateApiCostOpenAI(info, inputTokens, outputTokens, 0, 0)
+					: { totalCost: 0 }
+	
 				yield {
 					type: "usage",
-					inputTokens: event.data.usage.promptTokens || 0,
-					outputTokens: event.data.usage.completionTokens || 0,
+					inputTokens,
+					outputTokens,
+					totalCost,
 				}
 			}
 		}
