@@ -55,7 +55,7 @@ vi.mock("../rulesMessageHandler", () => ({
 	handleOpenRulesDirectory: vi.fn(),
 }))
 
-import type { ModelRecord } from "@roo-code/types"
+import type { ModelRecord, WebviewMessage } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
@@ -1170,6 +1170,74 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+	})
+})
+
+describe("webviewMessageHandler - hookDefinitions", () => {
+	const validHook = {
+		id: "session-hook",
+		name: "Session hook",
+		enabled: false,
+		phase: "sessionStart" as const,
+		executable: "node",
+		argv: ["script.js", " argument with spaces "],
+	}
+
+	beforeEach(() => vi.clearAllMocks())
+
+	it("persists the complete hook array without normalizing command fields", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { hookDefinitions: [validHook] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("hookDefinitions", [validHook])
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledOnce()
+	})
+
+	it("persists an explicit empty array to clear hooks", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { hookDefinitions: [] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("hookDefinitions", [])
+	})
+
+	it("rejects duplicate definitions atomically before persisting other settings", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { language: "en", hookDefinitions: [validHook, validHook] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("must be unique"))
+	})
+
+	it("rejects malformed phases and command values", async () => {
+		// This test deliberately crosses the typed webview boundary with a malformed runtime payload.
+		const message = {
+			type: "updateSettings",
+			updatedSettings: {
+				hookDefinitions: [{ ...validHook, phase: "postToolUse", executable: " node " }],
+			},
+		} as unknown as WebviewMessage
+
+		await webviewMessageHandler(mockClineProvider, message)
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+	})
+
+	it("rejects command fields that schema parsing would otherwise normalize", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { hookDefinitions: [{ ...validHook, executable: " node " }] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("valid as entered"))
 	})
 })
 

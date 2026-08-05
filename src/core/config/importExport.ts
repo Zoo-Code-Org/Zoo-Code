@@ -97,6 +97,10 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
+		if (key === "hookDefinitions") {
+			warnings.push(`Setting "${path}" was skipped: Hook definitions cannot be imported.`)
+			continue
+		}
 		const schema = globalSettingsShape[key as keyof GlobalSettings]
 
 		if (!schema) {

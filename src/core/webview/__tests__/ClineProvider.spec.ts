@@ -1352,6 +1352,26 @@ describe("ClineProvider", () => {
 		expect((await provider.getState()).showRooIgnoredFiles).toBe(false)
 	})
 
+	test("returns persisted hook definitions and the shared empty default in both state stages", async () => {
+		expect((await provider.getState()).hookDefinitions).toEqual([])
+		expect((await provider.getStateToPostToWebview()).hookDefinitions).toEqual([])
+
+		const definitions = [
+			{
+				id: "session-hook",
+				name: "Session hook",
+				enabled: false,
+				phase: "sessionStart" as const,
+				executable: "node",
+				argv: ["script.js"],
+			},
+		]
+		await provider.contextProxy.setValue("hookDefinitions", definitions)
+
+		expect((await provider.getState()).hookDefinitions).toEqual(definitions)
+		expect((await provider.getStateToPostToWebview()).hookDefinitions).toEqual(definitions)
+	})
+
 	test("handles updatePrompt message correctly", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]

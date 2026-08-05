@@ -26,6 +26,7 @@
 		"discardButton": "Değişiklikleri At"
 	},
 	"sections": {
+		"hooks": "Hooks",
 		"providers": "Sağlayıcılar",
 		"modes": "Modlar",
 		"mcp": "MCP Sunucuları",
@@ -43,6 +44,49 @@
 		"about": "Zoo Code Hakkında",
 		"skills": "Skills",
 		"rules": "Kurallar"
+	},
+	"hooks": {
+		"description": "Configure global lifecycle hooks. Definitions are saved only when you use the Settings Save button.",
+		"securityWarning": "Enabled hooks execute trusted code on the VS Code extension host at the task workspace cwd and are not sandboxed.",
+		"add": "Add hook",
+		"edit": "Edit hook",
+		"delete": "Delete hook",
+		"global": "Global hooks",
+		"empty": "No hooks configured. Session start hooks run at task start; before-tool hooks match exact tool names. Execution is unavailable until hook runner support is added.",
+		"enabled": "Enabled",
+		"disabled": "Disabled",
+		"footer": "Commands use a fixed 10-second timeout. Executable and argument boundaries are preserved exactly.",
+		"phase": { "sessionStart": "Session start", "preToolUse": "Before tool use" },
+		"search": {
+			"definitions": "Enabled hooks, phases, and exact tool matching",
+			"commandFormat": "Executable, exact arguments, and fixed timeout"
+		},
+		"fields": {
+			"name": "Name",
+			"phase": "Phase",
+			"tools": "Exact tool matches",
+			"toolsHint": "Select one or more exact tool names. This applies only before tool use.",
+			"executable": "Executable",
+			"executableHint": "Enter only the executable path or name, without shell syntax or arguments.",
+			"arguments": "Arguments",
+			"argumentsHint": "Each row is passed as exactly one argv value. Empty rows are empty arguments.",
+			"argument": "Argument {{number}}",
+			"addArgument": "Add argument",
+			"enabled": "Enabled"
+		},
+		"dialog": {
+			"addTitle": "Add hook",
+			"editTitle": "Edit hook",
+			"description": "Hook changes remain local until you save Settings. New hooks are disabled by default.",
+			"add": "Add",
+			"update": "Update"
+		},
+		"deleteDialog": {
+			"title": "Delete hook",
+			"description": "Delete this hook from the pending settings changes?",
+			"confirm": "Delete"
+		},
+		"validation": { "invalid": "Invalid hook definition: {{message}}" }
 	},
 	"about": {
 		"bugReport": {

@@ -23,6 +23,7 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	hookDefinitionsSchema,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -699,8 +700,49 @@ export const webviewMessageHandler = async (
 					}
 				}
 
+				let parsedHookDefinitions
+				if (Object.prototype.hasOwnProperty.call(message.updatedSettings, "hookDefinitions")) {
+					const result = hookDefinitionsSchema.safeParse(message.updatedSettings.hookDefinitions)
+					if (!result.success) {
+						const details = result.error.issues
+							.map((issue) => `${issue.path.join(".") || "hookDefinitions"}: ${issue.message}`)
+							.join(", ")
+						await vscode.window.showErrorMessage(`Hook settings were not saved: ${details}`)
+						break
+					}
+					const hasNormalizedOrUnsupportedFields = result.data.some((definition, index) => {
+						const raw = (message.updatedSettings?.hookDefinitions as unknown[])[index] as Record<
+							string,
+							unknown
+						>
+						const allowedKeys = new Set([
+							"id",
+							"name",
+							"enabled",
+							"phase",
+							"executable",
+							"argv",
+							...(definition.phase === "preToolUse" ? ["toolMatcher"] : []),
+						])
+						return (
+							Object.keys(raw).some((key) => !allowedKeys.has(key)) ||
+							raw.name !== definition.name ||
+							raw.executable !== definition.executable ||
+							JSON.stringify(raw.argv) !== JSON.stringify(definition.argv) ||
+							JSON.stringify(raw.toolMatcher) !== JSON.stringify(definition.toolMatcher)
+						)
+					})
+					if (hasNormalizedOrUnsupportedFields) {
+						await vscode.window.showErrorMessage(
+							"Hook settings were not saved: command fields must be valid as entered and unsupported fields are not allowed.",
+						)
+						break
+					}
+					parsedHookDefinitions = result.data
+				}
+
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
-					let newValue = value
+					let newValue = key === "hookDefinitions" ? parsedHookDefinitions : value
 
 					if (key === "language") {
 						newValue = value ?? "en"

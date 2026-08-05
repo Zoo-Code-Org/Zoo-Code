@@ -219,6 +219,42 @@ describe("importExport", () => {
 			])
 		})
 
+		it("does not install hook definitions from imported settings", async () => {
+			;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
+			;(fs.readFile as Mock).mockResolvedValue(
+				JSON.stringify({
+					providerProfiles: {
+						currentApiConfigName: "test",
+						apiConfigs: { test: { apiProvider: "openai", id: "test-id" } },
+					},
+					globalSettings: {
+						mode: "code",
+						hookDefinitions: [
+							{
+								id: "imported",
+								name: "Imported",
+								enabled: true,
+								phase: "sessionStart",
+								executable: "node",
+								argv: [],
+							},
+						],
+					},
+				}),
+			)
+			mockProviderSettingsManager.export.mockResolvedValue({ currentApiConfigName: "test", apiConfigs: {} })
+			mockProviderSettingsManager.listConfig.mockResolvedValue([])
+
+			const result = await importSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(mockContextProxy.setValues).toHaveBeenCalledWith({ mode: "code" })
+			expect(result).toMatchObject({ success: true, warnings: [expect.stringContaining("cannot be imported")] })
+		})
+
 		it("should return success: false when file content is invalid", async () => {
 			;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/settings.json" }])
 

@@ -17,6 +17,7 @@ import {
 	type HookDefinition,
 } from "../hooks.js"
 import { clineMessageSchema, clineSaySchema } from "../message.js"
+import { GLOBAL_SETTINGS_KEYS, globalSettingsSchema } from "../global-settings.js"
 
 const encoder = new TextEncoder()
 
@@ -28,6 +29,14 @@ const sessionHook: HookDefinition = {
 	executable: "/usr/bin/env",
 	argv: ["node", "setup.js"],
 }
+
+describe("hook global settings", () => {
+	it("is optional, known, and accepts an explicit empty array", () => {
+		expect(globalSettingsSchema.parse({}).hookDefinitions).toBeUndefined()
+		expect(globalSettingsSchema.parse({ hookDefinitions: [] }).hookDefinitions).toEqual([])
+		expect(GLOBAL_SETTINGS_KEYS).toContain("hookDefinitions")
+	})
+})
 
 const preToolHook: HookDefinition = {
 	id: "pre-read",

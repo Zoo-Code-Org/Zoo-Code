@@ -29,6 +29,7 @@ import {
 	GitCommitVertical,
 	GraduationCap,
 	ScrollText,
+	Cable,
 } from "lucide-react"
 
 import {
@@ -81,6 +82,7 @@ import PromptsSettings from "./PromptsSettings"
 import { SlashCommandsSettings } from "./SlashCommandsSettings"
 import { SkillsSettings } from "./SkillsSettings"
 import { RulesSettings } from "./RulesSettings"
+import { HooksSettings } from "./HooksSettings"
 import { UISettings } from "./UISettings"
 import ModesView from "../modes/ModesView"
 import McpView from "../mcp/McpView"
@@ -105,6 +107,7 @@ export const sectionNames = [
 	"slashCommands",
 	"skills",
 	"rules",
+	"hooks",
 	"checkpoints",
 	"notifications",
 	"contextManagement",
@@ -217,6 +220,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedFiles,
 		autoCloseZooOpenedFilesAfterUserEdited,
 		autoCloseZooOpenedNewFiles,
+		hookDefinitions,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -448,6 +452,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
+					hookDefinitions: hookDefinitions ?? [],
 				},
 			})
 
@@ -539,6 +544,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			{ id: "skills", icon: GraduationCap },
 			{ id: "slashCommands", icon: SquareSlash },
 			{ id: "rules", icon: ScrollText },
+			{ id: "hooks", icon: Cable },
 			{ id: "autoApprove", icon: CheckCheck },
 			{ id: "mcp", icon: Server },
 			{ id: "checkpoints", icon: GitCommitVertical },
@@ -835,6 +841,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 						{/* Rules Section */}
 						{renderTab === "rules" && <RulesSettings />}
+
+						{/* Hooks Section */}
+						{renderTab === "hooks" && (
+							<HooksSettings
+								hookDefinitions={hookDefinitions ?? []}
+								onChange={(definitions) => setCachedStateField("hookDefinitions", definitions)}
+								setErrorMessage={setErrorMessage}
+							/>
+						)}
 
 						{/* Checkpoints Section */}
 						{renderTab === "checkpoints" && (

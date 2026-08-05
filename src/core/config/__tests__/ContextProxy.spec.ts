@@ -150,6 +150,27 @@ describe("ContextProxy", () => {
 		})
 	})
 
+	describe("hook definitions", () => {
+		it("initializes, stores, and excludes hook definitions from export", async () => {
+			const definitions = [
+				{
+					id: "session-hook",
+					name: "Session hook",
+					enabled: false,
+					phase: "sessionStart" as const,
+					executable: "node",
+					argv: ["script.js"],
+				},
+			]
+
+			expect(mockGlobalState.get).toHaveBeenCalledWith("hookDefinitions")
+			await proxy.setValue("hookDefinitions", definitions)
+			expect(proxy.getValue("hookDefinitions")).toEqual(definitions)
+			expect(mockGlobalState.update).toHaveBeenCalledWith("hookDefinitions", definitions)
+			expect(await proxy.export()).not.toHaveProperty("hookDefinitions")
+		})
+	})
+
 	describe("updateGlobalState", () => {
 		it("should update state directly in original context", async () => {
 			await proxy.updateGlobalState("apiProvider", "deepseek")

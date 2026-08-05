@@ -21,6 +21,34 @@ vi.mock("../ApiConfigManager", () => ({
 	),
 }))
 
+vi.mock("../HooksSettings", () => ({
+	HooksSettings: ({ hookDefinitions, onChange }: any) => (
+		<div data-testid="hooks-settings">
+			<span data-testid="hook-count">{hookDefinitions.length}</span>
+			<button
+				data-testid="add-cached-hook"
+				onClick={() =>
+					onChange([
+						...hookDefinitions,
+						{
+							id: "new-hook",
+							name: "New hook",
+							enabled: false,
+							phase: "sessionStart",
+							executable: "node",
+							argv: [],
+						},
+					])
+				}>
+				Add cached hook
+			</button>
+			<button data-testid="clear-cached-hooks" onClick={() => onChange([])}>
+				Clear cached hooks
+			</button>
+		</div>
+	),
+}))
+
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeButton: ({ children, onClick, appearance, "data-testid": dataTestId }: any) =>
 		appearance === "icon" ? (
@@ -571,6 +599,65 @@ describe("SettingsView - Sound Settings", () => {
 				}),
 			}),
 		)
+	})
+})
+
+describe("SettingsView - Hooks Settings", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it("keeps hook edits cached until Save and includes the complete array", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ hookDefinitions: [] })
+		activateTab("hooks")
+
+		fireEvent.click(within(getSettingsContent()).getByTestId("add-cached-hook"))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "updateSettings" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					hookDefinitions: [expect.objectContaining({ id: "new-hook", enabled: false })],
+				}),
+			}),
+		)
+	})
+
+	it("sends an explicit empty array when clearing hooks", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			currentApiConfigName: "hooks-profile",
+			hookDefinitions: [
+				{
+					id: "existing",
+					name: "Existing",
+					enabled: false,
+					phase: "sessionStart",
+					executable: "node",
+					argv: [],
+				},
+			],
+		})
+		activateTab("hooks")
+
+		fireEvent.click(within(getSettingsContent()).getByTestId("clear-cached-hooks"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({ hookDefinitions: [] }),
+			}),
+		)
+	})
+
+	it("does not overwrite dirty hook edits on ordinary extension-state pushes", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({ hookDefinitions: [] })
+		activateTab("hooks")
+		fireEvent.click(within(getSettingsContent()).getByTestId("add-cached-hook"))
+
+		act(() => mockPostMessage({ hookDefinitions: [] }))
+
+		expect(within(getSettingsContent()).getByTestId("hook-count")).toHaveTextContent("1")
 	})
 })
 

@@ -3,6 +3,7 @@ import { z } from "zod"
 import { codebaseIndexConfigSchema, codebaseIndexModelsSchema } from "./codebase-index.js"
 import { experimentsSchema } from "./experiment.js"
 import { historyItemSchema } from "./history.js"
+import { hookDefinitionsSchema } from "./hooks.js"
 import { customModePromptsSchema, customSupportPromptsSchema, modeConfigSchema } from "./mode.js"
 import {
 	type ProviderSettings,
@@ -273,6 +274,7 @@ export const globalSettingsSchema = z.object({
 	 * Tools in this list will be excluded from prompt generation and rejected at execution time.
 	 */
 	disabledTools: z.array(toolNamesSchema).optional(),
+	hookDefinitions: hookDefinitionsSchema.optional(),
 })
 
 export type GlobalSettings = z.infer<typeof globalSettingsSchema>
