@@ -1,0 +1,72 @@
+name: Zoo CLI Release
+
+on:
+    workflow_dispatch:
+        inputs:
+            dry_run:
+                description: Build and verify without publishing
+                type: boolean
+                default: true
+
+permissions:
+    contents: read
+
+jobs:
+    artifact:
+        strategy:
+            fail-fast: false
+            matrix:
+                include:
+                    - runs-on: macos-latest
+                      platform: darwin-arm64
+                    - runs-on: ubuntu-latest
+                      platform: linux-x64
+                    - runs-on: ubuntu-24.04-arm
+                      platform: linux-arm64
+        runs-on: ${{ matrix.runs-on }}
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+            - uses: ./.github/actions/setup-node-pnpm
+            - run: pnpm --dir packages/zoo-protocol test
+            - run: pnpm --dir packages/zoo-host test
+            - run: pnpm --dir apps/zoo test
+            - run: pnpm bundle
+            - run: pnpm --dir packages/zoo-host build
+            - name: Assemble relocatable artifact
+              env:
+                  PLATFORM: ${{ matrix.platform }}
+              run: |
+                  root="zoo-cli-${PLATFORM}"
+                  mkdir -p "$root/bin" "$root/lib/host" "$root/lib/extension"
+                  cp -R apps/zoo/dist/. "$root/lib/"
+                  cp -R packages/zoo-host/dist/. "$root/lib/host/"
+                  cp -R src/dist/. "$root/lib/extension/"
+                  printf '{"type":"commonjs"}\n' > "$root/lib/extension/package.json"
+                  node -e 'const p=require("./apps/zoo/package.json"); console.log(JSON.stringify({name:p.name,version:p.version,private:true,type:"module",dependencies:{ink:p.dependencies.ink,react:p.dependencies.react}},null,2))' > "$root/package.json"
+                  npm install --prefix "$root" --omit=dev --ignore-scripts
+                  printf '%s\n' '#!/usr/bin/env sh' 'base=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)' 'export ZOO_HOST_PATH="$base/lib/host/child.js"' 'export ZOO_EXTENSION_PATH="$base/lib/extension"' 'exec node "$base/lib/index.js" "$@"' > "$root/bin/zoo"
+                  chmod +x "$root/bin/zoo"
+                  "$root/bin/zoo" --help
+                  "$root/bin/zoo" --version
+                  tar -czf "zoo-cli-${PLATFORM}.tar.gz" "$root"
+                  shasum -a 256 "zoo-cli-${PLATFORM}.tar.gz" > "zoo-cli-${PLATFORM}.tar.gz.sha256"
+            - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: zoo-cli-${{ matrix.platform }}
+                  path: zoo-cli-${{ matrix.platform }}.tar.gz*
+
+    release:
+        if: ${{ !inputs.dry_run }}
+        needs: artifact
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+            - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+              with:
+                  pattern: zoo-cli-*
+                  merge-multiple: true
+            - env:
+                  GH_TOKEN: ${{ github.token }}
+              run: gh release create "zoo-cli-v$(node -p 'require("./apps/zoo/package.json").version')" zoo-cli-*.tar.gz* --generate-notes

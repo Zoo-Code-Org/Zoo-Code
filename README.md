@@ -14,6 +14,8 @@
 
 > Your AI-Powered Dev Team, Right in Your Editor
 
+Zoo Code is also available in the terminal through the new [`zoo` CLI](docs/zoo-cli.md), with an interactive UI and deterministic text, JSON, and NDJSON automation.
+
 ## We are Zoo Code
 
 > Zoo Code continues development of this project after the Roo team wound down
