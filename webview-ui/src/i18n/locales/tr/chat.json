@@ -369,6 +369,10 @@
 		}
 	},
 	"profileViolationWarning": "Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Resmi yetki devri olmadan mod değişimi",
+		"message": "⚠️ Görev yetki devri olmadan mod {{fromMode}}'dan {{toMode}}'a değiştirildi — konuşma geçmişi yeni modelle ({{toProvider}}) uyumlu olmayabilir."
+	},
 	"shellIntegration": {
 		"title": "Komut Çalıştırma Uyarısı",
 		"description": "Komutunuz VSCode terminal kabuk entegrasyonu olmadan çalıştırılıyor. Bu uyarıyı gizlemek için <settingsLink>Zoo Code ayarları</settingsLink>'nın <strong>Terminal</strong> bölümünden kabuk entegrasyonunu devre dışı bırakabilir veya aşağıdaki bağlantıyı kullanarak VSCode terminal entegrasyonu sorunlarını giderebilirsiniz.",

@@ -368,6 +368,10 @@
 		}
 	},
 	"profileViolationWarning": "현재 프로필이 조직 설정과 호환되지 않습니다",
+	"modeSwitchCompatibilityWarning": {
+		"title": "공식 위임 없는 모드 전환",
+		"message": "⚠️ 작업 위임 없이 모드가 {{fromMode}}에서 {{toMode}}로 전환되었습니다 — 대화 기록이 새 모델({{toProvider}})과 호환되지 않을 수 있습니다."
+	},
 	"shellIntegration": {
 		"title": "명령 실행 경고",
 		"description": "명령이 VSCode 터미널 쉘 통합 없이 실행되고 있습니다. 이 경고를 숨기려면 <settingsLink>Zoo Code 설정</settingsLink>의 <strong>Terminal</strong> 섹션에서 쉘 통합을 비활성화하거나 아래 링크를 사용하여 VSCode 터미널 통합 문제를 해결하세요.",

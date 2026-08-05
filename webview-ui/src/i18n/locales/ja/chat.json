@@ -368,6 +368,10 @@
 		}
 	},
 	"profileViolationWarning": "現在のプロファイルは組織の設定と互換性がありません",
+	"modeSwitchCompatibilityWarning": {
+		"title": "正式な委任なしのモード切り替え",
+		"message": "⚠️ タスク委任なしでモードが {{fromMode}} から {{toMode}} に切り替わりました — 会話履歴が新しいモデル ({{toProvider}}) と互換性がない可能性があります。"
+	},
 	"shellIntegration": {
 		"title": "コマンド実行警告",
 		"description": "コマンドはVSCodeターミナルシェル統合なしで実行されています。この警告を非表示にするには、<settingsLink>Zoo Code 設定</settingsLink>の<strong>Terminal</strong>セクションでシェル統合を無効にするか、以下のリンクを使用してVSCodeターミナル統合のトラブルシューティングを行ってください。",

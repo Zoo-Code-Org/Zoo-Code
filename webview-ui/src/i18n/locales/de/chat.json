@@ -368,6 +368,10 @@
 		}
 	},
 	"profileViolationWarning": "Das aktuelle Profil ist nicht kompatibel mit den Einstellungen deiner Organisation",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Moduswechsel ohne formale Delegation",
+		"message": "⚠️ Modus von {{fromMode}} zu {{toMode}} ohne Aufgaben-Delegation gewechselt — der Gesprächsverlauf ist möglicherweise mit dem neuen Modell ({{toProvider}}) inkompatibel."
+	},
 	"shellIntegration": {
 		"title": "Befehlsausführungswarnung",
 		"description": "Dein Befehl wird ohne VSCode Terminal-Shell-Integration ausgeführt. Um diese Warnung zu unterdrücken, kannst du die Shell-Integration im Abschnitt <strong>Terminal</strong> der <settingsLink>Zoo Code Einstellungen</settingsLink> deaktivieren oder die VSCode Terminal-Integration mit dem Link unten beheben.",

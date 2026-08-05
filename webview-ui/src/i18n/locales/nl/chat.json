@@ -368,6 +368,10 @@
 		}
 	},
 	"profileViolationWarning": "Het huidige profiel is niet compatibel met de instellingen van uw organisatie",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Moduswissel zonder formele delegatie",
+		"message": "⚠️ Modus gewijzigd van {{fromMode}} naar {{toMode}} zonder taakdelegatie — de gespreksgeschiedenis is mogelijk niet compatibel met het nieuwe model ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Waarschuwing commando-uitvoering",
 		"description": "Je commando wordt uitgevoerd zonder VSCode-terminal-shellintegratie. Om deze waarschuwing te onderdrukken kun je shellintegratie uitschakelen in de sectie <strong>Terminal</strong> van de <settingsLink>Zoo Code-instellingen</settingsLink> of de VSCode-terminalintegratie oplossen via de onderstaande link.",

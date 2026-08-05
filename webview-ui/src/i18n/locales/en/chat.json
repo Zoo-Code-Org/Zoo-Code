@@ -395,6 +395,10 @@
 		}
 	},
 	"profileViolationWarning": "The current profile isn't compatible with your organization's settings",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Mode switch without formal delegation",
+		"message": "\u26a0\ufe0f Mode switched from {{fromMode}} to {{toMode}} without task delegation \u2014 conversation history may be incompatible with the new model ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Command Execution Warning",
 		"description": "Your command is being executed without VSCode terminal shell integration. To suppress this warning you can disable shell integration in the <strong>Terminal</strong> section of the <settingsLink>Zoo Code settings</settingsLink> or troubleshoot VSCode terminal integration using the link below.",

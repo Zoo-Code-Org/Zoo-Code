@@ -369,6 +369,10 @@
 		}
 	},
 	"profileViolationWarning": "Hồ sơ hiện tại không tương thích với cài đặt của tổ chức của bạn",
+	"modeSwitchCompatibilityWarning": {
+		"title": "Chuyển chế độ mà không có ủy quyền chính thức",
+		"message": "⚠️ Chế độ đã chuyển từ {{fromMode}} sang {{toMode}} mà không ủy quyền nhiệm vụ — lịch sử hội thoại có thể không tương thích với mô hình mới ({{toProvider}})."
+	},
 	"shellIntegration": {
 		"title": "Cảnh báo thực thi lệnh",
 		"description": "Lệnh của bạn đang được thực thi mà không có tích hợp shell terminal VSCode. Để ẩn cảnh báo này, bạn có thể tắt tích hợp shell trong phần <strong>Terminal</strong> của <settingsLink>cài đặt Zoo Code</settingsLink> hoặc khắc phục sự cố tích hợp terminal VSCode bằng liên kết bên dưới.",

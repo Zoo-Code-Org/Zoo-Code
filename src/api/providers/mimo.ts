@@ -14,6 +14,8 @@ import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { OpenAiHandler } from "./openai"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
+import { historyHasToolCallsWithoutReasoning } from "./utils/reasoning-history-guard"
+import { logger } from "../../utils/logging"
 
 /**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
@@ -81,6 +83,20 @@ export class MimoHandler extends OpenAiHandler {
 
 		const tools = metadata?.tools
 
+		// Layer 1 Guard: detect incompatible history (tool_calls without reasoning_content)
+		// and disable thinking mode for this request to prevent a 400 error from the API.
+		// MiMo previously had NO disable path — this closes that gap.
+		const hasIncompatibleHistory = historyHasToolCallsWithoutReasoning(convertedMessages)
+
+		if (hasIncompatibleHistory) {
+			logger.warn("provider_reasoning_guard_triggered", {
+				ctx: "mimo",
+				provider: "mimo",
+				modelId,
+				taskId: metadata?.taskId,
+			})
+		}
+
 		// Build request per MiMo's OpenAI-compatible API
 		// https://developer.puter.com/ai/xiaomi/mimo-v2.5-pro/
 		// Note: temperature is omitted because MiMo forces it to 1.0 when thinking mode
@@ -91,7 +107,7 @@ export class MimoHandler extends OpenAiHandler {
 			stream: true,
 			stream_options: { include_usage: true },
 			// MiMo requires thinking to be enabled via extra_body
-			extra_body: { thinking: { type: "enabled" } },
+			extra_body: { thinking: { type: hasIncompatibleHistory ? "disabled" : "enabled" } },
 		}
 
 		if (tools && tools.length > 0) {
