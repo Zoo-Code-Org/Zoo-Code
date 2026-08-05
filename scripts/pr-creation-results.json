@@ -1,0 +1,104 @@
+﻿[
+	{
+		"Number": 22,
+		"Branch": "pr/b04-shell-contracts-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1120"
+	},
+	{
+		"Number": 23,
+		"Branch": "pr/b01-error-contracts-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1121"
+	},
+	{
+		"Number": 24,
+		"Branch": "pr/b08-task-persistence-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1122"
+	},
+	{
+		"Number": 25,
+		"Branch": "pr/b13-usage-store-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1123"
+	},
+	{
+		"Number": 26,
+		"Branch": "pr/b05a-strict-reasoning-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1124"
+	},
+	{
+		"Number": 27,
+		"Branch": "pr/b05-shell-resolution-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1125"
+	},
+	{
+		"Number": 28,
+		"Branch": "pr/b02-error-runtime-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1126"
+	},
+	{
+		"Number": 29,
+		"Branch": "pr/b09-task-org-ipc-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1127"
+	},
+	{
+		"Number": 30,
+		"Branch": "pr/b03-error-integration-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1128"
+	},
+	{
+		"Number": 31,
+		"Branch": "pr/b10-task-org-ui-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1129"
+	},
+	{
+		"Number": 32,
+		"Branch": "pr/b12-mimo-enforcement-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1130"
+	},
+	{
+		"Number": 33,
+		"Branch": "pr/b14-usage-aggregation-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1131"
+	},
+	{
+		"Number": 34,
+		"Branch": "pr/b17-provider-cost-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1132"
+	},
+	{
+		"Number": 35,
+		"Branch": "pr/b15-usage-capture-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1133"
+	},
+	{
+		"Number": 36,
+		"Branch": "pr/b16-stats-ui-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1134"
+	},
+	{
+		"Number": 37,
+		"Branch": "pr/b06-terminal-lifecycle-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1135"
+	},
+	{
+		"Number": 38,
+		"Branch": "pr/b07-shell-integration-v2",
+		"Status": "CREATED",
+		"Url": "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1136"
+	}
+]

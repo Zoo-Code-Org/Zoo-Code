@@ -1,0 +1,87 @@
+﻿[
+	{
+		"Branch": "pr/b04-shell-contracts-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b04-shell-contracts-v2"
+	},
+	{
+		"Branch": "pr/b01-error-contracts-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b01-error-contracts-v2"
+	},
+	{
+		"Branch": "pr/b08-task-persistence-v2",
+		"Status": "FAILED",
+		"Error": "squash merge failed"
+	},
+	{
+		"Branch": "pr/b13-usage-store-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b13-usage-store-v2"
+	},
+	{
+		"Branch": "pr/b05a-strict-reasoning-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b05a-strict-reasoning-v2"
+	},
+	{
+		"Branch": "pr/b05-shell-resolution-v2",
+		"Status": "FAILED",
+		"Error": "commit"
+	},
+	{
+		"Branch": "pr/b02-error-runtime-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b02-error-runtime-v2"
+	},
+	{
+		"Branch": "pr/b09-task-org-ipc-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b09-task-org-ipc-v2"
+	},
+	{
+		"Branch": "pr/b14-usage-aggregation-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b14-usage-aggregation-v2"
+	},
+	{
+		"Branch": "pr/b12-mimo-enforcement-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b12-mimo-enforcement-v2"
+	},
+	{
+		"Branch": "pr/b17-provider-cost-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b17-provider-cost-v2"
+	},
+	{
+		"Branch": "pr/b06-terminal-lifecycle-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b06-terminal-lifecycle-v2"
+	},
+	{
+		"Branch": "pr/b03-error-integration-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b03-error-integration-v2"
+	},
+	{
+		"Branch": "pr/b10-task-org-ui-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b10-task-org-ui-v2"
+	},
+	{
+		"Branch": "pr/b15-usage-capture-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b15-usage-capture-v2"
+	},
+	{
+		"Branch": "pr/b07-shell-integration-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b07-shell-integration-v2"
+	},
+	{
+		"Branch": "pr/b16-stats-ui-v2",
+		"Status": "SUCCESS",
+		"TempBranch": "temp/pr/b16-stats-ui-v2"
+	}
+]
