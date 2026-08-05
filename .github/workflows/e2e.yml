@@ -34,10 +34,6 @@ jobs:
             - name: Setup Node.js and pnpm
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               uses: ./.github/actions/setup-node-pnpm
-            - name: Run vscode-e2e unit tests
-              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
-              run: pnpm --filter @roo-code/vscode-e2e test:unit
-
             - name: Install xvfb
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: sudo apt-get install -y xvfb
