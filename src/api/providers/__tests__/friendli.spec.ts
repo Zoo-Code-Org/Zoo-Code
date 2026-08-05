@@ -11,7 +11,10 @@ import { FriendliHandler } from "../friendli"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 // Create mock functions
-const mockCreate = vi.fn()
+const { mockCreate, mockGetModels } = vi.hoisted(() => ({
+	mockCreate: vi.fn(),
+	mockGetModels: vi.fn(),
+}))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -26,11 +29,18 @@ vi.mock("openai", () => ({
 	}),
 }))
 
+// Mock modelCache so we can control dynamic model loading
+vi.mock("../fetchers/modelCache", () => ({
+	getModels: mockGetModels,
+}))
+
 describe("FriendliHandler", () => {
 	let handler: FriendliHandler
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// By default, dynamic model fetch resolves to empty (static models win)
+		mockGetModels.mockResolvedValue({})
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([
@@ -538,5 +548,97 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
 		expect(callArgs.parse_reasoning).toBe(true)
 		expect(callArgs.include_reasoning).toBe(true)
+	})
+})
+
+describe("FriendliHandler — dynamic model loading", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockCreate.mockImplementation(async () => asyncStreamFrom([]))
+	})
+
+	it("preserves a dynamic-only model id during the initial load window", () => {
+		// mockGetModels never resolves — simulates an in-flight fetch
+		mockGetModels.mockReturnValue(new Promise(() => {}))
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		// "friendli-only/future-model" is not in static friendliModels, but
+		// because dynamicModelsLoaded is still false the handler keeps the
+		// requested id and falls back to the default model's metadata.
+		const model = handler.getModel()
+		expect(model.id).toBe("friendli-only/future-model")
+		expect(model.info).toEqual(friendliModels[friendliDefaultModelId])
+	})
+
+	it("falls back to default model after load completes and id is not in dynamic set", async () => {
+		// Dynamic fetch resolves to empty — no models
+		mockGetModels.mockResolvedValue({})
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		// Wait for the dynamic fetch to settle
+		await vi.waitFor(() => {
+			expect((handler as unknown as Record<string, unknown>)["dynamicModelsLoaded"]).toBe(true)
+		})
+
+		// After load, the dynamic-only id is not found — falls back to default
+		const model = handler.getModel()
+		expect(model.id).toBe(friendliDefaultModelId)
+	})
+
+	it("uses dynamic model info when available", async () => {
+		const dynamicModel = {
+			"friendli-only/future-model": {
+				maxTokens: 8192,
+				contextWindow: 100000,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "A dynamic-only model",
+			},
+		}
+		mockGetModels.mockResolvedValue(dynamicModel)
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		await vi.waitFor(() => {
+			expect((handler as unknown as Record<string, unknown>)["dynamicModelsLoaded"]).toBe(true)
+		})
+
+		const model = handler.getModel()
+		expect(model.id).toBe("friendli-only/future-model")
+		expect(model.info).toEqual(
+			expect.objectContaining({
+				maxTokens: 8192,
+				contextWindow: 100000,
+				description: "A dynamic-only model",
+			}),
+		)
+	})
+
+	it("sets dynamicModelsLoaded even when getModels rejects", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockGetModels.mockRejectedValue(new Error("Network error"))
+
+		const handler = new FriendliHandler({
+			friendliApiKey: "test-key",
+		})
+
+		await vi.waitFor(() => {
+			expect((handler as unknown as Record<string, unknown>)["dynamicModelsLoaded"]).toBe(true)
+		})
+
+		// Falls back to default model
+		expect(handler.getModel().id).toBe(friendliDefaultModelId)
+		consoleErrorSpy.mockRestore()
 	})
 })

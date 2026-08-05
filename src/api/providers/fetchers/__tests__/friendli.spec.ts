@@ -257,6 +257,34 @@ describe("Friendli Fetchers", () => {
 			expect(result.supportsMaxTokens).toBeUndefined()
 		})
 
+		it("drops unknown reasoning effort values like ultracode and de-duplicates", () => {
+			const model: FriendliModel = {
+				...baseModel,
+				reasoning: true,
+				reasoning_options: [
+					{ type: "effort", values: ["low", "ultracode", "low", "high", "ultracode", "max", "default"] },
+				],
+			}
+
+			const result = parseFriendliModel({ id: "test/model", model })
+
+			// "ultracode" is not a known effort — dropped; "default" dropped;
+			// duplicates removed; known values preserved in API order.
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+		})
+
+		it("returns empty array when effort values are all unknown or default", () => {
+			const model: FriendliModel = {
+				...baseModel,
+				reasoning: true,
+				reasoning_options: [{ type: "effort", values: ["ultracode", "default"] }],
+			}
+
+			const result = parseFriendliModel({ id: "test/model", model })
+
+			expect(result.supportsReasoningEffort).toEqual([])
+		})
+
 		it("omits supportsReasoningEffort for non-reasoning models", () => {
 			const model: FriendliModel = {
 				...baseModel,
