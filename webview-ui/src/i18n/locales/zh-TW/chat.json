@@ -279,6 +279,7 @@
 		"exitStatus": "已結束，狀態碼 {{exitCode}}",
 		"malformedCommand": "命令格式錯誤：shell 語法錯誤",
 		"manageCommands": "自動核准的命令",
+		"denied": "命令已拒絕",
 		"addToAllowed": "新增至允許清單",
 		"removeFromAllowed": "從允許清單中移除",
 		"addToDenied": "新增至拒絕清單",

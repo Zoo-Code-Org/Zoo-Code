@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "コードベースで '{{query}}' を検索中..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard がこのコマンドをブロックしました。",
+			"blockedWithReason": "Destructive Command Guard がこのコマンドをブロックしました。DCG からのメッセージ: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard がこのコマンドをブロックしました。（ルール: {{ruleId}}）",
+			"blockedWithReasonAndRule": "Destructive Command Guard がこのコマンドをブロックしました。DCG からのメッセージ: {{reason}}（ルール: {{ruleId}}）"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "ポリシー制限により新しいタスクを作成できませんでした。"
