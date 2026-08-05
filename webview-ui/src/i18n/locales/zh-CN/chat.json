@@ -344,9 +344,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "Moonshot 和 Kimi Code 提供商 — 通过实时模型发现连接 Moonshot 模型，或使用 OAuth 设备流程登录 Kimi Code。",
-			"highlight2": "最新模型支持 — 跨提供商使用 Claude Opus 5，以及 Kimi K3、Gemini 3.6 Flash 和 MiniMax-M3。",
-			"highlight3": "更可靠的工作流 — 干净地放弃中断的子任务，并为代码库中的 Dart 和纯文本文件建立索引。"
+			"highlight1": "更多 OpenAI 控制选项 — 在 OpenAI Codex 中使用 Fast 优先模式，并为 OpenAI 兼容模型选择更高的 reasoning effort。",
+			"highlight2": "更可靠的提供商和模型 — 改进 router 元数据处理、Ollama 模型刷新、Bedrock 代理支持和 Friendli reasoning 控制。",
+			"highlight3": "更顺畅的设置和开发工作流 — 设置现在会保留未保存的编辑，短终端命令可正确完成，Architect 计划使用相对于工作区的路径，剩余面向用户的 Roo 品牌也已更新为 Zoo。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

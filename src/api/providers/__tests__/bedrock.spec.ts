@@ -58,6 +58,7 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	bedrockModels,
+	SERVICE_TIER_KEY,
 	ApiProviderError,
 } from "@roo-code/types"
 
@@ -1233,10 +1234,10 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// service_tier should be at the top level of the payload
-				expect(commandArg.service_tier).toBe("PRIORITY")
+				expect(commandArg[SERVICE_TIER_KEY]).toBe("PRIORITY")
 				// service_tier should NOT be in additionalModelRequestFields
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 
@@ -1263,10 +1264,10 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// service_tier should be at the top level of the payload
-				expect(commandArg.service_tier).toBe("FLEX")
+				expect(commandArg[SERVICE_TIER_KEY]).toBe("FLEX")
 				// service_tier should NOT be in additionalModelRequestFields
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 
@@ -1294,9 +1295,9 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// Service tier should NOT be included for unsupported models (at top level or in additionalModelRequestFields)
-				expect(commandArg.service_tier).toBeUndefined()
+				expect(commandArg[SERVICE_TIER_KEY]).toBeUndefined()
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 
@@ -1323,9 +1324,9 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// Service tier should NOT be included when not specified (at top level or in additionalModelRequestFields)
-				expect(commandArg.service_tier).toBeUndefined()
+				expect(commandArg[SERVICE_TIER_KEY]).toBeUndefined()
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 		})

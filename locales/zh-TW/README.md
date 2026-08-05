@@ -32,15 +32,28 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.72.0 新功能
+## v3.74.0 新功能
 
-- **Moonshot 與 Kimi Code 供應商** — 動態探索 Moonshot 模型，或使用 OAuth 裝置流程登入 Kimi Code。
-- **最新模型支援** — 跨供應商使用 Claude Opus 5，以及 Kimi K3、Gemini 3.6 Flash 與 MiniMax-M3。
-- **改善的子任務工作流程** — 乾淨地放棄中斷的子任務，並透過更安全的任務歷史失效機制與更完整的恢復測試提升可靠性。
-- **擴充程式碼庫索引** — 為 Dart 與純文字檔案建立索引。
-- **供應商可靠性** — 修正 ChatGPT OAuth 下的 GPT-5.6 Luna、LiteLLM reasoning content 與 DeepSeek V4 圖片輸入問題。
-- **更順暢的設定體驗** — 改善 Zoo Gateway 登入與模式切換行為。
-- API、供應商類型、相依套件、本地化與 CI 改善。
+**Zoo Gateway 正式上線！**
+
+此閘道是所有供應商的單一端點，共用一個餘額，並提供逐請求的費用/用量明細。
+
+**設定：**
+
+- 新增額度：https://www.zoocode.dev/dashboard/credits
+- 從擴充功能登入。
+- 在設定中，為不同模型建立設定檔時選擇 Zoo Gateway 作為供應商
+
+用量與費用可在[儀表板](https://www.zoocode.dev/dashboard)中查看。
+
+模型：https://www.zoocode.dev/dashboard/models
+
+- **更多 OpenAI 控制選項** — 在 OpenAI Codex 中使用 Fast 優先模式，並為 OpenAI 相容模型選擇更高的 reasoning effort。
+- **更可靠的供應商與模型** — 改善 router 中繼資料處理、Ollama 模型重新整理、Bedrock Proxy 支援與 Friendli reasoning 控制。
+- **更順暢的設定與開發工作流程** — 設定現在會保留未儲存的編輯，短終端機命令可正確完成，Architect 計畫使用相對於工作區的路徑，剩餘面向使用者的 Roo 品牌也已更新為 Zoo。
+- **更強大的任務基礎** — 新的任務登錄與以 semaphore 為基礎的排程器，讓 Zoo Code 能更安全地協調任務。
+- **一致的供應商架構** — 供應商識別碼與 service tier 元件現已集中到 API、核心、共用型別和 webview 中。
+- 安全性、相依套件、lint、視覺迴歸與端對端測試改善。
 
 ## Zoo Code 能為您做什麼？
 

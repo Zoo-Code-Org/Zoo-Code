@@ -14,6 +14,7 @@ import {
 } from "@roo-code/types"
 
 import { ZAiHandler } from "../zai"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -430,19 +431,9 @@ describe("ZAiHandler", () => {
 		it("createMessage should yield text content from stream", async () => {
 			const testContent = "This is test content from Z AI stream"
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vitest
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: testContent } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: testContent } }] }]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -452,22 +443,14 @@ describe("ZAiHandler", () => {
 		})
 
 		it("createMessage should yield usage data from stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vitest
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [{ delta: {} }],
-									usage: { prompt_tokens: 10, completion_tokens: 20 },
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 20 },
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -485,15 +468,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const systemPrompt = "Test system prompt for Z AI"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for Z AI" }]
@@ -526,15 +501,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -566,15 +533,7 @@ describe("ZAiHandler", () => {
 				modelMaxTokens: 100_000,
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -595,15 +554,7 @@ describe("ZAiHandler", () => {
 				// No reasoningEffort setting - should use model default (medium)
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -625,15 +576,7 @@ describe("ZAiHandler", () => {
 				// No reasoningEffort setting - should use model default (high)
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -655,15 +598,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "max",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -685,15 +620,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "disable",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -711,15 +638,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "medium",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -742,15 +661,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "disable",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -773,15 +684,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "medium",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -802,15 +705,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -827,15 +722,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -857,15 +744,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "disable",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()

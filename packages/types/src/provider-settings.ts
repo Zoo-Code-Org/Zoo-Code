@@ -1,6 +1,12 @@
 import { z } from "zod"
 
-import { modelInfoSchema, reasoningEffortSettingSchema, verbosityLevelsSchema, serviceTierSchema } from "./model.js"
+import {
+	modelInfoSchema,
+	openAiCodexServiceTierSchema,
+	reasoningEffortSettingSchema,
+	verbosityLevelsSchema,
+	serviceTierSchema,
+} from "./model.js"
 import { codebaseIndexProviderSchema } from "./codebase-index.js"
 import {
 	providerIdentifiers,
@@ -38,6 +44,7 @@ import {
  */
 
 export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
+export const OPEN_AI_CODEX_SERVICE_TIER_KEY = "openAiCodexServiceTier"
 
 /**
  * DynamicProvider
@@ -279,7 +286,8 @@ const geminiCliSchema = apiModelIdProviderModelSchema.extend({
 })
 
 const openAiCodexSchema = apiModelIdProviderModelSchema.extend({
-	// No additional settings needed - uses OAuth authentication
+	// Codex "Fast" mode maps to the Responses API priority service tier.
+	[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTierSchema.optional(),
 })
 
 const openAiNativeSchema = apiModelIdProviderModelSchema.extend({

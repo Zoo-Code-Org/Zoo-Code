@@ -36,15 +36,28 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da soruların olursa gel ve sor.
 
-## v3.72.0'daki Yenilikler
+## v3.74.0'daki Yenilikler
 
-- **Moonshot ve Kimi Code provider'ları** — Moonshot modellerini dinamik olarak keşfet veya OAuth cihaz akışıyla Kimi Code'da oturum aç.
-- **En yeni model desteği** — provider'lar genelinde Claude Opus 5'in yanı sıra Kimi K3, Gemini 3.6 Flash ve MiniMax-M3'ü kullan.
-- **Geliştirilmiş alt görev iş akışları** — daha güvenli görev geçmişi geçersiz kılma ve daha iyi devam ettirme kapsamıyla kesintiye uğramış alt görevleri temiz biçimde bırak.
-- **Genişletilmiş kod tabanı indeksleme** — Dart ve düz metin dosyalarını indeksle.
-- **Provider güvenilirliği** — ChatGPT OAuth ile GPT-5.6 Luna, LiteLLM reasoning content ve DeepSeek V4 görsel girdisi için düzeltmeler.
-- **Daha akıcı kurulum ve ayarlar** — Zoo Gateway oturum açma ve mod değiştirme davranışı iyileştirildi.
-- API, provider türleri, bağımlılıklar, yerelleştirme ve CI iyileştirmeleri.
+**Zoo Gateway yayında!**
+
+Gateway, tüm sağlayıcılar için tek bir uç noktadır; tek bakiye ve istek başına harcama/kullanım dökümü sunar.
+
+**Kurulum:**
+
+- Kredi ekleyin: https://www.zoocode.dev/dashboard/credits
+- Uzantıdan oturum açın.
+- Ayarlarda, farklı modeller için profil oluştururken sağlayıcı olarak Zoo Gateway'i seçin
+
+Kullanım ve ücretler [panodan](https://www.zoocode.dev/dashboard) görüntülenebilir.
+
+Modeller: https://www.zoocode.dev/dashboard/models
+
+- **Daha fazla OpenAI denetimi** — OpenAI Codex ile Fast öncelik modunu kullan ve OpenAI uyumlu modeller için daha yüksek reasoning effort seç.
+- **Daha güvenilir provider'lar ve modeller** — router metadata işleme, Ollama model yenileme, Bedrock proxy desteği ve Friendli reasoning denetimleri iyileştirildi.
+- **Daha akıcı ayarlar ve geliştirici iş akışları** — ayarlar kaydedilmemiş düzenlemeleri koruyor, kısa terminal komutları düzgün tamamlanıyor, architect planları workspace'e göreli yollar kullanıyor ve kullanıcıya görünen kalan Roo markaları Zoo olarak güncellendi.
+- **Daha güçlü görev temelleri** — yeni görev kayıt sistemi ve semaphore tabanlı scheduler, Zoo Code'u daha güvenli görev koordinasyonuna hazırlıyor.
+- **Tutarlı provider mimarisi** — provider tanımlayıcıları ve service tier bileşenleri artık API, core, paylaşılan türler ve webview genelinde merkezileştirildi.
+- Güvenlik, bağımlılık, lint, görsel regresyon ve uçtan uca test iyileştirmeleri.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

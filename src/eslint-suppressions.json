@@ -186,7 +186,7 @@
 	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 29
+			"count": 18
 		}
 	},
 	"api/providers/__tests__/minimax.spec.ts": {
@@ -206,7 +206,7 @@
 	},
 	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 30
+			"count": 23
 		}
 	},
 	"api/providers/__tests__/openai-codex.spec.ts": {
@@ -216,7 +216,7 @@
 	},
 	"api/providers/__tests__/openai-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 14
 		}
 	},
 	"api/providers/__tests__/openai-native-usage.spec.ts": {
@@ -226,7 +226,7 @@
 	},
 	"api/providers/__tests__/openai-native.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 79
+			"count": 78
 		}
 	},
 	"api/providers/__tests__/openai-timeout.spec.ts": {
@@ -234,19 +234,14 @@
 			"count": 5
 		}
 	},
-	"api/providers/__tests__/openai-usage-tracking.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/openai.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 4
 		}
 	},
 	"api/providers/__tests__/opencode-go.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 11
+			"count": 3
 		}
 	},
 	"api/providers/__tests__/openrouter.spec.ts": {
@@ -261,12 +256,7 @@
 	},
 	"api/providers/__tests__/qwen-code-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/providers/__tests__/requesty.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/__tests__/sambanova.spec.ts": {
@@ -276,7 +266,7 @@
 	},
 	"api/providers/__tests__/unbound.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 5
 		}
 	},
 	"api/providers/__tests__/vercel-ai-gateway.spec.ts": {
@@ -852,11 +842,6 @@
 	"core/task/__tests__/Task.persistence.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 8
-		}
-	},
-	"core/task/__tests__/Task.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 31
 		}
 	},
 	"core/task/__tests__/Task.sticky-profile-race.spec.ts": {

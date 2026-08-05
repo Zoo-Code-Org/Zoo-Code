@@ -1,6 +1,6 @@
 // npx vitest utils/__tests__/cost.spec.ts
 
-import type { ModelInfo } from "@roo-code/types"
+import { OpenAiServiceTier, type ModelInfo } from "@roo-code/types"
 
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
 
@@ -283,7 +283,7 @@ describe("Cost Utility", () => {
 					thresholdTokens: 272_000,
 					inputPriceMultiplier: 2,
 					outputPriceMultiplier: 1.5,
-					appliesToServiceTiers: ["default", "flex"],
+					appliesToServiceTiers: [OpenAiServiceTier.Default, OpenAiServiceTier.Flex],
 				},
 			}
 
@@ -293,7 +293,7 @@ describe("Cost Utility", () => {
 				1_000,
 				undefined,
 				100_000,
-				"priority",
+				OpenAiServiceTier.Priority,
 			)
 
 			// Input cost: (5.0 / 1_000_000) * (300000 - 100000) = 1.0

@@ -343,9 +343,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "Moonshot 및 Kimi Code 프로바이더 — 실시간 모델 검색으로 Moonshot 모델에 연결하거나 OAuth 기기 흐름으로 Kimi Code에 로그인하세요.",
-			"highlight2": "최신 모델 지원 — 여러 프로바이더에서 Claude Opus 5를 사용하고 Kimi K3, Gemini 3.6 Flash, MiniMax-M3도 이용하세요.",
-			"highlight3": "더 안정적인 워크플로우 — 중단된 하위 작업을 깔끔하게 포기하고 코드베이스의 Dart 및 일반 텍스트 파일을 인덱싱하세요."
+			"highlight1": "더 다양한 OpenAI 제어 — OpenAI Codex에서 Fast 우선 모드를 사용하고 OpenAI 호환 모델의 reasoning effort를 더 높게 선택하세요.",
+			"highlight2": "더 안정적인 프로바이더와 모델 — router 메타데이터 처리, Ollama 모델 새로고침, Bedrock 프록시 지원, Friendli reasoning 제어가 개선되었습니다.",
+			"highlight3": "더 매끄러운 설정 및 개발 워크플로우 — 설정에서 저장하지 않은 편집을 유지하고, 짧은 터미널 명령을 올바르게 완료하며, Architect 계획에 워크스페이스 상대 경로를 사용합니다. 남아 있던 사용자용 Roo 브랜드도 Zoo로 업데이트했습니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

@@ -17,6 +17,7 @@ import { kenariDefaultModelId } from "@roo-code/types"
 import { KenariHandler } from "../kenari"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
@@ -84,9 +85,9 @@ describe("KenariHandler", () => {
 
 	describe("createMessage", () => {
 		beforeEach(() => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -104,8 +105,8 @@ describe("KenariHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: {
 							prompt_tokens: 12,
@@ -113,19 +114,16 @@ describe("KenariHandler", () => {
 							total_tokens: 19,
 							prompt_tokens_details: { cached_tokens: 4 },
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 		})
 
 		it("streams text, reasoning, tool-call and usage chunks", async () => {
 			const handler = new KenariHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks = []
-			for await (const chunk of handler.createMessage("You are helpful.", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("You are helpful.", messages))
 
 			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking…" })
@@ -145,37 +143,31 @@ describe("KenariHandler", () => {
 		})
 
 		it("yields nothing for a chunk whose delta has no content, reasoning or tool calls", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: {}, index: 0 }], usage: null }
-					yield { choices: [], usage: null }
-				},
-			}))
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: {}, index: 0 }], usage: null },
+					{ choices: [], usage: null },
+				]),
+			)
 
 			const handler = new KenariHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toEqual([])
 		})
 
 		it("streams tool call chunks even when the function name and arguments are missing", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { tool_calls: [{ index: 1 }] }, index: 0 }],
 						usage: null,
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new KenariHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toEqual([
 				{
@@ -189,20 +181,17 @@ describe("KenariHandler", () => {
 		})
 
 		it("reports undefined cache reads when usage has no prompt_tokens_details", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new KenariHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toEqual([
 				{
@@ -215,39 +204,33 @@ describe("KenariHandler", () => {
 		})
 
 		it("skips the reasoning chunk when reasoning_content is an empty string", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "Hi", reasoning_content: "" }, index: 0 }],
 						usage: null,
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new KenariHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toEqual([{ type: "text", text: "Hi" }])
 		})
 
 		it("emits reasoning from the OpenRouter-style `reasoning` field when reasoning_content is absent", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "Hi", reasoning: "thinking…" }, index: 0 }],
 						usage: null,
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new KenariHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking…" })
 		})
@@ -264,9 +247,7 @@ describe("KenariHandler", () => {
 			})
 
 			const handler = new KenariHandler({ kenariApiKey: "test-key", kenariModelId: "openai/o3-mini" })
-			for await (const _chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -278,40 +259,35 @@ describe("KenariHandler", () => {
 
 		it("sends an explicitly configured model temperature", async () => {
 			const handler = new KenariHandler({ ...mockOptions, modelTemperature: 0.7 })
-			for await (const _chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ temperature: 0.7 }))
 		})
 
 		it("honors metadata.parallelToolCalls false", async () => {
 			const handler = new KenariHandler(mockOptions)
-			for await (const _chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }], {
-				taskId: "task-1",
-				parallelToolCalls: false,
-			})) {
-				void _chunk // drain
-			}
+			await collectStream(
+				handler.createMessage("sys", [{ role: "user", content: "Hi" }], {
+					taskId: "task-1",
+					parallelToolCalls: false,
+				}),
+			)
 
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ parallel_tool_calls: false }))
 		})
 
 		it("reports zero usage when the upstream counts are zero", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "x" }, index: 0 }],
 						usage: { prompt_tokens: 0, completion_tokens: 0 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new KenariHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("sys", [{ role: "user", content: "Hi" }])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(chunks).toContainEqual({
 				type: "usage",
@@ -324,9 +300,7 @@ describe("KenariHandler", () => {
 		it("requests a streaming completion with usage included", async () => {
 			const handler = new KenariHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({

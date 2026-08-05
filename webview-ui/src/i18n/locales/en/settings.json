@@ -1130,6 +1130,12 @@
 	"limitMaxTokensDescription": "Limit the maximum number of tokens in the response",
 	"maxOutputTokensLabel": "Max output tokens",
 	"maxTokensGenerateDescription": "Maximum tokens to generate in response",
+	"openAiCodexSpeed": {
+		"label": "Speed",
+		"tooltip": "Fast uses Codex priority processing for about 1.5x speed and consumes more subscription quota.",
+		"standard": "Standard",
+		"fast": "Fast (1.5x speed, increased usage)"
+	},
 	"serviceTier": {
 		"label": "Service tier",
 		"tooltip": "For faster processing of API requests, try the priority processing service tier. For lower prices with higher latency, try the flex processing tier.",

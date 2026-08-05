@@ -5,6 +5,7 @@ vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureEvent: vi.fn(),
+			isTelemetryEnabled: vi.fn().mockReturnValue(true),
 		},
 	},
 }))
@@ -45,6 +46,7 @@ vi.mock("../openrouter")
 vi.mock("../requesty")
 vi.mock("../kenari")
 vi.mock("../moonshot")
+vi.mock("../zoo-gateway")
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -62,18 +64,21 @@ import type { Mock, Mocked } from "vitest"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
+import { TelemetryService } from "@roo-code/telemetry"
 import { getModels, getModelsFromCache } from "../modelCache"
 import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
 import { getKenariModels } from "../kenari"
 import { getMoonshotModels } from "../moonshot"
+import { getZooGatewayModels } from "../zoo-gateway"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
 const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
+const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 
 const DUMMY_REQUESTY_KEY = "requesty-key-for-testing"
 
@@ -395,6 +400,193 @@ describe("empty cache protection", () => {
 			expect(result).toEqual(mockModels)
 			expect(mockSet).toHaveBeenCalledWith("openrouter", mockModels)
 		})
+
+		it("reuses an in-flight fetch for concurrent getModels() calls to the same provider", async () => {
+			const mockModels = {
+				"openrouter/model": {
+					maxTokens: 8192,
+					contextWindow: 128000,
+					supportsPromptCache: false,
+					description: "OpenRouter model",
+				},
+			}
+
+			let resolvePromise: (value: typeof mockModels) => void
+			const delayedPromise = new Promise<typeof mockModels>((resolve) => {
+				resolvePromise = resolve
+			})
+			mockGetOpenRouterModels.mockReturnValue(delayedPromise)
+			mockGet.mockReturnValue(undefined)
+
+			const promise1 = getModels({ provider: providerIdentifiers.openrouter })
+			const promise2 = getModels({ provider: providerIdentifiers.openrouter })
+
+			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+
+			resolvePromise!(mockModels)
+
+			const [result1, result2] = await Promise.all([promise1, promise2])
+			expect(result1).toEqual(mockModels)
+			expect(result2).toEqual(mockModels)
+		})
+
+		it("removes the in-flight entry after settlement so a later call starts a fresh fetch", async () => {
+			// Proves the dedupedFetch() finally() cleanup actually runs: if the in-flight map
+			// entry were never removed, this second, later call would resolve to the first
+			// call's stale result instead of invoking the fetcher again.
+			const firstModels = {
+				"openrouter/first": {
+					maxTokens: 8192,
+					contextWindow: 128000,
+					supportsPromptCache: false,
+					description: "First response",
+				},
+			}
+			const secondModels = {
+				"openrouter/second": {
+					maxTokens: 4096,
+					contextWindow: 64000,
+					supportsPromptCache: false,
+					description: "Second response",
+				},
+			}
+			mockGetOpenRouterModels.mockResolvedValueOnce(firstModels).mockResolvedValueOnce(secondModels)
+			mockGet.mockReturnValue(undefined)
+
+			const result1 = await getModels({ provider: providerIdentifiers.openrouter })
+			const result2 = await getModels({ provider: providerIdentifiers.openrouter })
+
+			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(2)
+			expect(result1).toEqual(firstModels)
+			expect(result2).toEqual(secondModels)
+		})
+
+		it("shares a single in-flight fetch between getModels() and refreshModels() for the same key", async () => {
+			// Both entry points converge on the same coordinator so a getModels() cache miss
+			// racing a concurrent refreshModels() call can't produce two unordered cache writes.
+			const mockModels = {
+				"openrouter/model": {
+					maxTokens: 8192,
+					contextWindow: 128000,
+					supportsPromptCache: false,
+					description: "OpenRouter model",
+				},
+			}
+
+			let resolvePromise: (value: typeof mockModels) => void
+			const delayedPromise = new Promise<typeof mockModels>((resolve) => {
+				resolvePromise = resolve
+			})
+			mockGetOpenRouterModels.mockReturnValue(delayedPromise)
+			mockGet.mockReturnValue(undefined)
+
+			const { refreshModels } = await import("../modelCache")
+
+			const getPromise = getModels({ provider: providerIdentifiers.openrouter })
+			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter })
+
+			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+
+			resolvePromise!(mockModels)
+
+			const [getResult, refreshResult] = await Promise.all([getPromise, refreshPromise])
+			expect(getResult).toEqual(mockModels)
+			expect(refreshResult).toEqual(mockModels)
+		})
+
+		it("preserves each entry point's own failure contract when joining a shared in-flight fetch", async () => {
+			// getModels() and refreshModels() share the same underlying provider fetch
+			// (dedupedFetch), but must not share its resolution/rejection wholesale: getModels()
+			// always re-throws on failure, while refreshModels() always degrades to cache/{}.
+			// Whichever call happens to start the shared fetch must not impose its own contract
+			// on the other caller that joined it.
+			const fetchError = new Error("provider unreachable")
+
+			let rejectPromise: (error: Error) => void
+			const delayedRejection = new Promise<never>((_resolve, reject) => {
+				rejectPromise = reject
+			})
+			mockGetOpenRouterModels.mockReturnValue(delayedRejection)
+			mockGet.mockReturnValue(undefined)
+
+			const { refreshModels } = await import("../modelCache")
+
+			// refreshModels() starts (and registers) the shared fetch; getModels() joins it.
+			const refreshPromise = refreshModels({ provider: providerIdentifiers.openrouter })
+			const getPromise = getModels({ provider: providerIdentifiers.openrouter })
+
+			expect(mockGetOpenRouterModels).toHaveBeenCalledTimes(1)
+
+			rejectPromise!(fetchError)
+
+			// refreshModels() degrades gracefully (no existing cache -> {}); getModels() still
+			// re-throws the original error instead of silently returning refreshModels()'s {}.
+			await expect(refreshPromise).resolves.toEqual({})
+			await expect(getPromise).rejects.toThrow("provider unreachable")
+		})
+
+		it("does not share an in-flight fetch between different endpoints/keys", async () => {
+			const mockModelsA = {
+				"litellm/model-a": {
+					maxTokens: 4096,
+					contextWindow: 64000,
+					supportsPromptCache: false,
+					description: "Server A model",
+				},
+			}
+			const mockModelsB = {
+				"litellm/model-b": {
+					maxTokens: 4096,
+					contextWindow: 64000,
+					supportsPromptCache: false,
+					description: "Server B model",
+				},
+			}
+			mockGetLiteLLMModels.mockResolvedValueOnce(mockModelsA).mockResolvedValueOnce(mockModelsB)
+			mockGet.mockReturnValue(undefined)
+
+			const [resultA, resultB] = await Promise.all([
+				getModels({ provider: providerIdentifiers.litellm, apiKey: "key-a", baseUrl: "http://server-a:4000" }),
+				getModels({ provider: providerIdentifiers.litellm, apiKey: "key-b", baseUrl: "http://server-b:4000" }),
+			])
+
+			expect(mockGetLiteLLMModels).toHaveBeenCalledTimes(2)
+			expect(resultA).toEqual(mockModelsA)
+			expect(resultB).toEqual(mockModelsB)
+		})
+
+		it("re-arms the empty-response throttle after a non-empty response from an auth-scoped provider", async () => {
+			// zoo-gateway is auth-scoped and skips caching entirely, but a non-empty response
+			// must still clear the throttle so a later empty response is reported again.
+			mockGetZooGatewayModels.mockResolvedValueOnce({})
+
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" })
+
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+
+			const mockModels = {
+				"zoo-gateway/model": {
+					maxTokens: 8192,
+					contextWindow: 128000,
+					supportsPromptCache: false,
+					description: "Zoo Gateway model",
+				},
+			}
+			mockGetZooGatewayModels.mockResolvedValueOnce(mockModels)
+
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" })
+
+			// Auth-scoped providers never populate the cache.
+			expect(mockSet).not.toHaveBeenCalled()
+
+			mockGetZooGatewayModels.mockResolvedValueOnce({})
+
+			await getModels({ provider: providerIdentifiers.zooGateway, apiKey: "test-key" })
+
+			// The throttle should have been re-armed by the non-empty response above, so this
+			// second empty response is reported again instead of being suppressed.
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+		})
 	})
 
 	describe("refreshModels", () => {
@@ -578,6 +770,242 @@ describe("empty cache protection", () => {
 			expect(s1).toEqual(mockModels)
 			expect(s2).toEqual(mockModels)
 		})
+	})
+})
+
+describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
+	type ModelCacheModule = typeof import("../modelCache")
+
+	let freshGetModels: ModelCacheModule["getModels"]
+	let freshRefreshModels: ModelCacheModule["refreshModels"]
+	let freshMockGetOpenRouterModels: Mock<typeof getOpenRouterModels>
+	let freshMockGetLiteLLMModels: Mock<typeof getLiteLLMModels>
+	let freshMockGetZooGatewayModels: Mock<typeof getZooGatewayModels>
+
+	beforeEach(async () => {
+		// The empty-response throttle is deliberately module-level, persistent state (once per
+		// cache key per session). Reset modules per test so each test starts with a clean gate.
+		vi.resetModules()
+		vi.clearAllMocks()
+
+		const modelCacheModule: ModelCacheModule = await import("../modelCache")
+		const openRouterModule = await import("../openrouter")
+		const liteLLMModule = await import("../litellm")
+		const zooGatewayModule = await import("../zoo-gateway")
+
+		freshGetModels = modelCacheModule.getModels
+		freshRefreshModels = modelCacheModule.refreshModels
+		freshMockGetOpenRouterModels = openRouterModule.getOpenRouterModels as Mock<typeof getOpenRouterModels>
+		freshMockGetLiteLLMModels = liteLLMModule.getLiteLLMModels as Mock<typeof getLiteLLMModels>
+		freshMockGetZooGatewayModels = zooGatewayModule.getZooGatewayModels as Mock<typeof getZooGatewayModels>
+
+		const NodeCacheModule = await import("node-cache")
+		const MockedNodeCache = vi.mocked(NodeCacheModule.default)
+		const mockCache = vi.mocked(new MockedNodeCache())
+		mockCache.get.mockReturnValue(undefined)
+	})
+
+	it("fires MODEL_CACHE_EMPTY_RESPONSE only once for repeated empty getModels responses from the same provider", async () => {
+		freshMockGetOpenRouterModels.mockResolvedValue({})
+
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+			"Model Cache Empty Response",
+			expect.objectContaining({ provider: providerIdentifiers.openrouter, context: "getModels" }),
+		)
+	})
+
+	it("fires again after a non-empty response resets the throttle", async () => {
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+
+		freshMockGetOpenRouterModels.mockResolvedValue({})
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+
+		freshMockGetOpenRouterModels.mockResolvedValue({
+			"openrouter/model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+				description: "OpenRouter model",
+			},
+		})
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+
+		freshMockGetOpenRouterModels.mockResolvedValue({})
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+	})
+
+	it("throttles independently per provider", async () => {
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+
+		freshMockGetOpenRouterModels.mockResolvedValue({})
+		freshMockGetLiteLLMModels.mockResolvedValue({})
+
+		await freshGetModels({ provider: providerIdentifiers.openrouter })
+		await freshGetModels({ provider: providerIdentifiers.litellm, apiKey: "key", baseUrl: "http://localhost:4000" })
+
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+	})
+
+	it("throttles empty responses from refreshModels using the same per-key gate", async () => {
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+
+		freshMockGetOpenRouterModels.mockResolvedValue({})
+
+		await freshRefreshModels({ provider: providerIdentifiers.openrouter })
+		await freshRefreshModels({ provider: providerIdentifiers.openrouter })
+
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledWith(
+			"Model Cache Empty Response",
+			expect.objectContaining({
+				provider: providerIdentifiers.openrouter,
+				context: "refreshModels",
+				hasExistingCache: false,
+				existingCacheSize: 0,
+			}),
+		)
+	})
+
+	it("throttles independently per distinct endpoint, not just per provider name", async () => {
+		// Two different LiteLLM servers share the "litellm" provider name but are a different
+		// cache identity (see getCacheKey) -- an empty response from one must not suppress the
+		// signal for the other.
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+
+		freshMockGetLiteLLMModels.mockResolvedValue({})
+
+		await freshGetModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "key-a",
+			baseUrl: "http://server-a:4000",
+		})
+		await freshGetModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "key-a",
+			baseUrl: "http://server-a:4000",
+		})
+		await freshGetModels({
+			provider: providerIdentifiers.litellm,
+			apiKey: "key-b",
+			baseUrl: "http://server-b:4000",
+		})
+
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+	})
+
+	it("throttles zoo-gateway independently per session token, even though caching itself is skipped", async () => {
+		// zoo-gateway is auth-scoped (see AUTH_SCOPED_PROVIDERS) and never persists to the
+		// memory/disk cache, but the empty-response throttle must still discriminate by
+		// identity: a sign-out/sign-in cycle to a different account carries a different
+		// session token (apiKey) on the same gateway URL, and must not have its empty-response
+		// signal suppressed by the previous account's throttle entry.
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+
+		freshMockGetZooGatewayModels.mockResolvedValue({})
+
+		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(1)
+
+		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+	})
+
+	it("throttles zoo-gateway independently per gateway baseUrl", async () => {
+		// Same session token, different gateway endpoint (e.g. staging vs. production) --
+		// must also be treated as a distinct identity for throttle purposes.
+		const { TelemetryService: FreshTelemetryService } = await import("@roo-code/telemetry")
+
+		freshMockGetZooGatewayModels.mockResolvedValue({})
+
+		await freshGetModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "token",
+			baseUrl: "https://gateway-a.example.com",
+		})
+		await freshGetModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "token",
+			baseUrl: "https://gateway-b.example.com",
+		})
+
+		expect(FreshTelemetryService.instance.captureEvent).toHaveBeenCalledTimes(2)
+	})
+
+	it("never shares results across different zoo-gateway credentials (auth isolation)", async () => {
+		// Auth-scoped providers (see AUTH_SCOPED_PROVIDERS) bypass dedupedFetch entirely --
+		// shouldSkipCache is true for zoo-gateway, so every call fires its own provider fetch
+		// and none are deduplicated. That means two concurrent calls can never resolve into
+		// each other's result regardless of token, which this test confirms for two different
+		// account tokens; the companion case below confirms the same holds for one token too.
+		const accountAModels = {
+			"zoo-gateway/account-a-model": {
+				maxTokens: 4096,
+				contextWindow: 64000,
+				supportsPromptCache: false,
+				description: "Account A model",
+			},
+		}
+		const accountBModels = {
+			"zoo-gateway/account-b-model": {
+				maxTokens: 4096,
+				contextWindow: 64000,
+				supportsPromptCache: false,
+				description: "Account B model",
+			},
+		}
+
+		let resolveA: (value: typeof accountAModels) => void
+		let resolveB: (value: typeof accountBModels) => void
+		freshMockGetZooGatewayModels
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveA = resolve
+					}),
+			)
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveB = resolve
+					}),
+			)
+
+		const promiseA = freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a-token" })
+		const promiseB = freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b-token" })
+
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+
+		resolveB!(accountBModels)
+		resolveA!(accountAModels)
+
+		const [resultA, resultB] = await Promise.all([promiseA, promiseB])
+		expect(resultA).toEqual(accountAModels)
+		expect(resultB).toEqual(accountBModels)
+	})
+
+	it("never deduplicates concurrent zoo-gateway fetches, even for the same token", async () => {
+		// Auth-scoped providers skip dedupedFetch unconditionally, so even two calls carrying
+		// an identical token each fire their own provider fetch -- there is no in-flight sharing
+		// to key correctly or incorrectly for these providers.
+		freshMockGetZooGatewayModels.mockResolvedValue({})
+
+		await Promise.all([
+			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
+		])
+
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 })
 

@@ -35,15 +35,28 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.72.0 में नया क्या है
+## v3.74.0 में नया क्या है
 
-- **Moonshot और Kimi Code providers** — Moonshot models को dynamically खोजें या OAuth device flow से Kimi Code में sign in करें।
-- **नवीनतम model support** — providers पर Claude Opus 5 के साथ Kimi K3, Gemini 3.6 Flash और MiniMax-M3 का उपयोग करें।
-- **बेहतर subtask workflows** — interrupted subtasks को साफ़ तौर पर छोड़ें, अधिक सुरक्षित task-history invalidation और बेहतर resume coverage के साथ।
-- **विस्तारित codebase indexing** — Dart और plain-text files को index करें।
-- **Provider reliability** — ChatGPT OAuth के साथ GPT-5.6 Luna, LiteLLM reasoning content और DeepSeek V4 image input के लिए fixes।
-- **अधिक सहज setup और settings** — Zoo Gateway sign-in और mode-switch behavior में सुधार।
-- API, provider types, dependencies, localization और CI में सुधार।
+**Zoo Gateway लाइव है!**
+
+गेटवे सभी प्रदाताओं के लिए एक ही एंडपॉइंट है, जिसमें एक बैलेंस और प्रति-अनुरोध खर्च/उपयोग का विवरण है।
+
+**सेटअप:**
+
+- क्रेडिट जोड़ें: https://www.zoocode.dev/dashboard/credits
+- एक्सटेंशन से साइन इन करें।
+- सेटिंग्स में, अलग-अलग मॉडलों के लिए प्रोफ़ाइल बनाते समय Zoo Gateway को प्रदाता के रूप में चुनें
+
+उपयोग और शुल्क [डैशबोर्ड](https://www.zoocode.dev/dashboard) में देखे जा सकते हैं।
+
+मॉडल: https://www.zoocode.dev/dashboard/models
+
+- **अधिक OpenAI controls** — OpenAI Codex के साथ Fast priority mode का उपयोग करें और OpenAI-compatible models के लिए अधिक reasoning effort चुनें।
+- **अधिक भरोसेमंद providers और models** — router metadata handling, Ollama model refresh, Bedrock proxy support और Friendli reasoning controls में सुधार।
+- **अधिक सहज settings और developer workflows** — settings अब unsaved edits सुरक्षित रखती हैं, छोटे terminal commands ठीक से पूरे होते हैं, architect plans workspace-relative paths का उपयोग करते हैं और बची हुई user-facing Roo branding को Zoo में अपडेट किया गया है।
+- **मज़बूत task foundations** — नया task registry और semaphore-based scheduler Zoo Code को अधिक सुरक्षित task coordination के लिए तैयार करते हैं।
+- **सुसंगत provider architecture** — provider identifiers और service-tier components अब API, core, shared types और webview में केंद्रीकृत हैं।
+- Security, dependencies, lint, visual regression और end-to-end tests में सुधार।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

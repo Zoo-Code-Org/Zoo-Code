@@ -9,29 +9,23 @@ vitest.mock("@roo-code/telemetry", () => ({
 }))
 
 import { Anthropic } from "@anthropic-ai/sdk"
+import { OPEN_AI_CODEX_SERVICE_TIER_KEY, OpenAiCodexServiceTier, SERVICE_TIER_KEY } from "@roo-code/types"
 import { OpenAiCodexHandler, transformLunaResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 function createCompletedStream() {
-	return {
-		async *[Symbol.asyncIterator]() {
-			yield {
-				type: "response.completed",
-				response: {
-					id: "response-1",
-					status: "completed",
-					output: [],
-					usage: { input_tokens: 1, output_tokens: 1 },
-				},
-			}
+	return asyncStreamFrom([
+		{
+			type: "response.completed",
+			response: {
+				id: "response-1",
+				status: "completed",
+				output: [],
+				usage: { input_tokens: 1, output_tokens: 1 },
+			},
 		},
-	}
-}
-
-async function drainStream(stream: AsyncIterable<unknown>) {
-	for await (const _chunk of stream) {
-		// Drain the response stream.
-	}
+	])
 }
 
 describe("OpenAiCodexHandler.getModel", () => {
@@ -76,6 +70,84 @@ describe("OpenAiCodexHandler.getModel", () => {
 })
 
 describe("OpenAiCodexHandler.createMessage", () => {
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	it("sends the priority service tier in streaming SDK requests when Fast is selected", async () => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-5.6-sol",
+			[OPEN_AI_CODEX_SERVICE_TIER_KEY]: OpenAiCodexServiceTier.Priority,
+		})
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
+		Reflect.set(handler, "client", { responses: { create: mockCreate } })
+
+		await collectStream(handler.createMessage("System prompt", []))
+
+		const [body] = mockCreate.mock.calls[0]
+		expect(body).toMatchObject({
+			stream: true,
+			[SERVICE_TIER_KEY]: OpenAiCodexServiceTier.Priority,
+		})
+	})
+
+	it.each([
+		["an absent preference", {}],
+		[
+			"an explicit Standard preference from an older profile",
+			{ [OPEN_AI_CODEX_SERVICE_TIER_KEY]: OpenAiCodexServiceTier.Default },
+		],
+	])("omits the service tier in streaming SDK requests for %s", async (_description, serviceTierOptions) => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-5.6-sol",
+			...serviceTierOptions,
+		} as ConstructorParameters<typeof OpenAiCodexHandler>[0])
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
+		Reflect.set(handler, "client", { responses: { create: mockCreate } })
+
+		await collectStream(handler.createMessage("System prompt", []))
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty(SERVICE_TIER_KEY)
+	})
+
+	it("preserves the priority service tier in the manual streaming fallback", async () => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-5.6-sol",
+			[OPEN_AI_CODEX_SERVICE_TIER_KEY]: OpenAiCodexServiceTier.Priority,
+		})
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			body: new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode(
+							'data: {"type":"response.completed","response":{"output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+						),
+					)
+					controller.close()
+				},
+			}),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await collectStream(handler.createMessage("System prompt", []))
+
+		expect(JSON.parse(mockFetch.mock.calls[0][1].body)).toMatchObject({
+			stream: true,
+			[SERVICE_TIER_KEY]: OpenAiCodexServiceTier.Priority,
+		})
+	})
+
 	it("should skip URL-sourced images in formatFullConversation (only base64 emits input_image)", async () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
 
@@ -87,19 +159,17 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			responses: {
 				create: vitest.fn().mockImplementation(async (body: any) => {
 					capturedInput.push(...(body.input ?? []))
-					return {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								type: "response.completed",
-								response: {
-									id: "r1",
-									status: "completed",
-									output: [],
-									usage: { input_tokens: 1, output_tokens: 1 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.completed",
+							response: {
+								id: "r1",
+								status: "completed",
+								output: [],
+								usage: { input_tokens: 1, output_tokens: 1 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -114,10 +184,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			},
 		]
 
-		const stream = handler.createMessage("system", messages)
-		for await (const _ of stream) {
-			// consume
-		}
+		await collectStream(handler.createMessage("system", messages))
 
 		// URL image is skipped; only the text input_text block should be present
 		const userMsg = capturedInput.find((item: any) => item.role === "user")
@@ -136,19 +203,17 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			responses: {
 				create: vitest.fn().mockImplementation(async (body: any) => {
 					capturedInput.push(...(body.input ?? []))
-					return {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								type: "response.completed",
-								response: {
-									id: "r1",
-									status: "completed",
-									output: [],
-									usage: { input_tokens: 1, output_tokens: 1 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.completed",
+							response: {
+								id: "r1",
+								status: "completed",
+								output: [],
+								usage: { input_tokens: 1, output_tokens: 1 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -163,16 +228,47 @@ describe("OpenAiCodexHandler.createMessage", () => {
 			},
 		]
 
-		const stream = handler.createMessage("system", messages)
-		for await (const _ of stream) {
-			// consume
-		}
+		await collectStream(handler.createMessage("system", messages))
 
 		const userMsg = capturedInput.find((item: any) => item.role === "user")
 		expect(userMsg?.content).toContainEqual({
 			type: "input_image",
 			image_url: "data:image/png;base64,abc123",
 		})
+	})
+})
+
+describe("OpenAiCodexHandler.completePrompt service tier", () => {
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	it.each<[string, OpenAiCodexServiceTier | undefined, typeof OpenAiCodexServiceTier.Priority | undefined]>([
+		["Fast", OpenAiCodexServiceTier.Priority, OpenAiCodexServiceTier.Priority],
+		["Standard", undefined, undefined],
+	])("uses the %s preference in non-streaming requests", async (_mode, configuredTier, expectedTier) => {
+		const handler = new OpenAiCodexHandler({
+			apiModelId: "gpt-5.6-sol",
+			...(configuredTier ? { [OPEN_AI_CODEX_SERVICE_TIER_KEY]: configuredTier } : {}),
+		})
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: vitest.fn().mockResolvedValue({ text: "Complete" }),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("Complete")
+
+		const body = JSON.parse(mockFetch.mock.calls[0][1].body)
+		expect(body.stream).toBe(false)
+		if (expectedTier) {
+			expect(body[SERVICE_TIER_KEY]).toBe(expectedTier)
+		} else {
+			expect(body).not.toHaveProperty(SERVICE_TIER_KEY)
+		}
 	})
 })
 
@@ -310,7 +406,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
 		;(handler as any).client = { responses: { create: mockCreate } }
 
-		await drainStream(
+		await collectStream(
 			handler.createMessage("Luna instructions", [{ role: "user", content: "Hello" }], {
 				taskId: "task-luna",
 				tools: [
@@ -385,7 +481,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		})
 		vitest.stubGlobal("fetch", mockFetch)
 
-		await drainStream(
+		await collectStream(
 			handler.createMessage("Instructions", [{ role: "user", content: "Fallback" }], {
 				taskId: "task-fallback",
 				tools: [],
@@ -436,7 +532,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 			})
 		vitest.stubGlobal("fetch", mockFetch)
 
-		await drainStream(
+		await collectStream(
 			handler.createMessage("Instructions", [{ role: "user", content: "Retry" }], {
 				taskId: "task-retry",
 				tools: [],
@@ -478,7 +574,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 			const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
 			;(handler as any).client = { responses: { create: mockCreate } }
 
-			await drainStream(
+			await collectStream(
 				handler.createMessage("Normal instructions", [{ role: "user", content: "Hello" }], {
 					taskId: "task-normal",
 					tools: [],

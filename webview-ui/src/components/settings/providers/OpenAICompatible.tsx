@@ -6,7 +6,7 @@ import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import {
 	type ProviderSettings,
 	type ModelInfo,
-	type ReasoningEffort,
+	type ReasoningEffortExtended,
 	type OrganizationAllowList,
 	type ExtensionMessage,
 	azureOpenAiDefaultApiVersion,
@@ -266,13 +266,13 @@ export const OpenAICompatible = ({
 
 								setApiConfigurationField("openAiCustomModelInfo", {
 									...openAiCustomModelInfo,
-									reasoningEffort: value as ReasoningEffort,
+									reasoningEffort: value as ReasoningEffortExtended,
 								})
 							}
 						}}
 						modelInfo={{
 							...(apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults),
-							supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+							supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 						}}
 					/>
 				)}

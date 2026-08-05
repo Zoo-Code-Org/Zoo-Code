@@ -35,15 +35,28 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.72.0
+## Yang Baru di v3.74.0
 
-- **Provider Moonshot dan Kimi Code** — temukan model Moonshot secara dinamis atau masuk ke Kimi Code melalui alur perangkat OAuth.
-- **Dukungan model terbaru** — gunakan Claude Opus 5 di berbagai provider, ditambah Kimi K3, Gemini 3.6 Flash, dan MiniMax-M3.
-- **Workflow subtask yang lebih baik** — tinggalkan subtask yang terinterupsi dengan bersih, dengan invalidasi riwayat tugas yang lebih aman dan cakupan resume yang lebih baik.
-- **Indexing codebase yang lebih luas** — indeks file Dart dan teks biasa.
-- **Keandalan provider** — perbaikan untuk GPT-5.6 Luna dengan ChatGPT OAuth, reasoning content LiteLLM, dan input gambar DeepSeek V4.
-- **Setup dan pengaturan lebih mulus** — peningkatan login Zoo Gateway dan perilaku pergantian mode.
-- Peningkatan API, tipe provider, dependensi, lokalisasi, dan CI.
+**Zoo Gateway sudah live!**
+
+Gateway adalah satu endpoint untuk semua penyedia, dengan satu saldo dan rincian pengeluaran/penggunaan per permintaan.
+
+**Penyiapan:**
+
+- Tambahkan kredit: https://www.zoocode.dev/dashboard/credits
+- Masuk dari ekstensi.
+- Di pengaturan, pilih Zoo Gateway sebagai penyedia saat membuat profil untuk berbagai model
+
+Penggunaan dan biaya dapat dilihat di [dasbor](https://www.zoocode.dev/dashboard).
+
+Model: https://www.zoocode.dev/dashboard/models
+
+- **Kontrol OpenAI yang lebih lengkap** — gunakan mode prioritas Fast dengan OpenAI Codex dan pilih tingkat reasoning yang lebih tinggi untuk model yang kompatibel dengan OpenAI.
+- **Provider dan model yang lebih andal** — peningkatan penanganan metadata router, refresh model Ollama, dukungan proxy Bedrock, dan kontrol reasoning Friendli.
+- **Settings dan workflow developer yang lebih mulus** — settings kini mempertahankan edit yang belum disimpan, perintah terminal singkat selesai dengan benar, rencana architect memakai path relatif workspace, dan branding Roo yang masih terlihat telah diperbarui menjadi Zoo.
+- **Fondasi task yang lebih kuat** — task registry baru dan scheduler berbasis semaphore menyiapkan Zoo Code untuk koordinasi task yang lebih aman.
+- **Arsitektur provider yang konsisten** — identifier provider dan komponen service tier kini dipusatkan di API, core, shared types, dan webview.
+- Peningkatan keamanan, dependensi, lint, regresi visual, dan pengujian end-to-end.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
