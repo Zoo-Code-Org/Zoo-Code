@@ -1050,6 +1050,12 @@
 	"limitMaxTokensDescription": "レスポンスの最大トークン数を制限する",
 	"maxOutputTokensLabel": "最大出力トークン",
 	"maxTokensGenerateDescription": "レスポンスで生成する最大トークン数",
+	"openAiCodexSpeed": {
+		"label": "速度",
+		"tooltip": "高速モードは Codex の優先処理を使用して約1.5倍の速度を実現し、サブスクリプションの利用枠をより多く消費します。",
+		"standard": "標準",
+		"fast": "高速（約1.5倍、使用量増加）"
+	},
 	"serviceTier": {
 		"label": "サービスティア",
 		"tooltip": "APIリクエストをより速く処理するには、優先処理サービスティアをお試しください。低価格でレイテンシが高い場合は、フレックス処理ティアをお試しください。",

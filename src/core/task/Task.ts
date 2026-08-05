@@ -135,6 +135,7 @@ import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
+import { shouldAddUserMessageToHistory } from "./messageCounting"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -321,6 +322,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	consecutiveNoToolUseCount: number = 0
 	consecutiveNoAssistantMessagesCount: number = 0
 	toolUsage: ToolUsage = {}
+
+	// Conversation message counts, summarized once per Task Completed
+	// installment instead of emitting a separate telemetry event per turn.
+	messageCounts: { user: number; assistant: number } = { user: 0, assistant: 0 }
+
+	// Idle/shutdown telemetry flush: reports toolUsage/messageCounts for tasks that
+	// go quiet or get torn down without the model ever calling attempt_completion
+	// (or without the user accepting it), so long-running/abandoned tasks aren't
+	// invisible to telemetry. Each flush reports only what changed since the previous
+	// one, tracked via telemetryToolUsageBaseline/telemetryMessageCountsBaseline --
+	// task.toolUsage/messageCounts themselves are never mutated by this, since they're
+	// also read as running totals by the public TaskCompleted API event and the UI.
+	// Checked on an interval rather than hooked into every say()/ask() call site.
+	private static readonly IDLE_TELEMETRY_CHECK_INTERVAL_MS = 5 * 60 * 1000
+	private static readonly IDLE_TELEMETRY_THRESHOLD_MS = 30 * 60 * 1000
+	private idleTelemetryCheckInterval?: NodeJS.Timeout
+	private lastTelemetryFlushAt: number = Date.now()
+	private telemetryToolUsageBaseline: ToolUsage = {}
+	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
 
 	// Checkpoints
 	enableCheckpoints: boolean
@@ -601,6 +621,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		if (startTask) {
 			this._started = true
+			this.startIdleTelemetryCheck()
 			if (task || images) {
 				void this.startTask(task, images).catch((error) => {
 					console.error("[Task#constructor] startTask failed:", error)
@@ -880,6 +901,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const instance = new Task({ ...options, startTask: false })
 		const { images, task, historyItem } = options
 		let promise
+
+		instance.startIdleTelemetryCheck()
 
 		if (images || task) {
 			promise = instance.startTask(task, images)
@@ -1882,6 +1905,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 		this._started = true
+		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -1906,6 +1930,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return Promise.resolve()
 		}
 		this._started = true
+		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -2274,6 +2299,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 
+		// Stop the idle telemetry check and report any unflushed activity as a
+		// shutdown installment, so a task torn down mid-work (panel closed, task
+		// switched, extension deactivated) isn't invisible to telemetry.
+		try {
+			clearInterval(this.idleTelemetryCheckInterval)
+			this.idleTelemetryCheckInterval = undefined
+			this.flushTelemetryInstallment("shutdown")
+		} catch (error) {
+			console.error("Error flushing shutdown telemetry:", error)
+		}
+
 		// Cancel any in-progress HTTP request
 		try {
 			this.cancelCurrentRequest()
@@ -2633,18 +2669,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Add environment details as its own text block, separate from tool
 			// results.
 			const finalUserContent = [...contentWithoutEnvDetails, { type: "text" as const, text: environmentDetails }]
-			// Only add user message to conversation history if:
-			// 1. This is the first attempt (retryAttempt === 0), AND
-			// 2. The original userContent was not empty (empty signals delegation resume where
-			//    the user message with tool_result and env details is already in history), OR
-			// 3. The message was removed in a previous iteration (userMessageWasRemoved === true)
-			// This prevents consecutive user messages while allowing re-add when needed
+			// See shouldAddUserMessageToHistory for the full add/skip rules (retry/empty/removed).
 			const isEmptyUserContent = currentUserContent.length === 0
-			const shouldAddUserMessage =
-				((currentItem.retryAttempt ?? 0) === 0 && !isEmptyUserContent) || currentItem.userMessageWasRemoved
+			const shouldAddUserMessage = shouldAddUserMessageToHistory({
+				retryAttempt: currentItem.retryAttempt,
+				isEmptyUserContent,
+				userMessageWasRemoved: currentItem.userMessageWasRemoved,
+			})
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
-				TelemetryService.instance.captureConversationMessage(this.taskId, "user")
+				this.messageCounts.user++
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -2765,6 +2799,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				NativeToolCallParser.clearRawChunkState()
 
 				await this.diffViewProvider.reset()
+
+				await this.safeEnsureModelFetched()
 
 				// Cache model info once per API request to avoid repeated calls during streaming
 				// This is especially important for tools and background usage collection
@@ -3561,7 +3597,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 					this.assistantMessageSavedToHistory = true
 
-					TelemetryService.instance.captureConversationMessage(this.taskId, "assistant")
+					this.messageCounts.assistant++
 				}
 
 				// Present any partial blocks that were just completed.
@@ -3662,11 +3698,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// we need to remove that message before retrying to avoid having two consecutive
 					// user messages (which would cause tool_result validation errors).
 					const state = await this.providerRef.deref()?.getState()
-					if (this.apiConversationHistory.length > 0) {
+					// Only pop the user message that this iteration added. When
+					// shouldAddUserMessage is false (empty continuation, resumed history,
+					// or flushPendingToolResultsToHistory message) there is nothing to
+					// remove, and popping would corrupt history.
+					let removedCurrentUserMessage = false
+					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 						if (lastMessage.role === "user") {
-							// Remove the last user message that we added earlier
 							this.apiConversationHistory.pop()
+							this.messageCounts.user--
+							removedCurrentUserMessage = true
 						}
 					}
 
@@ -3689,13 +3731,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							break
 						}
 
-						// Push the same content back onto the stack to retry, incrementing the retry attempt counter
-						// Mark that user message was removed so it gets re-added on retry
+						// Push the same content back onto the stack to retry, incrementing the retry attempt counter.
+						// Only mark userMessageWasRemoved when we actually removed one -- the
+						// restore branch in shouldAddUserMessageToHistory must only fire once.
 						stack.push({
 							userContent: currentUserContent,
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							userMessageWasRemoved: true,
+							userMessageWasRemoved: removedCurrentUserMessage,
 						})
 
 						// Continue to retry the request
@@ -3710,32 +3753,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
 
-							// Push the same content back to retry
+							// Push the same content back to retry. Only mark userMessageWasRemoved
+							// when we actually removed one so the restore fires exactly once.
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								userMessageWasRemoved: removedCurrentUserMessage,
 							})
 
 							// Continue to retry the request
 							continue
 						} else {
-							// User declined to retry
-							// Re-add the user message we removed.
-							await this.addToApiConversationHistory({
-								role: "user",
-								content: currentUserContent,
-							})
+							// User declined to retry. Re-add the user message only if this
+							// iteration removed one, so the history and counter stay consistent.
+							if (removedCurrentUserMessage) {
+								await this.addToApiConversationHistory({
+									role: "user",
+									content: currentUserContent,
+								})
+								this.messageCounts.user++
+							}
 
 							await this.say(
 								"error",
 								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
 							)
 
+							// Synthetic assistant message recording the failure -- increment
+							// messageCounts.assistant to match, same as the normal
+							// assistant-message-saved path.
 							await this.addToApiConversationHistory({
 								role: "assistant",
 								content: [{ type: "text", text: "Failure: I did not provide a response." }],
 							})
+							this.messageCounts.assistant++
 						}
 					}
 				}
@@ -3841,11 +3893,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 	}
 
+	/**
+	 * Ensures router-provider model metadata is loaded before getModel() is used for
+	 * context management or streaming. Failures fall back to hardcoded defaults rather
+	 * than aborting the task.
+	 */
+	private async safeEnsureModelFetched(): Promise<void> {
+		try {
+			await this.api.ensureModelFetched?.()
+		} catch (error) {
+			console.error(
+				`[Task#${this.taskId}] Failed to fetch model metadata:`,
+				error instanceof Error ? error.message : error,
+			)
+		}
+	}
+
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
 
 		const { contextTokens } = this.getTokenUsage()
+		await this.safeEnsureModelFetched()
 		const modelInfo = this.api.getModel().info
 
 		const maxTokens = getModelMaxOutputTokens({
@@ -4046,6 +4115,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
+			await this.safeEnsureModelFetched()
 			const modelInfo = this.api.getModel().info
 
 			const maxTokens = getModelMaxOutputTokens({
@@ -4681,6 +4751,76 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (error) {
 			this.emit(RooCodeEventName.TaskToolFailed, this.taskId, toolName, error)
 		}
+	}
+
+	/**
+	 * Emits a Task Completed installment for whatever toolUsage/messageCounts have
+	 * changed since the previous installment (from any reason), then advances the
+	 * telemetry baseline so a later installment reports only its own delta. Does
+	 * NOT touch task.toolUsage/messageCounts themselves -- those stay running totals
+	 * for the public TaskCompleted API event and the UI. No-ops if nothing changed
+	 * since the last installment, so idle/shutdown checks don't emit empty events
+	 * for tasks that were already fully reported (e.g. right after attempt_completion).
+	 */
+	public flushTelemetryInstallment(reason: "attempt_completion" | "idle" | "shutdown"): void {
+		const toolUsageDelta: ToolUsage = {}
+
+		for (const [toolName, usage] of Object.entries(this.toolUsage) as [ToolName, ToolUsage[ToolName]][]) {
+			if (!usage) {
+				continue
+			}
+
+			const baseline = this.telemetryToolUsageBaseline[toolName]
+			const attempts = usage.attempts - (baseline?.attempts ?? 0)
+			const failures = usage.failures - (baseline?.failures ?? 0)
+
+			if (attempts > 0 || failures > 0) {
+				toolUsageDelta[toolName] = { attempts, failures }
+			}
+		}
+
+		const messageCountDelta = {
+			user: Math.max(0, this.messageCounts.user - this.telemetryMessageCountsBaseline.user),
+			assistant: Math.max(0, this.messageCounts.assistant - this.telemetryMessageCountsBaseline.assistant),
+		}
+
+		const hasToolUsageDelta = Object.keys(toolUsageDelta).length > 0
+		const hasMessageDelta = messageCountDelta.user > 0 || messageCountDelta.assistant > 0
+
+		if (!hasToolUsageDelta && !hasMessageDelta) {
+			return
+		}
+
+		// Advance the baseline before emitting so a synchronous throw from an
+		// EventEmitter listener or TelemetryService client cannot leave the baseline
+		// behind the running totals, which would cause the same delta to re-appear
+		// on the next flush. The delta values are already captured in locals above.
+		this.telemetryToolUsageBaseline = JSON.parse(JSON.stringify(this.toolUsage))
+		this.telemetryMessageCountsBaseline = { ...this.messageCounts }
+		this.lastTelemetryFlushAt = Date.now()
+
+		this.emitFinalTokenUsageUpdate()
+		TelemetryService.instance.captureTaskCompleted(this.taskId, toolUsageDelta, messageCountDelta, reason)
+	}
+
+	startIdleTelemetryCheck(): void {
+		if (this.idleTelemetryCheckInterval !== undefined) {
+			return
+		}
+		this.idleTelemetryCheckInterval = setInterval(() => {
+			// Measure idleness from the later of the last activity and the last flush.
+			// Using lastMessageTs alone would keep the condition true forever after the
+			// first idle flush, re-running the empty-delta check on every interval tick.
+			const lastEventAt = Math.max(this.lastMessageTs ?? 0, this.lastTelemetryFlushAt)
+			const idleForMs = Date.now() - lastEventAt
+
+			if (idleForMs >= Task.IDLE_TELEMETRY_THRESHOLD_MS) {
+				this.flushTelemetryInstallment("idle")
+			}
+		}, Task.IDLE_TELEMETRY_CHECK_INTERVAL_MS)
+
+		// Don't hold the process open just for this timer.
+		this.idleTelemetryCheckInterval?.unref?.()
 	}
 
 	// Getters

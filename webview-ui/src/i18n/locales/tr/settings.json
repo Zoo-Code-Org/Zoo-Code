@@ -1050,6 +1050,12 @@
 	"limitMaxTokensDescription": "Yanıttaki maksimum token sayısını sınırla",
 	"maxOutputTokensLabel": "Maksimum çıktı tokenları",
 	"maxTokensGenerateDescription": "Yanıtta oluşturulacak maksimum token sayısı",
+	"openAiCodexSpeed": {
+		"label": "Hız",
+		"tooltip": "Hızlı mod, yaklaşık 1,5 kat hız için Codex öncelikli işlemeyi kullanır ve daha fazla abonelik kotası tüketir.",
+		"standard": "Standart",
+		"fast": "Hızlı (1,5 kat hız, daha fazla kullanım)"
+	},
 	"serviceTier": {
 		"label": "Hizmet seviyesi",
 		"tooltip": "Daha hızlı API isteği işleme için öncelikli işleme hizmeti seviyesini deneyin. Daha düşük gecikme süresiyle daha düşük fiyatlar için esnek işleme seviyesini deneyin.",

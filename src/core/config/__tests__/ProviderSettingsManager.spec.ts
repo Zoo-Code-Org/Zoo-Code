@@ -2,7 +2,12 @@
 
 import { ExtensionContext } from "vscode"
 
-import type { ProviderSettings } from "@roo-code/types"
+import {
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	OpenAiCodexServiceTier,
+	providerIdentifiers,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
 
@@ -450,6 +455,32 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store.mock.calls[0][0]).toEqual("roo_cline_config_api_config")
 			expect(storedConfig).toEqual(expectedConfig)
 		})
+
+		it.each([OpenAiCodexServiceTier.Default, OpenAiCodexServiceTier.Priority] as const)(
+			"should persist the OpenAI Codex %s speed preference",
+			async (openAiCodexServiceTier) => {
+				mockSecrets.get.mockResolvedValue(
+					JSON.stringify({
+						currentApiConfigName: "default",
+						apiConfigs: { default: {} },
+						modeApiConfigs: {},
+					}),
+				)
+
+				await providerSettingsManager.saveConfig("codex", {
+					apiProvider: providerIdentifiers.openaiCodex,
+					apiModelId: "gpt-5.6-sol",
+					[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTier,
+				})
+
+				const storedProfiles = JSON.parse(mockSecrets.store.mock.calls.at(-1)?.[1])
+				expect(storedProfiles.apiConfigs.codex).toMatchObject({
+					apiProvider: providerIdentifiers.openaiCodex,
+					apiModelId: "gpt-5.6-sol",
+					[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTier,
+				})
+			},
+		)
 
 		it("should only save provider relevant settings", async () => {
 			mockSecrets.get.mockResolvedValue(

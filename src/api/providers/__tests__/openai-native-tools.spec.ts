@@ -3,16 +3,13 @@ import OpenAI from "openai"
 import { OpenAiHandler } from "../openai"
 import { OpenAiNativeHandler } from "../openai-native"
 import type { ApiHandlerOptions } from "../../../shared/api"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 describe("OpenAiHandler native tools", () => {
 	it("includes tools in request when tools are provided via metadata (regression test)", async () => {
-		const mockCreate = vi.fn().mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: async function* () {
-				yield {
-					choices: [{ delta: { content: "Test response" } }],
-				}
-			},
-		}))
+		const mockCreate = vi
+			.fn()
+			.mockImplementationOnce(() => asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]))
 
 		// Set openAiCustomModelInfo without any tool capability flags; tools should
 		// still be passed whenever metadata.tools is present.
@@ -82,17 +79,15 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			responses: {
 				create: vi.fn().mockImplementation((body: any) => {
 					capturedRequestBody = body
-					return {
-						[Symbol.asyncIterator]: async function* () {
-							yield {
-								type: "response.done",
-								response: {
-									output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
-									usage: { input_tokens: 10, output_tokens: 5 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.done",
+							response: {
+								output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+								usage: { input_tokens: 10, output_tokens: 5 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -120,10 +115,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			tools: mcpTools,
 		})
 
-		// Consume the stream
-		for await (const _ of stream) {
-			// Just consume
-		}
+		await collectStream(stream)
 
 		// Verify the request body
 		expect(capturedRequestBody.tools).toBeDefined()
@@ -149,17 +141,15 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			responses: {
 				create: vi.fn().mockImplementation((body: any) => {
 					capturedRequestBody = body
-					return {
-						[Symbol.asyncIterator]: async function* () {
-							yield {
-								type: "response.done",
-								response: {
-									output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
-									usage: { input_tokens: 10, output_tokens: 5 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.done",
+							response: {
+								output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+								usage: { input_tokens: 10, output_tokens: 5 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -187,10 +177,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			tools: regularTools,
 		})
 
-		// Consume the stream
-		for await (const _ of stream) {
-			// Just consume
-		}
+		await collectStream(stream)
 
 		// Verify the request body
 		expect(capturedRequestBody.tools).toBeDefined()
@@ -216,17 +203,15 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			responses: {
 				create: vi.fn().mockImplementation((body: any) => {
 					capturedRequestBody = body
-					return {
-						[Symbol.asyncIterator]: async function* () {
-							yield {
-								type: "response.done",
-								response: {
-									output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
-									usage: { input_tokens: 10, output_tokens: 5 },
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.done",
+							response: {
+								output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+								usage: { input_tokens: 10, output_tokens: 5 },
+							},
 						},
-					}
+					])
 				}),
 			},
 		}
@@ -268,10 +253,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			tools: mcpToolsWithNestedObjects,
 		})
 
-		// Consume the stream
-		for await (const _ of stream) {
-			// Just consume
-		}
+		await collectStream(stream)
 
 		// Verify the request body
 		const tool = capturedRequestBody.tools[0]
@@ -290,43 +272,34 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		const mockClient = {
 			responses: {
 				create: vi.fn().mockImplementation(function () {
-					return {
-						[Symbol.asyncIterator]: async function* () {
-							// 1. Emit output_item.added with tool identity
-							yield {
-								type: "response.output_item.added",
-								item: {
-									type: "function_call",
-									call_id: "call_123",
-									name: "read_file",
-									arguments: "",
-								},
-							}
-
-							// 2. Emit tool_call_arguments.delta WITHOUT identity (just args)
-							yield {
-								type: "response.function_call_arguments.delta",
-								delta: '{"path":',
-							}
-
-							// 3. Emit another delta
-							yield {
-								type: "response.function_call_arguments.delta",
-								delta: '"/tmp/test.txt"}',
-							}
-
-							// 4. Emit output_item.done
-							yield {
-								type: "response.output_item.done",
-								item: {
-									type: "function_call",
-									call_id: "call_123",
-									name: "read_file",
-									arguments: '{"path":"/tmp/test.txt"}',
-								},
-							}
+					return asyncStreamFrom([
+						{
+							type: "response.output_item.added",
+							item: {
+								type: "function_call",
+								call_id: "call_123",
+								name: "read_file",
+								arguments: "",
+							},
 						},
-					}
+						{
+							type: "response.function_call_arguments.delta",
+							delta: '{"path":',
+						},
+						{
+							type: "response.function_call_arguments.delta",
+							delta: '"/tmp/test.txt"}',
+						},
+						{
+							type: "response.output_item.done",
+							item: {
+								type: "function_call",
+								call_id: "call_123",
+								name: "read_file",
+								arguments: '{"path":"/tmp/test.txt"}',
+							},
+						},
+					])
 				}),
 			},
 		}
@@ -336,12 +309,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 			taskId: "test-task-id",
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			if (chunk.type === "tool_call_partial") {
-				chunks.push(chunk)
-			}
-		}
+		const chunks = (await collectStream(stream)).filter((chunk) => chunk.type === "tool_call_partial")
 
 		expect(chunks.length).toBe(2)
 		expect(chunks[0]).toEqual({
@@ -370,13 +338,7 @@ describe("OpenAiNativeHandler done-event fallbacks", () => {
 
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						for (const event of events) {
-							yield event
-						}
-					},
-				}),
+				create: vi.fn().mockResolvedValue(asyncStreamFrom(events)),
 			},
 		}
 
@@ -390,11 +352,7 @@ describe("OpenAiNativeHandler done-event fallbacks", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
-		return chunks
+		return collectStream(stream)
 	}
 
 	it.each([

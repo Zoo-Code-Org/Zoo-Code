@@ -124,11 +124,11 @@ vi.mock("openai", () => {
 import OpenAI from "openai"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
-import { deepSeekDefaultModelId, DEEP_SEEK_DEFAULT_TEMPERATURE, type ModelInfo } from "@roo-code/types"
+import { deepSeekDefaultModelId, DEEP_SEEK_DEFAULT_TEMPERATURE, type ModelInfo, DeepSeekModelId } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
 
-import { DeepSeekHandler } from "../deepseek"
+import { DeepSeekHandler, normalizeDeepSeekReasoningEffort } from "../deepseek"
 
 describe("DeepSeekHandler", () => {
 	let handler: DeepSeekHandler
@@ -137,7 +137,7 @@ describe("DeepSeekHandler", () => {
 	beforeEach(() => {
 		mockOptions = {
 			deepSeekApiKey: "test-api-key",
-			apiModelId: "deepseek-chat",
+			apiModelId: "deepseek-v4-flash",
 			deepSeekBaseUrl: "https://api.deepseek.com",
 		}
 		handler = new DeepSeekHandler(mockOptions)
@@ -208,11 +208,11 @@ describe("DeepSeekHandler", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe(mockOptions.apiModelId)
 			expect(model.info).toBeDefined()
-			expect(model.info.maxTokens).toBe(8192) // deepseek-chat legacy alias has 8K max
-			expect(model.info.contextWindow).toBe(128_000)
-			expect(model.info.supportsImages).toBe(false)
+			expect(model.info.maxTokens).toBe(384_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsImages).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true) // Should be true now
-			expect((model.info as ModelInfo).preserveReasoning).toBeUndefined()
+			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 		})
 
 		it("should use deepseek-v4-flash as the default model ID for new configs", () => {
@@ -226,21 +226,7 @@ describe("DeepSeekHandler", () => {
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
 			expect(model.info.supportsImages).toBe(true)
-			expect((model.info as ModelInfo).supportsReasoningEffort).toContain("xhigh")
-		})
-
-		it("should return correct model info for deepseek-reasoner", () => {
-			const handlerWithReasoner = new DeepSeekHandler({
-				...mockOptions,
-				apiModelId: "deepseek-reasoner",
-			})
-			const model = handlerWithReasoner.getModel()
-			expect(model.id).toBe("deepseek-reasoner")
-			expect(model.info).toBeDefined()
-			expect(model.info.maxTokens).toBe(8192) // deepseek-reasoner has 8K max
-			expect(model.info.contextWindow).toBe(128_000)
-			expect(model.info.supportsImages).toBe(false)
-			expect(model.info.supportsPromptCache).toBe(true)
+			expect((model.info as ModelInfo).supportsReasoningEffort).toContain("max")
 		})
 
 		it("should return correct model info for deepseek-v4-pro", () => {
@@ -257,31 +243,6 @@ describe("DeepSeekHandler", () => {
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")
-		})
-
-		it("should have preserveReasoning enabled for deepseek-reasoner to support interleaved thinking", () => {
-			// This is critical for DeepSeek's interleaved thinking mode with tool calls.
-			// See: https://api-docs.deepseek.com/guides/thinking_mode
-			// The reasoning_content needs to be passed back during tool call continuation
-			// within the same turn for the model to continue reasoning properly.
-			const handlerWithReasoner = new DeepSeekHandler({
-				...mockOptions,
-				apiModelId: "deepseek-reasoner",
-			})
-			const model = handlerWithReasoner.getModel()
-			// Cast to ModelInfo to access preserveReasoning which is an optional property
-			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
-		})
-
-		it("should NOT have preserveReasoning enabled for deepseek-chat", () => {
-			// deepseek-chat doesn't use thinking mode, so no need to preserve reasoning
-			const chatHandler = new DeepSeekHandler({
-				...mockOptions,
-				apiModelId: "deepseek-chat",
-			})
-			const model = chatHandler.getModel()
-			// Cast to ModelInfo to access preserveReasoning which is an optional property
-			expect((model.info as ModelInfo).preserveReasoning).toBeUndefined()
 		})
 
 		it("should return provided model ID with default model info if model does not exist", () => {
@@ -540,10 +501,10 @@ describe("DeepSeekHandler", () => {
 			},
 		]
 
-		it("should handle reasoning_content in streaming responses for deepseek-reasoner", async () => {
+		it("should handle reasoning_content in streaming responses for deepseek-v4-pro", async () => {
 			const reasonerHandler = new DeepSeekHandler({
 				...mockOptions,
-				apiModelId: "deepseek-reasoner",
+				apiModelId: "deepseek-v4-pro",
 			})
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages)
@@ -559,10 +520,10 @@ describe("DeepSeekHandler", () => {
 			expect(reasoningChunks[1].text).toBe(" I'll analyze step by step.")
 		})
 
-		it("should pass thinking parameter for deepseek-reasoner model", async () => {
+		it("should pass thinking parameter for deepseek-v4-pro model", async () => {
 			const reasonerHandler = new DeepSeekHandler({
 				...mockOptions,
-				apiModelId: "deepseek-reasoner",
+				apiModelId: "deepseek-v4-pro",
 			})
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages)
@@ -579,7 +540,7 @@ describe("DeepSeekHandler", () => {
 				{}, // Empty path options for non-Azure URLs
 			)
 			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs.reasoning_effort).toBeUndefined()
+			expect(callArgs.reasoning_effort).toBe("high")
 		})
 
 		it("should enable thinking by default for deepseek-v4-flash", async () => {
@@ -619,27 +580,6 @@ describe("DeepSeekHandler", () => {
 			expect(callArgs.max_completion_tokens).toBe(32_000)
 		})
 
-		it("should map xhigh reasoning effort to DeepSeek max effort", async () => {
-			const v4Handler = new DeepSeekHandler({
-				...mockOptions,
-				apiModelId: "deepseek-v4-pro",
-				reasoningEffort: "xhigh",
-			})
-
-			const stream = v4Handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
-
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					thinking: { type: "enabled" },
-					reasoning_effort: "max",
-				}),
-				{},
-			)
-		})
-
 		it("should disable thinking for deepseek-v4 models when reasoning is disabled", async () => {
 			const v4Handler = new DeepSeekHandler({
 				...mockOptions,
@@ -674,26 +614,10 @@ describe("DeepSeekHandler", () => {
 			expect(callArgs.temperature).toBe(DEEP_SEEK_DEFAULT_TEMPERATURE)
 		})
 
-		it("should NOT pass thinking parameter for deepseek-chat model", async () => {
-			const chatHandler = new DeepSeekHandler({
-				...mockOptions,
-				apiModelId: "deepseek-chat",
-			})
-
-			const stream = chatHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
-
-			// Verify that the thinking parameter was NOT passed to the API
-			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs.thinking).toBeUndefined()
-		})
-
 		it("should handle tool calls with reasoning_content", async () => {
 			const reasonerHandler = new DeepSeekHandler({
 				...mockOptions,
-				apiModelId: "deepseek-reasoner",
+				apiModelId: "deepseek-v4-pro",
 			})
 
 			const tools: any[] = [
@@ -721,6 +645,73 @@ describe("DeepSeekHandler", () => {
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
 			expect(toolCallChunks.length).toBeGreaterThan(0)
 			expect(toolCallChunks[0].name).toBe("get_weather")
+		})
+	})
+
+	describe("normalizeDeepSeekReasoningEffort", () => {
+		// https://api-docs.deepseek.com/guides/thinking_mode/
+		it("should map acceptable reasoning efforts the same way as stated by the official documentation", async () => {
+			const mappings: {
+				modelId: DeepSeekModelId
+				rawReasoningEffort: string
+				mappedReasoningEffort: string | undefined
+			}[] = [
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
+				},
+			]
+
+			for (const { modelId, rawReasoningEffort, mappedReasoningEffort } of mappings) {
+				const result = normalizeDeepSeekReasoningEffort(modelId, rawReasoningEffort)
+				expect(result).toBe(mappedReasoningEffort)
+			}
 		})
 	})
 })

@@ -1050,6 +1050,12 @@
 	"limitMaxTokensDescription": "Limiter le nombre maximum de tokens dans la réponse",
 	"maxOutputTokensLabel": "Tokens de sortie maximum",
 	"maxTokensGenerateDescription": "Tokens maximum à générer dans la réponse",
+	"openAiCodexSpeed": {
+		"label": "Vitesse",
+		"tooltip": "Le mode rapide utilise le traitement prioritaire de Codex pour une vitesse environ 1,5 fois supérieure et consomme davantage de quota d'abonnement.",
+		"standard": "Standard",
+		"fast": "Rapide (vitesse 1,5 fois supérieure, utilisation accrue)"
+	},
 	"serviceTier": {
 		"label": "Niveau de service",
 		"tooltip": "Pour un traitement plus rapide des demandes d'API, essayez le niveau de service de traitement prioritaire. Pour des prix plus bas avec une latence plus élevée, essayez le niveau de traitement flexible.",

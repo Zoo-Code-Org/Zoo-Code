@@ -5,6 +5,7 @@ import * as path from "path"
 
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
+import type { Mock } from "vitest"
 
 import {
 	providerIdentifiers,
@@ -32,6 +33,19 @@ type TaskTestAccess = {
 	presentAssistantMessageSafe: () => void
 	updateClineMessage: (message: import("@roo-code/types").ClineMessage) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
+	safeEnsureModelFetched: () => Promise<void>
+	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+}
+
+type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
+type ProviderState = Awaited<ReturnType<ClineProvider["getState"]>>
+type MockedClineProvider = ClineProvider & {
+	getState: Mock<ClineProvider["getState"]> & {
+		mockResolvedValue: (value: Partial<ProviderState>) => void
+	}
+}
+type RateLimitedProviderSettings = ProviderSettings & {
+	rateLimitSeconds: number
 }
 
 function getTaskTestAccess(task: Task): TaskTestAccess {
@@ -66,7 +80,7 @@ vi.mock("execa", () => ({
 }))
 
 vi.mock("fs/promises", async (importOriginal) => {
-	const actual = (await importOriginal()) as Record<string, any>
+	const actual = await importOriginal<typeof import("fs/promises")>()
 	const mockFunctions = {
 		mkdir: vi.fn().mockResolvedValue(undefined),
 		writeFile: vi.fn().mockResolvedValue(undefined),
@@ -153,7 +167,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }), // FileType.File = 1
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: unknown) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -184,6 +198,14 @@ vi.mock("../../../integrations/misc/extract-text", () => ({
 vi.mock("../../environment/getEnvironmentDetails", () => ({
 	getEnvironmentDetails: vi.fn().mockResolvedValue(""),
 }))
+
+vi.mock("../../mentions/processUserContentMentions", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../mentions/processUserContentMentions")>()
+	return {
+		...actual,
+		processUserContentMentions: vi.fn().mockImplementation(actual.processUserContentMentions),
+	}
+})
 
 vi.mock("../../ignore/RooIgnoreController")
 
@@ -239,9 +261,9 @@ const mockMessages = [
 ]
 
 describe("Cline", () => {
-	let mockProvider: any
+	let mockProvider: ClineProvider
 	let mockApiConfig: ProviderSettings
-	let mockOutputChannel: any
+	let mockOutputChannel: vscode.OutputChannel
 	let mockExtensionContext: vscode.ExtensionContext
 
 	beforeEach(() => {
@@ -301,8 +323,10 @@ describe("Cline", () => {
 
 		// Setup mock output channel
 		mockOutputChannel = {
+			name: "test-output",
 			appendLine: vi.fn(),
 			append: vi.fn(),
+			replace: vi.fn(),
 			clear: vi.fn(),
 			show: vi.fn(),
 			hide: vi.fn(),
@@ -355,6 +379,74 @@ describe("Cline", () => {
 				},
 			],
 		}))
+	})
+
+	describe("empty-response retries", () => {
+		function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+			return (async function* () {
+				yield* chunks
+			})()
+		}
+
+		async function createTaskWithManualRetries() {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: mockApiConfig,
+				autoApprovalEnabled: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			return task
+		}
+
+		it("restores the user message before a confirmed empty-response retry", async () => {
+			const task = await createTaskWithManualRetries()
+			let retryHistory: ApiMessage[] | undefined
+			let retryUserMessageCount: number | undefined
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => stream([]))
+				.mockImplementationOnce(() => {
+					retryHistory = structuredClone(task.apiConversationHistory)
+					retryUserMessageCount = task.messageCounts.user
+					return stream([{ type: "text", text: "retry succeeded" }])
+				})
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(retryHistory).toHaveLength(1)
+			expect(retryHistory?.[0]).toMatchObject({
+				role: "user",
+				content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
+			})
+			expect(retryUserMessageCount).toBe(1)
+		})
+
+		it("restores the user message and records the failure when retry is declined", async () => {
+			const task = await createTaskWithManualRetries()
+
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
+
+			expect(result).toBe(false)
+			expect(task.apiConversationHistory).toMatchObject([
+				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
+			])
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
 	})
 
 	describe("constructor", () => {
@@ -498,7 +590,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(error: any) {
+					async throw(error: unknown) {
 						throw error
 					},
 					async [Symbol.asyncDispose]() {
@@ -604,7 +696,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(error: any) {
+					async throw(error: unknown) {
 						throw error
 					},
 					async [Symbol.asyncDispose]() {
@@ -681,7 +773,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -700,7 +792,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -772,7 +864,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {},
@@ -788,7 +880,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {},
@@ -849,7 +941,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -868,7 +960,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					async [Symbol.asyncDispose]() {
@@ -989,8 +1081,8 @@ describe("Cline", () => {
 		})
 
 		describe("Subtask Rate Limiting", () => {
-			let mockProvider: any
-			let mockApiConfig: any
+			let mockProvider: MockedClineProvider
+			let mockApiConfig: RateLimitedProviderSettings
 			let mockDelay: ReturnType<typeof vi.fn>
 
 			beforeEach(() => {
@@ -1021,7 +1113,8 @@ describe("Cline", () => {
 					postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 					postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 					updateTaskHistory: vi.fn().mockResolvedValue(undefined),
-				}
+					// Task receives a full ClineProvider at runtime; this focused unit test only exercises these methods.
+				} as unknown as MockedClineProvider
 
 				// Get the mocked delay function
 				mockDelay = delay as ReturnType<typeof vi.fn>
@@ -1056,7 +1149,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1097,7 +1190,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1149,7 +1242,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1215,7 +1308,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1305,7 +1398,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1363,7 +1456,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -1382,8 +1475,8 @@ describe("Cline", () => {
 		})
 
 		describe("Dynamic Strategy Selection", () => {
-			let mockProvider: any
-			let mockApiConfig: any
+			let mockProvider: MockedClineProvider
+			let mockApiConfig: ProviderSettings
 
 			beforeEach(() => {
 				vi.clearAllMocks()
@@ -1398,7 +1491,7 @@ describe("Cline", () => {
 						globalStorageUri: { fsPath: "/test/storage" },
 					},
 					getState: vi.fn(),
-				}
+				} as MockedClineProvider
 			})
 
 			it("should use MultiSearchReplaceDiffStrategy by default", async () => {
@@ -1950,7 +2043,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2101,7 +2194,7 @@ describe("Cline", () => {
 							async return() {
 								return { done: true, value: undefined }
 							},
-							async throw(e: any) {
+							async throw(e: unknown) {
 								throw e
 							},
 							[Symbol.asyncDispose]: async () => {},
@@ -2171,7 +2264,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2237,7 +2330,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2302,7 +2395,7 @@ describe("Cline", () => {
 						async return() {
 							return { done: true, value: undefined }
 						},
-						async throw(e: any) {
+						async throw(e: unknown) {
 							throw e
 						},
 						[Symbol.asyncDispose]: async () => {},
@@ -2462,7 +2555,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -2478,7 +2571,7 @@ describe("Cline", () => {
 					async return() {
 						return { done: true, value: undefined }
 					},
-					async throw(e: any) {
+					async throw(e: unknown) {
 						throw e
 					},
 					[Symbol.asyncDispose]: async () => {},
@@ -2504,6 +2597,230 @@ describe("Cline", () => {
 				expect(options.metadata?.abortSignal).toBeInstanceOf(AbortSignal)
 				expect(options.metadata?.abortSignal?.aborted).toBe(false)
 			})
+		})
+	})
+
+	describe("safeEnsureModelFetched", () => {
+		it("loads model metadata before getModel is used", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched })
+
+			await getTaskTestAccess(task).safeEnsureModelFetched()
+
+			expect(ensureModelFetched).toHaveBeenCalledTimes(1)
+		})
+
+		it("swallows fetch failures so callers can fall back to defaults", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const ensureModelFetched = vi.fn().mockRejectedValue(new Error("network down"))
+			Object.assign(task.api, { ensureModelFetched })
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBeUndefined()
+
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to fetch model metadata"),
+				"network down",
+			)
+			errorSpy.mockRestore()
+		})
+
+		it("is a no-op when the api handler does not implement ensureModelFetched", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await expect(getTaskTestAccess(task).safeEnsureModelFetched()).resolves.toBeUndefined()
+		})
+
+		it("calls safeEnsureModelFetched from attemptApiRequest when context tokens are present", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "text", text: "ok" }
+				},
+				async next() {
+					return { done: true, value: undefined }
+				},
+				async return() {
+					return { done: true, value: undefined }
+				},
+				async throw(error: unknown) {
+					throw error
+				},
+				async [Symbol.asyncDispose]() {},
+			} as AsyncGenerator<ApiStreamChunk>)
+
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			const iterator = task.attemptApiRequest(0)
+			await iterator.next()
+
+			expect(safeSpy).toHaveBeenCalled()
+		})
+
+		it("continues attemptApiRequest when model metadata fetch fails", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			const ensureModelFetched = vi.fn().mockRejectedValue(new Error("fetch failed"))
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "text", text: "ok" }
+				},
+				async next() {
+					return { done: false, value: { type: "text", text: "ok" } }
+				},
+				async return() {
+					return { done: true, value: undefined }
+				},
+				async throw(error: unknown) {
+					throw error
+				},
+				async [Symbol.asyncDispose]() {},
+			} as AsyncGenerator<ApiStreamChunk>)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			const iterator = task.attemptApiRequest(0)
+			await expect(iterator.next()).resolves.toMatchObject({
+				done: false,
+				value: { type: "text", text: "ok" },
+			})
+			expect(errorSpy).toHaveBeenCalled()
+			errorSpy.mockRestore()
+		})
+
+		it("fetches model metadata before caching the streaming model", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(task.api, "getModel").mockReturnValue({
+				id: mockApiConfig.apiModelId!,
+				info: {
+					supportsImages: false,
+					supportsPromptCache: true,
+					contextWindow: 200_000,
+					maxTokens: 4096,
+				} as ModelInfo,
+			})
+			vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+				content: [{ type: "text", text: "hello" }],
+				mode: undefined,
+			})
+			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				throw new Error("stop after model metadata fetch")
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+			vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
+
+			task.clineMessages = [
+				{
+					ts: Date.now(),
+					type: "say",
+					say: "api_req_started",
+					text: "{}",
+				},
+			]
+			vi.spyOn(task, "say").mockImplementation(async (type) => {
+				if (type === "api_req_started") {
+					task.clineMessages.push({
+						ts: Date.now(),
+						type: "say",
+						say: "api_req_started",
+						text: "{}",
+					})
+				}
+				return undefined as never
+			})
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
+
+			expect(result).toBe(true)
+			expect(safeSpy).toHaveBeenCalled()
+			expect(ensureModelFetched).toHaveBeenCalled()
+			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
 		})
 	})
 
@@ -2933,7 +3250,7 @@ describe("Cline", () => {
 })
 
 describe("Queued message processing after condense", () => {
-	function createProvider(): any {
+	function createProvider(): ClineProvider {
 		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
 		const ctx = {
 			globalState: {
@@ -3059,8 +3376,261 @@ describe("Queued message processing after condense", () => {
 	})
 })
 
+describe("Telemetry installments (idle/shutdown flush)", () => {
+	let mockProvider: ClineProvider
+	let mockApiConfig: ProviderSettings
+	let mockExtensionContext: vscode.ExtensionContext
+	let captureTaskCompletedSpy: ReturnType<typeof vi.spyOn>
+
+	beforeEach(() => {
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+
+		captureTaskCompletedSpy = vi.spyOn(TelemetryService.instance, "captureTaskCompleted")
+
+		const storageUri = { fsPath: path.join(os.tmpdir(), "test-storage") }
+
+		mockExtensionContext = {
+			globalState: {
+				get: vi.fn().mockReturnValue(undefined),
+				update: vi.fn().mockResolvedValue(undefined),
+				keys: vi.fn().mockReturnValue([]),
+			},
+			globalStorageUri: storageUri,
+			workspaceState: {
+				get: vi.fn().mockReturnValue(undefined),
+				update: vi.fn().mockResolvedValue(undefined),
+				keys: vi.fn().mockReturnValue([]),
+			},
+			secrets: {
+				get: vi.fn().mockResolvedValue(undefined),
+				store: vi.fn().mockResolvedValue(undefined),
+				delete: vi.fn().mockResolvedValue(undefined),
+			},
+			extensionUri: { fsPath: "/mock/extension/path" },
+			extension: { packageJSON: { version: "1.0.0" } },
+		} as unknown as vscode.ExtensionContext
+
+		mockProvider = new ClineProvider(
+			mockExtensionContext,
+			{
+				appendLine: vi.fn(),
+				append: vi.fn(),
+				clear: vi.fn(),
+				show: vi.fn(),
+				hide: vi.fn(),
+				dispose: vi.fn(),
+			} as unknown as vscode.OutputChannel,
+			"sidebar",
+			new ContextProxy(mockExtensionContext),
+		)
+		mockProvider.postMessageToWebview = vi.fn().mockResolvedValue(undefined)
+		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
+
+		mockApiConfig = {
+			apiProvider: "anthropic",
+			apiModelId: "claude-3-5-sonnet-20241022",
+			apiKey: "test-api-key",
+		}
+	})
+
+	const createdTasks: Task[] = []
+
+	afterEach(() => {
+		for (const task of createdTasks) {
+			task.dispose()
+		}
+		createdTasks.length = 0
+		vi.useRealTimers()
+		captureTaskCompletedSpy.mockRestore()
+	})
+
+	function createTask() {
+		const task = new Task({
+			provider: mockProvider,
+			apiConfiguration: mockApiConfig,
+			task: "test task",
+			startTask: false,
+		})
+		task.startIdleTelemetryCheck()
+		createdTasks.push(task)
+		return task
+	}
+
+	describe("flushTelemetryInstallment", () => {
+		it("reports nothing and does not call captureTaskCompleted when there is no new activity", () => {
+			const task = createTask()
+
+			task.flushTelemetryInstallment("idle")
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("reports the current toolUsage/messageCounts as the delta on the first flush", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 2, assistant: 3 }
+
+			task.flushTelemetryInstallment("idle")
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 2, failures: 0 } },
+				{ user: 2, assistant: 3 },
+				"idle",
+			)
+		})
+
+		it("does not mutate task.toolUsage/messageCounts (they stay running totals for the public API/UI)", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 1, assistant: 1 }
+
+			task.flushTelemetryInstallment("idle")
+
+			expect(task.toolUsage).toEqual({ read_file: { attempts: 1, failures: 0 } })
+			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+
+		it("reports only the delta since the previous installment on a second flush", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 1, assistant: 1 }
+			task.flushTelemetryInstallment("idle")
+			captureTaskCompletedSpy.mockClear()
+
+			task.recordToolUsage("read_file")
+			task.recordToolUsage("write_to_file")
+			task.messageCounts = { user: 3, assistant: 2 }
+			task.flushTelemetryInstallment("shutdown")
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 1, failures: 0 }, write_to_file: { attempts: 1, failures: 0 } },
+				{ user: 2, assistant: 1 },
+				"shutdown",
+			)
+		})
+
+		it("does not emit an empty second installment when nothing changed since the first flush", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.flushTelemetryInstallment("idle")
+			captureTaskCompletedSpy.mockClear()
+
+			task.flushTelemetryInstallment("shutdown")
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("includes failure deltas alongside attempt deltas", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.flushTelemetryInstallment("idle")
+			captureTaskCompletedSpy.mockClear()
+
+			task.recordToolError("read_file")
+
+			task.flushTelemetryInstallment("shutdown")
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 0, failures: 1 } },
+				{ user: 0, assistant: 0 },
+				"shutdown",
+			)
+		})
+	})
+
+	describe("idle flush timer", () => {
+		it("flushes once activity has been quiet for the idle threshold", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+
+			vi.advanceTimersByTime(31 * 60 * 1000)
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 1, failures: 0 } },
+				{ user: 0, assistant: 0 },
+				"idle",
+			)
+		})
+
+		it("does not flush before the idle threshold has elapsed", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+
+			vi.advanceTimersByTime(10 * 60 * 1000)
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("does not call the idle flush after a prior idle installment without new activity", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			const flushTelemetryInstallmentSpy = vi.spyOn(task, "flushTelemetryInstallment")
+			task.recordToolUsage("read_file")
+
+			vi.advanceTimersByTime(31 * 60 * 1000)
+			expect(captureTaskCompletedSpy).toHaveBeenCalledTimes(1)
+			flushTelemetryInstallmentSpy.mockClear()
+			captureTaskCompletedSpy.mockClear()
+
+			vi.advanceTimersByTime(5 * 60 * 1000)
+
+			expect(flushTelemetryInstallmentSpy).not.toHaveBeenCalled()
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("dispose", () => {
+		it("flushes unreported activity as a shutdown installment", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.messageCounts = { user: 1, assistant: 1 }
+
+			task.dispose()
+
+			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
+				task.taskId,
+				{ read_file: { attempts: 1, failures: 0 } },
+				{ user: 1, assistant: 1 },
+				"shutdown",
+			)
+		})
+
+		it("does not flush again if everything was already reported before dispose", () => {
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.flushTelemetryInstallment("attempt_completion")
+			captureTaskCompletedSpy.mockClear()
+
+			task.dispose()
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+
+		it("stops the idle timer so a disposed task never flushes again", () => {
+			vi.useFakeTimers()
+			const task = createTask()
+			task.recordToolUsage("read_file")
+			task.dispose()
+			captureTaskCompletedSpy.mockClear()
+
+			vi.advanceTimersByTime(60 * 60 * 1000)
+
+			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
+		})
+	})
+})
+
 describe("pushToolResultToUserContent", () => {
-	let mockProvider: any
+	let mockProvider: ClineProvider
 	let mockApiConfig: ProviderSettings
 
 	beforeEach(() => {

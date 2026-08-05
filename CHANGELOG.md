@@ -1,5 +1,39 @@
 # Zoo Code Changelog
 
+## [3.74.0]
+
+### Minor Changes
+
+- Add Fast priority mode for OpenAI Codex, persisting the selection and sending it with requests (PR #1063 by @WebMad)
+- Add higher reasoning-effort options for OpenAI-compatible models (#882 by @MINLEGO, PR #1051 by @ivanarifin)
+- Fetch router-provider model metadata before making context-management decisions (PR #1053 by @JamesRobert20)
+- Make Ollama model refreshes reliable, surface refresh errors, and use the base URL currently being edited (#877 by @navedmerchant, PR #878 by @navedmerchant)
+- Fix Amazon Bedrock DNS resolution when using a corporate proxy (#905 by @LouisClt, PR #906 by @LouisClt)
+- Add reasoning-parameter support to the Friendli provider (PR #886 by @Lee-Si-Yoon)
+- Keep Save-managed settings in the local editing buffer until the user explicitly saves (#862 by @JunyongParkDev, PR #872 by @JunyongParkDev)
+- Stop prompting about command output after short foreground commands have already completed (#1042 by @edelauna, PR #1043 by @app/zoomote)
+- Keep Architect mode plans workspace-relative so creating `./plans` does not fail on read-only filesystem roots (#965 by @juneleung, PR #968 by @app/zoomote)
+- Replace remaining user-facing Roo branding with Zoo branding (#551 by @proyectoauraorg, PR #971 by @rrewll)
+- Introduce a semaphore-based task scheduler for controlled task execution (#358 by @edelauna, PR #1031 by @edelauna)
+- Introduce `TaskRegistry` and migrate task-stack management to it (#367 by @edelauna, PR #1014 by @edelauna)
+- Complete the API provider migration to canonical provider identifiers (#955 by @WebMad, PR #1012 by @WebMad)
+- Use canonical provider identifiers for default model definitions (#954 by @WebMad, PR #991 by @WebMad)
+- Use canonical provider identifiers for API model caches (#957 by @WebMad, PR #1020 by @WebMad)
+- Use canonical provider identifiers in shared profile settings (#956 by @WebMad, PR #1019 by @WebMad)
+- Use canonical provider identifiers throughout extension-core flows (#958 by @WebMad, PR #1022 by @WebMad)
+- Use canonical provider identifiers throughout the webview (#959 by @WebMad, PR #1023 by @WebMad)
+- Finish the repository-wide canonical provider identifier audit (#960 by @WebMad, PR #1030 by @WebMad)
+- Centralize API service-tier types and helpers (PR #1040 by @WebMad)
+- Support the platform-package layout introduced by `@vscode/ripgrep` 1.18 and later (#1024 by @saravanaraj0078-lab, PR #1032 by @edelauna)
+- Update `shell-quote` to 1.9.0 to incorporate security fixes (PR #986 by @app/renovate)
+- Update the development and build toolchain to Node.js 22.23.1 LTS (PR #743 by @app/renovate)
+- Add a Playwright visual-regression harness for webview components (#515 by @edelauna, PR #526 by @edelauna)
+- Enforce the no-floating-promises lint ratchet in `core/webview` (#949 by @edelauna, PR #950 by @morgan-coded)
+- Harden the end-to-end workflow against transient VS Code binary download failures (#1044 by @edelauna, PR #1045 by @app/zoomote)
+- Isolate mocked subtask fixtures to prevent flaky parent-resume tests (#1001 by @app/zoomote, PR #1002 by @app/zoomote)
+- Prevent cancelled delayed mock streams from leaking between subtask end-to-end tests (PR #1074 by @app/zoomote)
+- Merge the v3.72.0 release preparation branch into `main` (PR #1013 by @navedmerchant)
+
 ## [3.72.0]
 
 ### Minor Changes
