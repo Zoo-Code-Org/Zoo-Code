@@ -4,12 +4,64 @@ import type { Socket } from "net"
 import type { RooCodeEvents } from "./events.js"
 import type { RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
+import type { TokenUsage } from "./message.js"
+import type { ToolUsage } from "./tool.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
 
+export type HeadlessCapabilities = {
+	checkpoints: false
+	typedAsks: true
+	rootTaskResults: true
+}
+
+export type HeadlessTaskReference = { taskId: string; rootTaskId: string }
+
+export type HeadlessAskResponse =
+	| { response: "approve" }
+	| { response: "reject" }
+	| { response: "message"; text: string; images?: string[] }
+
+export type HeadlessCancelSettlement = {
+	rootTaskId: string
+	resumable: boolean
+	status: "interrupted" | "failed"
+}
+
+export type HeadlessTaskResult = {
+	rootTaskId: string
+	currentTaskId: string
+	outcome: "completed" | "cancelled" | "failed"
+	resumable: boolean
+	content?: string
+	error?: { code: "task_failed" | "cancel_failed" | "shutdown"; message: string }
+	tokenUsage?: TokenUsage
+	toolUsage?: ToolUsage
+}
+
+export type HeadlessShutdownReport = {
+	settledRuns: number
+	pendingRuns: number
+}
+
 export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
+	initializeHeadless(): Promise<HeadlessCapabilities>
+	startHeadlessTask(input: {
+		text: string
+		images?: string[]
+		configuration?: RooCodeSettings
+	}): Promise<HeadlessTaskReference>
+	resumeHeadlessTask(taskId: string): Promise<HeadlessTaskReference>
+	respondToHeadlessAsk(input: { taskId: string; askId: string; response: HeadlessAskResponse }): Promise<void>
+	cancelHeadlessTask(input: {
+		rootTaskId: string
+		reason: "user" | "signal" | "timeout"
+	}): Promise<HeadlessCancelSettlement>
+	getHeadlessTaskResult(rootTaskId: string): Promise<HeadlessTaskResult | undefined>
+	waitForHeadlessTaskResult(rootTaskId: string): Promise<HeadlessTaskResult>
+	shutdownHeadless(): Promise<HeadlessShutdownReport>
 	/**
 	 * Starts a new task with an optional initial message and images.
 	 * @param task Optional initial task message.

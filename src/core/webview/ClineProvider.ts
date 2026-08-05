@@ -247,7 +247,8 @@ export class ClineProvider
 				this.scheduleGlobalStateWriteThrough()
 			},
 		})
-		this.initializeTaskHistoryStore().catch((error) => {
+		this.taskHistoryInitialization = this.initializeTaskHistoryStore()
+		this.taskHistoryInitialization.catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
 
@@ -3054,6 +3055,16 @@ export class ClineProvider
 		return this.taskRegistry.current
 	}
 
+	private readonly taskHistoryInitialization: Promise<void>
+
+	public waitUntilReady(): Promise<void> {
+		return this.taskHistoryInitialization
+	}
+
+	public getTaskById(taskId: string): Task | undefined {
+		return this.taskRegistry.getById(taskId)
+	}
+
 	private logWebviewHiddenDiagnostics(): void {
 		const task = this.getCurrentTask()
 		if (!task || task.abort || task.abandoned) {
@@ -3221,7 +3232,7 @@ export class ClineProvider
 		return task
 	}
 
-	public async cancelTask(): Promise<void> {
+	public async cancelTask(options: { rehydrate?: boolean } = {}): Promise<void> {
 		const task = this.getCurrentTask()
 
 		if (!task) {
@@ -3229,10 +3240,10 @@ export class ClineProvider
 		}
 
 		console.log(`[cancelTask] cancelling task ${task.taskId}.${task.instanceId}`)
-		await this.cancelTaskInternal(task)
+		await this.cancelTaskInternal(task, options)
 	}
 
-	private async cancelTaskInternal(task: Task): Promise<void> {
+	private async cancelTaskInternal(task: Task, options: { rehydrate?: boolean }): Promise<void> {
 		let historyItem: HistoryItem | undefined
 		try {
 			const history = await this.getTaskWithId(task.taskId)
@@ -3315,6 +3326,11 @@ export class ClineProvider
 			return
 		}
 
+		if (!task.parentTaskId && historyItem.status !== "interrupted") {
+			historyItem = { ...historyItem, status: "interrupted" }
+			await this.updateTaskHistory(historyItem)
+		}
+
 		if (task.parentTaskId) {
 			try {
 				await this.runDelegationTransition(task.parentTaskId, async () => {
@@ -3360,6 +3376,10 @@ export class ClineProvider
 					}`,
 				)
 			}
+		}
+
+		if (options.rehydrate === false) {
+			return
 		}
 
 		// Clears task again, so we need to abortTask manually above.

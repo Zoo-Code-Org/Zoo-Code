@@ -1184,11 +1184,6 @@
 			"count": 7
 		}
 	},
-	"extension/api.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
 	"i18n/index.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1

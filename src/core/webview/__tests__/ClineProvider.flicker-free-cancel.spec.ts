@@ -403,6 +403,14 @@ describe("ClineProvider flicker-free cancel", () => {
 		await provider.dispose()
 	})
 
+	it("exposes readiness and registered tasks to headless callers", async () => {
+		seedRegistry(provider, mockTask1)
+
+		await expect(provider.waitUntilReady()).resolves.toBeUndefined()
+		expect(provider.getTaskById("task-1")).toBe(mockTask1)
+		expect(provider.getTaskById("missing")).toBeUndefined()
+	})
+
 	it("should not remove current task from stack when rehydrating same taskId", async () => {
 		// Setup: Add a task to the registry first
 		seedRegistry(provider, mockTask1)
@@ -654,6 +662,42 @@ describe("ClineProvider flicker-free cancel", () => {
 				rootTaskId: "root-1",
 			}),
 		)
+	})
+
+	it("persists a top-level interruption without rehydrating a headless cancellation", async () => {
+		const historyItem: HistoryItem = {
+			id: "root-1",
+			number: 1,
+			task: "root task",
+			ts: Date.now(),
+			tokensIn: 10,
+			tokensOut: 20,
+			totalCost: 0.001,
+			workspace: "/test/workspace",
+			status: "active",
+		}
+		Object.assign(mockTask1, {
+			taskId: "root-1",
+			instanceId: "instance-root",
+			parentTaskId: undefined,
+			cancelCurrentRequest: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			abandoned: false,
+			isStreaming: false,
+			didFinishAbortingStream: true,
+			isWaitingForFirstChunk: false,
+		})
+		seedRegistry(provider, mockTask1)
+		provider.getTaskWithId = vi.fn().mockResolvedValue({ historyItem }) as unknown as ClineProvider["getTaskWithId"]
+		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+		const createTaskWithHistoryItemSpy = vi.spyOn(provider, "createTaskWithHistoryItem")
+
+		await provider.cancelTask({ rehydrate: false })
+
+		expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+			expect.objectContaining({ id: "root-1", status: "interrupted" }),
+		)
+		expect(createTaskWithHistoryItemSpy).not.toHaveBeenCalled()
 	})
 
 	it("detaches runtime parent links when delegated parent detach fails", async () => {

@@ -3,6 +3,7 @@ import { z } from "zod"
 import { clineMessageSchema, queuedMessageSchema, tokenUsageSchema } from "./message.js"
 import { modelInfoSchema } from "./model.js"
 import { toolNamesSchema, toolUsageSchema } from "./tool.js"
+import { historyItemSchema } from "./history.js"
 
 /**
  * RooCodeEventName
@@ -50,6 +51,11 @@ export enum RooCodeEventName {
 	CommandsResponse = "commandsResponse",
 	ModesResponse = "modesResponse",
 	ModelsResponse = "modelsResponse",
+
+	// Direct headless API
+	HeadlessAsk = "headlessAsk",
+	HeadlessTerminalFailure = "headlessTerminalFailure",
+	HeadlessTaskResult = "headlessTaskResult",
 }
 
 /**
@@ -124,6 +130,29 @@ export const rooCodeEventsSchema = z.object({
 	]),
 	[RooCodeEventName.ModesResponse]: z.tuple([z.array(z.object({ slug: z.string(), name: z.string() }))]),
 	[RooCodeEventName.ModelsResponse]: z.tuple([z.record(z.string(), modelInfoSchema)]),
+	[RooCodeEventName.HeadlessAsk]: z.tuple([
+		z.object({
+			taskId: z.string(),
+			rootTaskId: z.string(),
+			askId: z.string(),
+			ask: z.string(),
+			text: z.string().optional(),
+			isProtected: z.boolean().optional(),
+		}),
+	]),
+	[RooCodeEventName.HeadlessTerminalFailure]: z.tuple([
+		z.object({ taskId: z.string(), rootTaskId: z.string(), code: z.string(), message: z.string() }),
+	]),
+	[RooCodeEventName.HeadlessTaskResult]: z.tuple([
+		z.object({
+			rootTaskId: z.string(),
+			currentTaskId: z.string(),
+			outcome: z.enum(["completed", "cancelled", "failed"]),
+			resumable: z.boolean(),
+			content: z.string().optional(),
+			historyItem: historyItemSchema.optional(),
+		}),
+	]),
 })
 
 export type RooCodeEvents = z.infer<typeof rooCodeEventsSchema>
@@ -268,6 +297,18 @@ export const taskEventSchema = z.discriminatedUnion("eventName", [
 		eventName: z.literal(RooCodeEventName.ModelsResponse),
 		payload: rooCodeEventsSchema.shape[RooCodeEventName.ModelsResponse],
 		taskId: z.number().optional(),
+	}),
+	z.object({
+		eventName: z.literal(RooCodeEventName.HeadlessAsk),
+		payload: rooCodeEventsSchema.shape[RooCodeEventName.HeadlessAsk],
+	}),
+	z.object({
+		eventName: z.literal(RooCodeEventName.HeadlessTerminalFailure),
+		payload: rooCodeEventsSchema.shape[RooCodeEventName.HeadlessTerminalFailure],
+	}),
+	z.object({
+		eventName: z.literal(RooCodeEventName.HeadlessTaskResult),
+		payload: rooCodeEventsSchema.shape[RooCodeEventName.HeadlessTaskResult],
 	}),
 ])
 

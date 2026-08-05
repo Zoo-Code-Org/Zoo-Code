@@ -14,6 +14,12 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type CreateTaskOptions,
+	type HeadlessAskResponse,
+	type HeadlessCancelSettlement,
+	type HeadlessCapabilities,
+	type HeadlessShutdownReport,
+	type HeadlessTaskReference,
+	type HeadlessTaskResult,
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
@@ -30,6 +36,16 @@ import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
+type HeadlessRun = {
+	rootTaskId: string
+	currentTaskId: string
+	cancellationRequested: boolean
+	completionContent?: string
+	result?: HeadlessTaskResult
+	promise: Promise<HeadlessTaskResult>
+	resolve: (result: HeadlessTaskResult) => void
+}
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
@@ -37,6 +53,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly ipc?: IpcServer
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
+	private readonly headlessRuns = new Map<string, HeadlessRun>()
+	private headlessShutdown = false
 
 	constructor(
 		outputChannel: vscode.OutputChannel,
@@ -167,6 +185,202 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return super.emit(eventName, ...args)
 	}
 
+	public async initializeHeadless(): Promise<HeadlessCapabilities> {
+		if (this.headlessShutdown) throw new Error("Headless API is shut down")
+		await this.sidebarProvider.waitUntilReady()
+		return { checkpoints: false, typedAsks: true, rootTaskResults: true }
+	}
+
+	public async startHeadlessTask({
+		text,
+		images,
+		configuration,
+	}: {
+		text: string
+		images?: string[]
+		configuration?: RooCodeSettings
+	}): Promise<HeadlessTaskReference> {
+		await this.initializeHeadless()
+		if (!text.trim()) throw new Error("Headless task text must not be blank")
+		if ([...this.headlessRuns.values()].some((run) => !run.result)) {
+			throw new Error("A headless root task is already active")
+		}
+		const task = await this.sidebarProvider.createTask(text, images, undefined, {}, configuration)
+		const rootTaskId = task.rootTaskId ?? task.taskId
+		this.createHeadlessRun(rootTaskId, task.taskId)
+		return { taskId: task.taskId, rootTaskId }
+	}
+
+	public async resumeHeadlessTask(taskId: string): Promise<HeadlessTaskReference> {
+		await this.initializeHeadless()
+		if ([...this.headlessRuns.values()].some((run) => !run.result)) {
+			throw new Error("A headless root task is already active")
+		}
+		const { historyItem } = await this.sidebarProvider.getTaskWithId(taskId)
+		const task = await this.sidebarProvider.createTaskWithHistoryItem(historyItem)
+		const rootTaskId = historyItem.rootTaskId ?? historyItem.id
+		this.createHeadlessRun(rootTaskId, task.taskId)
+		return { taskId: task.taskId, rootTaskId }
+	}
+
+	public async respondToHeadlessAsk({
+		taskId,
+		askId,
+		response,
+	}: {
+		taskId: string
+		askId: string
+		response: HeadlessAskResponse
+	}): Promise<void> {
+		const task = this.sidebarProvider.getTaskById(taskId)
+		if (!task) throw new Error(`Task ${taskId} is not active`)
+		const numericAskId = Number(askId)
+		if (!Number.isSafeInteger(numericAskId)) throw new Error(`Invalid ask ID ${askId}`)
+		const mappedResponse =
+			response.response === "approve"
+				? "yesButtonClicked"
+				: response.response === "reject"
+					? "noButtonClicked"
+					: "messageResponse"
+		const accepted = task.respondToAsk(
+			numericAskId,
+			mappedResponse,
+			response.response === "message" ? response.text : undefined,
+			response.response === "message" ? response.images : undefined,
+		)
+		if (!accepted) throw new Error(`Ask ${askId} is not pending on task ${taskId}`)
+	}
+
+	public async cancelHeadlessTask({
+		rootTaskId,
+	}: {
+		rootTaskId: string
+		reason: "user" | "signal" | "timeout"
+	}): Promise<HeadlessCancelSettlement> {
+		const run = this.headlessRuns.get(rootTaskId)
+		if (!run || run.result) throw new Error(`Root task ${rootTaskId} is not active`)
+		const currentTask = this.sidebarProvider.getCurrentTask()
+		if (!currentTask || (currentTask.rootTaskId ?? currentTask.taskId) !== rootTaskId) {
+			throw new Error(`Root task ${rootTaskId} is not current`)
+		}
+		run.cancellationRequested = true
+		try {
+			await this.sidebarProvider.cancelTask({ rehydrate: false })
+			const history = this.sidebarProvider.taskHistoryStore.get(currentTask.taskId)
+			const resumable = history?.status === "interrupted"
+			this.settleHeadlessRun(run, {
+				rootTaskId,
+				currentTaskId: currentTask.taskId,
+				outcome: "cancelled",
+				resumable,
+			})
+			return { rootTaskId, resumable, status: "interrupted" }
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			this.settleHeadlessRun(run, {
+				rootTaskId,
+				currentTaskId: currentTask.taskId,
+				outcome: "failed",
+				resumable: false,
+				error: { code: "cancel_failed", message },
+			})
+			return { rootTaskId, resumable: false, status: "failed" }
+		}
+	}
+
+	public async getHeadlessTaskResult(rootTaskId: string): Promise<HeadlessTaskResult | undefined> {
+		return this.headlessRuns.get(rootTaskId)?.result
+	}
+
+	public async waitForHeadlessTaskResult(rootTaskId: string): Promise<HeadlessTaskResult> {
+		const run = this.headlessRuns.get(rootTaskId)
+		if (!run) throw new Error(`Unknown headless root task ${rootTaskId}`)
+		return run.promise
+	}
+
+	public async shutdownHeadless(): Promise<HeadlessShutdownReport> {
+		if (this.headlessShutdown) {
+			const pendingRuns = [...this.headlessRuns.values()].filter((run) => !run.result).length
+			return { settledRuns: this.headlessRuns.size - pendingRuns, pendingRuns }
+		}
+		this.headlessShutdown = true
+		const pending = [...this.headlessRuns.values()].filter((run) => !run.result)
+		for (const run of pending) {
+			this.settleHeadlessRun(run, {
+				rootTaskId: run.rootTaskId,
+				currentTaskId: run.currentTaskId,
+				outcome: "failed",
+				resumable: false,
+				error: { code: "shutdown", message: "Headless API shut down before task settlement" },
+			})
+		}
+		await this.sidebarProvider.dispose()
+		return { settledRuns: this.headlessRuns.size, pendingRuns: pending.length }
+	}
+
+	private createHeadlessRun(rootTaskId: string, currentTaskId: string): HeadlessRun {
+		let resolve!: (result: HeadlessTaskResult) => void
+		const promise = new Promise<HeadlessTaskResult>((resolvePromise) => {
+			resolve = resolvePromise
+		})
+		const run: HeadlessRun = { rootTaskId, currentTaskId, cancellationRequested: false, promise, resolve }
+		this.headlessRuns.set(rootTaskId, run)
+		return run
+	}
+
+	private settleHeadlessRun(run: HeadlessRun, result: HeadlessTaskResult): void {
+		if (run.result) return
+		run.result = result
+		run.resolve(result)
+		this.emit(RooCodeEventName.HeadlessTaskResult, {
+			rootTaskId: result.rootTaskId,
+			currentTaskId: result.currentTaskId,
+			outcome: result.outcome,
+			resumable: result.resumable,
+			content: result.content,
+			historyItem: this.sidebarProvider.taskHistoryStore.get(result.rootTaskId),
+		})
+	}
+
+	private async settleCompletedHeadlessRun(
+		taskId: string,
+		tokenUsage: HeadlessTaskResult["tokenUsage"],
+		toolUsage: HeadlessTaskResult["toolUsage"],
+	): Promise<void> {
+		const run = this.headlessRuns.get(taskId)
+		if (!run || run.result || run.cancellationRequested) return
+		try {
+			await pWaitFor(() => this.sidebarProvider.taskHistoryStore.get(taskId)?.status === "completed", {
+				timeout: 5_000,
+				interval: 20,
+			})
+			this.settleHeadlessRun(run, {
+				rootTaskId: taskId,
+				currentTaskId: taskId,
+				outcome: "completed",
+				resumable: false,
+				content: run.completionContent,
+				tokenUsage,
+				toolUsage,
+			})
+		} catch {
+			const result: HeadlessTaskResult = {
+				rootTaskId: taskId,
+				currentTaskId: taskId,
+				outcome: "failed",
+				resumable: false,
+				error: { code: "task_failed", message: "Root completion was not persisted" },
+			}
+			this.emit(RooCodeEventName.HeadlessTerminalFailure, {
+				taskId,
+				rootTaskId: taskId,
+				code: "task_failed",
+				message: result.error!.message,
+			})
+			this.settleHeadlessRun(run, result)
+		}
+	}
+
 	public async startNewTask({
 		configuration,
 		text,
@@ -260,6 +474,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async cancelCurrentTask() {
+		const currentTask = this.sidebarProvider.getCurrentTask()
+		if (currentTask && this.sidebarProvider.taskHistoryStore.get(currentTask.taskId)?.status === "completed") return
 		await this.sidebarProvider.cancelTask()
 	}
 
@@ -329,6 +545,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
+			const rootTaskId = task.rootTaskId ?? task.taskId
+			const existingRun = this.headlessRuns.get(rootTaskId)
+			if (existingRun) existingRun.currentTaskId = task.taskId
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -344,10 +563,30 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
 				)
+				if (!task.parentTaskId && task.taskId === rootTaskId) {
+					void this.settleCompletedHeadlessRun(task.taskId, tokenUsage, toolUsage)
+				}
 			})
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
+				const run = this.headlessRuns.get(rootTaskId)
+				if (run && !run.result && !run.cancellationRequested && task.taskId === rootTaskId) {
+					const result: HeadlessTaskResult = {
+						rootTaskId,
+						currentTaskId: task.taskId,
+						outcome: "failed",
+						resumable: false,
+						error: { code: "task_failed", message: "Root task aborted unexpectedly" },
+					}
+					this.emit(RooCodeEventName.HeadlessTerminalFailure, {
+						taskId: task.taskId,
+						rootTaskId,
+						code: "task_failed",
+						message: result.error!.message,
+					})
+					this.settleHeadlessRun(run, result)
+				}
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
@@ -388,22 +627,34 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskSpawned, task.taskId, childTaskId)
 			})
 
-			task.on(RooCodeEventName.TaskDelegated as any, (childTaskId: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegated, task.taskId, childTaskId)
-			})
-
-			task.on(RooCodeEventName.TaskDelegationCompleted as any, (childTaskId: string, summary: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, task.taskId, childTaskId, summary)
-			})
-
-			task.on(RooCodeEventName.TaskDelegationResumed as any, (childTaskId: string) => {
-				;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, task.taskId, childTaskId)
-			})
-
 			// Task Execution
 
 			task.on(RooCodeEventName.Message, async (message) => {
 				this.emit(RooCodeEventName.Message, { taskId: task.taskId, ...message })
+				const run = this.headlessRuns.get(rootTaskId)
+				if (
+					run &&
+					message.message.type === "say" &&
+					message.message.say === "completion_result" &&
+					message.message.partial !== true
+				) {
+					run.completionContent = message.message.text
+				}
+				if (
+					message.message.type === "ask" &&
+					message.message.ask &&
+					message.message.partial !== true &&
+					!message.message.isAnswered
+				) {
+					this.emit(RooCodeEventName.HeadlessAsk, {
+						taskId: task.taskId,
+						rootTaskId,
+						askId: String(message.message.ts),
+						ask: message.message.ask,
+						text: message.message.text,
+						isProtected: message.message.isProtected,
+					})
+				}
 
 				if (message.message.partial !== true) {
 					await this.fileLog(`[${new Date().toISOString()}] ${JSON.stringify(message.message, null, 2)}\n`)
@@ -439,13 +690,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 		// Delegation events are emitted by the provider, not by individual task instances.
 		provider.on(RooCodeEventName.TaskDelegated, (parentTaskId, childTaskId) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
+			this.emit(RooCodeEventName.TaskDelegated, parentTaskId, childTaskId)
 		})
 		provider.on(RooCodeEventName.TaskDelegationCompleted, (parentTaskId, childTaskId, summary) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
+			this.emit(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, summary)
 		})
 		provider.on(RooCodeEventName.TaskDelegationResumed, (parentTaskId, childTaskId) => {
-			;(this.emit as any)(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+			this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
 		})
 	}
 

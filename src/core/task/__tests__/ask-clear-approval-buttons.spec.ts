@@ -35,6 +35,21 @@ async function attachQueue(task: Task) {
 }
 
 describe("Task.ask auto-approval stamping", () => {
+	it("accepts a response only for the exact pending headless ask", () => {
+		const task = buildTask(undefined)
+		const handleWebviewAskResponse = vi.fn()
+		task["pendingHeadlessAskId"] = 42
+		task["handleWebviewAskResponse"] = handleWebviewAskResponse
+
+		expect(task.pendingAskId).toBe(42)
+		expect(task.respondToAsk(41, "messageResponse", "wrong")).toBe(false)
+		expect(task.pendingAskId).toBe(42)
+		expect(task.respondToAsk(42, "messageResponse", "answer", ["image"])).toBe(true)
+		expect(handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "answer", ["image"])
+		expect(task.pendingAskId).toBeUndefined()
+		expect(task.respondToAsk(42, "messageResponse")).toBe(false)
+	})
+
 	it("stamps isAnswered:true on the message when a command ask is auto-approved", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {

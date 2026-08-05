@@ -1265,6 +1265,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// So in this case we must make sure that the message ts is
 					// never altered after first setting it.
 					askTs = lastMessage.ts
+					this.pendingHeadlessAskId = askTs
 					this.lastMessageTs = askTs
 					lastMessage.text = text
 					lastMessage.partial = false
@@ -1286,6 +1287,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
 					askTs = Date.now()
+					this.pendingHeadlessAskId = askTs
 					this.lastMessageTs = askTs
 					await this.addToClineMessages({
 						ts: askTs,
@@ -1304,6 +1306,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
 			askTs = Date.now()
+			this.pendingHeadlessAskId = askTs
 			this.lastMessageTs = askTs
 			await this.addToClineMessages({
 				ts: askTs,
@@ -1316,6 +1319,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 		}
 
+		this.pendingHeadlessAskId = askTs
 		const timeouts: NodeJS.Timeout[] = []
 
 		if (approval.decision === "approve") {
@@ -1429,10 +1433,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
+			timeouts.forEach((timeout) => clearTimeout(timeout))
+			if (this.pendingHeadlessAskId === askTs) this.pendingHeadlessAskId = undefined
 			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
 		if (this.lastMessageTs !== askTs) {
+			timeouts.forEach((timeout) => clearTimeout(timeout))
+			if (this.pendingHeadlessAskId === askTs) this.pendingHeadlessAskId = undefined
 			// Could happen if we send multiple asks in a row i.e. with
 			// command_output. It's important that when we know an ask could
 			// fail, it is handled gracefully.
@@ -1443,6 +1451,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponse = undefined
 		this.askResponseText = undefined
 		this.askResponseImages = undefined
+		if (this.pendingHeadlessAskId === askTs) this.pendingHeadlessAskId = undefined
 
 		// Cancel the timeouts if they are still running.
 		timeouts.forEach((timeout) => clearTimeout(timeout))
@@ -1508,6 +1517,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				})
 			}
 		}
+	}
+
+	private pendingHeadlessAskId: number | undefined
+
+	public get pendingAskId(): number | undefined {
+		return this.pendingHeadlessAskId
+	}
+
+	public respondToAsk(askId: number, askResponse: ClineAskResponse, text?: string, images?: string[]): boolean {
+		if (this.abort || this.pendingHeadlessAskId !== askId) return false
+		this.pendingHeadlessAskId = undefined
+		this.handleWebviewAskResponse(askResponse, text, images)
+		return true
 	}
 
 	/**
