@@ -214,18 +214,25 @@ export const parseFriendliModel = ({ id, model }: { id: string; model: FriendliM
 
 	const reasoningEffort = buildSupportsReasoningEffort(model.reasoning, model.reasoning_options)
 	if (reasoningEffort !== undefined) {
-		modelInfo.supportsReasoningEffort = reasoningEffort
 		if (Array.isArray(reasoningEffort)) {
-			// Default the selected effort to "high" for controllable reasoning
-			// models, matching the static `friendliModels` entries for GLM-5.x.
+			// Controllable reasoning model with discrete effort enum — expose
+			// the effort dropdown and default to "high".
+			modelInfo.supportsReasoningEffort = reasoningEffort
 			modelInfo.reasoningEffort = "high"
+		} else {
+			// Reasoning-capable model without a discrete effort enum. Friendli
+			// only supports toggling thinking on/off via chat_template_kwargs for
+			// these models, so expose a binary toggle instead of an effort
+			// dropdown that would let the user pick values the API ignores.
+			modelInfo.supportsReasoningBinary = true
 		}
 	}
 
-	// Friendli's reasoning models honour a configurable max-output slider
-	// (supportsMaxTokens). The static fallback marks GLM-5.x with this; mirror
-	// it for dynamic controllable-reasoning models so the UI shows the slider.
-	if (Array.isArray(reasoningEffort)) {
+	// Friendli's chat models honour a configurable max-output slider
+	// (supportsMaxTokens). All Friendli models accept the max_tokens param,
+	// so surface the slider for every reasoning-capable model, not just
+	// controllable-reasoning ones with discrete effort enums.
+	if (model.reasoning && model.max_completion_tokens) {
 		modelInfo.supportsMaxTokens = true
 	}
 

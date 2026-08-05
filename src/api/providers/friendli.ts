@@ -162,22 +162,37 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	 * Build Friendli-specific reasoning params to merge into the OpenAI request.
 	 *
 	 * Rules:
-	 * - Controllable reasoning models (GLM-5.x): always send `chat_template_kwargs`.
+	 * - Controllable reasoning models (GLM-5.2): always send `chat_template_kwargs`.
 	 *   User enabled → { enable_thinking: true } + reasoning_effort + parse_reasoning.
 	 *   User disabled (none/disable) → { enable_thinking: false } to prevent the
 	 *   model's Jinja template from defaulting thinking ON.
-	 * - Non-reasoning models (DeepSeek-V3.2, MiniMax-M2.5): no extra params
-	 *   (reasoning_effort silently ignored).
+	 * - Boolean reasoning models (DeepSeek-V3.2, MiniMax-M2.5, GLM-5.1): reasoning
+	 *   is on/off only — no reasoning_effort enum. The handler sends
+	 *   { enable_thinking: true } + parse_reasoning when enabled, or nothing when
+	 *   disabled. reasoning_effort is omitted because the API doesn't accept it.
 	 */
 	private buildFriendliReasoningParams(): Partial<FriendliReasoningParams> {
 		const { info: modelInfo, reasoningEffort } = this.getModel()
 		const extra: Partial<FriendliReasoningParams> = {}
 
 		const isControllableReasoning = Array.isArray(modelInfo.supportsReasoningEffort)
+		const isBinaryReasoning = !!modelInfo.supportsReasoningBinary
 
 		const useReasoningEffort = modelInfo.supportsReasoningEffort
 			? shouldUseReasoningEffort({ model: modelInfo, settings: this.options })
 			: false
+
+		// Binary reasoning toggle (no effort enum). These models accept
+		// enable_thinking + parse_reasoning but not reasoning_effort.
+		if (isBinaryReasoning && !isControllableReasoning) {
+			if (this.options.enableReasoningEffort === false) {
+				return extra // reasoning disabled — send nothing
+			}
+			extra.parse_reasoning = true
+			extra.include_reasoning = true
+			extra.chat_template_kwargs = { enable_thinking: true }
+			return extra
+		}
 
 		// User disabled reasoning on a controllable model — explicitly turn thinking off.
 		// The model's Jinja chat template defaults enable_thinking to true, so omitting
@@ -187,12 +202,12 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			return extra
 		}
 
-		// Non-reasoning model — nothing to send
+		// Non-reasoning model — nothing to send.
 		if (!useReasoningEffort) {
 			return extra
 		}
 
-		// Reasoning is enabled
+		// Reasoning is enabled (controllable model with effort enum)
 		extra.parse_reasoning = true
 		extra.include_reasoning = true
 		extra.chat_template_kwargs = { enable_thinking: true }

@@ -244,7 +244,7 @@ describe("Friendli Fetchers", () => {
 			expect(result.supportsMaxTokens).toBe(true)
 		})
 
-		it("sets supportsReasoningEffort to true for reasoning models without effort options", () => {
+		it("sets supportsReasoningBinary for reasoning models without effort options", () => {
 			const model: FriendliModel = {
 				...baseModel,
 				reasoning: true,
@@ -252,9 +252,11 @@ describe("Friendli Fetchers", () => {
 
 			const result = parseFriendliModel({ id: "test/model", model })
 
-			expect(result.supportsReasoningEffort).toBe(true)
+			expect(result.supportsReasoningBinary).toBe(true)
+			expect(result.supportsReasoningEffort).toBeUndefined()
 			expect(result.reasoningEffort).toBeUndefined()
-			expect(result.supportsMaxTokens).toBeUndefined()
+			// supportsMaxTokens is set for all reasoning models with max_completion_tokens
+			expect(result.supportsMaxTokens).toBe(true)
 		})
 
 		it("drops unknown reasoning effort values like ultracode and de-duplicates", () => {
