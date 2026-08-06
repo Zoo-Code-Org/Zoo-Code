@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Kod tabanında '{{query}}' aranıyor..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard bu komutu engelledi.",
+			"blockedWithReason": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard bu komutu engelledi. (Kural: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard bu komutu engelledi. DCG mesajı: {{reason}} (Kural: {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Politika kısıtlamaları nedeniyle yeni görev oluşturulamadı."
