@@ -161,18 +161,16 @@ describe("TerminalSettings inline shell selector", () => {
 			)
 		})
 
-		const profileButton = screen.queryByTestId("option-profile:PowerShell")
-		if (profileButton) {
-			act(() => {
-				fireEvent.click(profileButton)
-			})
+		const profileButton = screen.getByTestId("option-profile:PowerShell")
+		act(() => {
+			fireEvent.click(profileButton)
+		})
 
-			expect(onShellSelectionChange).toHaveBeenCalledWith({
-				kind: "profile",
-				profileName: "PowerShell",
-			})
-			expect(onTerminalProfilePickerOpened).toHaveBeenCalled()
-		}
+		expect(onShellSelectionChange).toHaveBeenCalledWith({
+			kind: "profile",
+			profileName: "PowerShell",
+		})
+		expect(onTerminalProfilePickerOpened).toHaveBeenCalled()
 	})
 
 	it("displays effective shell info when available", () => {

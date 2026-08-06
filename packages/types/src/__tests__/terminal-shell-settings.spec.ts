@@ -57,7 +57,7 @@ describe("terminalShellSelectionSchema", () => {
 			expect(() => terminalShellSelectionSchema.parse({ kind: "profile" })).toThrow()
 		})
 
-		it("should reject profile with empty profileName", () => {
+		it("should accept profile with empty profileName (extension-host validates)", () => {
 			expect(() => terminalShellSelectionSchema.parse({ kind: "profile", profileName: "" })).not.toThrow() // z.string() accepts empty; validation is extension-host responsibility
 		})
 	})

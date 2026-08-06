@@ -851,21 +851,21 @@
 			"noProfiles": "(brak profili ze ścieżką w terminal.integrated.profiles)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "Powłoka terminala wbudowanego",
+			"description": "Wybierz powłokę używaną do wykonywania poleceń w terminalu wbudowanym. Auto podąża za zaufanym profilem terminala VS Code. Niestandardowe ścieżki są weryfikowane przez host rozszerzenia.",
+			"auto": "Auto (podąża za zaufanym profilem terminala)",
+			"customPath": "Wybierz niestandardowy plik wykonywalny",
+			"customPathPlaceholder": "Wybierz plik wykonywalny powłoki...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "Efektywna powłoka",
+				"family": "Rodzina",
+				"source": "Źródło",
+				"fallback": "Zachowanie rezerwowe",
+				"fallbackDescription": "Jeśli integracja powłoki nie powiedzie się, polecenia są ponawiane z tą samą rodziną powłoki."
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "Wybrana powłoka nie jest obsługiwana. Wybierz zaufany profil lub prawidłowy plik wykonywalny powłoki.",
+				"unavailable": "Opcje powłoki są obecnie niedostępne. Host rozszerzenia może być jeszcze w trakcie inicjalizacji."
 			}
 		}
 	},

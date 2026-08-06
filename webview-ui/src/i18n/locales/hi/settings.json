@@ -851,21 +851,21 @@
 			"noProfiles": "(terminal.integrated.profiles में कोई पथ-आधारित प्रोफ़ाइल नहीं मिली)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "इनलाइन टर्मिनल शेल",
+			"description": "इनलाइन टर्मिनल कमांड निष्पादन के लिए उपयोग की जाने वाली शेल चुनें। ऑटो आपके विश्वसनीय VS Code टर्मिनल प्रोफ़ाइल का अनुसरण करता है। कस्टम पथ एक्सटेंशन होस्ट द्वारा सत्यापित किए जाते हैं।",
+			"auto": "ऑटो (विश्वसनीय टर्मिनल प्रोफ़ाइल का अनुसरण करता है)",
+			"customPath": "कस्टम निष्पादन योग्य चुनें",
+			"customPathPlaceholder": "शेल निष्पादन योग्य चुनें...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "प्रभावी शेल",
+				"family": "फ़ैमिली",
+				"source": "स्रोत",
+				"fallback": "फ़ॉलबैक व्यवहार",
+				"fallbackDescription": "यदि शेल एकीकरण विफल हो जाता है, तो कमांड उसी शेल फ़ैमिली के साथ पुनः प्रयास किए जाते हैं।"
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "चयनित शेल समर्थित नहीं है। विश्वसनीय प्रोफ़ाइल या मान्य शेल निष्पादन योग्य चुनें।",
+				"unavailable": "शेल विकल्प वर्तमान में उपलब्ध नहीं हैं। एक्सटेंशन होस्ट अभी प्रारंभ हो रहा हो सकता है।"
 			}
 		}
 	},

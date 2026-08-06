@@ -851,21 +851,21 @@
 			"noProfiles": "(không tìm thấy hồ sơ dựa trên đường dẫn trong terminal.integrated.profiles)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "Shell của terminal nội tuyến",
+			"description": "Chọn shell dùng để thực thi lệnh trong terminal nội tuyến. Tự động theo hồ sơ terminal VS Code đáng tin cậy của bạn. Đường dẫn tùy chỉnh được xác thực bởi máy chủ tiện ích mở rộng.",
+			"auto": "Tự động (theo hồ sơ terminal đáng tin cậy)",
+			"customPath": "Chọn tệp thực thi tùy chỉnh",
+			"customPathPlaceholder": "Chọn tệp thực thi shell...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "Shell hiệu lực",
+				"family": "Họ",
+				"source": "Nguồn",
+				"fallback": "Hành vi dự phòng",
+				"fallbackDescription": "Nếu tích hợp shell thất bại, lệnh sẽ thử lại với cùng họ shell."
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "Shell đã chọn không được hỗ trợ. Hãy chọn hồ sơ đáng tin cậy hoặc tệp thực thi shell hợp lệ.",
+				"unavailable": "Các tùy chọn shell hiện không khả dụng. Máy chủ tiện ích mở rộng có thể vẫn đang khởi tạo."
 			}
 		}
 	},

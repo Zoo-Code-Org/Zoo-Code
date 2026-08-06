@@ -851,21 +851,21 @@
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "内联终端 Shell",
+			"description": "选择用于内联终端命令执行的 Shell。自动模式会跟随您信任的 VS Code 终端配置文件。自定义路径由扩展主机验证。",
+			"auto": "自动（跟随受信任的终端配置文件）",
+			"customPath": "选择自定义可执行文件",
+			"customPathPlaceholder": "选择 Shell 可执行文件...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "生效的 Shell",
+				"family": "系列",
+				"source": "来源",
+				"fallback": "回退行为",
+				"fallbackDescription": "如果 Shell 集成失败，命令将使用相同的 Shell 系列重试。"
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "所选 Shell 不受支持。请选择受信任的配置文件或有效的 Shell 可执行文件。",
+				"unavailable": "Shell 选项当前不可用。扩展主机可能仍在初始化中。"
 			}
 		}
 	},

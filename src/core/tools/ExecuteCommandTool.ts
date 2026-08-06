@@ -22,6 +22,7 @@ import {
 	ExitCodeDetails,
 	RooTerminal,
 	RooTerminalCallbacks,
+	RooTerminalProcess,
 	RooTerminalProvider,
 	ShellIntegrationError,
 	ShellIntegrationErrorDetails,
@@ -118,22 +119,6 @@ interface ExecuteCommandParams {
 	timeout?: number | null
 }
 
-export function formatDcgBlockedMessage(reason?: string, ruleId?: string): string {
-	if (reason && ruleId) {
-		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReasonAndRule", { reason, ruleId })
-	}
-
-	if (reason) {
-		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReason", { reason })
-	}
-
-	if (ruleId) {
-		return t("tools:executeCommand.destructiveCommandGuard.blockedWithRule", { ruleId })
-	}
-
-	return t("tools:executeCommand.destructiveCommandGuard.blocked")
-}
-
 export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined): number {
 	const requestedAgentTimeout = typeof timeoutSeconds === "number" && timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0
 
@@ -210,41 +195,16 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				return
 			}
 
-			const provider = await task.providerRef.deref()
-			let dcgBlocked = false
-			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
-				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
-				// Resolve through the managed installer on use so an extension update
-				// automatically installs the newly pinned and verified DCG version.
-				const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
-				if (!binaryPath) {
-					throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
-				}
-				const workingDirectory = customCwd
-					? path.isAbsolute(customCwd)
-						? customCwd
-						: path.resolve(task.cwd, customCwd)
-					: task.cwd
-				const dcgResult = await runDcg(binaryPath, canonicalCommand, workingDirectory)
-				dcgBlocked = dcgResult.decision === "deny"
-				if (dcgResult.decision === "deny") {
-					await task.say("error", formatDcgBlockedMessage(dcgResult.reason, dcgResult.ruleId))
-				}
-			}
-
-			// DCG-approved commands are auto-approved by checkAutoApproval. A DCG
-			// block is presented as Zoo's normal command prompt, with isProtected
-			// forcing the user to explicitly choose whether to execute it.
-			const didApprove = dcgBlocked
-				? await askApproval("command", canonicalCommand, undefined, true)
-				: await askApproval("command", canonicalCommand)
+			const didApprove = await askApproval("command", canonicalCommand)
 
 			if (!didApprove) {
 				return
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
+			const provider = await task.providerRef.deref()
 			const providerState = await provider?.getState()
+
 			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
 
 			// Resolve the command environment snapshot for this request.
@@ -494,6 +454,7 @@ export async function executeCommandInTerminal(
 		return [false, `Working directory '${workingDir}' does not exist.`]
 	}
 
+	let message: { text?: string; images?: string[] } | undefined
 	let runInBackground = false
 	let completed = false
 	let result: string = ""
@@ -729,9 +690,6 @@ export async function executeCommandInTerminal(
 			terminal.setShellInvocationPlan(plan)
 		}
 	}
-
-	// Fallback anchor for providers that never fire onShellExecutionStarted.
-	commandStartedAt = Date.now()
 
 	traceBuilder?.markCommandSubmittedAt(Date.now())
 	const process = terminal.runCommand(command, callbacks, executionId)

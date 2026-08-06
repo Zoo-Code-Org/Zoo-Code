@@ -851,21 +851,21 @@
 			"noProfiles": "(terminal.integrated.profiles에 경로 기반 프로필이 없습니다)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "인라인 터미널 셸",
+			"description": "인라인 터미널 명령 실행에 사용할 셸을 선택합니다. 자동은 신뢰하는 VS Code 터미널 프로필을 따릅니다. 사용자 지정 경로는 확장 호스트에서 검증됩니다.",
+			"auto": "자동 (신뢰하는 터미널 프로필 따르기)",
+			"customPath": "사용자 지정 실행 파일 선택",
+			"customPathPlaceholder": "셸 실행 파일 선택...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "적용 셸",
+				"family": "패밀리",
+				"source": "소스",
+				"fallback": "폴백 동작",
+				"fallbackDescription": "셸 통합이 실패하면 동일한 셸 패밀리로 명령을 다시 시도합니다."
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "선택한 셸이 지원되지 않습니다. 신뢰하는 프로필 또는 유효한 셸 실행 파일을 선택하세요.",
+				"unavailable": "셸 옵션을 현재 사용할 수 없습니다. 확장 호스트가 아직 초기화 중일 수 있습니다."
 			}
 		}
 	},

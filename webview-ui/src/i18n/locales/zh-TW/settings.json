@@ -878,21 +878,21 @@
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路徑型設定檔)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "內嵌終端機 Shell",
+			"description": "選擇用於內嵌終端機命令執行的 Shell。自動模式會跟隨您信任的 VS Code 終端機設定檔。自訂路徑由擴充功能主機驗證。",
+			"auto": "自動（跟隨受信任的終端機設定檔）",
+			"customPath": "選擇自訂可執行檔",
+			"customPathPlaceholder": "選擇 Shell 可執行檔...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "生效的 Shell",
+				"family": "系列",
+				"source": "來源",
+				"fallback": "回溯行為",
+				"fallbackDescription": "如果 Shell 整合失敗，命令會使用相同的 Shell 系列重試。"
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "所選 Shell 不受支援。請選擇受信任的設定檔或有效的 Shell 可執行檔。",
+				"unavailable": "Shell 選項目前無法使用。擴充功能主機可能仍在初始化中。"
 			}
 		}
 	},

@@ -851,21 +851,21 @@
 			"noProfiles": "(nessun profilo con percorso trovato in terminal.integrated.profiles)"
 		},
 		"inlineShell": {
-			"label": "Inline Terminal Shell",
-			"description": "Select the shell used for inline terminal command execution. Auto follows your trusted VS Code terminal profile. Custom paths are validated by the extension host.",
-			"auto": "Auto (follows trusted terminal profile)",
-			"customPath": "Choose custom executable",
-			"customPathPlaceholder": "Select a shell executable...",
+			"label": "Shell del terminale integrato",
+			"description": "Seleziona la shell usata per eseguire i comandi nel terminale integrato. Auto segue il profilo di terminale VS Code di cui ti fidi. I percorsi personalizzati vengono validati dall'host dell'estensione.",
+			"auto": "Auto (segue il profilo di terminale affidabile)",
+			"customPath": "Scegli eseguibile personalizzato",
+			"customPathPlaceholder": "Seleziona un eseguibile di shell...",
 			"effectiveShell": {
-				"label": "Effective shell",
-				"family": "Family",
-				"source": "Source",
-				"fallback": "Fallback behavior",
-				"fallbackDescription": "If shell integration fails, commands retry using the same shell family."
+				"label": "Shell effettiva",
+				"family": "Famiglia",
+				"source": "Origine",
+				"fallback": "Comportamento di fallback",
+				"fallbackDescription": "Se l'integrazione della shell fallisce, i comandi vengono ritentati con la stessa famiglia di shell."
 			},
 			"error": {
-				"invalid": "The selected shell is not supported. Choose a trusted profile or a valid shell executable.",
-				"unavailable": "Shell options are currently unavailable. The extension host may still be initializing."
+				"invalid": "La shell selezionata non è supportata. Scegli un profilo affidabile o un eseguibile di shell valido.",
+				"unavailable": "Le opzioni di shell non sono attualmente disponibili. L'host dell'estensione potrebbe essere ancora in fase di inizializzazione."
 			}
 		}
 	},
