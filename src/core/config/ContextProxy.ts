@@ -36,6 +36,9 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// `getValues()` merges secrets into global state, so any secret listed in the
+	// schema would otherwise be written in cleartext to the exported settings file.
+	autocompleteApiKey: true,
 })
 
 export class ContextProxy {

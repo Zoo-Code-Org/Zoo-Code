@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "Acceptar Entrada/Suggeriment",
 	"command.showRipgrepDiagnostic.title": "Mostra el diagnòstic de Ripgrep",
 	"command.toggleAutoApprove.title": "Alternar Auto-Aprovació",
+	"command.triggerInlineCompletion.title": "Dispara la compleció en línia",
+	"command.toggleAutocomplete.title": "Alterna la compleció en línia",
+	"command.autocompleteAccepted.title": "Compleció en línia acceptada",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Accepta certificats auto-signats del proxy. **Requerit per a la inspecció MITM.** ⚠️ Insegur — utilitza-ho només per a debugging local.",
 	"settings.workspace.rootResolution.description": "Com resol Zoo l'arrel de l'espai de treball en un espai de treball multi-arrel. L'arrel s'utilitza per localitzar `.roomodes`, `.roo/mcp.json`, `.roo/rules/` i altra configuració d'àmbit de projecte. Canviar aquest paràmetre només afecta les cerques futures; les tasques en execució conserven la seva arrel original.",
 	"settings.workspace.rootResolution.activeEditor.description": "Utilitza la carpeta de l'espai de treball que conté l'editor actiu; recorre a la primera carpeta de l'espai de treball. (Per defecte — conserva el comportament heretat.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Utilitza sempre la primera carpeta de l'espai de treball (workspaceFolders[0]). Determinista — independent del fitxer que tingui el focus en aquest moment."
+	"settings.workspace.rootResolution.firstFolder.description": "Utilitza sempre la primera carpeta de l'espai de treball (workspaceFolders[0]). Determinista — independent del fitxer que tingui el focus en aquest moment.",
+	"settings.autocomplete.disabled.description": "Desactiva l'autocompleció en línia de Zoo Code en aquest espai de treball, independentment del valor al panell de configuració de Zoo Code. Va bé per a repositoris que mai no haurien d'enviar codi a un model de compleció.",
+	"settings.autocomplete.debugLogging.description": "Escriu diagnòstics de l'autocompleció en línia (el prompt generat, la latència de les peticions i les decisions de postprocessament) al canal de sortida Zoo-Code."
 }

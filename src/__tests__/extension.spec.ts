@@ -168,6 +168,7 @@ vi.mock("../activate", () => ({
 	registerCommands: vi.fn(),
 	registerCodeActions: vi.fn(),
 	registerTerminalActions: vi.fn(),
+	registerAutocomplete: vi.fn().mockResolvedValue({ dispose: vi.fn() }),
 	CodeActionProvider: vi.fn().mockImplementation(function () {
 		return {
 			providedCodeActionKinds: [],

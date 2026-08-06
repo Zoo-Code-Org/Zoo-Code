@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "공급자",
+		"autocomplete": "자동 완성",
 		"modes": "모드",
 		"mcp": "MCP 서버",
 		"worktrees": "Worktrees",
@@ -43,6 +44,100 @@
 		"about": "Zoo Code 정보",
 		"skills": "Skills",
 		"rules": "규칙"
+	},
+	"autocomplete": {
+		"description": "입력하는 동안 나타나는 인라인 코드 제안입니다. 사용할 모델은 직접 고를 수 있어요. chat 모델과 따로 동작하므로 큰 클라우드 chat 모델과 작고 빠른 로컬 completion 모델을 함께 쓸 수 있습니다.",
+		"enable": {
+			"label": "인라인 자동 완성 사용",
+			"description": "커서 위치에 고스트 텍스트로 코드를 제안합니다. VS Code의 인라인 제안이 켜져 있어야 합니다."
+		},
+		"shortcuts": {
+			"label": "키보드 단축키",
+			"description": "Tab으로 수락, Esc로 닫기, Alt+]와 Alt+[로 다른 후보를 넘깁니다. VS Code 자체 단축키이며 키보드 단축키 설정에서 바꿀 수 있습니다."
+		},
+		"triggerMode": {
+			"label": "입력하는 동안 제안",
+			"description": "제안이 자동으로 뜰지, 요청할 때만 뜰지 고르세요. VS Code의 quick suggestions와는 다릅니다. 그건 고스트 텍스트가 아니라 IntelliSense 팝업을 제어합니다.",
+			"options": {
+				"automatic": "입력하는 동안",
+				"manual": "단축키를 누를 때만"
+			}
+		},
+		"debounce": {
+			"label": "제안까지의 지연",
+			"description": "입력을 멈춘 뒤 제안을 요청하기까지 기다리는 시간입니다. 짧을수록 반응이 빠르게 느껴지지만 요청이 늘어납니다."
+		},
+		"provider": {
+			"label": "제공자",
+			"description": "completion을 가져오는 곳입니다. 처음 세 가지는 fill-in-the-middle 엔드포인트와 직접 통신해서 chat 모델에 prompt를 보내는 것보다 훨씬 빠르고 정확합니다.",
+			"options": {
+				"ollama": "Ollama (로컬)",
+				"openai-compatible": "OpenAI 호환 (LM Studio, llama.cpp, vLLM)",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Chat 모델 (느린 대체 수단)"
+			},
+			"nativeFimHint": "fill-in-the-middle 엔드포인트와 직접 통신합니다. 가장 빠르고 정확한 선택입니다.",
+			"chatHint": "채팅 경로로 전달됩니다. 모든 공급자에서 동작하지만 fill-in-the-middle 엔드포인트보다 느리고 부정확합니다.",
+			"chatWarning": "이 공급자는 채팅 모델로 사용됩니다. 최상의 결과를 위해 Ollama, OpenAI 호환 서버 또는 fill-in-the-middle 베이스 모델의 Codestral을 선택하세요."
+		},
+		"baseUrl": {
+			"label": "기본 URL"
+		},
+		"model": {
+			"label": "모델",
+			"description": "qwen2.5-coder:1.5b-base 같은 fill-in-the-middle 베이스 모델을 권장합니다. instruction-tuned chat 모델은 훨씬 커도 이 작업에서는 성능이 떨어집니다.",
+			"sectionTitle": "완성 모델",
+			"sectionDescription": "어떤 모델이 제안을 만들고 어떻게 연결할지.",
+			"selectPlaceholder": "모델 ID 선택 또는 입력",
+			"customPlaceholder": "목록에 없는 모델 ID 입력",
+			"refresh": "모델 목록 새로 고침",
+			"fetchFailed": "엔드포인트에 연결할 수 없습니다: {{error}}"
+		},
+		"apiKey": {
+			"label": "API 키",
+			"description": "VS Code Secret Storage에 저장되며 내보낸 설정에는 절대 포함되지 않습니다.",
+			"storedPlaceholder": "저장된 키가 있습니다. 입력하면 교체됩니다.",
+			"emptyPlaceholder": "API 키를 입력하세요",
+			"optionalLabel": "API 키(선택)",
+			"localDescription": "로컬 서버는 비워 두세요. ollama.com이나 Codestral 같은 호스팅 엔드포인트에는 필요합니다."
+		},
+		"profiles": {
+			"label": "저장된 설정",
+			"description": "공급자·모델·조정값 조합을 저장해 빠른 로컬 모델과 강력한 클라우드 모델을 손쉽게 전환하세요.",
+			"none": "저장된 설정 사용 안 함",
+			"namePlaceholder": "예: 로컬 Qwen, 클라우드 Codestral",
+			"save": "현재 설정 저장",
+			"saveLabel": "이 설정의 이름",
+			"rename": "설정 이름 변경",
+			"renameLabel": "설정 이름 변경",
+			"delete": "설정 삭제",
+			"confirm": "확인",
+			"cancel": "취소",
+			"limitReached": "저장 가능한 설정 개수의 한도에 도달했습니다.",
+			"unsavedChanges": "“{{name}}” 저장 이후 변경되었습니다. 이 값을 유지하려면 다시 저장하세요."
+		},
+		"behavior": {
+			"sectionTitle": "동작",
+			"sectionDescription": "입력 중 제안이 나타나는 시점."
+		},
+		"advanced": {
+			"label": "고급 설정"
+		},
+		"maxOutputTokens": {
+			"label": "최대 제안 길이",
+			"description": "단일 제안의 상한입니다. 값이 작을수록 응답이 빠르며 유용한 코드가 잘리는 일은 드뿬니다."
+		},
+		"connection": {
+			"needsKey": "이 엔드포인트의 사용 가능한 모델을 불러오려면 API 키를 입력하세요.",
+			"checking": "연결 중…",
+			"connected": "연결됨 — 모델 {{count}}개 사용 가능.",
+			"connectedLocal": "연결됨."
+		},
+		"chatProvider": {
+			"label": "채팅 공급자",
+			"placeholder": "공급자 선택",
+			"description": "어떤 채팅 공급자가 완성을 생성할지 선택합니다. 공급자 탭과 동일한 목록을 사용하며, 자격 증명은 그곳에서 설정하세요."
+		}
 	},
 	"about": {
 		"bugReport": {

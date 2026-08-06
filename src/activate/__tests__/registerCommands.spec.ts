@@ -3,6 +3,7 @@ import * as vscode from "vscode"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 
 import { getVisibleProviderOrLog, openClineInNewTab, registerCommands, setPanel } from "../registerCommands"
+import { getAutocompleteService } from "../../services/autocomplete/AutocompleteService"
 
 vi.mock("execa", () => ({
 	execa: vi.fn(),
@@ -87,6 +88,15 @@ vi.mock("../../core/config/ContextProxy", () => ({
 
 vi.mock("../../i18n", () => ({
 	t: (key: string) => key,
+}))
+
+const mockAutocompleteService = vi.hoisted(() => ({
+	triggerInlineCompletion: vi.fn(),
+	toggleEnabled: vi.fn().mockResolvedValue(undefined),
+}))
+
+vi.mock("../../services/autocomplete/AutocompleteService", () => ({
+	getAutocompleteService: vi.fn().mockReturnValue(mockAutocompleteService),
 }))
 
 vi.mock("../../services/ripgrep/diagnostic", () => ({
@@ -373,6 +383,46 @@ describe("registerCommands handlers", () => {
 
 		// Should not throw even with no visible provider
 		await handlers["zoo-code.plusButtonClicked"]()
+	})
+
+	it("triggerInlineCompletion arms the autocomplete service", () => {
+		handlers["zoo-code.triggerInlineCompletion"]()
+
+		expect(mockAutocompleteService.triggerInlineCompletion).toHaveBeenCalledTimes(1)
+	})
+
+	it("triggerInlineCompletion logs when the service is not registered", () => {
+		vi.mocked(getAutocompleteService).mockReturnValueOnce(undefined)
+
+		handlers["zoo-code.triggerInlineCompletion"]()
+
+		expect(mockAutocompleteService.triggerInlineCompletion).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			"[triggerInlineCompletion] Autocomplete service is not registered.",
+		)
+	})
+
+	it("toggleAutocomplete flips the service enable flag", async () => {
+		await handlers["zoo-code.toggleAutocomplete"]()
+
+		expect(mockAutocompleteService.toggleEnabled).toHaveBeenCalledTimes(1)
+	})
+
+	it("toggleAutocomplete logs when the service is not registered", async () => {
+		vi.mocked(getAutocompleteService).mockReturnValueOnce(undefined)
+
+		await handlers["zoo-code.toggleAutocomplete"]()
+
+		expect(mockAutocompleteService.toggleEnabled).not.toHaveBeenCalled()
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			"[toggleAutocomplete] Autocomplete service is not registered.",
+		)
+	})
+
+	it("autocompleteAccepted is a stable no-op target for acceptance telemetry", () => {
+		// The command exists so `InlineCompletionItem.command` has a stable target
+		// from day one; the actual telemetry capture lands with the engine (Phase 2).
+		expect(handlers["zoo-code.autocompleteAccepted"]()).toBeUndefined()
 	})
 })
 

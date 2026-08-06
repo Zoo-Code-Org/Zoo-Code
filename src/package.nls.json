@@ -25,6 +25,9 @@
 	"command.acceptInput.title": "Accept Input/Suggestion",
 	"command.showRipgrepDiagnostic.title": "Show Ripgrep Diagnostic",
 	"command.toggleAutoApprove.title": "Toggle Auto-Approve",
+	"command.triggerInlineCompletion.title": "Trigger Inline Completion",
+	"command.toggleAutocomplete.title": "Toggle Inline Autocomplete",
+	"command.autocompleteAccepted.title": "Inline Autocomplete Accepted",
 	"configuration.title": "Zoo Code",
 	"commands.allowedCommands.description": "Commands that can be auto-executed when 'Always approve execute operations' is enabled",
 	"commands.deniedCommands.description": "Command prefixes that will be automatically denied without asking for approval. In case of conflicts with allowed commands, the longest prefix match takes precedence. Add * to deny all commands.",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Accept self-signed certificates from the proxy. **Required for MITM inspection.** ⚠️ Insecure — only use for local debugging.",
 	"settings.workspace.rootResolution.description": "How Zoo resolves the workspace root in a multi-root workspace. The root is used to locate `.roomodes`, `.roo/mcp.json`, `.roo/rules/`, and other project-scoped configuration. Changing this setting only affects future lookups; running tasks keep their original root.",
 	"settings.workspace.rootResolution.activeEditor.description": "Use the workspace folder containing the active editor; fall back to the first workspace folder. (Default — preserves legacy behavior.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Always use the first workspace folder (workspaceFolders[0]). Deterministic — independent of which file is currently focused."
+	"settings.workspace.rootResolution.firstFolder.description": "Always use the first workspace folder (workspaceFolders[0]). Deterministic — independent of which file is currently focused.",
+	"settings.autocomplete.disabled.description": "Turn off Zoo Code inline autocomplete for this workspace, regardless of the setting in Zoo Code's settings panel. Useful for repositories that should never send code to a completion model.",
+	"settings.autocomplete.debugLogging.description": "Write inline autocomplete diagnostics — the rendered prompt, request latency and post-processing decisions — to the Zoo-Code output channel."
 }

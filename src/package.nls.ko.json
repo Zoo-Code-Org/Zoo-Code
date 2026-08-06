@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "입력/제안 수락",
 	"command.showRipgrepDiagnostic.title": "Ripgrep 진단 표시",
 	"command.toggleAutoApprove.title": "자동 승인 전환",
+	"command.triggerInlineCompletion.title": "인라인 완성 트리거",
+	"command.toggleAutocomplete.title": "인라인 자동 완성 전환",
+	"command.autocompleteAccepted.title": "인라인 완성 수락됨",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "프록시의 self-signed 인증서를 허용합니다. **MITM 검사에 필요합니다.** ⚠️ 안전하지 않으므로 로컬 디버깅에만 사용하세요.",
 	"settings.workspace.rootResolution.description": "멀티 루트 워크스페이스에서 Zoo가 워크스페이스 루트를 어떻게 결정하는지 설정합니다. 루트는 `.roomodes`, `.roo/mcp.json`, `.roo/rules/` 및 기타 프로젝트 범위 구성을 찾는 데 사용됩니다. 이 설정을 변경해도 이후의 조회에만 영향을 주며, 실행 중인 작업은 원래 루트를 유지합니다.",
 	"settings.workspace.rootResolution.activeEditor.description": "활성 편집기가 있는 워크스페이스 폴더를 사용하고, 첫 번째 워크스페이스 폴더로 폴백합니다. (기본값 — 기존 동작을 유지합니다.)",
-	"settings.workspace.rootResolution.firstFolder.description": "항상 첫 번째 워크스페이스 폴더(workspaceFolders[0])를 사용합니다. 결정적이며, 현재 포커스된 파일과 무관합니다."
+	"settings.workspace.rootResolution.firstFolder.description": "항상 첫 번째 워크스페이스 폴더(workspaceFolders[0])를 사용합니다. 결정적이며, 현재 포커스된 파일과 무관합니다.",
+	"settings.autocomplete.disabled.description": "Zoo Code 설정 패널의 값과 상관없이 이 작업 영역에서 인라인 자동 완성을 끕니다. 코드를 completion 모델로 절대 보내면 안 되는 저장소에 유용합니다.",
+	"settings.autocomplete.debugLogging.description": "인라인 자동 완성 진단 정보(생성된 prompt, 요청 지연 시간, 후처리 결정)를 Zoo-Code 출력 채널에 기록합니다."
 }

@@ -29,9 +29,11 @@ import {
 	GitCommitVertical,
 	GraduationCap,
 	ScrollText,
+	Sparkles,
 } from "lucide-react"
 
 import {
+	type AutocompleteConfig,
 	type ProviderSettings,
 	type ExperimentId,
 	type TelemetrySetting,
@@ -68,6 +70,7 @@ import { SetCachedStateField, SetExperimentEnabled } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import ApiConfigManager from "./ApiConfigManager"
 import ApiOptions from "./ApiOptions"
+import { AutocompleteSettings } from "./AutocompleteSettings"
 import { AutoApproveSettings } from "./AutoApproveSettings"
 import { CheckpointSettings } from "./CheckpointSettings"
 import { NotificationSettings } from "./NotificationSettings"
@@ -101,6 +104,7 @@ export interface SettingsViewRef {
 
 export const sectionNames = [
 	"providers",
+	"autocomplete",
 	"autoApprove",
 	"slashCommands",
 	"skills",
@@ -217,6 +221,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedFiles,
 		autoCloseZooOpenedFilesAfterUserEdited,
 		autoCloseZooOpenedNewFiles,
+		autocompleteConfig,
+		autocompleteProfiles,
+		activeAutocompleteProfileId,
+		hasAutocompleteApiKey,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -350,6 +358,117 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		})
 	}, [])
 
+	/**
+	 * Autocomplete config is a nested object, so a new reference must be produced on every
+	 * change: `setCachedStateField` bails out on `===`, which an in-place mutation would hit.
+	 */
+	const setAutocompleteConfigField = useCallback(
+		<K extends keyof AutocompleteConfig>(field: K, value: AutocompleteConfig[K]) => {
+			setCachedState((prevState) => {
+				if (prevState.autocompleteConfig?.[field] === value) {
+					return prevState
+				}
+
+				setChangeDetected(true)
+				return { ...prevState, autocompleteConfig: { ...prevState.autocompleteConfig, [field]: value } }
+			})
+		},
+		[],
+	)
+
+	/**
+	 * Write-only buffer for the autocomplete API key.
+	 *
+	 * The stored key is never sent to the webview (only `hasAutocompleteApiKey`), so there is
+	 * nothing to hydrate from. `undefined` means "untouched" and is omitted from the save
+	 * payload, which keeps an existing key intact when the user edits unrelated fields.
+	 */
+	const [autocompleteApiKeyDraft, setAutocompleteApiKeyDraft] = useState<string | undefined>(undefined)
+
+	const setAutocompleteApiKey = useCallback((apiKey: string) => {
+		setAutocompleteApiKeyDraft(apiKey)
+		setChangeDetected(true)
+	}, [])
+
+	/**
+	 * Autocomplete profile management.
+	 *
+	 * Profiles are plain data in `cachedState`, so every operation is a local edit
+	 * that the existing Save button persists through `updateSettings` — there is no
+	 * separate save path, and no way to end up with a profile list on disk that
+	 * disagrees with the config the user is looking at.
+	 */
+	const selectAutocompleteProfile = useCallback((profileId: string) => {
+		setCachedState((prevState) => {
+			const profile = prevState.autocompleteProfiles?.find((candidate) => candidate.id === profileId)
+
+			if (!profile) {
+				return prevState
+			}
+
+			setChangeDetected(true)
+
+			return {
+				...prevState,
+				activeAutocompleteProfileId: profileId,
+				autocompleteConfig: { ...profile.config },
+			}
+		})
+	}, [])
+
+	const saveAutocompleteProfile = useCallback((name: string) => {
+		setCachedState((prevState) => {
+			const profiles = prevState.autocompleteProfiles ?? []
+			const existing = profiles.find((profile) => profile.name === name)
+			// Saving under an existing name overwrites it, matching the mental model
+			// of "save" in the Providers tab rather than silently creating a duplicate.
+			const id = existing?.id ?? `autocomplete-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+			const entry = { id, name, config: { ...prevState.autocompleteConfig } }
+
+			setChangeDetected(true)
+
+			return {
+				...prevState,
+				activeAutocompleteProfileId: id,
+				autocompleteProfiles: existing
+					? profiles.map((profile) => (profile.id === id ? entry : profile))
+					: [...profiles, entry],
+			}
+		})
+	}, [])
+
+	const renameAutocompleteProfile = useCallback((profileId: string, name: string) => {
+		setCachedState((prevState) => {
+			setChangeDetected(true)
+
+			return {
+				...prevState,
+				autocompleteProfiles: (prevState.autocompleteProfiles ?? []).map((profile) =>
+					profile.id === profileId ? { ...profile, name } : profile,
+				),
+			}
+		})
+	}, [])
+
+	const deleteAutocompleteProfile = useCallback((profileId: string) => {
+		setCachedState((prevState) => {
+			setChangeDetected(true)
+
+			return {
+				...prevState,
+				// The live config is deliberately left untouched: deleting a preset
+				// removes the bookmark, not the settings the user is currently using.
+				activeAutocompleteProfileId:
+					prevState.activeAutocompleteProfileId === profileId
+						? undefined
+						: prevState.activeAutocompleteProfileId,
+				autocompleteProfiles: (prevState.autocompleteProfiles ?? []).filter(
+					(profile) => profile.id !== profileId,
+				),
+			}
+		})
+	}, [])
+
 	const setImageGenerationSelectedModel = useCallback((model: string) => {
 		setCachedState((prevState) => {
 			if (prevState.openRouterImageGenerationSelectedModel !== model) {
@@ -448,6 +567,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
+					autocompleteConfig,
+					autocompleteProfiles,
+					activeAutocompleteProfileId,
+					// Omitted when untouched so an existing stored key survives unrelated edits.
+					...(autocompleteApiKeyDraft !== undefined ? { autocompleteApiKey: autocompleteApiKeyDraft } : {}),
 				},
 			})
 
@@ -457,6 +581,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			vscode.postMessage({ type: "telemetrySetting", text: telemetrySetting })
 			vscode.postMessage({ type: "debugSetting", bool: cachedState.debug })
 
+			// Back to "untouched" so a subsequent save doesn't re-send the key.
+			setAutocompleteApiKeyDraft(undefined)
 			setChangeDetected(false)
 		}
 	}
@@ -535,6 +661,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const sections: { id: SectionName; icon: LucideIcon }[] = useMemo(
 		() => [
 			{ id: "providers", icon: Plug },
+			{ id: "autocomplete", icon: Sparkles },
 			{ id: "modes", icon: UsersRound },
 			{ id: "skills", icon: GraduationCap },
 			{ id: "slashCommands", icon: SquareSlash },
@@ -802,6 +929,23 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 									/>
 								</Section>
 							</div>
+						)}
+
+						{/* Autocomplete Section */}
+						{renderTab === "autocomplete" && (
+							<AutocompleteSettings
+								autocompleteConfig={autocompleteConfig}
+								hasAutocompleteApiKey={hasAutocompleteApiKey}
+								autocompleteApiKeyDraft={autocompleteApiKeyDraft}
+								autocompleteProfiles={autocompleteProfiles}
+								activeAutocompleteProfileId={activeAutocompleteProfileId}
+								setAutocompleteConfigField={setAutocompleteConfigField}
+								setAutocompleteApiKey={setAutocompleteApiKey}
+								onSelectProfile={selectAutocompleteProfile}
+								onSaveProfile={saveAutocompleteProfile}
+								onRenameProfile={renameAutocompleteProfile}
+								onDeleteProfile={deleteAutocompleteProfile}
+							/>
 						)}
 
 						{/* Auto-Approve Section */}

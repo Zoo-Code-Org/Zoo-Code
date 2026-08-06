@@ -16,6 +16,7 @@ if (fs.existsSync(envPath)) {
 }
 
 import type { CloudUserInfo, AuthState } from "@roo-code/types"
+import { resolveAutocompleteConfig } from "@roo-code/types"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService, PostHogTelemetryClient } from "@roo-code/telemetry"
 import { customToolRegistry } from "@roo-code/core"
@@ -45,6 +46,7 @@ import {
 	registerCommands,
 	registerCodeActions,
 	registerTerminalActions,
+	registerAutocomplete,
 	CodeActionProvider,
 } from "./activate"
 import { initializeI18n } from "./i18n"
@@ -295,6 +297,17 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	registerCodeActions(context)
 	registerTerminalActions(context)
+
+	// Inline autocomplete (ghost text). The global config is re-read on every
+	// request so saved settings apply without re-registering; the message handler
+	// notifies the service after `updateSettings` completes.
+	const autocompleteService = await registerAutocomplete({
+		context,
+		provider,
+		getGlobalConfig: () => resolveAutocompleteConfig(contextProxy.getValues().autocompleteConfig),
+		getApiKey: () => contextProxy.getValue("autocompleteApiKey"),
+	})
+	context.subscriptions.push(autocompleteService)
 
 	// Allows other extensions to activate once Roo is ready.
 	vscode.commands.executeCommand(`${Package.name}.activationCompleted`)

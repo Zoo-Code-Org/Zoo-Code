@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { autocompleteConfigSchema, autocompleteProfileSchema } from "./autocomplete.js"
 import { codebaseIndexConfigSchema, codebaseIndexModelsSchema } from "./codebase-index.js"
 import { experimentsSchema } from "./experiment.js"
 import { historyItemSchema } from "./history.js"
@@ -222,6 +223,19 @@ export const globalSettingsSchema = z.object({
 	codebaseIndexModels: codebaseIndexModelsSchema.optional(),
 	codebaseIndexConfig: codebaseIndexConfigSchema.optional(),
 
+	/**
+	 * Inline autocomplete (ghost text). Deliberately independent of the chat API
+	 * profiles: the FIM model that serves tab-completion is usually a small local
+	 * base model, not the instruction-tuned chat model.
+	 */
+	autocompleteConfig: autocompleteConfigSchema.optional(),
+	/** Credential for the autocomplete endpoint. Routed to SecretStorage via GLOBAL_SECRET_KEYS. */
+	autocompleteApiKey: z.string().optional(),
+	/** Named autocomplete presets the user can switch between (local vs. cloud, fast vs. accurate). */
+	autocompleteProfiles: z.array(autocompleteProfileSchema).optional(),
+	/** Id of the profile in `autocompleteProfiles` currently loaded into `autocompleteConfig`. */
+	activeAutocompleteProfileId: z.string().optional(),
+
 	language: languagesSchema.optional(),
 
 	telemetrySetting: telemetrySettingsSchema.optional(),
@@ -330,6 +344,7 @@ export const SECRET_STATE_KEYS = [
 // Global secrets that are part of GlobalSettings (not ProviderSettings)
 export const GLOBAL_SECRET_KEYS = [
 	"openRouterImageApiKey", // For image generation
+	"autocompleteApiKey", // For inline autocomplete
 ] as const
 
 // Type for the actual secret storage keys

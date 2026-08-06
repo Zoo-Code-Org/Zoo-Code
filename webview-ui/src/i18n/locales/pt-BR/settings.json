@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "Provedores",
+		"autocomplete": "Autocompletar",
 		"modes": "Modos",
 		"mcp": "Servidores MCP",
 		"worktrees": "Worktrees",
@@ -43,6 +44,100 @@
 		"about": "Sobre",
 		"skills": "Skills",
 		"rules": "Regras"
+	},
+	"autocomplete": {
+		"description": "Sugestões de código inline que aparecem enquanto você digita, com o modelo que você escolher. Funciona separado do modelo de chat, então dá para combinar um modelo de chat grande na nuvem com um modelo de completion local pequeno e rápido.",
+		"enable": {
+			"label": "Ativar autocompletar inline",
+			"description": "Sugere código como texto fantasma no cursor. Requer que as sugestões inline do VS Code estejam ativadas."
+		},
+		"shortcuts": {
+			"label": "Atalhos de teclado",
+			"description": "Aceite com Tab, dispense com Esc e alterne alternativas com Alt+] e Alt+[. São atalhos do próprio VS Code e podem ser alterados em Atalhos de Teclado."
+		},
+		"triggerMode": {
+			"label": "Sugerir enquanto digito",
+			"description": "Escolha se as sugestões aparecem sozinhas ou só quando você pedir. Isso é diferente das quick suggestions do VS Code, que controlam o popup do IntelliSense e não o texto fantasma.",
+			"options": {
+				"automatic": "Enquanto digito",
+				"manual": "Só quando eu apertar o atalho"
+			}
+		},
+		"debounce": {
+			"label": "Atraso antes de sugerir",
+			"description": "Quanto esperar depois que você para de digitar antes de pedir uma sugestão. Menos tempo parece mais ágil, mas envia mais requisições."
+		},
+		"provider": {
+			"label": "Provedor",
+			"description": "De onde vêm as completions. Os três primeiros falam direto com um endpoint fill-in-the-middle, bem mais rápido e preciso do que mandar prompt para um modelo de chat.",
+			"options": {
+				"ollama": "Ollama (local)",
+				"openai-compatible": "Compatível com OpenAI (LM Studio, llama.cpp, vLLM)",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Modelo de chat (alternativa mais lenta)"
+			},
+			"nativeFimHint": "Fala direto com um endpoint fill-in-the-middle — a opção mais rápida e precisa.",
+			"chatHint": "Roteado pelo caminho de chat. Funciona com qualquer provedor, mas é mais lento e menos preciso que um endpoint fill-in-the-middle.",
+			"chatWarning": "Este provedor é usado como modelo de chat. Para melhores resultados escolha Ollama, um servidor compatível com OpenAI ou Codestral com um modelo base fill-in-the-middle."
+		},
+		"baseUrl": {
+			"label": "URL base"
+		},
+		"model": {
+			"label": "Modelo",
+			"description": "Prefira um modelo base fill-in-the-middle como qwen2.5-coder:1.5b-base. Modelos de chat ajustados por instrução vão mal nessa tarefa, mesmo sendo bem maiores.",
+			"sectionTitle": "Modelo de completion",
+			"sectionDescription": "Qual modelo gera as sugestões e como alcançá-lo.",
+			"selectPlaceholder": "Selecione ou digite um id de modelo",
+			"customPlaceholder": "Ou digite um id de modelo fora da lista",
+			"refresh": "Atualizar lista de modelos",
+			"fetchFailed": "Não foi possível acessar o endpoint: {{error}}"
+		},
+		"apiKey": {
+			"label": "Chave de API",
+			"description": "Guardada no Secret Storage do VS Code e nunca incluída nas configurações exportadas.",
+			"storedPlaceholder": "Já existe uma chave salva. Digite para substituir.",
+			"emptyPlaceholder": "Digite sua chave de API",
+			"optionalLabel": "Chave de API (opcional)",
+			"localDescription": "Deixe vazio para servidores locais. Obrigatória para endpoints hospedados como ollama.com ou Codestral."
+		},
+		"profiles": {
+			"label": "Configurações salvas",
+			"description": "Salve uma combinação de provedor, modelo e ajustes para alternar entre, por exemplo, um modelo local rápido e um de nuvem mais forte.",
+			"none": "Sem configuração salva",
+			"namePlaceholder": "ex. Qwen local, Codestral nuvem",
+			"save": "Salvar as configurações atuais",
+			"saveLabel": "Dê um nome a esta configuração",
+			"rename": "Renomear configuração",
+			"renameLabel": "Renomear configuração",
+			"delete": "Excluir configuração",
+			"confirm": "Confirmar",
+			"cancel": "Cancelar",
+			"limitReached": "Você atingiu o número máximo de configurações salvas.",
+			"unsavedChanges": "Alterado desde que “{{name}}” foi salva. Salve novamente para manter estes valores."
+		},
+		"behavior": {
+			"sectionTitle": "Comportamento",
+			"sectionDescription": "Quando as sugestões aparecem enquanto você digita."
+		},
+		"advanced": {
+			"label": "Configurações avançadas"
+		},
+		"maxOutputTokens": {
+			"label": "Comprimento máximo da sugestão",
+			"description": "Limite de uma única sugestão. Valores menores respondem mais rápido e raramente cortam código útil."
+		},
+		"connection": {
+			"needsKey": "Informe uma chave de API para carregar os modelos disponíveis neste endpoint.",
+			"checking": "Conectando…",
+			"connected": "Conectado — {{count}} modelo(s) disponíveis.",
+			"connectedLocal": "Conectado."
+		},
+		"chatProvider": {
+			"label": "Provedor de chat",
+			"placeholder": "Selecione um provedor",
+			"description": "Qual provedor de chat gera as compleções. Usa os mesmos provedores da aba Provedores; configure as credenciais lá."
+		}
 	},
 	"about": {
 		"bugReport": {

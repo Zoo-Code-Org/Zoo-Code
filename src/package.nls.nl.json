@@ -25,6 +25,9 @@
 	"command.acceptInput.title": "Invoer/Suggestie Accepteren",
 	"command.showRipgrepDiagnostic.title": "Ripgrep-diagnose weergeven",
 	"command.toggleAutoApprove.title": "Auto-Goedkeuring Schakelen",
+	"command.triggerInlineCompletion.title": "Inline-aanvulling activeren",
+	"command.toggleAutocomplete.title": "Inline-automatische aanvulling schakelen",
+	"command.autocompleteAccepted.title": "Inline-aanvulling geaccepteerd",
 	"configuration.title": "Zoo Code",
 	"commands.allowedCommands.description": "Commando's die automatisch kunnen worden uitgevoerd wanneer 'Altijd goedkeuren uitvoerbewerkingen' is ingeschakeld",
 	"commands.deniedCommands.description": "Commando-prefixen die automatisch worden geweigerd zonder om goedkeuring te vragen. Bij conflicten met toegestane commando's heeft de langste prefix-match voorrang. Voeg * toe om alle commando's te weigeren.",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Accepteer zelfondertekende certificaten van de proxy. **Vereist voor MITM-inspectie.** ⚠️ Onveilig — gebruik dit alleen voor lokale debugging.",
 	"settings.workspace.rootResolution.description": "Hoe Zoo de workspace-root bepaalt in een multi-root workspace. De root wordt gebruikt om `.roomodes`, `.roo/mcp.json`, `.roo/rules/` en andere project-scoped configuratie te vinden. Deze instelling wijzigen heeft alleen invloed op toekomstige zoekopdrachten; lopende taken behouden hun oorspronkelijke root.",
 	"settings.workspace.rootResolution.activeEditor.description": "Gebruik de workspace-map die de actieve editor bevat; val terug op de eerste workspace-map. (Standaard — behoudt het oude gedrag.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Gebruik altijd de eerste workspace-map (workspaceFolders[0]). Deterministisch — onafhankelijk van welk bestand op dit moment de focus heeft."
+	"settings.workspace.rootResolution.firstFolder.description": "Gebruik altijd de eerste workspace-map (workspaceFolders[0]). Deterministisch — onafhankelijk van welk bestand op dit moment de focus heeft.",
+	"settings.autocomplete.disabled.description": "Schakelt de inline automatische aanvulling van Zoo Code uit voor deze werkruimte, ongeacht de instelling in het instellingenpaneel van Zoo Code. Handig voor repositories waarvan code nooit naar een completion-model mag.",
+	"settings.autocomplete.debugLogging.description": "Schrijft diagnostiek van inline automatisch aanvullen — de gegenereerde prompt, verzoeklatentie en nabewerkingsbeslissingen — naar het uitvoerkanaal Zoo-Code."
 }

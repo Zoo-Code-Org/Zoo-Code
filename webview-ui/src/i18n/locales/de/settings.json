@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "Anbieter",
+		"autocomplete": "Autovervollständigung",
 		"modes": "Modi",
 		"mcp": "MCP-Server",
 		"worktrees": "Worktrees",
@@ -43,6 +44,100 @@
 		"about": "Über Zoo Code",
 		"skills": "Skills",
 		"rules": "Regeln"
+	},
+	"autocomplete": {
+		"description": "Inline-Codevorschläge, die beim Tippen erscheinen – mit dem Modell deiner Wahl. Läuft getrennt vom Chat-Modell, du kannst also ein großes Cloud-Chat-Modell mit einem kleinen, schnellen lokalen Completion-Modell kombinieren.",
+		"enable": {
+			"label": "Inline-Autovervollständigung aktivieren",
+			"description": "Schlägt Code als Geistertext an deinem Cursor vor. Die Inline-Vorschläge von VS Code müssen aktiviert sein."
+		},
+		"shortcuts": {
+			"label": "Tastenkürzel",
+			"description": "Mit Tab annehmen, mit Esc verwerfen, mit Alt+] und Alt+[ durch Alternativen blättern. Das sind VS Codes eigene Kürzel und lassen sich unter Tastenkombinationen ändern."
+		},
+		"triggerMode": {
+			"label": "Beim Tippen vorschlagen",
+			"description": "Lege fest, ob Vorschläge automatisch erscheinen oder nur auf Anforderung. Das ist etwas anderes als die Quick Suggestions von VS Code, die das IntelliSense-Popup steuern und nicht den Geistertext.",
+			"options": {
+				"automatic": "Beim Tippen",
+				"manual": "Nur wenn ich das Kürzel drücke"
+			}
+		},
+		"debounce": {
+			"label": "Verzögerung vor dem Vorschlag",
+			"description": "Wie lange nach der letzten Eingabe gewartet wird, bevor ein Vorschlag angefordert wird. Kürzer wirkt flotter, erzeugt aber mehr Anfragen."
+		},
+		"provider": {
+			"label": "Anbieter",
+			"description": "Woher die Completions kommen. Die ersten drei sprechen direkt mit einem Fill-in-the-Middle-Endpunkt – deutlich schneller und genauer, als ein Chat-Modell zu prompten.",
+			"options": {
+				"ollama": "Ollama (lokal)",
+				"openai-compatible": "OpenAI-kompatibel (LM Studio, llama.cpp, vLLM)",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Chat-Modell (langsamerer Fallback)"
+			},
+			"nativeFimHint": "Spricht direkt mit einem Fill-in-the-Middle-Endpunkt – die schnellste und genaueste Option.",
+			"chatHint": "Läuft über den Chat-Pfad. Funktioniert mit jedem Anbieter, ist aber langsamer und ungenauer als ein Fill-in-the-Middle-Endpunkt.",
+			"chatWarning": "Dieser Anbieter wird als Chat-Modell angesprochen. Für beste Ergebnisse wählen Sie Ollama, einen OpenAI-kompatiblen Server oder Codestral mit einem Fill-in-the-Middle-Basismodell."
+		},
+		"baseUrl": {
+			"label": "Basis-URL"
+		},
+		"model": {
+			"label": "Modell",
+			"description": "Nimm am besten ein Fill-in-the-Middle-Basismodell wie qwen2.5-coder:1.5b-base. Auf Instruktionen trainierte Chat-Modelle schneiden hier schlecht ab, selbst wenn sie viel größer sind.",
+			"sectionTitle": "Completion-Modell",
+			"sectionDescription": "Welches Modell die Vorschläge erzeugt und wie es erreicht wird.",
+			"selectPlaceholder": "Modell-ID wählen oder eingeben",
+			"customPlaceholder": "Oder eine nicht gelistete Modell-ID eingeben",
+			"refresh": "Modellliste aktualisieren",
+			"fetchFailed": "Endpunkt nicht erreichbar: {{error}}"
+		},
+		"apiKey": {
+			"label": "API-Schlüssel",
+			"description": "Wird im Secret Storage von VS Code gespeichert und nie in exportierte Einstellungen aufgenommen.",
+			"storedPlaceholder": "Ein Schlüssel ist gespeichert. Tippe, um ihn zu ersetzen.",
+			"emptyPlaceholder": "Gib deinen API-Schlüssel ein",
+			"optionalLabel": "API-Schlüssel (optional)",
+			"localDescription": "Für lokale Server leer lassen. Für gehostete Endpunkte wie ollama.com oder Codestral erforderlich."
+		},
+		"profiles": {
+			"label": "Gespeicherte Konfigurationen",
+			"description": "Speichern Sie eine Kombination aus Anbieter, Modell und Einstellungen, um etwa zwischen einem schnellen lokalen und einem stärkeren Cloud-Modell zu wechseln.",
+			"none": "Keine gespeicherte Konfiguration",
+			"namePlaceholder": "z. B. Lokales Qwen, Cloud-Codestral",
+			"save": "Aktuelle Einstellungen speichern",
+			"saveLabel": "Diese Konfiguration benennen",
+			"rename": "Konfiguration umbenennen",
+			"renameLabel": "Konfiguration umbenennen",
+			"delete": "Konfiguration löschen",
+			"confirm": "Bestätigen",
+			"cancel": "Abbrechen",
+			"limitReached": "Sie haben die maximale Anzahl gespeicherter Konfigurationen erreicht.",
+			"unsavedChanges": "Geändert, seit „{{name}}“ gespeichert wurde. Erneut speichern, um die Werte zu behalten."
+		},
+		"behavior": {
+			"sectionTitle": "Verhalten",
+			"sectionDescription": "Wann Vorschläge beim Tippen erscheinen."
+		},
+		"advanced": {
+			"label": "Erweiterte Einstellungen"
+		},
+		"maxOutputTokens": {
+			"label": "Maximale Vorschlagslänge",
+			"description": "Obergrenze für einen einzelnen Vorschlag. Niedrigere Werte antworten schneller und schneiden selten nützlichen Code ab."
+		},
+		"connection": {
+			"needsKey": "Geben Sie einen API-Schlüssel ein, um die verfügbaren Modelle dieses Endpunkts zu laden.",
+			"checking": "Verbinden…",
+			"connected": "Verbunden – {{count}} Modell(e) verfügbar.",
+			"connectedLocal": "Verbunden."
+		},
+		"chatProvider": {
+			"label": "Chat-Anbieter",
+			"placeholder": "Anbieter auswählen",
+			"description": "Welcher Chat-Anbieter die Vervollständigungen liefert. Nutzt dieselben Anbieter wie der Tab „Anbieter“; Zugangsdaten dort konfigurieren."
+		}
 	},
 	"about": {
 		"bugReport": {

@@ -25,6 +25,9 @@
 	"command.acceptInput.title": "Принять ввод/предложение",
 	"command.showRipgrepDiagnostic.title": "Показать диагностику Ripgrep",
 	"command.toggleAutoApprove.title": "Переключить Авто-Подтверждение",
+	"command.triggerInlineCompletion.title": "Запустить встроенное дополнение",
+	"command.toggleAutocomplete.title": "Переключить встроенное дополнение",
+	"command.autocompleteAccepted.title": "Встроенное дополнение принято",
 	"configuration.title": "Zoo Code",
 	"commands.allowedCommands.description": "Команды, которые могут быть автоматически выполнены, когда включена опция 'Всегда подтверждать операции выполнения'",
 	"commands.deniedCommands.description": "Префиксы команд, которые будут автоматически отклонены без запроса подтверждения. В случае конфликтов с разрешенными командами приоритет имеет самое длинное совпадение префикса. Добавьте * чтобы отклонить все команды.",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Принимать self-signed сертификаты от прокси. **Требуется для MITM-инспекции.** ⚠️ Небезопасно — используй только для локальной отладки.",
 	"settings.workspace.rootResolution.description": "Как Zoo определяет корень рабочей области в рабочей области с несколькими корнями. Корень используется для поиска `.roomodes`, `.roo/mcp.json`, `.roo/rules/` и другой конфигурации уровня проекта. Изменение этой настройки влияет только на последующие поиски; выполняющиеся задачи сохраняют свой исходный корень.",
 	"settings.workspace.rootResolution.activeEditor.description": "Использовать папку рабочей области, содержащую активный редактор; при необходимости вернуться к первой папке рабочей области. (По умолчанию — сохраняет прежнее поведение.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Всегда использовать первую папку рабочей области (workspaceFolders[0]). Детерминированно — не зависит от того, какой файл сейчас в фокусе."
+	"settings.workspace.rootResolution.firstFolder.description": "Всегда использовать первую папку рабочей области (workspaceFolders[0]). Детерминированно — не зависит от того, какой файл сейчас в фокусе.",
+	"settings.autocomplete.disabled.description": "Отключает встроенное автодополнение Zoo Code для этой рабочей области независимо от значения в панели настроек Zoo Code. Полезно для репозиториев, код которых нельзя отправлять в модель completion.",
+	"settings.autocomplete.debugLogging.description": "Записывает диагностику встроенного автодополнения — сформированный prompt, задержку запросов и решения постобработки — в канал вывода Zoo-Code."
 }

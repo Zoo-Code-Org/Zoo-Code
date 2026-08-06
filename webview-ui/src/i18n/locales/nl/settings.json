@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "Providers",
+		"autocomplete": "Automatisch aanvullen",
 		"modes": "Modi",
 		"mcp": "MCP-servers",
 		"worktrees": "Worktrees",
@@ -43,6 +44,100 @@
 		"about": "Over Zoo Code",
 		"skills": "Skills",
 		"rules": "Regels"
+	},
+	"autocomplete": {
+		"description": "Inline codesuggesties die verschijnen terwijl je typt, met het model dat jij kiest. Draait los van het chat-model, dus je kunt een groot chat-model in de cloud combineren met een klein, snel lokaal completion-model.",
+		"enable": {
+			"label": "Inline automatisch aanvullen inschakelen",
+			"description": "Stelt code voor als spooktekst bij je cursor. Vereist dat de inline suggesties van VS Code aanstaan."
+		},
+		"shortcuts": {
+			"label": "Sneltoetsen",
+			"description": "Accepteer met Tab, sluit met Esc en blader door alternatieven met Alt+] en Alt+[. Dit zijn VS Codes eigen sneltoetsen; je past ze aan bij Sneltoetsen."
+		},
+		"triggerMode": {
+			"label": "Suggesties tijdens het typen",
+			"description": "Kies of suggesties automatisch verschijnen of alleen wanneer je erom vraagt. Dit staat los van de quick suggestions van VS Code, die het IntelliSense-venster aansturen en niet de spooktekst.",
+			"options": {
+				"automatic": "Tijdens het typen",
+				"manual": "Alleen als ik de sneltoets indruk"
+			}
+		},
+		"debounce": {
+			"label": "Vertraging voor suggestie",
+			"description": "Hoe lang er gewacht wordt nadat je stopt met typen voordat een suggestie wordt opgevraagd. Korter voelt vlotter, maar stuurt meer verzoeken."
+		},
+		"provider": {
+			"label": "Aanbieder",
+			"description": "Waar de completions vandaan komen. De eerste drie praten rechtstreeks met een fill-in-the-middle endpoint, wat veel sneller en nauwkeuriger is dan een chat-model prompten.",
+			"options": {
+				"ollama": "Ollama (lokaal)",
+				"openai-compatible": "OpenAI-compatibel (LM Studio, llama.cpp, vLLM)",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Chat-model (tragere terugval)"
+			},
+			"nativeFimHint": "Talks to a fill-in-the-middle endpoint directly — the fastest and most accurate option.",
+			"chatHint": "Routed through the chat path. Works with any provider, but slower and less precise than a fill-in-the-middle endpoint.",
+			"chatWarning": "This provider is prompted as a chat model. For the best results choose Ollama, an OpenAI-compatible server, or Codestral with a fill-in-the-middle base model."
+		},
+		"baseUrl": {
+			"label": "Basis-URL"
+		},
+		"model": {
+			"label": "Model",
+			"description": "Kies bij voorkeur een fill-in-the-middle basismodel zoals qwen2.5-coder:1.5b-base. Instruction-tuned chat-modellen presteren hier slecht, ook als ze veel groter zijn.",
+			"sectionTitle": "Completion model",
+			"sectionDescription": "Which model produces the suggestions, and how to reach it.",
+			"selectPlaceholder": "Select or type a model id",
+			"customPlaceholder": "Or type a model id not in the list",
+			"refresh": "Refresh model list",
+			"fetchFailed": "Could not reach the endpoint: {{error}}"
+		},
+		"apiKey": {
+			"label": "API-sleutel",
+			"description": "Opgeslagen in de Secret Storage van VS Code en nooit opgenomen in geëxporteerde instellingen.",
+			"storedPlaceholder": "Er is een sleutel opgeslagen. Typ om hem te vervangen.",
+			"emptyPlaceholder": "Voer je API-sleutel in",
+			"optionalLabel": "API key (optional)",
+			"localDescription": "Leave empty for local servers. Required for hosted endpoints such as ollama.com or Codestral."
+		},
+		"profiles": {
+			"label": "Saved setups",
+			"description": "Save a provider, model and tuning combination so you can switch between, say, a fast local model and a stronger cloud one.",
+			"none": "Not using a saved setup",
+			"namePlaceholder": "e.g. Local Qwen, Cloud Codestral",
+			"save": "Save current settings as a setup",
+			"saveLabel": "Name this setup",
+			"rename": "Rename setup",
+			"renameLabel": "Rename setup",
+			"delete": "Delete setup",
+			"confirm": "Confirm",
+			"cancel": "Cancel",
+			"limitReached": "You have reached the maximum number of saved setups.",
+			"unsavedChanges": "Changed since “{{name}}” was saved. Save the setup again to keep these values."
+		},
+		"behavior": {
+			"sectionTitle": "Behavior",
+			"sectionDescription": "When suggestions appear while you type."
+		},
+		"advanced": {
+			"label": "Advanced settings"
+		},
+		"maxOutputTokens": {
+			"label": "Maximum suggestion length",
+			"description": "Upper bound on a single suggestion. Lower values return faster and rarely cut off useful code."
+		},
+		"connection": {
+			"needsKey": "Enter an API key to load the available models from this endpoint.",
+			"checking": "Connecting…",
+			"connected": "Connected — {{count}} model(s) available.",
+			"connectedLocal": "Connected."
+		},
+		"chatProvider": {
+			"label": "Chat provider",
+			"placeholder": "Select a provider",
+			"description": "Which chat provider serves completions. Uses the same providers as the Providers tab; configure its credentials there."
+		}
 	},
 	"about": {
 		"bugReport": {

@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "Accepter l'Entrée/Suggestion",
 	"command.showRipgrepDiagnostic.title": "Afficher le diagnostic Ripgrep",
 	"command.toggleAutoApprove.title": "Basculer Auto-Approbation",
+	"command.triggerInlineCompletion.title": "Déclencher la complétion en ligne",
+	"command.toggleAutocomplete.title": "Basculer la complétion en ligne",
+	"command.autocompleteAccepted.title": "Complétion en ligne acceptée",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Accepter les certificats auto-signés du proxy. **Requis pour l'inspection MITM.** ⚠️ Non sécurisé — à utiliser uniquement pour le debug local.",
 	"settings.workspace.rootResolution.description": "Comment Zoo résout la racine de l'espace de travail dans un espace de travail multi-racine. La racine sert à localiser `.roomodes`, `.roo/mcp.json`, `.roo/rules/` et d'autres configurations propres au projet. Modifier ce paramètre n'affecte que les recherches futures ; les tâches en cours conservent leur racine d'origine.",
 	"settings.workspace.rootResolution.activeEditor.description": "Utilise le dossier de l'espace de travail contenant l'éditeur actif ; revient au premier dossier de l'espace de travail. (Par défaut — conserve le comportement hérité.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Utilise toujours le premier dossier de l'espace de travail (workspaceFolders[0]). Déterministe — indépendant du fichier actuellement ciblé."
+	"settings.workspace.rootResolution.firstFolder.description": "Utilise toujours le premier dossier de l'espace de travail (workspaceFolders[0]). Déterministe — indépendant du fichier actuellement ciblé.",
+	"settings.autocomplete.disabled.description": "Désactive l'autocomplétion en ligne de Zoo Code pour cet espace de travail, quel que soit le réglage du panneau de paramètres de Zoo Code. Pratique pour les dépôts dont le code ne doit jamais être envoyé à un modèle de complétion.",
+	"settings.autocomplete.debugLogging.description": "Écrit les diagnostics de l'autocomplétion en ligne — le prompt généré, la latence des requêtes et les décisions de post-traitement — dans le canal de sortie Zoo-Code."
 }

@@ -52,6 +52,7 @@ import {
 	getModelId,
 	isRetiredProvider,
 	providerIdentifiers,
+	resolveAutocompleteConfig,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -2486,6 +2487,10 @@ export class ClineProvider
 			customCondensingPrompt,
 			codebaseIndexConfig,
 			codebaseIndexModels,
+			autocompleteConfig,
+			autocompleteProfiles,
+			activeAutocompleteProfileId,
+			hasAutocompleteApiKey,
 			profileThresholds,
 			alwaysAllowFollowupQuestions,
 			followupAutoApproveTimeoutMs,
@@ -2665,6 +2670,10 @@ export class ClineProvider
 				codebaseIndexBedrockProfile: codebaseIndexConfig?.codebaseIndexBedrockProfile,
 				codebaseIndexOpenRouterSpecificProvider: codebaseIndexConfig?.codebaseIndexOpenRouterSpecificProvider,
 			},
+			autocompleteConfig: resolveAutocompleteConfig(autocompleteConfig),
+			autocompleteProfiles,
+			activeAutocompleteProfileId,
+			hasAutocompleteApiKey,
 			// Phase 1 cloud removal: do not let Cloud-auth MDM enforcement force login-only UI flows.
 			mdmCompliant: undefined,
 			profileThresholds: profileThresholds ?? {},
@@ -2894,6 +2903,11 @@ export class ClineProvider
 				codebaseIndexOpenRouterSpecificProvider:
 					stateValues.codebaseIndexConfig?.codebaseIndexOpenRouterSpecificProvider,
 			},
+			autocompleteConfig: resolveAutocompleteConfig(stateValues.autocompleteConfig),
+			autocompleteProfiles: stateValues.autocompleteProfiles ?? [],
+			activeAutocompleteProfileId: stateValues.activeAutocompleteProfileId,
+			// The key itself never leaves the extension host; the webview only learns whether one is set.
+			hasAutocompleteApiKey: !!stateValues.autocompleteApiKey,
 			profileThresholds: stateValues.profileThresholds ?? {},
 			lockApiConfigAcrossModes: this.context.workspaceState.get("lockApiConfigAcrossModes", false),
 			includeDiagnosticMessages: stateValues.includeDiagnosticMessages ?? true,

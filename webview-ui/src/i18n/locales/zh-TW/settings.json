@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "供應商",
+		"autocomplete": "自動完成",
 		"modes": "模式",
 		"mcp": "MCP 伺服器",
 		"worktrees": "Worktree",
@@ -43,6 +44,100 @@
 		"about": "關於 Zoo Code",
 		"skills": "Skills",
 		"rules": "規則"
+	},
+	"autocomplete": {
+		"description": "在你輸入時出現的內嵌程式碼建議，由你挑選的模型提供。它與 chat 模型分開運作，所以你可以用雲端的大型 chat 模型搭配小而快的本機 completion 模型。",
+		"enable": {
+			"label": "啟用內嵌自動完成",
+			"description": "在游標處以幽靈文字提供程式碼建議。需要先開啟 VS Code 的內嵌建議。"
+		},
+		"shortcuts": {
+			"label": "鍵盤快速鍵",
+			"description": "按 Tab 採用，按 Esc 取消，用 Alt+] 與 Alt+[ 切換候選。這些是 VS Code 內建的快速鍵，可以在鍵盤快速鍵中修改。"
+		},
+		"triggerMode": {
+			"label": "輸入時給建議",
+			"description": "選擇建議要自動出現，還是只在你主動呼叫時出現。這和 VS Code 的 quick suggestions 不同，後者控制的是 IntelliSense 彈出視窗而非幽靈文字。",
+			"options": {
+				"automatic": "輸入時",
+				"manual": "只在我按快速鍵時"
+			}
+		},
+		"debounce": {
+			"label": "給建議前的延遲",
+			"description": "你停止輸入後要等多久才去請求建議。數值越小越即時，但請求也越多。"
+		},
+		"provider": {
+			"label": "提供者",
+			"description": "completion 的來源。前三項直接連到 fill-in-the-middle 端點，比向 chat 模型送 prompt 快得多也準得多。",
+			"options": {
+				"ollama": "Ollama（本機）",
+				"openai-compatible": "OpenAI 相容（LM Studio、llama.cpp、vLLM）",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Chat 模型（較慢的備援）"
+			},
+			"nativeFimHint": "直接與 fill-in-the-middle 端點通訊，是最快且最準確的選項。",
+			"chatHint": "透過聊天路徑呼叫。適用於任何供應商，但比 fill-in-the-middle 端點更慢、更不精確。",
+			"chatWarning": "此供應商以聊天模型方式呼叫。為獲得最佳效果，請選擇 Ollama、OpenAI 相容伺服器，或搭配 fill-in-the-middle 基礎模型的 Codestral。"
+		},
+		"baseUrl": {
+			"label": "基礎 URL"
+		},
+		"model": {
+			"label": "模型",
+			"description": "建議選用 qwen2.5-coder:1.5b-base 這類 fill-in-the-middle 基礎模型。經過指令微調的 chat 模型就算大得多，在這個任務上表現也不好。",
+			"sectionTitle": "補全模型",
+			"sectionDescription": "由哪個模型產生建議，以及如何連接它。",
+			"selectPlaceholder": "選擇或輸入模型 ID",
+			"customPlaceholder": "或輸入清單中沒有的模型 ID",
+			"refresh": "重新整理模型清單",
+			"fetchFailed": "無法連線端點：{{error}}"
+		},
+		"apiKey": {
+			"label": "API 金鑰",
+			"description": "儲存在 VS Code 的 Secret Storage，絕不會寫進匯出的設定。",
+			"storedPlaceholder": "已儲存金鑰。輸入即可取代。",
+			"emptyPlaceholder": "輸入你的 API 金鑰",
+			"optionalLabel": "API 金鑰（選填）",
+			"localDescription": "本機伺服器可留空。ollama.com、Codestral 等託管端點則必須填寫。"
+		},
+		"profiles": {
+			"label": "已儲存的設定",
+			"description": "儲存提供者、模型與調校的組合，以便在快速本機模型與更強的雲端模型之間切換。",
+			"none": "不使用已儲存的設定",
+			"namePlaceholder": "例如：本機 Qwen、雲端 Codestral",
+			"save": "將目前設定儲存",
+			"saveLabel": "為此設定命名",
+			"rename": "重新命名設定",
+			"renameLabel": "重新命名設定",
+			"delete": "刪除設定",
+			"confirm": "確認",
+			"cancel": "取消",
+			"limitReached": "已達到可儲存設定的上限。",
+			"unsavedChanges": "自儲存「{{name}}」後已有變更。再次儲存以保留這些值。"
+		},
+		"behavior": {
+			"sectionTitle": "行為",
+			"sectionDescription": "輸入時建議出現的時機。"
+		},
+		"advanced": {
+			"label": "進階設定"
+		},
+		"maxOutputTokens": {
+			"label": "建議最大長度",
+			"description": "單條建議的上限。數值越小回應越快，且很少截斷有用的程式碼。"
+		},
+		"connection": {
+			"needsKey": "請輸入 API 金鑰以載入該端點上可用的模型。",
+			"checking": "連線中…",
+			"connected": "已連線 — 有 {{count}} 個可用模型。",
+			"connectedLocal": "已連線。"
+		},
+		"chatProvider": {
+			"label": "聊天供應商",
+			"placeholder": "選擇供應商",
+			"description": "由哪個聊天供應商產生補全。與「供應商」分頁使用同一份清單；請在該處設定憑證。"
+		}
 	},
 	"about": {
 		"bugReport": {

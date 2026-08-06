@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "इनपुट/सुझाव स्वीकारें",
 	"command.showRipgrepDiagnostic.title": "Ripgrep डायग्नोस्टिक दिखाएं",
 	"command.toggleAutoApprove.title": "ऑटो-अनुमोदन टॉगल करें",
+	"command.triggerInlineCompletion.title": "इनलाइन पूर्णता ट्रिगर करें",
+	"command.toggleAutocomplete.title": "इनलाइन स्वतः पूर्णता टॉगल करें",
+	"command.autocompleteAccepted.title": "इनलाइन पूर्णता स्वीकृत",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Proxy से आने वाले self-signed certificates accept करो। **MITM inspection के लिए ज़रूरी।** ⚠️ Insecure — सिर्फ local debugging के लिए इस्तेमाल करो।",
 	"settings.workspace.rootResolution.description": "Multi-root workspace में Zoo workspace root को कैसे resolve करता है। Root का इस्तेमाल `.roomodes`, `.roo/mcp.json`, `.roo/rules/` और दूसरी project-scoped configuration ढूंढने के लिए होता है। इस setting को बदलने का असर सिर्फ आगे की lookups पर पड़ता है; चल रहे tasks अपना original root बनाए रखते हैं।",
 	"settings.workspace.rootResolution.activeEditor.description": "उस workspace folder का इस्तेमाल करो जिसमें active editor है; पहले workspace folder पर fall back करो। (Default — legacy behavior बनाए रखता है।)",
-	"settings.workspace.rootResolution.firstFolder.description": "हमेशा पहले workspace folder (workspaceFolders[0]) का इस्तेमाल करो। Deterministic — इस बात से स्वतंत्र कि अभी कौन सी file focused है।"
+	"settings.workspace.rootResolution.firstFolder.description": "हमेशा पहले workspace folder (workspaceFolders[0]) का इस्तेमाल करो। Deterministic — इस बात से स्वतंत्र कि अभी कौन सी file focused है।",
+	"settings.autocomplete.disabled.description": "Zoo Code के सेटिंग्स पैनल की सेटिंग चाहे जो हो, इस workspace के लिए Zoo Code की इनलाइन स्वतः पूर्णता बंद कर देता है। उन repositories के लिए उपयोगी जिनका कोड कभी किसी completion मॉडल को नहीं भेजा जाना चाहिए।",
+	"settings.autocomplete.debugLogging.description": "इनलाइन स्वतः पूर्णता का डायग्नोस्टिक डेटा — तैयार किया गया prompt, अनुरोध की latency और पोस्ट-प्रोसेसिंग निर्णय — Zoo-Code आउटपुट चैनल में लिखता है।"
 }

@@ -11,6 +11,7 @@ import { ContextProxy } from "../core/config/ContextProxy"
 import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
 import { CodeIndexManager } from "../services/code-index/manager"
+import { getAutocompleteService } from "../services/autocomplete/AutocompleteService"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
@@ -218,6 +219,28 @@ const getCommandsMap = ({
 		} catch (error) {
 			outputChannel.appendLine(`[toggleAutoApprove] postMessageToWebview failed: ${error}`)
 		}
+	},
+	triggerInlineCompletion: () => {
+		const service = getAutocompleteService()
+		if (!service) {
+			outputChannel.appendLine("[triggerInlineCompletion] Autocomplete service is not registered.")
+			return
+		}
+		service.triggerInlineCompletion()
+	},
+	toggleAutocomplete: async () => {
+		const service = getAutocompleteService()
+		if (!service) {
+			outputChannel.appendLine("[toggleAutocomplete] Autocomplete service is not registered.")
+			return
+		}
+		await service.toggleEnabled()
+	},
+	autocompleteAccepted: () => {
+		// Acceptance telemetry is captured by the completion engine (Phase 2) when
+		// it renders the item; the command exists so `InlineCompletionItem.command`
+		// has a stable target from day one.
+		return undefined
 	},
 })
 

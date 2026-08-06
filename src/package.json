@@ -169,6 +169,21 @@
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.triggerInlineCompletion",
+				"title": "%command.triggerInlineCompletion.title%",
+				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.toggleAutocomplete",
+				"title": "%command.toggleAutocomplete.title%",
+				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.autocompleteAccepted",
+				"title": "%command.autocompleteAccepted.title%",
+				"category": "%configuration.title%"
 			}
 		],
 		"menus": {
@@ -282,6 +297,14 @@
 				"mac": "cmd+alt+a",
 				"win": "ctrl+alt+a",
 				"linux": "ctrl+alt+a"
+			},
+			{
+				"command": "zoo-code.triggerInlineCompletion",
+				"key": "cmd+alt+\\",
+				"mac": "cmd+alt+\\",
+				"win": "ctrl+alt+\\",
+				"linux": "ctrl+alt+\\",
+				"when": "editorTextFocus && !editorReadonly"
 			}
 		],
 		"submenus": [
@@ -434,6 +457,18 @@
 					"scope": "machine",
 					"description": "%settings.workspace.rootResolution.description%",
 					"markdownDescription": "%settings.workspace.rootResolution.description%"
+				},
+				"zoo-code.autocomplete.disabled": {
+					"type": "boolean",
+					"default": false,
+					"description": "%settings.autocomplete.disabled.description%",
+					"markdownDescription": "%settings.autocomplete.disabled.description%"
+				},
+				"zoo-code.autocomplete.debugLogging": {
+					"type": "boolean",
+					"default": false,
+					"description": "%settings.autocomplete.debugLogging.description%",
+					"markdownDescription": "%settings.autocomplete.debugLogging.description%"
 				}
 			}
 		}

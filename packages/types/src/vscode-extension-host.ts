@@ -7,6 +7,7 @@ import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
 import type { ClineMessage, QueuedMessage } from "./message.js"
 import type { MarketplaceItem, MarketplaceInstalledMetadata, InstallMarketplaceItemOptions } from "./marketplace.js"
+import type { AutocompleteModelSummary } from "./autocomplete.js"
 import type { TodoItem } from "./todo.js"
 import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
@@ -43,6 +44,7 @@ export interface ExtensionMessage {
 		| "openAiModels"
 		| "ollamaModels"
 		| "lmStudioModels"
+		| "autocompleteModels"
 		| "vsCodeLmModels"
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
@@ -138,6 +140,8 @@ export interface ExtensionMessage {
 	openAiModels?: string[]
 	ollamaModels?: ModelRecord
 	lmStudioModels?: ModelRecord
+	/** Models offered by the configured autocomplete endpoint, plus any fetch error. */
+	autocompleteModels?: { models: AutocompleteModelSummary[]; error?: string }
 	vsCodeLmModels?: { vendor?: string; family?: string; version?: string; id?: string }[]
 	mcpServers?: McpServer[]
 	commits?: GitCommit[]
@@ -307,6 +311,9 @@ export type ExtensionState = Pick<
 	| "customCondensingPrompt"
 	| "codebaseIndexConfig"
 	| "codebaseIndexModels"
+	| "autocompleteConfig"
+	| "autocompleteProfiles"
+	| "activeAutocompleteProfileId"
 	| "profileThresholds"
 	| "includeDiagnosticMessages"
 	| "maxDiagnosticMessages"
@@ -332,6 +339,12 @@ export type ExtensionState = Pick<
 	apiConfiguration: ProviderSettings
 	uriScheme?: string
 	shouldShowAnnouncement: boolean
+
+	/**
+	 * Whether an autocomplete API key is stored. The key itself is never sent to the
+	 * webview: the settings input is write-only and this flag drives its placeholder.
+	 */
+	hasAutocompleteApiKey?: boolean
 
 	taskHistory: HistoryItem[]
 
@@ -479,6 +492,7 @@ export interface WebviewMessage {
 		| "requestOpenAiModels"
 		| "requestOllamaModels"
 		| "requestLmStudioModels"
+		| "requestAutocompleteModels"
 		| "requestRooModels"
 		| "requestVsCodeLmModels"
 		| "openImage"

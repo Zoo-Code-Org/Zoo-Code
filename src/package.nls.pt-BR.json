@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "Aceitar Entrada/Sugestão",
 	"command.showRipgrepDiagnostic.title": "Mostrar diagnóstico do Ripgrep",
 	"command.toggleAutoApprove.title": "Alternar Auto-Aprovação",
+	"command.triggerInlineCompletion.title": "Disparar preenchimento em linha",
+	"command.toggleAutocomplete.title": "Alternar preenchimento em linha",
+	"command.autocompleteAccepted.title": "Preenchimento em linha aceito",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Aceitar certificados self-signed do proxy. **Necessário para inspeção MITM.** ⚠️ Inseguro — use apenas para depuração local.",
 	"settings.workspace.rootResolution.description": "Como o Zoo resolve a raiz do workspace em um workspace multi-raiz. A raiz é usada para localizar `.roomodes`, `.roo/mcp.json`, `.roo/rules/` e outras configurações no escopo do projeto. Alterar esta configuração afeta apenas as buscas futuras; as tarefas em execução mantêm sua raiz original.",
 	"settings.workspace.rootResolution.activeEditor.description": "Usa a pasta do workspace que contém o editor ativo; recorre à primeira pasta do workspace. (Padrão — preserva o comportamento legado.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Usa sempre a primeira pasta do workspace (workspaceFolders[0]). Determinístico — independente de qual arquivo está em foco no momento."
+	"settings.workspace.rootResolution.firstFolder.description": "Usa sempre a primeira pasta do workspace (workspaceFolders[0]). Determinístico — independente de qual arquivo está em foco no momento.",
+	"settings.autocomplete.disabled.description": "Desativa o autocompletar inline do Zoo Code neste workspace, independentemente da configuração no painel de configurações do Zoo Code. Útil para repositórios cujo código nunca deve ir para um modelo de completion.",
+	"settings.autocomplete.debugLogging.description": "Escreve diagnósticos do autocompletar inline — o prompt gerado, a latência das requisições e as decisões de pós-processamento — no canal de saída Zoo-Code."
 }

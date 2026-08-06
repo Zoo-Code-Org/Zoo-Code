@@ -47,6 +47,10 @@ export const commandIds = [
 	"focusPanel",
 	"toggleAutoApprove",
 
+	"triggerInlineCompletion",
+	"toggleAutocomplete",
+	"autocompleteAccepted",
+
 	"showRipgrepDiagnostic",
 ] as const
 

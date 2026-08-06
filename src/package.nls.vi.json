@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "Chấp Nhận Đầu Vào/Gợi Ý",
 	"command.showRipgrepDiagnostic.title": "Hiển thị chẩn đoán Ripgrep",
 	"command.toggleAutoApprove.title": "Bật/Tắt Tự Động Phê Duyệt",
+	"command.triggerInlineCompletion.title": "Kích hoạt hoàn thành nội tuyến",
+	"command.toggleAutocomplete.title": "Chuyển đổi hoàn thành nội tuyến",
+	"command.autocompleteAccepted.title": "Hoàn thành nội tuyến được chấp nhận",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "Chấp nhận chứng chỉ self-signed từ proxy. **Bắt buộc cho việc kiểm tra MITM.** ⚠️ Không an toàn — chỉ dùng cho debug cục bộ.",
 	"settings.workspace.rootResolution.description": "Cách Zoo xác định gốc workspace trong một workspace nhiều gốc. Gốc được dùng để tìm `.roomodes`, `.roo/mcp.json`, `.roo/rules/` và các cấu hình khác ở phạm vi dự án. Thay đổi cài đặt này chỉ ảnh hưởng đến các lần tra cứu về sau; các tác vụ đang chạy vẫn giữ gốc ban đầu của chúng.",
 	"settings.workspace.rootResolution.activeEditor.description": "Dùng thư mục workspace chứa trình soạn thảo đang hoạt động; quay lại thư mục workspace đầu tiên. (Mặc định — giữ nguyên hành vi cũ.)",
-	"settings.workspace.rootResolution.firstFolder.description": "Luôn dùng thư mục workspace đầu tiên (workspaceFolders[0]). Mang tính xác định — không phụ thuộc vào tệp nào đang được focus."
+	"settings.workspace.rootResolution.firstFolder.description": "Luôn dùng thư mục workspace đầu tiên (workspaceFolders[0]). Mang tính xác định — không phụ thuộc vào tệp nào đang được focus.",
+	"settings.autocomplete.disabled.description": "Tắt tự động hoàn thành nội tuyến của Zoo Code cho không gian làm việc này, bất kể thiết lập trong bảng cài đặt của Zoo Code. Hữu ích cho các kho mà mã không bao giờ được gửi tới mô hình completion.",
+	"settings.autocomplete.debugLogging.description": "Ghi thông tin chẩn đoán của tự động hoàn thành nội tuyến — prompt đã dựng, độ trễ yêu cầu và các quyết định hậu xử lý — vào kênh output Zoo-Code."
 }

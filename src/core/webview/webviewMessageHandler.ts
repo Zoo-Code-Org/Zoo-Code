@@ -23,6 +23,8 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	autocompleteProviderIds,
+	type AutocompleteProviderId,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -33,6 +35,7 @@ import { saveTaskMessages } from "../task-persistence"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
+import { getAutocompleteService } from "../../services/autocomplete/AutocompleteService"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
@@ -86,6 +89,13 @@ import { getCommand } from "../../utils/commands"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
+
+/** Narrows an untrusted webview value to a known autocomplete provider id. */
+function toAutocompleteProviderId(value: unknown): AutocompleteProviderId | undefined {
+	return typeof value === "string" && (autocompleteProviderIds as readonly string[]).includes(value)
+		? (value as AutocompleteProviderId)
+		: undefined
+}
 
 import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
 import { setPendingTodoList } from "../tools/UpdateTodoListTool"
@@ -801,6 +811,11 @@ export const webviewMessageHandler = async (
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
 
+				// Refresh the inline autocomplete service *after* the loop: the settings
+				// payload may contain both `autocompleteConfig` and `autocompleteApiKey`,
+				// and Object.entries gives no ordering guarantee between them.
+				getAutocompleteService()?.handleSettingsChange()
+
 				await provider.postStateToWebview()
 			}
 
@@ -1360,6 +1375,46 @@ export const webviewMessageHandler = async (
 				// Silently fail - user hasn't configured LM Studio yet.
 				console.debug("LM Studio models fetch failed:", error)
 			}
+			break
+		}
+		case "requestAutocompleteModels": {
+			// Probes the endpoint the user is currently editing (values override the
+			// persisted config), so the picker works before Save is pressed.
+			const service = getAutocompleteService()
+
+			if (!service) {
+				await provider.postMessageToWebview({
+					type: "autocompleteModels",
+					autocompleteModels: { models: [], error: "Autocomplete is not available." },
+				})
+				break
+			}
+
+			const controller = new AbortController()
+			const timeout = setTimeout(() => controller.abort(), 10_000)
+
+			try {
+				const models = await service.listModels(controller.signal, {
+					provider: toAutocompleteProviderId(message.values?.provider),
+					baseUrl: typeof message.values?.baseUrl === "string" ? message.values.baseUrl : undefined,
+					apiKey: typeof message.values?.apiKey === "string" ? message.values.apiKey : undefined,
+				})
+
+				await provider.postMessageToWebview({ type: "autocompleteModels", autocompleteModels: { models } })
+			} catch (error) {
+				// Surfaced in the UI rather than swallowed: an unreachable endpoint is
+				// the single most common setup mistake, and silence looks like a bug.
+				await provider.postMessageToWebview({
+					type: "autocompleteModels",
+					autocompleteModels: {
+						models: [],
+						error: error instanceof Error ? error.message : String(error),
+					},
+				})
+			} finally {
+				clearTimeout(timeout)
+			}
+
 			break
 		}
 		case "requestRooModels": {

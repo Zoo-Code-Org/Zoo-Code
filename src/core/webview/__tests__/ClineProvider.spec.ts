@@ -1036,6 +1036,88 @@ describe("ClineProvider", () => {
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
 	})
 
+	test("getStateToPostToWebview returns a fully-defaulted autocompleteConfig when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.autocompleteConfig).toEqual({
+			enabled: false,
+			provider: "ollama",
+			modelId: undefined,
+			baseUrl: "http://localhost:11434",
+			chatFallbackProvider: undefined,
+			triggerMode: "automatic",
+			debounceMs: 300,
+			minCharsTyped: 0,
+			multilineMode: "auto",
+			contextLength: 8192,
+			maxPrefixTokens: 1024,
+			maxSuffixTokens: 512,
+			maxSnippetTokens: 512,
+			maxOutputTokens: 256,
+			temperature: 0.01,
+			requestTimeoutMs: 5_000,
+			useRecentlyEdited: true,
+			useOpenTabs: true,
+			useImportDefinitions: true,
+			useAst: true,
+			fimTemplate: "auto",
+			stopSequences: undefined,
+			disabledLanguages: [],
+		})
+		expect(state.hasAutocompleteApiKey).toBe(false)
+	})
+
+	test("getStateToPostToWebview echoes the saved autocompleteConfig and key presence", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("autocompleteConfig", {
+			enabled: true,
+			provider: "codestral",
+			modelId: "codestral-latest",
+			baseUrl: "https://codestral.mistral.ai",
+			triggerMode: "manual",
+			debounceMs: 0,
+		})
+		await provider.contextProxy.setValue("autocompleteApiKey", "sk-secret")
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.autocompleteConfig).toEqual(
+			expect.objectContaining({
+				enabled: true,
+				provider: "codestral",
+				modelId: "codestral-latest",
+				triggerMode: "manual",
+				debounceMs: 0,
+			}),
+		)
+		// The key itself never reaches the webview; only its presence is signaled.
+		expect(state).not.toHaveProperty("autocompleteApiKey")
+		expect(state.hasAutocompleteApiKey).toBe(true)
+	})
+
+	test("updateSettings persists autocompleteConfig and routes the key to secret storage", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		// mockWebviewView is typed `any`, so no explicit cast is needed on the chain.
+		const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0]
+
+		await messageHandler({
+			type: "updateSettings",
+			updatedSettings: {
+				autocompleteConfig: { enabled: true, provider: "codestral", modelId: "codestral-latest" },
+				autocompleteApiKey: "sk-secret",
+			},
+		})
+
+		expect(updateGlobalStateSpy).toHaveBeenCalledWith("autocompleteConfig", {
+			enabled: true,
+			provider: "codestral",
+			modelId: "codestral-latest",
+		})
+		expect(mockContext.secrets.store).toHaveBeenCalledWith("autocompleteApiKey", "sk-secret")
+	})
+
 	test("language is set to VSCode language", async () => {
 		// Mock VSCode language as Spanish
 		;(vscode.env as any).language = "pt-BR"

@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "提供商",
+		"autocomplete": "自动补全",
 		"modes": "模式",
 		"mcp": "MCP 服务",
 		"worktrees": "Worktrees",
@@ -43,6 +44,100 @@
 		"about": "关于 Zoo Code",
 		"skills": "Skills",
 		"rules": "规则"
+	},
+	"autocomplete": {
+		"description": "在你输入时出现的内联代码建议，由你选择的模型提供。它与 chat 模型分开运行，所以你可以用云端的大 chat 模型搭配一个小而快的本地 completion 模型。",
+		"enable": {
+			"label": "启用内联自动补全",
+			"description": "在光标处以幽灵文本形式给出代码建议。需要先打开 VS Code 的内联建议。"
+		},
+		"shortcuts": {
+			"label": "键盘快捷键",
+			"description": "按 Tab 采纳，按 Esc 取消，用 Alt+] 和 Alt+[ 切换候选。这些是 VS Code 自带的快捷键，可以在键盘快捷方式中修改。"
+		},
+		"triggerMode": {
+			"label": "输入时给出建议",
+			"description": "选择建议是自动出现，还是只在你主动调用时出现。这与 VS Code 的 quick suggestions 不是一回事，后者控制的是 IntelliSense 弹窗而不是幽灵文本。",
+			"options": {
+				"automatic": "输入时",
+				"manual": "只在我按快捷键时"
+			}
+		},
+		"debounce": {
+			"label": "给出建议前的延迟",
+			"description": "你停止输入后等待多久才去请求建议。数值越小越跟手，但请求也越多。"
+		},
+		"provider": {
+			"label": "提供方",
+			"description": "completion 的来源。前三项直接对接 fill-in-the-middle 端点，比向 chat 模型发送 prompt 要快得多也准得多。",
+			"options": {
+				"ollama": "Ollama（本地）",
+				"openai-compatible": "OpenAI 兼容（LM Studio、llama.cpp、vLLM）",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Chat 模型（较慢的兜底方案）"
+			},
+			"nativeFimHint": "直接与 fill-in-the-middle 端点通信，是最快且最准确的选项。",
+			"chatHint": "通过聊天路径调用。适用于任何提供商，但比 fill-in-the-middle 端点更慢、更不精确。",
+			"chatWarning": "该提供商以聊天模型方式调用。为获得最佳效果，请选择 Ollama、OpenAI 兼容服务器，或搭配 fill-in-the-middle 基础模型的 Codestral。"
+		},
+		"baseUrl": {
+			"label": "基础 URL"
+		},
+		"model": {
+			"label": "模型",
+			"description": "建议选用 qwen2.5-coder:1.5b-base 这类 fill-in-the-middle 基础模型。经过指令微调的 chat 模型即便大得多，在这个任务上表现也不好。",
+			"sectionTitle": "补全模型",
+			"sectionDescription": "由哪个模型生成建议，以及如何连接它。",
+			"selectPlaceholder": "选择或输入模型 ID",
+			"customPlaceholder": "或输入列表中没有的模型 ID",
+			"refresh": "刷新模型列表",
+			"fetchFailed": "无法连接端点：{{error}}"
+		},
+		"apiKey": {
+			"label": "API 密钥",
+			"description": "保存在 VS Code 的 Secret Storage 中，绝不会写入导出的设置。",
+			"storedPlaceholder": "已保存密钥。输入即可替换。",
+			"emptyPlaceholder": "输入你的 API 密钥",
+			"optionalLabel": "API 密钥（可选）",
+			"localDescription": "本地服务器可留空。ollama.com、Codestral 等托管端点则必须填写。"
+		},
+		"profiles": {
+			"label": "已保存的配置",
+			"description": "保存提供商、模型和调优的组合，以便在快速本地模型和更强的云端模型之间切换。",
+			"none": "不使用已保存的配置",
+			"namePlaceholder": "例如：本地 Qwen、云端 Codestral",
+			"save": "将当前设置保存为配置",
+			"saveLabel": "为此配置命名",
+			"rename": "重命名配置",
+			"renameLabel": "重命名配置",
+			"delete": "删除配置",
+			"confirm": "确认",
+			"cancel": "取消",
+			"limitReached": "已达到可保存配置的上限。",
+			"unsavedChanges": "自保存“{{name}}”后已有变更。再次保存以保留这些值。"
+		},
+		"behavior": {
+			"sectionTitle": "行为",
+			"sectionDescription": "输入时建议出现的时机。"
+		},
+		"advanced": {
+			"label": "高级设置"
+		},
+		"maxOutputTokens": {
+			"label": "建议最大长度",
+			"description": "单条建议的上限。数值越小响应越快，且很少截断有用的代码。"
+		},
+		"connection": {
+			"needsKey": "请输入 API 密钥以加载该端点上可用的模型。",
+			"checking": "正在连接…",
+			"connected": "已连接 — 有 {{count}} 个可用模型。",
+			"connectedLocal": "已连接。"
+		},
+		"chatProvider": {
+			"label": "聊天提供商",
+			"placeholder": "选择提供商",
+			"description": "由哪个聊天提供商生成补全。与“提供商”选项卡使用同一列表；请在那里配置凭据。"
+		}
 	},
 	"about": {
 		"bugReport": {

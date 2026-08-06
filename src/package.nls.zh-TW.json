@@ -16,6 +16,9 @@
 	"command.acceptInput.title": "接受輸入/建議",
 	"command.showRipgrepDiagnostic.title": "顯示 Ripgrep 診斷",
 	"command.toggleAutoApprove.title": "切換自動批准",
+	"command.triggerInlineCompletion.title": "觸發內聯補全",
+	"command.toggleAutocomplete.title": "切換內聯補全",
+	"command.autocompleteAccepted.title": "內聯補全已接受",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
@@ -48,5 +51,7 @@
 	"settings.debugProxy.tlsInsecure.description": "接受來自代理的 self-signed 憑證。**MITM 檢查所必需。** ⚠️ 不安全——只在本機偵錯時使用。",
 	"settings.workspace.rootResolution.description": "Zoo 在多根工作區中如何解析工作區根目錄。根目錄用於定位 `.roomodes`、`.roo/mcp.json`、`.roo/rules/` 以及其他專案範圍的設定。變更此設定僅影響後續查找；正在執行的工作會保留其原始根目錄。",
 	"settings.workspace.rootResolution.activeEditor.description": "使用包含使用中編輯器的工作區資料夾；回退到第一個工作區資料夾。（預設——保留舊行為。）",
-	"settings.workspace.rootResolution.firstFolder.description": "一律使用第一個工作區資料夾（workspaceFolders[0]）。具決定性——與目前聚焦的檔案無關。"
+	"settings.workspace.rootResolution.firstFolder.description": "一律使用第一個工作區資料夾（workspaceFolders[0]）。具決定性——與目前聚焦的檔案無關。",
+	"settings.autocomplete.disabled.description": "無論 Zoo Code 設定面板中的值為何，都為目前工作區關閉內嵌自動完成。適合那些絕不能把程式碼送給 completion 模型的儲存庫。",
+	"settings.autocomplete.debugLogging.description": "將內嵌自動完成的診斷資訊（產生的 prompt、請求延遲以及後處理決策）寫入 Zoo-Code 輸出頻道。"
 }

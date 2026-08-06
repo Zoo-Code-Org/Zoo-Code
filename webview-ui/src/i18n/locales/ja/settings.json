@@ -27,6 +27,7 @@
 	},
 	"sections": {
 		"providers": "プロバイダー",
+		"autocomplete": "自動補完",
 		"modes": "モード",
 		"mcp": "MCPサーバー",
 		"worktrees": "Worktrees",
@@ -43,6 +44,100 @@
 		"about": "Zoo Codeについて",
 		"skills": "Skills",
 		"rules": "ルール"
+	},
+	"autocomplete": {
+		"description": "入力中に表示されるインラインのコード候補です。使うモデルは自分で選べます。chat モデルとは別に動くので、大きなクラウドの chat モデルと、小さくて速いローカルの completion モデルを組み合わせられます。",
+		"enable": {
+			"label": "インライン自動補完を有効にする",
+			"description": "カーソル位置にゴーストテキストでコードを提案します。VS Code のインライン候補が有効になっている必要があります。"
+		},
+		"shortcuts": {
+			"label": "キーボードショートカット",
+			"description": "Tab で確定、Esc で取り消し、Alt+] と Alt+[ で候補を切り替えます。これらは VS Code 自身のショートカットで、キーボードショートカットの設定から変更できます。"
+		},
+		"triggerMode": {
+			"label": "入力中に候補を出す",
+			"description": "候補を自動で出すか、呼び出したときだけ出すかを選びます。これは VS Code の quick suggestions とは別物です。あちらはゴーストテキストではなく IntelliSense のポップアップを制御します。",
+			"options": {
+				"automatic": "入力中に出す",
+				"manual": "ショートカットを押したときだけ"
+			}
+		},
+		"debounce": {
+			"label": "候補を出すまでの待ち時間",
+			"description": "入力が止まってから候補を要求するまでの待ち時間です。短いほど機敏に感じますが、リクエストは増えます。"
+		},
+		"provider": {
+			"label": "プロバイダー",
+			"description": "completion の取得元です。最初の 3 つは fill-in-the-middle のエンドポイントに直接接続するため、chat モデルに prompt を送るよりずっと速く正確です。",
+			"options": {
+				"ollama": "Ollama（ローカル）",
+				"openai-compatible": "OpenAI 互換（LM Studio、llama.cpp、vLLM）",
+				"codestral": "Mistral Codestral",
+				"chat-fallback": "Chat モデル（低速なフォールバック）"
+			},
+			"nativeFimHint": "fill-in-the-middle エンドポイントと直接通信します。最も高速かつ正確な選択肢です。",
+			"chatHint": "チャット経路を使用します。どのプロバイダーでも動作しますが、fill-in-the-middle エンドポイントより低速で精度も劣ります。",
+			"chatWarning": "このプロバイダーはチャットモデルとして扱われます。最良の結果を得るには Ollama、OpenAI 互換サーバー、または fill-in-the-middle ベースモデルの Codestral を選んでください。"
+		},
+		"baseUrl": {
+			"label": "ベース URL"
+		},
+		"model": {
+			"label": "モデル",
+			"description": "qwen2.5-coder:1.5b-base のような fill-in-the-middle のベースモデルがおすすめです。命令調整済みの chat モデルは、はるかに大きくてもこの用途では精度が出ません。",
+			"sectionTitle": "補完モデル",
+			"sectionDescription": "どのモデルが提案を生成し、どこに接続するか。",
+			"selectPlaceholder": "モデル ID を選択または入力",
+			"customPlaceholder": "一覧にないモデル ID を入力",
+			"refresh": "モデル一覧を更新",
+			"fetchFailed": "エンドポイントに接続できませんでした: {{error}}"
+		},
+		"apiKey": {
+			"label": "API キー",
+			"description": "VS Code の Secret Storage に保存され、エクスポートした設定には含まれません。",
+			"storedPlaceholder": "キーは保存済みです。入力すると置き換わります。",
+			"emptyPlaceholder": "API キーを入力",
+			"optionalLabel": "API キー（任意）",
+			"localDescription": "ローカルサーバーでは空のままで構いません。ollama.com や Codestral などのホスト型エンドポイントでは必須です。"
+		},
+		"profiles": {
+			"label": "保存された設定",
+			"description": "プロバイダー・モデル・調整の組み合わせを保存し、高速なローカルモデルと強力なクラウドモデルを切り替えられます。",
+			"none": "保存された設定を使用しない",
+			"namePlaceholder": "例: ローカル Qwen、クラウド Codestral",
+			"save": "現在の設定を保存",
+			"saveLabel": "この設定に名前を付ける",
+			"rename": "設定の名前を変更",
+			"renameLabel": "設定の名前を変更",
+			"delete": "設定を削除",
+			"confirm": "確定",
+			"cancel": "キャンセル",
+			"limitReached": "保存できる設定の上限に達しました。",
+			"unsavedChanges": "「{{name}}」の保存後に変更されています。この値を保つには再度保存してください。"
+		},
+		"behavior": {
+			"sectionTitle": "動作",
+			"sectionDescription": "入力中に提案が表示されるタイミング。"
+		},
+		"advanced": {
+			"label": "詳細設定"
+		},
+		"maxOutputTokens": {
+			"label": "提案の最大長",
+			"description": "1 つの提案の上限。小さい値ほど応答が速く、有用なコードが切れることはほとんどありません。"
+		},
+		"connection": {
+			"needsKey": "このエンドポイントの利用可能なモデルを読み込むには API キーを入力してください。",
+			"checking": "接続中…",
+			"connected": "接続済み — {{count}} 個のモデルが利用可能です。",
+			"connectedLocal": "接続済み。"
+		},
+		"chatProvider": {
+			"label": "チャットプロバイダー",
+			"placeholder": "プロバイダーを選択",
+			"description": "どのチャットプロバイダーが補完を生成するか。「プロバイダー」タブと同じ一覧を使用します。認証情報はそちらで設定してください。"
+		}
 	},
 	"about": {
 		"bugReport": {
