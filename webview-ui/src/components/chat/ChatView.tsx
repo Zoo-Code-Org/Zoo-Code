@@ -8,7 +8,8 @@ import { LRUCache } from "lru-cache"
 import { useDebounceEffect } from "@src/utils/useDebounceEffect"
 import { appendImages } from "@src/utils/imageUtils"
 import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
-import { batchConsecutive } from "@src/utils/batchConsecutive"
+import { batchNearby } from "@src/utils/batchNearby"
+import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
 import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
 import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
@@ -1279,10 +1280,27 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 		}
 
-		// Consolidate consecutive ask messages into batches
-		const readFileBatched = batchConsecutive(filtered, isReadFileAsk, synthesizeReadFileBatch)
-		const listFilesBatched = batchConsecutive(readFileBatched, isListFilesAsk, synthesizeListFilesBatch)
-		const result = batchConsecutive(listFilesBatched, isEditFileAsk, synthesizeEditFileBatch)
+		// Consolidate tool asks into batches, allowing ignorable messages between targets.
+		// batchNearby skips over api_req_started, empty text rows, and reasoning rows that
+		// models like qwen insert between tool calls during streaming.
+		const readFileBatched = batchNearby(filtered, {
+			isTarget: isReadFileAsk,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeReadFileBatch,
+		})
+		const listFilesBatched = batchNearby(readFileBatched, {
+			isTarget: isListFilesAsk,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeListFilesBatch,
+		})
+		const result = batchNearby(listFilesBatched, {
+			isTarget: isEditFileAsk,
+			isIgnorableBetweenTargets,
+			isBoundary,
+			synthesize: synthesizeEditFileBatch,
+		})
 
 		if (isCondensing) {
 			result.push({

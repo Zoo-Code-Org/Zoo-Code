@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Recherche de '{{query}}' dans la base de code..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard a bloqué cette commande.",
+			"blockedWithReason": "Destructive Command Guard a bloqué cette commande. Message de DCG : {{reason}}",
+			"blockedWithRule": "Destructive Command Guard a bloqué cette commande. (Règle : {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard a bloqué cette commande. Message de DCG : {{reason}} (Règle : {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Impossible de créer une nouvelle tâche en raison de restrictions de politique."

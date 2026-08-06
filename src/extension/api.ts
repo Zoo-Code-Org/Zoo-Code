@@ -23,6 +23,7 @@ import {
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
+import type { Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -505,6 +506,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	public async setConfiguration(values: RooCodeSettings) {
 		await this.sidebarProvider.contextProxy.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		if (values.modeApiConfigs) {
+			await Promise.all(
+				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+				),
+			)
+		}
 		await this.sidebarProvider.postStateToWebview()
 	}
 

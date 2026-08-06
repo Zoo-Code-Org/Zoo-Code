@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Ricerca di '{{query}}' nella base di codice..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard ha bloccato questo comando.",
+			"blockedWithReason": "Destructive Command Guard ha bloccato questo comando. Messaggio da DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard ha bloccato questo comando. (Regola: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard ha bloccato questo comando. Messaggio da DCG: {{reason}} (Regola: {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Impossibile creare una nuova attività a causa di restrizioni di policy."

@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Ausführen",
 			"description": "Erlaubte Terminal-Befehle automatisch ohne Genehmigung ausführen",
+			"destructiveCommandGuard": {
+				"label": "Schutz vor destruktiven Befehlen aktivieren",
+				"description": "Lädt Destructive Command Guard (DCG) für diese Plattform herunter und verwendet es. Von DCG erlaubte Befehle werden automatisch ausgeführt. Von DCG blockierte Befehle benötigen deine Zustimmung. Die Befehlslisten von Zoo sind währenddessen deaktiviert. Die heruntergeladene ausführbare Datei bleibt erhalten, wenn du die Option ausschaltest."
+			},
 			"allowedCommands": "Erlaubte Auto-Ausführungsbefehle",
 			"allowedCommandsDescription": "Befehlspräfixe, die automatisch ausgeführt werden können, wenn 'Ausführungsoperationen immer genehmigen' aktiviert ist. Fügen Sie * hinzu, um alle Befehle zu erlauben (mit Vorsicht verwenden).",
 			"deniedCommands": "Verweigerte Befehle",
