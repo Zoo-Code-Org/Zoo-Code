@@ -94,6 +94,21 @@ const HistoryPreviewInner = memo(() => {
 		})
 	}, [])
 
+	// Expanded state for pinned folder shortcut cards (inline member list).
+	const [expandedPinnedFolderIds, setExpandedPinnedFolderIds] = useState<Set<string>>(new Set())
+
+	const togglePinnedFolderExpand = useCallback((folderId: string) => {
+		setExpandedPinnedFolderIds((prev) => {
+			const next = new Set(prev)
+			if (next.has(folderId)) {
+				next.delete(folderId)
+			} else {
+				next.add(folderId)
+			}
+			return next
+		})
+	}, [])
+
 	const handleViewAllHistory = () => {
 		vscode.postMessage({ type: "switchTab", tab: "history" })
 	}
@@ -169,6 +184,10 @@ const HistoryPreviewInner = memo(() => {
 									const target = pin.target
 									if (target.kind === "folder") {
 										const folder = organization.folders.find((f) => f.folderId === target.folderId)
+										const folderProjection = projection.folderProjections.find(
+											(p) => p.folderId === target.folderId,
+										)
+										const memberGroups = folderProjection?.members ?? []
 										return (
 											<PinnedHistoryItem
 												key={`preview-pin-folder-${target.folderId}`}
@@ -176,8 +195,35 @@ const HistoryPreviewInner = memo(() => {
 												isPinned
 												canPin={canPin}
 												onTogglePin={() => void togglePin(target)}
-												data-testid={`preview-pinned-folder-${target.folderId}`}
-											/>
+												isExpanded={expandedPinnedFolderIds.has(target.folderId)}
+												onClick={() => togglePinnedFolderExpand(target.folderId)}
+												data-testid={`preview-pinned-folder-${target.folderId}`}>
+												{memberGroups.length > 0
+													? memberGroups.map((memberGroup) => (
+															<TaskGroupItem
+																key={memberGroup.parent.id}
+																group={memberGroup}
+																variant="compact"
+																onToggleExpand={() =>
+																	toggleExpand(memberGroup.parent.id)
+																}
+																onToggleSubtaskExpand={toggleExpand}
+																showPin
+																isPinned={isPinned({
+																	kind: "task",
+																	taskId: memberGroup.parent.id,
+																})}
+																canPin={canPin}
+																onTogglePin={() =>
+																	togglePin({
+																		kind: "task",
+																		taskId: memberGroup.parent.id,
+																	})
+																}
+															/>
+														))
+													: undefined}
+											</PinnedHistoryItem>
 										)
 									}
 									const rootId =

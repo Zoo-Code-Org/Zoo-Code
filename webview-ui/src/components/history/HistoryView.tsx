@@ -277,6 +277,21 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 		})
 	}, [])
 
+	// Expanded state for pinned folder shortcut cards (inline member list).
+	const [expandedPinnedFolderIds, setExpandedPinnedFolderIds] = useState<Set<string>>(new Set())
+
+	const togglePinnedFolderExpand = useCallback((folderId: string) => {
+		setExpandedPinnedFolderIds((prev) => {
+			const next = new Set(prev)
+			if (next.has(folderId)) {
+				next.delete(folderId)
+			} else {
+				next.add(folderId)
+			}
+			return next
+		})
+	}, [])
+
 	// Resolve the active drag's source unit for the DragOverlay label.
 	// History owns the data (tasks, folder names) needed for a readable label;
 	// the shared surface owns the overlay itself.
@@ -330,6 +345,10 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 					const target = pin.target
 					if (target.kind === "folder") {
 						const folder = organization.folders.find((f) => f.folderId === target.folderId)
+						const folderProjection = projection.folderProjections.find(
+							(p) => p.folderId === target.folderId,
+						)
+						const memberGroups = folderProjection?.members ?? []
 						return (
 							<PinnedHistoryItem
 								key={`pin-folder-${target.folderId}`}
@@ -337,8 +356,33 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 								isPinned
 								canPin={canPin}
 								onTogglePin={() => void togglePin(target)}
-								data-testid={`pinned-folder-${target.folderId}`}
-							/>
+								isExpanded={expandedPinnedFolderIds.has(target.folderId)}
+								onClick={() => togglePinnedFolderExpand(target.folderId)}
+								data-testid={`pinned-folder-${target.folderId}`}>
+								{memberGroups.length > 0
+									? memberGroups.map((memberGroup) => {
+											const rootId = memberGroup.parent.id
+											return (
+												<TaskGroupItem
+													key={rootId}
+													group={memberGroup}
+													variant="compact"
+													showWorkspace={showAllWorkspaces}
+													isSelectionMode={isSelectionMode}
+													isSelected={selectedTaskIds.includes(rootId)}
+													onToggleSelection={toggleTaskSelection}
+													onDelete={handleDelete}
+													onToggleExpand={() => toggleExpand(rootId)}
+													onToggleSubtaskExpand={toggleExpand}
+													showPin
+													isPinned={isPinned({ kind: "task", taskId: rootId })}
+													canPin={canPin}
+													onTogglePin={() => void togglePin({ kind: "task", taskId: rootId })}
+												/>
+											)
+										})
+									: undefined}
+							</PinnedHistoryItem>
 						)
 					}
 					const rootId =
