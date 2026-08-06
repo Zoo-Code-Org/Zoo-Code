@@ -242,6 +242,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	protected options: ApiHandlerOptions
 	protected models: Record<string, ModelInfo> = {}
 	private warnedKeyDropped = false
+	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -661,10 +662,34 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * discovery fetch (both /api/tags and /api/show) so an aborted or
 	 * timed-out request is cancelled at the network level instead of
 	 * settling in the background.
+	 *
+	 * The fetch is single-flight and is skipped once the catalog is
+	 * populated, so per-request callers (createMessage, completePrompt) do
+	 * not repeat the discovery requests on every message. A failed fetch
+	 * clears the in-flight promise so the next call retries.
 	 */
 	async fetchModel(signal?: AbortSignal) {
-		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey, { signal })
-		return this.getModel()
+		if (Object.keys(this.models).length > 0) {
+			return this.getModel()
+		}
+
+		if (!this.modelFetchPromise) {
+			const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+			this.modelFetchPromise = getOllamaModels(
+				this.options.ollamaBaseUrl,
+				this.options.ollamaApiKey,
+				...fetchOpts,
+			)
+				.then((models) => {
+					this.models = models
+					return this.getModel()
+				})
+				.finally(() => {
+					this.modelFetchPromise = undefined
+				})
+		}
+
+		return this.modelFetchPromise
 	}
 
 	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
