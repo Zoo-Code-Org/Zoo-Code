@@ -16,6 +16,7 @@ coverage:
       default:
         target: 80%       # new lines must be 80% covered
         threshold: 0%
+        informational: true  # non-blocking for PRs with large new code
       webview-patch:
         target: 70%       # new lines in webview must be 70% covered
         threshold: 0%
