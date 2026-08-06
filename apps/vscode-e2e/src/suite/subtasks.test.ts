@@ -660,7 +660,8 @@ suite("Roo Code Subtasks", function () {
 			...parentProfile,
 			openRouterModelId: "openai/gpt-4.1-mini",
 		}
-		const priorModeApiConfigs = api.getConfiguration().modeApiConfigs ?? {}
+		const priorConfiguration = api.getConfiguration()
+		const priorActiveProfile = api.getActiveProfile()
 		const parentProfileId = await api.upsertProfile("subtask-parent-profile", parentProfile, true)
 		const childProfileId = await api.upsertProfile("subtask-child-profile", childProfile, false)
 		await api.setConfiguration({
@@ -735,7 +736,10 @@ suite("Roo Code Subtasks", function () {
 			)
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			await api.setConfiguration({ modeApiConfigs: priorModeApiConfigs })
+			await api.setConfiguration(priorConfiguration)
+			if (priorActiveProfile) {
+				await api.setActiveProfile(priorActiveProfile)
+			}
 			await api.deleteProfile("subtask-child-profile").catch(() => {})
 			await api.deleteProfile("subtask-parent-profile").catch(() => {})
 			while (api.getCurrentTaskStack().length > 0) {

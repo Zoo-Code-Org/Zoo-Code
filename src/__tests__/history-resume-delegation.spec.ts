@@ -26,7 +26,7 @@ vi.mock("vscode", () => {
 	return { window, workspace, env, Uri, commands, ExtensionMode, version }
 })
 
-// Mock TelemetryService (needed by attemptCompletionTool's emitTaskCompleted)
+// Mock TelemetryService (needed by attemptCompletionTool's emitPublicTaskCompleted)
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
@@ -1255,6 +1255,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				userMessageContent: [],
 				consecutiveMistakeCount: 0,
 				emitFinalTokenUsageUpdate: vi.fn(),
+				flushTelemetryInstallment: vi.fn(),
 			} as unknown as import("../core/task/Task").Task
 
 			const block = {

@@ -16,6 +16,7 @@ const mockVirtuosoState = vi.hoisted(() => ({
 		defaultItemHeight?: number
 		increaseViewportBy?: number | { top?: number; bottom?: number }
 	} | null,
+	lastData: [] as ClineMessage[],
 }))
 
 // Define minimal types needed for testing
@@ -111,6 +112,7 @@ vi.mock("react-virtuoso", () => ({
 			defaultItemHeight,
 			increaseViewportBy,
 		}
+		mockVirtuosoState.lastData = data
 
 		return (
 			<div data-testid="virtuoso-item-list">
@@ -287,6 +289,22 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			</button>
 		)
 	},
+	VSCodeCheckbox: function MockVSCodeCheckbox({
+		children,
+		checked,
+		onChange,
+	}: {
+		children: React.ReactNode
+		checked?: boolean
+		onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
+	}) {
+		return (
+			<label>
+				<input type="checkbox" checked={checked} onChange={onChange} />
+				{children}
+			</label>
+		)
+	},
 	VSCodeTextField: function MockVSCodeTextField({
 		value,
 		onInput,
@@ -307,6 +325,9 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	},
 	VSCodeLink: function MockVSCodeLink({ children, href }: { children: React.ReactNode; href?: string }) {
 		return <a href={href}>{children}</a>
+	},
+	VSCodeProgressRing: function MockVSCodeProgressRing() {
+		return <div data-testid="vscode-progress-ring" />
 	},
 }))
 
@@ -348,6 +369,55 @@ const renderChatView = (props: Partial<ChatViewProps> = {}) => {
 		</ExtensionStateContextProvider>,
 	)
 }
+
+describe("ChatView - Tool Batching Tests", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it("batches readFile asks separated by an API request row", async () => {
+		renderChatView()
+
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: 1,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 2,
+					text: JSON.stringify({ tool: "readFile", path: "a.ts" }),
+				},
+				{
+					type: "say",
+					say: "api_req_started",
+					ts: 3,
+					text: JSON.stringify({ apiProtocol: "anthropic" }),
+				},
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 4,
+					text: JSON.stringify({ tool: "readFile", path: "b.ts" }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			const toolRows = mockVirtuosoState.lastData.filter(
+				(message) => message.type === "ask" && message.ask === "tool",
+			)
+			const [toolRow] = toolRows
+
+			expect(toolRows).toHaveLength(1)
+			expect(toolRow?.text).toContain('"batchFiles"')
+			expect(toolRow?.text).toContain('"path":"a.ts"')
+			expect(toolRow?.text).toContain('"path":"b.ts"')
+		})
+	})
+})
 
 describe("ChatView - Sound Playing Tests", () => {
 	beforeEach(() => vi.clearAllMocks())
