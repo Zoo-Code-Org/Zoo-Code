@@ -34,6 +34,7 @@ import { ZooGatewayHandler, classifyGatewayApiError, toGatewayStreamError } from
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -140,12 +141,7 @@ describe("ZooGatewayHandler", () => {
 	}
 
 	async function drainCreateMessage(handler: ZooGatewayHandler) {
-		const stream = handler.createMessage("system", [{ role: "user", content: "hi" }])
-		const out: unknown[] = []
-		for await (const chunk of stream) {
-			out.push(chunk)
-		}
-		return out
+		return collectStream(handler.createMessage("system", [{ role: "user", content: "hi" }]))
 	}
 
 	describe("constructor", () => {
@@ -231,13 +227,13 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		beforeEach(() => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [{ delta: { content: "Test response" }, index: 0 }],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: {
 							prompt_tokens: 10,
@@ -247,30 +243,25 @@ describe("ZooGatewayHandler", () => {
 							prompt_tokens_details: { cached_tokens: 3 },
 							cost: 0.005,
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 		})
 
 		it("requires authentication at request time when no session token is available", async () => {
 			const handler = new ZooGatewayHandler({})
 			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
 
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// drain
-				}
-			}).rejects.toThrow("Zoo Gateway requires authentication. Please sign in to Zoo Code first.")
+			await expect(collectStream(stream)).rejects.toThrow(
+				"Zoo Gateway requires authentication. Please sign in to Zoo Code first.",
+			)
 		})
 
 		it("streams text and usage chunks", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
 
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toEqual([
 				{ type: "text", text: "Test response" },
@@ -343,9 +334,9 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("yields tool_call_partial chunks when streaming tool calls", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -360,15 +351,12 @@ describe("ZooGatewayHandler", () => {
 								index: 0,
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
-			const chunks = []
-			for await (const chunk of handler.createMessage("prompt", [])) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("prompt", []))
 
 			expect(chunks).toEqual([
 				{
@@ -382,17 +370,17 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("throws the upstream reason when the gateway sends an in-stream error chunk", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						error: {
 							message: "Too many requests, please wait before trying again",
 							status: 429,
 							code: "rate_limited",
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
 
@@ -402,17 +390,17 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("surfaces the add-credits prompt when an in-stream error carries a budget code", async () => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						error: {
 							message: "Monthly budget exceeded",
 							status: 429,
 							code: "monthly_budget_exceeded",
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new ZooGatewayHandler(mockOptions)
 

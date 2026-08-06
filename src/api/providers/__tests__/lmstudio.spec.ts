@@ -1,4 +1,6 @@
 // Mock OpenAI client - must come before other imports
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
@@ -26,32 +28,30 @@ vi.mock("openai", () => {
 								}
 							}
 
-							return {
-								[Symbol.asyncIterator]: async function* () {
-									yield {
-										choices: [
-											{
-												delta: { content: "Test response" },
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-									yield {
-										choices: [
-											{
-												delta: {},
-												index: 0,
-											},
-										],
-										usage: {
-											prompt_tokens: 10,
-											completion_tokens: 5,
-											total_tokens: 15,
+							return asyncStreamFrom([
+								{
+									choices: [
+										{
+											delta: { content: "Test response" },
+											index: 0,
 										},
-									}
+									],
+									usage: null,
 								},
-							}
+								{
+									choices: [
+										{
+											delta: {},
+											index: 0,
+										},
+									],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
+									},
+								},
+							])
 						}),
 					},
 				},
@@ -104,11 +104,7 @@ describe("LmStudioHandler", () => {
 		]
 
 		it("should handle streaming responses", async () => {
-			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -121,11 +117,7 @@ describe("LmStudioHandler", () => {
 
 			const stream = handler.createMessage(systemPrompt, messages)
 
-			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should not reach here
-				}
-			}).rejects.toThrow(
+			await expect(collectStream(stream)).rejects.toThrow(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		})
