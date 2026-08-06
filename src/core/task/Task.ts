@@ -136,6 +136,7 @@ import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
+import { shouldAddUserMessageToHistory } from "./messageCounting"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
@@ -428,6 +429,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	consecutiveNoAssistantMessagesCount: number = 0
 	toolUsage: ToolUsage = {}
 
+	// Conversation message counts, summarized once per Task Completed
+	// installment instead of emitting a separate telemetry event per turn.
+	messageCounts: { user: number; assistant: number } = { user: 0, assistant: 0 }
+
+	// Idle/shutdown telemetry flush: reports toolUsage/messageCounts for tasks that
+	// go quiet or get torn down without the model ever calling attempt_completion
+	// (or without the user accepting it), so long-running/abandoned tasks aren't
+	// invisible to telemetry. Each flush reports only what changed since the previous
+	// one, tracked via telemetryToolUsageBaseline/telemetryMessageCountsBaseline --
+	// task.toolUsage/messageCounts themselves are never mutated by this, since they're
+	// also read as running totals by the public TaskCompleted API event and the UI.
+	// Checked on an interval rather than hooked into every say()/ask() call site.
+	private static readonly IDLE_TELEMETRY_CHECK_INTERVAL_MS = 5 * 60 * 1000
+	private static readonly IDLE_TELEMETRY_THRESHOLD_MS = 30 * 60 * 1000
+	private idleTelemetryCheckInterval?: NodeJS.Timeout
+	private lastTelemetryFlushAt: number = Date.now()
+	private telemetryToolUsageBaseline: ToolUsage = {}
+	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
+
 	// Checkpoints
 	enableCheckpoints: boolean
 	checkpointTimeout: number
@@ -516,7 +536,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private readonly _isHistoryTask: boolean
 	// No streaming parser is required.
 	assistantMessageParser?: undefined
-	private providerProfileChangeListener?: (config: { name: string; provider?: string }) => void
 
 	// Native tool call streaming state (track which index each tool is at)
 	private streamingToolCallIndices: Map<string, number> = new Map()
@@ -686,9 +705,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.messageQueueService.on("stateChanged", this.messageQueueStateChangedHandler)
 
-		// Listen for provider profile changes to update parser state
-		this.setupProviderProfileChangeListener(provider)
-
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
 
@@ -725,6 +741,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		if (startTask) {
 			this._started = true
+			this.startIdleTelemetryCheck()
 			if (task || images) {
 				void this.startTask(task, images).catch((error) => {
 					console.error("[Task#constructor] startTask failed:", error)
@@ -812,35 +829,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const errorMessage = `Failed to initialize task API config name: ${error instanceof Error ? error.message : String(error)}`
 			provider.log(errorMessage)
 		}
-	}
-
-	/**
-	 * Sets up a listener for provider profile changes.
-	 *
-	 * @private
-	 * @param provider - The ClineProvider instance to listen to
-	 */
-	private setupProviderProfileChangeListener(provider: ClineProvider): void {
-		// Only set up listener if provider has the on method (may not exist in test mocks)
-		if (typeof provider.on !== "function") {
-			return
-		}
-
-		this.providerProfileChangeListener = async () => {
-			try {
-				const newState = await provider.getState()
-				if (newState?.apiConfiguration) {
-					this.updateApiConfiguration(newState.apiConfiguration)
-				}
-			} catch (error) {
-				console.error(
-					`[Task#${this.taskId}.${this.instanceId}] Failed to update API configuration on profile change:`,
-					error,
-				)
-			}
-		}
-
-		provider.on(RooCodeEventName.ProviderProfileChanged, this.providerProfileChangeListener)
 	}
 
 	/**
@@ -1004,6 +992,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const instance = new Task({ ...options, startTask: false })
 		const { images, task, historyItem } = options
 		let promise
+
+		instance.startIdleTelemetryCheck()
 
 		if (images || task) {
 			promise = instance.startTask(task, images)
@@ -1309,6 +1299,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const state = provider ? await provider.getState() : undefined
 		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
+		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
@@ -1372,6 +1363,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.isProtected = isProtected
 					if (isAutoAnswered) {
 						lastMessage.isAnswered = true
+						lastMessage.autoApprovalDecision = autoApprovalDecision
 					}
 					await this.saveClineMessages()
 					// Fire-and-forget: see updateClineMessage call above for the
@@ -1393,6 +1385,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						text,
 						isProtected,
 						isAnswered: isAutoAnswered || undefined,
+						autoApprovalDecision,
 					})
 				}
 			}
@@ -1410,6 +1403,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				text,
 				isProtected,
 				isAnswered: isAutoAnswered || undefined,
+				autoApprovalDecision,
 			})
 		}
 
@@ -1661,6 +1655,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (provider) {
 				if (mode) {
 					await provider.setMode(mode)
+					this._taskMode = mode
 				}
 
 				if (providerProfile) {
@@ -1669,6 +1664,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Update this task's API configuration to match the new profile
 					// This ensures the parser state is synchronized with the selected model
 					const newState = await provider.getState()
+					this.setTaskApiConfigName(newState?.currentApiConfigName ?? providerProfile)
 					if (newState?.apiConfiguration) {
 						this.updateApiConfiguration(newState.apiConfiguration)
 					}
@@ -1715,7 +1711,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Get condensing configuration
 		const state = await this.providerRef.deref()?.getState()
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
-		const { mode, apiConfiguration } = state ?? {}
+		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens: prevContextTokens } = this.getTokenUsage()
 
@@ -2002,6 +2000,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 		this._started = true
+		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -2026,6 +2025,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return Promise.resolve()
 		}
 		this._started = true
+		this.startIdleTelemetryCheck()
 
 		const { task, images } = this.metadata
 
@@ -2394,24 +2394,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 
+		// Stop the idle telemetry check and report any unflushed activity as a
+		// shutdown installment, so a task torn down mid-work (panel closed, task
+		// switched, extension deactivated) isn't invisible to telemetry.
+		try {
+			clearInterval(this.idleTelemetryCheckInterval)
+			this.idleTelemetryCheckInterval = undefined
+			this.flushTelemetryInstallment("shutdown")
+		} catch (error) {
+			console.error("Error flushing shutdown telemetry:", error)
+		}
+
 		// Cancel any in-progress HTTP request
 		try {
 			this.cancelCurrentRequest()
 		} catch (error) {
 			console.error("Error cancelling current request:", error)
-		}
-
-		// Remove provider profile change listener
-		try {
-			if (this.providerProfileChangeListener) {
-				const provider = this.providerRef.deref()
-				if (provider) {
-					provider.off(RooCodeEventName.ProviderProfileChanged, this.providerProfileChangeListener)
-				}
-				this.providerProfileChangeListener = undefined
-			}
-		} catch (error) {
-			console.error("Error removing provider profile change listener:", error)
 		}
 
 		// Dispose message queue and remove event listeners.
@@ -2705,7 +2703,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const showRooIgnoredFiles = state?.showRooIgnoredFiles ?? false
 			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
-			const currentMode = state?.mode ?? defaultModeSlug
+			const currentMode = await this.getTaskMode()
 
 			const { content: parsedUserContent, mode: slashCommandMode } = await processUserContentMentions({
 				userContent: currentUserContent,
@@ -2753,18 +2751,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Add environment details as its own text block, separate from tool
 			// results.
 			const finalUserContent = [...contentWithoutEnvDetails, { type: "text" as const, text: environmentDetails }]
-			// Only add user message to conversation history if:
-			// 1. This is the first attempt (retryAttempt === 0), AND
-			// 2. The original userContent was not empty (empty signals delegation resume where
-			//    the user message with tool_result and env details is already in history), OR
-			// 3. The message was removed in a previous iteration (userMessageWasRemoved === true)
-			// This prevents consecutive user messages while allowing re-add when needed
+			// See shouldAddUserMessageToHistory for the full add/skip rules (retry/empty/removed).
 			const isEmptyUserContent = currentUserContent.length === 0
-			const shouldAddUserMessage =
-				((currentItem.retryAttempt ?? 0) === 0 && !isEmptyUserContent) || currentItem.userMessageWasRemoved
+			const shouldAddUserMessage = shouldAddUserMessageToHistory({
+				retryAttempt: currentItem.retryAttempt,
+				isEmptyUserContent,
+				userMessageWasRemoved: currentItem.userMessageWasRemoved,
+			})
 			if (shouldAddUserMessage) {
 				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
-				TelemetryService.instance.captureConversationMessage(this.taskId, "user")
+				this.messageCounts.user++
 			}
 
 			// Since we sent off a placeholder api_req_started message to update the
@@ -3762,7 +3758,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					)
 					this.assistantMessageSavedToHistory = true
 
-					TelemetryService.instance.captureConversationMessage(this.taskId, "assistant")
+					this.messageCounts.assistant++
 				}
 
 				// Present any partial blocks that were just completed.
@@ -3863,11 +3859,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// we need to remove that message before retrying to avoid having two consecutive
 					// user messages (which would cause tool_result validation errors).
 					const state = await this.providerRef.deref()?.getState()
-					if (this.apiConversationHistory.length > 0) {
+					// Only pop the user message that this iteration added. When
+					// shouldAddUserMessage is false (empty continuation, resumed history,
+					// or flushPendingToolResultsToHistory message) there is nothing to
+					// remove, and popping would corrupt history.
+					let removedCurrentUserMessage = false
+					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 						if (lastMessage.role === "user") {
-							// Remove the last user message that we added earlier
 							this.apiConversationHistory.pop()
+							this.messageCounts.user--
+							removedCurrentUserMessage = true
 						}
 					}
 
@@ -3890,13 +3892,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							break
 						}
 
-						// Push the same content back onto the stack to retry, incrementing the retry attempt counter
-						// Mark that user message was removed so it gets re-added on retry
+						// Push the same content back onto the stack to retry, incrementing the retry attempt counter.
+						// Only mark userMessageWasRemoved when we actually removed one -- the
+						// restore branch in shouldAddUserMessageToHistory must only fire once.
 						stack.push({
 							userContent: currentUserContent,
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
-							userMessageWasRemoved: true,
+							userMessageWasRemoved: removedCurrentUserMessage,
 						})
 
 						// Continue to retry the request
@@ -3911,32 +3914,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						if (response === "yesButtonClicked") {
 							await this.say("api_req_retried")
 
-							// Push the same content back to retry
+							// Push the same content back to retry. Only mark userMessageWasRemoved
+							// when we actually removed one so the restore fires exactly once.
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								userMessageWasRemoved: removedCurrentUserMessage,
 							})
 
 							// Continue to retry the request
 							continue
 						} else {
-							// User declined to retry
-							// Re-add the user message we removed.
-							await this.addToApiConversationHistory({
-								role: "user",
-								content: currentUserContent,
-							})
+							// User declined to retry. Re-add the user message only if this
+							// iteration removed one, so the history and counter stay consistent.
+							if (removedCurrentUserMessage) {
+								await this.addToApiConversationHistory({
+									role: "user",
+									content: currentUserContent,
+								})
+								this.messageCounts.user++
+							}
 
 							await this.say(
 								"error",
 								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
 							)
 
+							// Synthetic assistant message recording the failure -- increment
+							// messageCounts.assistant to match, same as the normal
+							// assistant-message-saved path.
 							await this.addToApiConversationHistory({
 								role: "assistant",
 								content: [{ type: "text", text: "Failure: I did not provide a response." }],
 							})
+							this.messageCounts.assistant++
 						}
 					}
 				}
@@ -3985,16 +3997,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		const state = await this.providerRef.deref()?.getState()
 
-		const {
-			mode,
-			customModes,
-			customModePrompts,
-			customInstructions,
-			experiments,
-			language,
-			apiConfiguration,
-			enableSubfolderRules,
-		} = state ?? {}
+		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
+			state ?? {}
+		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		return await (async () => {
 			const provider = this.providerRef.deref()
@@ -4060,7 +4067,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async handleContextWindowExceededError(): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
-		const { profileThresholds = {}, mode, apiConfiguration } = state ?? {}
+		const { profileThresholds = {} } = state ?? {}
+		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
 		await this.safeEnsureModelFetched()
@@ -4200,9 +4210,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * the `api_req_rate_limit_wait` say type (not an error).
 	 */
 	private async maybeWaitForProviderRateLimit(retryAttempt: number): Promise<void> {
-		const state = await this.providerRef.deref()?.getState()
-		const rateLimitSeconds =
-			state?.apiConfiguration?.rateLimitSeconds ?? this.apiConfiguration?.rateLimitSeconds ?? 0
+		const rateLimitSeconds = this.apiConfiguration?.rateLimitSeconds ?? 0
 
 		const lastRequestTime = this.rateLimitClock.getLastRequestTime()
 		if (rateLimitSeconds <= 0 || !lastRequestTime) {
@@ -4235,14 +4243,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const state = await this.providerRef.deref()?.getState()
 
 		const {
-			apiConfiguration,
 			autoApprovalEnabled,
 			requestDelaySeconds,
-			mode,
 			autoCondenseContext = true,
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},
 		} = state ?? {}
+		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
+		const mode = await this.getTaskMode()
+		const apiConfiguration = this.apiConfiguration
 
 		// Get condensing configuration for automatic triggers.
 		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
@@ -4655,7 +4664,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Respect provider rate limit window
 			let rateLimitDelay = 0
-			const rateLimit = (state?.apiConfiguration ?? this.apiConfiguration)?.rateLimitSeconds || 0
+			const rateLimit = this.apiConfiguration?.rateLimitSeconds ?? 0
 			const lastRequestTime = this.rateLimitClock.getLastRequestTime()
 			if (lastRequestTime && rateLimit > 0) {
 				const elapsed = performance.now() - lastRequestTime
@@ -4900,6 +4909,76 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (error) {
 			this.emit(RooCodeEventName.TaskToolFailed, this.taskId, toolName, error)
 		}
+	}
+
+	/**
+	 * Emits a Task Completed installment for whatever toolUsage/messageCounts have
+	 * changed since the previous installment (from any reason), then advances the
+	 * telemetry baseline so a later installment reports only its own delta. Does
+	 * NOT touch task.toolUsage/messageCounts themselves -- those stay running totals
+	 * for the public TaskCompleted API event and the UI. No-ops if nothing changed
+	 * since the last installment, so idle/shutdown checks don't emit empty events
+	 * for tasks that were already fully reported (e.g. right after attempt_completion).
+	 */
+	public flushTelemetryInstallment(reason: "attempt_completion" | "idle" | "shutdown"): void {
+		const toolUsageDelta: ToolUsage = {}
+
+		for (const [toolName, usage] of Object.entries(this.toolUsage) as [ToolName, ToolUsage[ToolName]][]) {
+			if (!usage) {
+				continue
+			}
+
+			const baseline = this.telemetryToolUsageBaseline[toolName]
+			const attempts = usage.attempts - (baseline?.attempts ?? 0)
+			const failures = usage.failures - (baseline?.failures ?? 0)
+
+			if (attempts > 0 || failures > 0) {
+				toolUsageDelta[toolName] = { attempts, failures }
+			}
+		}
+
+		const messageCountDelta = {
+			user: Math.max(0, this.messageCounts.user - this.telemetryMessageCountsBaseline.user),
+			assistant: Math.max(0, this.messageCounts.assistant - this.telemetryMessageCountsBaseline.assistant),
+		}
+
+		const hasToolUsageDelta = Object.keys(toolUsageDelta).length > 0
+		const hasMessageDelta = messageCountDelta.user > 0 || messageCountDelta.assistant > 0
+
+		if (!hasToolUsageDelta && !hasMessageDelta) {
+			return
+		}
+
+		// Advance the baseline before emitting so a synchronous throw from an
+		// EventEmitter listener or TelemetryService client cannot leave the baseline
+		// behind the running totals, which would cause the same delta to re-appear
+		// on the next flush. The delta values are already captured in locals above.
+		this.telemetryToolUsageBaseline = JSON.parse(JSON.stringify(this.toolUsage))
+		this.telemetryMessageCountsBaseline = { ...this.messageCounts }
+		this.lastTelemetryFlushAt = Date.now()
+
+		this.emitFinalTokenUsageUpdate()
+		TelemetryService.instance.captureTaskCompleted(this.taskId, toolUsageDelta, messageCountDelta, reason)
+	}
+
+	startIdleTelemetryCheck(): void {
+		if (this.idleTelemetryCheckInterval !== undefined) {
+			return
+		}
+		this.idleTelemetryCheckInterval = setInterval(() => {
+			// Measure idleness from the later of the last activity and the last flush.
+			// Using lastMessageTs alone would keep the condition true forever after the
+			// first idle flush, re-running the empty-delta check on every interval tick.
+			const lastEventAt = Math.max(this.lastMessageTs ?? 0, this.lastTelemetryFlushAt)
+			const idleForMs = Date.now() - lastEventAt
+
+			if (idleForMs >= Task.IDLE_TELEMETRY_THRESHOLD_MS) {
+				this.flushTelemetryInstallment("idle")
+			}
+		}, Task.IDLE_TELEMETRY_CHECK_INTERVAL_MS)
+
+		// Don't hold the process open just for this timer.
+		this.idleTelemetryCheckInterval?.unref?.()
 	}
 
 	// Getters
