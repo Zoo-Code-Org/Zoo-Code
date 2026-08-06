@@ -272,9 +272,13 @@ const createInitialExtensionState = (): ExtensionState => ({
 	lockApiConfigAcrossModes: false,
 })
 
+type ExtensionStateProviderInitialState = Partial<ExtensionState> & {
+	routerModels?: RouterModels
+}
+
 export const ExtensionStateContextProvider: React.FC<{
 	children: React.ReactNode
-	initialState?: Partial<ExtensionState>
+	initialState?: ExtensionStateProviderInitialState
 }> = ({ children, initialState }) => {
 	const [state, setState] = useState<ExtensionState>(() =>
 		mergeExtensionState(createInitialExtensionState(), initialState ?? {}),
@@ -288,19 +292,30 @@ export const ExtensionStateContextProvider: React.FC<{
 	const [commands, setCommands] = useState<Command[]>([])
 	const [mcpServers, setMcpServers] = useState<McpServer[]>([])
 	const [currentCheckpoint, setCurrentCheckpoint] = useState<string>()
-	const [extensionRouterModels, setExtensionRouterModels] = useState<RouterModels | undefined>(undefined)
-	const [marketplaceItems, setMarketplaceItems] = useState<any[]>([])
-	const [alwaysAllowFollowupQuestions, setAlwaysAllowFollowupQuestions] = useState(false) // Add state for follow-up questions auto-approve
-	const [followupAutoApproveTimeoutMs, setFollowupAutoApproveTimeoutMs] = useState<number | undefined>(undefined) // Will be set from global settings
-	const [marketplaceInstalledMetadata, setMarketplaceInstalledMetadata] = useState<MarketplaceInstalledMetadata>({
-		project: {},
-		global: {},
-	})
+	const [extensionRouterModels, setExtensionRouterModels] = useState<RouterModels | undefined>(
+		() => initialState?.routerModels,
+	)
+	const [marketplaceItems, setMarketplaceItems] = useState<any[]>(() => initialState?.marketplaceItems ?? [])
+	const [alwaysAllowFollowupQuestions, setAlwaysAllowFollowupQuestions] = useState(
+		() => initialState?.alwaysAllowFollowupQuestions ?? false,
+	) // Add state for follow-up questions auto-approve
+	const [followupAutoApproveTimeoutMs, setFollowupAutoApproveTimeoutMs] = useState<number | undefined>(
+		() => initialState?.followupAutoApproveTimeoutMs,
+	) // Will be set from global settings
+	const [marketplaceInstalledMetadata, setMarketplaceInstalledMetadata] = useState<MarketplaceInstalledMetadata>(
+		() =>
+			initialState?.marketplaceInstalledMetadata ?? {
+				project: {},
+				global: {},
+			},
+	)
 	const [skills, setSkills] = useState<SkillMetadata[]>([])
 	const [rules, setRules] = useState<RuleMetadata[]>([])
-	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(true)
-	const [includeCurrentTime, setIncludeCurrentTime] = useState(true)
-	const [includeCurrentCost, setIncludeCurrentCost] = useState(true)
+	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(
+		() => initialState?.includeTaskHistoryInEnhance ?? true,
+	)
+	const [includeCurrentTime, setIncludeCurrentTime] = useState(() => initialState?.includeCurrentTime ?? true)
+	const [includeCurrentCost, setIncludeCurrentCost] = useState(() => initialState?.includeCurrentCost ?? true)
 
 	const setListApiConfigMeta = useCallback(
 		(value: ProviderSettingsEntry[]) => setState((prevState) => ({ ...prevState, listApiConfigMeta: value })),
