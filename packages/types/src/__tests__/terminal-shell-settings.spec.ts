@@ -6,6 +6,7 @@
  * - Discriminated shape validation (auto, profile, path)
  * - Legacy `execaShellPath` remains readable
  * - Message payload types compile correctly
+ * - `commandExecutionStatusSchema` discriminated union variants
  */
 import { describe, it, expect } from "vitest"
 
@@ -15,6 +16,8 @@ import {
 	type GlobalSettings,
 	type TerminalShellSelection,
 } from "../global-settings.js"
+
+import { commandExecutionStatusSchema, type CommandExecutionStatus } from "../terminal.js"
 
 import type {
 	ExtensionMessage,
@@ -312,5 +315,117 @@ describe("message payload type compilation", () => {
 			terminalShellSelection: { kind: "auto" },
 		}
 		expect(settingsWithSelection.terminalShellSelection).toEqual({ kind: "auto" })
+	})
+})
+
+describe("commandExecutionStatusSchema", () => {
+	it("parses the started variant with pid and command", () => {
+		const result = commandExecutionStatusSchema.parse({
+			executionId: "exec-1",
+			status: "started",
+			pid: 1234,
+			command: "npm test",
+		})
+		expect(result).toMatchObject({ executionId: "exec-1", status: "started", pid: 1234, command: "npm test" })
+	})
+
+	it("parses the started variant without optional pid", () => {
+		const result = commandExecutionStatusSchema.parse({
+			executionId: "exec-1",
+			status: "started",
+			command: "npm test",
+		})
+		expect(result.status).toBe("started")
+		expect(result).not.toHaveProperty("pid")
+	})
+
+	it("parses the output variant", () => {
+		const result = commandExecutionStatusSchema.parse({
+			executionId: "exec-1",
+			status: "output",
+			output: "compressed output",
+		})
+		expect(result).toMatchObject({ executionId: "exec-1", status: "output", output: "compressed output" })
+	})
+
+	it("parses the exited variant with and without exitCode", () => {
+		const withCode = commandExecutionStatusSchema.parse({ executionId: "e1", status: "exited", exitCode: 0 })
+		expect(withCode).toMatchObject({ executionId: "e1", status: "exited", exitCode: 0 })
+
+		const withoutCode = commandExecutionStatusSchema.parse({ executionId: "e2", status: "exited" })
+		expect(withoutCode.status).toBe("exited")
+		expect(withoutCode).not.toHaveProperty("exitCode")
+	})
+
+	it("parses the fallback variant with optional reasonCode", () => {
+		const withReason = commandExecutionStatusSchema.parse({
+			executionId: "e1",
+			status: "fallback",
+			reasonCode: "SHELL_FALLBACK",
+		})
+		expect(withReason.status).toBe("fallback")
+		if (withReason.status === "fallback") {
+			expect(withReason.reasonCode).toBe("SHELL_FALLBACK")
+		}
+
+		const withoutReason = commandExecutionStatusSchema.parse({ executionId: "e2", status: "fallback" })
+		expect(withoutReason.status).toBe("fallback")
+		expect(withoutReason).not.toHaveProperty("reasonCode")
+	})
+
+	it("parses the timeout variant", () => {
+		const result = commandExecutionStatusSchema.parse({ executionId: "e1", status: "timeout" })
+		expect(result).toMatchObject({ executionId: "e1", status: "timeout" })
+	})
+
+	it("parses the error variant with message and code", () => {
+		const result = commandExecutionStatusSchema.parse({
+			executionId: "e1",
+			status: "error",
+			message: "boom",
+			code: "E_1",
+		})
+		expect(result).toMatchObject({ executionId: "e1", status: "error", message: "boom", code: "E_1" })
+
+		const minimal = commandExecutionStatusSchema.parse({ executionId: "e2", status: "error" })
+		expect(minimal.status).toBe("error")
+		expect(minimal).not.toHaveProperty("message")
+		expect(minimal).not.toHaveProperty("code")
+	})
+
+	it("parses the queued variant", () => {
+		const result = commandExecutionStatusSchema.parse({ executionId: "e1", status: "queued" })
+		expect(result).toMatchObject({ executionId: "e1", status: "queued" })
+	})
+
+	it("parses the recovering variant with optional errorCode", () => {
+		const withCode = commandExecutionStatusSchema.parse({
+			executionId: "e1",
+			status: "recovering",
+			errorCode: "RECOVER_1",
+		})
+		expect(withCode.status).toBe("recovering")
+		if (withCode.status === "recovering") {
+			expect(withCode.errorCode).toBe("RECOVER_1")
+		}
+
+		const withoutCode = commandExecutionStatusSchema.parse({ executionId: "e2", status: "recovering" })
+		expect(withoutCode.status).toBe("recovering")
+		expect(withoutCode).not.toHaveProperty("errorCode")
+	})
+
+	it("rejects an unknown status", () => {
+		expect(() => commandExecutionStatusSchema.parse({ executionId: "e1", status: "unknown" })).toThrow()
+	})
+
+	it("rejects a missing executionId", () => {
+		expect(() => commandExecutionStatusSchema.parse({ status: "queued" })).toThrow()
+	})
+
+	it("produces a CommandExecutionStatus type that narrows by status", () => {
+		const status: CommandExecutionStatus = { executionId: "e1", status: "started", command: "ls" }
+		if (status.status === "started") {
+			expect(status.command).toBe("ls")
+		}
 	})
 })

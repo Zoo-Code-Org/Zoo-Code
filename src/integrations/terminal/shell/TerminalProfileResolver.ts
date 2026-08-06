@@ -197,7 +197,9 @@ function deriveDisplayName(family: ShellFamily, executable: string, profileName?
 		case "fish":
 			return "Fish"
 		case "posix":
-			return path.basename(executable)
+			// Separator-agnostic basename: path.basename() is unreliable on
+			// Windows when the executable uses forward slashes (or vice versa).
+			return executable.split(/[\\/]/).pop() ?? executable
 	}
 }
 
