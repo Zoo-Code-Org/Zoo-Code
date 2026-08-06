@@ -375,6 +375,8 @@ export function applyRunLengthEncoding(content: string): string {
  *
  * @param input The terminal output to process
  * @returns The processed terminal output with carriage returns (\r) handled
+ *
+ * @internal
  */
 export function processCarriageReturns(input: string): string {
 	// Quick check: if no carriage returns (\r), return the original input
@@ -426,6 +428,8 @@ export function processCarriageReturns(input: string): string {
  *
  * @param input The terminal output to process
  * @returns The processed output with backspaces handled
+ *
+ * @internal
  */
 export function processBackspaces(input: string): string {
 	let output = ""

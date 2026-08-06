@@ -10,7 +10,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui"
 import { StandardTooltip } from "@/components/ui"
 
 export enum DropdownOptionType {
-	ITEM = "item",
 	SEPARATOR = "separator",
 	SHORTCUT = "shortcut",
 	ACTION = "action",

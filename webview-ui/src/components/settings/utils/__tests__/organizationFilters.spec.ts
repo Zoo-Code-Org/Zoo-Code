@@ -35,12 +35,14 @@ describe("organizationFilters", () => {
 				allowAll: false,
 				providers: {
 					anthropic: { allowAll: true },
+					openai: { allowAll: false, models: ["gpt-4o"] },
 					gemini: { allowAll: true },
 				},
 			}
 			const result = filterProviders(mockProviders, allowList)
-			expect(result).toHaveLength(2)
+			expect(result).toHaveLength(3)
 			expect(result).toContainEqual({ value: "anthropic", label: "Anthropic" })
+			expect(result).toContainEqual({ value: "openai", label: "OpenAI" })
 			expect(result).toContainEqual({ value: "gemini", label: "Gemini" })
 		})
 	})

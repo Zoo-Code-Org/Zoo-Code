@@ -85,18 +85,12 @@ importers:
       '@roo-code/vscode-shim':
         specifier: workspace:^
         version: link:../../packages/vscode-shim
-      '@trpc/client':
-        specifier: ^11.18.0
-        version: 11.18.0(@trpc/server@11.18.0(typescript@5.9.3))(typescript@5.9.3)
       '@vscode/ripgrep':
         specifier: ^1.15.9
         version: 1.18.0
       commander:
         specifier: ^12.1.0
         version: 12.1.0
-      execa:
-        specifier: ^9.5.2
-        version: 9.6.1
       fuzzysort:
         specifier: ^3.1.0
         version: 3.1.0
@@ -109,9 +103,6 @@ importers:
       react:
         specifier: ^19.1.0
         version: 19.2.7
-      superjson:
-        specifier: ^2.2.6
-        version: 2.2.6
       zustand:
         specifier: ^5.0.14
         version: 5.0.14(@types/react@18.3.31)(react@19.2.7)
@@ -122,9 +113,6 @@ importers:
       '@roo-code/config-typescript':
         specifier: workspace:^
         version: link:../../packages/config-typescript
-      '@trpc/server':
-        specifier: ^11.18.0
-        version: 11.18.0(typescript@5.9.3)
       '@types/node':
         specifier: 22.20.1
         version: 22.20.1
@@ -134,6 +122,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: 4.1.9
         version: 4.1.9(vitest@4.1.9)
+      execa:
+        specifier: ^9.5.2
+        version: 9.6.1
       ink-testing-library:
         specifier: 4.0.0
         version: 4.0.0(@types/react@18.3.31)
@@ -586,9 +577,6 @@ importers:
       say:
         specifier: ^0.16.0
         version: 0.16.0
-      semver-compare:
-        specifier: ^1.0.0
-        version: 1.0.0
       serialize-error:
         specifier: ^12.0.0
         version: 12.0.0
@@ -629,9 +617,6 @@ importers:
         specifier: 3.25.76
         version: 3.25.76
     devDependencies:
-      '@ai-sdk/openai-compatible':
-        specifier: 2.0.56
-        version: 2.0.56(zod@3.25.76)
       '@roo-code/build':
         specifier: workspace:^
         version: link:../packages/build
@@ -662,9 +647,6 @@ importers:
       '@types/ps-tree':
         specifier: 1.1.6
         version: 1.1.6
-      '@types/semver-compare':
-        specifier: 1.0.3
-        version: 1.0.3
       '@types/vscode':
         specifier: 1.100.0
         version: 1.100.0
@@ -749,9 +731,6 @@ importers:
       '@roo-code/types':
         specifier: workspace:^
         version: link:../packages/types
-      '@tailwindcss/vite':
-        specifier: ^4.0.0
-        version: 4.3.2(vite@8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       '@tanstack/react-query':
         specifier: ^5.68.0
         version: 5.101.2(react@18.3.1)
@@ -909,6 +888,9 @@ importers:
       '@roo-code/config-typescript':
         specifier: workspace:^
         version: link:../packages/config-typescript
+      '@tailwindcss/vite':
+        specifier: ^4.0.0
+        version: 4.3.2(vite@8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
       '@testing-library/jest-dom':
         specifier: 6.9.1
         version: 6.9.1
@@ -2946,19 +2928,6 @@ packages:
   '@textlint/types@15.7.1':
     resolution: {integrity: sha512-Vye/GmFNBTgVzZFtIFJTmLB+s2A7oIADxNG6r9UhfPuY+Czv0z5G3xeyFZZudPlfxURsKUyPIU5XsjOFqVp33A==}
 
-  '@trpc/client@11.18.0':
-    resolution: {integrity: sha512-wOqeg3Fvl25V1ZisQhUD3K8G60ZJDlSGJNSyeXrLH24xAo5w6GSR2Kzb1cSNY9Y+IQ2YZvYGZstBU+V/ulo/ow==}
-    hasBin: true
-    peerDependencies:
-      '@trpc/server': 11.18.0
-      typescript: '>=5.7.2'
-
-  '@trpc/server@11.18.0':
-    resolution: {integrity: sha512-JAvXOuNTxgXjIDfQaOvDq1j66LMNfDJUH1IU7Slfn8EvRv2EkH6ehu3A7zpYhjO0syHHiYg77v2lG2JFJgvw7Q==}
-    hasBin: true
-    peerDependencies:
-      typescript: '>=5.7.2'
-
   '@turbo/darwin-64@2.10.0':
     resolution: {integrity: sha512-EwvHThXzpY0KGd1/NAmuewI5D+aVa3Rl/OlxE36yfjUKb/+ySrfJrSlEFt8aD1OXwnnaHnQnPKHFndor0Zxlsg==}
     cpu: [x64]
@@ -3213,9 +3182,6 @@ packages:
 
   '@types/sarif@2.1.7':
     resolution: {integrity: sha512-kRz0VEkJqWLf1LLVN4pT1cg1Z9wAuvI6L97V3m2f5B76Tg8d413ddvLBPTEHAZJlnn4XSvu0FkZtViCQGVyrXQ==}
-
-  '@types/semver-compare@1.0.3':
-    resolution: {integrity: sha512-mVZkB2QjXmZhh+MrtwMlJ8BqUnmbiSkpd88uOWskfwB8yitBT0tBRAKt+41VRgZD9zr9Sc+Xs02qGgvzd1Rq/Q==}
 
   '@types/stack-utils@2.0.3':
     resolution: {integrity: sha512-9aEbYZ3TbYMznPdcdr3SmIrLXwC/AKZXQeCf9Pgao5CKb8CyHuEX5jzWPTkvregvhRJHcpRO6BFoGW9ycaOkYw==}
@@ -5584,10 +5550,6 @@ packages:
     resolution: {integrity: sha512-mfcwb6IzQyOKTs84CQMrOwW4gQcaTOAWJ0zzJCl2WSPDrWk/OzDaImWFH3djXhb24g4eudZfLRozAvPGw4d9hQ==}
     engines: {node: '>= 0.4'}
 
-  is-what@5.5.0:
-    resolution: {integrity: sha512-oG7cgbmg5kLYae2N5IVd3jm2s+vldjxJzK1pcu9LfpGuQ93MQSzo0okvRna+7y5ifrD+20FE8FvjusyGaz14fw==}
-    engines: {node: '>=18'}
-
   is-windows@1.0.2:
     resolution: {integrity: sha512-eXK1UInq2bPmjyX6e3VHIzMLobc4J94i4AWn+Hpq3OU5KkrRC96OAcR3PRJ/pGu6m8TRnBHP9dkXQVsT/COVIA==}
     engines: {node: '>=0.10.0'}
@@ -7716,10 +7678,6 @@ packages:
     resolution: {integrity: sha512-8EbVDiu9iN/nESwxeSxDKe0dunta1GOlHufmSSXxMD2z2/tMZpDMpvXQGsc+ajGo8y2uYUmixaSRUc/QPoQ0GA==}
     engines: {node: '>=16 || 14 >=14.17'}
     hasBin: true
-
-  superjson@2.2.6:
-    resolution: {integrity: sha512-H+ue8Zo4vJmV2nRjpx86P35lzwDT3nItnIsocgumgr0hHMQ+ZGq5vrERg9kJBo5AWGmxZDhzDo+WVIJqkB0cGA==}
-    engines: {node: '>=16'}
 
   supports-color@7.2.0:
     resolution: {integrity: sha512-qpCAvRl9stuOHveKsn7HncJRvv501qIacKzQlO/+Lwxc9+0q2wLyv4Dfvt80/DPn2pqOBsJdDiogXGR9+OvwRw==}
@@ -10746,15 +10704,6 @@ snapshots:
     dependencies:
       '@textlint/ast-node-types': 15.7.1
 
-  '@trpc/client@11.18.0(@trpc/server@11.18.0(typescript@5.9.3))(typescript@5.9.3)':
-    dependencies:
-      '@trpc/server': 11.18.0(typescript@5.9.3)
-      typescript: 5.9.3
-
-  '@trpc/server@11.18.0(typescript@5.9.3)':
-    dependencies:
-      typescript: 5.9.3
-
   '@turbo/darwin-64@2.10.0':
     optional: true
 
@@ -11029,8 +10978,6 @@ snapshots:
   '@types/retry@0.12.5': {}
 
   '@types/sarif@2.1.7': {}
-
-  '@types/semver-compare@1.0.3': {}
 
   '@types/stack-utils@2.0.3': {}
 
@@ -13721,8 +13668,6 @@ snapshots:
       call-bound: 1.0.4
       get-intrinsic: 1.3.0
 
-  is-what@5.5.0: {}
-
   is-windows@1.0.2: {}
 
   is-wsl@3.1.0:
@@ -16382,10 +16327,6 @@ snapshots:
       mz: 2.7.0
       pirates: 4.0.7
       ts-interface-checker: 0.1.13
-
-  superjson@2.2.6:
-    dependencies:
-      copy-anything: 4.0.5
 
   supports-color@7.2.0:
     dependencies:

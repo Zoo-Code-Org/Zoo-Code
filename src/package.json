@@ -512,7 +512,6 @@
 		"safe-stable-stringify": "^2.5.0",
 		"sanitize-filename": "^1.6.4",
 		"say": "^0.16.0",
-		"semver-compare": "^1.0.0",
 		"serialize-error": "^12.0.0",
 		"shell-quote": "^1.8.2",
 		"simple-git": "^3.27.0",
@@ -528,7 +527,6 @@
 		"zod": "3.25.76"
 	},
 	"devDependencies": {
-		"@ai-sdk/openai-compatible": "2.0.56",
 		"@roo-code/build": "workspace:^",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
@@ -539,7 +537,6 @@
 		"@types/node-cache": "4.2.5",
 		"@types/proper-lockfile": "4.1.4",
 		"@types/ps-tree": "1.1.6",
-		"@types/semver-compare": "1.0.3",
 		"@types/vscode": "1.100.0",
 		"@vitest/coverage-v8": "4.1.9",
 		"@vscode/vsce": "3.9.2",

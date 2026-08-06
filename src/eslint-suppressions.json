@@ -374,11 +374,6 @@
 			"count": 8
 		}
 	},
-	"api/providers/lm-studio.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"api/providers/mimo.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
@@ -772,11 +767,6 @@
 	"core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 14
-		}
-	},
-	"core/prompts/tools/filter-tools-for-mode.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
 		}
 	},
 	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
@@ -1217,11 +1207,6 @@
 	"integrations/misc/__tests__/extract-text.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"integrations/misc/__tests__/line-counter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
 		}
 	},
 	"integrations/misc/__tests__/open-file.spec.ts": {

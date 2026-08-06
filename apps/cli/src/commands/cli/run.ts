@@ -164,7 +164,6 @@ export async function run(promptArg: string | undefined, flagOptions: FlagOption
 		mode: effectiveMode,
 		reasoningEffort: effectiveReasoningEffort === "unspecified" ? undefined : effectiveReasoningEffort,
 		consecutiveMistakeLimit: effectiveConsecutiveMistakeLimit,
-		user: null,
 		provider: effectiveProvider,
 		model: effectiveModel,
 		workspacePath: effectiveWorkspacePath,

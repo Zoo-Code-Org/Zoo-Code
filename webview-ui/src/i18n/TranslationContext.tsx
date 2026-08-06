@@ -13,7 +13,7 @@ export const TranslationContext = createContext<{
 })
 
 // Translation provider component
-export const TranslationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+const TranslationProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 	// Initialize with default configuration
 	const { i18n } = useTranslation()
 	// Get the extension state directly - it already contains all state properties

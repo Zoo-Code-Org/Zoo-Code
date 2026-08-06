@@ -159,6 +159,9 @@ export function convertToVsCodeLmMessages(
 	return vsCodeLmMessages
 }
 
+/**
+ * @internal
+ */
 export function convertToAnthropicRole(vsCodeLmMessageRole: vscode.LanguageModelChatMessageRole): string | null {
 	switch (vsCodeLmMessageRole) {
 		case vscode.LanguageModelChatMessageRole.Assistant:

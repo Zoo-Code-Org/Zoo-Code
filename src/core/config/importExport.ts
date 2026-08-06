@@ -294,6 +294,8 @@ export const importSettings = async ({ providerSettingsManager, contextProxy, cu
 
 /**
  * Import settings from a specific file
+ *
+ * @internal
  * @param options - Import options containing managers and proxy
  * @param fileUri - URI of the file to import from
  * @returns Promise resolving to import result

@@ -174,6 +174,8 @@ export async function generateImageWithProvider(options: ImageGenerationOptions)
 /**
  * Generate an image using OpenAI's Images API (/v1/images/generations)
  * Supports BFL models (Flux) with provider-specific options for image editing
+ *
+ * @internal
  */
 export async function generateImageWithImagesApi(options: ImagesApiOptions): Promise<ImageGenerationResult> {
 	const { baseURL, authToken, model, prompt, inputImage, outputFormat = "png" } = options

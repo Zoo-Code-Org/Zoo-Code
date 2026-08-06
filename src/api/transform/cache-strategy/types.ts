@@ -22,7 +22,7 @@ export interface ModelInfo {
 /**
  * Cache point definition
  */
-export interface CachePoint {
+interface CachePoint {
 	/** Type of cache point */
 	type: "default"
 }

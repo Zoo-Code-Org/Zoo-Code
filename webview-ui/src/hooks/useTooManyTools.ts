@@ -20,7 +20,7 @@ export interface TooManyToolsInfo {
 
 /**
  * Hook that calculates tool counts and provides localized warning messages.
- * Used by TooManyToolsWarning components in both chat and MCP settings views.
+ * Used by MCP settings views to summarize enabled tool counts.
  *
  * @returns Tool count information and localized messages
  *

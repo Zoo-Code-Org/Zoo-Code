@@ -56,6 +56,9 @@ export const getOpenRouterReasoning = ({
 				: undefined
 			: undefined
 
+/**
+ * @internal
+ */
 export const getRooReasoning = ({
 	model,
 	reasoningEffort,

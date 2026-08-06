@@ -86,19 +86,3 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		throw error
 	}
 }
-
-/**
- * Common checkpoint restore validation and initialization utility.
- * This can be used by any checkpoint restore flow that needs to wait for initialization.
- */
-export async function waitForClineInitialization(provider: ClineProvider, timeoutMs: number = 3000): Promise<boolean> {
-	try {
-		await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, {
-			timeout: timeoutMs,
-		})
-		return true
-	} catch (error) {
-		vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
-		return false
-	}
-}

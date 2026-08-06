@@ -12,6 +12,9 @@ export interface Credentials {
 	orgId?: string
 }
 
+/**
+ * @internal
+ */
 export async function saveToken(token: string, options?: { userId?: string; orgId?: string }): Promise<void> {
 	await fs.mkdir(getConfigDir(), { recursive: true })
 

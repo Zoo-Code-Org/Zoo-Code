@@ -79,10 +79,14 @@ describe("Path Mentions Utilities", () => {
 			expect(convertToMentionPath(absPath, MOCK_CWD_POSIX)).toBe("@/src/normal.ts")
 		})
 
-		it("should add leading slash if missing after cwd removal", () => {
-			const absPath = "/Users/test/projectfile.txt" // Edge case: file directly in project root
+		it("should not convert external paths that share the cwd prefix", () => {
+			const absPath = "/Users/test/projectfile.txt"
 			const cwd = "/Users/test/project"
-			expect(convertToMentionPath(absPath, cwd)).toBe("@/file.txt") // Should still add '/'
+			expect(convertToMentionPath(absPath, cwd)).toBe("/Users/test/projectfile.txt")
+		})
+
+		it("should preserve the leading slash for the cwd itself", () => {
+			expect(convertToMentionPath(MOCK_CWD_POSIX, MOCK_CWD_POSIX)).toBe("@/")
 		})
 
 		it("should handle cwd with trailing slash", () => {

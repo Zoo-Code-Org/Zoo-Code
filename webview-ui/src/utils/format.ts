@@ -13,6 +13,9 @@ export function formatLargeNumber(num: number): string {
 	return num.toString()
 }
 
+/**
+ * @internal
+ */
 export const formatDate = (timestamp: number) => {
 	const date = new Date(timestamp)
 	const locale = i18next.language || "en"

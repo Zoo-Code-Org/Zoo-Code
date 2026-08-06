@@ -190,7 +190,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
 			// Create params object with optional draft model
-			const params: any = {
+			const params: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming & { draft_model?: string } = {
 				model: this.getModel().id,
 				messages: [{ role: "user", content: prompt }],
 				temperature: this.options.modelTemperature ?? LMSTUDIO_DEFAULT_TEMPERATURE,
@@ -214,19 +214,5 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		}
-	}
-}
-
-export async function getLmStudioModels(baseUrl = "http://localhost:1234") {
-	try {
-		if (!URL.canParse(baseUrl)) {
-			return []
-		}
-
-		const response = await axios.get(`${baseUrl}/v1/models`)
-		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
-		return [...new Set<string>(modelsArray)]
-	} catch (error) {
-		return []
 	}
 }

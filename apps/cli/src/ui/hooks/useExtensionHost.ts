@@ -69,7 +69,6 @@ export function useExtensionHost({
 	continueSession,
 	mode,
 	reasoningEffort,
-	user,
 	provider,
 	apiKey,
 	model,
@@ -107,7 +106,6 @@ export function useExtensionHost({
 
 				const host = createExtensionHost({
 					mode,
-					user,
 					reasoningEffort,
 					provider,
 					apiKey,

@@ -63,11 +63,6 @@ function getToolName(tool: OpenAI.Chat.ChatCompletionTool): string {
  * @param options - Configuration options for building the tools
  * @returns Array of filtered native and MCP tools
  */
-export async function buildNativeToolsArray(options: BuildToolsOptions): Promise<OpenAI.Chat.ChatCompletionTool[]> {
-	const result = await buildNativeToolsArrayWithRestrictions(options)
-	return result.tools
-}
-
 /**
  * Builds the complete tools array for native protocol requests with optional mode restrictions.
  * When includeAllToolsWithRestrictions is true, returns ALL tools but also provides

@@ -16,6 +16,8 @@ export type InjectableConfigType =
  * Uses VSCode env:name pattern: https://code.visualstudio.com/docs/reference/variables-reference#_environment-variables
  *
  * Does not mutate original object
+ *
+ * @internal
  */
 export async function injectEnv<C extends InjectableConfigType>(config: C, notFoundValue: any = "") {
 	return injectVariables(config, { env: process.env }, notFoundValue)

@@ -27,7 +27,6 @@ import { createVSCodeAPI, IExtensionHost, ExtensionHostEventMap, setRuntimeConfi
 import { DebugLogger, setDebugLogEnabled } from "@roo-code/core/cli"
 
 import { DEFAULT_FLAGS, type SupportedProvider } from "@/types/index.js"
-import type { User } from "@/lib/sdk/index.js"
 import { getProviderSettings } from "@/lib/utils/provider.js"
 import { createEphemeralStorageDir } from "@/lib/storage/index.js"
 
@@ -67,7 +66,6 @@ export interface ExtensionHostOptions {
 	mode: string
 	reasoningEffort?: ReasoningEffortExtended | "unspecified" | "disabled"
 	consecutiveMistakeLimit?: number
-	user: User | null
 	provider: SupportedProvider
 	apiKey?: string
 	model: string

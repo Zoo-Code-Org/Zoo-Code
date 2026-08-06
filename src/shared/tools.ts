@@ -15,7 +15,7 @@ export type HandleError = (action: string, error: Error) => Promise<void>
 
 export type PushToolResult = (content: ToolResponse) => void
 
-export type AskFinishSubTaskApproval = () => Promise<boolean>
+type AskFinishSubTaskApproval = () => Promise<boolean>
 
 export interface TextContent {
 	type: "text"
@@ -166,13 +166,13 @@ export interface McpToolUse {
 	partial: boolean
 }
 
-export interface ExecuteCommandToolUse extends ToolUse<"execute_command"> {
+interface ExecuteCommandToolUse extends ToolUse<"execute_command"> {
 	name: "execute_command"
 	// Pick<Record<ToolParamName, string>, "command"> makes "command" required, but Partial<> makes it optional
 	params: Partial<Pick<Record<ToolParamName, string>, "command" | "cwd" | "timeout">>
 }
 
-export interface ReadFileToolUse extends ToolUse<"read_file"> {
+interface ReadFileToolUse extends ToolUse<"read_file"> {
 	name: "read_file"
 	params: Partial<
 		Pick<
@@ -193,67 +193,70 @@ export interface ReadFileToolUse extends ToolUse<"read_file"> {
 	>
 }
 
-export interface WriteToFileToolUse extends ToolUse<"write_to_file"> {
+interface WriteToFileToolUse extends ToolUse<"write_to_file"> {
 	name: "write_to_file"
 	params: Partial<Pick<Record<ToolParamName, string>, "path" | "content">>
 }
 
-export interface CodebaseSearchToolUse extends ToolUse<"codebase_search"> {
+interface CodebaseSearchToolUse extends ToolUse<"codebase_search"> {
 	name: "codebase_search"
 	params: Partial<Pick<Record<ToolParamName, string>, "query" | "path">>
 }
 
-export interface SearchFilesToolUse extends ToolUse<"search_files"> {
+interface SearchFilesToolUse extends ToolUse<"search_files"> {
 	name: "search_files"
 	params: Partial<Pick<Record<ToolParamName, string>, "path" | "regex" | "file_pattern">>
 }
 
-export interface ListFilesToolUse extends ToolUse<"list_files"> {
+interface ListFilesToolUse extends ToolUse<"list_files"> {
 	name: "list_files"
 	params: Partial<Pick<Record<ToolParamName, string>, "path" | "recursive">>
 }
 
-export interface UseMcpToolToolUse extends ToolUse<"use_mcp_tool"> {
+interface UseMcpToolToolUse extends ToolUse<"use_mcp_tool"> {
 	name: "use_mcp_tool"
 	params: Partial<Pick<Record<ToolParamName, string>, "server_name" | "tool_name" | "arguments">>
 }
 
-export interface AccessMcpResourceToolUse extends ToolUse<"access_mcp_resource"> {
+interface AccessMcpResourceToolUse extends ToolUse<"access_mcp_resource"> {
 	name: "access_mcp_resource"
 	params: Partial<Pick<Record<ToolParamName, string>, "server_name" | "uri">>
 }
 
-export interface AskFollowupQuestionToolUse extends ToolUse<"ask_followup_question"> {
+interface AskFollowupQuestionToolUse extends ToolUse<"ask_followup_question"> {
 	name: "ask_followup_question"
 	params: Partial<Pick<Record<ToolParamName, string>, "question" | "follow_up">>
 }
 
+/**
+ * @public
+ */
 export interface AttemptCompletionToolUse extends ToolUse<"attempt_completion"> {
 	name: "attempt_completion"
 	params: Partial<Pick<Record<ToolParamName, string>, "result">>
 }
 
-export interface SwitchModeToolUse extends ToolUse<"switch_mode"> {
+interface SwitchModeToolUse extends ToolUse<"switch_mode"> {
 	name: "switch_mode"
 	params: Partial<Pick<Record<ToolParamName, string>, "mode_slug" | "reason">>
 }
 
-export interface NewTaskToolUse extends ToolUse<"new_task"> {
+interface NewTaskToolUse extends ToolUse<"new_task"> {
 	name: "new_task"
 	params: Partial<Pick<Record<ToolParamName, string>, "mode" | "message" | "todos">>
 }
 
-export interface RunSlashCommandToolUse extends ToolUse<"run_slash_command"> {
+interface RunSlashCommandToolUse extends ToolUse<"run_slash_command"> {
 	name: "run_slash_command"
 	params: Partial<Pick<Record<ToolParamName, string>, "command" | "args">>
 }
 
-export interface SkillToolUse extends ToolUse<"skill"> {
+interface SkillToolUse extends ToolUse<"skill"> {
 	name: "skill"
 	params: Partial<Pick<Record<ToolParamName, string>, "skill" | "args">>
 }
 
-export interface GenerateImageToolUse extends ToolUse<"generate_image"> {
+interface GenerateImageToolUse extends ToolUse<"generate_image"> {
 	name: "generate_image"
 	params: Partial<Pick<Record<ToolParamName, string>, "prompt" | "path" | "image">>
 }
@@ -264,33 +267,6 @@ export type ToolGroupConfig = {
 	alwaysAvailable?: boolean // Whether this group is always available and shouldn't show in prompts view
 	customTools?: readonly string[] // Opt-in only tools - only available when explicitly included via model's includedTools
 }
-
-export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
-	execute_command: "run commands",
-	read_file: "read files",
-	read_command_output: "read command output",
-	write_to_file: "write files",
-	apply_diff: "apply changes",
-	edit: "edit files",
-	search_and_replace: "apply changes using search and replace",
-	search_replace: "apply single search and replace",
-	edit_file: "edit files using search and replace",
-	apply_patch: "apply patches using codex format",
-	search_files: "search files",
-	list_files: "list files",
-	use_mcp_tool: "use mcp tools",
-	access_mcp_resource: "access mcp resources",
-	ask_followup_question: "ask questions",
-	attempt_completion: "complete tasks",
-	switch_mode: "switch modes",
-	new_task: "create new task",
-	codebase_search: "codebase search",
-	update_todo_list: "update todo list",
-	run_slash_command: "run slash command",
-	skill: "load skill",
-	generate_image: "generate images",
-	custom_tool: "use custom tools",
-} as const
 
 // Define available tool groups.
 export const TOOL_GROUPS: Record<ToolGroup, ToolGroupConfig> = {

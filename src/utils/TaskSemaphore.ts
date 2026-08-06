@@ -1,3 +1,4 @@
+// Retained for in-flight work: #355 (parallelizable tasks), #368 (TaskScheduler), #373, #375
 import { Semaphore } from "async-mutex"
 
 /**

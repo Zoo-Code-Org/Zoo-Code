@@ -19,7 +19,6 @@ interface HeaderProps extends ExtensionHostOptions {
 
 function Header({
 	workspacePath,
-	user,
 	provider,
 	model,
 	mode,
@@ -46,7 +45,6 @@ function Header({
 						<Text color="magenta">{ASCII_ROO}</Text>
 					</Box>
 					<Box flexDirection="column" marginLeft={1} marginTop={1}>
-						{user && <Text color={theme.dimText}>Welcome back, {user.name}</Text>}
 						<Text color={theme.dimText}>
 							cwd:{" "}
 							{workspacePath.startsWith(homeDir) ? workspacePath.replace(homeDir, "~") : workspacePath}

@@ -7,6 +7,9 @@ import { arePathsEqual } from "@/lib/utils/path.js"
 
 const DEFAULT_CLI_TASK_STORAGE_PATH = path.join(os.homedir(), ".vscode-mock", "global-storage")
 
+/**
+ * @internal
+ */
 export function getDefaultCliTaskStoragePath(): string {
 	return DEFAULT_CLI_TASK_STORAGE_PATH
 }

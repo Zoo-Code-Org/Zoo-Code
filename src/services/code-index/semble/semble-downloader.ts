@@ -68,6 +68,8 @@ export function isSembleSupportedPlatform(platform?: string, arch?: string): boo
 
 /**
  * Returns the list of supported platform-arch keys (e.g. "linux-x64", "darwin-arm64").
+ *
+ * @internal
  */
 export function getSembleSupportedPlatforms(): string[] {
 	return Object.keys(SEMBLE_ARCHIVES)
@@ -142,6 +144,8 @@ export async function downloadSemble(storageDir: string): Promise<string | undef
 
 /**
  * Returns the path to the semble binary if it's already been downloaded, or undefined.
+ *
+ * @internal
  */
 export async function getSembleBinaryPath(storageDir: string): Promise<string | undefined> {
 	const info = getArchiveInfo()

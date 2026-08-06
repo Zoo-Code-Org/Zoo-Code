@@ -35,16 +35,12 @@ const commandsSchema = z.array(
 	}),
 )
 
-export type Commands = z.infer<typeof commandsSchema>
-
 const menuItemSchema = z.object({
 	group: z.string(),
 	command: z.string().optional(),
 	submenu: z.string().optional(),
 	when: z.string().optional(),
 })
-
-export type MenuItem = z.infer<typeof menuItemSchema>
 
 const menusSchema = z.record(z.string(), z.array(menuItemSchema))
 
@@ -56,8 +52,6 @@ const submenusSchema = z.array(
 		label: z.string(),
 	}),
 )
-
-export type Submenus = z.infer<typeof submenusSchema>
 
 const keybindingsSchema = z.array(
 	z.object({
@@ -91,8 +85,6 @@ const configurationPropertySchema = z.object({
 	description: z.string(),
 })
 
-export type ConfigurationProperty = z.infer<typeof configurationPropertySchema>
-
 const configurationSchema = z.object({
 	title: z.string(),
 	properties: z.record(z.string(), configurationPropertySchema),
@@ -109,5 +101,3 @@ export const contributesSchema = z.object({
 	keybindings: keybindingsSchema.optional(),
 	configuration: configurationSchema,
 })
-
-export type Contributes = z.infer<typeof contributesSchema>

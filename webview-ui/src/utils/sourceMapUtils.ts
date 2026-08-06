@@ -165,6 +165,8 @@ export function enhanceErrorWithSourceMaps(error: Error, componentStack?: string
 /**
  * Parse a stack trace string into structured stack frames
  * This is kept for backward compatibility with tests
+ *
+ * @internal
  */
 export async function parseStackTrace(stack: string): Promise<any[]> {
 	if (!stack) return []
