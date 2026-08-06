@@ -410,4 +410,49 @@ describe("NativeToolCallParser", () => {
 			expect(NativeToolCallParser.consumeParseError("call_consume")).toBeUndefined()
 		})
 	})
+
+	describe("streaming state inspection (ghost quarantine support)", () => {
+		afterEach(() => {
+			// Always clear streaming state so leftovers cannot leak between tests.
+			NativeToolCallParser.clearAllStreamingToolCalls()
+		})
+
+		it("getStreamingToolCallState returns undefined for an unknown id", () => {
+			expect(NativeToolCallParser.getStreamingToolCallState("missing-id")).toBeUndefined()
+		})
+
+		it("getStreamingToolCallState returns a snapshot of the in-progress tool call", () => {
+			const id = "toolu_state_123"
+			NativeToolCallParser.startStreamingToolCall(id, "read_file")
+			NativeToolCallParser.processStreamingChunk(id, JSON.stringify({ path: "demo.ts" }))
+
+			const state = NativeToolCallParser.getStreamingToolCallState(id)
+
+			expect(state).toBeDefined()
+			expect(state?.id).toBe(id)
+			expect(state?.name).toBe("read_file")
+			// Arguments are progressively accumulated as the stream is processed.
+			expect(typeof state?.argumentsAccumulator).toBe("string")
+			expect(state?.argumentsAccumulator.length).toBeGreaterThan(0)
+		})
+
+		it("discardStreamingToolCall removes the streaming entry without finalizing it", () => {
+			const id = "toolu_discard_123"
+			NativeToolCallParser.startStreamingToolCall(id, "read_file")
+			NativeToolCallParser.processStreamingChunk(id, JSON.stringify({ path: "demo.ts" }))
+
+			// Sanity check: state is present before discarding.
+			expect(NativeToolCallParser.getStreamingToolCallState(id)).toBeDefined()
+
+			const removed = NativeToolCallParser.discardStreamingToolCall(id)
+
+			expect(removed).toBe(true)
+			// State must be gone so subsequent reads return undefined.
+			expect(NativeToolCallParser.getStreamingToolCallState(id)).toBeUndefined()
+		})
+
+		it("discardStreamingToolCall returns false for an unknown id (idempotent no-op)", () => {
+			expect(NativeToolCallParser.discardStreamingToolCall("never-streamed")).toBe(false)
+		})
+	})
 })
