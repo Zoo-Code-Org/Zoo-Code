@@ -15,6 +15,20 @@ export async function createDiagnosticsReport(options: {
 	providers: DiagnosticsProviderSource[]
 }): Promise<void> {
 	try {
+		const colorThemeKind = (() => {
+			switch (vscode.window.activeColorTheme.kind) {
+				case vscode.ColorThemeKind.Light:
+					return "light" as const
+				case vscode.ColorThemeKind.Dark:
+					return "dark" as const
+				case vscode.ColorThemeKind.HighContrast:
+					return "highContrast" as const
+				case vscode.ColorThemeKind.HighContrastLight:
+					return "highContrastLight" as const
+				default:
+					return "unknown" as const
+			}
+		})()
 		const storagePath = await getStorageBasePath(options.context.globalStorageUri.fsPath)
 		const report = await buildDiagnosticsReport({
 			providers: options.providers,
@@ -38,6 +52,7 @@ export async function createDiagnosticsReport(options: {
 				customStorageConfigured: Boolean(
 					vscode.workspace.getConfiguration(Package.name).get<string>("customStoragePath", ""),
 				),
+				colorThemeKind,
 			},
 		})
 		const json = JSON.stringify(report, null, 2)

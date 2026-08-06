@@ -16,6 +16,7 @@ vi.mock("../report", () => ({ buildDiagnosticsReport: mocks.buildDiagnosticsRepo
 vi.mock("vscode", () => ({
 	version: "1.100.0",
 	UIKind: { Desktop: 1, Web: 2 },
+	ColorThemeKind: { Light: 1, Dark: 2, HighContrast: 3, HighContrastLight: 4 },
 	env: {
 		appName: "Visual Studio Code",
 		uiKind: 1,
@@ -29,6 +30,7 @@ vi.mock("vscode", () => ({
 		openTextDocument: mocks.openTextDocument,
 	},
 	window: {
+		activeColorTheme: { kind: 2 },
 		showTextDocument: mocks.showTextDocument,
 		showInformationMessage: mocks.showInformationMessage,
 		showWarningMessage: mocks.showWarningMessage,

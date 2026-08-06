@@ -30,19 +30,39 @@ describe("buildDiagnosticsReport", () => {
 						tokensOut: 0,
 						totalCost: 0,
 					},
+					{
+						id: "failed-navigation-target",
+						number: 2,
+						ts: 2,
+						task: "ANOTHER SECRET PROMPT",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+					},
 				],
-				events: Array.from({ length: 100 }, (_, index) => ({
-					timestamp: new Date(index).toISOString(),
-					boundary: "webview-out" as const,
-					phase: "success" as const,
-					type: "state",
-					taskId: "raw-task-id",
-				})),
+				events: [
+					...Array.from({ length: 99 }, (_, index) => ({
+						timestamp: new Date(index).toISOString(),
+						boundary: "webview-out" as const,
+						phase: "success" as const,
+						type: "state",
+						taskId: "raw-task-id",
+					})),
+					{
+						timestamp: new Date(100).toISOString(),
+						boundary: "task-navigation" as const,
+						phase: "failure" as const,
+						type: "show-task",
+						taskId: "failed-navigation-target",
+					},
+				],
 				eventsTruncated: true,
 			}),
 			requestWebviewDiagnostics: async () => ({
 				capturedAt: new Date(0).toISOString(),
+				didHydrateState: true,
 				activeView: "chat",
+				currentTaskId: "raw-task-id",
 				chatMessageCount: 4,
 				theme: {
 					bodyBackground: "#fff",
@@ -75,6 +95,7 @@ describe("buildDiagnosticsReport", () => {
 					remote: false,
 					workspaceFolderCount: 1,
 					customStorageConfigured: false,
+					colorThemeKind: "dark",
 				},
 			})
 			const serialized = JSON.stringify(report)
@@ -82,11 +103,18 @@ describe("buildDiagnosticsReport", () => {
 			expect(report.providers[0].events).toHaveLength(100)
 			expect(report.providers[0].currentTask).toMatch(/^task-[a-f0-9]{12}$/)
 			expect(report.providers[0].webviewResponse).toBe("received")
+			expect(report.persistence.tasks).toHaveLength(2)
+			expect(report.providers[0].webview).toMatchObject({
+				didHydrateState: true,
+				currentTask: report.providers[0].currentTask,
+			})
 			expect(serialized).not.toContain("raw-task-id")
+			expect(serialized).not.toContain("failed-navigation-target")
 			expect(serialized).not.toContain("TOP SECRET")
 			expect(serialized).not.toContain("API_KEY_SECRET")
 			expect(serialized).not.toContain("user@example.com")
 			expect(serialized).not.toContain("/Users/person")
+			expect(serialized).not.toContain("webview-ui/src/App.tsx")
 			expect(report.privacy).toMatchObject({ conversationContentIncluded: false, uploaded: false })
 		} finally {
 			await fs.rm(storagePath, { recursive: true, force: true })
@@ -126,6 +154,7 @@ describe("buildDiagnosticsReport", () => {
 				remote: false,
 				workspaceFolderCount: 0,
 				customStorageConfigured: false,
+				colorThemeKind: "dark",
 			},
 		})
 

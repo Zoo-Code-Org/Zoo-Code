@@ -68,6 +68,17 @@ function isSafeTaskId(value: string): boolean {
 	return /^[A-Za-z0-9_-]{1,128}$/.test(value)
 }
 
+function hasParentCycle(item: HistoryItem, byId: Map<string, HistoryItem>): boolean {
+	const visited = new Set<string>()
+	let current: HistoryItem | undefined = item
+	while (current) {
+		if (visited.has(current.id)) return true
+		visited.add(current.id)
+		current = current.parentTaskId ? byId.get(current.parentTaskId) : undefined
+	}
+	return false
+}
+
 function selectRelevant(history: HistoryItem[], currentIds: string[]): HistoryItem[] {
 	const byId = new Map(history.map((item) => [item.id, item]))
 	const selected = new Set<string>()
@@ -140,6 +151,7 @@ export async function collectPersistenceDiagnostics(options: {
 			if (item.parentTaskId && !byId.get(item.parentTaskId)?.childIds?.includes(item.id)) {
 				findings.push("parentChildMismatch")
 			}
+			if (hasParentCycle(item, byId)) findings.push("parentCycle")
 
 			return {
 				id: pseudonymize(item.id),

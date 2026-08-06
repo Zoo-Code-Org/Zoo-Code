@@ -3,6 +3,7 @@ import {
 	installWebviewDiagnostics,
 	recordDiagnosticsActiveTab,
 	recordDiagnosticsError,
+	recordDiagnosticsExtensionState,
 	recordDiagnosticsHydration,
 	recordDiagnosticsStateSequence,
 	recordDiagnosticsUnknownMessageUpdate,
@@ -34,6 +35,12 @@ describe("webview diagnostics", () => {
 	it("collects a bounded structural snapshot without error paths", () => {
 		recordDiagnosticsHydration(true)
 		recordDiagnosticsActiveTab("settings")
+		recordDiagnosticsExtensionState({
+			currentTaskId: "task-123",
+			chatMessageCount: 4,
+			historyItemCount: 7,
+			todoCount: 2,
+		})
 
 		recordDiagnosticsStateSequence(25, true)
 		recordDiagnosticsStateSequence(24, true)
@@ -51,6 +58,12 @@ describe("webview diagnostics", () => {
 
 		expect(snapshot.didHydrateState).toBe(true)
 		expect(snapshot.activeView).toBe("settings")
+		expect(snapshot).toMatchObject({
+			currentTaskId: "task-123",
+			chatMessageCount: 4,
+			historyItemCount: 7,
+			todoCount: 2,
+		})
 		expect(snapshot.lastReceivedStateSequence).toBe(24)
 		expect(snapshot.lastAppliedStateSequence).toBe(25)
 		expect(snapshot.staleStateRejectionCount).toBe(1)

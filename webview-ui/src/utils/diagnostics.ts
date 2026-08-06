@@ -20,6 +20,10 @@ const diagnosticsState = {
 	staleStateRejectionCount: 0,
 	unknownMessageUpdateCount: 0,
 	activeView: undefined as string | undefined,
+	currentTaskId: undefined as string | undefined,
+	chatMessageCount: 0,
+	historyItemCount: 0,
+	todoCount: 0,
 	error: undefined as WebviewDiagnosticsSnapshot["error"],
 }
 
@@ -51,6 +55,18 @@ const getErrorFingerprintSource = (source: DiagnosticsErrorSource, error: unknow
 
 export const recordDiagnosticsHydration = (didHydrateState: boolean) => {
 	diagnosticsState.didHydrateState = didHydrateState
+}
+
+export const recordDiagnosticsExtensionState = (state: {
+	currentTaskId?: string
+	chatMessageCount: number
+	historyItemCount: number
+	todoCount: number
+}) => {
+	diagnosticsState.currentTaskId = state.currentTaskId
+	diagnosticsState.chatMessageCount = state.chatMessageCount
+	diagnosticsState.historyItemCount = state.historyItemCount
+	diagnosticsState.todoCount = state.todoCount
 }
 
 export const recordDiagnosticsStateSequence = (sequence: unknown, hasMessages: boolean) => {
@@ -171,6 +187,10 @@ export const createWebviewDiagnosticsSnapshot = (): DiagnosticsSnapshot => ({
 	lastAppliedStateSequence: diagnosticsState.lastAppliedStateSequence,
 	staleStateRejectionCount: diagnosticsState.staleStateRejectionCount,
 	unknownMessageUpdateCount: diagnosticsState.unknownMessageUpdateCount,
+	currentTaskId: diagnosticsState.currentTaskId,
+	chatMessageCount: diagnosticsState.chatMessageCount,
+	historyItemCount: diagnosticsState.historyItemCount,
+	todoCount: diagnosticsState.todoCount,
 	viewport: readViewportSnapshot(),
 	theme: readThemeSnapshot(),
 	error: diagnosticsState.error ? { ...diagnosticsState.error } : undefined,

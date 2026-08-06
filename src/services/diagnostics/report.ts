@@ -46,23 +46,19 @@ function safeCount(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined
 }
 
-export function sanitizeWebviewDiagnostics(snapshot: WebviewDiagnosticsSnapshot): Record<string, unknown> {
+export function sanitizeWebviewDiagnostics(
+	snapshot: WebviewDiagnosticsSnapshot,
+	pseudonymize: (value: string) => string,
+): Record<string, unknown> {
 	const variables = Object.fromEntries(
 		Object.entries(snapshot.theme?.variables ?? {})
 			.filter(([key]) => ALLOWED_THEME_VARIABLES.has(key))
 			.map(([key, value]) => [key, safeToken(value, 64)])
 			.filter((entry): entry is [string, string] => entry[1] !== undefined),
 	)
-	const stackLocations = snapshot.error?.stackLocations
-		?.map((location) => safeToken(location, 160))
-		.filter(
-			(location): location is string =>
-				location !== undefined && !location.startsWith("/") && !/^[A-Za-z]:/.test(location),
-		)
-		.slice(0, 10)
-
 	return {
 		capturedAt: safeToken(snapshot.capturedAt),
+		didHydrateState: typeof snapshot.didHydrateState === "boolean" ? snapshot.didHydrateState : undefined,
 		documentReadyState: safeToken(snapshot.documentReadyState),
 		documentVisibilityState: safeToken(snapshot.documentVisibilityState),
 		activeView: safeToken(snapshot.activeView, 40),
@@ -72,6 +68,7 @@ export function sanitizeWebviewDiagnostics(snapshot: WebviewDiagnosticsSnapshot)
 		lastAppliedStateSequence: safeCount(snapshot.lastAppliedStateSequence),
 		staleStateRejectionCount: safeCount(snapshot.staleStateRejectionCount),
 		unknownMessageUpdateCount: safeCount(snapshot.unknownMessageUpdateCount),
+		currentTask: snapshot.currentTaskId ? pseudonymize(snapshot.currentTaskId) : undefined,
 		chatMessageCount: safeCount(snapshot.chatMessageCount),
 		historyItemCount: safeCount(snapshot.historyItemCount),
 		todoCount: safeCount(snapshot.todoCount),
@@ -97,7 +94,6 @@ export function sanitizeWebviewDiagnostics(snapshot: WebviewDiagnosticsSnapshot)
 			? {
 					name: safeToken(snapshot.error.name, 40),
 					fingerprint: safeToken(snapshot.error.fingerprint, 128),
-					stackLocations,
 				}
 			: undefined,
 	}
@@ -177,7 +173,7 @@ export async function buildDiagnosticsReport(options: {
 				})),
 				eventsTruncated: snapshot.eventsTruncated || snapshot.events.length > 100,
 				webviewResponse: webview ? "received" : "unavailable",
-				webview: webview ? sanitizeWebviewDiagnostics(webview) : undefined,
+				webview: webview ? sanitizeWebviewDiagnostics(webview, pseudonymize) : undefined,
 			}
 		}),
 	)
@@ -187,7 +183,12 @@ export async function buildDiagnosticsReport(options: {
 		persistence = await collectPersistenceDiagnostics({
 			storagePath: options.storagePath,
 			history: mergeHistory(snapshots),
-			currentTaskIds: snapshots.flatMap((snapshot) => (snapshot.currentTaskId ? [snapshot.currentTaskId] : [])),
+			currentTaskIds: snapshots.flatMap((snapshot) => [
+				...(snapshot.currentTaskId ? [snapshot.currentTaskId] : []),
+				...snapshot.events
+					.filter((event) => event.boundary === "task-navigation" && event.taskId)
+					.map((event) => event.taskId!),
+			]),
 			pseudonymize,
 		})
 	} catch {

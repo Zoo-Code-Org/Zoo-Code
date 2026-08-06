@@ -101,4 +101,39 @@ describe("collectPersistenceDiagnostics", () => {
 		expect(result.tasks[0].historyItem.exists).toBe(false)
 		expect(result.tasks[0].uiMessages.parseStatus).toBe("invalid")
 	})
+
+	it("reports cycles in parent relationships", async () => {
+		const history: HistoryItem[] = [
+			{
+				id: "task-1",
+				parentTaskId: "task-2",
+				number: 1,
+				ts: 10,
+				task: "not reported",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			},
+			{
+				id: "task-2",
+				parentTaskId: "task-1",
+				number: 2,
+				ts: 20,
+				task: "not reported",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			},
+		]
+
+		const result = await collectPersistenceDiagnostics({
+			storagePath,
+			history,
+			currentTaskIds: ["task-1"],
+			pseudonymize: (value) => `hashed-${value}`,
+		})
+
+		expect(result.tasks).toHaveLength(2)
+		expect(result.tasks.every((task) => task.integrityFindings.includes("parentCycle"))).toBe(true)
+	})
 })

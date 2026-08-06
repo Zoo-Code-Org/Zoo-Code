@@ -471,6 +471,7 @@ export type AudioType = "notification" | "celebration" | "progress_loop"
 
 export interface WebviewDiagnosticsSnapshot {
 	capturedAt: string
+	didHydrateState?: boolean
 	documentReadyState?: "loading" | "interactive" | "complete"
 	documentVisibilityState?: "hidden" | "visible" | "prerender"
 	activeView?: string

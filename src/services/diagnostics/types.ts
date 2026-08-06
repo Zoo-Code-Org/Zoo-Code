@@ -57,6 +57,7 @@ export interface DiagnosticsReportV1 {
 		remote: boolean
 		workspaceFolderCount: number
 		customStorageConfigured: boolean
+		colorThemeKind: "light" | "dark" | "highContrast" | "highContrastLight" | "unknown"
 	}
 	providers: DiagnosticsProviderReport[]
 	persistence: DiagnosticsPersistenceReport
