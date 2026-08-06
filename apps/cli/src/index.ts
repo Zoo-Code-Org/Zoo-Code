@@ -1,6 +1,7 @@
 import { Command } from "commander"
 
 import { DEFAULT_FLAGS } from "@/types/constants.js"
+import { supportedProviders } from "@/types/index.js"
 import { VERSION } from "@/lib/utils/version.js"
 import { run, logout, status, listCommands, listModes, listModels, listSessions, upgrade } from "@/commands/index.js"
 
@@ -35,7 +36,7 @@ program
 	.option("-d, --debug", "Enable debug output (includes detailed debug information)", false)
 	.option("-a, --require-approval", "Require manual approval for actions", false)
 	.option("-k, --api-key <key>", "API key for the LLM provider")
-	.option("--provider <provider>", "API provider (anthropic, openai-native, gemini, openrouter, etc.)")
+	.option("--provider <provider>", `API provider (${supportedProviders.join(", ")})`)
 	.option("-m, --model <model>", "Model to use", DEFAULT_FLAGS.model)
 	.option("--mode <mode>", "Mode to start in (code, architect, ask, debug, etc.)", DEFAULT_FLAGS.mode)
 	.option("--terminal-shell <path>", "Absolute path to shell executable for inline terminal commands")
