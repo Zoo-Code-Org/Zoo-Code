@@ -245,6 +245,12 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					getMcpHub: () => ({
 						findServerNameBySanitizedName: () => "my_server",
+						getAllServers: () => [
+							{
+								name: "my_server",
+								tools: [{ name: "do_thing", enabledForPrompt: true }],
+							},
+						],
 					}),
 				}),
 			}
