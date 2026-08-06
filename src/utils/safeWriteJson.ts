@@ -238,7 +238,7 @@ async function safeUpdateJson<T>(
 			fileExisted = true
 			current = JSON.parse(raw) as T
 		} catch (readError: unknown) {
-			if (readError instanceof Error && (readError as NodeJS.ErrnoException).code !== "ENOENT") {
+			if ((readError as NodeJS.ErrnoException | undefined)?.code !== "ENOENT") {
 				throw readError
 			}
 		}
