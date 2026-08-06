@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Mencari '{{query}}' di codebase..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard memblokir perintah ini.",
+			"blockedWithReason": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard memblokir perintah ini. (Aturan: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard memblokir perintah ini. Pesan dari DCG: {{reason}} (Aturan: {{ruleId}})"
+		}
+	},
 	"searchFiles": {
 		"workspaceBoundaryError": "Tidak dapat mencari di luar workspace. Path '{{path}}' berada di luar workspace saat ini."
 	},

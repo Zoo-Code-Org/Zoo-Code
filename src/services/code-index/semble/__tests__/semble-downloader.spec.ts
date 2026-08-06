@@ -550,7 +550,7 @@ describe("semble-downloader", () => {
 				// Should call PowerShell for zip extraction
 				expect(spawn).toHaveBeenCalledWith(
 					"powershell",
-					expect.arrayContaining(["-NoProfile", "-Command", expect.stringContaining("Expand-Archive")]),
+					["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)],
 					expect.any(Object),
 				)
 				// Should NOT call chmod on windows

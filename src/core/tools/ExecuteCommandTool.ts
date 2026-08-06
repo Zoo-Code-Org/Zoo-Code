@@ -23,7 +23,6 @@ import {
 	RooTerminal,
 	RooTerminalCallbacks,
 	RooTerminalProvider,
-	RooTerminalProcess,
 	ShellIntegrationError,
 	ShellIntegrationErrorDetails,
 	TerminalErrorCode,
@@ -119,6 +118,22 @@ interface ExecuteCommandParams {
 	timeout?: number | null
 }
 
+export function formatDcgBlockedMessage(reason?: string, ruleId?: string): string {
+	if (reason && ruleId) {
+		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReasonAndRule", { reason, ruleId })
+	}
+
+	if (reason) {
+		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReason", { reason })
+	}
+
+	if (ruleId) {
+		return t("tools:executeCommand.destructiveCommandGuard.blockedWithRule", { ruleId })
+	}
+
+	return t("tools:executeCommand.destructiveCommandGuard.blocked")
+}
+
 export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined): number {
 	const requestedAgentTimeout = typeof timeoutSeconds === "number" && timeoutSeconds > 0 ? timeoutSeconds * 1000 : 0
 
@@ -195,16 +210,41 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				return
 			}
 
-			const didApprove = await askApproval("command", canonicalCommand)
+			const provider = await task.providerRef.deref()
+			let dcgBlocked = false
+			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
+				const { ensureDcgInstalled, runDcg } = await import("../../services/destructive-command-guard")
+				// Resolve through the managed installer on use so an extension update
+				// automatically installs the newly pinned and verified DCG version.
+				const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
+				if (!binaryPath) {
+					throw new Error(t("common:errors.destructiveCommandGuard.unavailable"))
+				}
+				const workingDirectory = customCwd
+					? path.isAbsolute(customCwd)
+						? customCwd
+						: path.resolve(task.cwd, customCwd)
+					: task.cwd
+				const dcgResult = await runDcg(binaryPath, canonicalCommand, workingDirectory)
+				dcgBlocked = dcgResult.decision === "deny"
+				if (dcgResult.decision === "deny") {
+					await task.say("error", formatDcgBlockedMessage(dcgResult.reason, dcgResult.ruleId))
+				}
+			}
+
+			// DCG-approved commands are auto-approved by checkAutoApproval. A DCG
+			// block is presented as Zoo's normal command prompt, with isProtected
+			// forcing the user to explicitly choose whether to execute it.
+			const didApprove = dcgBlocked
+				? await askApproval("command", canonicalCommand, undefined, true)
+				: await askApproval("command", canonicalCommand)
 
 			if (!didApprove) {
 				return
 			}
 
 			const executionId = task.lastMessageTs?.toString() ?? Date.now().toString()
-			const provider = await task.providerRef.deref()
 			const providerState = await provider?.getState()
-
 			const { terminalShellIntegrationDisabled = true } = providerState ?? {}
 
 			// Resolve the command environment snapshot for this request.
@@ -454,14 +494,12 @@ export async function executeCommandInTerminal(
 		return [false, `Working directory '${workingDir}' does not exist.`]
 	}
 
-	let message: { text?: string; images?: string[] } | undefined
 	let runInBackground = false
 	let completed = false
 	let result: string = ""
 	let persistedResult: PersistedCommandOutput | undefined
 	let exitDetails: ExitCodeDetails | undefined
 	let shellIntegrationError: ShellIntegrationError | undefined
-	let hasAskedForCommandOutput = false
 
 	// Determine the terminal provider. When a resolved environment is available,
 	// the provider comes from the primary plan — this is the single source of truth
@@ -561,58 +599,6 @@ export async function executeCommandInTerminal(
 		resolveOnCompleted = resolve
 	})
 
-	// Delay the `command_output` ask so short foreground commands that emit
-	// output and exit normally never prompt the user. The ask only fires if the
-	// command is still running once COMMAND_OUTPUT_ASK_DELAY_MS has elapsed
-	// since execution started, preserving the interrupt/feedback path for
-	// long-running commands. The anchor is re-based to onShellExecutionStarted
-	// (falling back to the pre-runCommand timestamp when that event never
-	// fires) so shell-integration startup on cold terminals does not consume
-	// the grace period.
-	let commandStartedAt = 0
-	let commandOutputAskTimer: NodeJS.Timeout | undefined
-
-	const askForCommandOutput = async (process: RooTerminalProcess): Promise<void> => {
-		if (runInBackground || hasAskedForCommandOutput || completed) {
-			return
-		}
-
-		// Mark that we've asked to prevent multiple concurrent asks
-		hasAskedForCommandOutput = true
-
-		try {
-			const { response, text, images } = await task.ask("command_output", "")
-			runInBackground = true
-
-			if (response === "messageResponse") {
-				message = { text, images }
-			}
-
-			// Any answer means the command should keep running in the background;
-			// continue the process so the tool resolves now instead of blocking
-			// until the command actually completes.
-			process.continue()
-		} catch (_error) {
-			// Silently handle ask errors (e.g., "Current ask promise was ignored")
-		}
-	}
-
-	const scheduleCommandOutputAsk = (process: RooTerminalProcess): void => {
-		if (runInBackground || hasAskedForCommandOutput || completed || commandOutputAskTimer) {
-			return
-		}
-
-		const remainingDelay = COMMAND_OUTPUT_ASK_DELAY_MS - (Date.now() - commandStartedAt)
-
-		commandOutputAskTimer = setTimeout(
-			() => {
-				commandOutputAskTimer = undefined
-				void askForCommandOutput(process)
-			},
-			Math.max(remainingDelay, 0),
-		)
-	}
-
 	const callbacks: RooTerminalCallbacks = {
 		onLine: async (lines: string, process: RooTerminalProcess) => {
 			traceBuilder?.markFirstOutputAt(Date.now())
@@ -632,20 +618,8 @@ export async function executeCommandInTerminal(
 			const status: CommandExecutionStatus = { executionId, status: "output", output: compressedOutput }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 			schedulePartialCommandOutputUpdate()
-
-			scheduleCommandOutputAsk(process)
 		},
 		onCompleted: async (output: string | undefined) => {
-			clearTimeout(commandOutputAskTimer)
-			commandOutputAskTimer = undefined
-
-			// If an interactive command_output ask is still pending, supersede it
-			// so it resolves immediately instead of lingering until the next
-			// interactive message bumps lastMessageTs.
-			if (hasAskedForCommandOutput && !runInBackground) {
-				task.supersedePendingAsk()
-			}
-
 			clearTimeout(pendingCommandOutputEmitTimer)
 			pendingCommandOutputEmitTimer = undefined
 
@@ -687,18 +661,6 @@ export async function executeCommandInTerminal(
 			traceBuilder?.markShellExecutionStartedAt(now)
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
 			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
-
-			// Re-anchor the ask delay to actual execution start so the shell
-			// integration startup wait does not count against the grace period.
-			commandStartedAt = Date.now()
-
-			// Output should not precede this event, but if it did, reschedule
-			// the pending ask against the corrected anchor.
-			if (commandOutputAskTimer) {
-				clearTimeout(commandOutputAskTimer)
-				commandOutputAskTimer = undefined
-				scheduleCommandOutputAsk(process)
-			}
 		},
 		onShellExecutionComplete: (details: ExitCodeDetails) => {
 			traceBuilder?.markShellExecutionEndedAt(Date.now(), details.exitCode ?? undefined)
@@ -793,8 +755,6 @@ export async function executeCommandInTerminal(
 				new Promise<void>((resolve) => {
 					agentTimeoutId = setTimeout(() => {
 						runInBackground = true
-						clearTimeout(commandOutputAskTimer)
-						commandOutputAskTimer = undefined
 						process.continue()
 						task.supersedePendingAsk()
 						resolve()
@@ -836,7 +796,6 @@ export async function executeCommandInTerminal(
 	} finally {
 		clearTimeout(agentTimeoutId)
 		clearTimeout(userTimeoutId)
-		clearTimeout(commandOutputAskTimer)
 		clearTimeout(pendingCommandOutputEmitTimer)
 		task.terminalProcess = undefined
 	}

@@ -179,11 +179,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/__tests__/lmstudio.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -277,11 +272,6 @@
 	"api/providers/__tests__/vertex.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
-		}
-	},
-	"api/providers/__tests__/xai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"api/providers/__tests__/zai.spec.ts": {
@@ -1076,7 +1066,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 40
+			"count": 37
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {

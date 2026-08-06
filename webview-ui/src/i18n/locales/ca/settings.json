@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Executar",
 			"description": "Executar automàticament comandes de terminal permeses sense requerir aprovació",
+			"destructiveCommandGuard": {
+				"label": "Activa la protecció contra ordres destructives",
+				"description": "Baixa i utilitza Destructive Command Guard (DCG) per a aquesta plataforma. Les ordres permeses per DCG s'executen automàticament. Les ordres bloquejades per DCG requereixen la teva aprovació. Les llistes d'ordres de Zoo es desactiven mentre aquesta opció està activa. L'executable baixat es conserva si la desactives."
+			},
 			"allowedCommands": "Comandes d'auto-execució permeses",
 			"allowedCommandsDescription": "Prefixos de comandes que poden ser executats automàticament quan \"Aprovar sempre operacions d'execució\" està habilitat. Afegeix * per permetre totes les comandes (usar amb precaució).",
 			"deniedCommands": "Comandes denegades",

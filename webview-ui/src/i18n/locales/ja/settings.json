@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "実行",
 			"description": "承認なしで自動的に許可されたターミナルコマンドを実行",
+			"destructiveCommandGuard": {
+				"label": "破壊的コマンドガードを有効にする",
+				"description": "このプラットフォーム用の Destructive Command Guard（DCG）をダウンロードして使用します。DCG が許可したコマンドは自動的に実行されます。DCG がブロックしたコマンドの実行には承認が必要です。有効な間は Zoo のコマンドリストが無効になります。無効にしても、ダウンロードした実行ファイルは保持されます。"
+			},
 			"allowedCommands": "許可された自動実行コマンド",
 			"allowedCommandsDescription": "「実行操作を常に承認」が有効な場合に自動実行できるコマンドプレフィックス。すべてのコマンドを許可するには * を追加します（注意して使用してください）。",
 			"deniedCommands": "拒否されたコマンド",
