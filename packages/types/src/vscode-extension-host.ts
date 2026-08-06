@@ -103,6 +103,7 @@ export interface ExtensionMessage {
 		| "rules"
 		| "fileContent"
 		| "rooHistoryImportProgress"
+		| "diagnosticsRequest"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -150,6 +151,7 @@ export interface ExtensionMessage {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	values?: Record<string, any>
 	requestId?: string
+	diagnostics?: WebviewDiagnosticsSnapshot
 	promptText?: string
 	results?:
 		| { path: string; type: "file" | "folder"; label?: string }[]
@@ -438,6 +440,40 @@ export type ClineAskResponse = "yesButtonClicked" | "noButtonClicked" | "message
 
 export type AudioType = "notification" | "celebration" | "progress_loop"
 
+export interface WebviewDiagnosticsSnapshot {
+	capturedAt: string
+	didHydrateState?: boolean
+	documentReadyState?: "loading" | "interactive" | "complete"
+	documentVisibilityState?: "hidden" | "visible" | "prerender"
+	activeView?: string
+	rootMounted?: boolean
+	rootChildCount?: number
+	lastReceivedStateSequence?: number
+	lastAppliedStateSequence?: number
+	staleStateRejectionCount?: number
+	unknownMessageUpdateCount?: number
+	currentTaskId?: string
+	chatMessageCount?: number
+	historyItemCount?: number
+	todoCount?: number
+	viewport?: { width: number; height: number; devicePixelRatio: number }
+	theme?: {
+		kind?: number
+		identifier?: string
+		bodyForeground?: string
+		bodyBackground?: string
+		rootForeground?: string
+		rootBackground?: string
+		variables?: Record<string, string>
+	}
+	error?: {
+		name?: string
+		message?: string
+		fingerprint?: string
+		stackLocations?: string[]
+	}
+}
+
 export interface UpdateTodoListPayload {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	todos: any[]
@@ -632,6 +668,7 @@ export interface WebviewMessage {
 		| "deleteRule"
 		| "openRuleFile"
 		| "openRulesDirectory"
+		| "diagnosticsResponse"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -678,6 +715,7 @@ export interface WebviewMessage {
 	/** Target mode slugs for updateSkillModes */
 	newSkillModeSlugs?: string[] // For updateSkillModes (new mode restrictions)
 	requestId?: string
+	diagnostics?: WebviewDiagnosticsSnapshot
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number

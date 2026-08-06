@@ -15,6 +15,7 @@
 	"command.terminal.explainCommand.title": "Spiega Questo Comando",
 	"command.acceptInput.title": "Accetta Input/Suggerimento",
 	"command.showRipgrepDiagnostic.title": "Mostra diagnostica Ripgrep",
+	"command.createDiagnosticsReport.title": "Crea rapporto di diagnostica",
 	"command.toggleAutoApprove.title": "Attiva/Disattiva Auto-Approvazione",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",

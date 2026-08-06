@@ -14,6 +14,7 @@ import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
+import { createDiagnosticsReport } from "../services/diagnostics"
 import { t } from "../i18n"
 
 /**
@@ -173,6 +174,12 @@ const getCommandsMap = ({
 			filePath,
 		)
 	},
+	createDiagnosticsReport: () =>
+		createDiagnosticsReport({
+			context,
+			outputChannel,
+			providers: ClineProvider.getAllInstances(),
+		}),
 	focusInput: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)

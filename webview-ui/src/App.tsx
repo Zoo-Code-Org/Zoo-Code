@@ -22,6 +22,7 @@ import ErrorBoundary from "./components/ErrorBoundary"
 import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonInteractiveClick"
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
+import { recordDiagnosticsActiveTab } from "./utils/diagnostics"
 
 type Tab = "settings" | "history" | "chat" | "marketplace"
 
@@ -163,6 +164,8 @@ const App = () => {
 	)
 
 	useEvent("message", onMessage)
+
+	useEffect(() => recordDiagnosticsActiveTab(tab), [tab])
 
 	useEffect(() => {
 		if (shouldShowAnnouncement && tab === "chat") {

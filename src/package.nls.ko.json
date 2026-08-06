@@ -15,6 +15,7 @@
 	"command.terminal.explainCommand.title": "이 명령어 설명",
 	"command.acceptInput.title": "입력/제안 수락",
 	"command.showRipgrepDiagnostic.title": "Ripgrep 진단 표시",
+	"command.createDiagnosticsReport.title": "진단 보고서 만들기",
 	"command.toggleAutoApprove.title": "자동 승인 전환",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",

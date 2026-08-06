@@ -15,6 +15,7 @@
 	"command.terminal.explainCommand.title": "Giải Thích Lệnh Này",
 	"command.acceptInput.title": "Chấp Nhận Đầu Vào/Gợi Ý",
 	"command.showRipgrepDiagnostic.title": "Hiển thị chẩn đoán Ripgrep",
+	"command.createDiagnosticsReport.title": "Tạo báo cáo chẩn đoán",
 	"command.toggleAutoApprove.title": "Bật/Tắt Tự Động Phê Duyệt",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",

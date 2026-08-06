@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useState } from "react"
+import React, { createContext, useCallback, useEffect, useRef, useState } from "react"
 
 import {
 	type ProviderSettings,
@@ -32,6 +32,12 @@ import { experimentDefault } from "@roo/experiments"
 
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
+import {
+	recordDiagnosticsHydration,
+	recordDiagnosticsExtensionState,
+	recordDiagnosticsStateSequence,
+	recordDiagnosticsUnknownMessageUpdate,
+} from "@src/utils/diagnostics"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
@@ -272,6 +278,17 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 		includeCurrentCost: true,
 		lockApiConfigAcrossModes: false,
 	})
+	const stateRef = useRef(state)
+	stateRef.current = state
+
+	useEffect(() => {
+		recordDiagnosticsExtensionState({
+			currentTaskId: state.currentTaskId,
+			chatMessageCount: state.clineMessages.length,
+			historyItemCount: state.taskHistory.length,
+			todoCount: state.currentTaskTodos?.length ?? 0,
+		})
+	}, [state.currentTaskId, state.clineMessages.length, state.taskHistory.length, state.currentTaskTodos?.length])
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
@@ -316,9 +333,11 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 			switch (message.type) {
 				case "state": {
 					const newState = message.state ?? {}
+					recordDiagnosticsStateSequence(newState.clineMessagesSeq, newState.clineMessages !== undefined)
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
+					recordDiagnosticsHydration(true)
 					// Update alwaysAllowFollowupQuestions if present in state message
 					if ((newState as any).alwaysAllowFollowupQuestions !== undefined) {
 						setAlwaysAllowFollowupQuestions((newState as any).alwaysAllowFollowupQuestions)
@@ -380,6 +399,9 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 				}
 				case "messageUpdated": {
 					const clineMessage = message.clineMessage!
+					if (!stateRef.current.clineMessages.some((existing) => existing.ts === clineMessage.ts)) {
+						recordDiagnosticsUnknownMessageUpdate()
+					}
 					setState((prevState) => {
 						// worth noting it will never be possible for a more up-to-date message to be sent here or in normal messages post since the presentAssistantContent function uses lock
 						const lastIndex = findLastIndex(prevState.clineMessages, (msg) => msg.ts === clineMessage.ts)
