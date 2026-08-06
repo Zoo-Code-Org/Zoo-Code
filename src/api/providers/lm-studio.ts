@@ -16,6 +16,7 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
 import { handleOpenAIError } from "./utils/error-handler"
+import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -80,6 +81,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 
 		let assistantText = ""
+		let reasoningOutput = ""
 
 		try {
 			const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
@@ -123,6 +125,15 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 					}
 				}
 
+				// Reasoning models served by LM Studio (Qwen3, DeepSeek-R1, QwQ, ...) stream
+				// their thinking in a dedicated `reasoning_content`/`reasoning` delta field
+				// rather than as <think> tags inside `content`, so TagMatcher never sees it.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					reasoningOutput += reasoningText
+					yield { type: "reasoning", text: reasoningText }
+				}
+
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
@@ -151,7 +162,9 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 
 			let outputTokens = 0
 			try {
-				outputTokens = await this.countTokens([{ type: "text", text: assistantText }])
+				// Reasoning tokens are billed as output, so count them alongside the
+				// visible text — otherwise thinking models under-report usage entirely.
+				outputTokens = await this.countTokens([{ type: "text", text: reasoningOutput + assistantText }])
 			} catch (err) {
 				console.error("[LmStudio] Failed to count output tokens:", err)
 				outputTokens = 0
