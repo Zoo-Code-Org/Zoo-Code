@@ -840,12 +840,18 @@ export class TaskOrganizationStore {
 		}
 
 		this.getTasksDir()
-			.then((tasksDir) => {
+			.then(async (tasksDir) => {
 				if (this.disposed) {
 					return
 				}
 
 				try {
+					// Ensure the tasks directory exists before watching it.
+					// fs.watch throws ENOENT when the watched path does not
+					// exist, which happens on first run before any task is
+					// persisted.
+					await fs.mkdir(tasksDir, { recursive: true })
+
 					this.fsWatcher = fsSync.watch(tasksDir, { recursive: false }, (_eventType, filename) => {
 						if (this.disposed) {
 							return

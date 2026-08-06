@@ -88,7 +88,7 @@ describe("safeUpdateJson", () => {
 	test("creates a new file when allowCreate is true and the file does not exist", async () => {
 		const updated = await safeUpdateJson(
 			currentTestFilePath,
-			(current) => ({ ...(current ?? {}), created: true }),
+			(current: { created?: boolean } | undefined) => ({ ...(current ?? {}), created: true }),
 			{ allowCreate: true },
 		)
 
@@ -99,7 +99,7 @@ describe("safeUpdateJson", () => {
 
 	test("throws when the file does not exist and allowCreate is false", async () => {
 		await expect(
-			safeUpdateJson(currentTestFilePath, (current) => ({ ...(current ?? {}), nope: true })),
+			safeUpdateJson(currentTestFilePath, (current: { nope?: boolean } | undefined) => ({ ...(current ?? {}), nope: true })),
 		).rejects.toThrow("safeUpdateJson: file does not exist and allowCreate is false")
 
 		// The file must not have been created.
@@ -109,10 +109,13 @@ describe("safeUpdateJson", () => {
 	test("reads the current content and writes the updater result back", async () => {
 		await fs.writeFile(currentTestFilePath, JSON.stringify({ counter: 1 }))
 
-		const updated = await safeUpdateJson(currentTestFilePath, (current) => ({
-			...current,
-			counter: (current?.counter ?? 0) + 1,
-		}))
+		const updated = await safeUpdateJson(
+			currentTestFilePath,
+			(current: { counter: number } | undefined) => ({
+				...current,
+				counter: (current?.counter ?? 0) + 1,
+			}),
+		)
 
 		expect(updated).toEqual({ counter: 2 })
 		const content = await readFileContent(currentTestFilePath)
@@ -122,7 +125,11 @@ describe("safeUpdateJson", () => {
 	test("supports prettyPrint output", async () => {
 		await fs.writeFile(currentTestFilePath, JSON.stringify({ a: 1 }))
 
-		await safeUpdateJson(currentTestFilePath, (current) => ({ ...current, b: 2 }), { prettyPrint: true })
+		await safeUpdateJson(
+			currentTestFilePath,
+			(current: { a?: number; b?: number } | undefined) => ({ ...current, b: 2 }),
+			{ prettyPrint: true },
+		)
 
 		const raw = await fs.readFile(currentTestFilePath, "utf8")
 		expect(raw).toContain("\n\t")
@@ -132,7 +139,11 @@ describe("safeUpdateJson", () => {
 	test("creates parent directories when they do not exist", async () => {
 		const deepPath = path.join(tempDir, "level1", "level2", "deep.json")
 
-		await safeUpdateJson(deepPath, (current) => ({ ...(current ?? {}), deep: true }), { allowCreate: true })
+		await safeUpdateJson(
+			deepPath,
+			(current: { deep?: boolean } | undefined) => ({ ...(current ?? {}), deep: true }),
+			{ allowCreate: true },
+		)
 
 		expect(await readFileContent(deepPath)).toEqual({ deep: true })
 	})
@@ -165,32 +176,23 @@ describe("safeUpdateJson", () => {
 
 	// ────────────────────────────── Failure & rollback scenarios ──────────────────────────────
 
-	test("rolls back to the original file when the final rename fails", async () => {
+	test("leaves the original file unchanged when the final rename fails", async () => {
 		const initialData = { message: "Initial content, should be restored" }
 		await fs.writeFile(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		let renameCallCount = 0
-		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
-			renameCallCount++
-			if (renameCallCount === 1) {
-				// First call: filePath -> tempBackupFilePath (should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
-			} else if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
-				throw new Error("Rename from temp to final failed")
-			} else if (renameCallCount === 3) {
-				// Third call: tempBackupFilePath -> filePath (rollback, should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
-			}
-			return fsPromisesActuals.rename!(oldPath, newPath)
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename from temp to final failed")
 		})
 
 		await expect(
-			safeUpdateJson(currentTestFilePath, (current) => ({ ...current, changed: true })),
+			safeUpdateJson(
+				currentTestFilePath,
+				(current: { message?: string; changed?: boolean } | undefined) => ({ ...current, changed: true }),
+			),
 		).rejects.toThrow("Rename from temp to final failed")
 
-		// The file was restored to its initial content.
+		// The file was never moved, so its initial content is intact.
 		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
 	})
 
@@ -213,13 +215,19 @@ describe("safeUpdateJson", () => {
 		vi.mocked(fsSyncActual.createWriteStream).mockImplementationOnce((_path, _options) => errorStream)
 
 		await expect(
-			safeUpdateJson(currentTestFilePath, (current) => ({ ...current, changed: true })),
+			safeUpdateJson(
+				currentTestFilePath,
+				(current: { initial?: string; changed?: boolean } | undefined) => ({ ...current, changed: true }),
+			),
 		).rejects.toThrow("Stream write error")
 
 		// If the lock wasn't released, this second attempt would fail with a lock error.
 		// Instead, it should succeed (proving the lock was released).
 		await expect(
-			safeUpdateJson(currentTestFilePath, (current) => ({ ...current, second: true })),
+			safeUpdateJson(
+				currentTestFilePath,
+				(current: { initial?: string; second?: boolean } | undefined) => ({ ...current, second: true }),
+			),
 		).resolves.toEqual({ initial: "content", second: true })
 	})
 
@@ -238,7 +246,7 @@ describe("safeUpdateJson", () => {
 		const { safeUpdateJson: mockedSafeUpdateJson } = await import("../safeWriteJson")
 
 		await expect(
-			mockedSafeUpdateJson(lockTestFilePath, (current) => ({ ...(current ?? {}), changed: true })),
+			mockedSafeUpdateJson(lockTestFilePath, (current: { changed?: boolean } | undefined) => ({ ...(current ?? {}), changed: true })),
 		).rejects.toThrow("Failed to get lock.")
 
 		// Clean up

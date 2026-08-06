@@ -22,8 +22,9 @@ export interface SafeWriteJsonOptions {
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
  * - Writes to a temporary file first.
- * - If the target file exists, it's backed up before being replaced.
- * - Attempts to roll back and clean up in case of errors.
+ * - Atomically renames the temporary file over the target (a single rename,
+ *   no backup step), so readers never observe a missing or partial file.
+ * - Cleans up the temporary file in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
  * @param {string} filePath - The absolute path to the target file.
@@ -78,9 +79,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		throw lockError
 	}
 
-	// Variables to hold the actual paths of temp files if they are created.
+	// Variable to hold the actual path of the temp file if it is created.
 	let actualTempNewFilePath: string | null = null
-	let actualTempBackupFilePath: string | null = null
 
 	try {
 		// Step 1: Write data to a new temporary file.
@@ -91,93 +91,32 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
 
-		// Step 2: Check if the target file exists. If so, rename it to a backup path.
-		try {
-			// Check for target file existence
-			await fs.access(absoluteFilePath)
-			// Target exists, create a backup path and rename.
-			actualTempBackupFilePath = path.join(
-				path.dirname(absoluteFilePath),
-				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-			)
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: unknown) {
-			// Explicitly type accessError
-			if (accessError instanceof Error && (accessError as NodeJS.ErrnoException).code !== "ENOENT") {
-				// An error other than "file not found" occurred during access check.
-				throw accessError
-			}
-			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
-		}
-
-		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step.
+		// Step 2: Atomically replace the target file with the new file.
+		// A single rename is atomic on POSIX and Windows (MoveFileEx with
+		// MOVEFILE_REPLACE_EXISTING), so concurrent readers never observe a
+		// missing file or a partially written file. No backup step is needed:
+		// if the rename fails, the original file is left untouched.
 		await fs.rename(actualTempNewFilePath, absoluteFilePath)
 
 		// If we reach here, the new file is successfully in place.
 		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
 		// Mark as "used" or "committed"
 		actualTempNewFilePath = null
-
-		// Step 4: If a backup was created, attempt to delete it.
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-				// Mark backup as handled
-				actualTempBackupFilePath = null
-			} catch (unlinkBackupError) {
-				// Log this error, but do not re-throw. The main operation was successful.
-				// actualTempBackupFilePath remains set, indicating an orphaned backup.
-				console.error(
-					`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
-					unlinkBackupError,
-				)
-			}
-		}
 	} catch (originalError) {
 		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 
-		const newFileToCleanupWithinCatch = actualTempNewFilePath
-		const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
-
-		// Attempt rollback if a backup was made
-		if (backupFileToRollbackOrCleanupWithinCatch) {
-			try {
-				await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-				// Mark as handled, prevent later unlink of this path
-				actualTempBackupFilePath = null
-			} catch (rollbackError) {
-				// actualTempBackupFilePath (outer scope) remains pointing to backupFileToRollbackOrCleanupWithinCatch
-				console.error(
-					`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
-					rollbackError,
-				)
-			}
-		}
-
 		// Cleanup the .new file if it exists
-		if (newFileToCleanupWithinCatch) {
+		if (actualTempNewFilePath) {
 			try {
-				await fs.unlink(newFileToCleanupWithinCatch)
+				await fs.unlink(actualTempNewFilePath)
 			} catch (cleanupError) {
 				console.error(
-					`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
+					`[Catch] Failed to clean up temporary new file ${actualTempNewFilePath}:`,
 					cleanupError,
 				)
 			}
 		}
 
-		// Cleanup the .bak file if it still needs to be (i.e., wasn't successfully restored)
-		if (actualTempBackupFilePath) {
-			try {
-				await fs.unlink(actualTempBackupFilePath)
-			} catch (cleanupError) {
-				console.error(
-					`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
-					cleanupError,
-				)
-			}
-		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
@@ -314,7 +253,6 @@ async function safeUpdateJson<T>(
 		// we already hold. safeWriteJson would try to acquire the lock again,
 		// so we inline the streaming write here.
 		let actualTempNewFilePath: string | null = null
-		let actualTempBackupFilePath: string | null = null
 
 		try {
 			actualTempNewFilePath = path.join(
@@ -324,68 +262,22 @@ async function safeUpdateJson<T>(
 
 			await _streamDataToFile(actualTempNewFilePath, updated, options?.prettyPrint)
 
-			try {
-				await fs.access(absoluteFilePath)
-				actualTempBackupFilePath = path.join(
-					path.dirname(absoluteFilePath),
-					`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-				)
-				await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-			} catch (accessError: unknown) {
-				if (accessError instanceof Error && (accessError as NodeJS.ErrnoException).code !== "ENOENT") {
-					throw accessError
-				}
-			}
-
+			// Atomically replace the target file with the new file. A single
+			// rename is atomic on POSIX and Windows, so readers never observe
+			// a missing or partial file. No backup step is needed: if the
+			// rename fails, the original file is left untouched.
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 			actualTempNewFilePath = null
-
-			if (actualTempBackupFilePath) {
-				try {
-					await fs.unlink(actualTempBackupFilePath)
-					actualTempBackupFilePath = null
-				} catch (unlinkBackupError) {
-					console.error(
-						`Successfully wrote ${absoluteFilePath}, but failed to clean up backup ${actualTempBackupFilePath}:`,
-						unlinkBackupError,
-					)
-				}
-			}
 		} catch (writeError) {
 			console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, writeError)
 
-			const newFileToCleanupWithinCatch = actualTempNewFilePath
-			const backupFileToRollbackOrCleanupWithinCatch = actualTempBackupFilePath
-
-			if (backupFileToRollbackOrCleanupWithinCatch) {
+			// Cleanup the .new file if it exists
+			if (actualTempNewFilePath) {
 				try {
-					await fs.rename(backupFileToRollbackOrCleanupWithinCatch, absoluteFilePath)
-					actualTempBackupFilePath = null
-				} catch (rollbackError) {
-					console.error(
-						`[Catch] Failed to restore backup ${backupFileToRollbackOrCleanupWithinCatch} to ${absoluteFilePath}:`,
-						rollbackError,
-					)
-				}
-			}
-
-			if (newFileToCleanupWithinCatch) {
-				try {
-					await fs.unlink(newFileToCleanupWithinCatch)
+					await fs.unlink(actualTempNewFilePath)
 				} catch (cleanupError) {
 					console.error(
-						`[Catch] Failed to clean up temporary new file ${newFileToCleanupWithinCatch}:`,
-						cleanupError,
-					)
-				}
-			}
-
-			if (actualTempBackupFilePath) {
-				try {
-					await fs.unlink(actualTempBackupFilePath)
-				} catch (cleanupError) {
-					console.error(
-						`[Catch] Failed to clean up temporary backup file ${actualTempBackupFilePath}:`,
+						`[Catch] Failed to clean up temporary new file ${actualTempNewFilePath}:`,
 						cleanupError,
 					)
 				}

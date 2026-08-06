@@ -158,7 +158,7 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ initial: "content" })
 	})
 
-	test("should handle failure when renaming filePath to tempBackupFilePath (filePath exists)", async () => {
+	test("should handle failure when renaming the temp file to the target (filePath exists)", async () => {
 		const initialData = { message: "Initial content, should remain" }
 		const newData = { message: "New content, should not be written" }
 
@@ -167,46 +167,31 @@ describe("safeWriteJson", () => {
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.rename).mockImplementationOnce(async () => {
-			throw new Error("Rename to backup failed")
+			throw new Error("Rename to final failed")
 		})
 
-		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename to backup failed")
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename to final failed")
 
-		// Verify the original file still exists with initial content
+		// The atomic rename never happened, so the original file is untouched.
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(initialData)
 	})
 
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath exists, backup succeeded)", async () => {
+	test("should leave the original file unchanged when the atomic rename fails", async () => {
 		const initialData = { message: "Initial content, should be restored" }
 		const newData = { message: "New content" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// Track rename calls
-		let renameCallCount = 0
-
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
-			renameCallCount++
-			if (renameCallCount === 1) {
-				// First call: filePath -> tempBackupFilePath (should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
-			} else if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
-				throw new Error("Rename from temp to final failed")
-			} else if (renameCallCount === 3) {
-				// Third call: tempBackupFilePath -> filePath (rollback, should succeed)
-				return fsPromisesActuals.rename!(oldPath, newPath)
-			}
-			// Default: use original implementation
-			return fsPromisesActuals.rename!(oldPath, newPath)
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename from temp to final failed")
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
 
-		// Verify the file was restored to initial content
+		// The file was never moved, so its initial content is intact.
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(initialData)
 	})
@@ -292,28 +277,28 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual(data)
 	})
 
-	test("should handle failure when deleting tempBackupFilePath (filePath exists, all renames succeed)", async () => {
+	test("should clean up the temp file when the atomic rename fails", async () => {
 		const initialData = { message: "Initial content" }
-		const newData = { message: "Successfully written new content" }
+		const newData = { message: "New content" }
 
 		// Overwrite the pre-created file with specific initial data
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
-		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.unlink).mockImplementationOnce(async () => {
-			throw new Error("Failed to delete backup file")
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename from temp to final failed")
 		})
 
-		// The write should succeed even if backup deletion fails
-		await safeWriteJson(currentTestFilePath, newData)
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
 
-		// Verify the new content was written successfully
-		const content = await readFileContent(currentTestFilePath)
-		expect(content).toEqual(newData)
+		// The temp file must be cleaned up and the original file left intact.
+		const dirEntries = await fs.readdir(tempDir)
+		expect(dirEntries.filter((entry) => entry.includes(".new_"))).toHaveLength(0)
+		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
 	})
 
-	// Test for console error suppression during backup deletion
-	test("should suppress console.error when backup deletion fails", async () => {
+	// Test for console error suppression during temp file cleanup
+	test("should suppress console.error when temp file cleanup fails", async () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
 		const initialData = { message: "Initial" }
 		const newData = { message: "New" }
@@ -322,23 +307,27 @@ describe("safeWriteJson", () => {
 
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
-			if (filePath.toString().includes(".bak_")) {
-				throw new Error("Backup deletion failed")
+			if (filePath.toString().includes(".new_")) {
+				throw new Error("Temp file cleanup failed")
 			}
 			return fsPromisesActuals.unlink!(filePath)
 		})
 
-		await safeWriteJson(currentTestFilePath, newData)
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename from temp to final failed")
+		})
+
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename from temp to final failed")
 
 		// Verify console.error was called with the expected message
-		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Successfully wrote"), expect.any(Error))
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to clean up temporary new file"), expect.any(Error))
 
 		consoleErrorSpy.mockRestore()
 		vi.mocked(fs.unlink).mockRestore()
 	})
 
-	// The expected error message might need to change if the mock behaves differently.
-	test("should handle failure when renaming tempNewFilePath to filePath (filePath initially exists)", async () => {
+	test("should handle failure when renaming the temp file to the target (filePath initially exists)", async () => {
 		// currentTestFilePath exists due to beforeEach.
 		const initialData = { message: "Initial content" }
 		const newData = { message: "New content" }
@@ -346,20 +335,13 @@ describe("safeWriteJson", () => {
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		let renameCallCount = 0
-		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
-			renameCallCount++
-			if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (should fail)
-				throw new Error("Rename failed")
-			}
-			// For all other calls, use the original implementation
-			return fsPromisesActuals.rename!(oldPath, newPath)
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Rename failed")
 		})
 
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Rename failed")
 
-		// The file should be restored to its initial content
+		// The file was never moved, so its initial content is intact.
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(initialData)
 	})
@@ -434,9 +416,9 @@ describe("safeWriteJson", () => {
 		expect(vi.mocked(fs.access)).toHaveBeenCalled()
 	})
 
-	// Test for rollback failure scenario
-	test("should log error and re-throw original if rollback fails", async () => {
-		const initialData = { message: "Initial, should be lost if rollback fails" }
+	// Test for temp file cleanup failure scenario
+	test("should log error and re-throw original if temp file cleanup fails", async () => {
+		const initialData = { message: "Initial, should remain" }
 		const newData = { message: "New content" }
 
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
@@ -444,26 +426,22 @@ describe("safeWriteJson", () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
 
 		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		let renameCallCount = 0
-		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
-			renameCallCount++
-			if (renameCallCount === 2) {
-				// Second call: tempNewFilePath -> filePath (fail)
-				throw new Error("Primary rename failed")
-			} else if (renameCallCount === 3) {
-				// Third call: tempBackupFilePath -> filePath (rollback, also fail)
-				throw new Error("Rollback rename failed")
-			}
-			return fsPromisesActuals.rename!(oldPath, newPath)
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw new Error("Primary rename failed")
 		})
 
-		// Should throw the original error, not the rollback error
+		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		vi.mocked(fs.unlink).mockImplementationOnce(async () => {
+			throw new Error("Temp cleanup failed")
+		})
+
+		// Should throw the original error, not the cleanup error
 		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow("Primary rename failed")
 
-		// Verify console.error was called for the rollback failure
+		// Verify console.error was called for the cleanup failure
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Failed to restore backup"),
-			expect.objectContaining({ message: "Rollback rename failed" }),
+			expect.stringContaining("Failed to clean up temporary new file"),
+			expect.objectContaining({ message: "Temp cleanup failed" }),
 		)
 
 		consoleErrorSpy.mockRestore()
