@@ -3,9 +3,10 @@
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId } from "@roo-code/types"
+import { getModelId, RooCodeEventName } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
+import type { Mode } from "../../../shared/modes"
 import { Task, TaskOptions } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
 
@@ -110,6 +111,7 @@ vi.mock("../../task/Task", () => ({
 			overwriteApiConversationHistory: vi.fn(),
 			taskId: options?.historyItem?.id || "test-task-id",
 			emit: vi.fn(),
+			setTaskApiConfigName: vi.fn(),
 			updateApiConfiguration: vi.fn().mockImplementation(function (this: any, newConfig: any) {
 				this.apiConfiguration = newConfig
 			}),
@@ -235,6 +237,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 					{ name: "test-config", id: "test-id", apiProvider: "openrouter", modelId: "openai/gpt-4" },
 				]),
 			setModeConfig: vi.fn(),
+			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			activateProfile: vi.fn().mockResolvedValue({
 				name: "test-config",
 				id: "test-id",
@@ -410,6 +413,198 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 	})
 
 	describe("activateProviderProfile", () => {
+		test("serializes provider profile mutations without interleaving", async () => {
+			const events: string[] = []
+			let resolveFirst!: () => void
+
+			provider["providerSettingsManager"].activateProfile = vi
+				.fn()
+				.mockImplementationOnce(async () => {
+					events.push("first:start")
+					await new Promise<void>((resolve) => {
+						resolveFirst = resolve
+					})
+					events.push("first:end")
+					return {
+						name: "first-profile",
+						id: "first-id",
+						apiProvider: "openrouter",
+						openRouterModelId: "openai/gpt-4",
+					}
+				})
+				.mockImplementationOnce(async () => {
+					events.push("second:start")
+					return {
+						name: "second-profile",
+						id: "second-id",
+						apiProvider: "openrouter",
+						openRouterModelId: "openai/gpt-4.1-mini",
+					}
+				})
+
+			const first = provider.activateProviderProfile({ name: "first-profile" })
+			const second = provider.activateProviderProfile({ name: "second-profile" })
+
+			await Promise.resolve()
+			expect(events).toEqual(["first:start"])
+
+			resolveFirst()
+			await first
+			await second
+
+			expect(events).toEqual(["first:start", "first:end", "second:start"])
+		})
+
+		test("provider profile mutation rejection does not poison later queued mutations", async () => {
+			const firstError = new Error("first profile failed")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+
+			provider["providerSettingsManager"].activateProfile = vi
+				.fn()
+				.mockRejectedValueOnce(firstError)
+				.mockResolvedValueOnce({
+					name: "second-profile",
+					id: "second-id",
+					apiProvider: "openrouter",
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+
+			await expect(provider.activateProviderProfile({ name: "first-profile" })).rejects.toThrow(firstError)
+			await expect(provider.activateProviderProfile({ name: "second-profile" })).resolves.toBeUndefined()
+			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
+		})
+
+		test("timed-out mutations abort before writing state and advance the queue", async () => {
+			vi.useFakeTimers()
+			const logSpy = vi.spyOn(provider, "log")
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			let resolveFirst!: () => void
+			const firstActivation = new Promise<void>((resolve) => {
+				resolveFirst = resolve
+			})
+			provider["providerSettingsManager"].activateProfile = vi
+				.fn()
+				.mockImplementationOnce(async () => {
+					await firstActivation
+					return {
+						name: "first-profile",
+						id: "first-id",
+						apiProvider: "openrouter",
+						openRouterModelId: "openai/gpt-4",
+					}
+				})
+				.mockResolvedValueOnce({
+					name: "second-profile",
+					id: "second-id",
+					apiProvider: "openrouter",
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+
+			try {
+				const first = provider.activateProviderProfile({ name: "first-profile" })
+				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+
+				// Queue advanced immediately on timeout — second enqueues now.
+				const second = provider.activateProviderProfile({ name: "second-profile" })
+				// activateProfile not yet called for second (it runs in the next microtask).
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+
+				// Resolve the first activation's inner promise so its in-flight mock can return.
+				// The aborted signal prevents it from writing any state.
+				resolveFirst()
+				await expect(second).resolves.toBeUndefined()
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
+				// Aborted first activation wrote nothing; only second profile is set.
+				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
+				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
+				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("mode switch preserves its default task when queued behind a profile mutation", async () => {
+			let releaseProfileActivation!: () => void
+			const profileActivation = new Promise<void>((resolve) => {
+				releaseProfileActivation = resolve
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockImplementationOnce(async () => {
+				await profileActivation
+				return {
+					name: "first-profile",
+					id: "first-id",
+					apiProvider: "openrouter",
+					openRouterModelId: "openai/gpt-4",
+				}
+			})
+
+			const firstTask = new Task(defaultTaskOptions)
+			const secondTask = new Task(defaultTaskOptions)
+			Object.defineProperty(firstTask, "taskId", { value: "first-task-id" })
+			Object.defineProperty(secondTask, "taskId", { value: "second-task-id" })
+			firstTask["_taskMode"] = "code" as Mode
+			secondTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(firstTask)
+
+			const profileSwitch = provider.activateProviderProfile({ name: "first-profile" })
+			const modeSwitch = provider.handleModeSwitch("ask" as Mode)
+			await provider.addClineToStack(secondTask)
+
+			releaseProfileActivation()
+			await profileSwitch
+			await modeSwitch
+
+			expect(firstTask["_taskMode"]).toBe("ask")
+			expect(secondTask["_taskMode"]).toBe("code")
+		})
+
+		test("fan-out preparation leaves the focused task untouched", async () => {
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: "openrouter",
+					openRouterModelId: "openai/gpt-4",
+				},
+			})
+			await provider.addClineToStack(mockTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: "openrouter" }])
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: "openrouter",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: "openrouter",
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			const emitSpy = vi.spyOn(provider, "emit")
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+			await provider.handleModeSwitch("ask" as Mode, null)
+
+			expect(mockTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(mockTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(emitSpy).not.toHaveBeenCalledWith(
+				RooCodeEventName.ProviderProfileChanged,
+				expect.objectContaining({ name: "ask-profile" }),
+			)
+			expect(postStateSpy).not.toHaveBeenCalled()
+			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
+			expect(setProviderSettingsSpy).not.toHaveBeenCalled()
+			expect(emitSpy).toHaveBeenCalledWith(RooCodeEventName.ModeChanged, "ask")
+			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
+		})
+
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
 			const mockTask = new Task({
 				...defaultTaskOptions,
