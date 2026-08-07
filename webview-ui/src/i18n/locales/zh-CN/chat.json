@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更多 OpenAI 控制选项 — 在 OpenAI Codex 中使用 Fast 优先模式，并为 OpenAI 兼容模型选择更高的 reasoning effort。",
-			"highlight2": "更可靠的提供商和模型 — 改进 router 元数据处理、Ollama 模型刷新、Bedrock 代理支持和 Friendli reasoning 控制。",
-			"highlight3": "更顺畅的设置和开发工作流 — 设置现在会保留未保存的编辑，短终端命令可正确完成，Architect 计划使用相对于工作区的路径，剩余面向用户的 Roo 品牌也已更新为 Zoo。"
+			"highlight1": "使用 Destructive Command Guard（DCG）长时间不间断地运行任务 — DCG 会拦截危险命令，让 Zoo 无需你持续点击批准按钮也能继续工作。",
+			"highlight2": "更好的提供商控制和可靠性 — 选择 OpenAI Codex 响应速度、使用更新后的 DeepSeek 配置，并让运行中的任务不受配置文件更改影响。",
+			"highlight3": "关键终端执行问题修复 — Zoo 现在会等待终端命令结束后再开始下一步。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

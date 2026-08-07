@@ -1,5 +1,38 @@
 # Zoo Code Changelog
 
+## [3.76.0]
+
+### Minor Changes
+
+- Add Destructive Command Guard as an opt-in safety layer that blocks dangerous terminal commands while allowing longer tasks to continue without repeated approvals (#1057 by @navedmerchant, PR #1061 by @navedmerchant)
+- Streamline Destructive Command Guard approval handling so safe commands can continue with fewer interruptions (#1058 by @navedmerchant, PR #1062 by @navedmerchant)
+- Harden Destructive Command Guard binary installation and platform handling (#1056 by @navedmerchant, PR #1060 by @navedmerchant)
+- Strengthen shared managed-binary downloads, archive extraction, verification, and atomic installation (#1055 by @navedmerchant, PR #1059 by @navedmerchant)
+- Fix Zoo starting the next step before a terminal command finishes (PR #1145 by @app/zoomote)
+- Add an OpenAI Codex response-speed selector to provider settings (PR #1076 by @WebMad)
+- Update DeepSeek model configurations and defaults (#1082 by @WHMHammer, PR #1083 by @WHMHammer)
+- Isolate each task's provider configuration from changes to the currently focused provider state (PR #1085 by @edelauna)
+- Isolate provider-profile mutations from running tasks to prevent mid-task configuration changes (PR #1087 by @edelauna)
+- Group nearby, related tool approval requests while keeping unrelated requests separate (#1004 by @easonLiangWorldedtech, PR #1005 by @easonLiangWorldedtech)
+- Add telemetry circuit breaking and drain pending events during shutdown for more reliable, bounded delivery (PR #1070 by @edelauna)
+- Aggregate task-completion telemetry using incremental delta installments (PR #1071 by @edelauna)
+- Deduplicate concurrent model-cache fetches and throttle telemetry for empty provider responses (PR #1072 by @edelauna)
+- Fix Semble archive extraction on Windows by safely encoding the extraction command (#1167 by @navedmerchant, PR #1168 by @navedmerchant)
+- Introduce shared provider-stream test utilities to reduce duplicated stream setup (PR #1086 by @app/zoomote)
+- Reuse the shared webview query-client helper in tests (PR #1088 by @app/zoomote)
+- Migrate Requesty provider tests to shared stream helpers (PR #1089 by @app/zoomote)
+- Migrate Unbound provider tests to shared stream helpers (PR #1090 by @app/zoomote)
+- Migrate OpenAI-family provider tests to shared stream helpers (PR #1091 by @app/zoomote)
+- Migrate base OpenAI-compatible provider tests to shared stream helpers (PR #1092 by @app/zoomote)
+- Migrate OpenAI provider tests to shared stream helpers (PR #1093 by @app/zoomote)
+- Migrate Anthropic Vertex provider tests to shared stream helpers (PR #1094 by @app/zoomote)
+- Migrate LiteLLM and Z.ai provider tests to shared stream helpers (PR #1095 by @app/zoomote)
+- Migrate Friendli, OpenCode Go, and MiMo provider tests to shared stream helpers (PR #1102 by @app/zoomote)
+- Migrate Qwen, LM Studio, and Fireworks provider tests to shared stream helpers (PR #1103 by @app/zoomote)
+- Migrate Kenari, MiniMax, Vercel, and Mistral provider tests to shared stream helpers (PR #1105 by @app/zoomote)
+- Finish the provider-stream test-helper rollout across the remaining provider suites (PR #1169 by @app/zoomote)
+- Merge the v3.74.0 release preparation branch into `main` (PR #1081 by @taltas)
+
 ## [3.74.0]
 
 ### Minor Changes

@@ -4,6 +4,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import { ApiHandlerOptions } from "../../../shared/api"
 import { OpenAiHandler } from "../openai"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 const mockCreate = vitest.fn()
@@ -89,11 +90,11 @@ describe("OpenAiHandler with usage tracking fix", () => {
 	let mockOptions: ApiHandlerOptions
 
 	beforeEach(() => {
-		mockOptions = {
+		mockOptions = makeApiHandlerOptions({
 			openAiApiKey: "test-api-key",
 			openAiModelId: "gpt-4",
 			openAiBaseUrl: "https://api.openai.com/v1",
-		}
+		})
 		handler = new OpenAiHandler(mockOptions)
 		mockCreate.mockClear()
 	})

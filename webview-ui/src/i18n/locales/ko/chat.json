@@ -344,9 +344,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "더 다양한 OpenAI 제어 — OpenAI Codex에서 Fast 우선 모드를 사용하고 OpenAI 호환 모델의 reasoning effort를 더 높게 선택하세요.",
-			"highlight2": "더 안정적인 프로바이더와 모델 — router 메타데이터 처리, Ollama 모델 새로고침, Bedrock 프록시 지원, Friendli reasoning 제어가 개선되었습니다.",
-			"highlight3": "더 매끄러운 설정 및 개발 워크플로우 — 설정에서 저장하지 않은 편집을 유지하고, 짧은 터미널 명령을 올바르게 완료하며, Architect 계획에 워크스페이스 상대 경로를 사용합니다. 남아 있던 사용자용 Roo 브랜드도 Zoo로 업데이트했습니다."
+			"highlight1": "Destructive Command Guard(DCG)로 더 긴 task를 중단 없이 실행하세요 — DCG가 위험한 명령을 차단하므로 승인 버튼을 계속 누르지 않아도 Zoo가 작업을 이어갈 수 있습니다.",
+			"highlight2": "향상된 provider 제어와 안정성 — OpenAI Codex 응답 속도를 선택하고, 업데이트된 DeepSeek 구성을 사용하며, 실행 중인 task를 프로필 변경과 격리할 수 있습니다.",
+			"highlight3": "중요한 터미널 실행 문제 수정 — 이제 Zoo는 터미널 명령이 끝날 때까지 기다린 후 다음 단계를 시작합니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

@@ -272,7 +272,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "jul-2026-v3.74.0-openai-provider-workflows" // v3.74.0 OpenAI controls, provider reliability, and smoother workflows
+	public readonly latestAnnouncementId = "aug-2026-v3.76.0-dcg-providers-terminal" // v3.76.0 destructive command guard, provider improvements, and terminal execution fix
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
