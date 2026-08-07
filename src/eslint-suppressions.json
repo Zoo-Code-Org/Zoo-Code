@@ -1036,7 +1036,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.parallelMode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 143
+			"count": 139
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
@@ -1144,14 +1144,14 @@
 			"count": 1
 		}
 	},
-	"extension/__tests__/api-set-configuration.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"extension/__tests__/api-send-message.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
+		}
+	},
+	"extension/__tests__/api-set-configuration.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 2
 		}
 	},
 	"extension/api.ts": {

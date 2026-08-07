@@ -2,7 +2,13 @@
 
 import * as vscode from "vscode"
 
-import { type ExtensionMessage, type ExtensionState, RooCodeEventName } from "@roo-code/types"
+import {
+	type ExtensionMessage,
+	type ExtensionState,
+	type ProviderSettingsEntry,
+	type ProviderSettingsWithId,
+	RooCodeEventName,
+} from "@roo-code/types"
 
 import { defaultModeSlug } from "../../../shared/modes"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -1395,17 +1401,25 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		it("should activate configured mode profile when switching modes", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
-				{ id: "profile-id", name: "mode-profile", apiProvider: "openrouter" },
-			] as any)
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
+			const profileEntry: ProviderSettingsEntry = {
+				id: "profile-id",
+				name: "mode-profile",
 				apiProvider: "openrouter",
-			} as any)
-			const activateProviderProfileSpy = vi.spyOn(provider, "activateProviderProfile")
+			}
+			const profileSettings: ProviderSettingsWithId & { name: string } = {
+				id: "profile-id",
+				name: "mode-profile",
+				apiProvider: "openrouter",
+			}
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
+			const activateProfileSpy = vi
+				.spyOn(provider.providerSettingsManager, "activateProfile")
+				.mockResolvedValueOnce(profileSettings)
 
 			await provider.handleModeSwitch("architect" as any)
 
-			expect(activateProviderProfileSpy).toHaveBeenCalledWith({ name: "mode-profile" })
+			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "mode-profile" })
 
 			await provider.dispose()
 		})
@@ -1413,15 +1427,17 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		it("should leave current configuration unchanged for empty mode profiles", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
-				{ id: "empty-profile-id", name: "empty-profile" },
-			] as any)
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({} as any)
-			const activateProviderProfileSpy = vi.spyOn(provider, "activateProviderProfile")
+			const profileEntry: ProviderSettingsEntry = { id: "empty-profile-id", name: "empty-profile" }
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
+				id: "empty-profile-id",
+				name: "empty-profile",
+			})
+			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
 
 			await provider.handleModeSwitch("architect" as any)
 
-			expect(activateProviderProfileSpy).not.toHaveBeenCalled()
+			expect(activateProfileSpy).not.toHaveBeenCalled()
 
 			await provider.dispose()
 		})
