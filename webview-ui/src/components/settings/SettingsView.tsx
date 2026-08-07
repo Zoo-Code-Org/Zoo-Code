@@ -422,7 +422,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			const existing = profiles.find((profile) => profile.name === name)
 			// Saving under an existing name overwrites it, matching the mental model
 			// of "save" in the Providers tab rather than silently creating a duplicate.
-			const id = existing?.id ?? `autocomplete-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+			const id = existing?.id ?? `autocomplete-${crypto.randomUUID()}`
 			const entry = { id, name, config: { ...prevState.autocompleteConfig } }
 
 			setChangeDetected(true)
