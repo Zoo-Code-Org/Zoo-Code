@@ -1,10 +1,15 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/ChatView.spec.tsx
 
 import React from "react"
-import { render, waitFor, act, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+	makeExtensionState,
+	mockVscodePostMessage,
+	renderWithExtensionState,
+	waitFor,
+	act,
+	fireEvent,
+} from "@/utils/test-utils"
 
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 import type { SuggestionItem } from "@roo-code/types"
 
@@ -27,16 +32,6 @@ interface ClineMessage {
 	ts: number
 	text?: string
 	partial?: boolean
-}
-
-interface ExtensionState {
-	version: string
-	clineMessages: ClineMessage[]
-	taskHistory: any[]
-	shouldShowAnnouncement: boolean
-	allowedCommands: string[]
-	alwaysAllowExecute: boolean
-	[key: string]: any
 }
 
 // Mock vscode API
@@ -332,21 +327,13 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 }))
 
 // Mock window.postMessage to trigger state hydration
-const mockPostMessage = (state: Partial<ExtensionState>) => {
+const vscodePostMessageMock = mockVscodePostMessage(vi.mocked(vscode.postMessage))
+
+const mockPostMessage = (state: Record<string, unknown>) => {
 	window.postMessage(
 		{
 			type: "state",
-			state: {
-				version: "1.0.0",
-				clineMessages: [],
-				taskHistory: [],
-				shouldShowAnnouncement: false,
-				allowedCommands: [],
-				alwaysAllowExecute: false,
-				cloudIsAuthenticated: false,
-				telemetrySetting: "enabled",
-				...state,
-			},
+			state: makeExtensionState(state),
 		},
 		"*",
 	)
@@ -358,16 +345,8 @@ const defaultProps: ChatViewProps = {
 	hideAnnouncement: () => {},
 }
 
-const queryClient = new QueryClient()
-
 const renderChatView = (props: Partial<ChatViewProps> = {}) => {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatView {...defaultProps} {...props} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+	return renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 }
 
 describe("ChatView - Tool Batching Tests", () => {
@@ -878,7 +857,7 @@ describe("ChatView - Message Queueing Tests", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		// Reset the mock to clear any initial calls
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 	})
 
 	it("shows sending is disabled when task is active", async () => {
@@ -954,7 +933,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear any initial calls
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Add api_req_started without cost (spinner state - API request in progress)
 		mockPostMessage({
@@ -980,7 +959,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user typing and sending a message during the spinner
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1051,7 +1030,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user sending a message when API is done
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1114,7 +1093,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user sending a new message while queue has items
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1177,7 +1156,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user typing and sending a message during command execution
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1272,7 +1251,7 @@ describe("ChatView - Message Queueing Tests", () => {
 describe("ChatView - Follow-up Suggestions", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 	})
 
 	it("switches to a known mode from a malformed object mode suggestion", async () => {
@@ -1302,7 +1281,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 		})
 
 		const suggestion = await waitFor(() => getByRole("button", { name: "Use code mode" }))
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		fireEvent.click(suggestion)
 
@@ -1344,7 +1323,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 		})
 
 		const suggestion = await waitFor(() => getByRole("button", { name: "Use invalid mode" }))
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		fireEvent.click(suggestion)
 
