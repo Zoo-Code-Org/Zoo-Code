@@ -88,6 +88,15 @@ describe("costRecalculation", () => {
 			const info = lookupModelInfo("anthropic", "claude-sonnet-4-20250514")
 			expect(info).toBeDefined()
 		})
+
+		it("should pick the longest matching substring when multiple known IDs match", () => {
+			// The model string contains both "claude-sonnet-4-20250514" and "claude-sonnet-4".
+			// The lookup iterates over sorted known IDs and returns the first (longest) match.
+			const info = lookupModelInfo("anthropic", "claude-sonnet-4-20250514-snapshot")
+			expect(info).toBeDefined()
+			expect(info?.inputPrice).toBe(3.0)
+			expect(info?.outputPrice).toBe(15.0)
+		})
 	})
 
 	describe("computeEventCost", () => {

@@ -451,6 +451,53 @@ describe("useDashboardStatsStream", () => {
 			expect(result.current.state.generation).toBe(2)
 		})
 
+		it("should ignore malformed messages", () => {
+			const { result } = renderHook(() =>
+				useDashboardStatsStream({
+					range: makeQuery(),
+					heatmapRangeDays: 30,
+				}),
+			)
+
+			// Missing type field should be ignored without throwing.
+			expect(() => {
+				postExtensionMessage({ dashboardStatsStreamSnapshot: makeSnapshot() })
+			}).not.toThrow()
+
+			// Non-string type should be ignored.
+			expect(() => {
+				postExtensionMessage({ type: 123, dashboardStatsStreamSnapshot: makeSnapshot() })
+			}).not.toThrow()
+
+			// Null/undefined message data should be ignored.
+			expect(() => {
+				postExtensionMessage(null as unknown as Record<string, unknown>)
+			}).not.toThrow()
+
+			expect(result.current.state.status).toBe("loading")
+		})
+
+		it("should set an error when loading times out", () => {
+			const { result } = renderHook(() =>
+				useDashboardStatsStream({
+					range: makeQuery(),
+					heatmapRangeDays: 30,
+				}),
+			)
+
+			expect(result.current.state.status).toBe("loading")
+			expect(result.current.state.isLoading).toBe(true)
+
+			act(() => {
+				vi.advanceTimersByTime(10000)
+			})
+
+			expect(result.current.state.status).toBe("error")
+			expect(result.current.state.isLoading).toBe(false)
+			expect(result.current.state.backgroundError).not.toBeNull()
+			expect(result.current.state.backgroundError?.code).toBe("STATS_HANDLER/stream/timeout")
+		})
+
 		it("should ignore duplicate sequence delta", () => {
 			const { result } = renderHook(() =>
 				useDashboardStatsStream({

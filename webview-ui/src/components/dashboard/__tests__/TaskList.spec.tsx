@@ -19,21 +19,32 @@ vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
+// Capture the last endReached callback so tests can trigger it manually.
+let lastEndReached: (() => void) | undefined
+export function triggerVirtuosoEndReached() {
+	lastEndReached?.()
+}
+
 // Mock react-virtuoso to render all items without virtualization in tests
 vi.mock("react-virtuoso", () => ({
 	Virtuoso: ({
 		data,
 		itemContent,
+		endReached,
 	}: {
 		data: DashboardTaskSummary[]
 		itemContent: (index: number, task: DashboardTaskSummary) => React.ReactNode
-	}) => (
-		<div data-testid="virtuoso-mock">
-			{data.map((task, index) => (
-				<React.Fragment key={task.taskId}>{itemContent(index, task)}</React.Fragment>
-			))}
-		</div>
-	),
+		endReached?: () => void
+	}) => {
+		lastEndReached = endReached
+		return (
+			<div data-testid="virtuoso-mock">
+				{data.map((task, index) => (
+					<React.Fragment key={task.taskId}>{itemContent(index, task)}</React.Fragment>
+				))}
+			</div>
+		)
+	},
 }))
 
 // ── Test fixtures ────────────────────────────────────────────────────────────
@@ -268,5 +279,84 @@ describe("TaskList", () => {
 			/>,
 		)
 		expect(container.querySelector('[data-testid="dashboard-session-detail-no-calls"]')).toBeTruthy()
+	})
+
+	describe("formatRelativeTime branches", () => {
+		const baseTime = new Date("2026-08-07T12:00:00.000Z").getTime()
+
+		beforeEach(() => {
+			vi.useFakeTimers()
+			vi.setSystemTime(baseTime)
+		})
+
+		afterEach(() => {
+			vi.useRealTimers()
+		})
+
+		function renderWithTimestamp(timestamp: number) {
+			const tasks = [makeTask({ taskId: "time-task", lastUsageAt: timestamp })]
+			const { container } = render(<TaskList tasks={tasks} {...defaultProps} />)
+			return container
+		}
+
+		it("renders just now for timestamps under a minute ago", () => {
+			const container = renderWithTimestamp(baseTime - 30 * 1000)
+			expect(container.textContent).toContain("time.justNow")
+		})
+
+		it("renders minutes ago for timestamps 1-59 minutes ago", () => {
+			const container = renderWithTimestamp(baseTime - 5 * 60 * 1000)
+			expect(container.textContent).toContain("time.minutesAgo")
+		})
+
+		it("renders hours ago for timestamps 1-23 hours ago", () => {
+			const container = renderWithTimestamp(baseTime - 3 * 60 * 60 * 1000)
+			expect(container.textContent).toContain("time.hoursAgo")
+		})
+
+		it("renders yesterday for timestamps exactly one day ago", () => {
+			const container = renderWithTimestamp(baseTime - 24 * 60 * 60 * 1000)
+			expect(container.textContent).toContain("time.yesterday")
+		})
+
+		it("renders days ago for timestamps 2-6 days ago", () => {
+			const container = renderWithTimestamp(baseTime - 3 * 24 * 60 * 60 * 1000)
+			expect(container.textContent).toContain("time.daysAgo")
+		})
+
+		it("renders absolute date for timestamps older than a week", () => {
+			const timestamp = new Date("2026-07-25T12:00:00.000Z").getTime()
+			const container = renderWithTimestamp(timestamp)
+			// Absolute fallback uses toLocaleDateString(); ensure it no longer shows relative keys.
+			expect(container.textContent).not.toContain("time.justNow")
+			expect(container.textContent).not.toContain("time.minutesAgo")
+			expect(container.textContent).not.toContain("time.hoursAgo")
+			expect(container.textContent).not.toContain("time.yesterday")
+			expect(container.textContent).not.toContain("time.daysAgo")
+		})
+	})
+
+	it("toggles a row on Enter and Space keydown", () => {
+		const onToggleTask = vi.fn()
+		const tasks = [makeTask({ taskId: "task-A", title: "Keyboard me" })]
+		const { container } = render(<TaskList tasks={tasks} {...defaultProps} onToggleTask={onToggleTask} />)
+		const row = container.querySelector('[data-testid="dashboard-task-row"]')
+		expect(row).toBeTruthy()
+
+		fireEvent.keyDown(row!, { key: "Enter" })
+		expect(onToggleTask).toHaveBeenCalledWith("task-A")
+
+		onToggleTask.mockClear()
+		fireEvent.keyDown(row!, { key: " " })
+		expect(onToggleTask).toHaveBeenCalledWith("task-A")
+	})
+
+	it("calls onLoadMore when endReached fires and a cursor is present", () => {
+		const onLoadMore = vi.fn()
+		const tasks = [makeTask({ taskId: "task-A" })]
+		render(<TaskList tasks={tasks} {...defaultProps} onLoadMore={onLoadMore} taskCursor="cursor-1" />)
+
+		triggerVirtuosoEndReached()
+		expect(onLoadMore).toHaveBeenCalled()
 	})
 })

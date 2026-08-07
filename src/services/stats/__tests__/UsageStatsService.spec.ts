@@ -8,18 +8,9 @@ import type { UsageEventV1, StatsQuery } from "@roo-code/types"
 
 import { UsageStatsService, StatsServiceError } from "../UsageStatsService"
 import { StatsStoreError } from "../UsageEventStore"
+import { UsageStatsMigration } from "../UsageStatsMigration"
+import { UsageStatsDatabase } from "../UsageStatsDatabase"
 import type { DashboardTaskCatalog } from "../DashboardTaskCatalog"
-
-vi.mock("vscode", () => ({
-	workspace: {
-		createFileSystemWatcher: vi.fn(() => ({
-			onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
-			onDidCreate: vi.fn(() => ({ dispose: vi.fn() })),
-			onDidDelete: vi.fn(() => ({ dispose: vi.fn() })),
-			dispose: vi.fn(),
-		})),
-	},
-}))
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -970,13 +961,214 @@ describe("UsageStatsService", () => {
 	})
 
 	describe("generateNonce fallback", () => {
-		it("should fall back to timestamp-based nonce when crypto is unavailable", () => {
-			// Access private method via bracket access for coverage of the catch path
+		it("should fall back to timestamp-based nonce when crypto.randomUUID throws", () => {
+			const crypto = require("crypto")
+			const spy = vi.spyOn(crypto, "randomUUID").mockImplementation(() => {
+				throw new Error("crypto.randomUUID unavailable")
+			})
+
 			const svc = service as unknown as { generateNonce(): string }
-			// Normal path returns a string
 			const nonce = svc.generateNonce()
 			expect(typeof nonce).toBe("string")
 			expect(nonce.length).toBeGreaterThan(0)
+			expect(nonce).toContain("-")
+
+			spy.mockRestore()
+		})
+	})
+
+	describe("diff coverage: initialize error/fallback branches", () => {
+		it("catches SQLite database initialization failure and continues", async () => {
+			const freshDir = await createTempDir()
+			const svc = new UsageStatsService(freshDir)
+			const db = svc["database"] as UsageStatsDatabase
+
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const initSpy = vi.spyOn(db, "initialize").mockImplementation(() => {
+				throw new Error("sqlite failed")
+			})
+
+			await expect(svc.initialize()).resolves.toBeUndefined()
+
+			expect(initSpy).toHaveBeenCalled()
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to initialize SQLite database"),
+				expect.anything(),
+			)
+
+			warnSpy.mockRestore()
+			initSpy.mockRestore()
+			svc.dispose()
+			await fs.rm(freshDir, { recursive: true, force: true })
+		})
+
+		it("logs migration success when events are migrated", async () => {
+			const freshDir = await createTempDir()
+			const statsDir = path.join(freshDir, "usage-stats")
+			const segmentPath = path.join(statsDir, "events-000001.ndjson")
+			const event = makeEvent({ eventId: "migrated-evt", idempotencyKey: "migrated-idem" })
+			await fs.mkdir(statsDir, { recursive: true })
+			await fs.writeFile(segmentPath, JSON.stringify(event) + "\n", "utf-8")
+
+			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const svc = new UsageStatsService(freshDir)
+			await svc.initialize()
+
+			// Migration should run and log success
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Migrated 1 events from NDJSON to SQLite"))
+
+			logSpy.mockRestore()
+			warnSpy.mockRestore()
+			svc.dispose()
+			await fs.rm(freshDir, { recursive: true, force: true })
+		})
+
+		it("catches NDJSON migration failure and continues", async () => {
+			const freshDir = await createTempDir()
+			const migrateSpy = vi.spyOn(UsageStatsMigration.prototype, "migrate").mockImplementation(() => {
+				throw new Error("migration failed")
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const svc = new UsageStatsService(freshDir)
+			await expect(svc.initialize()).resolves.toBeUndefined()
+
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("NDJSON migration failed"), expect.anything())
+
+			migrateSpy.mockRestore()
+			warnSpy.mockRestore()
+			svc.dispose()
+			await fs.rm(freshDir, { recursive: true, force: true })
+		})
+
+		it("falls back to null when the catalog provides no change listener", async () => {
+			const catalog = {
+				sourceInitialized: Promise.resolve(),
+				rebuild: vi.fn(),
+				onDidChange: vi.fn(() => undefined),
+			} as unknown as DashboardTaskCatalog
+
+			const svc = new UsageStatsService(tempDir, catalog)
+			await svc.initialize()
+
+			expect(catalog.onDidChange).toHaveBeenCalledOnce()
+			svc.dispose()
+		})
+
+		it("ensureInitialized waits for an in-flight initialization promise", async () => {
+			let resolveInit: (() => void) | undefined
+			const catalog = {
+				sourceInitialized: new Promise<void>((resolve) => {
+					resolveInit = resolve
+				}),
+				rebuild: vi.fn(),
+				onDidChange: vi.fn(() => ({ dispose: vi.fn() })),
+			} as unknown as DashboardTaskCatalog
+
+			const svc = new UsageStatsService(tempDir, catalog)
+			const initPromise = svc.initialize()
+			const ensurePromise = svc.ensureInitialized()
+
+			let ensureResolved = false
+			void ensurePromise.then(() => {
+				ensureResolved = true
+			})
+
+			await Promise.resolve()
+			expect(ensureResolved).toBe(false)
+
+			resolveInit!()
+			await Promise.all([initPromise, ensurePromise])
+
+			expect(ensureResolved).toBe(true)
+			svc.dispose()
+		})
+	})
+
+	describe("append coordinator notification", () => {
+		it("notifies the coordinator after a successful append", async () => {
+			const coordinator = service.getCoordinator()
+			expect(coordinator).not.toBeNull()
+			if (!coordinator) return
+
+			const notifySpy = vi.spyOn(coordinator, "notifyEventAppended")
+			const event = makeEvent({ eventId: "notify-evt", idempotencyKey: "notify-idem" })
+
+			await service.append(event)
+
+			expect(notifySpy).toHaveBeenCalledOnce()
+			expect(notifySpy).toHaveBeenCalledWith(expect.objectContaining({ eventId: "notify-evt" }))
+		})
+	})
+
+	describe("clearStats direct database clear fallback", () => {
+		it("clears the database directly when no coordinator exists", async () => {
+			await service.backfillFromHistory([
+				makeEvent({ eventId: "clear-fallback", idempotencyKey: "clear-fallback" }),
+			])
+
+			// Remove the coordinator without touching the database
+			service["coordinator"] = null
+
+			const db = service.getDatabase()
+			expect(db).not.toBeNull()
+			if (!db) return
+
+			const clearSpy = vi.spyOn(db, "clearGeneration")
+			const nonce = service.issueClearNonce()
+			await service.clearStats(nonce)
+
+			expect(clearSpy).toHaveBeenCalledOnce()
+		})
+	})
+
+	describe("backfillFromHistory error handling", () => {
+		it("re-throws non-StatsStoreError as StatsServiceError", async () => {
+			const store = (service as unknown as { store: { append: () => Promise<boolean> } }).store
+			const appendSpy = vi.spyOn(store, "append").mockRejectedValueOnce(new Error("unknown failure"))
+
+			await expect(service.backfillFromHistory([makeEvent()])).rejects.toThrow(StatsServiceError)
+
+			appendSpy.mockRestore()
+		})
+	})
+
+	describe("file watcher debounce", () => {
+		it("debounces file system change notifications for 300ms", async () => {
+			vi.useFakeTimers()
+
+			const listener = vi.fn()
+			service.onDidChange(listener)
+
+			const watcher = service["watcher"] as unknown as {
+				onDidChange: ReturnType<typeof vi.fn>
+				onDidCreate: ReturnType<typeof vi.fn>
+			}
+			expect(watcher).not.toBeNull()
+
+			const onChangeCallback = watcher.onDidChange.mock.calls[0][0] as () => void
+			onChangeCallback()
+
+			// Listener should not fire immediately
+			expect(listener).not.toHaveBeenCalled()
+
+			vi.advanceTimersByTime(300)
+
+			expect(listener).toHaveBeenCalledOnce()
+
+			vi.useRealTimers()
+		})
+	})
+
+	describe("CSV extractCsvValue default branch", () => {
+		it("returns empty string for unknown columns", async () => {
+			const svc = service as unknown as {
+				extractCsvValue(event: UsageEventV1, column: string): string
+			}
+			const value = svc.extractCsvValue(makeEvent(), "unknownColumn")
+			expect(value).toBe("")
 		})
 	})
 })

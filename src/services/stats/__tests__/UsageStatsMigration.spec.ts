@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import type { UsageEventV1 } from "@roo-code/types"
 
 import { UsageStatsDatabase } from "../UsageStatsDatabase"
-import { UsageStatsMigration } from "../UsageStatsMigration"
+import { UsageStatsMigration, StatsMigrationError } from "../UsageStatsMigration"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -489,6 +489,87 @@ describe("UsageStatsMigration", () => {
 			})
 
 			expect(migration.isComplete()).toBe(false)
+		})
+	})
+
+	describe("diff coverage: error branches", () => {
+		it("constructs StatsMigrationError with code, message, and cause", () => {
+			const cause = new Error("root cause")
+			const err = new StatsMigrationError("STATS_MIGRATION/read/001", "read failed", cause)
+
+			expect(err.code).toBe("STATS_MIGRATION/read/001")
+			expect(err.message).toContain("[STATS_MIGRATION/read/001]")
+			expect(err.message).toContain("read failed")
+			expect(err.cause).toBe(cause)
+			expect(err.name).toBe("StatsMigrationError")
+		})
+
+		it("throws StatsMigrationError when a segment cannot be read", () => {
+			writeSegment(statsDir, "events-000001.ndjson", [makeEvent()])
+
+			// Replace the segment file with a directory so readFileSync throws
+			const segmentPath = path.join(statsDir, "events-000001.ndjson")
+			fs.rmSync(segmentPath)
+			fs.mkdirSync(segmentPath)
+
+			expect(() => migration.migrate()).toThrow(StatsMigrationError)
+			try {
+				migration.migrate()
+			} catch (err) {
+				expect(err).toBeInstanceOf(StatsMigrationError)
+				expect((err as StatsMigrationError).code).toBe("STATS_MIGRATION/read/001")
+			}
+		})
+
+		it("throws StatsMigrationError when the database append fails", () => {
+			writeSegment(statsDir, "events-000001.ndjson", [makeEvent()])
+
+			const appendSpy = vi.spyOn(db, "append").mockImplementation(() => {
+				throw new Error("db append failed")
+			})
+
+			expect(() => migration.migrate()).toThrow(StatsMigrationError)
+			try {
+				migration.migrate()
+			} catch (err) {
+				expect(err).toBeInstanceOf(StatsMigrationError)
+				expect((err as StatsMigrationError).code).toBe("STATS_MIGRATION/append/001")
+			}
+
+			appendSpy.mockRestore()
+		})
+
+		it("returns an empty segment list when readdirSync fails", () => {
+			// Point the migration at a plain file so readdirSync throws ENOTDIR,
+			// while leaving the real statsDir (and its open database) untouched.
+			const filePath = path.join(tempDir, "not-a-directory")
+			fs.writeFileSync(filePath, "")
+			;(migration as unknown as { statsDir: string }).statsDir = filePath
+
+			const result = migration.migrate()
+
+			expect(result.complete).toBe(true)
+			expect(result.totalMigrated).toBe(0)
+		})
+
+		it("skips unreadable segments when building the parent map", () => {
+			writeSegment(statsDir, "events-000001.ndjson", [makeEvent({ taskId: "task-A", parentTaskId: "task-B" })])
+			writeSegment(statsDir, "events-000002.ndjson", [makeEvent({ taskId: "task-B" })])
+
+			// Make the second segment unreadable
+			const segmentPath = path.join(statsDir, "events-000002.ndjson")
+			fs.rmSync(segmentPath)
+			fs.mkdirSync(segmentPath)
+
+			const parentMap = (
+				migration as unknown as {
+					buildParentMap(segmentFiles: string[]): Map<string, string | undefined>
+				}
+			).buildParentMap(["events-000001.ndjson", "events-000002.ndjson"])
+
+			expect(parentMap.has("task-A")).toBe(true)
+			expect(parentMap.get("task-A")).toBe("task-B")
+			expect(parentMap.has("task-B")).toBe(false)
 		})
 	})
 })

@@ -50,6 +50,8 @@ const mockSelection = class extends mockRange {
 	}
 }
 
+const { vi } = globalThis
+
 export const workspace = {
 	workspaceFolders: [],
 	getWorkspaceFolder: () => null,
@@ -57,12 +59,12 @@ export const workspace = {
 	getConfiguration: () => ({
 		get: (key, defaultValue) => defaultValue,
 	}),
-	createFileSystemWatcher: () => ({
-		onDidCreate: () => mockDisposable,
-		onDidChange: () => mockDisposable,
-		onDidDelete: () => mockDisposable,
-		dispose: () => {},
-	}),
+	createFileSystemWatcher: vi.fn(() => ({
+		onDidCreate: vi.fn(() => ({ dispose: () => {} })),
+		onDidChange: vi.fn(() => ({ dispose: () => {} })),
+		onDidDelete: vi.fn(() => ({ dispose: () => {} })),
+		dispose: vi.fn(() => {}),
+	})),
 	fs: {
 		readFile: () => Promise.resolve(new Uint8Array()),
 		writeFile: () => Promise.resolve(),
@@ -126,6 +128,12 @@ export const Range = mockRange
 export const Position = mockPosition
 export const Selection = mockSelection
 export const Disposable = mockDisposable
+export const RelativePattern = class {
+	constructor(base, pattern) {
+		this.base = base
+		this.pattern = pattern
+	}
+}
 export const ThemeIcon = class {
 	constructor(id) {
 		this.id = id
@@ -179,6 +187,7 @@ export default {
 	Position,
 	Selection,
 	Disposable,
+	RelativePattern,
 	ThemeIcon,
 	FileType,
 	DiagnosticSeverity,

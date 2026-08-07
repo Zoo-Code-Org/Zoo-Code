@@ -712,6 +712,17 @@ describe("dashboardStreamReducer", () => {
 		})
 	})
 
+	describe("default case", () => {
+		it("should return the current state for an unknown action type", () => {
+			const state = connectedState()
+			const newState = dashboardStreamReducer(state, { type: "UNKNOWN_ACTION" } as unknown as Parameters<
+				typeof dashboardStreamReducer
+			>[1])
+
+			expect(newState).toBe(state)
+		})
+	})
+
 	describe("Ordering matrix", () => {
 		it("should handle snapshot → delta → delta → snapshot (resync) → delta", () => {
 			let state = dashboardStreamReducer(initialDashboardStreamState, {

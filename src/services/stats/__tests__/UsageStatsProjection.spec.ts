@@ -804,5 +804,44 @@ describe("UsageStatsProjection", () => {
 
 			expect(() => assembleRollupSnapshot(db, makeQuery())).toThrow(StatsProjError)
 		})
+
+		it("should throw StatsProjError when computeSessionPage fails", () => {
+			db.close()
+
+			expect(() => computeSessionPage(db, "req-001")).toThrow(StatsProjError)
+		})
+
+		it("should throw StatsProjError when computeHeatmapSnapshot fails", () => {
+			db.close()
+
+			expect(() => computeHeatmapSnapshot(db, 30, "Asia/Seoul")).toThrow(StatsProjError)
+		})
+
+		it("should throw StatsProjError when applyEventToProjection fails", () => {
+			const event = makeEvent({ taskId: "task-A", rootTaskId: "task-A" })
+			db.append(event)
+			db.close()
+
+			expect(() =>
+				applyEventToProjection(db, event, makeQuery({ groupBy: ["day"] }), "req-001", 30, 1, 1),
+			).toThrow(StatsProjError)
+		})
+	})
+
+	describe("diff coverage: rollup fast path", () => {
+		it("falls back to event scan for unsupported groupBy axes", () => {
+			db.append(makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", status: "completed" }))
+			db.append(makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", status: "failed" }))
+
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["status"] }))
+
+			expect(snapshot.totals.events).toBe(2)
+			expect(snapshot.buckets).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({ key: { status: "completed" } }),
+					expect.objectContaining({ key: { status: "failed" } }),
+				]),
+			)
+		})
 	})
 })

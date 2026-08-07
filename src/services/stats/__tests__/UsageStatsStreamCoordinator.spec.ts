@@ -10,6 +10,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { DashboardTaskCatalog, type DashboardTaskCatalogSource } from "../DashboardTaskCatalog"
 import { UsageStatsDatabase } from "../UsageStatsDatabase"
 import { UsageStatsStreamCoordinator, type StatsStreamSink } from "../UsageStatsStreamCoordinator"
+import * as UsageStatsProjection from "../UsageStatsProjection"
 
 vi.mock("vscode", () => {
 	class EventEmitter<T> {
@@ -1122,6 +1123,231 @@ describe("UsageStatsStreamCoordinator", () => {
 			coordinator._forceDrain()
 
 			expect(sink.messagesOfType("dashboardStatsStreamDelta").length).toBeGreaterThan(0)
+
+			coordinator.dispose()
+		})
+	})
+
+	describe("diff coverage: coordinator edge cases", () => {
+		it("re-subscribing the same sink replaces the existing subscription", () => {
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			const sub1 = makeSubscription({ requestId: "req-1" })
+			coordinator.subscribe(sink, sub1)
+
+			expect(coordinator.getSubscription(sink)?.requestId).toBe("req-1")
+			expect(sink.messagesOfType("dashboardStatsStreamSnapshot")).toHaveLength(1)
+
+			const sub2 = makeSubscription({ requestId: "req-2" })
+			coordinator.subscribe(sink, sub2)
+
+			expect(coordinator.getSubscription(sink)?.requestId).toBe("req-2")
+			expect(sink.messagesOfType("dashboardStatsStreamSnapshot")).toHaveLength(2)
+
+			coordinator.dispose()
+		})
+
+		it("dispose clears the catalog debounce timer", () => {
+			const { catalog } = createTaskCatalog([makeHistoryItem({ id: "cat", ts: 100 })])
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+
+			coordinator.notifyTaskCatalogChanged()
+			expect(coordinator["catalogSnapshotTimer"]).not.toBeNull()
+
+			coordinator.dispose()
+			expect(coordinator["catalogSnapshotTimer"]).toBeNull()
+
+			catalog.dispose()
+		})
+
+		it("force-flushes the drain when coalescing exceeds MAX_COALESCE_MS", () => {
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			db.append(makeEvent())
+			coordinator.notifyEventAppended(makeEvent())
+
+			// Wait long enough that the next notification exceeds the max coalesce window
+			vi.advanceTimersByTime(110)
+			coordinator.notifyEventAppended(makeEvent())
+
+			expect(sink.messagesOfType("dashboardStatsStreamDelta").length).toBeGreaterThan(0)
+
+			coordinator.dispose()
+		})
+
+		it("sends a snapshot during drain when the generation changes", () => {
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			// Change generation outside the coordinator so subscribers stay on the old generation
+			db.clearGeneration()
+
+			db.append(makeEvent())
+			coordinator.notifyEventAppended(makeEvent())
+			coordinator._forceDrain()
+
+			expect(sink.messagesOfType("dashboardStatsStreamSnapshot").length).toBeGreaterThan(0)
+			expect(sink.messagesOfType("dashboardStatsStreamDelta")).toHaveLength(0)
+
+			coordinator.dispose()
+		})
+
+		it("falls back to snapshot when applyEventToProjection throws during drain", () => {
+			const applySpy = vi.spyOn(UsageStatsProjection, "applyEventToProjection").mockImplementation(() => {
+				throw new Error("projection failed")
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			db.append(makeEvent())
+			coordinator.notifyEventAppended(makeEvent())
+			coordinator._forceDrain()
+
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to compute delta"), expect.anything())
+			expect(sink.messagesOfType("dashboardStatsStreamSnapshot").length).toBeGreaterThan(0)
+
+			applySpy.mockRestore()
+			warnSpy.mockRestore()
+			coordinator.dispose()
+		})
+
+		it("logs and swallows drain failure when readEventsAfter throws", () => {
+			const readSpy = vi.spyOn(db, "readEventsAfter").mockImplementation(() => {
+				throw new Error("read failed")
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			db.append(makeEvent())
+			coordinator.notifyEventAppended(makeEvent())
+
+			expect(() => coordinator._forceDrain()).not.toThrow()
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Drain failed"), expect.anything())
+
+			readSpy.mockRestore()
+			warnSpy.mockRestore()
+			coordinator.dispose()
+		})
+
+		it("does not run async rebuild after the coordinator is disposed", () => {
+			db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+			const rawDb = db as unknown as { db: { exec: (sql: string) => void } }
+			rawDb.db.exec("DELETE FROM stats_rollup")
+			rawDb.db.exec("DELETE FROM session_metadata")
+			rawDb.db.exec("DELETE FROM session_activity")
+
+			const rebuildSpy = vi.spyOn(db, "rebuildRollupsFromEvents")
+
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+
+			coordinator.dispose()
+			vi.runOnlyPendingTimers()
+
+			expect(rebuildSpy).not.toHaveBeenCalled()
+
+			rebuildSpy.mockRestore()
+		})
+
+		it("sends a post-rebuild task snapshot when a task catalog is configured", () => {
+			const { catalog } = createTaskCatalog([makeHistoryItem({ id: "history-task", ts: 100 })])
+			db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+			const rawDb = db as unknown as { db: { exec: (sql: string) => void } }
+			rawDb.db.exec("DELETE FROM stats_rollup")
+			rawDb.db.exec("DELETE FROM session_metadata")
+			rawDb.db.exec("DELETE FROM session_activity")
+
+			const coordinator = new UsageStatsStreamCoordinator(db, { taskCatalog: catalog })
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+
+			const snapshotsBefore = sink.messagesOfType("dashboardStatsStreamSnapshot").length
+			vi.runOnlyPendingTimers()
+
+			const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+			expect(snapshots.length).toBeGreaterThan(snapshotsBefore)
+			const rebuiltSnapshot = snapshots[snapshots.length - 1].dashboardStatsStreamSnapshot
+			expect(rebuiltSnapshot).toBeDefined()
+			if (!rebuiltSnapshot || !("tasks" in rebuiltSnapshot)) {
+				throw new Error("STATS_TEST/postRebuildTaskSnapshot/001: expected task snapshot")
+			}
+			expect(rebuiltSnapshot.tasks.tasks).toEqual([expect.objectContaining({ taskId: "history-task" })])
+
+			coordinator.dispose()
+			catalog.dispose()
+		})
+
+		it("logs when sending a post-rebuild snapshot throws", () => {
+			db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
+			const rawDb = db as unknown as { db: { exec: (sql: string) => void } }
+			rawDb.db.exec("DELETE FROM stats_rollup")
+			rawDb.db.exec("DELETE FROM session_metadata")
+			rawDb.db.exec("DELETE FROM session_activity")
+
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			class SinkThatThrowsOnRebuildSnapshot implements StatsStreamSink {
+				private callCount = 0
+				postMessage(message: ExtensionMessage): void {
+					this.callCount++
+					if (this.callCount > 1 && message.type === "dashboardStatsStreamSnapshot") {
+						throw new Error("snapshot rejected")
+					}
+				}
+				isVisible(): boolean {
+					return true
+				}
+			}
+
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new SinkThatThrowsOnRebuildSnapshot()
+			coordinator.subscribe(sink, makeSubscription())
+
+			vi.runOnlyPendingTimers()
+
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to send post-rebuild snapshot"),
+				expect.anything(),
+			)
+
+			warnSpy.mockRestore()
+			coordinator.dispose()
+		})
+
+		it("sends a fresh snapshot at midnight rollover", () => {
+			const coordinator = new UsageStatsStreamCoordinator(db)
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			// Start just before midnight on day 1
+			vi.setSystemTime(new Date("2026-08-01T23:59:50.000Z"))
+			// Trigger first rollover check (sets lastDayBucket to day 2)
+			vi.advanceTimersByTime(30_000)
+
+			expect(sink.messagesOfType("dashboardStatsStreamSnapshot")).toHaveLength(0)
+
+			// Advance to day 3 and trigger another rollover check
+			vi.setSystemTime(new Date("2026-08-03T00:00:10.000Z"))
+			vi.advanceTimersByTime(30_000)
+
+			expect(sink.messagesOfType("dashboardStatsStreamSnapshot")).toHaveLength(1)
 
 			coordinator.dispose()
 		})

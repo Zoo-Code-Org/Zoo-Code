@@ -97,12 +97,16 @@ describe("SessionDetail", () => {
 	})
 
 	it("renders the API call table when apiCalls exist", () => {
-		const { container } = render(<SessionDetail detail={makeDetail({
-			apiCalls: [
-				makeApiCall({ index: 1, mode: "code", inputTokens: 100, outputTokens: 50 }),
-				makeApiCall({ index: 2, mode: "architect", inputTokens: 200, outputTokens: 100 }),
-			],
-		})} />)
+		const { container } = render(
+			<SessionDetail
+				detail={makeDetail({
+					apiCalls: [
+						makeApiCall({ index: 1, mode: "code", inputTokens: 100, outputTokens: 50 }),
+						makeApiCall({ index: 2, mode: "architect", inputTokens: 200, outputTokens: 100 }),
+					],
+				})}
+			/>,
+		)
 		const callsTable = container.querySelector('[data-testid="dashboard-session-detail-calls"]')
 		expect(callsTable).toBeTruthy()
 		expect(container.textContent).toContain("code")
@@ -117,13 +121,17 @@ describe("SessionDetail", () => {
 	})
 
 	it("renders status icons for completed, failed, and cancelled calls", () => {
-		const { container } = render(<SessionDetail detail={makeDetail({
-			apiCalls: [
-				makeApiCall({ index: 1, status: "completed" }),
-				makeApiCall({ index: 2, status: "failed" }),
-				makeApiCall({ index: 3, status: "cancelled" }),
-			],
-		})} />)
+		const { container } = render(
+			<SessionDetail
+				detail={makeDetail({
+					apiCalls: [
+						makeApiCall({ index: 1, status: "completed" }),
+						makeApiCall({ index: 2, status: "failed" }),
+						makeApiCall({ index: 3, status: "cancelled" }),
+					],
+				})}
+			/>,
+		)
 		// Check that status icons are rendered (role="img")
 		const statusIcons = container.querySelectorAll('[role="img"]')
 		expect(statusIcons.length).toBe(3)
@@ -166,10 +174,30 @@ describe("SessionDetail", () => {
 	})
 
 	it("renders multiple models in summary header", () => {
-		const { container } = render(<SessionDetail detail={makeDetail({
-			models: ["gpt-4", "claude-3"],
-		})} />)
+		const { container } = render(
+			<SessionDetail
+				detail={makeDetail({
+					models: ["gpt-4", "claude-3"],
+				})}
+			/>,
+		)
 		expect(container.textContent).toContain("gpt-4")
 		expect(container.textContent).toContain("claude-3")
+	})
+
+	it("falls back to --:-- when a timestamp cannot be formatted", () => {
+		const badTimestamp = {
+			toString: () => {
+				throw new Error("bad date")
+			},
+		} as unknown as number
+		const { container } = render(
+			<SessionDetail
+				detail={makeDetail({
+					apiCalls: [makeApiCall({ index: 1, timestamp: badTimestamp })],
+				})}
+			/>,
+		)
+		expect(container.textContent).toContain("--:--")
 	})
 })

@@ -894,6 +894,29 @@ describe("UsageAggregator", () => {
 			const sources = result.buckets.map((b) => b.key.source).sort()
 			expect(sources).toEqual(["backfilled", "estimated", "provider"])
 		})
+
+		it("should create an 'estimated' source bucket when costUsd is missing but tokens are present", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					provider: "anthropic",
+					model: "claude-sonnet-4-5",
+					usage: {
+						inputTokens: { value: 1_000_000, source: "provider" },
+						outputTokens: { value: 0, source: "provider" },
+						// costUsd missing → falls back to computed cost
+					},
+				}),
+			]
+			const query = makeQuery({ groupBy: ["source"] })
+
+			const result = aggregator.query(events, query)
+
+			const estimatedBucket = result.buckets.find((b) => b.key.source === "estimated")
+			expect(estimatedBucket).toBeDefined()
+			expect(estimatedBucket!.costUsd).toBeCloseTo(3.0, 5)
+		})
 	})
 
 	// ── Multi-axis sorting ─────────────────────────────────────────────────

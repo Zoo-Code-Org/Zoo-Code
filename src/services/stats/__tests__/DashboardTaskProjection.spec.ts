@@ -6,6 +6,7 @@ import {
 	computeTaskDetail,
 	computeTaskPage,
 	computeTaskSummaries,
+	DashboardTaskProjectionError,
 	type DashboardTaskUsageReader,
 } from "../DashboardTaskProjection"
 import { DashboardTaskCatalog, type DashboardTaskCatalogSource } from "../DashboardTaskCatalog"
@@ -360,6 +361,30 @@ describe("DashboardTaskProjection", () => {
 		expect(detail.totalCost).toBeCloseTo(0.01)
 		expect(detail.models).toEqual(["root-model"])
 		expect(detail.apiCalls.map((call) => call.model)).toEqual(["root-model"])
+		catalog.dispose()
+	})
+
+	it("constructs DashboardTaskProjectionError with code and message", () => {
+		const err = new DashboardTaskProjectionError("DASHBOARD_TASK_PROJECTION/computeTaskDetail/001", "Task missing")
+
+		expect(err.code).toBe("DASHBOARD_TASK_PROJECTION/computeTaskDetail/001")
+		expect(err.message).toContain("[DASHBOARD_TASK_PROJECTION/computeTaskDetail/001]")
+		expect(err.message).toContain("Task missing")
+		expect(err.name).toBe("DashboardTaskProjectionError")
+	})
+
+	it("throws when computing detail for a task absent from the catalog", () => {
+		const catalog = createCatalog([makeHistoryItem({ id: "known", ts: 100, task: "Known" })])
+		const reader = createUsageReader()
+
+		expect(() => computeTaskDetail(catalog, reader, "unknown", "request-8")).toThrow(DashboardTaskProjectionError)
+		try {
+			computeTaskDetail(catalog, reader, "unknown", "request-8")
+		} catch (err) {
+			expect(err).toBeInstanceOf(DashboardTaskProjectionError)
+			expect((err as DashboardTaskProjectionError).code).toBe("DASHBOARD_TASK_PROJECTION/computeTaskDetail/001")
+		}
+
 		catalog.dispose()
 	})
 })
