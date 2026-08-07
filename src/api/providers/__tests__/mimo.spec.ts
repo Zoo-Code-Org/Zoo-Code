@@ -657,6 +657,120 @@ describe("MimoHandler", () => {
 			expect(mockCreate).toHaveBeenCalledTimes(1)
 		})
 
+		it("does not retry when a non-Error rejection carries no parallel/strict signal", async () => {
+			// A non-Error (string) rejection hits the `return false` branch of both
+			// error-detection helpers, so it must NOT trigger any fallback retry.
+			mockCreate.mockRejectedValueOnce("network down")
+
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, {
+					taskId: "test-task",
+					parallelToolCalls: false,
+				})
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not retry strict-schema fallback when a non-Error rejection occurs with tools", async () => {
+			// With tools present, a non-Error rejection routes through
+			// isStrictToolSchemaRejected's non-Error `return false` branch (line 63),
+			// so it must NOT retry.
+			mockCreate.mockRejectedValueOnce({ status: 400, message: "strict rejected" })
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, { taskId: "test-task", tools })
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not retry strict-schema fallback when status is not 400", async () => {
+			// A 500 with a "strict" message hits the `status !== 400 → return false`
+			// branch of isStrictToolSchemaRejected, so no retry.
+			mockCreate.mockRejectedValueOnce(
+				Object.assign(new Error("500 - strict internal error"), { status: 500 }),
+			)
+
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			await expect(async () => {
+				const stream = handler.createMessage("System prompt", messages, { taskId: "test-task", tools })
+				for await (const _chunk of stream) {
+					// drain
+				}
+			}).rejects.toThrow()
+
+			expect(mockCreate).toHaveBeenCalledTimes(1)
+		})
+
+		it("retries strict fallback while preserving non-function tools unchanged", async () => {
+			// Exercises stripStrictFromTools's `tool.type !== "function"` passthrough.
+			mockCreate.mockRejectedValueOnce(
+				Object.assign(new Error("400 - Unknown parameter: tools[0].function.strict"), { status: 400 }),
+			)
+			mockCreate.mockImplementationOnce(async () => ({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: {}, index: 0, finish_reason: "stop" }], usage: null }
+					yield {
+						choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					}
+				},
+			}))
+
+			const customTool = { type: "custom", name: "mcp_tool" } as unknown as OpenAI.Chat.ChatCompletionTool
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				customTool,
+				{
+					type: "function",
+					function: { name: "read_file", description: "Read", parameters: {} },
+				},
+			]
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: [{ type: "text", text: "Hello" }] },
+			]
+
+			const stream = handler.createMessage("System prompt", messages, { taskId: "test-task", tools })
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			const retryCallParams = mockCreate.mock.calls[1][0]
+			// Non-function tool is returned as-is; function tool has strict stripped.
+			expect(retryCallParams.tools[0]).toBe(customTool)
+			expect(retryCallParams.tools[1].function).not.toHaveProperty("strict")
+		})
+
 		it("should send stream_options with include_usage", async () => {
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },

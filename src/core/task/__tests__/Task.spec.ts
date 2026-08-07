@@ -2289,6 +2289,55 @@ describe("Cline", () => {
 					expect(allowedFunctionNames.every((name) => toolNames.includes(name))).toBe(true)
 				})
 
+				it("resolves single-call policy and emits policy telemetry for MiMo provider", async () => {
+					const apiConfiguration = {
+						...mockApiConfig,
+						apiProvider: "mimo",
+					} as ProviderSettings
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration,
+						task: "test task",
+						startTask: false,
+					})
+
+					vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+					vi.spyOn(task.api, "getModel").mockReturnValue({
+						id: "mimo-v2.5-pro",
+						info: { contextWindow: 200000, maxTokens: 4096 } as ModelInfo,
+					})
+					const providerState = await mockProvider.getState()
+					vi.spyOn(mockProvider, "getState").mockResolvedValue({
+						...providerState,
+						apiConfiguration,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					})
+					const mockStream = (async function* () {
+						yield { type: "text", text: "response" } as ApiStreamChunk
+					})()
+					const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(mockStream)
+					const policyTelemetrySpy = vi.spyOn(TelemetryService.instance, "captureToolCallPolicyResolution")
+					task.apiConversationHistory = [
+						{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+					]
+
+					await task.attemptApiRequest(0).next()
+
+					// Metadata must force single-call generation for MiMo.
+					const [, , metadata] = requireDefined(createMessageSpy.mock.calls[0])
+					expect(requireDefined(metadata?.tools).length).toBeGreaterThan(0)
+					expect(metadata?.parallelToolCalls).toBe(false)
+					// Policy-resolution telemetry must fire with single-call policy metadata.
+					expect(policyTelemetrySpy).toHaveBeenCalledTimes(1)
+					const [, policyMeta] = policyTelemetrySpy.mock.calls[0]!
+					expect(policyMeta.provider).toBe("mimo")
+					expect(policyMeta.model).toBe("mimo-v2.5-pro")
+					expect(policyMeta.maxCallsPerTurn).toBe(1)
+					expect(policyMeta.parallelToolCallsRequested).toBe(false)
+					expect(policyMeta.parallelToolCallsSent).toBe(false)
+				})
+
 				it("should invoke abort on currentRequestAbortController during first-chunk wait", async () => {
 					const task = new Task({
 						provider: mockProvider,

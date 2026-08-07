@@ -409,6 +409,49 @@ describe("NativeToolCallParser", () => {
 			expect(NativeToolCallParser.consumeParseError("call_consume")).toBeDefined()
 			expect(NativeToolCallParser.consumeParseError("call_consume")).toBeUndefined()
 		})
+
+		it("classifies a non-plain-object argument payload as invalid_argument_shape", () => {
+			NativeToolCallParser.parseToolCall({
+				id: "call_array_args",
+				name: "read_file",
+				arguments: "[1,2,3]",
+			})
+
+			const failure = NativeToolCallParser.consumeParseFailure("call_array_args")
+			expect(failure).toBeDefined()
+			expect(failure?.kind).toBe("invalid_argument_shape")
+			expect(failure?.toolName).toBe("read_file")
+			expect(failure?.missingParameters).toEqual([])
+		})
+
+		it("classifies a primitive argument payload as invalid_argument_shape", () => {
+			NativeToolCallParser.parseToolCall({
+				id: "call_primitive_args",
+				name: "read_file",
+				arguments: "42",
+			})
+
+			const failure = NativeToolCallParser.consumeParseFailure("call_primitive_args")
+			expect(failure?.kind).toBe("invalid_argument_shape")
+			expect(failure?.missingParameters).toEqual([])
+		})
+
+		it("classifies present-but-falsy required arg with unmatched shape as invalid_argument_shape", () => {
+			// attempt_completion requires `result`. The field is present (not
+			// undefined) so the "missing required" check passes, but its falsy
+			// value fails structural construction (the parser builds nativeArgs
+			// only when `result` is truthy). This yields invalid_argument_shape
+			// rather than missing_required_arguments.
+			NativeToolCallParser.parseToolCall({
+				id: "call_shape_mismatch",
+				name: "attempt_completion",
+				arguments: JSON.stringify({ result: 0 }),
+			})
+
+			const failure = NativeToolCallParser.consumeParseFailure("call_shape_mismatch")
+			expect(failure?.kind).toBe("invalid_argument_shape")
+			expect(failure?.missingParameters).toEqual([])
+		})
 	})
 
 	describe("streaming state inspection (ghost quarantine support)", () => {
