@@ -16,6 +16,7 @@ import {
 	type Command as SlashCommand,
 	type WebviewMessage,
 	type EditQueuedMessagePayload,
+	type UpdateTodoListPayload,
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
@@ -217,7 +218,10 @@ export const webviewMessageHandler = async (
 	 * this function prefers non-summary messages to ensure user operations
 	 * target the intended message rather than the summary.
 	 */
-	const findMessageIndices = (messageTs: number, currentCline: any) => {
+	const findMessageIndices = (
+		messageTs: number,
+		currentCline: { clineMessages: ClineMessage[]; apiConversationHistory: ApiMessage[] },
+	) => {
 		// Find the exact message by timestamp, not the first one after a cutoff
 		const messageIndex = currentCline.clineMessages.findIndex((msg: ClineMessage) => msg.ts === messageTs)
 
@@ -237,7 +241,7 @@ export const webviewMessageHandler = async (
 	 * Fallback: find first API history index at or after a timestamp.
 	 * Used when the exact user message isn't present in apiConversationHistory (e.g., after condense).
 	 */
-	const findFirstApiIndexAtOrAfter = (ts: number, currentCline: any) => {
+	const findFirstApiIndexAtOrAfter = (ts: number, currentCline: { apiConversationHistory: ApiMessage[] }) => {
 		if (typeof ts !== "number") return -1
 		return currentCline.apiConversationHistory.findIndex(
 			(msg: ApiMessage) => typeof msg?.ts === "number" && (msg.ts as number) >= ts,
@@ -327,7 +331,7 @@ export const webviewMessageHandler = async (
 			} else {
 				// For non-checkpoint deletes, preserve checkpoint associations for remaining messages
 				// Store checkpoints from messages that will be preserved
-				const preservedCheckpoints = new Map<number, any>()
+				const preservedCheckpoints = new Map<number, Record<string, unknown>>()
 				for (let i = 0; i < messageIndex; i++) {
 					const msg = currentCline.clineMessages[i]
 					if (msg?.checkpoint && msg.ts) {
@@ -494,7 +498,7 @@ export const webviewMessageHandler = async (
 			}
 
 			// Store checkpoints from messages that will be preserved
-			const preservedCheckpoints = new Map<number, any>()
+			const preservedCheckpoints = new Map<number, Record<string, unknown>>()
 			for (let i = 0; i < deleteFromMessageIndex; i++) {
 				const msg = currentCline.clineMessages[i]
 				if (msg?.checkpoint && msg.ts) {
@@ -558,7 +562,9 @@ export const webviewMessageHandler = async (
 	}
 
 	switch (message.type) {
-		case "webviewDidLaunch":
+		case "webviewDidLaunch": {
+			await provider.setViewStateId(message.viewStateId)
+
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
 			await updateGlobalState("customModes", customModes)
@@ -607,7 +613,8 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					const currentConfigName = getGlobalState("currentApiConfigName")
+					const currentState = await provider.getState()
+					const currentConfigName = currentState.currentApiConfigName
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
@@ -642,6 +649,7 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		}
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
@@ -1220,18 +1228,24 @@ export const webviewMessageHandler = async (
 			})
 
 			if (!providerFilter || providerFilter === "kimi-code") {
-				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
-				const kimiCodeAuthMethod =
-					message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
-				const kimiCodeApiKey =
-					kimiCodeAuthMethod === "api-key"
-						? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
-						: await kimiCodeOAuthManager.getAccessToken()
-				if (kimiCodeApiKey) {
-					candidates.push({
-						key: "kimi-code",
-						options: { provider: "kimi-code", apiKey: kimiCodeApiKey },
-					})
+				try {
+					const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
+					const kimiCodeAuthMethod =
+						message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
+					const kimiCodeApiKey =
+						kimiCodeAuthMethod === "api-key"
+							? (message?.values?.kimiCodeApiKey ?? apiConfiguration.kimiCodeApiKey)
+							: await kimiCodeOAuthManager.getAccessToken()
+					if (kimiCodeApiKey) {
+						candidates.push({
+							key: "kimi-code",
+							options: { provider: "kimi-code", apiKey: kimiCodeApiKey },
+						})
+					}
+				} catch (error) {
+					provider.log(
+						`[requestRouterModels] kimi-code credential lookup failed: ${error instanceof Error ? error.message : String(error)}`,
+					)
 				}
 			}
 
@@ -2085,7 +2099,7 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "updateTodoList": {
-			const payload = message.payload as { todos?: any[] }
+			const payload = message.payload as UpdateTodoListPayload
 			const todos = payload?.todos
 			if (Array.isArray(todos)) {
 				await setPendingTodoList(todos)

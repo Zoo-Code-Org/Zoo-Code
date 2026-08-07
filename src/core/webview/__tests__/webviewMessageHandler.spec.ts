@@ -11,6 +11,17 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
 
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			updateTelemetryState: vi.fn(),
+			captureCustomModeCreated: vi.fn(),
+			captureModeSettingChanged: vi.fn(),
+		},
+		hasInstance: vi.fn(() => false),
+	},
+}))
+
 vi.mock("../../../integrations/openai-codex/oauth", () => ({
 	openAiCodexOAuthManager: {
 		getAccessToken: vi.fn(),
@@ -87,6 +98,7 @@ const mockClineProvider = {
 	postMessageToWebview: vi.fn(),
 	customModesManager: {
 		getCustomModes: vi.fn(),
+		updateCustomMode: vi.fn(),
 		deleteCustomMode: vi.fn(),
 	},
 	context: {
@@ -107,6 +119,7 @@ const mockClineProvider = {
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	getSkillsManager: vi.fn(),
+	handleModeSwitch: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
 
@@ -136,7 +149,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../../i18n", () => ({
-	t: vi.fn((key: string, args?: Record<string, any>) => {
+	t: vi.fn((key: string, args?: Record<string, unknown>) => {
 		// For the delete confirmation with rules, we need to return the interpolated string
 		if (key === "common:confirmation.delete_custom_mode_with_rules" && args) {
 			return `Are you sure you want to delete this ${args.scope} mode?\n\nThis will also delete the associated rules folder at:\n${args.rulesFolderPath}`
@@ -182,6 +195,7 @@ import { getWorkspacePath } from "../../../utils/path"
 import { ensureSettingsDirectoryExists } from "../../../utils/globalContext"
 import { generateErrorDiagnostics } from "../diagnosticsHandler"
 import type { ModeConfig } from "@roo-code/types"
+import { defaultModeSlug } from "../../../shared/modes"
 
 vi.mock("../../../utils/fs")
 vi.mock("../../../utils/path")
@@ -197,6 +211,53 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
+
+describe("webviewMessageHandler - webviewDidLaunch", () => {
+	type ProviderWithPrivateMethods = typeof mockClineProvider & {
+		setViewStateId: ReturnType<typeof vi.fn>
+		workspaceTracker: { initializeFilePaths: ReturnType<typeof vi.fn> }
+		providerSettingsManager: {
+			listConfig: ReturnType<typeof vi.fn>
+			hasConfig: ReturnType<typeof vi.fn>
+		}
+		activateProviderProfile: ReturnType<typeof vi.fn>
+		getMcpHub: ReturnType<typeof vi.fn>
+		getStateToPostToWebview: ReturnType<typeof vi.fn>
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(mockClineProvider.getState).mockResolvedValue({
+			apiConfiguration: { apiProvider: "anthropic" },
+			currentApiConfigName: "view-local-profile",
+		} as unknown as import("@roo-code/types").ExtensionState)
+		const providerAccess = mockClineProvider as ProviderWithPrivateMethods
+		providerAccess.setViewStateId = vi.fn().mockResolvedValue(undefined)
+		providerAccess.workspaceTracker = {
+			initializeFilePaths: vi.fn().mockResolvedValue(undefined),
+		} as unknown as typeof providerAccess.workspaceTracker
+		providerAccess.providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", apiProvider: "anthropic" }]),
+			hasConfig: vi.fn().mockResolvedValue(false),
+		} as unknown as typeof providerAccess.providerSettingsManager
+		providerAccess.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+		providerAccess.getMcpHub = vi.fn().mockReturnValue(undefined)
+		providerAccess.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "disabled" })
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue("shared-profile")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
+	})
+
+	it("validates the view-local currentApiConfigName on launch", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+
+		const providerAccess = mockClineProvider as ProviderWithPrivateMethods
+		expect(providerAccess.setViewStateId).toHaveBeenCalledWith("view-1")
+		expect(providerAccess.providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
+		expect(providerAccess.providerSettingsManager.hasConfig).not.toHaveBeenCalledWith("shared-profile")
+	})
+})
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -280,7 +341,7 @@ describe("webviewMessageHandler - image mentions", () => {
 			cwd: "/mock/workspace",
 			rooIgnoreController: undefined,
 			handleWebviewAskResponse: mockHandleWebviewAskResponse,
-		} as any)
+		} as unknown as ReturnType<typeof mockClineProvider.getCurrentTask>)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "askResponse",
@@ -532,9 +593,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Must be fetched despite no configured key, forwarding apiKey: undefined.
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: undefined })
 
-		const routerModelsCall = (mockClineProvider.postMessageToWebview as any).mock.calls.find(
-			([msg]: [{ type: string }]) => msg.type === "routerModels",
-		)
+		const postMessageMock = mockClineProvider.postMessageToWebview as ReturnType<typeof vi.fn>
+		const routerModelsCall = postMessageMock.mock.calls.find((call) => call[0].type === "routerModels")
 		expect(routerModelsCall?.[0].routerModels["opencode-go"]).toEqual(mockModels)
 	})
 
@@ -852,7 +912,7 @@ describe("webviewMessageHandler - requestOpenAiCodexRateLimits", () => {
 	})
 
 	it("posts error when not authenticated", async () => {
-		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiCodexRateLimits" } as any)
+		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiCodexRateLimits" })
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "openAiCodexRateLimits",
@@ -868,7 +928,7 @@ describe("webviewMessageHandler - requestOpenAiCodexRateLimits", () => {
 			fetchedAt: 1700000000000,
 		})
 
-		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiCodexRateLimits" } as any)
+		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiCodexRateLimits" })
 
 		expect(mockFetchOpenAiCodexRateLimitInfo).toHaveBeenCalledWith("token", { accountId: "acct_123" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -1002,7 +1062,7 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 			taskId: "test-task-id",
 			apiConversationHistory: [],
 			clineMessages: [],
-		} as any)
+		} as unknown as ReturnType<typeof mockClineProvider.getCurrentTask>)
 		// Reset getValue mock
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(false)
 	})
@@ -1012,7 +1072,7 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 			vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 				clineMessages: [],
 				apiConversationHistory: [],
-			} as any) // Mock current cline with proper structure
+			} as unknown as ReturnType<typeof mockClineProvider.getCurrentTask>)
 
 			await webviewMessageHandler(mockClineProvider, {
 				type: "deleteMessage",
@@ -1032,7 +1092,7 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 			vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 				clineMessages: [],
 				apiConversationHistory: [],
-			} as any) // Mock current cline with proper structure
+			} as unknown as ReturnType<typeof mockClineProvider.getCurrentTask>)
 
 			await webviewMessageHandler(mockClineProvider, {
 				type: "submitEditedMessage",
@@ -1052,7 +1112,8 @@ describe("webviewMessageHandler - message dialog preferences", () => {
 })
 
 describe("webviewMessageHandler - mcpEnabled", () => {
-	let mockMcpHub: any
+	let mockMcpHub: { handleMcpEnabledChange: ReturnType<typeof vi.fn> }
+	let getMcpHubMock: ReturnType<typeof vi.fn>
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -1062,8 +1123,14 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 			handleMcpEnabledChange: vi.fn().mockResolvedValue(undefined),
 		}
 
+		getMcpHubMock = vi.fn().mockReturnValue(mockMcpHub)
+
 		// Ensure provider exposes getMcpHub and returns our mock
-		;(mockClineProvider as any).getMcpHub = vi.fn().mockReturnValue(mockMcpHub)
+		Object.defineProperty(mockClineProvider, "getMcpHub", {
+			value: getMcpHubMock,
+			writable: true,
+			configurable: true,
+		})
 	})
 
 	it("delegates enable=true to McpHub and posts updated state", async () => {
@@ -1072,7 +1139,7 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 			updatedSettings: { mcpEnabled: true },
 		})
 
-		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
+		expect(getMcpHubMock).toHaveBeenCalledTimes(1)
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledWith(true)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
@@ -1084,21 +1151,25 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 			updatedSettings: { mcpEnabled: false },
 		})
 
-		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
+		expect(getMcpHubMock).toHaveBeenCalledTimes(1)
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledTimes(1)
 		expect(mockMcpHub.handleMcpEnabledChange).toHaveBeenCalledWith(false)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 
 	it("handles missing McpHub instance gracefully and still posts state", async () => {
-		;(mockClineProvider as any).getMcpHub = vi.fn().mockReturnValue(undefined)
+		Object.defineProperty(mockClineProvider, "getMcpHub", {
+			value: vi.fn().mockReturnValue(undefined),
+			writable: true,
+			configurable: true,
+		})
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
 			updatedSettings: { mcpEnabled: true },
 		})
 
-		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
+		expect(mockClineProvider.getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })
@@ -1242,7 +1313,7 @@ describe("webviewMessageHandler - terminalProfile", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
-			updatedSettings: { terminalProfile: 42 as any },
+			updatedSettings: { terminalProfile: 42 as unknown as string },
 		})
 
 		expect(Terminal.getTerminalProfile()).toBeUndefined()
@@ -1476,7 +1547,11 @@ describe("webviewMessageHandler - rules", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue(undefined)
-		;(mockClineProvider as any).cwd = "/mock/workspace"
+		Object.defineProperty(mockClineProvider, "cwd", {
+			value: "/mock/workspace",
+			writable: true,
+			configurable: true,
+		})
 	})
 
 	it("routes rules management messages with the current workspace", async () => {
@@ -1489,7 +1564,7 @@ describe("webviewMessageHandler - rules", () => {
 		] as const
 
 		for (const message of messages) {
-			await webviewMessageHandler(mockClineProvider, message as any)
+			await webviewMessageHandler(mockClineProvider, message as Parameters<typeof webviewMessageHandler>[1])
 		}
 
 		expect(handleRequestRules).toHaveBeenCalledWith(mockClineProvider, "/mock/workspace")
@@ -1505,7 +1580,7 @@ describe("webviewMessageHandler - rules", () => {
 		} as unknown as ReturnType<ClineProvider["getCurrentTask"]>)
 
 		const message = { type: "requestRules" } as const
-		await webviewMessageHandler(mockClineProvider, message as any)
+		await webviewMessageHandler(mockClineProvider, message as Parameters<typeof webviewMessageHandler>[1])
 
 		expect(handleRequestRules).toHaveBeenCalledWith(mockClineProvider, "/mock/task-workspace")
 	})
@@ -1516,12 +1591,17 @@ describe("webviewMessageHandler - downloadErrorDiagnostics", () => {
 		vi.clearAllMocks()
 
 		// Ensure contextProxy has a globalStorageUri for the handler
-		;(mockClineProvider as any).contextProxy.globalStorageUri = { fsPath: "/mock/global/storage" }
+		Object.defineProperty(mockClineProvider.contextProxy, "globalStorageUri", {
+			value: { fsPath: "/mock/global/storage" },
+			writable: true,
+			configurable: true,
+		})
 
 		// Provide a current task with a stable ID
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
 			taskId: "test-task-id",
-		} as any)
+			handleWebviewAskResponse: vi.fn(),
+		} as unknown as ReturnType<typeof mockClineProvider.getCurrentTask>)
 	})
 
 	it("calls generateErrorDiagnostics with correct parameters", async () => {
@@ -1534,7 +1614,7 @@ describe("webviewMessageHandler - downloadErrorDiagnostics", () => {
 				model: "test-model",
 				details: "Sample error details",
 			},
-		} as any)
+		} as Parameters<typeof webviewMessageHandler>[1])
 
 		// Verify generateErrorDiagnostics was called with the correct parameters
 		expect(generateErrorDiagnostics).toHaveBeenCalledTimes(1)
@@ -1553,15 +1633,25 @@ describe("webviewMessageHandler - downloadErrorDiagnostics", () => {
 	})
 
 	it("shows error when no active task", async () => {
-		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue(null as any)
+		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue(undefined)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "downloadErrorDiagnostics",
 			values: {},
-		} as any)
+		} as Parameters<typeof webviewMessageHandler>[1])
 
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("No active task to generate diagnostics for")
-		expect(generateErrorDiagnostics).not.toHaveBeenCalled()
+	})
+
+	it("shows error when no active task", async () => {
+		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "downloadErrorDiagnostics",
+			values: {},
+		})
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("No active task to generate diagnostics for")
 	})
 })
 
@@ -1572,43 +1662,55 @@ describe("zooCodeSignOut", () => {
 
 	it("disconnects Zoo Code and clears tokens from all Zoo Gateway profiles", async () => {
 		const { disconnectZooCode } = await import("../../../services/zoo-code-auth")
-		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
-		const saveConfig = vi.fn().mockResolvedValue(undefined)
+		const mockUpsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		const mockSaveConfig = vi.fn().mockResolvedValue(undefined)
 
-		;(mockClineProvider as any).contextProxy = {
-			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
-			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
-		}
-		;(mockClineProvider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([
-				{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
-				{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
-			]),
-			getProfile: vi
-				.fn()
-				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
-					zooSessionToken: "token-active",
-					zooGatewayModelId: "anthropic/claude-sonnet-4",
-				})
-				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
-					zooSessionToken: "token-backup",
-				}),
-			saveConfig,
-		}
-		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+		Object.defineProperty(mockClineProvider, "contextProxy", {
+			value: {
+				...mockClineProvider.contextProxy,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+				getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+			},
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(mockClineProvider, "providerSettingsManager", {
+			value: {
+				listConfig: vi.fn().mockResolvedValue([
+					{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
+					{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+				]),
+				getProfile: vi
+					.fn()
+					.mockResolvedValueOnce({
+						apiProvider: "zoo-gateway",
+						zooSessionToken: "token-active",
+						zooGatewayModelId: "anthropic/claude-sonnet-4",
+					})
+					.mockResolvedValueOnce({
+						apiProvider: "zoo-gateway",
+						zooSessionToken: "token-backup",
+					}),
+				saveConfig: mockSaveConfig,
+			},
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(mockClineProvider, "upsertProviderProfile", {
+			value: mockUpsertProviderProfile,
+			writable: true,
+			configurable: true,
+		})
 
 		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
 
 		expect(disconnectZooCode).toHaveBeenCalled()
-		expect(upsertProviderProfile).toHaveBeenCalledWith(
+		expect(mockUpsertProviderProfile).toHaveBeenCalledWith(
 			"Zoo Gateway",
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
 		)
-		expect(saveConfig).toHaveBeenCalledWith(
+		expect(mockSaveConfig).toHaveBeenCalledWith(
 			"Backup Zoo",
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 		)
@@ -1616,26 +1718,38 @@ describe("zooCodeSignOut", () => {
 	})
 
 	it("still clears the in-memory handler when the active profile token is already empty on disk", async () => {
-		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		const mockUpsertProviderProfile = vi.fn().mockResolvedValue(undefined)
 
-		;(mockClineProvider as any).contextProxy = {
-			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
-			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
-		}
-		;(mockClineProvider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
-			getProfile: vi.fn().mockResolvedValue({
-				apiProvider: "zoo-gateway",
-				zooGatewayModelId: "anthropic/claude-sonnet-4",
-			}),
-			saveConfig: vi.fn(),
-		}
-		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
+		Object.defineProperty(mockClineProvider, "contextProxy", {
+			value: {
+				...mockClineProvider.contextProxy,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+				getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+			},
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(mockClineProvider, "providerSettingsManager", {
+			value: {
+				listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+				getProfile: vi.fn().mockResolvedValue({
+					apiProvider: "zoo-gateway",
+					zooGatewayModelId: "anthropic/claude-sonnet-4",
+				}),
+				saveConfig: vi.fn(),
+			},
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(mockClineProvider, "upsertProviderProfile", {
+			value: mockUpsertProviderProfile,
+			writable: true,
+			configurable: true,
+		})
 
 		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
 
-		expect(upsertProviderProfile).toHaveBeenCalledWith(
+		expect(mockUpsertProviderProfile).toHaveBeenCalledWith(
 			"Zoo Gateway",
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
@@ -1670,8 +1784,16 @@ describe("webviewMessageHandler - kimiCodeSignIn", () => {
 		}))
 
 		const mockOpenExternal = vi.fn().mockResolvedValue(true)
-		;(vscode as any).env = { openExternal: mockOpenExternal }
-		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+		Object.defineProperty(vscode, "env", {
+			value: { openExternal: mockOpenExternal },
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(vscode, "Uri", {
+			value: { parse: vi.fn((url: string) => url) },
+			writable: true,
+			configurable: true,
+		})
 
 		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
 
@@ -1701,8 +1823,16 @@ describe("webviewMessageHandler - kimiCodeSignIn", () => {
 		}))
 
 		const mockOpenExternal = vi.fn().mockResolvedValue(true)
-		;(vscode as any).env = { openExternal: mockOpenExternal }
-		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+		Object.defineProperty(vscode, "env", {
+			value: { openExternal: mockOpenExternal },
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(vscode, "Uri", {
+			value: { parse: vi.fn((url: string) => url) },
+			writable: true,
+			configurable: true,
+		})
 
 		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
 		await new Promise((resolve) => setTimeout(resolve, 10))
@@ -1726,8 +1856,16 @@ describe("webviewMessageHandler - kimiCodeSignIn", () => {
 		}))
 
 		const mockOpenExternal = vi.fn().mockResolvedValue(true)
-		;(vscode as any).env = { openExternal: mockOpenExternal }
-		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+		Object.defineProperty(vscode, "env", {
+			value: { openExternal: mockOpenExternal },
+			writable: true,
+			configurable: true,
+		})
+		Object.defineProperty(vscode, "Uri", {
+			value: { parse: vi.fn((url: string) => url) },
+			writable: true,
+			configurable: true,
+		})
 
 		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
 		await new Promise((resolve) => setTimeout(resolve, 10))

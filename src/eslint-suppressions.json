@@ -1139,19 +1139,9 @@
 			"count": 3
 		}
 	},
-	"core/webview/__tests__/webviewMessageHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
 	"core/webview/messageEnhancer.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"core/webview/webviewMessageHandler.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"extension.ts": {

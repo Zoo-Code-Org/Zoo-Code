@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import type { WebviewMessage } from "@roo-code/types"
+
 import type { ClineProvider } from "../ClineProvider"
 
 // Mock vscode (minimal)
@@ -37,9 +39,15 @@ vi.mock("vscode", () => ({
 // Mock modelCache getModels/flushModels used by the handler
 const getModelsMock = vi.fn()
 const flushModelsMock = vi.fn()
+const kimiCodeGetAccessTokenMock = vi.fn()
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: (...args: any[]) => getModelsMock(...args),
 	flushModels: (...args: any[]) => flushModelsMock(...args),
+}))
+vi.mock("../../../integrations/kimi-code/oauth", () => ({
+	kimiCodeOAuthManager: {
+		getAccessToken: (...args: unknown[]) => kimiCodeGetAccessTokenMock(...args),
+	},
 }))
 
 describe("webviewMessageHandler - requestRouterModels provider filter", () => {
@@ -293,6 +301,31 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			provider: "litellm",
 			apiKey: "stored-api-key",
 			baseUrl: "http://stored:4000",
+		})
+	})
+
+	it("continues posting routerModels when Kimi Code OAuth lookup fails", async () => {
+		mockProvider.getState.mockResolvedValue({
+			apiConfiguration: {
+				kimiCodeAuthMethod: "oauth",
+			},
+		})
+		kimiCodeGetAccessTokenMock.mockRejectedValueOnce(new Error("refresh failed"))
+
+		await webviewMessageHandler(mockProvider, {
+			type: "requestRouterModels",
+			values: { provider: "kimi-code" },
+		} satisfies WebviewMessage)
+
+		expect(kimiCodeGetAccessTokenMock).toHaveBeenCalledOnce()
+		expect(mockProvider.log).toHaveBeenCalledWith(
+			"[requestRouterModels] kimi-code credential lookup failed: refresh failed",
+		)
+		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "kimi-code" }))
+		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {},
+			values: { provider: "kimi-code" },
 		})
 	})
 

@@ -350,8 +350,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Switch mode
 			await provider.handleModeSwitch("architect")
 
-			// Verify mode was updated in global state
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was updated in durable per-view state
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"viewStates",
+				expect.objectContaining({
+					[provider.viewId]: expect.objectContaining({ mode: "architect" }),
+				}),
+			)
 
 			// Verify task history was updated with new mode
 			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
@@ -682,8 +687,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Switch mode - should not throw
 			await expect(provider.handleModeSwitch("architect")).resolves.not.toThrow()
 
-			// Verify mode was still updated in global state
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was still updated in durable per-view state
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"viewStates",
+				expect.objectContaining({
+					[provider.viewId]: expect.objectContaining({ mode: "architect" }),
+				}),
+			)
 		})
 
 		it("should handle null/undefined mode gracefully", async () => {
@@ -859,12 +869,16 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			await Promise.all(switches)
 
-			// Find the last mode update call
-			const modeCalls = vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode")
-			const lastModeCall = modeCalls[modeCalls.length - 1]
+			// Find the last durable view state update call
+			const viewStateCalls = vi
+				.mocked(mockContext.globalState.update)
+				.mock.calls.filter((call) => call[0] === "viewStates")
+			const lastViewStateCall = viewStateCalls[viewStateCalls.length - 1]
 
 			// Verify the last mode switch wins
-			expect(lastModeCall).toEqual(["mode", "code"])
+			expect(lastViewStateCall?.[1]).toMatchObject({
+				[provider.viewId]: { mode: "code" },
+			})
 
 			// Verify task history was updated with final mode
 			const lastCall = updateTaskHistorySpy.mock.calls[updateTaskHistorySpy.mock.calls.length - 1]
@@ -955,7 +969,12 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.handleModeSwitch("invalid-mode" as any)
 
 			// The mode WILL be updated to invalid-mode (this is the actual behavior)
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "invalid-mode")
+			expect(mockContext.globalState.update).toHaveBeenCalledWith(
+				"viewStates",
+				expect.objectContaining({
+					[provider.viewId]: expect.objectContaining({ mode: "invalid-mode" }),
+				}),
+			)
 		})
 
 		it("should handle errors during mode switch gracefully", async () => {

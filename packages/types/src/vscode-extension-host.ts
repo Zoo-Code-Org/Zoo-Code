@@ -632,6 +632,7 @@ export interface WebviewMessage {
 		| "deleteRule"
 		| "openRuleFile"
 		| "openRulesDirectory"
+	viewStateId?: string
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
