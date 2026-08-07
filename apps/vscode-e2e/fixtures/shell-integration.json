@@ -1,0 +1,32 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "SHELL_INTEGRATION_E2E_PATH_OVERRIDE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'zoo-shell-integration-path-ok\\\\n' > shell-integration-e2e/shell-integration-path.txt\"}",
+						"id": "call_shell_integration_path_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "SHELL_INTEGRATION_E2E_AUTO"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"printf 'zoo-shell-integration-auto-ok\\\\n' > shell-integration-e2e/shell-integration-auto.txt\"}",
+						"id": "call_shell_integration_auto_001"
+					}
+				]
+			}
+		}
+	]
+}

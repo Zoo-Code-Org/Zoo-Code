@@ -15,6 +15,7 @@ import { addTerminalReuseShellRaceFixtures } from "./fixtures/terminal-reuse-she
 import { addLongRuningSilentCommandFixtures } from "./fixtures/long-running-silent-command"
 import { addColdShellInitFixtures } from "./fixtures/cold-shell-init"
 import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
+import { addShellIntegrationResultFixtures } from "./fixtures/shell-integration"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
@@ -122,6 +123,7 @@ async function main() {
 				addLongRuningSilentCommandFixtures(mock)
 				addColdShellInitFixtures(mock)
 				addTerminalProfileResultFixtures(mock)
+				addShellIntegrationResultFixtures(mock)
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
