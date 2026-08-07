@@ -12,6 +12,7 @@ import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
 import { addFastExitShellRaceResultFixtures } from "./fixtures/fast-exit-shell-race"
 import { addZeroChunkShellRaceResultFixtures } from "./fixtures/zero-chunk-shell-race"
 import { addTerminalReuseShellRaceFixtures } from "./fixtures/terminal-reuse-shell-race"
+import { addTerminalLifecycleFixtures } from "./fixtures/terminal-lifecycle"
 import { addLongRuningSilentCommandFixtures } from "./fixtures/long-running-silent-command"
 import { addColdShellInitFixtures } from "./fixtures/cold-shell-init"
 import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
@@ -119,6 +120,7 @@ async function main() {
 				addFastExitShellRaceResultFixtures(mock)
 				addZeroChunkShellRaceResultFixtures(mock)
 				addTerminalReuseShellRaceFixtures(mock)
+				addTerminalLifecycleFixtures(mock)
 				addLongRuningSilentCommandFixtures(mock)
 				addColdShellInitFixtures(mock)
 				addTerminalProfileResultFixtures(mock)

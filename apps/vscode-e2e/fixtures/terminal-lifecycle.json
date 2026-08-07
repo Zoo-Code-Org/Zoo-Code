@@ -1,0 +1,32 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "TERMINAL_LIFECYCLE_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"echo lifecycle-first\"}",
+						"id": "call_terminal_lifecycle_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "TERMINAL_LIFECYCLE_CANCEL_E2E"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "execute_command",
+						"arguments": "{\"command\":\"sleep 30\"}",
+						"id": "call_terminal_lifecycle_cancel_001"
+					}
+				]
+			}
+		}
+	]
+}
