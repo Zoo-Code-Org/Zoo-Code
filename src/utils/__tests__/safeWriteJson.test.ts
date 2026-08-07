@@ -1,4 +1,5 @@
 import * as fsSyncActual from "fs"
+import type { WriteStream } from "fs"
 import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
@@ -25,15 +26,15 @@ vi.mock("fs/promises", async () => {
 	// or have their implementations changed in tests.
 	// This ensures that other fs.promises functions used by the SUT
 	// (like proper-lockfile's internals) will use their actual implementations.
-	mockedFs.writeFile = vi.fn(actual.writeFile) as any
-	mockedFs.readFile = vi.fn(actual.readFile) as any
-	mockedFs.rename = vi.fn(actual.rename) as any
-	mockedFs.unlink = vi.fn(actual.unlink) as any
-	mockedFs.access = vi.fn(actual.access) as any
-	mockedFs.mkdtemp = vi.fn(actual.mkdtemp) as any
-	mockedFs.rm = vi.fn(actual.rm) as any
-	mockedFs.readdir = vi.fn(actual.readdir) as any
-	mockedFs.mkdir = vi.fn(actual.mkdir) as any
+	mockedFs.writeFile = vi.mocked(actual.writeFile)
+	mockedFs.readFile = vi.mocked(actual.readFile)
+	mockedFs.rename = vi.fn(actual.rename)
+	mockedFs.unlink = vi.fn(actual.unlink)
+	mockedFs.access = vi.fn(actual.access)
+	mockedFs.mkdtemp = vi.mocked(actual.mkdtemp)
+	mockedFs.rm = vi.fn(actual.rm)
+	mockedFs.readdir = vi.mocked(actual.readdir)
+	mockedFs.mkdir = vi.mocked(actual.mkdir)
 	// fs.stat and fs.lstat will be available via { ...actual }
 
 	return mockedFs
@@ -44,7 +45,7 @@ vi.mock("fs", async () => {
 	const actualFs = await vi.importActual<typeof import("fs")>("fs")
 	return {
 		...actualFs, // Spread actual implementations
-		createWriteStream: vi.fn(actualFs.createWriteStream) as any, // Default to actual, but mockable
+		createWriteStream: vi.fn(actualFs.createWriteStream), // Default to actual, but mockable
 	}
 })
 
@@ -87,7 +88,7 @@ describe("safeWriteJson", () => {
 	})
 
 	// Helper function to read file content
-	async function readFileContent(filePath: string): Promise<any> {
+	async function readFileContent(filePath: string): Promise<unknown> {
 		const readContent = await fs.readFile(filePath, "utf-8")
 		return JSON.parse(readContent)
 	}
@@ -132,10 +133,11 @@ describe("safeWriteJson", () => {
 		// currentTestFilePath exists due to beforeEach, allowing lock acquisition.
 		const data = { message: "test write failure" }
 
-		const mockErrorStream = new Writable() as any
-		mockErrorStream._write = (_chunk: any, _encoding: any, callback: any) => {
-			callback(new Error("Write stream error"))
-		}
+		const mockErrorStream = new Writable({
+			write(_chunk, _encoding, callback) {
+				callback(new Error("Write stream error"))
+			},
+		}) as WriteStream
 		// Add missing WriteStream properties
 		mockErrorStream.close = vi.fn()
 		mockErrorStream.bytesWritten = 0
@@ -143,7 +145,7 @@ describe("safeWriteJson", () => {
 		mockErrorStream.pending = false
 
 		// Mock createWriteStream to return a stream that errors on write
-		;(fsSyncActual.createWriteStream as any).mockImplementationOnce((_path: any, _options: any) => {
+		vi.mocked(fsSyncActual.createWriteStream).mockImplementationOnce((_path, _options) => {
 			return mockErrorStream
 		})
 
@@ -255,10 +257,11 @@ describe("safeWriteJson", () => {
 	})
 
 	test("should handle directory creation permission errors", async () => {
-		// fs.mkdir is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.mkdir).mockImplementationOnce(async () => {
-			const error = new Error("EACCES: permission denied") as any
-			error.code = "EACCES"
+		// fs.mkdir is the real implementation in the mock factory (vi.mocked is
+		// type-only), so spy on it to override the implementation for this test.
+		vi.spyOn(fs, "mkdir").mockImplementationOnce(async () => {
+			const error = new Error("EACCES: permission denied")
+			;(error as NodeJS.ErrnoException).code = "EACCES"
 			throw error
 		})
 
@@ -321,7 +324,7 @@ describe("safeWriteJson", () => {
 		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
 
 		// fs.unlink is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
-		vi.mocked(fs.unlink).mockImplementation(async (filePath: any) => {
+		vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
 			if (filePath.toString().includes(".bak_")) {
 				throw new Error("Backup deletion failed")
 			}
@@ -392,15 +395,16 @@ describe("safeWriteJson", () => {
 
 		// Mock createWriteStream to throw an error
 		const createWriteStreamSpy = vi.spyOn(fsSyncActual, "createWriteStream")
-		createWriteStreamSpy.mockImplementationOnce((_path: any, _options: any) => {
-			const errorStream = new Writable() as any
-			errorStream._write = (_chunk: any, _encoding: any, callback: any) => {
-				callback(new Error("Stream write error"))
-			}
+		createWriteStreamSpy.mockImplementationOnce((_path, _options) => {
+			const errorStream = new Writable({
+				write(_chunk, _encoding, callback) {
+					callback(new Error("Stream write error"))
+				},
+			}) as WriteStream
 			// Add missing WriteStream properties
 			errorStream.close = vi.fn()
 			errorStream.bytesWritten = 0
-			errorStream.path = _path
+			errorStream.path = _path as string | Buffer
 			errorStream.pending = false
 			return errorStream
 		})
@@ -420,8 +424,8 @@ describe("safeWriteJson", () => {
 		const data = { message: "access error test" }
 		// fs.access is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
 		vi.mocked(fs.access).mockImplementationOnce(async () => {
-			const error = new Error("EACCES: permission denied") as any
-			error.code = "EACCES"
+			const error = new Error("EACCES: permission denied")
+			;(error as NodeJS.ErrnoException).code = "EACCES"
 			throw error
 		})
 
@@ -484,7 +488,7 @@ describe("safeUpdateJson", () => {
 		vi.restoreAllMocks()
 	})
 
-	async function readFileContent(filePath: string): Promise<any> {
+	async function readFileContent(filePath: string): Promise<unknown> {
 		const readContent = await fs.readFile(filePath, "utf-8")
 		return JSON.parse(readContent)
 	}

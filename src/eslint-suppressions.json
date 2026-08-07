@@ -1714,11 +1714,6 @@
       "count": 1
     }
   },
-  "utils/__tests__/safeWriteJson.test.ts": {
-    "@typescript-eslint/no-explicit-any": {
-      "count": 27
-    }
-  },
   "utils/__tests__/shell.spec.ts": {
     "@typescript-eslint/no-explicit-any": {
       "count": 46
