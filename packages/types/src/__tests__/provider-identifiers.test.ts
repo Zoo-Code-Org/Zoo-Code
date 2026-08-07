@@ -11,6 +11,7 @@ import {
 	isProviderName,
 	isRetiredProvider,
 	localProviders,
+	MODELS_BY_PROVIDER,
 	providerIdentifiers,
 	providerNames,
 	providerNamesSchema,
@@ -111,6 +112,12 @@ describe("provider identifiers", () => {
 		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm])
 		expect(customProviders).toEqual([providerIdentifiers.openai])
 		expect(fauxProviders).toEqual([providerIdentifiers.fakeAi])
+	})
+
+	it("keeps model provider ids aligned with their keys", () => {
+		for (const [identifier, providerModels] of Object.entries(MODELS_BY_PROVIDER)) {
+			expect(providerModels.id).toBe(identifier)
+		}
 	})
 
 	it("preserves provider category type guards", () => {
