@@ -173,6 +173,82 @@ describe("AutocompleteSettings", () => {
 		expect(screen.queryByTestId("autocomplete-max-output-tokens-clamped")).not.toBeInTheDocument()
 	})
 
+	it("propagates the behaviour sliders", () => {
+		const { setAutocompleteConfigField } = renderSettings({ autocompleteConfig: { enabled: true } })
+
+		fireEvent.keyDown(screen.getByTestId("autocomplete-debounce-slider").querySelector("[role=slider]")!, {
+			key: "ArrowRight",
+		})
+		fireEvent.keyDown(screen.getByTestId("autocomplete-max-output-tokens-slider").querySelector("[role=slider]")!, {
+			key: "ArrowRight",
+		})
+
+		expect(setAutocompleteConfigField).toHaveBeenCalledWith("debounceMs", expect.any(Number))
+		expect(setAutocompleteConfigField).toHaveBeenCalledWith("maxOutputTokens", expect.any(Number))
+	})
+
+	it("disables the sliders while autocomplete is off", () => {
+		renderSettings({ autocompleteConfig: { enabled: false } })
+
+		expect(screen.getByTestId("autocomplete-debounce-slider")).toHaveAttribute("data-disabled")
+		expect(screen.getByTestId("autocomplete-max-output-tokens-slider")).toHaveAttribute("data-disabled")
+	})
+
+	describe("profile bar", () => {
+		const profileHandlers = {
+			onSelectProfile: vi.fn(),
+			onSaveProfile: vi.fn(),
+			onRenameProfile: vi.fn(),
+			onDeleteProfile: vi.fn(),
+		}
+
+		it("stays hidden unless every profile handler is supplied", () => {
+			renderSettings({ autocompleteConfig: { enabled: true } })
+
+			expect(screen.queryByTestId("autocomplete-profile-select")).not.toBeInTheDocument()
+		})
+
+		it("reports a saved profile as clean when the config still matches", () => {
+			const config = { enabled: true, provider: "ollama", modelId: "qwen2.5-coder:1.5b-base" }
+
+			renderSettings({
+				autocompleteConfig: config,
+				autocompleteProfiles: [{ id: "p1", name: "local", config }],
+				activeAutocompleteProfileId: "p1",
+				...profileHandlers,
+			})
+
+			expect(screen.getByText("settings:autocomplete.profiles.description")).toBeInTheDocument()
+		})
+
+		it("marks the profile dirty once a field diverges from the snapshot", () => {
+			// Without this the panel silently drifts from the preset the user picked.
+			renderSettings({
+				autocompleteConfig: { enabled: true, provider: "ollama", modelId: "changed" },
+				autocompleteProfiles: [
+					{ id: "p1", name: "local", config: { enabled: true, provider: "ollama", modelId: "original" } },
+				],
+				activeAutocompleteProfileId: "p1",
+				...profileHandlers,
+			})
+
+			expect(screen.getByText("settings:autocomplete.profiles.unsavedChanges")).toBeInTheDocument()
+		})
+
+		it("compares array fields by value rather than identity", () => {
+			const stops = ["\n\n"]
+
+			renderSettings({
+				autocompleteConfig: { enabled: true, stopSequences: [...stops] },
+				autocompleteProfiles: [{ id: "p1", name: "local", config: { enabled: true, stopSequences: stops } }],
+				activeAutocompleteProfileId: "p1",
+				...profileHandlers,
+			})
+
+			expect(screen.getByText("settings:autocomplete.profiles.description")).toBeInTheDocument()
+		})
+	})
+
 	it("mounts headlessly without issuing any side effects", () => {
 		// SettingsView cycles every section at opacity-0 on mount to build the search
 		// index. A section that fetched models on mount would fire for every user.
