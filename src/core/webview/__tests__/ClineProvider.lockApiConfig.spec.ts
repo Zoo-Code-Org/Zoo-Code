@@ -374,14 +374,15 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 				apiProvider: "anthropic",
 			})
 
-			const activateProviderProfileSpy = vi
-				.spyOn(provider, "activateProviderProfile")
-				.mockResolvedValue(undefined)
+			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "architect-profile",
+				apiProvider: "anthropic",
+			})
 
 			await provider.handleModeSwitch("architect")
 
 			expect(getModeConfigIdSpy).toHaveBeenCalledWith("architect")
-			expect(activateProviderProfileSpy).toHaveBeenCalledWith({ name: "architect-profile" })
+			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "architect-profile" })
 		})
 	})
 })

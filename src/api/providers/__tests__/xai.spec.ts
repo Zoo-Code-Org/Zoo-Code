@@ -31,23 +31,7 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
-
-// Helper to create an async iterable from events
-function mockStream(events: any[]) {
-	return {
-		[Symbol.asyncIterator]: () => {
-			let index = 0
-			return {
-				async next() {
-					if (index < events.length) {
-						return { done: false, value: events[index++] }
-					}
-					return { done: true, value: undefined }
-				},
-			}
-		},
-	}
-}
+import { asyncStreamFrom } from "../../../test-utils/stream"
 
 describe("XAIHandler", () => {
 	let handler: XAIHandler
@@ -93,7 +77,7 @@ describe("XAIHandler", () => {
 	})
 
 	it("should use Responses API (client.responses.create)", async () => {
-		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 		const stream = handler.createMessage("test prompt", [])
 		await stream.next()
@@ -113,7 +97,7 @@ describe("XAIHandler", () => {
 		const testContent = "This is test content"
 
 		mockResponsesCreate.mockResolvedValueOnce(
-			mockStream([{ type: "response.output_text.delta", delta: testContent }]),
+			asyncStreamFrom([{ type: "response.output_text.delta", delta: testContent }]),
 		)
 
 		const stream = handler.createMessage("system prompt", [])
@@ -130,7 +114,7 @@ describe("XAIHandler", () => {
 		const testReasoning = "Test reasoning content"
 
 		mockResponsesCreate.mockResolvedValueOnce(
-			mockStream([{ type: "response.reasoning_text.delta", delta: testReasoning }]),
+			asyncStreamFrom([{ type: "response.reasoning_text.delta", delta: testReasoning }]),
 		)
 
 		const stream = handler.createMessage("system prompt", [])
@@ -145,7 +129,7 @@ describe("XAIHandler", () => {
 
 	it("createMessage should yield usage data from response.completed", async () => {
 		mockResponsesCreate.mockResolvedValueOnce(
-			mockStream([
+			asyncStreamFrom([
 				{
 					type: "response.completed",
 					response: {
@@ -177,7 +161,7 @@ describe("XAIHandler", () => {
 
 	it("createMessage should yield tool_call from output_item.done", async () => {
 		mockResponsesCreate.mockResolvedValueOnce(
-			mockStream([
+			asyncStreamFrom([
 				{
 					type: "response.output_item.done",
 					item: {
@@ -214,7 +198,7 @@ describe("XAIHandler", () => {
 			},
 		]
 
-		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 		const stream = handler.createMessage("test prompt", [], {
 			taskId: "test-task-id",
@@ -261,7 +245,7 @@ describe("XAIHandler", () => {
 			reasoningEffort: "high",
 		})
 
-		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 		const stream = miniModelHandler.createMessage("test prompt", [])
 		await stream.next()
@@ -280,7 +264,7 @@ describe("XAIHandler", () => {
 			apiModelId: "grok-4.5",
 		})
 
-		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 		const stream = grok45Handler.createMessage("test prompt", [])
 		await stream.next()
@@ -301,7 +285,7 @@ describe("XAIHandler", () => {
 			reasoningEffort: "low",
 		})
 
-		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 		const stream = grok45Handler.createMessage("test prompt", [])
 		await stream.next()
@@ -322,7 +306,7 @@ describe("XAIHandler", () => {
 			reasoningEffort: "high",
 		})
 
-		mockResponsesCreate.mockResolvedValueOnce(mockStream([]))
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
 
 		const stream = regularHandler.createMessage("test prompt", [])
 		await stream.next()

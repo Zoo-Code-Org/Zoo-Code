@@ -3,6 +3,8 @@ import * as vscode from "vscode"
 import * as path from "path"
 import delay from "delay"
 
+import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
+
 // Mock delay
 vi.mock("delay", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
@@ -356,26 +358,19 @@ describe("DiffViewProvider", () => {
 	describe("scrollToFirstDiff method", () => {
 		const setupEditor = (currentContent: string) => {
 			const revealRange = vi.fn()
-			// Mirror how VS Code reports lineCount: a trailing newline yields a final
-			// empty line, so the count is the number of "\n"-delimited segments.
-			const lineCount = currentContent === "" ? 0 : currentContent.split("\n").length
-			const lines = currentContent.split("\n")
-			const document = {
-				uri: { fsPath: `${mockCwd}/mock-file-target.txt`, scheme: "file" },
+			const document = makeTextDocument({
+				uri: makeUri(`${mockCwd}/mock-file-target.txt`),
 				getText: vi.fn().mockReturnValue(currentContent),
-				lineCount,
-				lineAt: vi.fn().mockImplementation((line: number) => ({ text: lines[line] ?? "" })),
-			}
-			const editor = {
+			})
+			const editor = makeTextEditor({
 				document,
-				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
-				visibleRanges: [{ start: { line: 0 }, end: { line: 0 } }],
+				visibleRanges: [makeRange()],
 				revealRange,
-			}
+			})
 			;(diffViewProvider as any).activeDiffEditor = editor
 			// Register the editor as the live modified-side editor so resolveLiveEditor
 			// finds it by document identity, mirroring the runtime path.
-			vi.mocked(vscode.window).visibleTextEditors = [editor as any]
+			vi.mocked(vscode.window).visibleTextEditors = [editor]
 			return revealRange
 		}
 

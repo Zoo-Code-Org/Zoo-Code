@@ -32,10 +32,19 @@ vi.mock("fs/promises", () => ({
 	readdir: vi.fn().mockResolvedValue([]),
 }))
 
+vi.mock("proper-lockfile", () => ({
+	lock: vi.fn().mockResolvedValue(vi.fn().mockResolvedValue(undefined)),
+}))
+
 // Mock fs (createWriteStream and createReadStream for checksum verification)
+let closeHandler: (() => void) | undefined
 const mockWriteStream = {
 	on: vi.fn(),
 	close: vi.fn(),
+}
+const onWriteStreamEvent = (event: string, callback: () => void) => {
+	if (event === "finish") setImmediate(callback)
+	if (event === "close") closeHandler = callback
 }
 vi.mock("fs", () => ({
 	createWriteStream: vi.fn(() => mockWriteStream),
@@ -103,8 +112,9 @@ describe("SEMBLE_SHA256 checksum fixture", () => {
 describe("semble-downloader", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		mockWriteStream.on = vi.fn()
-		mockWriteStream.close = vi.fn()
+		closeHandler = undefined
+		mockWriteStream.on = vi.fn(onWriteStreamEvent)
+		mockWriteStream.close = vi.fn(() => closeHandler?.())
 
 		// Restore the default https.get mock so tests that override it don't leak
 		;(https.get as any).mockImplementation((_url: string, callback: (res: any) => void) => {
@@ -223,13 +233,6 @@ describe("semble-downloader", () => {
 			// No version file exists
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
-			// Simulate successful download: pipe is called, then "finish" fires
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -263,12 +266,14 @@ describe("semble-downloader", () => {
 				)
 				// Version file should be written
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					path.join("/storage", "semble", ".semble-version"),
+					path.join("/storage", "semble.new", ".semble-version"),
 					"v0.4.1",
 					"utf-8",
 				)
 				// Archive should be cleaned up (version-prefixed local cache path)
-				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "v0.4.1-semble-linux-x64-fast.tar.gz"))
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "v0.4.1-semble-linux-x64-fast.tar.gz"), {
+					force: true,
+				})
 			} finally {
 				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 				if (originalArch) Object.defineProperty(process, "arch", originalArch)
@@ -325,7 +330,9 @@ describe("semble-downloader", () => {
 
 			try {
 				await expect(downloadSemble("/storage")).rejects.toThrow("Failed to download semble")
-				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "v0.4.1-semble-linux-arm64-fast.tar.gz"))
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "v0.4.1-semble-linux-arm64-fast.tar.gz"), {
+					force: true,
+				})
 				// Should clean up staging directory, not the original
 				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble.new"), {
 					recursive: true,
@@ -374,12 +381,6 @@ describe("semble-downloader", () => {
 			})
 
 			// Simulate successful download on the second response
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -542,12 +543,6 @@ describe("semble-downloader", () => {
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -555,7 +550,7 @@ describe("semble-downloader", () => {
 				// Should call PowerShell for zip extraction
 				expect(spawn).toHaveBeenCalledWith(
 					"powershell",
-					expect.arrayContaining(["-NoProfile", "-Command", expect.stringContaining("Expand-Archive")]),
+					["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)],
 					expect.any(Object),
 				)
 				// Should NOT call chmod on windows
@@ -582,14 +577,8 @@ describe("semble-downloader", () => {
 			;(fs.readFile as any).mockRejectedValue(new Error("ENOENT"))
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			// Archive cleanup fails but should not throw (only archive removal after extraction)
-			;(fs.unlink as any).mockRejectedValue(new Error("unlink cleanup failed"))
+			;(fs.rm as any).mockRejectedValueOnce(new Error("archive cleanup failed"))
 
 			try {
 				const result = await downloadSemble("/storage")
@@ -617,12 +606,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -641,7 +624,7 @@ describe("semble-downloader", () => {
 				expect(https.get).toHaveBeenCalledWith(expect.stringContaining("v0.4.1"), expect.any(Function))
 				// Should write the new version file
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					path.join("/storage", "semble", ".semble-version"),
+					path.join("/storage", "semble.new", ".semble-version"),
 					"v0.4.1",
 					"utf-8",
 				)
@@ -673,12 +656,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -700,19 +677,23 @@ describe("semble-downloader", () => {
 				)
 				// The stale archive is removed before the fresh download to guarantee
 				// a clean package is verified against the new checksum.
-				expect(fs.unlink).toHaveBeenCalledWith(versionedArchive)
+				expect(fs.rm).toHaveBeenCalledWith(versionedArchive, { force: true })
 				// The prior-version archive (v0.4.0-*) is swept by cleanupStaleArchives
 				// after a successful install, so a version upgrade doesn't accumulate
 				// orphaned packages on disk.
-				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "v0.4.0-semble-linux-x64-fast.tar.gz"))
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "v0.4.0-semble-linux-x64-fast.tar.gz"), {
+					force: true,
+				})
 				// The legacy unversioned archive (pre-v0.4.0 cache layout) is also
 				// swept, covering the v0.3.1 → v0.4.1 upgrade path.
-				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "semble-linux-x64-fast.tar.gz"))
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble-linux-x64-fast.tar.gz"), {
+					force: true,
+				})
 				// Unrelated files in the storage dir must not be touched.
-				expect(fs.unlink).not.toHaveBeenCalledWith(path.join("/storage", "unrelated-file.txt"))
+				expect(fs.rm).not.toHaveBeenCalledWith(path.join("/storage", "unrelated-file.txt"), expect.anything())
 				// The new version file is recorded
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					path.join("/storage", "semble", ".semble-version"),
+					path.join("/storage", "semble.new", ".semble-version"),
 					"v0.4.1",
 					"utf-8",
 				)
@@ -769,12 +750,6 @@ describe("semble-downloader", () => {
 			})
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -789,7 +764,7 @@ describe("semble-downloader", () => {
 				)
 				// Should write version file again
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					path.join("/storage", "semble", ".semble-version"),
+					path.join("/storage", "semble.new", ".semble-version"),
 					"v0.4.1",
 					"utf-8",
 				)
@@ -812,12 +787,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 
 			// Simulate successful download
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				const result = await downloadSemble("/storage")
 
@@ -831,7 +800,7 @@ describe("semble-downloader", () => {
 				)
 				// Should write version file
 				expect(fs.writeFile).toHaveBeenCalledWith(
-					path.join("/storage", "semble", ".semble-version"),
+					path.join("/storage", "semble.new", ".semble-version"),
 					"v0.4.1",
 					"utf-8",
 				)
@@ -855,12 +824,6 @@ describe("semble-downloader", () => {
 			;(fs.access as any).mockResolvedValue(undefined)
 			// readdir rejects — exercises the catch block in cleanupStaleArchives
 			;(fs.readdir as any).mockRejectedValue(new Error("EACCES"))
-
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
 
 			try {
 				const result = await downloadSemble("/storage")
@@ -892,29 +855,27 @@ describe("semble-downloader", () => {
 				"unrelated.txt",
 			])
 
-			mockWriteStream.on.mockImplementation((event: string, cb: () => void) => {
-				if (event === "finish") {
-					setImmediate(cb)
-				}
-			})
-
 			try {
 				await downloadSemble("/storage")
 
 				const currentArchive = path.join("/storage", "v0.4.1-semble-linux-x64-fast.tar.gz")
 				// Stale versioned + legacy unversioned archives are swept
-				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "v0.4.0-semble-linux-x64-fast.tar.gz"))
-				expect(fs.unlink).toHaveBeenCalledWith(path.join("/storage", "semble-linux-x64-fast.tar.gz"))
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "v0.4.0-semble-linux-x64-fast.tar.gz"), {
+					force: true,
+				})
+				expect(fs.rm).toHaveBeenCalledWith(path.join("/storage", "semble-linux-x64-fast.tar.gz"), {
+					force: true,
+				})
 				// The current archive is never swept by cleanupStaleArchives (it is
 				// excluded by the currentArchivePath guard). It is unlinked only by
 				// the pre-download partial-archive cleanup and the post-install
 				// archive cleanup steps. unrelated.txt is never touched.
-				expect(fs.unlink).not.toHaveBeenCalledWith(path.join("/storage", "unrelated.txt"))
+				expect(fs.rm).not.toHaveBeenCalledWith(path.join("/storage", "unrelated.txt"), expect.anything())
 				// Sanity: the current archive path is never passed to the stale sweep.
 				// It is unlinked exactly twice (pre-download cleanup + post-install
 				// archive cleanup), never via cleanupStaleArchives.
-				const currentUnlinks = (fs.unlink as any).mock.calls.filter((c: any[]) => c[0] === currentArchive)
-				expect(currentUnlinks.length).toBe(2)
+				const currentRemovals = (fs.rm as any).mock.calls.filter((c: any[]) => c[0] === currentArchive)
+				expect(currentRemovals.length).toBe(2)
 			} finally {
 				if (originalPlatform) Object.defineProperty(process, "platform", originalPlatform)
 				if (originalArch) Object.defineProperty(process, "arch", originalArch)
