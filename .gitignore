@@ -55,3 +55,10 @@ qdrant_storage/
 plans/
 
 roo-cli-*.tar.gz*
+
+# Session reports and temp artifacts
+docs/26*/
+coverage-json/
+scripts/fix_*.py
+scripts/resolve_*.py
+scripts/insert_*.py
