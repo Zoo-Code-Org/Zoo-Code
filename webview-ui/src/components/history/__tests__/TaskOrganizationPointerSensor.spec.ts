@@ -114,10 +114,24 @@ describe("TaskOrganizationPointerSensor activator", () => {
 	it("delegates to PointerSensor for non-interactive targets", () => {
 		const div = document.createElement("div")
 		document.body.appendChild(div)
-		// The base PointerSensor handler returns true for a valid primary-button
-		// pointerdown on a draggable node (jsdom provides a node ownerDocument).
 		const result = handler(makePointerEvent(div), makeOptions())
 		expect(typeof result).toBe("boolean")
 		div.remove()
+	})
+
+	it("stops upward traversal when encountering a draggable-entry or manual-folder boundary", () => {
+		const container = document.createElement("div")
+		container.setAttribute("data-testid", "draggable-entry-task-1")
+
+		const childSpan = document.createElement("span")
+		container.appendChild(childSpan)
+
+		const outerButton = document.createElement("button")
+		outerButton.appendChild(container)
+		document.body.appendChild(outerButton)
+
+		// Traversal stops at container, ignoring outerButton
+		expect(isInteractivePointerTarget(childSpan)).toBe(false)
+		outerButton.remove()
 	})
 })

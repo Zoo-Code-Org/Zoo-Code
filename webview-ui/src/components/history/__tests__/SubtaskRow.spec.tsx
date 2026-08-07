@@ -209,5 +209,39 @@ describe("SubtaskRow", () => {
 			expect(screen.getByTestId("subtask-row-grandchild")).toBeInTheDocument()
 			expect(screen.getByText("Grandchild")).toBeInTheDocument()
 		})
+
+		it("posts showTaskWithId message on Enter or Space key press", () => {
+			const node = createMockNode({ id: "keyboard-task", task: "Task Keyboard" })
+			render(<SubtaskRow node={node} depth={1} onToggleExpand={vi.fn()} />)
+
+			const row = screen.getByTestId("subtask-row-keyboard-task").querySelector("[role='button']")!
+
+			fireEvent.keyDown(row, { key: "Enter" })
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "showTaskWithId", text: "keyboard-task" })
+
+			fireEvent.keyDown(row, { key: " " })
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "showTaskWithId", text: "keyboard-task" })
+		})
+
+		it("renders PinButton when showPin and onTogglePin are provided", () => {
+			const node = createMockNode({ id: "pin-task", task: "Task Pin" })
+			const onTogglePin = vi.fn()
+			render(
+				<SubtaskRow
+					node={node}
+					depth={1}
+					onToggleExpand={vi.fn()}
+					showPin={true}
+					canPin={true}
+					isPinned={false}
+					onTogglePin={onTogglePin}
+				/>,
+			)
+
+			const pinBtn = screen.getByTestId("subtask-pin-button")
+			expect(pinBtn).toBeInTheDocument()
+			fireEvent.click(pinBtn)
+			expect(onTogglePin).toHaveBeenCalledTimes(1)
+		})
 	})
 })

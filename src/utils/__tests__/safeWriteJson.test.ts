@@ -3,7 +3,16 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { safeWriteJson } from "../safeWriteJson"
+import * as lockfile from "proper-lockfile"
+import { safeWriteJson, safeUpdateJson } from "../safeWriteJson"
+
+vi.mock("proper-lockfile", async () => {
+	const actual = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+	return {
+		...actual,
+		lock: vi.fn(actual.lock),
+	}
+})
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -365,27 +374,18 @@ describe("safeWriteJson", () => {
 	})
 
 	test("should throw an error if an inter-process lock is already held for the filePath", async () => {
-		vi.resetModules() // Clear module cache to ensure fresh imports for this test
-
 		const data = { message: "test lock failure" }
 
 		// Create a new file path for this specific test to avoid conflicts
 		const lockTestFilePath = path.join(tempDir, "lock-test-file.json")
 		await fs.writeFile(lockTestFilePath, JSON.stringify({ initial: "lock test content" }))
 
-		vi.doMock("proper-lockfile", () => ({
-			...vi.importActual("proper-lockfile"),
-			lock: vi.fn().mockRejectedValueOnce(new Error("Failed to get lock.")),
-		}))
+		vi.mocked(lockfile.lock).mockRejectedValueOnce(new Error("Failed to get lock."))
 
-		// Re-import safeWriteJson to use the mocked proper-lockfile
-		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
-
-		await expect(mockedSafeWriteJson(lockTestFilePath, data)).rejects.toThrow("Failed to get lock.")
+		await expect(safeWriteJson(lockTestFilePath, data)).rejects.toThrow("Failed to get lock.")
 
 		// Clean up
 		await fs.unlink(lockTestFilePath).catch(() => {}) // Ignore errors if file doesn't exist
-		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
 	})
 	test("should release lock even if an error occurs mid-operation", async () => {
 		const data = { message: "test lock release on error" }
@@ -467,5 +467,221 @@ describe("safeWriteJson", () => {
 		)
 
 		consoleErrorSpy.mockRestore()
+	})
+})
+
+describe("safeUpdateJson", () => {
+	let tempDir: string
+	let currentTestFilePath: string
+
+	beforeEach(async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safeUpdateJson-test-"))
+		currentTestFilePath = path.join(tempDir, "test-file.json")
+		await fs.writeFile(currentTestFilePath, JSON.stringify({ count: 1 }))
+	})
+
+	afterEach(async () => {
+		await fs.rm(tempDir, { recursive: true, force: true })
+		vi.restoreAllMocks()
+	})
+
+	test("updates existing file successfully", async () => {
+		const updated = await safeUpdateJson<{ count: number }>(currentTestFilePath, (current) => {
+			expect(current).toEqual({ count: 1 })
+			return { count: 2 }
+		})
+		expect(updated).toEqual({ count: 2 })
+		const content = JSON.parse(await fs.readFile(currentTestFilePath, "utf-8"))
+		expect(content).toEqual({ count: 2 })
+	})
+
+	test("supports prettyPrint option", async () => {
+		const updated = await safeUpdateJson<{ count: number }>(
+			currentTestFilePath,
+			(current) => ({ count: (current?.count ?? 0) + 1 }),
+			{ prettyPrint: true },
+		)
+		expect(updated).toEqual({ count: 2 })
+		const raw = await fs.readFile(currentTestFilePath, "utf-8")
+		expect(raw).toContain("\t")
+	})
+
+	test("throws error if file does not exist and allowCreate is false", async () => {
+		const nonExistent = path.join(tempDir, "non-existent.json")
+		await expect(safeUpdateJson(nonExistent, (curr) => curr ?? { a: 1 }, { allowCreate: false })).rejects.toThrow(
+			"safeUpdateJson: file does not exist and allowCreate is false",
+		)
+	})
+
+	test("creates new file if allowCreate is true and file does not exist", async () => {
+		const nonExistent = path.join(tempDir, "non-existent.json")
+		const result = await safeUpdateJson(
+			nonExistent,
+			(curr) => {
+				expect(curr).toBeUndefined()
+				return { created: true }
+			},
+			{ allowCreate: true },
+		)
+		expect(result).toEqual({ created: true })
+		const content = JSON.parse(await fs.readFile(nonExistent, "utf-8"))
+		expect(content).toEqual({ created: true })
+	})
+
+	test("throws original read parse error if file exists but is malformed JSON", async () => {
+		await fs.writeFile(currentTestFilePath, "invalid json {")
+		await expect(safeUpdateJson(currentTestFilePath, (curr) => curr)).rejects.toThrow(SyntaxError)
+	})
+
+	test("rethrows read error if non-ENOENT read error occurs", async () => {
+		vi.mocked(fs.readFile).mockImplementationOnce(async () => {
+			const err = new Error("EACCES: permission denied") as NodeJS.ErrnoException
+			err.code = "EACCES"
+			throw err
+		})
+		await expect(safeUpdateJson(currentTestFilePath, (curr) => curr)).rejects.toThrow("EACCES")
+	})
+
+	test("handles lock acquisition failure", async () => {
+		vi.mocked(lockfile.lock).mockRejectedValueOnce(new Error("Lock failed"))
+		await expect(safeUpdateJson(currentTestFilePath, (curr) => curr)).rejects.toThrow("Lock failed")
+	})
+
+	test("handles directory creation error", async () => {
+		vi.mocked(fs.mkdir).mockImplementationOnce(async () => {
+			const err = new Error("mkdir failed")
+			throw err
+		})
+		const subFile = path.join(tempDir, "subdir", "file.json")
+		await expect(safeUpdateJson(subFile, (curr) => curr, { allowCreate: true })).rejects.toThrow("mkdir failed")
+	})
+
+	test("rolls back backup if write or rename fails", async () => {
+		const initial = { count: 1 }
+		let renameCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCount++
+			if (renameCount === 2) {
+				throw new Error("Write rename failed")
+			}
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		await expect(safeUpdateJson(currentTestFilePath, () => ({ count: 99 }))).rejects.toThrow("Write rename failed")
+
+		const restored = JSON.parse(await fs.readFile(currentTestFilePath, "utf-8"))
+		expect(restored).toEqual(initial)
+	})
+
+	test("handles backup cleanup failure gracefully after successful update", async () => {
+		vi.mocked(fs.unlink).mockImplementation(async (filePath) => {
+			if (filePath.toString().includes(".bak_")) {
+				throw new Error("Unlink backup failed")
+			}
+			return fsPromisesActuals.unlink!(filePath)
+		})
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		const updated = await safeUpdateJson<{ count: number }>(currentTestFilePath, () => ({ count: 5 }))
+		expect(updated).toEqual({ count: 5 })
+		expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("failed to clean up backup"), expect.any(Error))
+		consoleSpy.mockRestore()
+	})
+
+	test("logs error if rollback fails during write error catch block", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		let renameCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCount++
+			if (renameCount === 2) {
+				throw new Error("Write rename failed")
+			} else if (renameCount === 3) {
+				throw new Error("Rollback rename failed")
+			}
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		await expect(safeUpdateJson(currentTestFilePath, () => ({ count: 99 }))).rejects.toThrow("Write rename failed")
+
+		expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to restore backup"), expect.any(Error))
+		consoleSpy.mockRestore()
+	})
+
+	test("handles lock compromise callback and unlock failure in finally block", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(lockfile.lock).mockImplementationOnce(async (_path, options) => {
+			if (options?.onCompromised) {
+				options.onCompromised(new Error("Compromised!"))
+			}
+			return async () => {
+				throw new Error("Unlock failed")
+			}
+		})
+
+		await expect(safeUpdateJson(currentTestFilePath, () => ({ count: 10 }))).rejects.toThrow("Compromised!")
+
+		expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("was compromised"), expect.any(Error))
+		consoleSpy.mockRestore()
+	})
+
+	test("rethrows non-ENOENT error during backup access check", async () => {
+		const accessMock = vi.mocked(fs.access).mockImplementation(async (targetPath) => {
+			if (targetPath === currentTestFilePath) {
+				const err = new Error("EACCES: permission denied") as NodeJS.ErrnoException
+				err.code = "EACCES"
+				throw err
+			}
+			return undefined
+		})
+
+		try {
+			await expect(safeUpdateJson(currentTestFilePath, () => ({ count: 10 }))).rejects.toThrow("EACCES")
+		} finally {
+			accessMock.mockRestore()
+		}
+	})
+
+	test("handles cleanup errors for temporary files during write failure catch block", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		let renameCount = 0
+
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCount++
+			if (renameCount === 2) {
+				throw new Error("Rename to target failed")
+			}
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		vi.mocked(fs.unlink).mockImplementation(async (targetPath) => {
+			if (targetPath.toString().includes(".tmp")) {
+				throw new Error("Unlink temp failed")
+			}
+			return fsPromisesActuals.unlink!(targetPath)
+		})
+
+		await expect(safeUpdateJson(currentTestFilePath, () => ({ count: 99 }))).rejects.toThrow(
+			"Rename to target failed",
+		)
+
+		expect(consoleSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to clean up temporary"),
+			expect.any(Error),
+		)
+		consoleSpy.mockRestore()
+	})
+
+	test("handles unlock error in finally block during normal execution", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(lockfile.lock).mockImplementationOnce(async () => {
+			return async () => {
+				throw new Error("Unlock failed on success")
+			}
+		})
+
+		const result = await safeUpdateJson<{ count: number }>(currentTestFilePath, () => ({ count: 50 }))
+		expect(result).toEqual({ count: 50 })
+		expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to release lock"), expect.any(Error))
+		consoleSpy.mockRestore()
 	})
 })

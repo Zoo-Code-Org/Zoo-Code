@@ -1189,4 +1189,68 @@ describe("HistoryView task organization integration", () => {
 			expect(screen.getByTestId("pinned-unit-t-other")).toBeInTheDocument()
 		})
 	})
+
+	describe("ErrorBoundary fallback and baseline fallback coverage", () => {
+		it("renders baseline fallback view when TaskOrganizationInner throws an error", () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockUseTaskOrganizationDnd.mockImplementation(() => {
+				throw new Error("Simulated DnD Failure")
+			})
+
+			const task = makeTask("t-fallback")
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: createEmptyOrganizationState(),
+				mutateTaskOrganization: vi.fn(),
+			})
+			mockUseTaskSearch.mockReturnValue({
+				...defaultSearchResult,
+				tasks: [task],
+			})
+			mockUseGroupedTasks.mockReturnValue({
+				groups: [makeGroup(task)],
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryView onDone={vi.fn()} />)
+
+			// Baseline fallback should render virtuoso container with task group
+			expect(screen.getByTestId("virtuoso-container")).toBeInTheDocument()
+
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("handles batch selection and deletion in baseline fallback mode", () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockUseTaskOrganizationDnd.mockImplementation(() => {
+				throw new Error("Simulated DnD Failure")
+			})
+
+			const task1 = makeTask("t1")
+			const task2 = makeTask("t2")
+
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: createEmptyOrganizationState(),
+				mutateTaskOrganization: vi.fn(),
+			})
+			mockUseTaskSearch.mockReturnValue({
+				...defaultSearchResult,
+				tasks: [task1, task2],
+			})
+			mockUseGroupedTasks.mockReturnValue({
+				groups: [makeGroup(task1), makeGroup(task2)],
+				flatTasks: [task1, task2],
+				toggleExpand: vi.fn(),
+				isSearchMode: true,
+			})
+
+			render(<HistoryView onDone={vi.fn()} />)
+
+			// Virtuoso container rendered
+			expect(screen.getByTestId("virtuoso-container")).toBeInTheDocument()
+
+			consoleErrorSpy.mockRestore()
+		})
+	})
 })

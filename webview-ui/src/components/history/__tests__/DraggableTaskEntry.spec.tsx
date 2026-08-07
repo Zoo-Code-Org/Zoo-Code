@@ -217,4 +217,32 @@ describe("DraggableTaskEntry", () => {
 		expect(droppableId).toBe("drop-task-1")
 		expect(droppableId).not.toBe("drag-task-1")
 	})
+
+	it("applies transform style and dragging opacity when active drag is in progress", async () => {
+		const dndKit = await import("@dnd-kit/core")
+		vi.spyOn(dndKit, "useDraggable").mockReturnValueOnce({
+			attributes: { role: "button" } as any,
+			listeners: {} as any,
+			setNodeRef: vi.fn(),
+			transform: { x: 20, y: 40, scaleX: 1, scaleY: 1 },
+			isDragging: true,
+			node: { current: null },
+			active: null,
+			over: null,
+			activatorEvent: null,
+			activeNodeRect: null,
+			setActivatorNodeRef: vi.fn(),
+		} as any)
+
+		renderWithDnd(
+			<DraggableTaskEntry id="task-active" dndData={makeTaskData("task-active")}>
+				<div>Child</div>
+			</DraggableTaskEntry>,
+		)
+
+		const wrapper = screen.getByTestId("draggable-entry-task-active")
+		expect(wrapper).toHaveStyle("transform: translate3d(20px, 40px, 0)")
+		expect(wrapper).toHaveAttribute("data-dragging", "true")
+		expect(wrapper.className).toContain("opacity-40")
+	})
 })

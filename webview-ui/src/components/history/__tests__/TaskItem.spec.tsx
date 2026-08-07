@@ -109,4 +109,36 @@ describe("TaskItem", () => {
 		const taskItem = screen.getByTestId("task-item-1")
 		expect(taskItem).toHaveClass("hover:text-vscode-foreground")
 	})
+
+	it("invokes onToggleSelection when clicking card in selection mode", () => {
+		const onToggleSelection = vi.fn()
+		render(
+			<TaskItem
+				item={mockTask}
+				variant="full"
+				isSelected={false}
+				onToggleSelection={onToggleSelection}
+				isSelectionMode={true}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("task-item-1"))
+		expect(onToggleSelection).toHaveBeenCalledWith("1", true)
+	})
+
+	it("posts showTaskWithId message when clicking card in normal mode", async () => {
+		const { vscode } = await import("@src/utils/vscode")
+		render(
+			<TaskItem
+				item={mockTask}
+				variant="full"
+				isSelected={false}
+				onToggleSelection={vi.fn()}
+				isSelectionMode={false}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("task-item-1"))
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "showTaskWithId", text: "1" })
+	})
 })

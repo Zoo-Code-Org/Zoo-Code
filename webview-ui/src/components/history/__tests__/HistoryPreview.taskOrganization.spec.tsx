@@ -67,12 +67,66 @@ function createEmptyOrganizationState(): TaskOrganizationStateV1 {
 }
 
 const mockTasks: HistoryItem[] = [
-	{ id: "task-1", number: 1, task: "First task", ts: 600, tokensIn: 100, tokensOut: 50, totalCost: 0.01, workspace: "/test/workspace" },
-	{ id: "task-2", number: 2, task: "Second task", ts: 500, tokensIn: 200, tokensOut: 100, totalCost: 0.02, workspace: "/test/workspace" },
-	{ id: "task-3", number: 3, task: "Third task", ts: 400, tokensIn: 150, tokensOut: 75, totalCost: 0.015, workspace: "/test/workspace" },
-	{ id: "task-4", number: 4, task: "Fourth task", ts: 300, tokensIn: 300, tokensOut: 150, totalCost: 0.03, workspace: "/test/workspace" },
-	{ id: "task-5", number: 5, task: "Fifth task", ts: 200, tokensIn: 250, tokensOut: 125, totalCost: 0.025, workspace: "/test/workspace" },
-	{ id: "task-6", number: 6, task: "Sixth task", ts: 100, tokensIn: 400, tokensOut: 200, totalCost: 0.04, workspace: "/test/workspace" },
+	{
+		id: "task-1",
+		number: 1,
+		task: "First task",
+		ts: 600,
+		tokensIn: 100,
+		tokensOut: 50,
+		totalCost: 0.01,
+		workspace: "/test/workspace",
+	},
+	{
+		id: "task-2",
+		number: 2,
+		task: "Second task",
+		ts: 500,
+		tokensIn: 200,
+		tokensOut: 100,
+		totalCost: 0.02,
+		workspace: "/test/workspace",
+	},
+	{
+		id: "task-3",
+		number: 3,
+		task: "Third task",
+		ts: 400,
+		tokensIn: 150,
+		tokensOut: 75,
+		totalCost: 0.015,
+		workspace: "/test/workspace",
+	},
+	{
+		id: "task-4",
+		number: 4,
+		task: "Fourth task",
+		ts: 300,
+		tokensIn: 300,
+		tokensOut: 150,
+		totalCost: 0.03,
+		workspace: "/test/workspace",
+	},
+	{
+		id: "task-5",
+		number: 5,
+		task: "Fifth task",
+		ts: 200,
+		tokensIn: 250,
+		tokensOut: 125,
+		totalCost: 0.025,
+		workspace: "/test/workspace",
+	},
+	{
+		id: "task-6",
+		number: 6,
+		task: "Sixth task",
+		ts: 100,
+		tokensIn: 400,
+		tokensOut: 200,
+		totalCost: 0.04,
+		workspace: "/test/workspace",
+	},
 ]
 
 function createMockGroups(tasks: HistoryItem[]): TaskGroup[] {
@@ -600,6 +654,113 @@ describe("HistoryPreview task organization integration", () => {
 			expect(screen.queryByTestId("manual-folder-folder-other")).not.toBeInTheDocument()
 			// Local task should still be visible.
 			expect(screen.getByTestId("task-group-task-local")).toBeInTheDocument()
+		})
+
+		it("posts switchTab message when View All History button is clicked", () => {
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: createEmptyOrganizationState(),
+				mutateTaskOrganization: vi.fn(),
+				cwd: "/test/workspace",
+			})
+			mockUseTaskOrganization.mockReturnValue({
+				organization: createEmptyOrganizationState(),
+				isPinned: () => false,
+				canPin: true,
+				togglePin: vi.fn(),
+				createFolder: vi.fn(),
+				renameFolder: vi.fn(),
+				deleteFolder: vi.fn(),
+				moveToFolder: vi.fn(),
+				removeFromFolder: vi.fn(),
+			})
+			mockUseTaskSearch.mockReturnValue(defaultSearchResult)
+			mockUseGroupedTasks.mockReturnValue({
+				groups: createMockGroups(mockTasks),
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryPreview />)
+
+			const viewAllButton = screen.getByLabelText("history:viewAllHistory")
+			fireEvent.click(viewAllButton)
+
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "switchTab", tab: "history" })
+		})
+
+		it("expands a manual folder and renders its member tasks in preview", () => {
+			const task1 = mockTasks[0]
+			const folder = {
+				folderId: "f-preview",
+				name: "Preview Folder",
+				taskIds: ["task-1"],
+				createdAt: 100,
+				updatedAt: 100,
+			}
+			const orgState: TaskOrganizationStateV1 = {
+				...createEmptyOrganizationState(),
+				folders: [folder],
+			}
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: orgState,
+				mutateTaskOrganization: vi.fn(),
+				cwd: "/test/workspace",
+			})
+			mockUseTaskOrganization.mockReturnValue({
+				organization: orgState,
+				isPinned: () => false,
+				canPin: true,
+				togglePin: vi.fn(),
+				createFolder: vi.fn(),
+				renameFolder: vi.fn(),
+				deleteFolder: vi.fn(),
+				moveToFolder: vi.fn(),
+				removeFromFolder: vi.fn(),
+			})
+			mockUseTaskSearch.mockReturnValue(defaultSearchResult)
+			mockUseGroupedTasks.mockReturnValue({
+				groups: createMockGroups([task1]),
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryPreview />)
+
+			const expandToggle = screen.getByTestId("folder-expand-toggle")
+			fireEvent.click(expandToggle)
+
+			expect(screen.getByTestId("folder-member-task-1")).toBeInTheDocument()
+		})
+
+		it("renders baseline fallback view and handles view all history on ErrorBoundary failure", () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			mockUseTaskOrganization.mockImplementation(() => {
+				throw new Error("Simulated Error for Fallback")
+			})
+			mockUseExtensionState.mockReturnValue({
+				taskOrganization: createEmptyOrganizationState(),
+				mutateTaskOrganization: vi.fn(),
+				cwd: "/test/workspace",
+			})
+			mockUseTaskSearch.mockReturnValue(defaultSearchResult)
+			mockUseGroupedTasks.mockReturnValue({
+				groups: createMockGroups(mockTasks),
+				flatTasks: null,
+				toggleExpand: vi.fn(),
+				isSearchMode: false,
+			})
+
+			render(<HistoryPreview />)
+
+			const viewAllButton = screen.getByLabelText("history:viewAllHistory")
+			expect(viewAllButton).toBeInTheDocument()
+			fireEvent.click(viewAllButton)
+
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "switchTab", tab: "history" })
+
+			consoleErrorSpy.mockRestore()
 		})
 	})
 })

@@ -1,8 +1,26 @@
 // pnpm --filter roo-cline test core/task-persistence/__tests__/TaskOrganizationStore.spec.ts
 
 import * as fs from "fs/promises"
+import * as fsSync from "fs"
 import * as path from "path"
 import * as os from "os"
+
+vi.mock("fs/promises", async () => {
+	const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+	return {
+		...actual,
+		readFile: vi.fn(actual.readFile),
+		writeFile: vi.fn(actual.writeFile),
+	}
+})
+
+vi.mock("fs", async () => {
+	const actualFs = await vi.importActual<typeof import("fs")>("fs")
+	return {
+		...actualFs,
+		watch: vi.fn(actualFs.watch),
+	}
+})
 
 import type { HistoryItem } from "@roo-code/types"
 import { createEmptyTaskOrganizationState, MAX_PINNED_TARGETS } from "@roo-code/types"
@@ -845,6 +863,353 @@ describe("TaskOrganizationStore", () => {
 
 				expect(onChange).not.toHaveBeenCalled()
 				watched.dispose()
+			})
+		})
+
+		describe("edge cases & uncovered branches", () => {
+			it("returns empty state when getState() structuredClone throws", async () => {
+				await store.initialize()
+				const spy = vi.spyOn(globalThis, "structuredClone").mockImplementationOnce(() => {
+					throw new Error("clone failed")
+				})
+				const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				const state = store.getState()
+				expect(state.schemaVersion).toBe(1)
+				expect(state.folders).toEqual([])
+				expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("getState() structuredClone failed"))
+				spy.mockRestore()
+				consoleSpy.mockRestore()
+			})
+
+			it("reconcile returns early if schemaVersion !== 1", async () => {
+				const tasksDir = path.join(tmpDir, "tasks")
+				await fs.mkdir(tasksDir, { recursive: true })
+				await fs.writeFile(
+					path.join(tasksDir, GlobalFileNames.taskOrganization),
+					JSON.stringify({ schemaVersion: 2, revision: 1, folders: [], pins: [], updatedAt: 1 }),
+					"utf8",
+				)
+				await store.initialize()
+				await expect(store.reconcile()).resolves.toBeUndefined()
+			})
+
+			it("logs transient read error during load when error is not ENOENT", async () => {
+				const filePath = path.join(tmpDir, "tasks", GlobalFileNames.taskOrganization)
+				await fs.mkdir(path.dirname(filePath), { recursive: true })
+				await fs.writeFile(
+					filePath,
+					JSON.stringify({ schemaVersion: 1, revision: 0, folders: [], pins: [], updatedAt: 1 }),
+				)
+
+				vi.mocked(fs.readFile).mockImplementationOnce(async () => {
+					const err = new Error("EACCES") as NodeJS.ErrnoException
+					err.code = "EACCES"
+					throw err
+				})
+				const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await store["load"]()
+
+				expect(consoleSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Failed to read organization file"),
+					expect.any(Error),
+				)
+				consoleSpy.mockRestore()
+			})
+
+			it("logs error when quarantine writeFile fails", async () => {
+				vi.mocked(fs.writeFile).mockRejectedValueOnce(new Error("quarantine failed"))
+				const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await store["quarantine"]("some-file", "raw content")
+
+				expect(consoleSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Failed to quarantine corrupted organization file"),
+					expect.any(Error),
+				)
+				consoleSpy.mockRestore()
+			})
+
+			it("rejects duplicate folderId in createFolder", async () => {
+				await store.initialize()
+				await store.mutate(
+					{
+						kind: "createFolder",
+						folderId: "f1",
+						name: "Folder 1",
+						source: { kind: "task", taskId: "t1" },
+						destination: { kind: "task", taskId: "t2" },
+					},
+					0,
+				)
+
+				const res = await store.mutate(
+					{
+						kind: "createFolder",
+						folderId: "f1",
+						name: "Folder Dup",
+						source: { kind: "task", taskId: "t3" },
+						destination: { kind: "task", taskId: "t4" },
+					},
+					1,
+				)
+
+				expect(res.success).toBe(false)
+				expect(res.error?.code).toBe("TASK_ORG/VALIDATION/001")
+				expect(res.error?.message).toBe("Folder already exists.")
+			})
+
+			it("rejects duplicate folderId in createFolderFromSelection", async () => {
+				await store.initialize()
+				await store.mutate(
+					{
+						kind: "createFolder",
+						folderId: "f1",
+						name: "Folder 1",
+						source: { kind: "task", taskId: "t1" },
+						destination: { kind: "task", taskId: "t2" },
+					},
+					0,
+				)
+
+				const res = await store.mutate(
+					{
+						kind: "createFolderFromSelection",
+						folderId: "f1",
+						name: "Folder Dup",
+						targets: [
+							{ kind: "task", taskId: "t3" },
+							{ kind: "task", taskId: "t4" },
+						],
+					},
+					1,
+				)
+
+				expect(res.success).toBe(false)
+				expect(res.error?.code).toBe("TASK_ORG/VALIDATION/001")
+			})
+
+			it("rejects createFolderFromSelection if fewer than 2 units resolved", async () => {
+				await store.initialize()
+				const res = await store.mutate(
+					{
+						kind: "createFolderFromSelection",
+						folderId: "f2",
+						name: "Folder Single",
+						targets: [
+							{ kind: "task", taskId: "t1" },
+							{ kind: "task", taskId: "t1" },
+						],
+					},
+					0,
+				)
+
+				expect(res.success).toBe(false)
+				expect(res.error?.code).toBe("TASK_ORG/VALIDATION/001")
+				expect(res.error?.message).toContain("At least two canonical units are required")
+			})
+
+			it("rejects deleteFolders when folderId is not found", async () => {
+				await store.initialize()
+				const res = await store.mutate(
+					{
+						kind: "deleteFolders",
+						folderIds: ["non-existent-folder"],
+					},
+					0,
+				)
+
+				expect(res.success).toBe(false)
+				expect(res.error?.code).toBe("TASK_ORG/NOT_FOUND/004")
+			})
+
+			it("unpinning a target that is not pinned is a no-op", async () => {
+				await store.initialize()
+				const res = await store.mutate(
+					{
+						kind: "setPinned",
+						target: { kind: "task", taskId: "t1" },
+						pinned: false,
+					},
+					0,
+				)
+
+				expect(res.success).toBe(true)
+				expect(store.getState().pins).toHaveLength(0)
+			})
+
+			it("handles unknown mutation kind in applyMutation", async () => {
+				await store.initialize()
+				const res = await store.mutate(
+					// eslint-disable-next-line @typescript-eslint/no-explicit-any
+					{ kind: "unknownMutation" } as any,
+					0,
+				)
+
+				expect(res.success).toBe(false)
+				expect(res.error?.code).toBe("TASK_ORG/VALIDATION/001")
+			})
+
+			it("resolves unit correctly for folder target and default fallback", async () => {
+				await store.initialize()
+				await store.mutate(
+					{
+						kind: "createFolder",
+						folderId: "f1",
+						name: "Folder 1",
+						source: { kind: "task", taskId: "t1" },
+						destination: { kind: "task", taskId: "t2" },
+					},
+					0,
+				)
+
+				// resolveUnit for folder
+				const units = store["resolveUnit"]({ kind: "folder", folderId: "f1" })
+				expect(units).toEqual(["t1", "t2"])
+
+				// resolveUnit for non-existent folder
+				const emptyUnits = store["resolveUnit"]({ kind: "folder", folderId: "f-none" })
+				expect(emptyUnits).toEqual([])
+
+				// resolveUnit default branch
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				const unknownUnits = store["resolveUnit"]({ kind: "unknown" } as any)
+				expect(unknownUnits).toEqual([])
+			})
+
+			it("handles default cases in targetsEqual and recomputeFromHistory pin filter", async () => {
+				await store.initialize()
+
+				// targetsEqual with unknown kind
+				expect(store["targetsEqual"]({ kind: "task", taskId: "a" }, { kind: "folder", folderId: "a" })).toBe(
+					false,
+				)
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				expect(store["targetsEqual"]({ kind: "unknown" } as any, { kind: "unknown" } as any)).toBe(false)
+
+				// recomputeFromHistory with unknown pin target kind
+				const customState = store.getState()
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				customState.pins.push({ target: { kind: "unknown" } as any, pinnedAt: 100 })
+				const recomputed = store["recomputeFromHistory"](customState)
+				expect(
+					recomputed.pins.some((p: unknown) => (p as { target: { kind: string } }).target.kind === "unknown"),
+				).toBe(true)
+			})
+
+			it("tests fsWatcher event handling and startWatcher", async () => {
+				await store.initialize()
+
+				// Calling startWatcher when disposed does nothing
+				store.dispose()
+				store["startWatcher"]()
+
+				// Test fsWatcher callback with non-matching filename
+				const instance = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000 })
+				await instance.initialize()
+
+				// Exercise startWatcher when already disposed inside then
+				const pendingInstance = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000 })
+				pendingInstance.dispose()
+				pendingInstance["startWatcher"]()
+
+				instance.dispose()
+			})
+
+			it("covers all fsWatcher callback, error, and setup branches", async () => {
+				let watchCallback: ((event: string, filename: string) => void) | undefined
+				let watcherErrorListener: ((err: Error) => void) | undefined
+
+				const mockWatcher = {
+					on: vi.fn((event: string, listener: (err: Error) => void) => {
+						if (event === "error") {
+							watcherErrorListener = listener
+						}
+						return mockWatcher
+					}),
+					close: vi.fn(),
+				}
+
+				vi.mocked(fsSync.watch).mockImplementation(((
+					_dir: string,
+					_options: unknown,
+					cb?: (event: string, filename: string) => void,
+				) => {
+					if (cb) {
+						watchCallback = cb
+					}
+					return mockWatcher as unknown as fsSync.FSWatcher
+				}) as typeof fsSync.watch)
+
+				const instance = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000 })
+				await instance.initialize()
+				await new Promise((resolve) => setTimeout(resolve, 20))
+
+				expect(watchCallback).toBeDefined()
+
+				// 1. Non-matching filename
+				watchCallback!("change", "other_file.json")
+
+				// 2. Matching filename - sets debounce timer
+				vi.useFakeTimers()
+				watchCallback!("change", GlobalFileNames.taskOrganization)
+
+				// 3. Matching filename again - clears previous debounce timer
+				watchCallback!("change", GlobalFileNames.taskOrganization)
+
+				// Run timer to trigger reloadFromWatcher
+				await vi.runAllTimersAsync()
+				vi.useRealTimers()
+
+				// 4. Trigger watcher error listener
+				const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				expect(watcherErrorListener).toBeDefined()
+				watcherErrorListener!(new Error("watcher emitted error"))
+				expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("fs.watch error:"), expect.any(Error))
+
+				// 5. Callback when disposed
+				instance.dispose()
+				watchCallback!("change", GlobalFileNames.taskOrganization)
+
+				vi.mocked(fsSync.watch).mockRestore()
+				consoleSpy.mockRestore()
+			})
+
+			it("handles error thrown by fsSync.watch", async () => {
+				const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				vi.mocked(fsSync.watch).mockImplementationOnce(() => {
+					throw new Error("watch start failed")
+				})
+
+				const instance = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000 })
+				await instance.initialize()
+				await new Promise((resolve) => setTimeout(resolve, 20))
+
+				expect(consoleSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Failed to start fs.watch:"),
+					expect.any(Error),
+				)
+
+				instance.dispose()
+				consoleSpy.mockRestore()
+			})
+
+			it("handles error in getTasksDir during startWatcher", async () => {
+				const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				const instance = new TaskOrganizationStore(tmpDir, { taskHistory: history, now: () => 1000 })
+				// eslint-disable-next-line @typescript-eslint/no-explicit-any
+				vi.spyOn(instance as any, "getTasksDir").mockRejectedValueOnce(new Error("getTasksDir failed"))
+
+				instance["startWatcher"]()
+				await new Promise((resolve) => setTimeout(resolve, 10))
+
+				expect(consoleSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Failed to get tasks dir for watcher:"),
+					expect.any(Error),
+				)
+
+				instance.dispose()
+				consoleSpy.mockRestore()
 			})
 		})
 	})

@@ -274,4 +274,61 @@ describe("handleTaskOrganizationMessage", () => {
 		})
 		expect(provider.log).toHaveBeenCalledWith(expect.stringContaining("TASK_ORG/HANDLER/001"))
 	})
+
+	it("handles malformed request with missing or non-string requestId", async () => {
+		const provider = createMockProvider({
+			requestId: "ignored",
+			success: true,
+			committedRevision: 0,
+		})
+
+		const message: WebviewMessage = {
+			type: "taskOrganizationMutation",
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			taskOrganizationMutation: { invalid: true } as any,
+		}
+
+		await handleTaskOrganizationMessage(provider, message)
+
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "taskOrganizationMutationResult",
+			requestId: "",
+			taskOrganizationMutationResult: {
+				requestId: "",
+				success: false,
+				committedRevision: 0,
+				error: {
+					code: "TASK_ORG/VALIDATION/001",
+					message: expect.stringContaining("Invalid mutation request"),
+				},
+			},
+		})
+	})
+
+	it("handles non-Error thrown value from store gracefully", async () => {
+		const provider = {
+			log: vi.fn(),
+			postMessageToWebview: vi.fn(),
+			getTaskOrganizationStore: vi.fn(() => ({
+				mutate: vi.fn().mockRejectedValue("string error message"),
+				getState: vi.fn(() => createEmptyTaskOrganizationState()),
+			})),
+		} as unknown as ClineProvider
+
+		const message: WebviewMessage = {
+			type: "taskOrganizationMutation",
+			taskOrganizationMutation: {
+				requestId: "req-non-error",
+				baseRevision: 0,
+				mutation: {
+					kind: "deleteFolder",
+					folderId: "f1",
+				},
+			},
+		}
+
+		await handleTaskOrganizationMessage(provider, message)
+
+		expect(provider.log).toHaveBeenCalledWith(expect.stringContaining("string error message"))
+	})
 })

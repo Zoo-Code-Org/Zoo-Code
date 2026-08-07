@@ -241,9 +241,12 @@ vi.mock("@roo-code/cloud", () => ({
 				getOrganizationMemberships: vi.fn().mockResolvedValue([]),
 				getUserSettings: vi.fn().mockReturnValue(null),
 				isTaskSyncEnabled: vi.fn().mockReturnValue(false),
+				on: vi.fn(),
+				off: vi.fn(),
 			}
 		},
 	},
+
 	getRooCodeApiUrl: vi.fn().mockReturnValue("https://app.roocode.com"),
 }))
 
@@ -878,6 +881,128 @@ describe("ClineProvider Task History Synchronization", () => {
 				String(call[0]).includes("Task organization reconciliation failed"),
 			)
 			expect(reconciliationFailures).toHaveLength(0)
+		})
+
+		it("logs an error message when reconciliation throws an Error", async () => {
+			vi.spyOn(provider.taskOrganizationStore, "reconcile").mockRejectedValueOnce(new Error("reconcile boom"))
+			const logSpy = vi.spyOn(provider, "log")
+
+			await getOnWrite()([])
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"[TaskHistoryStore.onWrite] Task organization reconciliation failed: reconcile boom",
+				),
+			)
+		})
+
+		it("logs a string error when reconciliation throws a non-Error value", async () => {
+			vi.spyOn(provider.taskOrganizationStore, "reconcile").mockRejectedValueOnce("non-error string")
+			const logSpy = vi.spyOn(provider, "log")
+
+			await getOnWrite()([])
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining(
+					"[TaskHistoryStore.onWrite] Task organization reconciliation failed: non-error string",
+				),
+			)
+		})
+
+		it("posts taskOrganizationUpdated message on onChange when view is launched", async () => {
+			provider.isViewLaunched = true
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue()
+
+			const onChange = provider.taskOrganizationStore["onChange"]
+			expect(onChange).toBeDefined()
+
+			const dummyState = provider.taskOrganizationStore.getState()
+			await onChange!(dummyState)
+
+			expect(postSpy).toHaveBeenCalledWith({
+				type: "taskOrganizationUpdated",
+				taskOrganization: dummyState,
+			})
+		})
+
+		it("does not post message on onChange when view is not launched", async () => {
+			provider.isViewLaunched = false
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue()
+
+			const onChange = provider.taskOrganizationStore["onChange"]
+			expect(onChange).toBeDefined()
+
+			await onChange!(provider.taskOrganizationStore.getState())
+
+			expect(postSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "taskOrganizationUpdated" }))
+		})
+	})
+
+	describe("TaskOrganizationStore getters and state posting", () => {
+		it("getTaskOrganizationStore returns the store instance", () => {
+			const store = provider.getTaskOrganizationStore()
+			expect(store).toBe(provider.taskOrganizationStore)
+		})
+
+		it("getStateToPostToWebview includes taskOrganization state", async () => {
+			const state = await provider.getStateToPostToWebview()
+			expect(state.taskOrganization).toBeDefined()
+			expect(state.taskOrganization?.schemaVersion).toBe(1)
+		})
+
+		it("getStateToPostToWebview returns empty state when store is not initialized", async () => {
+			;(provider as unknown as { taskOrganizationStoreInitialized: boolean }).taskOrganizationStoreInitialized =
+				false
+			const state = await provider.getStateToPostToWebview()
+			expect(state.taskOrganization).toBeDefined()
+			expect(state.taskOrganization?.schemaVersion).toBe(1)
+			expect(state.taskOrganization?.folders).toEqual([])
+		})
+
+		it("getStateToPostToWebview handles errors when reading task organization state", async () => {
+			;(provider as unknown as { taskOrganizationStoreInitialized: boolean }).taskOrganizationStoreInitialized =
+				true
+			const getStateSpy = vi.spyOn(provider.taskOrganizationStore, "getState").mockImplementationOnce(() => {
+				throw new Error("task org read error")
+			})
+			const logSpy = vi.spyOn(provider, "log")
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.taskOrganization).toBeDefined()
+			expect(state.taskOrganization?.schemaVersion).toBe(1)
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[getStateToPostToWebview] Failed to read task organization state"),
+			)
+
+			getStateSpy.mockRestore()
+		})
+
+		it("disposes taskOrganizationStore on provider dispose", async () => {
+			const disposeSpy = vi.spyOn(provider.taskOrganizationStore, "dispose")
+			await provider.dispose()
+			expect(disposeSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("logs error when taskOrganizationStore.initialize fails during construction", async () => {
+			const { TaskOrganizationStore } = await import("../../task-persistence/TaskOrganizationStore")
+			const initSpy = vi
+				.spyOn(TaskOrganizationStore.prototype, "initialize")
+				.mockRejectedValueOnce(new Error("init fail"))
+			const logSpy = vi.fn()
+
+			// Constructing new ClineProvider should trigger TaskOrganizationStore.initialize failure catch block
+			const testProvider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", provider.contextProxy)
+			;(testProvider as unknown as { log: (msg: string) => void }).log = logSpy
+
+			await new Promise((resolve) => setTimeout(resolve, 20))
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to initialize TaskOrganizationStore: Error: init fail"),
+			)
+
+			initSpy.mockRestore()
+			await testProvider.dispose()
 		})
 	})
 })

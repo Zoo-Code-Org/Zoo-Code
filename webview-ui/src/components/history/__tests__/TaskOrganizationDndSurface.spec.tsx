@@ -353,4 +353,16 @@ describe("TaskOrganizationDndSurface", () => {
 		renderSurface(<div />)
 		expect(screen.queryByTestId("drag-overlay")).not.toBeInTheDocument()
 	})
+
+	it("renders empty string in drag overlay when resolveDragLabel returns null", () => {
+		installDndCapture({
+			activeDrag: {
+				id: "drag-1",
+				data: { kind: "task", target: { kind: "task", taskId: "t1" } },
+			},
+		})
+
+		renderSurface(<div />, { resolveDragLabel: () => null })
+		expect(screen.getByTestId("drag-overlay").textContent).toBe("")
+	})
 })

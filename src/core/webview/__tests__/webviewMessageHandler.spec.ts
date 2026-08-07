@@ -55,10 +55,15 @@ vi.mock("../rulesMessageHandler", () => ({
 	handleOpenRulesDirectory: vi.fn(),
 }))
 
+vi.mock("../taskOrganizationMessageHandler", () => ({
+	handleTaskOrganizationMessage: vi.fn(),
+}))
+
 import type { ModelRecord } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
+import { handleTaskOrganizationMessage } from "../taskOrganizationMessageHandler"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
@@ -1785,5 +1790,22 @@ describe("webviewMessageHandler - kimiCodeSignOut", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignOut" })
 
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Kimi Code sign out failed.")
+	})
+})
+
+describe("webviewMessageHandler - taskOrganizationMutation", () => {
+	it("dispatches taskOrganizationMutation to handleTaskOrganizationMessage", async () => {
+		const message = {
+			type: "taskOrganizationMutation" as const,
+			taskOrganizationMutation: {
+				requestId: "r1",
+				baseRevision: 0,
+				mutation: { kind: "deleteFolder" as const, folderId: "f1" },
+			},
+		}
+
+		await webviewMessageHandler(mockClineProvider, message)
+
+		expect(handleTaskOrganizationMessage).toHaveBeenCalledWith(mockClineProvider, message)
 	})
 })

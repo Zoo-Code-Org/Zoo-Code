@@ -228,4 +228,174 @@ describe("useTaskOrganizationDnd", () => {
 		expect(result.current.activeDrag).toBeNull()
 		expect(result.current.targetMeta.isOverTarget).toBe(false)
 	})
+
+	it("triggers handleDragOver and updates target meta when hovering over valid target", () => {
+		const { result } = renderHook(() => useTaskOrganizationDnd(mockCallbacks()))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragOver({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+				over: { id: "drop-b", data: { current: makeTarget("b") } },
+			} as unknown as DragOverEvent)
+		})
+
+		expect(result.current.targetMeta.isOverTarget).toBe(true)
+		expect(result.current.targetMeta.targetKind).toBe("task")
+	})
+
+	it("calls onCancel when dropping an item onto itself", () => {
+		const callbacks = mockCallbacks()
+		const { result } = renderHook(() => useTaskOrganizationDnd(callbacks))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragEnd({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+				over: { id: "drop-a", data: { current: makeTarget("a") } },
+			} as unknown as DragEndEvent)
+		})
+
+		expect(callbacks.onCancel).toHaveBeenCalledTimes(1)
+	})
+
+	it("calls onCancel when dropping a folder member into its current folder header", () => {
+		const callbacks = mockCallbacks()
+		const { result } = renderHook(() => useTaskOrganizationDnd(callbacks))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeFolderMemberTarget("a", "f1") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragEnd({
+				active: { id: "drag-a", data: { current: makeFolderMemberTarget("a", "f1") } },
+				over: { id: "drop-f1", data: { current: makeFolderTarget("f1") } },
+			} as unknown as DragEndEvent)
+		})
+
+		expect(callbacks.onCancel).toHaveBeenCalledTimes(1)
+	})
+
+	it("calls onCancel when dropping onto a target without dnd item data", () => {
+		const callbacks = mockCallbacks()
+		const { result } = renderHook(() => useTaskOrganizationDnd(callbacks))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragEnd({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+				over: { id: "some-other-element", data: { current: null } },
+			} as unknown as DragEndEvent)
+		})
+
+		expect(callbacks.onCancel).toHaveBeenCalledTimes(1)
+	})
+
+	it("handles handleDragStart with invalid drag data", () => {
+		const { result } = renderHook(() => useTaskOrganizationDnd(mockCallbacks()))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-invalid", data: { current: { invalid: true } } },
+			} as unknown as DragStartEvent)
+		})
+
+		expect(result.current.activeDrag).toBeNull()
+	})
+
+	it("sets isOverTarget false when dragging over self", () => {
+		const { result } = renderHook(() => useTaskOrganizationDnd(mockCallbacks()))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragOver({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+				over: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragOverEvent)
+		})
+
+		expect(result.current.targetMeta.isOverTarget).toBe(false)
+	})
+
+	it("sets isOverTarget false when hovering over an element with unknown over data", () => {
+		const { result } = renderHook(() => useTaskOrganizationDnd(mockCallbacks()))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragOver({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+				over: { id: "unknown-zone", data: { current: { foo: "bar" } } },
+			} as unknown as DragOverEvent)
+		})
+
+		expect(result.current.targetMeta.isOverTarget).toBe(false)
+	})
+
+	it("calls onCancel and resets activeDrag on handleDragCancel", () => {
+		const callbacks = mockCallbacks()
+		const { result } = renderHook(() => useTaskOrganizationDnd(callbacks))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		expect(result.current.activeDrag).not.toBeNull()
+
+		act(() => {
+			result.current.handleDragCancel()
+		})
+
+		expect(result.current.activeDrag).toBeNull()
+		expect(callbacks.onCancel).toHaveBeenCalledTimes(1)
+	})
+
+	it("calls onCancel when handleDragEnd has no over target", () => {
+		const callbacks = mockCallbacks()
+		const { result } = renderHook(() => useTaskOrganizationDnd(callbacks))
+
+		act(() => {
+			result.current.handleDragStart({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+			} as unknown as DragStartEvent)
+		})
+
+		act(() => {
+			result.current.handleDragEnd({
+				active: { id: "drag-a", data: { current: makeTarget("a") } },
+				over: null,
+			} as unknown as DragEndEvent)
+		})
+
+		expect(callbacks.onCancel).toHaveBeenCalledTimes(1)
+	})
 })

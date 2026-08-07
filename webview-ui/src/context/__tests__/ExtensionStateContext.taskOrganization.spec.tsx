@@ -318,4 +318,42 @@ describe("ExtensionStateContext task organization", () => {
 			expect((window as any).__lastMutationResult__).toEqual(result)
 		})
 	})
+
+	it("handles taskOrganizationUpdated with null/undefined snapshot gracefully", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TaskOrganizationTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "taskOrganizationUpdated", taskOrganization: undefined },
+				}),
+			)
+		})
+
+		const expected = createEmptyTaskOrganizationState()
+		const parsed = JSON.parse(screen.getByTestId("task-organization").textContent!)
+		expect(parsed.schemaVersion).toBe(expected.schemaVersion)
+	})
+
+	it("handles taskOrganizationMutationResult with null/undefined result gracefully", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<TaskOrganizationTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "taskOrganizationMutationResult", taskOrganizationMutationResult: undefined },
+				}),
+			)
+		})
+
+		expect((window as any).__lastMutationResult__).toBeUndefined()
+	})
 })

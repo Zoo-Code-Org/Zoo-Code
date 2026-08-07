@@ -244,4 +244,103 @@ describe("TaskOrganizationInteractionContext", () => {
 		msg = latestMutationCall()
 		expect(msg.taskOrganizationMutation.mutation).toEqual({ kind: "deleteFolder", folderId: "folder-9" })
 	})
+
+	it("returns error code TASK_ORG/PIN_LIMIT/003 when attempting to pin beyond maximum limit", async () => {
+		const TestPinLimit = () => {
+			const { togglePin } = useTaskOrganization()
+			return (
+				<button
+					data-testid="btn-pin"
+					onClick={async () => {
+						const res = await togglePin({ kind: "task", taskId: "new-task" })
+						;(window as any).__pinLimitResult__ = res
+					}}
+				/>
+			)
+		}
+
+		render(
+			<ExtensionStateContextProvider>
+				<TaskOrganizationInteractionProvider>
+					<TestPinLimit />
+				</TaskOrganizationInteractionProvider>
+			</ExtensionStateContextProvider>,
+		)
+
+		hydrateState({
+			schemaVersion: 1,
+			revision: 5,
+			folders: [],
+			pins: [
+				{ target: { kind: "task", taskId: "p1" }, pinnedAt: 1 },
+				{ target: { kind: "task", taskId: "p2" }, pinnedAt: 2 },
+				{ target: { kind: "task", taskId: "p3" }, pinnedAt: 3 },
+			],
+			updatedAt: 100,
+		})
+
+		act(() => {
+			screen.getByTestId("btn-pin").click()
+		})
+
+		await waitFor(() => {
+			expect((window as any).__pinLimitResult__).toEqual({
+				requestId: "",
+				success: false,
+				committedRevision: 5,
+				error: {
+					code: "TASK_ORG/PIN_LIMIT/003",
+					message: "TASK_ORG/PIN_LIMIT/003",
+				},
+			})
+		})
+	})
+
+	it("sends renameFolder mutation when renameFolder is called", async () => {
+		const TestRename = () => {
+			const { renameFolder } = useTaskOrganization()
+			return (
+				<button
+					data-testid="btn-rename"
+					onClick={() => {
+						void renameFolder("folder-1", "New Folder Name")
+					}}
+				/>
+			)
+		}
+
+		render(
+			<ExtensionStateContextProvider>
+				<TaskOrganizationInteractionProvider>
+					<TestRename />
+				</TaskOrganizationInteractionProvider>
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			screen.getByTestId("btn-rename").click()
+		})
+
+		await waitFor(() => {
+			expect(postMessageMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "taskOrganizationMutation",
+					taskOrganizationMutation: expect.objectContaining({
+						mutation: { kind: "renameFolder", folderId: "folder-1", name: "New Folder Name" },
+					}),
+				}),
+			)
+		})
+	})
+
+	it("throws error when useTaskOrganization is used outside TaskOrganizationInteractionProvider", () => {
+		const BadComponent = () => {
+			useTaskOrganization()
+			return null
+		}
+
+		expect(() => render(<BadComponent />)).toThrow(
+			"useTaskOrganization must be used within a TaskOrganizationInteractionProvider",
+		)
+	})
 })

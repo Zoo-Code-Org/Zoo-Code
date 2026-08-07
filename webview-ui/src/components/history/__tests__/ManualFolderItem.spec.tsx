@@ -2,7 +2,7 @@ import React from "react"
 import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
 import userEvent from "@testing-library/user-event"
 import { DndContext } from "@dnd-kit/core"
-import { ManualFolderItem } from "../ManualFolderItem"
+import { ManualFolderItem, ManualFolderMemberItem } from "../ManualFolderItem"
 
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
@@ -23,16 +23,26 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
 	DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 	DropdownMenuTrigger: ({ children, asChild }: { children: React.ReactNode; asChild?: boolean }) =>
 		asChild ? <>{children}</> : <div data-testid="dropdown-trigger">{children}</div>,
-	DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
-		<div data-testid="dropdown-content">{children}</div>
-	),
+	DropdownMenuContent: ({
+		children,
+		onCloseAutoFocus,
+	}: {
+		children: React.ReactNode
+		onCloseAutoFocus?: (e: Event) => void
+	}) => {
+		if (onCloseAutoFocus) {
+			const dummyEvent = { preventDefault: vi.fn() } as unknown as Event
+			onCloseAutoFocus(dummyEvent)
+		}
+		return <div data-testid="dropdown-content">{children}</div>
+	},
 	DropdownMenuItem: ({
 		children,
 		onClick,
 		"data-testid": dataTestId,
 	}: {
 		children: React.ReactNode
-		onClick?: () => void
+		onClick?: (e: React.MouseEvent) => void
 		"data-testid"?: string
 	}) => (
 		<div onClick={onClick} data-testid={dataTestId ?? "dropdown-item"}>
@@ -162,6 +172,32 @@ describe("ManualFolderItem", () => {
 		fireEvent.click(screen.getByTestId("folder-rename-button"))
 		const input = screen.getByTestId("folder-name-input")
 		fireEvent.change(input, { target: { value: "Bad\u0000Name" } })
+		fireEvent.blur(input)
+
+		expect(screen.getByTestId("folder-name-error")).toBeInTheDocument()
+		expect(onRename).not.toHaveBeenCalled()
+	})
+
+	it("shows validation error for a folder name exceeding max length", () => {
+		const onRename = vi.fn()
+		renderWithDnd(
+			<ManualFolderItem
+				folderId="f1"
+				name="My Folder"
+				unitCount={0}
+				isExpanded={false}
+				isPinned={false}
+				canPin={true}
+				onToggleExpand={vi.fn()}
+				onRename={onRename}
+				onDelete={vi.fn()}
+				onTogglePin={vi.fn()}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("folder-rename-button"))
+		const input = screen.getByTestId("folder-name-input")
+		fireEvent.change(input, { target: { value: "A".repeat(85) } })
 		fireEvent.blur(input)
 
 		expect(screen.getByTestId("folder-name-error")).toBeInTheDocument()
@@ -305,5 +341,149 @@ describe("ManualFolderItem", () => {
 		)
 
 		expect(screen.getByTestId("child-content")).toBeInTheDocument()
+	})
+
+	it("enters inline rename mode when clicking rename option in dropdown menu", async () => {
+		const user = userEvent.setup()
+		renderWithDnd(
+			<ManualFolderItem
+				folderId="f1"
+				name="My Folder"
+				unitCount={0}
+				isExpanded={false}
+				isPinned={false}
+				canPin={true}
+				onToggleExpand={vi.fn()}
+				onRename={vi.fn()}
+				onDelete={vi.fn()}
+				onTogglePin={vi.fn()}
+			/>,
+		)
+
+		await user.click(screen.getByTestId("folder-options-menu"))
+		await waitFor(() => expect(screen.getByTestId("folder-rename-option")).toBeInTheDocument())
+		await user.click(screen.getByTestId("folder-rename-option"))
+
+		expect(screen.getByTestId("folder-name-input")).toBeInTheDocument()
+	})
+
+	it("renders ManualFolderMemberItem correctly", () => {
+		const mockUnit = {
+			rootTaskId: "task-1",
+			target: { kind: "task" as const, taskId: "task-1" },
+			closureTaskIds: ["task-1"],
+			tasks: [],
+		}
+
+		renderWithDnd(
+			<ManualFolderMemberItem unit={mockUnit} folderId="f1">
+				<div data-testid="member-content">Member Task</div>
+			</ManualFolderMemberItem>,
+		)
+
+		const member = screen.getByTestId("folder-member-task-1")
+		expect(member).toBeInTheDocument()
+		expect(member).toHaveAttribute("data-is-over", "false")
+		expect(screen.getByTestId("member-content")).toBeInTheDocument()
+	})
+
+	it("cancels inline rename on Escape key", () => {
+		const onRename = vi.fn()
+		renderWithDnd(
+			<ManualFolderItem
+				folderId="f1"
+				name="My Folder"
+				unitCount={0}
+				isExpanded={false}
+				isPinned={false}
+				canPin={true}
+				onToggleExpand={vi.fn()}
+				onRename={onRename}
+				onDelete={vi.fn()}
+				onTogglePin={vi.fn()}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("folder-rename-button"))
+		const input = screen.getByTestId("folder-name-input")
+		fireEvent.change(input, { target: { value: "Changed Name" } })
+		fireEvent.keyDown(input, { key: "Escape" })
+
+		expect(onRename).not.toHaveBeenCalled()
+		expect(screen.queryByTestId("folder-name-input")).not.toBeInTheDocument()
+		expect(screen.getByTestId("folder-name")).toHaveTextContent("My Folder")
+	})
+
+	it("commits inline rename on Enter key", () => {
+		const onRename = vi.fn()
+		renderWithDnd(
+			<ManualFolderItem
+				folderId="f1"
+				name="My Folder"
+				unitCount={0}
+				isExpanded={false}
+				isPinned={false}
+				canPin={true}
+				onToggleExpand={vi.fn()}
+				onRename={onRename}
+				onDelete={vi.fn()}
+				onTogglePin={vi.fn()}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("folder-rename-button"))
+		const input = screen.getByTestId("folder-name-input")
+		fireEvent.change(input, { target: { value: "Enter Name" } })
+		fireEvent.keyDown(input, { key: "Enter" })
+
+		expect(onRename).toHaveBeenCalledWith("Enter Name")
+		expect(screen.queryByTestId("folder-name-input")).not.toBeInTheDocument()
+	})
+
+	it("supports custom data-testid and custom className", () => {
+		renderWithDnd(
+			<ManualFolderItem
+				folderId="f1"
+				name="My Folder"
+				unitCount={0}
+				isExpanded={true}
+				isPinned={false}
+				canPin={true}
+				onToggleExpand={vi.fn()}
+				onRename={vi.fn()}
+				onDelete={vi.fn()}
+				onTogglePin={vi.fn()}
+				data-testid="custom-folder-id"
+				className="custom-class"
+			/>,
+		)
+
+		const folderEl = screen.getByTestId("custom-folder-id")
+		expect(folderEl).toBeInTheDocument()
+		expect(folderEl.className).toContain("custom-class")
+	})
+
+	it("stops event propagation on children click", () => {
+		const parentClick = vi.fn()
+		renderWithDnd(
+			<div onClick={parentClick}>
+				<ManualFolderItem
+					folderId="f1"
+					name="My Folder"
+					unitCount={1}
+					isExpanded={true}
+					isPinned={false}
+					canPin={true}
+					onToggleExpand={vi.fn()}
+					onRename={vi.fn()}
+					onDelete={vi.fn()}
+					onTogglePin={vi.fn()}>
+					<div data-testid="nested-child">Child</div>
+				</ManualFolderItem>
+			</div>,
+		)
+
+		fireEvent.click(screen.getByTestId("nested-child"))
+		expect(parentClick).not.toHaveBeenCalled()
 	})
 })

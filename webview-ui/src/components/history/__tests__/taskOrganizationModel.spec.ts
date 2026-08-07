@@ -729,5 +729,92 @@ describe("taskOrganizationModel", () => {
 			expect(projection.folderProjections[0].members[0]).toBe(g1)
 			expect(projection.unfiledGroups[0]).toBe(g2)
 		})
+
+		it("skips unfiled groups that are not visible in the current workspace filter", () => {
+			const t1 = makeTask({ id: "t1", workspace: "/workspace/a" })
+			const t2 = makeTask({ id: "t2", workspace: "/workspace/b" })
+			const g1 = makeGroup(t1)
+			const g2 = makeGroup(t2)
+			const state = createEmptyTaskOrganizationState()
+			const projection = buildGroupedOrganizationProjection(state, [g1, g2], [t1, t2], "/workspace/a")
+			expect(projection.unfiledGroups).toHaveLength(1)
+			expect(projection.unfiledGroups[0].parent.id).toBe("t1")
+		})
+	})
+
+	describe("edge cases and branch coverage", () => {
+		it("buildPinnedProjection ignores pins whose root tasks no longer exist in taskMap", () => {
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				pins: [{ target: { kind: "task", taskId: "deleted-task" }, pinnedAt: 1 }],
+			}
+			const projection = buildPinnedProjection(state, [], [])
+			expect(projection).toHaveLength(0)
+		})
+
+		it("buildRecentTasksProjection skips tasks in membershipMap or missing from taskMap", () => {
+			const t1 = makeTask({ id: "t1" })
+			const t2 = makeTask({ id: "t2" })
+			const g1 = makeGroup(t1)
+			const g2 = makeGroup(t2)
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				folders: [{ folderId: "f1", name: "F1", taskIds: ["t1"], createdAt: 1, updatedAt: 1 }],
+			}
+			// Pass g1 and g2 in groupedTasks, but only t1 in tasks (so g2 root is missing from taskMap)
+			const projection = buildRecentTasksProjection(state, [g1, g2], [t1], 5)
+			expect(projection).toHaveLength(1)
+			expect(projection[0].category).toBe("manualFolder")
+		})
+
+		it("buildRecentTasksProjection returns empty array when maxSlots <= 0", () => {
+			const state = createEmptyTaskOrganizationState()
+			expect(buildRecentTasksProjection(state, [], [], 0)).toEqual([])
+			expect(buildRecentTasksProjection(state, [], [], -1)).toEqual([])
+		})
+
+		it("buildRecentTasksProjection handles duplicate pinned folders and duplicate manual folders", () => {
+			const t1 = makeTask({ id: "t1" })
+			const g1 = makeGroup(t1)
+			const folder1 = { folderId: "f1", name: "F1", taskIds: ["t1"], createdAt: 10, updatedAt: 10 }
+			const folder2 = { folderId: "f1", name: "F1", taskIds: ["t1"], createdAt: 20, updatedAt: 20 }
+			const state: TaskOrganizationStateV1 = {
+				...createEmptyTaskOrganizationState(),
+				folders: [folder1, folder2],
+				pins: [
+					{ target: { kind: "folder", folderId: "f1" }, pinnedAt: 1 },
+					{ target: { kind: "folder", folderId: "f1" }, pinnedAt: 2 },
+				],
+			}
+			const projection = buildRecentTasksProjection(state, [g1], [t1], 4)
+			// Only 1 slot for f1 (duplicate pin ignored, and secondary manual folder f1 ignored)
+			expect(projection).toHaveLength(1)
+			expect(projection[0].category).toBe("pinned")
+		})
+
+		it("handles cyclic task parent/child relationships gracefully in collectDescendants", () => {
+			// Task A has child B, Task B has child A (cycle)
+			const taskA = makeTask({ id: "taskA", childIds: ["taskB"] })
+			const taskB = makeTask({ id: "taskB", childIds: ["taskA"], parentTaskId: "taskA" })
+
+			const unit = resolveOrganizationUnit("taskA", [taskA, taskB])
+			expect(unit.closureTaskIds).toContain("taskA")
+			expect(unit.closureTaskIds).toContain("taskB")
+		})
+
+		it("handles taskBelongsToWorkspace with undefined task", () => {
+			const entry: import("../types").VirtualDisplayEntry = {
+				id: "unit-unknown",
+				category: "unfiled",
+				unit: {
+					target: { kind: "task", taskId: "unknown-task" },
+					rootTaskId: "unknown-task",
+					closureTaskIds: ["unknown-task"],
+				},
+			}
+			// Filtering entries when task is missing in taskMap
+			const filtered = filterByWorkspace([entry], [], "/workspace/project")
+			expect(filtered).toHaveLength(0)
+		})
 	})
 })

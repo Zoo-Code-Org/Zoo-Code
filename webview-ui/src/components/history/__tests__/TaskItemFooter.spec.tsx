@@ -94,4 +94,20 @@ describe("TaskItemFooter", () => {
 
 		expect(screen.queryByText("history:subtaskTag")).not.toBeInTheDocument()
 	})
+
+	it("shows PinButton when showPin is true and onTogglePin is provided", () => {
+		const onTogglePin = vi.fn()
+		render(
+			<TaskItemFooter
+				item={mockItem}
+				variant="full"
+				showPin={true}
+				canPin={true}
+				isPinned={false}
+				onTogglePin={onTogglePin}
+			/>,
+		)
+
+		expect(screen.getByTestId("task-pin-button")).toBeInTheDocument()
+	})
 })
