@@ -9,6 +9,7 @@ vi.mock("node:fs", () => ({
 }))
 
 const mockCreate = vi.fn()
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -77,13 +78,9 @@ describe("QwenCodeHandler Native Tools", () => {
 
 	describe("Native Tool Calling Support", () => {
 		it("should include tools in request when model supports native tools and tools are provided", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -107,13 +104,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should include tool_choice when provided", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -130,13 +123,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should always include tools and tool_choice (tools are guaranteed to be present after ALWAYS_AVAILABLE_TOOLS)", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -151,9 +140,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should yield tool_call_partial chunks during streaming", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -170,8 +159,8 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -186,19 +175,16 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
 				tools: testTools,
 			})
 
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({
 				type: "tool_call_partial",
@@ -218,13 +204,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should set parallel_tool_calls based on metadata", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -241,9 +223,9 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("should yield tool_call_end events when finish_reason is tool_calls", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -260,8 +242,8 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {},
@@ -269,9 +251,9 @@ describe("QwenCodeHandler Native Tools", () => {
 							},
 						],
 						usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -303,50 +285,44 @@ describe("QwenCodeHandler Native Tools", () => {
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
-					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -356,28 +332,25 @@ describe("QwenCodeHandler Native Tools", () => {
 								index: 0,
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
 		})
 
 		it("should preserve thinking block handling alongside tool calls", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -385,8 +358,8 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -403,17 +376,17 @@ describe("QwenCodeHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {},
 								finish_reason: "tool_calls",
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",

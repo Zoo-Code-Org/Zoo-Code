@@ -26,6 +26,10 @@ vi.mock("../../../services/command/commands", () => ({
 	getCommands: vi.fn(),
 }))
 
+vi.mock("../../../services/destructive-command-guard", () => ({
+	ensureDcgInstalled: vi.fn(),
+}))
+
 vi.mock("@anthropic-ai/vertex-sdk", () => ({
 	AnthropicVertex: vi.fn(),
 }))
@@ -58,6 +62,7 @@ import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
+import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
 import {
 	handleCreateRule,
 	handleDeleteRule,
@@ -1095,6 +1100,76 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(ensureDcgInstalled).mockResolvedValue("/mock/global/storage/dcg")
+	})
+
+	it("installs and persists destructive command guard when enabled", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(ensureDcgInstalled).toHaveBeenCalledWith("/mock/global/storage")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("disables the setting and reports an installation failure", async () => {
+		vi.mocked(ensureDcgInstalled).mockRejectedValue(new Error("checksum mismatch"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"common:errors.destructiveCommandGuard.enableFailed",
+		)
+	})
+
+	it("disables the setting when DCG is unavailable for the current platform", async () => {
+		vi.mocked(ensureDcgInstalled).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(t).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.unavailable")
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.unavailable")
+		expect(t).not.toHaveBeenCalledWith("common:errors.destructiveCommandGuard.enableFailed", expect.anything())
+	})
+
+	it("reports non-Error installation failures", async () => {
+		vi.mocked(ensureDcgInstalled).mockRejectedValue("download unavailable")
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(t).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.enableFailed", {
+			error: "download unavailable",
+		})
+	})
+
+	it("persists disabled state without trying to install", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: false },
+		})
+
+		expect(ensureDcgInstalled).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
 	})
 })
 

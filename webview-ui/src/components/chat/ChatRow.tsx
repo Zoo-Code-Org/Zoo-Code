@@ -72,6 +72,7 @@ import {
 	Split,
 	ArrowRight,
 	Check,
+	OctagonX,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { PathTooltip } from "../ui/PathTooltip"
@@ -290,6 +291,18 @@ export const ChatRowContent = ({
 			case "mistake_limit_reached":
 				return [null, null] // These will be handled by ErrorRow component
 			case "command":
+				if (message.autoApprovalDecision === "deny") {
+					return [
+						<OctagonX
+							key="denied-icon"
+							className="size-4 text-vscode-errorForeground"
+							aria-label="Denied command icon"
+						/>,
+						<span key="denied-title" className="font-bold text-vscode-errorForeground">
+							{t("chat:commandExecution.denied")}
+						</span>,
+					]
+				}
 				return [
 					isCommandExecuting ? (
 						<ProgressIndicator />
@@ -1603,6 +1616,7 @@ export const ChatRowContent = ({
 							text={message.text}
 							icon={icon}
 							title={title}
+							isDenied={message.autoApprovalDecision === "deny"}
 						/>
 					)
 				case "use_mcp_server":

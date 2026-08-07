@@ -72,6 +72,10 @@
 		"url_fetch_failed": "URL सामग्री प्राप्त करने में त्रुटि: {{error}}",
 		"url_fetch_error_with_url": "{{url}} के लिए सामग्री प्राप्त करने में त्रुटि: {{error}}",
 		"command_timeout": "कमांड निष्पादन {{seconds}} सेकंड के बाद समय समाप्त हो गया",
+		"destructiveCommandGuard": {
+			"unavailable": "Destructive Command Guard सक्षम है, लेकिन इस प्लेटफ़ॉर्म के लिए उपलब्ध नहीं है",
+			"enableFailed": "Destructive Command Guard को सक्षम नहीं किया जा सका: {{error}}"
+		},
 		"share_task_failed": "कार्य साझा करने में विफल। कृपया पुनः प्रयास करें।",
 		"share_no_active_task": "साझा करने के लिए कोई सक्रिय कार्य नहीं",
 		"share_auth_required": "प्रमाणीकरण आवश्यक है। कार्य साझा करने के लिए कृपया साइन इन करें।",

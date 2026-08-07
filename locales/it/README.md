@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -36,28 +35,25 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.74.0
+## Cosa ha aggiunto Zoo Code rispetto a Roo Code
 
-**Zoo Gateway è live!**
+Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 
-Il gateway è un unico endpoint per tutti i provider, con un solo saldo e un dettaglio delle spese e dell'utilizzo per richiesta.
+- **Intelligenza della codebase Semble** — ricerca semantica del codice rapida e on demand, con configurazione automatica e senza un workflow di indicizzazione separato.
+- **Workflow Orchestrator più solidi** — delega più sicura, coordinamento parallelo delle attività, recupero affidabile delle attività principali e secondarie e migliore isolamento tra attività secondarie e profili provider.
+- **Esecuzioni autonome più lunghe con Destructive Command Guard (DCG)** — blocca automaticamente i comandi pericolosi mentre il lavoro attendibile prosegue senza ripetute richieste di approvazione.
+- **I modelli più recenti** — supporto continuo per le nuove famiglie di modelli Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax e altre.
+- **Più modi per connettersi** — provider nuovi e ampliati, tra cui Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go e molti altri.
+- **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
+- **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-**Configurazione:**
+## Novità in v3.76.0
 
-- Aggiungi crediti: https://www.zoocode.dev/dashboard/credits
-- Accedi dall'estensione.
-- Nelle impostazioni, seleziona Zoo Gateway come provider quando crei profili per modelli diversi
-
-Utilizzo e addebiti sono visibili nella [dashboard](https://www.zoocode.dev/dashboard).
-
-Modelli: https://www.zoocode.dev/dashboard/models
-
-- **Più controlli OpenAI** — usa la modalità di priorità Fast con OpenAI Codex e scegli un livello di reasoning più elevato per i modelli compatibili con OpenAI.
-- **Provider e modelli più affidabili** — gestione migliorata dei metadati del router, aggiornamento dei modelli Ollama, supporto proxy per Bedrock e controlli di reasoning per Friendli.
-- **Impostazioni e workflow di sviluppo più fluidi** — le impostazioni conservano le modifiche non salvate, i comandi brevi del terminale terminano correttamente, i piani di architettura usano percorsi relativi al workspace e le ultime occorrenze visibili del brand Roo sono state aggiornate a Zoo.
-- **Fondamenta più solide per le attività** — il nuovo registro delle attività e lo scheduler basato su semafori preparano Zoo Code a coordinare le attività in modo più sicuro.
-- **Architettura dei provider coerente** — gli identificatori dei provider e i componenti service tier sono ora centralizzati in API, core, tipi condivisi e webview.
-- Miglioramenti a sicurezza, dipendenze, lint, regressione visiva e test end-to-end.
+- **Esegui attività più lunghe e senza interruzioni con Destructive Command Guard (DCG)** — DCG blocca i comandi pericolosi lasciando che Zoo continui a lavorare senza costringerti a premere continuamente i pulsanti di approvazione, con download e installazione rafforzati del binario gestito.
+- **Controlli e affidabilità dei provider migliorati** — scegli la velocità di risposta di OpenAI Codex, usa le configurazioni DeepSeek aggiornate e approfitta di un isolamento più solido tra le modifiche ai profili provider e le attività in esecuzione.
+- **Correzione critica dell'esecuzione nel terminale** — Zoo ora attende che i comandi del terminale terminino prima di iniziare il passaggio successivo, evitando sovrapposizioni di lavoro e la continuazione prematura del modello.
+- Un raggruppamento più intelligente riunisce le approvazioni degli strumenti correlati mantenendo separate le richieste non correlate.
+- L'invio della telemetria e il recupero della cache dei modelli sono più resilienti in caso di errori e richieste simultanee.
 
 ## Cosa può fare Zoo Code per TE?
 
@@ -81,24 +77,9 @@ Zoo Code si adatta al tuo modo di lavorare, non il contrario:
 
 Scopri di più: [Usare le Modalità](https://docs.zoocode.dev/basic-usage/using-modes) • [Modalità personalizzate](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Tutorial e video sulle funzionalità
-
-<div align="center">
-
-|                                                                                                                                                                                 |                                                                                                                                                                                  |                                                                                                                                                                                     |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Installazione di Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configurazione dei profili</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Indicizzazione della codebase</b> |
-|  <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Modalità personalizzate</b>  |         <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Checkpoint</b>         |     <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Gestione del Contesto</b>     |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Altri video tutorial e funzionalità rapide...</a>
-</p>
-
 ## Risorse
 
 - **[Documentazione](https://docs.zoocode.dev):** La guida ufficiale per installare, configurare e padroneggiare Zoo Code.
-- **[Canale YouTube](https://youtube.com/@roocodeyt?feature=shared):** Guarda i tutorial e le funzionalità in azione.
 - **[Server Discord](https://discord.gg/VxfP4Vx3gX):** Unisciti alla community per aiuto e discussioni in tempo reale.
 - **[Comunità Reddit](https://www.reddit.com/r/ZooCode):** Condividi le tue esperienze e guarda cosa stanno costruendo gli altri.
 - **[Problemi GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Segnala bug e tieni traccia dello sviluppo.
