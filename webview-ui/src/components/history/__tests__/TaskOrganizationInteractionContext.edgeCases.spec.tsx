@@ -1,7 +1,7 @@
 import { render, screen, act, waitFor } from "@/utils/test-utils"
 import React from "react"
 
-import type { TaskOrganizationMutationResultV1, TaskOrganizationStateV1 } from "@roo-code/types"
+import type { TaskOrganizationStateV1 } from "@roo-code/types"
 import { MAX_PINNED_TARGETS } from "@roo-code/types"
 
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
