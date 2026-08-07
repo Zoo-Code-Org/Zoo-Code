@@ -249,4 +249,97 @@ describe("OllamaFimHandler", () => {
 		}
 		expect(chunks.join("")).toBe("")
 	})
+
+	describe("listModels", () => {
+		const handlerFor = (modelId?: string) =>
+			new OllamaFimHandler({
+				getConfig: () => ({ modelId, baseUrl: "http://localhost:11434" }),
+				getApiKey: () => undefined,
+			})
+
+		const tagsResponse = (body: unknown) => ({ ok: true, json: async () => body })
+
+		it("maps the tag list to model summaries", async () => {
+			fetchMock.mockResolvedValue(tagsResponse({ models: [{ name: "qwen2.5-coder:1.5b-base" }] }))
+
+			const models = await handlerFor().listModels(new AbortController().signal)
+
+			expect(models).toEqual([
+				{
+					id: "qwen2.5-coder:1.5b-base",
+					label: "qwen2.5-coder:1.5b-base",
+					contextWindow: undefined,
+					supportsFim: true,
+				},
+			])
+		})
+
+		it("drops models that cannot serve completions", async () => {
+			// An embedding-only model appears in /api/tags but can never complete.
+			fetchMock.mockResolvedValue(
+				tagsResponse({
+					models: [
+						{ name: "nomic-embed-text", capabilities: ["embedding"] },
+						{ name: "qwen2.5-coder:1.5b-base", capabilities: ["completion"] },
+					],
+				}),
+			)
+
+			const models = await handlerFor().listModels(new AbortController().signal)
+
+			expect(models.map((m) => m.id)).toEqual(["qwen2.5-coder:1.5b-base"])
+		})
+
+		it("keeps models that declare no capabilities at all", async () => {
+			fetchMock.mockResolvedValue(tagsResponse({ models: [{ name: "legacy-model" }] }))
+
+			expect(await handlerFor().listModels(new AbortController().signal)).toHaveLength(1)
+		})
+
+		it("returns an empty list when the payload does not match the schema", async () => {
+			fetchMock.mockResolvedValue(tagsResponse({ unexpected: true }))
+
+			expect(await handlerFor().listModels(new AbortController().signal)).toEqual([])
+		})
+
+		it("throws when the tags endpoint rejects", async () => {
+			fetchMock.mockResolvedValue({ ok: false, status: 500 })
+
+			await expect(handlerFor().listModels(new AbortController().signal)).rejects.toThrow("500")
+		})
+	})
+
+	describe("validate", () => {
+		const handlerFor = (modelId?: string) =>
+			new OllamaFimHandler({
+				getConfig: () => ({ modelId, baseUrl: "http://localhost:11434" }),
+				getApiKey: () => undefined,
+			})
+
+		it("succeeds when the configured model is present", async () => {
+			fetchMock.mockResolvedValue({ ok: true, json: async () => ({ models: [{ name: "qwen:base" }] }) })
+
+			const result = await handlerFor("qwen:base").validate(new AbortController().signal)
+
+			expect(result.ok).toBe(true)
+		})
+
+		it("fails with a clear message when the model is not pulled", async () => {
+			fetchMock.mockResolvedValue({ ok: true, json: async () => ({ models: [{ name: "other" }] }) })
+
+			const result = await handlerFor("qwen:base").validate(new AbortController().signal)
+
+			expect(result).toEqual({ ok: false, error: expect.stringContaining("was not found") })
+		})
+
+		it("reports a transport failure as the validation error", async () => {
+			// An unreachable server is the most common misconfiguration; surfacing the
+			// message is the difference between "broken" and "not running".
+			fetchMock.mockRejectedValue(new Error("ECONNREFUSED"))
+
+			const result = await handlerFor("qwen:base").validate(new AbortController().signal)
+
+			expect(result).toEqual({ ok: false, error: "ECONNREFUSED" })
+		})
+	})
 })

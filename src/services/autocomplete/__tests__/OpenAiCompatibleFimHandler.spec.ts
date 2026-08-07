@@ -8,6 +8,7 @@ vi.mock("vscode", async () => {
 
 const openaiMocks = vi.hoisted(() => ({
 	create: vi.fn(),
+	chatCreate: vi.fn(),
 	list: vi.fn(),
 	ctor: vi.fn(),
 }))
@@ -18,6 +19,7 @@ vi.mock("openai", () => ({
 		apiKey: string
 		maxRetries: number
 		completions: { create: typeof openaiMocks.create }
+		chat: { completions: { create: typeof openaiMocks.chatCreate } }
 		models: { list: typeof openaiMocks.list }
 
 		constructor(options: { baseURL: string; apiKey: string; maxRetries: number }) {
@@ -26,6 +28,7 @@ vi.mock("openai", () => ({
 			this.apiKey = options.apiKey
 			this.maxRetries = options.maxRetries
 			this.completions = { create: openaiMocks.create }
+			this.chat = { completions: { create: openaiMocks.chatCreate } }
 			this.models = { list: openaiMocks.list }
 		}
 	},
@@ -192,5 +195,123 @@ describe("OpenAiCompatibleFimHandler", () => {
 
 		const result = await handler.validate(new AbortController().signal)
 		expect(result.ok).toBe(false)
+	})
+
+	describe("chat endpoint path", () => {
+		async function drain(gen: AsyncGenerator<string, void, undefined>): Promise<string> {
+			let out = ""
+			for await (const chunk of gen) {
+				out += chunk
+			}
+			return out
+		}
+
+		function chatStream(deltas: string[]) {
+			return {
+				async *[Symbol.asyncIterator]() {
+					for (const content of deltas) {
+						yield { choices: [{ delta: { content } }] }
+					}
+				},
+			}
+		}
+
+		it("routes an instruction-tuned model through chat completions", async () => {
+			openaiMocks.chatCreate.mockResolvedValueOnce(chatStream(["a + b"]))
+
+			const text = await drain(
+				handler.streamFim(makeRequest({ useChatEndpoint: true, systemPrompt: "be terse", supportsFim: false })),
+			)
+
+			expect(text).toBe("a + b")
+			expect(openaiMocks.create).not.toHaveBeenCalled()
+		})
+
+		it("sends the system prompt as its own message", async () => {
+			// In a raw completions prompt the model simply continues the instruction
+			// text; only a system message is structurally out of band.
+			openaiMocks.chatCreate.mockResolvedValueOnce(chatStream([""]))
+
+			await drain(
+				handler.streamFim(makeRequest({ useChatEndpoint: true, systemPrompt: "be terse", supportsFim: false })),
+			)
+
+			const payload = openaiMocks.chatCreate.mock.calls[0][0]
+			expect(payload.messages[0]).toEqual({ role: "system", content: "be terse" })
+			expect(payload.messages[1].role).toBe("user")
+		})
+
+		it("omits the system message when there is no system prompt", async () => {
+			openaiMocks.chatCreate.mockResolvedValueOnce(chatStream([""]))
+
+			await drain(handler.streamFim(makeRequest({ useChatEndpoint: true, supportsFim: false })))
+
+			expect(openaiMocks.chatCreate.mock.calls[0][0].messages).toHaveLength(1)
+		})
+
+		it("drops the code-fence stop so a fenced reply is not truncated to nothing", async () => {
+			openaiMocks.chatCreate.mockResolvedValueOnce(chatStream([""]))
+
+			await drain(
+				handler.streamFim(
+					makeRequest({ useChatEndpoint: true, supportsFim: false, stopSequences: ["```", "<|im_end|>"] }),
+				),
+			)
+
+			expect(openaiMocks.chatCreate.mock.calls[0][0].stop).not.toContain("```")
+		})
+
+		it("swallows an abort on the chat path", async () => {
+			const error = new Error("aborted")
+			error.name = "AbortError"
+			openaiMocks.chatCreate.mockRejectedValueOnce(error)
+
+			const text = await drain(handler.streamFim(makeRequest({ useChatEndpoint: true, supportsFim: false })))
+
+			expect(text).toBe("")
+		})
+
+		it("surfaces an auth rejection with an actionable message", async () => {
+			// Hosted endpoints serve their model catalogue publicly but reject
+			// completions, so this looks configured while producing nothing.
+			const error = Object.assign(new Error("unauthorized"), { status: 401 })
+			openaiMocks.chatCreate.mockRejectedValueOnce(error)
+
+			await expect(
+				drain(handler.streamFim(makeRequest({ useChatEndpoint: true, supportsFim: false }))),
+			).rejects.toThrow("API key")
+		})
+	})
+
+	describe("base URL normalization", () => {
+		it("does not double up a /v1 the user already typed", async () => {
+			openaiMocks.create.mockResolvedValueOnce({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ text: "" }] }
+				},
+			})
+
+			const gen = handler.streamFim(makeRequest({ baseUrl: "http://localhost:1234/v1" }))
+			for await (const _ of gen) {
+				// drain
+			}
+
+			expect(openaiMocks.ctor.mock.calls.at(-1)?.[0].baseURL).toBe("http://localhost:1234/v1")
+		})
+
+		it("adds a scheme to a bare host", async () => {
+			openaiMocks.create.mockResolvedValueOnce({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ text: "" }] }
+				},
+			})
+
+			const gen = handler.streamFim(makeRequest({ baseUrl: "localhost:1234" }))
+			for await (const _ of gen) {
+				// drain
+			}
+
+			expect(openaiMocks.ctor.mock.calls.at(-1)?.[0].baseURL).toBe("http://localhost:1234/v1")
+		})
 	})
 })
