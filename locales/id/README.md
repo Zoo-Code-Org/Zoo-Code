@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -35,28 +34,25 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.74.0
+## Yang Ditambahkan Zoo Code Sejak Roo Code
 
-**Zoo Gateway sudah live!**
+Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memperluasnya dengan:
 
-Gateway adalah satu endpoint untuk semua penyedia, dengan satu saldo dan rincian pengeluaran/penggunaan per permintaan.
+- **Kecerdasan codebase Semble** — pencarian kode semantik yang cepat dan sesuai permintaan, dengan penyiapan otomatis dan tanpa workflow pengindeksan terpisah.
+- **Workflow Orchestrator yang lebih kuat** — delegasi yang lebih aman, koordinasi task paralel, pemulihan task induk/anak yang andal, serta isolasi yang lebih baik antara subtask dan profil provider.
+- **Proses otonom yang lebih panjang dengan Destructive Command Guard (DCG)** — memblokir perintah berbahaya secara otomatis sementara pekerjaan tepercaya terus berjalan tanpa permintaan persetujuan berulang.
+- **Model terbaru** — dukungan berkelanjutan untuk keluarga model Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax, dan lainnya.
+- **Lebih banyak cara untuk terhubung** — provider baru dan yang diperluas, termasuk Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go, dan banyak lagi.
+- **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
+- **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-**Penyiapan:**
+## Yang Baru di v3.76.0
 
-- Tambahkan kredit: https://www.zoocode.dev/dashboard/credits
-- Masuk dari ekstensi.
-- Di pengaturan, pilih Zoo Gateway sebagai penyedia saat membuat profil untuk berbagai model
-
-Penggunaan dan biaya dapat dilihat di [dasbor](https://www.zoocode.dev/dashboard).
-
-Model: https://www.zoocode.dev/dashboard/models
-
-- **Kontrol OpenAI yang lebih lengkap** — gunakan mode prioritas Fast dengan OpenAI Codex dan pilih tingkat reasoning yang lebih tinggi untuk model yang kompatibel dengan OpenAI.
-- **Provider dan model yang lebih andal** — peningkatan penanganan metadata router, refresh model Ollama, dukungan proxy Bedrock, dan kontrol reasoning Friendli.
-- **Settings dan workflow developer yang lebih mulus** — settings kini mempertahankan edit yang belum disimpan, perintah terminal singkat selesai dengan benar, rencana architect memakai path relatif workspace, dan branding Roo yang masih terlihat telah diperbarui menjadi Zoo.
-- **Fondasi task yang lebih kuat** — task registry baru dan scheduler berbasis semaphore menyiapkan Zoo Code untuk koordinasi task yang lebih aman.
-- **Arsitektur provider yang konsisten** — identifier provider dan komponen service tier kini dipusatkan di API, core, shared types, dan webview.
-- Peningkatan keamanan, dependensi, lint, regresi visual, dan pengujian end-to-end.
+- **Jalankan task yang lebih panjang tanpa gangguan dengan Destructive Command Guard (DCG)** — DCG memblokir perintah berbahaya sambil membiarkan Zoo terus bekerja tanpa kamu harus terus-menerus menekan tombol persetujuan, didukung download dan instalasi managed binary yang diperkuat.
+- **Kontrol provider dan keandalan yang lebih baik** — pilih kecepatan respons OpenAI Codex, gunakan konfigurasi DeepSeek terbaru, dan dapatkan isolasi yang lebih kuat antara perubahan profil provider dan task yang sedang berjalan.
+- **Perbaikan penting untuk eksekusi terminal** — Zoo kini menunggu perintah terminal selesai sebelum memulai langkah berikutnya, sehingga pekerjaan tidak saling tumpang tindih dan model tidak melanjutkan terlalu dini.
+- Batching yang lebih cerdas mengelompokkan persetujuan tool terkait sambil tetap memisahkan permintaan yang tidak berkaitan.
+- Pengiriman telemetri dan pengambilan cache model kini lebih tangguh saat terjadi kegagalan dan permintaan bersamaan.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
@@ -80,24 +76,9 @@ Zoo Code beradaptasi dengan cara Anda bekerja, bukan sebaliknya:
 
 Pelajari lebih lanjut: [Menggunakan Mode](https://docs.zoocode.dev/basic-usage/using-modes) • [Mode Kustom](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Video Tutorial & Fitur
-
-<div align="center">
-
-|                                                                                                                                                                           |                                                                                                                                                                             |                                                                                                                                                                               |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Menginstal Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Mengonfigurasi Profil</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Pengindeksan Basis Kode</b> |
-|     <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Mode Kustom</b>     |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Pos Pemeriksaan</b>    |    <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Manajemen Konteks</b>    |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Video tutorial dan fitur cepat lainnya...</a>
-</p>
-
 ## Sumber daya
 
 - **[Dokumentasi](https://docs.zoocode.dev):** Panduan resmi untuk menginstal, mengonfigurasi, dan menguasai Zoo Code.
-- **[Saluran YouTube](https://youtube.com/@roocodeyt?feature=shared):** Tonton tutorial dan lihat fitur-fitur dalam aksi.
 - **[Server Discord](https://discord.gg/VxfP4Vx3gX):** Bergabunglah dengan komunitas untuk bantuan dan diskusi real-time.
 - **[Komunitas Reddit](https://www.reddit.com/r/ZooCode):** Bagikan pengalaman Anda dan lihat apa yang sedang dibangun orang lain.
 - **[Masalah GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Laporkan bug dan lacak pengembangan.

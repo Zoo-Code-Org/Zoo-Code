@@ -46,6 +46,8 @@ export const DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES = false
  */
 export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 
+export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
+
 /**
  * Terminal output preview size options for persisted command output.
  *
@@ -136,6 +138,7 @@ export const globalSettingsSchema = z.object({
 	alwaysAllowModeSwitch: z.boolean().optional(),
 	alwaysAllowSubtasks: z.boolean().optional(),
 	alwaysAllowExecute: z.boolean().optional(),
+	destructiveCommandGuardEnabled: z.boolean().optional(),
 	alwaysAllowFollowupQuestions: z.boolean().optional(),
 	followupAutoApproveTimeoutMs: z.number().optional(),
 	allowedCommands: z.array(z.string()).optional(),

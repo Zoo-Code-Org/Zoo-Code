@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -35,28 +34,25 @@
 
 Roo Code から Zoo Code へ移行するためのクイックガイドは、[Roo→Zoo 移行ガイド](https://docs.zoocode.dev/roo-to-zoo-migration) で確認できます。移行中のユーザーをできるだけ支援したいと考えていて、そのために [Reddit](https://www.reddit.com/r/ZooCode) と [Discord](https://discord.gg/VxfP4Vx3gX) を用意しています。困ったことや質問があれば、気軽に参加して聞いてください。
 
-## v3.74.0 の新機能
+## Roo Code 以降に Zoo Code が追加した機能
 
-**Zoo Gateway がリリースされました！**
+Zoo Code は Roo Code が築いた基盤を引き継ぎ、次の機能で拡張を続けています。
 
-ゲートウェイはすべてのプロバイダーに対応する単一のエンドポイントで、1つの残高とリクエストごとの支出/使用量の内訳を提供します。
+- **Semble コードベースインテリジェンス** — 自動セットアップに対応し、別途インデックス作成を行わずに使える高速なオンデマンドセマンティックコード検索。
+- **より強力な Orchestrator ワークフロー** — より安全な委任、並列タスクの調整、親子タスクの確実な復旧、サブタスクとプロバイダープロファイル間の分離を強化。
+- **Destructive Command Guard（DCG）による長時間の自律実行** — 信頼できる作業を承認の繰り返しなしで継続しながら、危険なコマンドを自動的にブロック。
+- **最新モデル** — Claude、GPT、Gemini、Kimi、GLM、Grok、MiniMax など、新しいモデルファミリーを継続的にサポート。
+- **接続方法をさらに拡充** — Zoo Gateway、Moonshot、Kimi Code、Kenari、Friendli、OpenCode Go など、新規および拡張されたプロバイダーに対応。
+- **より信頼性の高いターミナルと編集ワークフロー** — ターミナルの早期完了、タスク状態の競合、コンテキスト管理、diff 編集、プロバイダー固有のツール利用に関する問題を修正。
+- **ワークスペースをより細かく制御** — ルール管理、モードごとの MCP 制限、マルチルートのパス制御、モデルの reasoning オプション、完了時の変更レビュー操作を追加。
 
-**セットアップ:**
+## v3.76.0 の新機能
 
-- クレジットを追加: https://www.zoocode.dev/dashboard/credits
-- 拡張機能からサインインします。
-- 設定で、異なるモデルのプロファイルを作成する際にプロバイダーとして Zoo Gateway を選択します
-
-使用状況と料金は[ダッシュボード](https://www.zoocode.dev/dashboard)で確認できます。
-
-モデル: https://www.zoocode.dev/dashboard/models
-
-- **OpenAI の制御を強化** — OpenAI Codex で Fast 優先モードを使用し、OpenAI 互換モデルではより高い reasoning effort を選択できます。
-- **プロバイダーとモデルの信頼性を向上** — router メタデータ処理、Ollama モデル更新、Bedrock のプロキシ対応、Friendli の reasoning 制御を改善しました。
-- **設定と開発ワークフローを改善** — 未保存の編集を設定画面で保持し、短いターミナルコマンドを正しく完了し、Architect のプランにはワークスペース相対パスを使用します。残っていたユーザー向け Roo 表記も Zoo に更新しました。
-- **タスク基盤を強化** — 新しいタスクレジストリとセマフォベースのスケジューラーにより、Zoo Code のタスク連携をより安全にします。
-- **一貫したプロバイダーアーキテクチャ** — プロバイダー識別子と service tier コンポーネントを API、コア、共有型、webview 全体で一元化しました。
-- セキュリティ、依存関係、lint、ビジュアルリグレッション、エンドツーエンドテストを改善しました。
+- **Destructive Command Guard（DCG）で長時間のタスクを中断なく実行** — DCG が危険なコマンドをブロックし、承認ボタンを何度も押さなくても Zoo が作業を継続します。管理対象バイナリのダウンロードとインストールも強化されました。
+- **プロバイダーの制御性と信頼性を向上** — OpenAI Codex の応答速度を選択でき、更新された DeepSeek 設定を利用できます。プロバイダープロファイルの変更と実行中タスクの分離も強化されました。
+- **ターミナル実行の重要な修正** — Zoo はターミナルコマンドが完了するまで次のステップを開始しなくなり、作業の重複やモデルの早すぎる続行を防ぎます。
+- よりスマートなバッチ処理により、関連するツール承認をまとめながら、無関係なリクエストは分離します。
+- 障害発生時や同時リクエスト時でも、テレメトリ送信とモデルキャッシュ取得の安定性が向上しました。
 
 ## Zoo Codeがあなたのためにできること
 
@@ -80,24 +76,9 @@ Zoo Codeは、あなたの働き方に合わせるように適応します。
 
 詳しくは: [モードの使い方](https://docs.zoocode.dev/basic-usage/using-modes) • [カスタムモード](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## チュートリアルと機能のビデオ
-
-<div align="center">
-
-|                                                                                                                                                                              |                                                                                                                                                                          |                                                                                                                                                                                      |
-| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Zoo Codeのインストール</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>プロファイルの設定</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>コードベースのインデックス作成</b> |
-|     <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>カスタムモード</b>     |  <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>チェックポイント</b>  |        <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>コンテキスト管理</b>        |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">その他のクイックチュートリアルと機能のビデオ...</a>
-</p>
-
 ## リソース
 
 - **[ドキュメント](https://docs.zoocode.dev):** Zoo Codeのインストール、設定、習熟のための公式ガイド。
-- **[YouTubeチャンネル](https://youtube.com/@roocodeyt?feature=shared):** チュートリアルを見て、実際の機能を確認できます。
 - **[Discordサーバー](https://discord.gg/VxfP4Vx3gX):** コミュニティに参加して、リアルタイムのヘルプやディスカッションに参加できます。
 - **[Redditコミュニティ](https://www.reddit.com/r/ZooCode):** あなたの経験を共有し、他の人が何を構築しているかを見ることができます。
 - **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** バグを報告し、開発を追跡します。
