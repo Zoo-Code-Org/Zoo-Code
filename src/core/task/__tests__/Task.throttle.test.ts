@@ -64,11 +64,19 @@ describe("Task token usage throttling", () => {
 	let mockProvider: any
 	let mockApiConfiguration: ProviderSettings
 	let task: Task
+	let consoleLogSpy: ReturnType<typeof vi.spyOn>
+	let consoleWarnSpy: ReturnType<typeof vi.spyOn>
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
 	beforeEach(() => {
 		// Reset all mocks
 		vi.clearAllMocks()
 		vi.useFakeTimers()
+
+		// Silence console output so no onUserConsoleLog RPC is pending during teardown
+		consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 		// Mock provider
 		mockProvider = {
@@ -96,11 +104,23 @@ describe("Task token usage throttling", () => {
 		})
 	})
 
-	afterEach(() => {
-		vi.useRealTimers()
+	afterEach(async () => {
+		// Flush any pending microtasks/timers before disposing so async saves settle
+		await vi.runAllTimersAsync()
+
+		// Dispose while fake timers are still active so any cleanup callbacks stay in fake-timer land
 		if (task && !task.abort) {
 			task.dispose()
 		}
+
+		// Clear all pending fake timers and restore real timers
+		vi.clearAllTimers()
+		vi.useRealTimers()
+
+		// Restore console spies last
+		consoleLogSpy.mockRestore()
+		consoleWarnSpy.mockRestore()
+		consoleErrorSpy.mockRestore()
 	})
 
 	test("should emit TaskTokenUsageUpdated immediately on first change", async () => {
