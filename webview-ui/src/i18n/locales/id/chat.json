@@ -373,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Kontrol OpenAI yang lebih lengkap — gunakan mode prioritas Fast dengan OpenAI Codex dan pilih tingkat reasoning yang lebih tinggi untuk model yang kompatibel dengan OpenAI.",
-			"highlight2": "Provider dan model yang lebih andal — peningkatan penanganan metadata router, refresh model Ollama, dukungan proxy Bedrock, dan kontrol reasoning Friendli.",
-			"highlight3": "Settings dan workflow developer yang lebih mulus — settings kini mempertahankan edit yang belum disimpan, perintah terminal singkat selesai dengan benar, rencana architect memakai path relatif workspace, dan branding Roo yang masih terlihat telah diperbarui menjadi Zoo."
+			"highlight1": "Jalankan task yang lebih lama tanpa gangguan dengan Destructive Command Guard (DCG) — DCG memblokir perintah berbahaya sambil membiarkan Zoo terus bekerja tanpa kamu terus-menerus menekan tombol persetujuan.",
+			"highlight2": "Kontrol dan keandalan provider yang lebih baik — pilih kecepatan respons OpenAI Codex, gunakan konfigurasi DeepSeek terbaru, dan pisahkan task yang sedang berjalan dari perubahan profil.",
+			"highlight3": "Perbaikan penting eksekusi terminal — Zoo kini menunggu perintah terminal selesai sebelum memulai langkah berikutnya."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

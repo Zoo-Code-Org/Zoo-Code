@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Meer OpenAI-bediening — gebruik de Fast-prioriteitsmodus met OpenAI Codex en kies een hogere reasoning effort voor OpenAI-compatibele modellen.",
-			"highlight2": "Betrouwbaardere providers en modellen — verbeterde verwerking van routermetadata, Ollama-modelverversing, Bedrock-proxyondersteuning en Friendli-reasoningbediening.",
-			"highlight3": "Soepelere instellingen en ontwikkelworkflows — instellingen bewaren niet-opgeslagen wijzigingen, korte terminalopdrachten worden correct voltooid, architectuurplannen gebruiken werkruimterelatieve paden en de resterende zichtbare Roo-branding is bijgewerkt naar Zoo."
+			"highlight1": "Voer langere taken zonder onderbreking uit met Destructive Command Guard (DCG) — DCG blokkeert gevaarlijke opdrachten terwijl Zoo doorwerkt zonder dat je voortdurend op goedkeuringsknoppen hoeft te drukken.",
+			"highlight2": "Betere providerbediening en betrouwbaarheid — kies de reactiesnelheid van OpenAI Codex, gebruik bijgewerkte DeepSeek-configuraties en houd actieve taken geïsoleerd van profielwijzigingen.",
+			"highlight3": "Kritieke oplossing voor terminaluitvoering — Zoo wacht nu tot terminalopdrachten klaar zijn voordat de volgende stap begint."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

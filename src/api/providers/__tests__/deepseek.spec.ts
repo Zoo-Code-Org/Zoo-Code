@@ -1,4 +1,6 @@
 // Mocks must come first, before imports
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
 	return {
@@ -34,85 +36,86 @@ vi.mock("openai", () => {
 							const isThinkingModel = options.thinking?.type === "enabled"
 							const isToolCallTest = options.tools?.length > 0
 
-							// Return async iterator for streaming
-							return {
-								[Symbol.asyncIterator]: async function* () {
-									// For thinking models, emit reasoning_content first
-									if (isThinkingModel) {
-										yield {
-											choices: [
-												{
-													delta: { reasoning_content: "Let me think about this..." },
-													index: 0,
-												},
-											],
-											usage: null,
-										}
-										yield {
-											choices: [
-												{
-													delta: { reasoning_content: " I'll analyze step by step." },
-													index: 0,
-												},
-											],
-											usage: null,
-										}
-									}
+							const chunks: unknown[] = []
 
-									// For tool call tests with thinking mode, emit tool call
-									if (isThinkingModel && isToolCallTest) {
-										yield {
-											choices: [
-												{
-													delta: {
-														tool_calls: [
-															{
-																index: 0,
-																id: "call_123",
-																function: {
-																	name: "get_weather",
-																	arguments: '{"location":"SF"}',
-																},
-															},
-														],
-													},
-													index: 0,
-												},
-											],
-											usage: null,
-										}
-									} else {
-										yield {
-											choices: [
-												{
-													delta: { content: "Test response" },
-													index: 0,
-												},
-											],
-											usage: null,
-										}
-									}
-
-									yield {
+							// For thinking models, emit reasoning_content first
+							if (isThinkingModel) {
+								chunks.push(
+									{
 										choices: [
 											{
-												delta: {},
+												delta: { reasoning_content: "Let me think about this..." },
 												index: 0,
-												finish_reason: isToolCallTest ? "tool_calls" : "stop",
 											},
 										],
-										usage: {
-											prompt_tokens: 10,
-											completion_tokens: 5,
-											total_tokens: 15,
-											prompt_tokens_details: {
-												cache_miss_tokens: 8,
-												cached_tokens: 2,
+										usage: null,
+									},
+									{
+										choices: [
+											{
+												delta: { reasoning_content: " I'll analyze step by step." },
+												index: 0,
 											},
-										},
-									}
-								},
+										],
+										usage: null,
+									},
+								)
 							}
+
+							// For tool call tests with thinking mode, emit tool call
+							if (isThinkingModel && isToolCallTest) {
+								chunks.push({
+									choices: [
+										{
+											delta: {
+												tool_calls: [
+													{
+														index: 0,
+														id: "call_123",
+														function: {
+															name: "get_weather",
+															arguments: '{"location":"SF"}',
+														},
+													},
+												],
+											},
+											index: 0,
+										},
+									],
+									usage: null,
+								})
+							} else {
+								chunks.push({
+									choices: [
+										{
+											delta: { content: "Test response" },
+											index: 0,
+										},
+									],
+									usage: null,
+								})
+							}
+
+							chunks.push({
+								choices: [
+									{
+										delta: {},
+										index: 0,
+										finish_reason: isToolCallTest ? "tool_calls" : "stop",
+									},
+								],
+								usage: {
+									prompt_tokens: 10,
+									completion_tokens: 5,
+									total_tokens: 15,
+									prompt_tokens_details: {
+										cache_miss_tokens: 8,
+										cached_tokens: 2,
+									},
+								},
+							})
+
+							return asyncStreamFrom(chunks)
 						}),
 					},
 				},
@@ -312,11 +315,7 @@ describe("DeepSeekHandler", () => {
 		]
 
 		it("should handle streaming responses", async () => {
-			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -325,11 +324,7 @@ describe("DeepSeekHandler", () => {
 		})
 
 		it("should include usage information", async () => {
-			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks.length).toBeGreaterThan(0)
@@ -338,11 +333,7 @@ describe("DeepSeekHandler", () => {
 		})
 
 		it("should include cache metrics in usage information", async () => {
-			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks.length).toBeGreaterThan(0)
@@ -351,40 +342,34 @@ describe("DeepSeekHandler", () => {
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
-					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
@@ -401,9 +386,9 @@ describe("DeepSeekHandler", () => {
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -413,18 +398,15 @@ describe("DeepSeekHandler", () => {
 								index: 0,
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
@@ -508,10 +490,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(stream)
 
 			// Should have reasoning chunks
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
@@ -527,9 +506,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
+			await collectStream(stream)
 
 			// Verify that the thinking parameter was passed to the API
 			// Note: mockCreate receives two arguments - request options and path options
@@ -550,9 +527,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = v4Handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -572,9 +547,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = v4Handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
+			await collectStream(stream)
 
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.max_completion_tokens).toBe(32_000)
@@ -588,9 +561,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = v4Handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
+			await collectStream(stream)
 
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.thinking).toEqual({ type: "disabled" })
@@ -604,9 +575,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = customHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-				// Consume the stream
-			}
+			await collectStream(stream)
 
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.thinking).toBeUndefined()
@@ -632,10 +601,7 @@ describe("DeepSeekHandler", () => {
 			]
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages, { taskId: "test", tools })
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks: any[] = await collectStream(stream)
 
 			// Should have reasoning chunks
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")

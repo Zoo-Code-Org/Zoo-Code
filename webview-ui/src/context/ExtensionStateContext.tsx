@@ -195,83 +195,94 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	}
 }
 
-export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-	const [state, setState] = useState<ExtensionState>({
-		apiConfiguration: {},
-		version: "",
-		clineMessages: [],
-		taskHistory: [],
-		shouldShowAnnouncement: false,
-		allowedCommands: [],
-		deniedCommands: [],
-		soundEnabled: false,
-		soundVolume: 0.5,
-		ttsEnabled: false,
-		ttsSpeed: 1.0,
-		enableCheckpoints: true,
-		checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
-		language: "en", // Default language code
-		writeDelayMs: 1000,
-		diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
-		terminalShellIntegrationTimeout: 4000,
-		mcpEnabled: true,
-		taskSyncEnabled: false,
-		currentApiConfigName: "default",
-		listApiConfigMeta: [],
-		mode: defaultModeSlug,
-		customModePrompts: defaultPrompts,
-		customSupportPrompts: {},
-		experiments: experimentDefault,
-		enhancementApiConfigId: "",
-		hasOpenedModeSelector: false, // Default to false (not opened yet)
-		autoApprovalEnabled: false,
-		customModes: [],
-		maxOpenTabsContext: 20,
-		maxWorkspaceFiles: 200,
-		cwd: "",
-		telemetrySetting: "unset",
-		showRooIgnoredFiles: true, // Default to showing .rooignore'd files with lock symbol (current behavior).
-		enableSubfolderRules: false, // Default to disabled - must be enabled to load rules from subdirectories
-		renderContext: "sidebar",
-		maxReadFileLine: -1, // Default max line limit for read_file tool (-1 for default)
-		maxImageFileSize: 5, // Default max image file size in MB
-		maxTotalImageSize: 20, // Default max total image size in MB
-		pinnedApiConfigs: {}, // Empty object for pinned API configs
-		terminalZshOhMy: false, // Default Oh My Zsh integration setting
-		terminalZshP10k: false, // Default Powerlevel10k integration setting
-		terminalZdotdir: false, // Default ZDOTDIR handling setting
-		terminalProfile: undefined, // Default VS Code terminal profile (use VS Code default)
-		historyPreviewCollapsed: false, // Initialize the new state (default to expanded)
-		reasoningBlockCollapsed: true, // Default to collapsed
-		enterBehavior: "send", // Default: Enter sends, Shift+Enter creates newline
-		cloudUserInfo: null,
-		cloudIsAuthenticated: false,
-		cloudOrganizations: [],
-		sharingEnabled: false,
-		publicSharingEnabled: false,
-		organizationAllowList: ORGANIZATION_ALLOW_ALL,
-		organizationSettingsVersion: -1,
-		autoCondenseContext: true,
-		autoCondenseContextPercent: 100,
-		profileThresholds: {},
-		codebaseIndexConfig: {
-			codebaseIndexEnabled: true,
-			codebaseIndexQdrantUrl: "http://localhost:6333",
-			codebaseIndexEmbedderProvider: "openai",
-			codebaseIndexEmbedderBaseUrl: "",
-			codebaseIndexEmbedderModelId: "",
-			codebaseIndexSearchMaxResults: undefined,
-			codebaseIndexSearchMinScore: undefined,
-		},
-		codebaseIndexModels: { ollama: {}, openai: {} },
-		includeDiagnosticMessages: true,
-		maxDiagnosticMessages: 50,
-		openRouterImageApiKey: "",
-		openRouterImageGenerationSelectedModel: "",
-		includeCurrentTime: true,
-		includeCurrentCost: true,
-		lockApiConfigAcrossModes: false,
-	})
+const createInitialExtensionState = (): ExtensionState => ({
+	apiConfiguration: {},
+	version: "",
+	clineMessages: [],
+	taskHistory: [],
+	shouldShowAnnouncement: false,
+	allowedCommands: [],
+	deniedCommands: [],
+	soundEnabled: false,
+	soundVolume: 0.5,
+	ttsEnabled: false,
+	ttsSpeed: 1.0,
+	enableCheckpoints: true,
+	checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
+	language: "en", // Default language code
+	writeDelayMs: 1000,
+	diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
+	terminalShellIntegrationTimeout: 4000,
+	mcpEnabled: true,
+	taskSyncEnabled: false,
+	currentApiConfigName: "default",
+	listApiConfigMeta: [],
+	mode: defaultModeSlug,
+	customModePrompts: defaultPrompts,
+	customSupportPrompts: {},
+	experiments: experimentDefault,
+	enhancementApiConfigId: "",
+	hasOpenedModeSelector: false, // Default to false (not opened yet)
+	autoApprovalEnabled: false,
+	customModes: [],
+	maxOpenTabsContext: 20,
+	maxWorkspaceFiles: 200,
+	cwd: "",
+	telemetrySetting: "unset",
+	showRooIgnoredFiles: true, // Default to showing .rooignore'd files with lock symbol (current behavior).
+	enableSubfolderRules: false, // Default to disabled - must be enabled to load rules from subdirectories
+	renderContext: "sidebar",
+	maxReadFileLine: -1, // Default max line limit for read_file tool (-1 for default)
+	maxImageFileSize: 5, // Default max image file size in MB
+	maxTotalImageSize: 20, // Default max total image size in MB
+	pinnedApiConfigs: {}, // Empty object for pinned API configs
+	terminalZshOhMy: false, // Default Oh My Zsh integration setting
+	terminalZshP10k: false, // Default Powerlevel10k integration setting
+	terminalZdotdir: false, // Default ZDOTDIR handling setting
+	terminalProfile: undefined, // Default VS Code terminal profile (use VS Code default)
+	historyPreviewCollapsed: false, // Initialize the new state (default to expanded)
+	reasoningBlockCollapsed: true, // Default to collapsed
+	enterBehavior: "send", // Default: Enter sends, Shift+Enter creates newline
+	cloudUserInfo: null,
+	cloudIsAuthenticated: false,
+	cloudOrganizations: [],
+	sharingEnabled: false,
+	publicSharingEnabled: false,
+	organizationAllowList: ORGANIZATION_ALLOW_ALL,
+	organizationSettingsVersion: -1,
+	autoCondenseContext: true,
+	autoCondenseContextPercent: 100,
+	profileThresholds: {},
+	codebaseIndexConfig: {
+		codebaseIndexEnabled: true,
+		codebaseIndexQdrantUrl: "http://localhost:6333",
+		codebaseIndexEmbedderProvider: "openai",
+		codebaseIndexEmbedderBaseUrl: "",
+		codebaseIndexEmbedderModelId: "",
+		codebaseIndexSearchMaxResults: undefined,
+		codebaseIndexSearchMinScore: undefined,
+	},
+	codebaseIndexModels: { ollama: {}, openai: {} },
+	includeDiagnosticMessages: true,
+	maxDiagnosticMessages: 50,
+	openRouterImageApiKey: "",
+	openRouterImageGenerationSelectedModel: "",
+	includeCurrentTime: true,
+	includeCurrentCost: true,
+	lockApiConfigAcrossModes: false,
+})
+
+type ExtensionStateProviderInitialState = Partial<ExtensionState> & {
+	routerModels?: RouterModels
+}
+
+export const ExtensionStateContextProvider: React.FC<{
+	children: React.ReactNode
+	initialState?: ExtensionStateProviderInitialState
+}> = ({ children, initialState }) => {
+	const [state, setState] = useState<ExtensionState>(() =>
+		mergeExtensionState(createInitialExtensionState(), initialState ?? {}),
+	)
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
@@ -281,19 +292,30 @@ export const ExtensionStateContextProvider: React.FC<{ children: React.ReactNode
 	const [commands, setCommands] = useState<Command[]>([])
 	const [mcpServers, setMcpServers] = useState<McpServer[]>([])
 	const [currentCheckpoint, setCurrentCheckpoint] = useState<string>()
-	const [extensionRouterModels, setExtensionRouterModels] = useState<RouterModels | undefined>(undefined)
-	const [marketplaceItems, setMarketplaceItems] = useState<any[]>([])
-	const [alwaysAllowFollowupQuestions, setAlwaysAllowFollowupQuestions] = useState(false) // Add state for follow-up questions auto-approve
-	const [followupAutoApproveTimeoutMs, setFollowupAutoApproveTimeoutMs] = useState<number | undefined>(undefined) // Will be set from global settings
-	const [marketplaceInstalledMetadata, setMarketplaceInstalledMetadata] = useState<MarketplaceInstalledMetadata>({
-		project: {},
-		global: {},
-	})
+	const [extensionRouterModels, setExtensionRouterModels] = useState<RouterModels | undefined>(
+		() => initialState?.routerModels,
+	)
+	const [marketplaceItems, setMarketplaceItems] = useState<any[]>(() => initialState?.marketplaceItems ?? [])
+	const [alwaysAllowFollowupQuestions, setAlwaysAllowFollowupQuestions] = useState(
+		() => initialState?.alwaysAllowFollowupQuestions ?? false,
+	) // Add state for follow-up questions auto-approve
+	const [followupAutoApproveTimeoutMs, setFollowupAutoApproveTimeoutMs] = useState<number | undefined>(
+		() => initialState?.followupAutoApproveTimeoutMs,
+	) // Will be set from global settings
+	const [marketplaceInstalledMetadata, setMarketplaceInstalledMetadata] = useState<MarketplaceInstalledMetadata>(
+		() =>
+			initialState?.marketplaceInstalledMetadata ?? {
+				project: {},
+				global: {},
+			},
+	)
 	const [skills, setSkills] = useState<SkillMetadata[]>([])
 	const [rules, setRules] = useState<RuleMetadata[]>([])
-	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(true)
-	const [includeCurrentTime, setIncludeCurrentTime] = useState(true)
-	const [includeCurrentCost, setIncludeCurrentCost] = useState(true)
+	const [includeTaskHistoryInEnhance, setIncludeTaskHistoryInEnhance] = useState(
+		() => initialState?.includeTaskHistoryInEnhance ?? true,
+	)
+	const [includeCurrentTime, setIncludeCurrentTime] = useState(() => initialState?.includeCurrentTime ?? true)
+	const [includeCurrentCost, setIncludeCurrentCost] = useState(() => initialState?.includeCurrentCost ?? true)
 
 	const setListApiConfigMeta = useCallback(
 		(value: ProviderSettingsEntry[]) => setState((prevState) => ({ ...prevState, listApiConfigMeta: value })),

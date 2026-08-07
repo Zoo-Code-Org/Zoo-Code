@@ -344,9 +344,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "OpenAI の制御を強化 — OpenAI Codex で Fast 優先モードを使用し、OpenAI 互換モデルではより高い reasoning effort を選択できます。",
-			"highlight2": "プロバイダーとモデルの信頼性を向上 — router メタデータ処理、Ollama モデル更新、Bedrock のプロキシ対応、Friendli の reasoning 制御を改善しました。",
-			"highlight3": "設定と開発ワークフローを改善 — 未保存の編集を設定画面で保持し、短いターミナルコマンドを正しく完了し、Architect のプランにはワークスペース相対パスを使用します。残っていたユーザー向け Roo 表記も Zoo に更新しました。"
+			"highlight1": "Destructive Command Guard（DCG）で長時間のタスクを中断なく実行 — DCG が危険なコマンドをブロックするため、承認ボタンを何度も押さなくても Zoo が作業を続けられます。",
+			"highlight2": "プロバイダーの制御と信頼性を向上 — OpenAI Codex の応答速度を選択し、更新された DeepSeek 設定を使用しながら、実行中のタスクをプロファイル変更から分離できます。",
+			"highlight3": "ターミナル実行の重大な問題を修正 — Zoo はターミナルコマンドの完了を待ってから次のステップを開始するようになりました。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

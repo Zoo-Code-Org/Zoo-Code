@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -35,28 +34,25 @@
 
 Bạn có thể xem hướng dẫn nhanh để chuyển từ Roo Code sang Zoo Code trong [hướng dẫn chuyển đổi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Chúng tôi muốn hỗ trợ người dùng nhiều nhất có thể trong quá trình chuyển đổi, và đó chính là lý do chúng tôi có [Reddit](https://www.reddit.com/r/ZooCode) và [Discord](https://discord.gg/VxfP4Vx3gX). Nếu bạn gặp vấn đề hoặc có câu hỏi, cứ vào hỏi nhé.
 
-## Điểm mới trong v3.74.0
+## Những gì Zoo Code đã bổ sung kể từ Roo Code
 
-**Zoo Gateway đã ra mắt!**
+Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục mở rộng với:
 
-Gateway là một điểm cuối duy nhất cho tất cả các nhà cung cấp, với một số dư và bảng phân tích chi tiêu/mức sử dụng theo từng yêu cầu.
+- **Trí tuệ codebase Semble** — tìm kiếm mã theo ngữ nghĩa nhanh chóng, theo yêu cầu, tự động thiết lập và không cần workflow lập chỉ mục riêng.
+- **Workflow Orchestrator mạnh mẽ hơn** — ủy quyền an toàn hơn, phối hợp tác vụ song song, khôi phục tác vụ cha/con đáng tin cậy và cách ly tốt hơn giữa tác vụ con với hồ sơ provider.
+- **Chạy tự động lâu hơn với Destructive Command Guard (DCG)** — tự động chặn lệnh nguy hiểm trong khi công việc đáng tin cậy vẫn tiếp tục mà không cần yêu cầu phê duyệt lặp lại.
+- **Các model mới nhất** — liên tục hỗ trợ các dòng model Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax và nhiều dòng khác.
+- **Nhiều cách kết nối hơn** — các provider mới và được mở rộng, gồm Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go và nhiều provider khác.
+- **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
+- **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-**Thiết lập:**
+## Điểm mới trong v3.76.0
 
-- Thêm tín dụng: https://www.zoocode.dev/dashboard/credits
-- Đăng nhập từ tiện ích mở rộng.
-- Trong phần cài đặt, chọn Zoo Gateway làm nhà cung cấp khi tạo hồ sơ cho các mô hình khác nhau
-
-Bạn có thể xem mức sử dụng và phí trong [bảng điều khiển](https://www.zoocode.dev/dashboard).
-
-Mô hình: https://www.zoocode.dev/dashboard/models
-
-- **Nhiều tùy chọn điều khiển OpenAI hơn** — dùng chế độ ưu tiên Fast với OpenAI Codex và chọn reasoning effort cao hơn cho các model tương thích OpenAI.
-- **Provider và model đáng tin cậy hơn** — cải thiện xử lý metadata của router, làm mới model Ollama, hỗ trợ proxy Bedrock và điều khiển reasoning của Friendli.
-- **Cài đặt và workflow phát triển mượt mà hơn** — cài đặt giữ lại các chỉnh sửa chưa lưu, lệnh terminal ngắn hoàn tất đúng cách, kế hoạch architect dùng đường dẫn tương đối với workspace và các nhãn Roo còn hiển thị cho người dùng đã được cập nhật thành Zoo.
-- **Nền tảng tác vụ vững chắc hơn** — task registry mới và scheduler dựa trên semaphore chuẩn bị cho Zoo Code phối hợp tác vụ an toàn hơn.
-- **Kiến trúc provider nhất quán** — identifier của provider và các thành phần service tier giờ được tập trung trong API, core, shared types và webview.
-- Cải tiến bảo mật, phụ thuộc, lint, hồi quy hình ảnh và kiểm thử end-to-end.
+- **Chạy tác vụ lâu hơn, không bị gián đoạn với Destructive Command Guard (DCG)** — DCG chặn các lệnh nguy hiểm trong khi vẫn để Zoo tiếp tục làm việc mà bạn không phải liên tục bấm nút phê duyệt, đồng thời tăng cường bảo mật cho việc tải xuống và cài đặt binary được quản lý.
+- **Kiểm soát provider và độ tin cậy tốt hơn** — chọn tốc độ phản hồi của OpenAI Codex, dùng cấu hình DeepSeek đã cập nhật và hưởng lợi từ khả năng cách ly mạnh hơn giữa thay đổi hồ sơ provider với tác vụ đang chạy.
+- **Bản sửa lỗi quan trọng cho việc chạy lệnh terminal** — Zoo giờ sẽ chờ lệnh terminal hoàn tất trước khi bắt đầu bước tiếp theo, ngăn công việc chồng chéo và model tiếp tục quá sớm.
+- Cơ chế gom nhóm thông minh hơn sẽ nhóm các phê duyệt công cụ liên quan và giữ riêng những yêu cầu không liên quan.
+- Việc gửi telemetry và tải cache model ổn định hơn khi có lỗi hoặc nhiều yêu cầu đồng thời.
 
 ## Zoo Code có thể làm gì cho BẠN?
 
@@ -80,24 +76,9 @@ Zoo Code thích ứng với cách bạn làm việc, chứ không phải ngượ
 
 Xem thêm: [Sử dụng Chế độ](https://docs.zoocode.dev/basic-usage/using-modes) • [Chế độ tùy chỉnh](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Video hướng dẫn & tính năng
-
-<div align="center">
-
-|                                                                                                                                                                        |                                                                                                                                                                           |                                                                                                                                                                            |
-| :--------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Cài đặt Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Định cấu hình Hồ sơ</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Lập chỉ mục cơ sở mã</b> |
-| <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Chế độ tùy chỉnh</b> |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Điểm kiểm tra</b>    |   <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Quản lý Ngữ cảnh</b>   |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Thêm video hướng dẫn và tính năng nhanh...</a>
-</p>
-
 ## Tài nguyên
 
 - **[Tài liệu](https://docs.zoocode.dev):** Hướng dẫn chính thức để cài đặt, cấu hình và sử dụng thành thạo Zoo Code.
-- **[Kênh YouTube](https://youtube.com/@roocodeyt?feature=shared):** Xem các video hướng dẫn và các tính năng đang hoạt động.
 - **[Máy chủ Discord](https://discord.gg/VxfP4Vx3gX):** Tham gia cộng đồng để được trợ giúp và thảo luận trong thời gian thực.
 - **[Cộng đồng Reddit](https://www.reddit.com/r/ZooCode):** Chia sẻ kinh nghiệm của bạn và xem những người khác đang xây dựng gì.
 - **[Vấn đề trên GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Báo cáo lỗi và theo dõi quá trình phát triển.

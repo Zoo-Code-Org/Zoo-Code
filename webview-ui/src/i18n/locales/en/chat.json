@@ -363,9 +363,9 @@
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "What's New:",
-			"highlight1": "More OpenAI controls — use Fast priority mode with OpenAI Codex and choose higher reasoning effort for OpenAI-compatible models.",
-			"highlight2": "More reliable providers and models — improved router metadata handling, Ollama model refresh, Bedrock proxy support, and Friendli reasoning controls.",
-			"highlight3": "Smoother settings and developer workflows — settings now preserve unsaved edits, short terminal commands complete cleanly, architect plans use workspace-relative paths, and remaining user-facing Roo branding is updated to Zoo."
+			"highlight1": "Run longer, uninterrupted tasks with Destructive Command Guard (DCG) — DCG blocks dangerous commands while letting Zoo keep working without you continuously pressing approval buttons.",
+			"highlight2": "Better provider controls and reliability — choose OpenAI Codex response speed, use updated DeepSeek configurations, and keep running tasks isolated from profile changes.",
+			"highlight3": "Critical terminal execution fix — Zoo now waits for terminal commands to finish before starting the next step."
 		},
 		"cloudAgents": {
 			"heading": "New in the Cloud:",

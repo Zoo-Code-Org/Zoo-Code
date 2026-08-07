@@ -174,14 +174,7 @@ describe("Destructive Command Guard manager", () => {
 		const expectedExecutable = process.platform === "win32" ? "powershell" : "unzip"
 		const expectedArgs =
 			process.platform === "win32"
-				? [
-						"-NoProfile",
-						"-NonInteractive",
-						"-Command",
-						"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
-						"C:\\dcg.zip",
-						"C:\\staging",
-					]
+				? ["-NoProfile", "-NonInteractive", "-EncodedCommand", expect.any(String)]
 				: ["-o", "C:\\dcg.zip", "-d", "C:\\staging"]
 
 		expect(mockSpawn).toHaveBeenCalledWith(expectedExecutable, expectedArgs, {
@@ -361,10 +354,11 @@ describe("Destructive Command Guard manager", () => {
 					kill: vi.fn(),
 				})
 				setImmediate(async () => {
-					const destinationIndex = args.indexOf(
-						"$archivePath = $args[0]; $destination = $args[1]; Expand-Archive -LiteralPath $archivePath -DestinationPath $destination -Force",
-					)
-					const stagingDir = args[destinationIndex + 2]
+					const encodedCommandIndex = args.indexOf("-EncodedCommand")
+					const script = Buffer.from(args[encodedCommandIndex + 1], "base64").toString("utf16le")
+					const destinationMatch = script.match(/\$destination = '((?:[^']|'')*)'/)
+					if (!destinationMatch) throw new Error("Expected a PowerShell destination")
+					const stagingDir = destinationMatch[1].replace(/''/g, "'")
 					await writeFile(path.join(stagingDir, info.binary), "ZIP executable")
 					child.emit("close", 0)
 				})
