@@ -60,7 +60,13 @@ vi.mock("vscode", () => {
 })
 
 import * as vscode from "vscode"
-import { VsCodeLmHandler } from "../vscode-lm"
+import {
+	VsCodeLmHandler,
+	extractLeakedToolCalls,
+	trailingPartialToolMarkerLength,
+	middleOutTruncate,
+	truncateToolResultsToFitWindow,
+} from "../vscode-lm"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
@@ -1072,6 +1078,195 @@ describe("VsCodeLmHandler", () => {
 			] as unknown as Anthropic.Messages.MessageParam["content"]
 			const result = handler["cleanMessageContent"](input) as unknown as Array<Record<string, unknown>>
 			expect(result[0].extra).toBe(42)
+		})
+	})
+})
+
+describe("leaked tool-call recovery", () => {
+	// Builders keep the XML fixtures readable and prevent this file's own markup from being
+	// mistaken for a real tool call.
+	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
+	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+
+	describe("extractLeakedToolCalls", () => {
+		it("recovers a known-tool block and strips it from the leftover text", () => {
+			const text = `Working on it.\n${invoke("update_todo_list", param("todos", "[x] one\n[ ] two"))}`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one\n[ ] two" } }])
+			expect(leftoverText).toBe("Working on it.\n")
+		})
+
+		it("recovers an unwrapped leak preceded by a stray token", () => {
+			const text = `court\n${invoke("update_todo_list", param("todos", "[x] done"))}`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] done" } }])
+			expect(leftoverText).toBe("court\n")
+		})
+
+		it("recovers multiple params and strips function-call wrapper tags", () => {
+			const body = param("mode", "code") + param("message", "go")
+			const text = `<function_calls>${invoke("new_task", body)}</function_calls>`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["new_task"]))
+
+			expect(calls).toEqual([{ name: "new_task", input: { mode: "code", message: "go" } }])
+			expect(leftoverText).toBe("")
+		})
+
+		it("passes through invoke blocks for tools that were not offered", () => {
+			const text = invoke("some_other_tool", param("x", "1"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe(text)
+		})
+
+		it("returns no calls for ordinary text", () => {
+			const { calls, leftoverText } = extractLeakedToolCalls("just a normal reply", new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([])
+			expect(leftoverText).toBe("just a normal reply")
+		})
+	})
+
+	describe("trailingPartialToolMarkerLength", () => {
+		it("holds back a split marker prefix at the end of a chunk", () => {
+			expect(trailingPartialToolMarkerLength("some text <in")).toBe(3)
+		})
+
+		it("returns 0 for plain text and complete tags", () => {
+			expect(trailingPartialToolMarkerLength("hello world")).toBe(0)
+			expect(trailingPartialToolMarkerLength("a < b")).toBe(0)
+			expect(trailingPartialToolMarkerLength("text <function_calls>")).toBe(0)
+		})
+	})
+})
+
+describe("context-window tool_result truncation", () => {
+	describe("middleOutTruncate", () => {
+		it("returns text unchanged when within the limit", () => {
+			expect(middleOutTruncate("hello world", 100)).toBe("hello world")
+		})
+
+		it("keeps the head and tail and inserts a truncation marker", () => {
+			const text = "A".repeat(500) + "B".repeat(500)
+			const result = middleOutTruncate(text, 200)
+
+			expect(result.length).toBeLessThanOrEqual(200)
+			expect(result).toContain("characters truncated to fit the model context window")
+			expect(result.startsWith("A")).toBe(true)
+			expect(result.endsWith("B")).toBe(true)
+		})
+
+		it("returns an empty string for a non-positive limit", () => {
+			expect(middleOutTruncate("anything", 0)).toBe("")
+		})
+	})
+
+	describe("truncateToolResultsToFitWindow", () => {
+		const toolUseMessage = (id: string): Anthropic.Messages.MessageParam => ({
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Calling a tool." },
+				{ type: "tool_use", id, name: "some_tool", input: { a: 1 } },
+			],
+		})
+
+		const toolResultMessage = (id: string, content: string): Anthropic.Messages.MessageParam => ({
+			role: "user",
+			content: [
+				{ type: "tool_result", tool_use_id: id, content },
+				{ type: "text", text: "<environment_details>env</environment_details>" },
+			],
+		})
+
+		const findBlock = (message: Anthropic.Messages.MessageParam, type: string) =>
+			(message.content as unknown as Array<{ type: string; [key: string]: unknown }>).find(
+				(block) => block.type === type,
+			)!
+
+		it("is a no-op when the conversation already fits the budget", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "small result"),
+			]
+			const before = JSON.parse(JSON.stringify(messages))
+
+			truncateToolResultsToFitWindow(messages, 100_000)
+
+			expect(messages).toEqual(before)
+		})
+
+		it("shrinks an oversized tool_result so the conversation fits the budget", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "X".repeat(50_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 10_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			expect(toolResult.tool_use_id).toBe("t1") // pairing preserved
+			expect(String(toolResult.content).length).toBeLessThanOrEqual(10_000)
+			expect(String(toolResult.content)).toContain("characters truncated")
+		})
+
+		it("truncates the largest tool_result first and leaves small ones intact", () => {
+			const small = "small but real result"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "B".repeat(40_000)),
+				toolUseMessage("t2"),
+				toolResultMessage("t2", small),
+			]
+
+			truncateToolResultsToFitWindow(messages, 12_000)
+
+			expect(String(findBlock(messages[1], "tool_result").content)).toContain("characters truncated")
+			expect(findBlock(messages[3], "tool_result").content).toBe(small) // untouched
+		})
+
+		it("never truncates tool_use blocks, assistant text, or environment details", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				toolResultMessage("t1", "X".repeat(50_000)),
+			]
+
+			truncateToolResultsToFitWindow(messages, 8_000)
+
+			expect(findBlock(messages[0], "text").text).toBe("Calling a tool.")
+			expect(findBlock(messages[0], "tool_use")).toMatchObject({ id: "t1", name: "some_tool" })
+			expect(findBlock(messages[1], "text").text).toBe("<environment_details>env</environment_details>")
+		})
+
+		it("handles array-form tool_result content and keeps it valid", () => {
+			const messages: Anthropic.Messages.MessageParam[] = [
+				toolUseMessage("t1"),
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "t1",
+							content: [{ type: "text", text: "Y".repeat(40_000) }],
+						},
+					],
+				},
+			]
+
+			truncateToolResultsToFitWindow(messages, 8_000)
+
+			const toolResult = findBlock(messages[1], "tool_result")
+			expect(toolResult.tool_use_id).toBe("t1")
+			expect(Array.isArray(toolResult.content)).toBe(true)
+			const parts = toolResult.content as Array<{ type: string; text?: string }>
+			expect(parts[0].type).toBe("text")
+			expect(String(parts[0].text)).toContain("characters truncated")
 		})
 	})
 })
