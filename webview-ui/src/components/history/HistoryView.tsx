@@ -605,6 +605,7 @@ const HistoryViewInner = memo(({ onDone }: HistoryViewProps) => {
 									checked={tasks.length > 0 && selectedTaskIds.length === tasks.length}
 									onCheckedChange={(checked) => toggleSelectAll(checked === true)}
 									variant="description"
+									data-testid="select-all-checkbox"
 								/>
 								<span className="text-vscode-foreground text-xs">
 									{selectedTaskIds.length === tasks.length
