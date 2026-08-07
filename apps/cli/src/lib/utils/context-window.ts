@@ -1,4 +1,4 @@
-import type { ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers, retiredProviderIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import type { RouterModels } from "@/ui/store.js"
 
@@ -36,24 +36,61 @@ export function getContextWindow(routerModels: RouterModels | null, apiConfigura
  */
 function getModelIdForProvider(config: ProviderSettings): string | undefined {
 	switch (config.apiProvider) {
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			return config.openRouterModelId
-		case "ollama":
+		case providerIdentifiers.ollama:
 			return config.ollamaModelId
-		case "lmstudio":
+		case providerIdentifiers.lmstudio:
 			return config.lmStudioModelId
-		case "openai":
+		case providerIdentifiers.openai:
 			return config.openAiModelId
-		case "requesty":
+		case providerIdentifiers.requesty:
 			return config.requestyModelId
-		case "unbound":
+		case providerIdentifiers.unbound:
 			return config.unboundModelId
-		case "litellm":
+		case providerIdentifiers.litellm:
 			return config.litellmModelId
-		case "vercel-ai-gateway":
+		case providerIdentifiers.vercelAiGateway:
 			return config.vercelAiGatewayModelId
-		default:
-			// For anthropic, bedrock, vertex, gemini, xai, etc.
+		case providerIdentifiers.opencodeGo:
+			return config.opencodeGoModelId
+		case providerIdentifiers.kenari:
+			return config.kenariModelId
+		case providerIdentifiers.zooGateway:
+			return config.zooGatewayModelId
+		case providerIdentifiers.anthropic:
+		case providerIdentifiers.bedrock:
+		case providerIdentifiers.baseten:
+		case providerIdentifiers.deepseek:
+		case providerIdentifiers.fireworks:
+		case providerIdentifiers.friendli:
+		case providerIdentifiers.gemini:
+		case providerIdentifiers.geminiCli:
+		case providerIdentifiers.mistral:
+		case providerIdentifiers.moonshot:
+		case providerIdentifiers.kimiCode:
+		case providerIdentifiers.minimax:
+		case providerIdentifiers.mimo:
+		case providerIdentifiers.openaiCodex:
+		case providerIdentifiers.openaiNative:
+		case providerIdentifiers.poe:
+		case providerIdentifiers.qwenCode:
+		case providerIdentifiers.sambanova:
+		case providerIdentifiers.vertex:
+		case providerIdentifiers.xai:
+		case providerIdentifiers.zai:
+		case retiredProviderIdentifiers.cerebras:
+		case retiredProviderIdentifiers.chutes:
+		case retiredProviderIdentifiers.deepinfra:
+		case retiredProviderIdentifiers.doubao:
+		case retiredProviderIdentifiers.featherless:
+		case retiredProviderIdentifiers.groq:
+		case retiredProviderIdentifiers.huggingface:
+		case retiredProviderIdentifiers.ioIntelligence:
+		case retiredProviderIdentifiers.roo:
+		case providerIdentifiers.vscodeLm:
+		case providerIdentifiers.fakeAi:
+		case undefined:
 			return config.apiModelId
 	}
 }
