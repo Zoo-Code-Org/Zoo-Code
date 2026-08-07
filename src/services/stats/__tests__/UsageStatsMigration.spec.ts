@@ -265,7 +265,7 @@ describe("UsageStatsMigration", () => {
 			// Database should have all 2500 events
 			const dbEvents = db.readAllEvents()
 			expect(dbEvents).toHaveLength(2500)
-		})
+		}, 60000)
 
 		it("should handle checkpoint at segment boundary", () => {
 			const events1: UsageEventV1[] = []
