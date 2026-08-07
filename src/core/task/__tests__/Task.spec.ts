@@ -36,6 +36,7 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+	streamingToolCallIndices: Map<string, number>
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -456,10 +457,176 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+			})
 		})
-	})
-
-	describe("constructor", () => {
+	
+		describe("ghost-quarantine", () => {
+			function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
+				return (async function* () {
+					yield* chunks
+				})()
+			}
+	
+			async function createGhostTask() {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "ghost task",
+					startTask: false,
+				})
+				const state = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...state,
+					apiConfiguration: mockApiConfig,
+					autoApprovalEnabled: false,
+				})
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				return task
+			}
+	
+			it("silently drops a legacy tool_call chunk with no name and no arguments", async () => {
+				const task = await createGhostTask()
+				const enforcementSpy = vi.spyOn(TelemetryService.instance, "captureToolCallEnforcement")
+	
+				vi.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(() => {
+						// Seed a real named tool_use (after the per-request reset) so the
+						// ghost-drop telemetry callCount filter executes over an existing
+						// tool_use block.
+						task.assistantMessageContent.push({
+							type: "tool_use",
+							name: "read_file" as never,
+							params: { path: "a.txt" },
+							partial: false,
+						} as never)
+						return stream([{ type: "tool_call", id: "ghost-1", name: "", arguments: "" } as ApiStreamChunk])
+					})
+					.mockImplementation(() => {
+						throw new Error("stop after ghost drop")
+					})
+	
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "trigger ghost" }])
+	
+				// The ghost must NOT become a tool_use block; only the seeded real call remains.
+				expect(task.assistantMessageContent.filter((b) => b.type === "tool_use")).toHaveLength(1)
+				// Ghost-drop telemetry must record the drop (counts/metadata only).
+				expect(enforcementSpy).toHaveBeenCalledWith(
+					task.taskId,
+					expect.objectContaining({ ghostDroppedCount: 1 }),
+				)
+			})
+	
+			it("silently drops a streaming ghost tool call (no resolved name/args) at stream finalize", async () => {
+				const task = await createGhostTask()
+				const enforcementSpy = vi.spyOn(TelemetryService.instance, "captureToolCallEnforcement")
+				const { NativeToolCallParser } = await import("../../assistant-message/NativeToolCallParser")
+				// After the ghost is spliced the assistant produced no visible content,
+				// triggering the empty-response retry prompt. Decline it so the loop ends.
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+	
+				// Force finalizeRawChunks() to surface a tool_call_end for the seeded
+				// ghost. The real parser only emits an end for named/started calls, so
+				// we stub it to model the defensive transport-artifact case: streaming
+				// state exists with an empty name and no argument bytes.
+				vi.spyOn(NativeToolCallParser, "finalizeRawChunks").mockReturnValue([
+					{ type: "tool_call_end", id: "ghost-2" },
+				])
+	
+				vi.spyOn(task, "attemptApiRequest").mockImplementationOnce(() => {
+					// Seed a streaming tool call that never resolved a name (transport
+					// artifact): the parser holds streaming state with an empty name and
+					// no argument bytes. A partial block + tracking index are registered
+					// as if tool_call_start had fired, so the ghost branch must splice it.
+					NativeToolCallParser.startStreamingToolCall("ghost-2", "")
+					getTaskTestAccess(task).streamingToolCallIndices.set("ghost-2", 0)
+					task.assistantMessageContent.push({
+						type: "tool_use",
+						name: "" as never,
+						params: {},
+						partial: true,
+					} as never)
+	
+					return stream([{ type: "text", text: "irrelevant" } as ApiStreamChunk])
+				})
+				.mockImplementation(() => {
+					throw new Error("stop after ghost drop")
+				})
+	
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "trigger streaming ghost" }])
+	
+				// The ghost is spliced out, leaving no tool_use behind.
+				expect(task.assistantMessageContent.filter((b) => b.type === "tool_use")).toHaveLength(0)
+				expect(getTaskTestAccess(task).streamingToolCallIndices.size).toBe(0)
+				// The ghost streaming state must be discarded (not finalized).
+				expect(NativeToolCallParser.getStreamingToolCallState("ghost-2")).toBeUndefined()
+				expect(enforcementSpy).toHaveBeenCalledWith(
+					task.taskId,
+					expect.objectContaining({ ghostDroppedCount: 1 }),
+				)
+			})
+	
+			it("silently drops an inline streaming ghost at the tool_call_partial tool_call_end event", async () => {
+				const task = await createGhostTask()
+				const enforcementSpy = vi.spyOn(TelemetryService.instance, "captureToolCallEnforcement")
+				const { NativeToolCallParser } = await import("../../assistant-message/NativeToolCallParser")
+				// After the ghost is spliced the assistant produced no visible content,
+				// triggering the empty-response retry prompt. Decline it so the loop ends.
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+	
+				// Force processRawChunk() to surface a tool_call_end for the seeded ghost.
+				// In production the inline tool_call_end branch is exercised when the
+				// parser emits an end event mid-stream; we model the defensive
+				// transport-artifact case where streaming state has an empty name and
+				// no argument bytes at the moment the end event arrives.
+				vi.spyOn(NativeToolCallParser, "processRawChunk").mockReturnValue([
+					{ type: "tool_call_end", id: "ghost-3" },
+				])
+	
+				vi.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(() => {
+						// Seed the ghost at index 0, a REAL named tool_use at index 1 (so
+						// the callCount telemetry filter executes over a tool_use block),
+						// and a second tracked call at index 2 (so the re-index loop
+						// shifts it down after the ghost splice).
+						NativeToolCallParser.startStreamingToolCall("ghost-3", "")
+						getTaskTestAccess(task).streamingToolCallIndices.set("ghost-3", 0)
+						task.assistantMessageContent.push({
+							type: "tool_use",
+							name: "" as never,
+							params: {},
+							partial: true,
+						} as never)
+						task.assistantMessageContent.push({
+							type: "tool_use",
+							name: "read_file" as never,
+							params: { path: "a.txt" },
+							partial: false,
+						} as never)
+						getTaskTestAccess(task).streamingToolCallIndices.set("real-3", 1)
+						NativeToolCallParser.startStreamingToolCall("real-3", "read_file")
+	
+						return stream([{ type: "tool_call_partial", index: 0, id: "ghost-3" } as ApiStreamChunk])
+					})
+					.mockImplementation(() => {
+						throw new Error("stop after ghost drop")
+					})
+	
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "trigger inline streaming ghost" }])
+	
+				// The ghost block is spliced out; the real named tool_use survives.
+				expect(task.assistantMessageContent.filter((b) => b.type === "tool_use")).toHaveLength(1)
+				// The higher-index tracked call is shifted down after the ghost splice.
+				expect(getTaskTestAccess(task).streamingToolCallIndices.get("real-3")).toBe(0)
+				expect(getTaskTestAccess(task).streamingToolCallIndices.has("ghost-3")).toBe(false)
+				expect(NativeToolCallParser.getStreamingToolCallState("ghost-3")).toBeUndefined()
+				expect(enforcementSpy).toHaveBeenCalledWith(
+					task.taskId,
+					expect.objectContaining({ ghostDroppedCount: 1 }),
+				)
+			})
+		})
+	
+		describe("constructor", () => {
 		it("should always have diff strategy defined", async () => {
 			const cline = new Task({
 				provider: mockProvider,
