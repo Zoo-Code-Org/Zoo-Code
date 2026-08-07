@@ -27,7 +27,7 @@
 	},
 	"sections": {
 		"providers": "Proveedores",
-		"autocomplete": "Autocompletado",
+		"autocomplete": "Autocompletado (Beta)",
 		"modes": "Modos",
 		"mcp": "Servidores MCP",
 		"worktrees": "Worktrees",
@@ -76,9 +76,7 @@
 				"codestral": "Mistral Codestral",
 				"chat-fallback": "Modelo de chat (alternativa más lenta)"
 			},
-			"nativeFimHint": "Habla directamente con un endpoint fill-in-the-middle: la opción más rápida y precisa.",
-			"chatHint": "Enrutado por la vía de chat. Funciona con cualquier proveedor, pero es más lento y menos preciso que un endpoint fill-in-the-middle.",
-			"chatWarning": "Este proveedor se usa como modelo de chat. Para mejores resultados elige Ollama, un servidor compatible con OpenAI o Codestral con un modelo base fill-in-the-middle."
+			"nativeFimHint": "Habla directamente con un endpoint fill-in-the-middle: la opción más rápida y precisa."
 		},
 		"baseUrl": {
 			"label": "URL base"
@@ -125,7 +123,8 @@
 		},
 		"maxOutputTokens": {
 			"label": "Longitud máxima de la sugerencia",
-			"description": "Límite de una sola sugerencia. Valores bajos responden antes y rara vez cortan código útil."
+			"description": "Límite de una sola sugerencia. Valores bajos responden antes y rara vez cortan código útil.",
+			"clamped": "La configuración guardada tiene {{stored}}; se muestra el máximo de {{max}}. Mueve el control para guardar un valor dentro del rango."
 		},
 		"connection": {
 			"needsKey": "Introduce una clave API para cargar los modelos disponibles en este endpoint.",

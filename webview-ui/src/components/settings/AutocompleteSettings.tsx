@@ -15,7 +15,6 @@ import { useAppTranslation } from "@/i18n/TranslationContext"
 import { SectionHeader } from "./SectionHeader"
 import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
-import { PROVIDERS } from "./constants"
 import { AutocompleteProfileBar } from "./autocomplete/AutocompleteProfileBar"
 import { AutocompleteModelPicker } from "./autocomplete/AutocompleteModelPicker"
 import { SearchableSelect, Slider } from "../ui"
@@ -39,11 +38,25 @@ const BASE_URL_PLACEHOLDERS: Record<string, string> = {
 const PROVIDERS_REQUIRING_API_KEY: ReadonlySet<string> = new Set(["codestral"])
 
 /**
- * The three transports that speak fill-in-the-middle natively.
+ * Slider bounds for the suggestion-length cap.
  *
- * Surfaced first because they are dramatically better at this task: they take a
- * prefix and a suffix directly, where every other provider has to be *asked* for
- * a completion through the chat path.
+ * Deliberately narrower than the schema's 1–2048: the post-processor already
+ * truncates to 12 lines, so tokens generated beyond roughly this ceiling are
+ * discarded after the user has waited for them.
+ */
+const MAX_OUTPUT_TOKENS_RANGE = { min: 64, max: 512 } as const
+
+/**
+ * The transports that speak fill-in-the-middle natively — the whole of the
+ * provider dropdown.
+ *
+ * Autocomplete is FIM-only by design. Every other provider the extension supports
+ * has to be *asked* for a completion through the chat path, which is slower, less
+ * accurate, and discards the after-cursor suffix that makes FIM work at all.
+ * Offering them produced a dropdown of thirty entries where three worked well and
+ * the rest quietly underperformed — including several near-identical "OpenAI"
+ * rows (`openai-native`, `openai-codex`, `openai`) that differed only in ways
+ * invisible at the point of choosing.
  */
 const NATIVE_FIM_OPTIONS: readonly { value: string; label: string }[] = [
 	{ value: "ollama", label: "Ollama" },
@@ -51,31 +64,12 @@ const NATIVE_FIM_OPTIONS: readonly { value: string; label: string }[] = [
 	{ value: "codestral", label: "Mistral Codestral" },
 ]
 
-const NATIVE_FIM_VALUES = new Set(NATIVE_FIM_OPTIONS.map((option) => option.value))
-
-/**
- * Providers-tab ids that duplicate a native transport above.
- *
- * `openai` is labelled "OpenAI Compatible" and `ollama`/`lmstudio`/`mistral` name
- * the same servers our transports already reach — listing both put two nearly
- * identical entries in the dropdown, and picking the wrong one silently routed a
- * local server through the chat path with no endpoint field.
- */
-const REDUNDANT_PROVIDER_IDS: ReadonlySet<string> = new Set(["openai", "ollama", "lmstudio", "mistral"])
-
 /**
  * Providers reached at a user-supplied endpoint.
  *
- * Self-hosted surfaces (vLLM, LiteLLM, a local gateway) need a base URL just as
- * much as the native transports do; hosted APIs derive theirs from the provider.
+ * Codestral is absent because it derives its endpoint from the provider.
  */
-const PROVIDERS_WITH_BASE_URL: ReadonlySet<string> = new Set([
-	"ollama",
-	"openai-compatible",
-	"litellm",
-	"vercel-ai-gateway",
-	"zoo-gateway",
-])
+const PROVIDERS_WITH_BASE_URL: ReadonlySet<string> = new Set(["ollama", "openai-compatible"])
 
 export interface AutocompleteSettingsProps extends HTMLAttributes<HTMLDivElement> {
 	autocompleteConfig?: AutocompleteConfig
@@ -120,14 +114,22 @@ export const AutocompleteSettings = ({
 	const enabled = autocompleteConfig?.enabled ?? AUTOCOMPLETE_DEFAULTS.ENABLED
 	const provider = autocompleteConfig?.provider ?? AUTOCOMPLETE_DEFAULTS.PROVIDER
 	const debounceMs = autocompleteConfig?.debounceMs ?? AUTOCOMPLETE_DEFAULTS.DEBOUNCE_MS
-	const maxOutputTokens = autocompleteConfig?.maxOutputTokens ?? AUTOCOMPLETE_DEFAULTS.MAX_OUTPUT_TOKENS
+	// Clamped to the slider's own range. The schema permits up to 2048, so a config
+	// written by hand, imported, or saved before these bounds were tightened can hold
+	// a larger number — which the slider could only render as a handle pinned to the
+	// far right, indistinguishable from a legitimate maximum.
+	const storedMaxOutputTokens = autocompleteConfig?.maxOutputTokens ?? AUTOCOMPLETE_DEFAULTS.MAX_OUTPUT_TOKENS
+	const maxOutputTokens = Math.min(
+		Math.max(storedMaxOutputTokens, MAX_OUTPUT_TOKENS_RANGE.min),
+		MAX_OUTPUT_TOKENS_RANGE.max,
+	)
+	const maxOutputTokensClamped = storedMaxOutputTokens !== maxOutputTokens
 
 	const requiresApiKey = PROVIDERS_REQUIRING_API_KEY.has(provider)
 	// Shown whenever the provider is reached at a user-supplied endpoint, and also
 	// whenever one is already stored — hiding a field that holds a value would
 	// strand the user with a URL they cannot see or edit.
 	const showBaseUrl = PROVIDERS_WITH_BASE_URL.has(provider) || Boolean(autocompleteConfig?.baseUrl)
-	const isNativeFim = NATIVE_FIM_VALUES.has(provider)
 	// Local endpoints don't need a key, but remote ones reached through the same
 	// transport do, so the field is always available and labelled optional.
 	const isRemoteEndpoint = /^https:\/\//i.test(autocompleteConfig?.baseUrl ?? "")
@@ -140,17 +142,7 @@ export const AutocompleteSettings = ({
 
 	const showProfiles = Boolean(onSelectProfile && onSaveProfile && onRenameProfile && onDeleteProfile)
 
-	const providerOptions = useMemo(
-		() => [
-			...NATIVE_FIM_OPTIONS,
-			// Every remaining provider from the Providers tab, routed through the
-			// chat path, minus the ones a native transport already covers.
-			...PROVIDERS.filter(
-				(entry) => !NATIVE_FIM_VALUES.has(entry.value) && !REDUNDANT_PROVIDER_IDS.has(entry.value),
-			).map((entry) => ({ value: entry.value, label: entry.label })),
-		],
-		[],
-	)
+	const providerOptions = useMemo(() => [...NATIVE_FIM_OPTIONS], [])
 
 	return (
 		<div {...props}>
@@ -234,9 +226,7 @@ export const AutocompleteSettings = ({
 							data-testid="autocomplete-provider-select"
 						/>
 						<div className="text-vscode-descriptionForeground text-sm mt-1">
-							{isNativeFim
-								? t("settings:autocomplete.provider.nativeFimHint")
-								: t("settings:autocomplete.provider.chatHint")}
+							{t("settings:autocomplete.provider.nativeFimHint")}
 						</div>
 					</div>
 				</SearchableSetting>
@@ -312,12 +302,6 @@ export const AutocompleteSettings = ({
 						onChange={(value) => setAutocompleteConfigField("modelId", value)}
 					/>
 				</SearchableSetting>
-
-				{!isNativeFim && (
-					<div className="text-vscode-descriptionForeground text-sm border-l-2 border-vscode-panel-border pl-3">
-						{t("settings:autocomplete.provider.chatWarning")}
-					</div>
-				)}
 			</Section>
 
 			<Section>
@@ -359,8 +343,8 @@ export const AutocompleteSettings = ({
 						</label>
 						<div className="flex items-center gap-2">
 							<Slider
-								min={64}
-								max={512}
+								min={MAX_OUTPUT_TOKENS_RANGE.min}
+								max={MAX_OUTPUT_TOKENS_RANGE.max}
 								step={16}
 								value={[maxOutputTokens]}
 								onValueChange={([value]) => setAutocompleteConfigField("maxOutputTokens", value)}
@@ -372,6 +356,16 @@ export const AutocompleteSettings = ({
 						<div className="text-vscode-descriptionForeground text-sm mt-1">
 							{t("settings:autocomplete.maxOutputTokens.description")}
 						</div>
+						{maxOutputTokensClamped && (
+							<div
+								className="text-vscode-descriptionForeground text-sm mt-1"
+								data-testid="autocomplete-max-output-tokens-clamped">
+								{t("settings:autocomplete.maxOutputTokens.clamped", {
+									stored: storedMaxOutputTokens,
+									max: MAX_OUTPUT_TOKENS_RANGE.max,
+								})}
+							</div>
+						)}
 					</div>
 				</SearchableSetting>
 			</Section>

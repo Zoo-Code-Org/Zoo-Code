@@ -28,42 +28,33 @@ export class FimTemplateRegistry {
 		}
 
 		if (modelId) {
-			// An explicit instruction-tuned marker outranks the family name:
-			// `qwen2.5-coder-1.5b-instruct` is a Qwen model, but it has no FIM
-			// tokens, so routing it to the `qwen` template produces free-running
-			// prose. A `-base` marker is the stronger signal in the other direction.
-			if (!isBaseModel(modelId) && INSTRUCT_MARKER.test(modelId)) {
-				const instruct = this.templates.find((template) => template.id === "instruct")
-
-				if (instruct) {
-					return instruct
-				}
-			}
-
-			const skipInstruct = isBaseModel(modelId)
-
-			// `none` matches /.*/ and sits last, so it would swallow every unknown
-			// model here and pre-empt the deliberate `instruct` fallback below.
-			const matched = this.templates.find(
-				(template) =>
-					template.id !== "none" &&
-					(!skipInstruct || template.id !== "instruct") &&
-					template.matches.test(modelId),
+			// A known FIM family outranks an instruction-tuned marker. Publishers
+			// ship FIM-trained models under `-instruct` tags — `codestral:22b-instruct`
+			// and `qwen2.5-coder:7b-instruct` both retain their FIM control tokens —
+			// so treating the tag as decisive routed genuinely FIM-capable models to
+			// the chat path and silently discarded the suffix. Families are matched
+			// first; `fimTemplate: "instruct"` is the escape hatch for the rare model
+			// that carries a family name without the corresponding FIM training.
+			const family = this.templates.find(
+				(template) => template.id !== "none" && template.id !== "instruct" && template.matches.test(modelId),
 			)
 
-			if (matched) {
-				return matched
+			if (family) {
+				return family
 			}
 
-			// A base model with no family match genuinely wants raw continuation:
-			// it has FIM training but none of our known token vocabularies.
-			if (skipInstruct) {
+			// No family match. A base model genuinely wants raw continuation: it has
+			// FIM training but none of our known token vocabularies, and the chat
+			// prompt would only pollute the output.
+			if (isBaseModel(modelId)) {
 				const none = this.templates.find((template) => template.id === "none")
 
 				if (none) {
 					return none
 				}
 			}
+
+			// Anything else falls through to the shared `instruct` default below.
 		}
 
 		// Unknown model. Default to `instruct` rather than `none`: the overwhelming
@@ -81,19 +72,10 @@ export class FimTemplateRegistry {
  * True when the model id advertises itself as a *base* (non-instruction-tuned)
  * model, e.g. `qwen2.5-coder:1.5b-base`.
  *
- * Base models are the FIM-capable variants, so they must never be routed to the
- * `instruct` template even when their family name also appears in an instruct
- * pattern.
+ * A base model with no known family is sent down the raw-continuation path
+ * rather than the chat path: it has FIM training, just not a vocabulary we
+ * recognise.
  */
-/**
- * An unambiguous instruction-tuned marker, which outranks any family match.
- *
- * Kept narrow on purpose: only suffixes that model publishers use to mean
- * "chat-tuned". Broader family patterns live on the `instruct` template itself
- * and are only consulted once no family template matches.
- */
-const INSTRUCT_MARKER = /[-:_]?instruct\b|[-:_]it\b|[-:_]chat\b/i
-
 export function isBaseModel(modelId: string): boolean {
 	return /[-:_/]base\b|\bbase[-_]/i.test(modelId)
 }

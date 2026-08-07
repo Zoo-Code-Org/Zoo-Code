@@ -61,7 +61,11 @@ export class PromptBuilder {
 
 		// Native-FIM endpoints take prefix+suffix as separate fields; the snippet
 		// preamble is prepended to the prefix so it travels with the prompt context.
-		const nativePrefix = template.renderSnippets(snippets) + prefix
+		// The preamble is newline-terminated so the last snippet line can never run
+		// into the first prefix line — concatenated flush, the model reads foreign
+		// code as contiguous with the cursor line and completes that instead.
+		const preamble = template.renderSnippets(snippets)
+		const nativePrefix = preamble && !preamble.endsWith("\n") ? `${preamble}\n${prefix}` : preamble + prefix
 		const renderedPrompt = template.render(prefix, suffix, snippets)
 
 		return {

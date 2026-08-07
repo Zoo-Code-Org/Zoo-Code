@@ -141,6 +141,38 @@ describe("AutocompleteSettings", () => {
 		expect(screen.queryByTestId("autocomplete-base-url-input")).not.toBeInTheDocument()
 	})
 
+	it("offers only the FIM-capable transports as providers", () => {
+		// Autocomplete is FIM-only: a chat provider cannot take a suffix, so listing
+		// the full Providers-tab set offered choices that quietly underperformed —
+		// including three near-identical "OpenAI" rows.
+		renderSettings({ autocompleteConfig: { enabled: true, provider: "ollama" } })
+
+		fireEvent.click(screen.getByTestId("autocomplete-provider-select"))
+
+		// Scoped to the listbox: the trigger also renders the selected label, so a
+		// document-wide query for "Ollama" matches twice.
+		const options = screen.getAllByRole("option").map((option) => option.textContent)
+
+		expect(options).toEqual(["Ollama", "OpenAI Compatible (LM Studio, llama.cpp, vLLM)", "Mistral Codestral"])
+	})
+
+	it("clamps an out-of-range stored suggestion length and says so", () => {
+		// The schema permits up to 2048 but the slider stops at 512, so a config saved
+		// before the bounds tightened rendered as a handle pinned to the far right —
+		// indistinguishable from a legitimate maximum.
+		renderSettings({ autocompleteConfig: { enabled: true, maxOutputTokens: 1024 } })
+
+		expect(screen.getByTestId("autocomplete-max-output-tokens-clamped")).toBeInTheDocument()
+	})
+
+	it("says nothing when the stored suggestion length is in range", () => {
+		renderSettings({
+			autocompleteConfig: { enabled: true, maxOutputTokens: AUTOCOMPLETE_DEFAULTS.MAX_OUTPUT_TOKENS },
+		})
+
+		expect(screen.queryByTestId("autocomplete-max-output-tokens-clamped")).not.toBeInTheDocument()
+	})
+
 	it("mounts headlessly without issuing any side effects", () => {
 		// SettingsView cycles every section at opacity-0 on mount to build the search
 		// index. A section that fetched models on mount would fire for every user.

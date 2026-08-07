@@ -103,7 +103,12 @@ export const AUTOCOMPLETE_DEFAULTS = {
 	/** Assumed model context window when the endpoint doesn't report one. */
 	CONTEXT_LENGTH: 8192,
 	MAX_PREFIX_TOKENS: 1024,
-	MAX_SUFFIX_TOKENS: 512,
+	/**
+	 * Deliberately close to the prefix budget: for FIM the code *after* the cursor
+	 * is what bounds the hole, and starving it collapses the completion toward a
+	 * plain continuation on exactly the mid-file edits FIM exists to serve.
+	 */
+	MAX_SUFFIX_TOKENS: 768,
 	MAX_SNIPPET_TOKENS: 512,
 	/**
 	 * Ghost text is read at a glance, so a long completion is not a better one.

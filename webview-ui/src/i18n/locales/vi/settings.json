@@ -27,7 +27,7 @@
 	},
 	"sections": {
 		"providers": "Nhà cung cấp",
-		"autocomplete": "Tự động hoàn thành",
+		"autocomplete": "Tự động hoàn thành (Beta)",
 		"modes": "Chế độ",
 		"mcp": "Máy chủ MCP",
 		"worktrees": "Worktrees",
@@ -76,9 +76,7 @@
 				"codestral": "Mistral Codestral",
 				"chat-fallback": "Mô hình chat (phương án dự phòng chậm hơn)"
 			},
-			"nativeFimHint": "Talks to a fill-in-the-middle endpoint directly — the fastest and most accurate option.",
-			"chatHint": "Routed through the chat path. Works with any provider, but slower and less precise than a fill-in-the-middle endpoint.",
-			"chatWarning": "This provider is prompted as a chat model. For the best results choose Ollama, an OpenAI-compatible server, or Codestral with a fill-in-the-middle base model."
+			"nativeFimHint": "Talks to a fill-in-the-middle endpoint directly — the fastest and most accurate option."
 		},
 		"baseUrl": {
 			"label": "URL cơ sở"
@@ -125,7 +123,8 @@
 		},
 		"maxOutputTokens": {
 			"label": "Maximum suggestion length",
-			"description": "Upper bound on a single suggestion. Lower values return faster and rarely cut off useful code."
+			"description": "Upper bound on a single suggestion. Lower values return faster and rarely cut off useful code.",
+			"clamped": "Cấu hình đã lưu chứa {{stored}}; đang hiển thị mức tối đa {{max}}. Di chuyển thanh trượt để lưu giá trị trong phạm vi."
 		},
 		"connection": {
 			"needsKey": "Enter an API key to load the available models from this endpoint.",

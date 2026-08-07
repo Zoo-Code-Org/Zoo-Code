@@ -27,7 +27,7 @@
 	},
 	"sections": {
 		"providers": "提供商",
-		"autocomplete": "自动补全",
+		"autocomplete": "自动补全 (Beta)",
 		"modes": "模式",
 		"mcp": "MCP 服务",
 		"worktrees": "Worktrees",
@@ -76,9 +76,7 @@
 				"codestral": "Mistral Codestral",
 				"chat-fallback": "Chat 模型（较慢的兜底方案）"
 			},
-			"nativeFimHint": "直接与 fill-in-the-middle 端点通信，是最快且最准确的选项。",
-			"chatHint": "通过聊天路径调用。适用于任何提供商，但比 fill-in-the-middle 端点更慢、更不精确。",
-			"chatWarning": "该提供商以聊天模型方式调用。为获得最佳效果，请选择 Ollama、OpenAI 兼容服务器，或搭配 fill-in-the-middle 基础模型的 Codestral。"
+			"nativeFimHint": "直接与 fill-in-the-middle 端点通信，是最快且最准确的选项。"
 		},
 		"baseUrl": {
 			"label": "基础 URL"
@@ -125,7 +123,8 @@
 		},
 		"maxOutputTokens": {
 			"label": "建议最大长度",
-			"description": "单条建议的上限。数值越小响应越快，且很少截断有用的代码。"
+			"description": "单条建议的上限。数值越小响应越快，且很少截断有用的代码。",
+			"clamped": "已保存的配置为 {{stored}}，此处显示最大值 {{max}}。移动滑块以保存范围内的值。"
 		},
 		"connection": {
 			"needsKey": "请输入 API 密钥以加载该端点上可用的模型。",

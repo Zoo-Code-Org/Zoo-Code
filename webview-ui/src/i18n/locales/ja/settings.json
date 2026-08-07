@@ -27,7 +27,7 @@
 	},
 	"sections": {
 		"providers": "プロバイダー",
-		"autocomplete": "自動補完",
+		"autocomplete": "自動補完 (Beta)",
 		"modes": "モード",
 		"mcp": "MCPサーバー",
 		"worktrees": "Worktrees",
@@ -76,9 +76,7 @@
 				"codestral": "Mistral Codestral",
 				"chat-fallback": "Chat モデル（低速なフォールバック）"
 			},
-			"nativeFimHint": "fill-in-the-middle エンドポイントと直接通信します。最も高速かつ正確な選択肢です。",
-			"chatHint": "チャット経路を使用します。どのプロバイダーでも動作しますが、fill-in-the-middle エンドポイントより低速で精度も劣ります。",
-			"chatWarning": "このプロバイダーはチャットモデルとして扱われます。最良の結果を得るには Ollama、OpenAI 互換サーバー、または fill-in-the-middle ベースモデルの Codestral を選んでください。"
+			"nativeFimHint": "fill-in-the-middle エンドポイントと直接通信します。最も高速かつ正確な選択肢です。"
 		},
 		"baseUrl": {
 			"label": "ベース URL"
@@ -125,7 +123,8 @@
 		},
 		"maxOutputTokens": {
 			"label": "提案の最大長",
-			"description": "1 つの提案の上限。小さい値ほど応答が速く、有用なコードが切れることはほとんどありません。"
+			"description": "1 つの提案の上限。小さい値ほど応答が速く、有用なコードが切れることはほとんどありません。",
+			"clamped": "保存された設定は {{stored}} ですが、最大値 {{max}} を表示しています。スライダーを動かすと範囲内の値が保存されます。"
 		},
 		"connection": {
 			"needsKey": "このエンドポイントの利用可能なモデルを読み込むには API キーを入力してください。",

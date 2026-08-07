@@ -30,8 +30,42 @@ function renderSnippetPreamble(snippets: readonly AutocompleteSnippet[]): string
 		return ""
 	}
 
-	const bodies = snippets.map((snippet) => snippet.content).join("\n\n")
+	const bodies = snippets.map((snippet) => renderSnippetBody(snippet)).join("\n\n")
 	return `${bodies}\n\n`
+}
+
+/**
+ * Labels a snippet with its originating file.
+ *
+ * Without a delimiter the snippet body is concatenated straight onto the file
+ * prefix, so the model reads another file's code as contiguous with the cursor
+ * line and completes *that* instead. A comment marker is used rather than a bare
+ * path so the label itself parses as code in whatever language is being edited.
+ */
+function renderSnippetBody(snippet: AutocompleteSnippet): string {
+	const filePath = snippet.filePath.trim()
+
+	return filePath ? `// ${filePath}\n${snippet.content}` : snippet.content
+}
+
+/**
+ * Qwen 2.5 Coder's repo-level FIM format.
+ *
+ * Qwen is trained with `<|repo_name|>` and `<|file_sep|>` for exactly the
+ * cross-file case, and using them is what separates "context the model consults"
+ * from "code the model continues". The file under edit is the final `<|file_sep|>`
+ * section, immediately followed by the FIM triplet.
+ */
+function renderQwenRepoContext(snippets: readonly AutocompleteSnippet[]): string {
+	if (snippets.length === 0) {
+		return ""
+	}
+
+	const files = snippets
+		.map((snippet) => `<|file_sep|>${snippet.filePath.trim() || "context"}\n${snippet.content}`)
+		.join("\n")
+
+	return `${files}\n<|file_sep|>`
 }
 
 /** A template that only emits the prefix (no suffix wrapping). */
@@ -49,10 +83,13 @@ export const FIM_TEMPLATES: readonly FimTemplate[] = [
 	{
 		id: "qwen",
 		matches: /qwen|codeqwen/i,
-		stop: ["<|endoftext|>", "<|fim_pad|>"],
+		// `<|file_sep|>` and `<|repo_name|>` terminate a file section in Qwen's
+		// repo-level format, so the model emits one to move on to the "next file"
+		// once it considers the hole filled.
+		stop: ["<|endoftext|>", "<|fim_pad|>", "<|file_sep|>", "<|repo_name|>"],
 		render: (prefix, suffix, snippets) =>
-			`${renderSnippetPreamble(snippets)}<|fim_prefix|>${prefix}<|fim_suffix|>${suffix}<|fim_middle|>`,
-		renderSnippets: renderSnippetPreamble,
+			`${renderQwenRepoContext(snippets)}<|fim_prefix|>${prefix}<|fim_suffix|>${suffix}<|fim_middle|>`,
+		renderSnippets: renderQwenRepoContext,
 	},
 	{
 		id: "starcoder",
@@ -64,9 +101,16 @@ export const FIM_TEMPLATES: readonly FimTemplate[] = [
 	},
 	{
 		id: "codestral",
-		matches: /codestral|mistral/i,
-		stop: ["[PREFIX]", "[SUFFIX]", "[MIDDLE]"],
-		render: (prefix, suffix, snippets) => `${renderSnippetPreamble(snippets)}[SUFFIX]${suffix}[PREFIX]${prefix}`,
+		// `mistral-nemo` and friends are instruction-tuned and have no FIM tokens;
+		// the bare family name would otherwise capture them now that family
+		// matching outranks instruct markers.
+		matches: /codestral/i,
+		// Only the *opening* markers terminate a completion. `[MIDDLE]` is the token
+		// this template deliberately emits to open the hole, so listing it as a stop
+		// truncated the response at its own prompt boundary.
+		stop: ["[PREFIX]", "[SUFFIX]"],
+		render: (prefix, suffix, snippets) =>
+			`${renderSnippetPreamble(snippets)}[SUFFIX]${suffix}[PREFIX]${prefix}[MIDDLE]`,
 		renderSnippets: renderSnippetPreamble,
 	},
 	{

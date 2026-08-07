@@ -27,7 +27,7 @@
 	},
 	"sections": {
 		"providers": "Provider",
-		"autocomplete": "Pelengkapan Otomatis",
+		"autocomplete": "Pelengkapan Otomatis (Beta)",
 		"modes": "Mode",
 		"mcp": "Server MCP",
 		"worktrees": "Worktrees",
@@ -76,9 +76,7 @@
 				"codestral": "Mistral Codestral",
 				"chat-fallback": "Model chat (cadangan yang lebih lambat)"
 			},
-			"nativeFimHint": "Talks to a fill-in-the-middle endpoint directly — the fastest and most accurate option.",
-			"chatHint": "Routed through the chat path. Works with any provider, but slower and less precise than a fill-in-the-middle endpoint.",
-			"chatWarning": "This provider is prompted as a chat model. For the best results choose Ollama, an OpenAI-compatible server, or Codestral with a fill-in-the-middle base model."
+			"nativeFimHint": "Talks to a fill-in-the-middle endpoint directly — the fastest and most accurate option."
 		},
 		"baseUrl": {
 			"label": "URL dasar"
@@ -125,7 +123,8 @@
 		},
 		"maxOutputTokens": {
 			"label": "Maximum suggestion length",
-			"description": "Upper bound on a single suggestion. Lower values return faster and rarely cut off useful code."
+			"description": "Upper bound on a single suggestion. Lower values return faster and rarely cut off useful code.",
+			"clamped": "Konfigurasi tersimpan berisi {{stored}}; menampilkan maksimum {{max}}. Geser slider untuk menyimpan nilai dalam rentang."
 		},
 		"connection": {
 			"needsKey": "Enter an API key to load the available models from this endpoint.",

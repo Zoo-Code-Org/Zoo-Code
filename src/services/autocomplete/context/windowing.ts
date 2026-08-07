@@ -2,7 +2,13 @@ import * as vscode from "vscode"
 
 /** Windowing caps: keep reads cheap even on huge files (see plan risk #6). */
 export const PREFIX_MAX_LINES = 200
-export const SUFFIX_MAX_LINES = 50
+/**
+ * The after-cursor window is what makes fill-in-the-middle different from plain
+ * continuation: editing mid-file, the closing brace and the following definitions
+ * are the signal that bounds the completion. A 50-line cap starved exactly that
+ * case, so a mid-file edit saw little more than a raw continuation would.
+ */
+export const SUFFIX_MAX_LINES = 150
 
 export interface WindowedDocument {
 	readonly prefix: string

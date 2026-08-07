@@ -66,5 +66,37 @@ export function trimToTokenBudget(text: string, budgetTokens: number, from: "tai
 		return text
 	}
 
-	return from === "tail" ? text.slice(text.length - maxChars) : text.slice(0, maxChars)
+	if (from === "tail") {
+		let trimmed = text.slice(text.length - maxChars)
+
+		// A high surrogate at the head means its pair was sliced off.
+		const firstCode = trimmed.charCodeAt(0)
+		if (firstCode >= 0xd800 && firstCode <= 0xdbff) {
+			trimmed = trimmed.slice(1)
+		}
+
+		// Realign to a line boundary so the prompt never opens mid-token. Bounded so
+		// a single very long line is kept rather than discarded wholesale.
+		const firstNewline = trimmed.indexOf("\n")
+		if (firstNewline > 0 && firstNewline < 80) {
+			trimmed = trimmed.slice(firstNewline + 1)
+		}
+
+		return trimmed
+	}
+
+	let trimmed = text.slice(0, maxChars)
+
+	// A low surrogate at the tail means its pair was sliced off.
+	const lastCode = trimmed.charCodeAt(trimmed.length - 1)
+	if (lastCode >= 0xdc00 && lastCode <= 0xdfff) {
+		trimmed = trimmed.slice(0, -1)
+	}
+
+	const lastNewline = trimmed.lastIndexOf("\n")
+	if (lastNewline >= 0 && trimmed.length - lastNewline < 80) {
+		trimmed = trimmed.slice(0, lastNewline + 1)
+	}
+
+	return trimmed
 }

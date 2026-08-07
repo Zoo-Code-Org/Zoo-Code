@@ -25,6 +25,34 @@ describe("trimToTokenBudget", () => {
 		const text = "0123456789"
 		expect(trimToTokenBudget(text, 1, "tail")).toBe("6789")
 	})
+
+	it("realigns a trimmed prefix to a line boundary", () => {
+		// A raw slice opens the prompt mid-token, which reads to the model as a
+		// broken identifier rather than the start of a statement.
+		const text = "const alpha = 1\nconst beta = 2\nconst gamma = 3"
+		const trimmed = trimToTokenBudget(text, 6, "tail")
+
+		expect(trimmed.startsWith("const")).toBe(true)
+		expect(text.endsWith(trimmed)).toBe(true)
+	})
+
+	it("realigns a trimmed suffix to a line boundary", () => {
+		const text = "const alpha = 1\nconst beta = 2\nconst gamma = 3"
+		const trimmed = trimToTokenBudget(text, 6, "head")
+
+		expect(trimmed.endsWith("\n")).toBe(true)
+		expect(text.startsWith(trimmed)).toBe(true)
+	})
+
+	it("never splits a surrogate pair", () => {
+		// An orphaned half-pair is an invalid code unit that corrupts the prompt.
+		const text = "a".repeat(20) + "😀".repeat(10)
+		const head = trimToTokenBudget(text, 5, "head")
+		const tail = trimToTokenBudget(text, 5, "tail")
+
+		expect(head).toBe(Array.from(head).join(""))
+		expect(tail).toBe(Array.from(tail).join(""))
+	})
 })
 
 describe("pruneSnippets", () => {

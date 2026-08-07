@@ -69,8 +69,8 @@ describe("FIM template golden strings", () => {
 		expect(templates.starcoder.render(P, S, [])).toBe(`<fim_prefix>${P}<fim_suffix>${S}<fim_middle>`)
 	})
 
-	it("codestral renders suffix before prefix", () => {
-		expect(templates.codestral.render(P, S, [])).toBe(`[SUFFIX]${S}[PREFIX]${P}`)
+	it("codestral renders suffix before prefix and opens the hole with [MIDDLE]", () => {
+		expect(templates.codestral.render(P, S, [])).toBe(`[SUFFIX]${S}[PREFIX]${P}[MIDDLE]`)
 	})
 
 	it("codellama renders with spaced tokens", () => {
@@ -95,13 +95,13 @@ describe("renderSnippetPreamble", () => {
 		expect(renderSnippetPreamble([])).toBe("")
 	})
 
-	it("joins snippet bodies with double newlines and a trailing pair", () => {
+	it("labels each snippet with its file and joins with a trailing pair", () => {
 		const snippets: AutocompleteSnippet[] = [
 			{ filePath: "a.ts", languageId: "typescript", line: 3, content: "const x = 1" },
 			{ filePath: "b.ts", languageId: "typescript", line: 7, content: "const y = 2" },
 		]
 
-		expect(renderSnippetPreamble(snippets)).toBe("const x = 1\n\nconst y = 2\n\n")
+		expect(renderSnippetPreamble(snippets)).toBe("// a.ts\nconst x = 1\n\n// b.ts\nconst y = 2\n\n")
 	})
 
 	it("prepends the preamble to the prefix in a native-FIM render", () => {
@@ -111,13 +111,54 @@ describe("renderSnippetPreamble", () => {
 
 		const preamble = renderSnippetPreamble(snippets)
 
-		expect(preamble + P).toBe("const x = 1\n\n" + P)
+		expect(preamble + P).toBe("// a.ts\nconst x = 1\n\n" + P)
+	})
+
+	it("separates foreign code from the cursor line so it is never read as contiguous", () => {
+		const snippets: AutocompleteSnippet[] = [
+			{ filePath: "a.ts", languageId: "typescript", line: 3, content: "const x = 1" },
+		]
+
+		// The boundary is what stops the model completing the *snippet* instead of
+		// the cursor line, so assert it explicitly rather than incidentally.
+		expect(renderSnippetPreamble(snippets).endsWith("\n\n")).toBe(true)
+	})
+})
+
+describe("qwen repo-level context", () => {
+	const qwen = FIM_TEMPLATES.find((t) => t.id === "qwen")!
+
+	const snippets: AutocompleteSnippet[] = [
+		{ filePath: "util.ts", languageId: "typescript", line: 1, content: "export const add = (a, b) => a + b" },
+	]
+
+	it("wraps cross-file snippets in <|file_sep|> sections", () => {
+		// Qwen is trained on this format for the repo-level case; bare snippet text
+		// is indistinguishable from the file under edit, so the model completes it.
+		expect(qwen.render(P, S, snippets)).toBe(
+			"<|file_sep|>util.ts\nexport const add = (a, b) => a + b\n" +
+				`<|file_sep|><|fim_prefix|>${P}<|fim_suffix|>${S}<|fim_middle|>`,
+		)
+	})
+
+	it("emits the plain FIM triplet when there are no snippets", () => {
+		expect(qwen.render(P, S, [])).toBe(`<|fim_prefix|>${P}<|fim_suffix|>${S}<|fim_middle|>`)
+	})
+
+	it("stops on the file separator so it cannot run into a fabricated next file", () => {
+		expect(qwen.stop).toContain("<|file_sep|>")
 	})
 })
 
 describe("template stop sequences", () => {
 	it("qwen includes fim_pad", () => {
 		expect(FIM_TEMPLATES.find((t) => t.id === "qwen")!.stop).toContain("<|fim_pad|>")
+	})
+
+	it("codestral does not stop on the [MIDDLE] token it emits", () => {
+		// Listing the opening marker as a stop truncated the completion at its own
+		// prompt boundary — the model had nothing left to generate into.
+		expect(FIM_TEMPLATES.find((t) => t.id === "codestral")!.stop).not.toContain("[MIDDLE]")
 	})
 
 	it("deepseek includes fim end token", () => {
@@ -133,12 +174,35 @@ describe("instruct template routing", () => {
 
 	it.each([
 		["lfm2.5-2.6b", "instruct"],
-		["qwen2.5-coder-1.5b-instruct", "instruct"],
 		["gemma-2-9b-it", "instruct"],
 		["phi-4", "instruct"],
 		["granite-3b-code", "instruct"],
 	])("routes %s to the %s template", (modelId, expected) => {
 		expect(registry.resolve(modelId, undefined).id).toBe(expected)
+	})
+
+	// Publishers ship FIM-trained weights under `-instruct` tags. Treating the tag
+	// as decisive sent these down the chat path, which discards the suffix outright
+	// — the model loses the after-cursor context that FIM exists to use.
+	it.each([
+		["qwen2.5-coder-1.5b-instruct", "qwen"],
+		["qwen2.5-coder:7b-instruct-q4_K_M", "qwen"],
+		["codestral:22b-v0.1-instruct-q4_K_M", "codestral"],
+		["codestral-latest", "codestral"],
+	])("keeps %s on its FIM family template (%s)", (modelId, expected) => {
+		expect(registry.resolve(modelId, undefined).id).toBe(expected)
+	})
+
+	it("lets an explicit override force the chat path for a misrouted family name", () => {
+		// The escape hatch for a model that carries a family name without the
+		// corresponding FIM training.
+		expect(registry.resolve("qwen2.5-coder-1.5b-instruct", "instruct").id).toBe("instruct")
+	})
+
+	it("no longer captures mistral-nemo with the codestral family pattern", () => {
+		// `mistral-nemo` is instruction-tuned and has no FIM tokens; the old bare
+		// `mistral` pattern would now claim it, since family matching wins.
+		expect(registry.resolve("mistral-nemo-instruct-2407", undefined).id).toBe("instruct")
 	})
 
 	it("keeps base models on their FIM family template even when the family also matches instruct", () => {

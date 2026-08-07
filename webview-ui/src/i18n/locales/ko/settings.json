@@ -27,7 +27,7 @@
 	},
 	"sections": {
 		"providers": "공급자",
-		"autocomplete": "자동 완성",
+		"autocomplete": "자동 완성 (Beta)",
 		"modes": "모드",
 		"mcp": "MCP 서버",
 		"worktrees": "Worktrees",
@@ -76,9 +76,7 @@
 				"codestral": "Mistral Codestral",
 				"chat-fallback": "Chat 모델 (느린 대체 수단)"
 			},
-			"nativeFimHint": "fill-in-the-middle 엔드포인트와 직접 통신합니다. 가장 빠르고 정확한 선택입니다.",
-			"chatHint": "채팅 경로로 전달됩니다. 모든 공급자에서 동작하지만 fill-in-the-middle 엔드포인트보다 느리고 부정확합니다.",
-			"chatWarning": "이 공급자는 채팅 모델로 사용됩니다. 최상의 결과를 위해 Ollama, OpenAI 호환 서버 또는 fill-in-the-middle 베이스 모델의 Codestral을 선택하세요."
+			"nativeFimHint": "fill-in-the-middle 엔드포인트와 직접 통신합니다. 가장 빠르고 정확한 선택입니다."
 		},
 		"baseUrl": {
 			"label": "기본 URL"
@@ -125,7 +123,8 @@
 		},
 		"maxOutputTokens": {
 			"label": "최대 제안 길이",
-			"description": "단일 제안의 상한입니다. 값이 작을수록 응답이 빠르며 유용한 코드가 잘리는 일은 드뿬니다."
+			"description": "단일 제안의 상한입니다. 값이 작을수록 응답이 빠르며 유용한 코드가 잘리는 일은 드뿬니다.",
+			"clamped": "저장된 설정은 {{stored}}이지만 최대값 {{max}}을 표시합니다. 슬라이더를 움직이면 범위 내 값이 저장됩니다."
 		},
 		"connection": {
 			"needsKey": "이 엔드포인트의 사용 가능한 모델을 불러오려면 API 키를 입력하세요.",
