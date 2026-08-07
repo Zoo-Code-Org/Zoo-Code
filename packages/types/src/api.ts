@@ -2,7 +2,7 @@ import type { EventEmitter } from "events"
 import type { Socket } from "net"
 
 import type { RooCodeEvents } from "./events.js"
-import type { RooCodeSettings } from "./global-settings.js"
+import type { GlobalState, RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
@@ -21,11 +21,13 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
 		configuration?: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}): Promise<string>
 	/**
 	 * Resumes a task with the given ID.
@@ -93,6 +95,15 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	approveCurrentAsk(): Promise<void>
 	/**
+	 * Programmatically approves the pending ask for a task by ID. Intended for use in tests only.
+	 */
+	approveTaskAsk(taskId: string): Promise<boolean>
+	/**
+	 * Simulates selecting a follow-up suggestion for a task by ID, including its optional mode switch.
+	 * Intended for use in tests only.
+	 */
+	selectTaskFollowupSuggestion(options: { taskId: string; answer: string; mode?: string }): Promise<boolean>
+	/**
 	 * Returns true if the API is ready to use.
 	 */
 	isReady(): boolean
@@ -106,6 +117,10 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * @param values An object containing key-value pairs to set.
 	 */
 	setConfiguration(values: RooCodeSettings): Promise<void>
+	/**
+	 * Returns a value from VS Code globalState. Intended for use in tests only.
+	 */
+	getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K]
 	/**
 	 * Returns a list of all configured profile names
 	 * @returns Array of profile names

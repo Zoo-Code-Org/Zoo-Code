@@ -8,6 +8,7 @@ import pWaitFor from "p-wait-for"
 
 import {
 	type RooCodeAPI,
+	type GlobalState,
 	type RooCodeSettings,
 	type RooCodeEvents,
 	type ProviderSettings,
@@ -23,7 +24,7 @@ import {
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
-import type { Mode } from "../shared/modes"
+import { getAllModes, type Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -31,11 +32,22 @@ import { openClineInNewTab } from "../activate/registerCommands"
 import { getCommands } from "../services/command/commands"
 import { getModels } from "../api/providers/fetchers/modelCache"
 
+type TaskAskController = {
+	approveAsk(): void
+	handleWebviewAskResponse(response: "messageResponse", text?: string, images?: string[]): void
+}
+
+type RegisteredTask = {
+	task: TaskAskController
+	provider: ClineProvider
+}
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
+	private readonly tasksById = new Map<string, RegisteredTask>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -173,17 +185,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
 		configuration: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}) {
 		let provider: ClineProvider
 
 		if (newTab) {
-			await vscode.commands.executeCommand("workbench.action.files.revert")
-			await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			if (!preserveOpenTabs) {
+				await vscode.commands.executeCommand("workbench.action.files.revert")
+				await vscode.commands.executeCommand("workbench.action.closeAllEditors")
+			}
 
 			provider = await openClineInNewTab({ context: this.context, outputChannel: this.outputChannel })
 			this.registerListeners(provider)
@@ -310,6 +326,47 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		this.sidebarProvider.getCurrentTask()?.approveAsk()
 	}
 
+	public async approveTaskAsk(taskId: string): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		entry.task.approveAsk()
+		return true
+	}
+
+	public async selectTaskFollowupSuggestion({
+		taskId,
+		answer,
+		mode,
+	}: {
+		taskId: string
+		answer: string
+		mode?: string
+	}): Promise<boolean> {
+		const entry = this.tasksById.get(taskId)
+
+		if (!entry) {
+			return false
+		}
+
+		if (mode) {
+			const { customModes } = await entry.provider.getState()
+			const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
+
+			if (isValidMode) {
+				await entry.provider.handleModeSwitch(mode)
+			} else {
+				this.log(`[API#selectTaskFollowupSuggestion] ignoring unknown mode "${mode}" for task ${taskId}`)
+			}
+		}
+
+		entry.task.handleWebviewAskResponse("messageResponse", answer)
+		return true
+	}
+
 	public isReady() {
 		return this.sidebarProvider.viewLaunched
 	}
@@ -330,6 +387,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
+			this.tasksById.set(task.taskId, { task: task as unknown as TaskAskController, provider })
+
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -341,6 +400,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
 					isSubtask: !!task.parentTaskId,
 				})
+				this.tasksById.delete(task.taskId)
 
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
@@ -349,6 +409,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
+				this.tasksById.delete(task.taskId)
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
@@ -357,6 +418,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskUnfocused, () => {
 				this.emit(RooCodeEventName.TaskUnfocused, task.taskId)
+				this.tasksById.delete(task.taskId)
 			})
 
 			task.on(RooCodeEventName.TaskActive, () => {
@@ -504,7 +566,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public async setConfiguration(values: RooCodeSettings) {
-		await this.sidebarProvider.contextProxy.setValues(values)
+		await this.sidebarProvider.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
 		if (values.modeApiConfigs) {
 			await Promise.all(
@@ -514,6 +576,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			)
 		}
 		await this.sidebarProvider.postStateToWebview()
+	}
+
+	public getGlobalState<K extends keyof GlobalState>(key: K): GlobalState[K] {
+		return this.context.globalState.get<GlobalState[K]>(key)
 	}
 
 	public setTerminalProfile(name: string | undefined): void {
