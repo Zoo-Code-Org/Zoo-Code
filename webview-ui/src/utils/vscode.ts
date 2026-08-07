@@ -11,8 +11,9 @@ import { WebviewMessage } from "@roo/WebviewMessage"
  * dev server by using native web browser features that mock the functionality
  * enabled by acquireVsCodeApi.
  */
-class VSCodeAPIWrapper {
+export class VSCodeAPIWrapper {
 	private readonly vsCodeApi: WebviewApi<unknown> | undefined
+	private fallbackState: unknown | undefined
 
 	constructor() {
 		// Check if the acquireVsCodeApi function exists in the current development
@@ -20,6 +21,31 @@ class VSCodeAPIWrapper {
 		if (typeof acquireVsCodeApi === "function") {
 			this.vsCodeApi = acquireVsCodeApi()
 		}
+	}
+
+	private createViewStateId(): string {
+		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+			return crypto.randomUUID()
+		}
+
+		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+	}
+
+	public getViewStateId(): string {
+		const currentState = this.getState()
+		const stateObject =
+			currentState && typeof currentState === "object" && !Array.isArray(currentState)
+				? (currentState as Record<string, unknown>)
+				: {}
+		const existingViewStateId = stateObject.viewStateId
+
+		if (typeof existingViewStateId === "string" && existingViewStateId.length > 0) {
+			return existingViewStateId
+		}
+
+		const viewStateId = this.createViewStateId()
+		this.setState({ ...stateObject, viewStateId })
+		return viewStateId
 	}
 
 	/**
@@ -49,10 +75,18 @@ class VSCodeAPIWrapper {
 	public getState(): unknown | undefined {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.getState()
-		} else {
-			const state = localStorage.getItem("vscodeState")
-			return state ? JSON.parse(state) : undefined
 		}
+
+		try {
+			if (typeof localStorage?.getItem === "function") {
+				const state = localStorage.getItem("vscodeState")
+				return state ? JSON.parse(state) : this.fallbackState
+			}
+		} catch {
+			return this.fallbackState
+		}
+
+		return this.fallbackState
 	}
 
 	/**
@@ -69,10 +103,20 @@ class VSCodeAPIWrapper {
 	public setState<T extends unknown | undefined>(newState: T): T {
 		if (this.vsCodeApi) {
 			return this.vsCodeApi.setState(newState)
-		} else {
-			localStorage.setItem("vscodeState", JSON.stringify(newState))
-			return newState
 		}
+
+		this.fallbackState = newState
+
+		try {
+			if (typeof localStorage?.setItem === "function") {
+				localStorage.setItem("vscodeState", JSON.stringify(newState))
+			}
+		} catch {
+			// Storage can be unavailable in restricted webview/browser contexts.
+			// The in-memory fallback above keeps a stable viewStateId for this session.
+		}
+
+		return newState
 	}
 }
 
