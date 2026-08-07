@@ -14,8 +14,14 @@ import type { TaskOrganizationTargetV1 } from "@roo-code/types"
 
 import { TaskOrganizationPointerSensor } from "./TaskOrganizationPointerSensor"
 
+/** Kind of item being dragged in the task organization DnD surface. */
 export type DndItemKind = "task" | "folder" | "pinned"
 
+/**
+ * Data payload attached to every draggable in the task organization surface.
+ * Carries the canonical organization target plus optional metadata used by
+ * drop handlers to determine the correct mutation.
+ */
 export interface DndItemData {
 	kind: DndItemKind
 	/** The canonical organization target represented by this draggable. */
@@ -26,11 +32,21 @@ export interface DndItemData {
 	isPinned?: boolean
 }
 
+/**
+ * Snapshot of the currently active drag operation.
+ * `id` is the dnd-kit draggable identifier; `data` is the payload extracted
+ * from the draggable at drag start.
+ */
 export interface ActiveDragState {
 	id: UniqueIdentifier
 	data: DndItemData
 }
 
+/**
+ * Metadata describing the drop target currently under the pointer.
+ * Used to render hover affordances and to decide which mutation to fire on
+ * drop.
+ */
 export interface DndTargetMeta {
 	/** True if the current pointer is over a valid drop target. */
 	isOverTarget: boolean
@@ -40,6 +56,11 @@ export interface DndTargetMeta {
 	targetFolderId?: string
 }
 
+/**
+ * Callbacks the host view must supply to handle drop outcomes.
+ * Each callback maps to a task organization mutation; the hook itself does
+ * not perform mutations, it only interprets drag events.
+ */
 export interface UseTaskOrganizationDndOptions {
 	/**
 	 * Called when a drop requires creating a new folder from a source and
@@ -60,6 +81,10 @@ export interface UseTaskOrganizationDndOptions {
 	onCancel?: () => void
 }
 
+/**
+ * Unique dnd-kit droppable ID for the "Unfiled" drop zone.
+ * Dropping a folder member onto this zone removes it from its current folder.
+ */
 export const UNFILED_DROP_ZONE_ID = "task-org-unfiled-drop-zone"
 
 const pointerActivationConstraint = {

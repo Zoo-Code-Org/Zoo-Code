@@ -37,6 +37,12 @@ import { experimentDefault } from "@roo/experiments"
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
 
+/**
+ * Combined extension state and webview-specific UI context exposed to React
+ * consumers. Extends the persisted {@link ExtensionState} with hydrated UI
+ * flags, router models, task organization mutation dispatcher, and setters
+ * that update both local state and the extension host.
+ */
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
 	didHydrateState: boolean
@@ -159,8 +165,25 @@ export interface ExtensionStateContextType extends ExtensionState {
 	rules: RuleMetadata[]
 }
 
+/**
+ * React context carrying the merged extension state and webview UI state.
+ * Initialized as `undefined` so consumers must be wrapped by
+ * {@link ExtensionStateContextProvider}.
+ */
 export const ExtensionStateContext = createContext<ExtensionStateContextType | undefined>(undefined)
 
+/**
+ * Merge a partial extension state update into the previous state while
+ * guarding against stale async pushes.
+ *
+ * Custom mode prompts and experiments are shallow-merged. `clineMessages`
+ * and `taskOrganization` are protected by sequence/revision checks so a
+ * delayed broadcast cannot overwrite newer local mutations.
+ *
+ * @param prevState - The current extension state.
+ * @param newState - Partial state update received from the extension host.
+ * @returns The merged next state.
+ */
 export const mergeExtensionState = (prevState: ExtensionState, newState: Partial<ExtensionState>) => {
 	const { customModePrompts: prevCustomModePrompts, experiments: prevExperiments, ...prevRest } = prevState
 
@@ -296,6 +319,17 @@ type ExtensionStateProviderInitialState = Partial<ExtensionState> & {
 	routerModels?: RouterModels
 }
 
+/**
+ * Provides the combined extension state to the React tree.
+ *
+ * Subscribes to `vscode.postMessage` events, maintains local UI state
+ * (welcome visibility, theme, file paths, MCP servers, etc.), and dispatches
+ * task organization mutations with request/revision tracking.
+ *
+ * @param props.children - React children to wrap with the context provider.
+ * @param props.initialState - Optional partial state used to seed the
+ *   provider before the extension host pushes the full state.
+ */
 export const ExtensionStateContextProvider: React.FC<{
 	children: React.ReactNode
 	initialState?: ExtensionStateProviderInitialState
@@ -736,6 +770,12 @@ export const ExtensionStateContextProvider: React.FC<{
 	return <ExtensionStateContext.Provider value={contextValue}>{children}</ExtensionStateContext.Provider>
 }
 
+/**
+ * Hook to consume the extension state context.
+ *
+ * @returns The current {@link ExtensionStateContextType} value.
+ * @throws {Error} If called outside of an {@link ExtensionStateContextProvider}.
+ */
 export const useExtensionState = () => {
 	const context = React.useContext(ExtensionStateContext)
 

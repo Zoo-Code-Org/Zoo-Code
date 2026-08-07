@@ -3,7 +3,7 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { safeWriteJson } from "../safeWriteJson"
+import { safeWriteJson, safeUpdateJson } from "../safeWriteJson"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -467,5 +467,126 @@ describe("safeWriteJson", () => {
 		)
 
 		consoleErrorSpy.mockRestore()
+	})
+})
+
+describe("safeUpdateJson", () => {
+	let tempDir: string
+	let currentTestFilePath: string
+
+	beforeEach(async () => {
+		tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "safeUpdateJson-test-"))
+		currentTestFilePath = path.join(tempDir, "test-update.json")
+	})
+
+	afterEach(async () => {
+		await fs.rm(tempDir, { recursive: true, force: true })
+		vi.restoreAllMocks()
+	})
+
+	async function readFileContent(filePath: string): Promise<any> {
+		const readContent = await fs.readFile(filePath, "utf-8")
+		return JSON.parse(readContent)
+	}
+
+	test("updates an existing file atomically and returns the updated value", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ count: 1, items: ["a"] }))
+
+		const result = await safeUpdateJson<{ count: number; items: string[] }>(currentTestFilePath, (current) => ({
+			count: (current?.count ?? 0) + 1,
+			items: [...(current?.items ?? []), "b"],
+		}))
+
+		expect(result).toEqual({ count: 2, items: ["a", "b"] })
+		expect(await readFileContent(currentTestFilePath)).toEqual({ count: 2, items: ["a", "b"] })
+	})
+
+	test("throws when file is missing and allowCreate is false", async () => {
+		await expect(safeUpdateJson(currentTestFilePath, (c) => c ?? {})).rejects.toThrow(
+			"file does not exist and allowCreate is false",
+		)
+	})
+
+	test("creates the file when missing and allowCreate is true", async () => {
+		const result = await safeUpdateJson<{ created: boolean }>(
+			currentTestFilePath,
+			(current) => {
+				expect(current).toBeUndefined()
+				return { created: true }
+			},
+			{ allowCreate: true },
+		)
+
+		expect(result).toEqual({ created: true })
+		expect(await readFileContent(currentTestFilePath)).toEqual({ created: true })
+	})
+
+	test("throws the parse error when the existing file contains invalid JSON", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, "{ not valid json")
+
+		const updater = vi.fn()
+		await expect(safeUpdateJson(currentTestFilePath, updater)).rejects.toThrow()
+		// Updater must not run on unparseable content.
+		expect(updater).not.toHaveBeenCalled()
+	})
+
+	test("leaves the file unchanged when the updater throws", async () => {
+		const initial = { stable: true }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initial))
+
+		await expect(
+			safeUpdateJson(currentTestFilePath, () => {
+				throw new Error("updater failed")
+			}),
+		).rejects.toThrow("updater failed")
+
+		expect(await readFileContent(currentTestFilePath)).toEqual(initial)
+	})
+
+	test("serializes concurrent updates through the advisory lock", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ count: 0 }))
+
+		const increments = Array.from({ length: 5 }, () =>
+			safeUpdateJson<{ count: number }>(currentTestFilePath, (current) => ({ count: (current?.count ?? 0) + 1 })),
+		)
+
+		await Promise.all(increments)
+
+		// Each update read-then-wrote under the same lock, so all 5 increments
+		// must be reflected with no lost updates.
+		expect(await readFileContent(currentTestFilePath)).toEqual({ count: 5 })
+	})
+
+	test("rolls back to the original content when the write fails mid-commit", async () => {
+		const initial = { version: 1 }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initial))
+
+		let renameCallCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 2) {
+				// tempNew -> target commit rename fails
+				throw new Error("commit rename failed")
+			}
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		await expect(safeUpdateJson(currentTestFilePath, () => ({ version: 2 }))).rejects.toThrow(
+			"commit rename failed",
+		)
+
+		expect(await readFileContent(currentTestFilePath)).toEqual(initial)
+	})
+
+	test("pretty-prints output when prettyPrint is enabled", async () => {
+		await safeUpdateJson(
+			currentTestFilePath,
+			() => ({ a: 1 }),
+			{ allowCreate: true, prettyPrint: true },
+		)
+
+		const raw = await fs.readFile(currentTestFilePath, "utf-8")
+		expect(raw).toContain("\n")
+		expect(raw).toContain("\t")
 	})
 })

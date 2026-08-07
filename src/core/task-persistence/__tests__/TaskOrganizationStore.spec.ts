@@ -848,4 +848,87 @@ describe("TaskOrganizationStore", () => {
 			})
 		})
 	})
+
+	describe("reconcile()", () => {
+		it("prunes folder members whose tasks were deleted from history", async () => {
+			const parent = makeHistoryItem({ id: "parent-1" })
+			const child = makeHistoryItem({ id: "child-1", parentTaskId: "parent-1" })
+			history.add(parent)
+			history.add(child)
+
+			await store.initialize()
+			await store.mutate(
+				{
+					kind: "createFolder",
+					folderId: "folder-1",
+					name: "Group",
+					source: { kind: "task", taskId: "parent-1" },
+					destination: { kind: "task", taskId: "child-1" },
+				},
+				0,
+			)
+			expect(store.getState().folders[0].taskIds).toEqual(["parent-1", "child-1"])
+
+			// Delete the parent from history; reconcile should keep the surviving
+			// descendant (child-1) rather than dropping the whole group.
+			history.delete("parent-1")
+			await store.reconcile()
+
+			const folder = store.getState().folders[0]
+			expect(folder.taskIds).toEqual(["child-1"])
+		})
+
+		it("prunes pins that reference deleted tasks", async () => {
+			const task = makeHistoryItem({ id: "pin-me" })
+			history.add(task)
+			await store.initialize()
+			await store.mutate({ kind: "setPinned", target: { kind: "task", taskId: "pin-me" }, pinned: true }, 0)
+			expect(store.getState().pins).toHaveLength(1)
+
+			history.delete("pin-me")
+			await store.reconcile()
+
+			expect(store.getState().pins).toHaveLength(0)
+		})
+
+		it("is a no-op when history has not changed", async () => {
+			const task = makeHistoryItem({ id: "t1" })
+			history.add(task)
+			await store.initialize()
+			await store.mutate({ kind: "setPinned", target: { kind: "task", taskId: "t1" }, pinned: true }, 0)
+			const before = store.getState()
+
+			await store.reconcile()
+
+			expect(store.getState().revision).toBe(before.revision)
+		})
+
+		it("skips reconciliation when schema version is from the future", async () => {
+			const tasksDir = path.join(tmpDir, "tasks")
+			await fs.mkdir(tasksDir, { recursive: true })
+			await fs.writeFile(
+				path.join(tasksDir, GlobalFileNames.taskOrganization),
+				JSON.stringify({ schemaVersion: 99, revision: 1, folders: [], pins: [], updatedAt: 1 }),
+				"utf8",
+			)
+			await store.initialize()
+
+			// Should return without throwing or mutating state.
+			await expect(store.reconcile()).resolves.toBeUndefined()
+			expect(store.getState().schemaVersion).toBe(99)
+		})
+	})
+
+	describe("lifecycle", () => {
+		it("dispose() is idempotent and clears pending state", async () => {
+			await store.initialize()
+			store.dispose()
+			expect(() => store.dispose()).not.toThrow()
+		})
+
+		it("waitForInitialized() resolves after initialize()", async () => {
+			await store.initialize()
+			await expect(store.waitForInitialized()).resolves.toBeUndefined()
+		})
+	})
 })

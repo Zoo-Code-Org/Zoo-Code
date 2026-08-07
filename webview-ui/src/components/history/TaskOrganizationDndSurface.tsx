@@ -27,6 +27,11 @@ export interface TaskOrganizationDndSurfaceRenderState {
 	activeDrag: ActiveDragState | null
 }
 
+/**
+ * Props for {@link TaskOrganizationDndSurface}.
+ * The host view supplies the enable flag, a label resolver for the drag
+ * overlay, and the content to render inside the DnD context.
+ */
 export interface TaskOrganizationDndSurfaceProps {
 	/** Master switch: when false, any pending folder draft is cancelled. */
 	enabled: boolean
