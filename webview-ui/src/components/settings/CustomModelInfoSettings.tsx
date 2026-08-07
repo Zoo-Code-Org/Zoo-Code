@@ -69,13 +69,15 @@ export const CustomModelInfoSettings = ({
 		if (parsePositiveInteger(contextWindowInput) !== configuredContextWindow) {
 			setContextWindowInput(configuredContextWindow?.toString() ?? "")
 		}
-	}, [configuredContextWindow, contextWindowInput])
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- Sync external config into local state only when the persisted value changes, not on every keystroke.
+	}, [configuredContextWindow])
 
 	useEffect(() => {
 		if (parsePositiveInteger(maxTokensInput) !== configuredMaxTokens) {
 			setMaxTokensInput(configuredMaxTokens?.toString() ?? "")
 		}
-	}, [configuredMaxTokens, maxTokensInput])
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- Sync external config into local state only when the persisted value changes, not on every keystroke.
+	}, [configuredMaxTokens])
 
 	useEffect(() => {
 		if (!selectedModelInfo) {
@@ -150,8 +152,9 @@ export const CustomModelInfoSettings = ({
 								placeholder={selectedModelInfo?.contextWindow?.toString() ?? "0"}
 								style={{ borderColor: getInputBorderColor(contextWindowInput), width: "100%" }}
 								aria-invalid={hasInvalidContextWindow}
+								aria-describedby="custom-context-window-desc"
 							/>
-							<span className="text-xs text-vscode-descriptionForeground">
+							<span id="custom-context-window-desc" className="text-xs text-vscode-descriptionForeground">
 								{t("settings:providers.customModelInfo.contextWindow.description")}
 							</span>
 						</div>
@@ -167,8 +170,9 @@ export const CustomModelInfoSettings = ({
 								placeholder={selectedModelInfo?.maxTokens?.toString() ?? "0"}
 								style={{ borderColor: getInputBorderColor(maxTokensInput), width: "100%" }}
 								aria-invalid={hasInvalidMaxTokens}
+								aria-describedby="custom-max-tokens-desc"
 							/>
-							<span className="text-xs text-vscode-descriptionForeground">
+							<span id="custom-max-tokens-desc" className="text-xs text-vscode-descriptionForeground">
 								{t("settings:providers.customModelInfo.maxTokens.description")}
 							</span>
 						</div>

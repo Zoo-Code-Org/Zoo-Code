@@ -1295,6 +1295,14 @@ describe("useSelectedModel", () => {
 	})
 
 	describe("Kimi Code provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
 		it("should resolve the configured model from router models", () => {
 			const modelInfo: ModelInfo = {
 				...kimiCodeDefaultModelInfo,

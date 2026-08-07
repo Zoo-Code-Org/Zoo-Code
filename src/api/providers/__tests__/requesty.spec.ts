@@ -173,6 +173,8 @@ describe("RequestyHandler", () => {
 
 			expect(result.info.contextWindow).toBe(100_000)
 			expect(result.info.maxTokens).toBe(10_000)
+			expect(result.info.supportsImages).toBe(false)
+			expect(result.info.supportsPromptCache).toBe(false)
 			expect(result.maxTokens).toBe(10_000)
 		})
 

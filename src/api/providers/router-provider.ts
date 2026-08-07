@@ -58,6 +58,17 @@ export abstract class RouterProvider extends BaseProvider {
 
 	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
 
+	/**
+	 * Apply user-supplied `customModelInfo` overrides for gateway providers.
+	 *
+	 * Only vercel-ai-gateway and zoo-gateway opt in here because the other
+	 * RouterProvider subclasses (openrouter, requesty, unbound) apply overrides
+	 * in their own `getModel()` methods — they need to merge with provider-
+	 * specific logic (e.g. specific-provider endpoints, tool preferences) that
+	 * runs before the overlay.  LiteLLM, Kenari, and OpenCode Go don't support
+	 * `customModelInfo` because they have their own discovery mechanisms and
+	 * are not exposed in the settings UI.
+	 */
 	private resolveModelInfo(info: ModelInfo | undefined, fallback: ModelInfo): ModelInfo {
 		if (this.name !== "vercel-ai-gateway" && this.name !== "zoo-gateway") {
 			return info ?? fallback

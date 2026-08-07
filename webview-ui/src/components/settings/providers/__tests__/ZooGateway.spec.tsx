@@ -125,6 +125,9 @@ describe("ZooGateway component", () => {
 			/>,
 		)
 
+		// Verify the component rendered (not a crash) by checking the model picker is present.
+		expect(screen.getByTestId("model-picker")).toBeInTheDocument()
+
 		await waitFor(() => {
 			expect(setApiConfigurationField).not.toHaveBeenCalled()
 		})
@@ -145,6 +148,9 @@ describe("ZooGateway component", () => {
 				organizationAllowList={baseProps.organizationAllowList}
 			/>,
 		)
+
+		// Verify the component actually rendered — prevents false positive on crash.
+		expect(screen.getByTestId("model-picker")).toBeInTheDocument()
 
 		await waitFor(() => {
 			expect(setApiConfigurationField).not.toHaveBeenCalled()

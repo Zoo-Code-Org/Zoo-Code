@@ -264,7 +264,7 @@ describe("ZooGatewayHandler", () => {
 			}))
 		})
 
-		it("requires authentication at request time when no session token is available", async () => {
+		it("requires authentication when draining the stream with no session token", async () => {
 			const handler = new ZooGatewayHandler({})
 			const stream = handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }])
 

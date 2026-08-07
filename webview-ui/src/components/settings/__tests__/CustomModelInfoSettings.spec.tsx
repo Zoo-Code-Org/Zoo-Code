@@ -38,9 +38,11 @@ describe("CustomModelInfoSettings", () => {
 		const contextWindowInput = screen.getByLabelText("settings:providers.customModelInfo.contextWindow.label")
 		fireEvent.input(contextWindowInput, { target: { value: "128000" } })
 
+		expect(setApiConfigurationField).toHaveBeenCalledTimes(1)
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", { contextWindow: 128_000 })
 
 		fireEvent.click(screen.getByText("settings:providers.customModelInfo.reset"))
+		expect(setApiConfigurationField).toHaveBeenCalledTimes(2)
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", undefined)
 	})
 
@@ -84,13 +86,18 @@ describe("CustomModelInfoSettings", () => {
 		expect(screen.getByText("settings:providers.customModelInfo.maxTokensWarning")).toBeInTheDocument()
 
 		fireEvent.click(screen.getByText("settings:providers.customModelInfo.supportsImages.label"))
+		expect(setApiConfigurationField).toHaveBeenCalledTimes(1)
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", {
 			contextWindow: 1000,
 			maxTokens: 2000,
 			supportsImages: true,
 		})
 
+		// Note: the component reads customModelInfo from apiConfiguration props, which
+		// doesn't re-render with the updated value — so the second toggle operates on
+		// the original prop state. This tests each toggle independently.
 		fireEvent.click(screen.getByText("settings:providers.customModelInfo.supportsPromptCache.label"))
+		expect(setApiConfigurationField).toHaveBeenCalledTimes(2)
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", {
 			contextWindow: 1000,
 			maxTokens: 2000,

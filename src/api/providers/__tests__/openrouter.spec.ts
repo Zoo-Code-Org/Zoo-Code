@@ -112,7 +112,12 @@ describe("OpenRouterHandler", () => {
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	}
 
-	beforeEach(() => vitest.clearAllMocks())
+	beforeEach(() => {
+		vitest.clearAllMocks()
+		// Reset getModelEndpoints to its default empty-object return so per-test
+		// overrides (e.g. specific-provider test) don't leak into subsequent tests.
+		vitest.mocked(getModelEndpoints).mockResolvedValue({})
+	})
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)
@@ -212,7 +217,7 @@ describe("OpenRouterHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(true)
 		})
 
-		it("honors custom maxTokens for thinking models", async () => {
+		it("clamps maxTokens to 20% of context window for thinking models", async () => {
 			const handler = new OpenRouterHandler({
 				openRouterApiKey: "test-key",
 				openRouterModelId: "anthropic/claude-3.7-sonnet:thinking",

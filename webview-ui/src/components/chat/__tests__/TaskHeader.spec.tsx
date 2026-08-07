@@ -362,6 +362,9 @@ describe("TaskHeader", () => {
 
 			renderTaskHeader()
 
+			// Positive assertion: the component rendered and the task text is visible.
+			expect(screen.getByText("Test task")).toBeInTheDocument()
+
 			expect(screen.queryByTestId("context-tokens-count")).not.toBeInTheDocument()
 			expect(screen.queryByTestId("context-window-size")).not.toBeInTheDocument()
 			expect(screen.queryByText(/%$/)).not.toBeInTheDocument()

@@ -71,6 +71,10 @@ export const ZooGateway = ({
 	const modelIds = useMemo(() => Object.keys(zooModels), [zooModels])
 	const resolvedDefaultModelId = useMemo(() => pickZooGatewayDefaultModelId(modelIds), [modelIds])
 
+	// Auto-select the default model only when no model is configured yet.
+	// We intentionally do NOT reset the selection when the configured model
+	// is absent from the catalog — router providers accept arbitrary model
+	// IDs (e.g. custom deployments) that may not appear in the fetched list.
 	useEffect(() => {
 		if (modelIds.length === 0) {
 			return
