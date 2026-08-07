@@ -18,6 +18,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
+	resolveAutocompleteConfig,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -1041,31 +1042,11 @@ describe("ClineProvider", () => {
 
 		const state = await provider.getStateToPostToWebview()
 
-		expect(state.autocompleteConfig).toEqual({
-			enabled: false,
-			provider: "ollama",
-			modelId: undefined,
-			baseUrl: "http://localhost:11434",
-			chatFallbackProvider: undefined,
-			triggerMode: "automatic",
-			debounceMs: 300,
-			minCharsTyped: 0,
-			multilineMode: "auto",
-			contextLength: 8192,
-			maxPrefixTokens: 1024,
-			maxSuffixTokens: 512,
-			maxSnippetTokens: 512,
-			maxOutputTokens: 256,
-			temperature: 0.01,
-			requestTimeoutMs: 5_000,
-			useRecentlyEdited: true,
-			useOpenTabs: true,
-			useImportDefinitions: true,
-			useAst: true,
-			fimTemplate: "auto",
-			stopSequences: undefined,
-			disabledLanguages: [],
-		})
+		// Compared against the shared resolver rather than a hand-copied literal.
+		// Duplicating all 22 defaults here meant the test broke on every tuning
+		// change while never checking the thing it exists to check — that an unset
+		// config reaches the webview fully defaulted.
+		expect(state.autocompleteConfig).toEqual(resolveAutocompleteConfig(undefined))
 		expect(state.hasAutocompleteApiKey).toBe(false)
 	})
 
