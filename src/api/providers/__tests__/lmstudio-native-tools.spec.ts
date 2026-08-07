@@ -2,6 +2,7 @@
 
 // Mock OpenAI client - must come before other imports
 const mockCreate = vi.fn()
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -58,13 +59,9 @@ describe("LmStudioHandler Native Tools", () => {
 
 	describe("Native Tool Calling Support", () => {
 		it("should include tools in request when model supports native tools and tools are provided", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -90,13 +87,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should include tool_choice when provided", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -113,13 +106,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should always include tools and tool_choice in request (tools are always present after PR #10841)", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -135,9 +124,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should yield tool_call_partial chunks during streaming", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -154,8 +143,8 @@ describe("LmStudioHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -170,19 +159,16 @@ describe("LmStudioHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
 				tools: testTools,
 			})
 
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toContainEqual({
 				type: "tool_call_partial",
@@ -202,13 +188,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should set parallel_tool_calls based on metadata", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Test response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Test response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -225,9 +207,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should yield tool_call_end events when finish_reason is tool_calls", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -244,17 +226,17 @@ describe("LmStudioHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {},
 								finish_reason: "tool_calls",
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -286,13 +268,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should work with parallel tool calls disabled (sends false)", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
-						choices: [{ delta: { content: "Response" } }],
-					}
-				},
-			}))
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "Response" } }] }]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",
@@ -307,9 +285,9 @@ describe("LmStudioHandler Native Tools", () => {
 		})
 
 		it("should handle reasoning content alongside tool calls", async () => {
-			mockCreate.mockImplementationOnce(() => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -317,8 +295,8 @@ describe("LmStudioHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {
@@ -335,17 +313,17 @@ describe("LmStudioHandler Native Tools", () => {
 								},
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [
 							{
 								delta: {},
 								finish_reason: "tool_calls",
 							},
 						],
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("test prompt", [], {
 				taskId: "test-task-id",

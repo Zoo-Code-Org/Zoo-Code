@@ -6,6 +6,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
 import { Package } from "../../../shared/package"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import axios from "axios"
 
@@ -88,11 +89,11 @@ describe("OpenAiHandler", () => {
 	let mockOptions: ApiHandlerOptions
 
 	beforeEach(() => {
-		mockOptions = {
+		mockOptions = makeApiHandlerOptions({
 			openAiApiKey: "test-api-key",
 			openAiModelId: "gpt-4",
 			openAiBaseUrl: "https://api.openai.com/v1",
-		}
+		})
 		handler = new OpenAiHandler(mockOptions)
 		mockCreate.mockClear()
 	})

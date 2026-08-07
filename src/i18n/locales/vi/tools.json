@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Đang tìm kiếm '{{query}}' trong cơ sở mã..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard đã chặn lệnh này.",
+			"blockedWithReason": "Destructive Command Guard đã chặn lệnh này. Thông báo từ DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard đã chặn lệnh này. (Quy tắc: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard đã chặn lệnh này. Thông báo từ DCG: {{reason}} (Quy tắc: {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Không thể tạo nhiệm vụ mới do hạn chế chính sách."

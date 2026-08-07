@@ -2510,20 +2510,14 @@ describe("importExport", () => {
 			{
 				testCase: "supportsReasoningBudget is false",
 				providerName: "deepseek-provider",
-				modelId: "deepseek-chat",
+				modelId: "deepseek-v4-flash",
 				providerId: "deepseek-id",
 			},
 			{
 				testCase: "requiredReasoningBudget is false",
 				providerName: "deepseek-provider-2",
-				modelId: "deepseek-coder",
+				modelId: "deepseek-v4-pro",
 				providerId: "deepseek-id-2",
-			},
-			{
-				testCase: "both supportsReasoningBudget and requiredReasoningBudget are false",
-				providerName: "deepseek-provider-3",
-				modelId: "deepseek-reasoner",
-				providerId: "deepseek-id-3",
 			},
 		])(
 			"should exclude modelMaxTokens and modelMaxThinkingTokens when $testCase",

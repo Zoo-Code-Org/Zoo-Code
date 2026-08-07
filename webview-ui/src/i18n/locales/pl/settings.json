@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Wykonaj",
 			"description": "Automatycznie wykonuj dozwolone polecenia terminala bez konieczności zatwierdzania",
+			"destructiveCommandGuard": {
+				"label": "Włącz ochronę przed destrukcyjnymi poleceniami",
+				"description": "Pobiera i używa Destructive Command Guard (DCG) dla tej platformy. Polecenia dozwolone przez DCG są wykonywane automatycznie. Polecenia zablokowane przez DCG wymagają twojej zgody. Listy poleceń Zoo są wyłączone, gdy ta opcja jest aktywna. Pobrany plik wykonywalny pozostaje na dysku po wyłączeniu opcji."
+			},
 			"allowedCommands": "Dozwolone polecenia auto-wykonania",
 			"allowedCommandsDescription": "Prefiksy poleceń, które mogą być automatycznie wykonywane, gdy \"Zawsze zatwierdzaj operacje wykonania\" jest włączone. Dodaj * aby zezwolić na wszystkie polecenia (używaj z ostrożnością).",
 			"deniedCommands": "Odrzucone polecenia",
