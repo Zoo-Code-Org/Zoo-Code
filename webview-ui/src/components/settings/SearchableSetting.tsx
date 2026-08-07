@@ -2,7 +2,7 @@ import { HTMLAttributes, useEffect } from "react"
 
 import { cn } from "@/lib/utils"
 
-import { SectionName } from "./SettingsView"
+import type { SectionName } from "./SettingsView"
 import { useSearchIndexContext } from "./useSettingsSearch"
 
 interface SearchableSettingProps extends HTMLAttributes<HTMLDivElement> {

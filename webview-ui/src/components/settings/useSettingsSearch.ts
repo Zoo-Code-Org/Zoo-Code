@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef, createContext, useContext } from "react"
 import { Fzf } from "fzf"
 
-import { SectionName } from "./SettingsView"
+import type { SectionName } from "./SettingsView"
 
 export interface SearchableSettingData {
 	settingId: string

@@ -59,6 +59,11 @@ export default defineConfig({
 			resolve: {
 				alias: {
 					"@src/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
+					// TerminalSettings (and other components) import the context via the
+					// "@/i18n/..." specifier, which the "@src/..." alias above does not
+					// cover. The real module pulls in i18n `setup` and ExtensionStateContext
+					// (→ @roo-code/types → zod), crashing CT mount with `z is not defined`.
+					"@/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
 					"@": path.resolve(dirname, "./src"),
 					"@src": path.resolve(dirname, "./src"),
 					"@roo": path.resolve(dirname, "../src/shared"),
