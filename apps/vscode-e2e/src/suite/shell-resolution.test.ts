@@ -178,6 +178,8 @@ suite("Shell Resolution", function () {
 							mode: "code",
 							autoApprovalEnabled: true,
 							alwaysAllowExecute: true,
+							alwaysAllowWrite: true,
+							alwaysAllowReadOnly: true,
 							allowedCommands: ["*"],
 							terminalShellIntegrationDisabled: false,
 						},
