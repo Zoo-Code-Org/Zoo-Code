@@ -388,12 +388,111 @@ describe("BaseOpenAiCompatibleProvider", () => {
 					},
 				]),
 			)
-
+	
 			const stream = handler.createMessage("system prompt", [])
 			const chunks = await collectStream(stream)
-
+	
 			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
 			expect(endChunks).toHaveLength(0)
 		})
 	})
-})
+	
+		describe("request parameter construction", () => {
+			const toolDef: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "Read a file",
+						parameters: { type: "object", properties: {} },
+					},
+				},
+			]
+	
+			it("should omit parallel_tool_calls when no tools are provided", async () => {
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+				)
+
+				const stream = handler.createMessage("system prompt", [])
+				await collectStream(stream)
+
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs).not.toHaveProperty("parallel_tool_calls")
+			})
+
+			it("should include parallel_tool_calls: true by default when tools are present", async () => {
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+				)
+
+				const stream = handler.createMessage("system prompt", [], { taskId: "t1", tools: toolDef })
+				await collectStream(stream)
+
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs.parallel_tool_calls).toBe(true)
+			})
+
+			it("should honor parallelToolCalls: false from metadata when tools are present", async () => {
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+				)
+
+				const stream = handler.createMessage("system prompt", [], {
+					taskId: "t1",
+					tools: toolDef,
+					parallelToolCalls: false,
+				})
+				await collectStream(stream)
+
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs.parallel_tool_calls).toBe(false)
+			})
+		})
+	
+		describe("openAiToolStrictMode pass-through", () => {
+			class StrictModeProvider extends TestOpenAiCompatibleProvider {
+				constructor(strict: boolean | undefined) {
+					super("test-api-key")
+					this.options.openAiToolStrictMode = strict
+				}
+			}
+	
+			const toolDef: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "Read a file",
+						parameters: { type: "object", properties: {} },
+					},
+				},
+			]
+	
+			it("should default to strict: false when openAiToolStrictMode is unset", async () => {
+				const strictHandler = new StrictModeProvider(undefined)
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+				)
+	
+				const stream = strictHandler.createMessage("system prompt", [], { taskId: "t1", tools: toolDef })
+				await collectStream(stream)
+	
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs.tools[0].function.strict).toBe(false)
+			})
+	
+			it("should pass strict: true when openAiToolStrictMode is enabled", async () => {
+				const strictHandler = new StrictModeProvider(true)
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([{ choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }]),
+				)
+	
+				const stream = strictHandler.createMessage("system prompt", [], { taskId: "t1", tools: toolDef })
+				await collectStream(stream)
+	
+				const callArgs = mockCreate.mock.calls[0][0]
+				expect(callArgs.tools[0].function.strict).toBe(true)
+			})
+		})
+	})
