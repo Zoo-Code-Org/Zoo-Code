@@ -201,7 +201,7 @@ suite("Error Interception — Runtime (e2e)", function () {
 		// Load the error-interception module from the built bundle. The bundle
 		// exposes its internal modules via a loader keyed by module path; we
 		// resolve the exact submodule so we test the real artifact.
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const bundle = require(entry) as { __errorInterception?: ErrorInterceptionRuntimeModule } & Record<
 			string,
 			unknown
@@ -222,7 +222,7 @@ suite("Error Interception — Runtime (e2e)", function () {
 				"index.js",
 			)
 			if (fs.existsSync(subPath)) {
-				// eslint-disable-next-line @typescript-eslint/no-var-requires
+				// eslint-disable-next-line @typescript-eslint/no-require-imports
 				ei = require(subPath) as ErrorInterceptionRuntimeModule
 			}
 		}
