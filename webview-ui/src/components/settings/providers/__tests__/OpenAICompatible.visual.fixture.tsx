@@ -53,7 +53,7 @@ export const OpenAICompatibleAzureFixture = () => (
 			}}>
 			<QueryClientProvider client={queryClient}>
 				<TooltipProvider>
-					<div className="h-[315px] w-[480px] overflow-hidden bg-vscode-editor-background p-4 text-vscode-foreground">
+					<div className="h-[300px] w-[480px] overflow-hidden bg-vscode-editor-background p-4 text-vscode-foreground">
 						<OpenAICompatible
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={() => {}}
