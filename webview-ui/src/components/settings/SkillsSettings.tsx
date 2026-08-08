@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react"
-import { Plus, Globe, Folder, Edit, Trash2, Settings } from "lucide-react"
+import { Plus, Globe, Folder, Edit, Trash2, Settings, TriangleAlert } from "lucide-react"
 import { Trans } from "react-i18next"
 
 import type { SkillMetadata } from "@roo-code/types"
@@ -35,7 +35,7 @@ import { CreateSkillDialog } from "./CreateSkillDialog"
 
 export const SkillsSettings: React.FC = () => {
 	const { t } = useAppTranslation()
-	const { cwd, skills: rawSkills, customModes } = useExtensionState()
+	const { cwd, skills: rawSkills, skillDiagnostics, customModes } = useExtensionState()
 	const skills = useMemo(() => rawSkills ?? [], [rawSkills])
 
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -232,6 +232,34 @@ export const SkillsSettings: React.FC = () => {
 							}}
 						/>
 					</p>
+					{skillDiagnostics.length > 0 && (
+						<div
+							role="alert"
+							className="flex gap-2 rounded-md border border-vscode-inputValidation-warningBorder bg-vscode-inputValidation-warningBackground p-3 text-sm">
+							<TriangleAlert className="mt-0.5 size-4 shrink-0" />
+							<div className="min-w-0">
+								<div className="font-medium">{t("settings:skills.diagnostics.title")}</div>
+								<div className="text-vscode-descriptionForeground">
+									{t("settings:skills.diagnostics.description")}
+								</div>
+								<ul className="mb-0 mt-2 space-y-1 pl-4">
+									{skillDiagnostics.map((diagnostic) => {
+										const location = diagnostic.line
+											? `:${diagnostic.line}${diagnostic.column ? `:${diagnostic.column}` : ""}`
+											: ""
+										return (
+											<li key={`${diagnostic.path}-${diagnostic.line}-${diagnostic.column}`}>
+												<span className="break-all font-mono">
+													{diagnostic.path + location}
+												</span>
+												<span>: {diagnostic.message}</span>
+											</li>
+										)
+									})}
+								</ul>
+							</div>
+						</div>
+					)}
 
 					{/* Add Skill button */}
 					<Button variant="secondary" className="py-1" onClick={() => setCreateDialogOpen(true)}>

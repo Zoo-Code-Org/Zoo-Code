@@ -47,6 +47,7 @@ describe("skillsMessageHandler", () => {
 	const mockLog = vi.fn()
 	const mockPostMessageToWebview = vi.fn()
 	const mockGetSkillsMetadata = vi.fn()
+	const mockGetSkillDiagnostics = vi.fn()
 	const mockCreateSkill = vi.fn()
 	const mockDeleteSkill = vi.fn()
 	const mockMoveSkill = vi.fn()
@@ -57,6 +58,7 @@ describe("skillsMessageHandler", () => {
 		const skillsManager = hasSkillsManager
 			? {
 					getSkillsMetadata: mockGetSkillsMetadata,
+					getSkillDiagnostics: mockGetSkillDiagnostics,
 					createSkill: mockCreateSkill,
 					deleteSkill: mockDeleteSkill,
 					moveSkill: mockMoveSkill,
@@ -90,6 +92,7 @@ describe("skillsMessageHandler", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockGetSkillDiagnostics.mockReturnValue([])
 	})
 
 	describe("handleRequestSkills", () => {
@@ -100,7 +103,34 @@ describe("skillsMessageHandler", () => {
 			const result = await handleRequestSkills(provider)
 
 			expect(result).toEqual(mockSkills)
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: mockSkills })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: mockSkills,
+				skillDiagnostics: [],
+			})
+		})
+
+		it("sends structured malformed-skill diagnostics without hiding valid skills", async () => {
+			const provider = createMockProvider(true)
+			const diagnostics = [
+				{
+					path: "/workspace/.roo/skills/broken/SKILL.md",
+					source: "project" as const,
+					message: "bad indentation of a mapping entry",
+					line: 3,
+					column: 20,
+				},
+			]
+			mockGetSkillsMetadata.mockReturnValue(mockSkills)
+			mockGetSkillDiagnostics.mockReturnValue(diagnostics)
+
+			await handleRequestSkills(provider)
+
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: mockSkills,
+				skillDiagnostics: diagnostics,
+			})
 		})
 
 		it("returns empty skills when skills manager is not available", async () => {
@@ -109,7 +139,11 @@ describe("skillsMessageHandler", () => {
 			const result = await handleRequestSkills(provider)
 
 			expect(result).toEqual([])
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [],
+				skillDiagnostics: [],
+			})
 		})
 
 		it("handles errors and returns empty skills", async () => {
@@ -122,7 +156,11 @@ describe("skillsMessageHandler", () => {
 
 			expect(result).toEqual([])
 			expect(mockLog).toHaveBeenCalled()
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [],
+				skillDiagnostics: [],
+			})
 		})
 	})
 
@@ -142,7 +180,11 @@ describe("skillsMessageHandler", () => {
 			expect(result).toEqual(mockSkills)
 			expect(mockCreateSkill).toHaveBeenCalledWith("new-skill", "global", "New skill description", undefined)
 			expect(openFile).toHaveBeenCalledWith("/path/to/new-skill/SKILL.md")
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: mockSkills })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: mockSkills,
+				skillDiagnostics: [],
+			})
 		})
 
 		it("creates a skill with mode restriction", async () => {
@@ -212,7 +254,11 @@ describe("skillsMessageHandler", () => {
 
 			expect(result).toEqual([mockSkills[1]])
 			expect(mockDeleteSkill).toHaveBeenCalledWith("test-skill", "global", undefined)
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [mockSkills[1]] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[1]],
+				skillDiagnostics: [],
+			})
 		})
 
 		it("deletes a skill with mode restriction", async () => {
@@ -280,7 +326,11 @@ describe("skillsMessageHandler", () => {
 
 			expect(result).toEqual([mockSkills[0]])
 			expect(mockMoveSkill).toHaveBeenCalledWith("test-skill", "global", undefined, "code")
-			expect(mockPostMessageToWebview).toHaveBeenCalledWith({ type: "skills", skills: [mockSkills[0]] })
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[0]],
+				skillDiagnostics: [],
+			})
 		})
 
 		it("moves a skill from one mode to another", async () => {

@@ -6,7 +6,7 @@ import matter from "gray-matter"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { getGlobalRooDirectory, getGlobalAgentsDirectory, getProjectAgentsDirectoryForCwd } from "../roo-config"
 import { directoryExists, fileExists } from "../roo-config"
-import { SkillMetadata, SkillContent } from "../../shared/skills"
+import { SkillMetadata, SkillContent, SkillDiagnostic } from "../../shared/skills"
 import { modes, getAllModes } from "../../shared/modes"
 import {
 	validateSkillName as validateSkillNameShared,
@@ -16,10 +16,11 @@ import {
 import { t } from "../../i18n"
 
 // Re-export for convenience
-export type { SkillMetadata, SkillContent }
+export type { SkillMetadata, SkillContent, SkillDiagnostic }
 
 export class SkillsManager {
 	private skills: Map<string, SkillMetadata> = new Map()
+	private diagnostics: SkillDiagnostic[] = []
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
 	private isDisposed = false
@@ -42,6 +43,7 @@ export class SkillsManager {
 	 */
 	async discoverSkills(): Promise<void> {
 		this.skills.clear()
+		this.diagnostics = []
 		const skillsDirs = await this.getSkillsDirectories()
 
 		for (const { dir, source, mode } of skillsDirs) {
@@ -100,9 +102,17 @@ export class SkillsManager {
 
 		try {
 			const fileContent = await fs.readFile(skillMdPath, "utf-8")
+			let parsed: ReturnType<typeof matter>
 
-			// Use gray-matter to parse frontmatter
-			const { data: frontmatter, content: body } = matter(fileContent)
+			try {
+				parsed = matter(fileContent)
+			} catch (error) {
+				this.recordDiagnostic(skillMdPath, source, error)
+				console.error(`Failed to parse skill at ${skillDir}:`, error)
+				return
+			}
+
+			const { data: frontmatter } = parsed
 
 			// Validate required fields (only name and description for now)
 			if (!frontmatter.name || typeof frontmatter.name !== "string") {
@@ -173,6 +183,20 @@ export class SkillsManager {
 		} catch (error) {
 			console.error(`Failed to load skill at ${skillDir}:`, error)
 		}
+	}
+
+	private recordDiagnostic(path: string, source: "global" | "project", error: unknown): void {
+		const yamlError = error as {
+			reason?: unknown
+			message?: unknown
+			mark?: { line?: unknown; column?: unknown }
+		}
+		const reason = typeof yamlError.reason === "string" ? yamlError.reason : undefined
+		const errorMessage = error instanceof Error ? error.message.split("\n", 1)[0] : String(error)
+		const line = typeof yamlError.mark?.line === "number" ? yamlError.mark.line + 1 : undefined
+		const column = typeof yamlError.mark?.column === "number" ? yamlError.mark.column + 1 : undefined
+
+		this.diagnostics.push({ path, source, message: reason ?? errorMessage, line, column })
 	}
 
 	/**
@@ -290,6 +314,10 @@ export class SkillsManager {
 		return this.getAllSkills()
 	}
 
+	getSkillDiagnostics(): SkillDiagnostic[] {
+		return [...this.diagnostics]
+	}
+
 	/**
 	 * Get a skill by name, source, and optionally mode
 	 */
@@ -394,25 +422,19 @@ export class SkillsManager {
 			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
 			.join(" ")
 
-		// Build frontmatter with optional modeSlugs
-		const frontmatterLines = [`name: ${name}`, `description: ${trimmedDescription}`]
-		if (modeSlugs && modeSlugs.length > 0) {
-			frontmatterLines.push(`modeSlugs:`)
-			for (const slug of modeSlugs) {
-				frontmatterLines.push(`  - ${slug}`)
-			}
+		const frontmatter = {
+			name,
+			description: trimmedDescription,
+			...(modeSlugs && modeSlugs.length > 0 ? { modeSlugs } : {}),
 		}
-
-		const skillContent = `---
-${frontmatterLines.join("\n")}
----
-
+		const body = `
 # ${titleName}
 
 ## Instructions
 
 Add your skill instructions here.
 `
+		const skillContent = matter.stringify(body, frontmatter)
 
 		// Write the SKILL.md file
 		await fs.writeFile(skillMdPath, skillContent, "utf-8")

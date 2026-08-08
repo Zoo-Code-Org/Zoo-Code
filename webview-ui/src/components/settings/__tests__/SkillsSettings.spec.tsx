@@ -1,7 +1,7 @@
 import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import type { SkillMetadata } from "@roo-code/types"
+import type { SkillDiagnostic, SkillMetadata } from "@roo-code/types"
 
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { vscode } from "@/utils/vscode"
@@ -166,7 +166,11 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => mockExtensionState,
 }))
 
-const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string) => {
+const renderSkillsSettings = (
+	skills: SkillMetadata[] = mockSkills,
+	cwd?: string,
+	skillDiagnostics: SkillDiagnostic[] = [],
+) => {
 	const queryClient = new QueryClient({
 		defaultOptions: {
 			queries: { retry: false },
@@ -177,6 +181,7 @@ const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string
 	// Update the mock state before rendering
 	mockExtensionState = {
 		skills,
+		skillDiagnostics,
 		cwd: cwd !== undefined ? cwd : "/workspace",
 		customModes: [],
 	}
@@ -206,6 +211,25 @@ describe("SkillsSettings", () => {
 		renderSkillsSettings()
 
 		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "requestSkills" })
+	})
+
+	it("displays an actionable malformed-skill warning with file location and message", () => {
+		renderSkillsSettings(mockSkills, undefined, [
+			{
+				path: "/workspace/.roo/skills/broken/SKILL.md",
+				source: "project",
+				message: "bad indentation of a mapping entry",
+				line: 3,
+				column: 20,
+			},
+		])
+
+		const warning = screen.getByRole("alert")
+		expect(warning).toHaveTextContent("settings:skills.diagnostics.title")
+		expect(warning).toHaveTextContent("settings:skills.diagnostics.description")
+		expect(warning).toHaveTextContent("/workspace/.roo/skills/broken/SKILL.md:3:20")
+		expect(warning).toHaveTextContent("bad indentation of a mapping entry")
+		expect(screen.getByText("global-skill")).toBeInTheDocument()
 	})
 
 	it("displays project skills section when in a workspace", () => {

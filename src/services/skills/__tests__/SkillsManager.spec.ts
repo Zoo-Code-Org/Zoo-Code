@@ -1,4 +1,5 @@
 import * as path from "path"
+import matter from "gray-matter"
 
 // Use vi.hoisted to ensure mocks are available during hoisting
 const {
@@ -1233,6 +1234,47 @@ Instructions`)
 			expect(writeCall[1]).toContain("- code")
 		})
 
+		it("round-trips the issue description and mode slugs through YAML frontmatter", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+			const description = 'Triggers on: "TDD", "test-driven development"'
+
+			await skillsManager.createSkill("tdd-skill", "global", description, ["code", "debug"])
+
+			const generatedContent = mockWriteFile.mock.calls[0][1] as string
+			const parsed = matter(generatedContent)
+			expect(parsed.data).toEqual({
+				name: "tdd-skill",
+				description,
+				modeSlugs: ["code", "debug"],
+			})
+			expect(parsed.content).toBe("\n# Tdd Skill\n\n## Instructions\n\nAdd your skill instructions here.\n")
+		})
+
+		it.each([
+			["colon-space", "Use when: tests fail"],
+			["quotes", "Use \"red-green-refactor\" and 'small steps'"],
+			["hash", "Use tests # not comments"],
+			["leading punctuation", "- Start from a failing test"],
+			["multiline", "First line\nSecond line: with # and quotes"],
+		])("preserves YAML-sensitive %s descriptions", async (_caseName, description) => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (p: string) => p)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.createSkill("yaml-sensitive", "global", description)
+
+			const generatedContent = mockWriteFile.mock.calls[0][1] as string
+			expect(matter(generatedContent).data.description).toBe(description)
+		})
+
 		it("should create a project skill", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (p: string) => p)
@@ -1296,6 +1338,45 @@ Instructions`)
 			await expect(skillsManager.createSkill("existing-skill", "global", "Description")).rejects.toThrow(
 				"already exists",
 			)
+		})
+	})
+
+	describe("skill diagnostics", () => {
+		it("reports malformed YAML with location while retaining valid skills", async () => {
+			const validSkillDir = p(globalSkillsDir, "valid-skill")
+			const malformedSkillDir = p(globalSkillsDir, "malformed-skill")
+			const validSkillPath = p(validSkillDir, "SKILL.md")
+			const malformedSkillPath = p(malformedSkillDir, "SKILL.md")
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (pathArg: string) => pathArg)
+			mockReaddir.mockImplementation(async (dir: string) =>
+				dir === globalSkillsDir ? ["valid-skill", "malformed-skill"] : [],
+			)
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockImplementation(async (file: string) =>
+				[validSkillPath, malformedSkillPath].includes(file),
+			)
+			mockReadFile.mockImplementation(async (file: string) => {
+				if (file === validSkillPath) {
+					return "---\nname: valid-skill\ndescription: Still visible\n---\nValid instructions"
+				}
+				return '---\nname: malformed-skill\ndescription: Triggers on: "TDD"\n---\nBroken instructions'
+			})
+
+			await skillsManager.discoverSkills()
+
+			expect(skillsManager.getSkillsMetadata()).toEqual([
+				expect.objectContaining({ name: "valid-skill", description: "Still visible" }),
+			])
+			expect(skillsManager.getSkillDiagnostics()).toEqual([
+				expect.objectContaining({
+					path: malformedSkillPath,
+					source: "global",
+					message: expect.any(String),
+					line: 3,
+					column: expect.any(Number),
+				}),
+			])
 		})
 	})
 
