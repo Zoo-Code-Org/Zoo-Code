@@ -35,6 +35,7 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
+	isCustomModelInfoProvider,
 	isRetiredProvider,
 	getProviderDefaultModelId,
 	providerIdentifiers,
@@ -63,20 +64,7 @@ function getValidatedModelId(
 	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
 }
 
-/** Providers that accept user-supplied `customModelInfo` overrides. */
-const CUSTOM_MODEL_INFO_PROVIDERS: ReadonlySet<ProviderName> = new Set([
-	providerIdentifiers.openrouter,
-	providerIdentifiers.requesty,
-	providerIdentifiers.unbound,
-	providerIdentifiers.vercelAiGateway,
-	providerIdentifiers.zooGateway,
-])
-
 function getConfiguredRouterModelId(provider: ProviderName, apiConfiguration: ProviderSettings): string | undefined {
-	if (!CUSTOM_MODEL_INFO_PROVIDERS.has(provider)) {
-		return undefined
-	}
-
 	switch (provider) {
 		case providerIdentifiers.openrouter:
 			return apiConfiguration.openRouterModelId
@@ -91,10 +79,6 @@ function getConfiguredRouterModelId(provider: ProviderName, apiConfiguration: Pr
 		default:
 			return undefined
 	}
-}
-
-function supportsCustomModelInfo(provider: ProviderName): boolean {
-	return CUSTOM_MODEL_INFO_PROVIDERS.has(provider)
 }
 
 export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
@@ -162,7 +146,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 
 	const { id } = selectedModel
 	const info =
-		activeProvider && supportsCustomModelInfo(activeProvider)
+		activeProvider && isCustomModelInfoProvider(activeProvider)
 			? applyCustomModelInfo(selectedModel.info, apiConfiguration)
 			: selectedModel.info
 

@@ -222,6 +222,24 @@ describe("ZooGatewayHandler", () => {
 			expect(result.info.supportsPromptCache).toBe(false)
 		})
 
+		it("propagates customModelInfo maxTokens into the completePrompt request body", async () => {
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "ok" } }],
+			}))
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 100_000, maxTokens: 10_000 },
+			})
+			await handler.completePrompt("test")
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					max_completion_tokens: 10_000,
+				}),
+			)
+		})
+
 		it("falls back to the default model when none is configured", async () => {
 			const handler = new ZooGatewayHandler({ zooSessionToken: "zoo_ext_test_token" })
 			const result = await handler.fetchModel()

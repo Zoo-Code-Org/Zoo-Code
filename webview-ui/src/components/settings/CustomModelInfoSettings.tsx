@@ -100,13 +100,26 @@ export const CustomModelInfoSettings = ({
 	const handleContextWindowInput = (event: ValueChangeEvent) => {
 		const value = getEventValue(event)
 		setContextWindowInput(value)
-		updateOverride("contextWindow", parsePositiveInteger(value))
+
+		const parsed = parsePositiveInteger(value)
+
+		// Only persist when the input is valid OR deliberately empty (= user
+		// cleared the field). Non-empty invalid input (e.g. "12abc") stays in
+		// local state without deleting an existing valid override.
+		if (parsed !== undefined || value.trim() === "") {
+			updateOverride("contextWindow", parsed)
+		}
 	}
 
 	const handleMaxTokensInput = (event: ValueChangeEvent) => {
 		const value = getEventValue(event)
 		setMaxTokensInput(value)
-		updateOverride("maxTokens", parsePositiveInteger(value))
+
+		const parsed = parsePositiveInteger(value)
+
+		if (parsed !== undefined || value.trim() === "") {
+			updateOverride("maxTokens", parsed)
+		}
 	}
 
 	const resetOverrides = () => {

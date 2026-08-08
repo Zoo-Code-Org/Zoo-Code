@@ -68,6 +68,9 @@ export abstract class RouterProvider extends BaseProvider {
 	 * runs before the overlay.  LiteLLM, Kenari, and OpenCode Go don't support
 	 * `customModelInfo` because they have their own discovery mechanisms and
 	 * are not exposed in the settings UI.
+	 *
+	 * See also: `customModelInfoProviders` in @roo-code/types for the full set
+	 * of providers whose UI exposes the override panel.
 	 */
 	private resolveModelInfo(info: ModelInfo | undefined, fallback: ModelInfo): ModelInfo {
 		if (this.name !== "vercel-ai-gateway" && this.name !== "zoo-gateway") {

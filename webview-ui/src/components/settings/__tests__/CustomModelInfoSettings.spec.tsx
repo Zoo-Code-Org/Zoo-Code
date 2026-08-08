@@ -64,18 +64,67 @@ describe("CustomModelInfoSettings", () => {
 
 		expect(maxTokensInput).toHaveValue("12abc")
 		expect(maxTokensInput).toHaveAttribute("aria-invalid", "true")
-		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", undefined)
+		// Invalid non-empty input should NOT persist — the override callback is not called
+		expect(setApiConfigurationField).not.toHaveBeenCalled()
 	})
 
-	it("updates capability overrides and warns when output exceeds the context window", () => {
+	it("does not delete an existing valid override when the user types invalid input", () => {
 		const setApiConfigurationField = vi.fn()
 
 		render(
 			<CustomModelInfoSettings
 				apiConfiguration={{
-					apiProvider: "unbound",
-					customModelInfo: { contextWindow: 1000, maxTokens: 2000 },
+					apiProvider: "requesty",
+					customModelInfo: { contextWindow: 64_000 },
 				}}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.title"))
+
+		const contextWindowInput = screen.getByLabelText("settings:providers.customModelInfo.contextWindow.label")
+		fireEvent.input(contextWindowInput, { target: { value: "12abc" } })
+
+		expect(contextWindowInput).toHaveValue("12abc")
+		expect(contextWindowInput).toHaveAttribute("aria-invalid", "true")
+		// The existing 64000 override must NOT be deleted
+		expect(setApiConfigurationField).not.toHaveBeenCalled()
+	})
+
+	it("clears the override when the user empties the input field", () => {
+		const setApiConfigurationField = vi.fn()
+
+		render(
+			<CustomModelInfoSettings
+				apiConfiguration={{
+					apiProvider: "requesty",
+					customModelInfo: { contextWindow: 64_000 },
+				}}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		fireEvent.click(screen.getByText("settings:providers.customModelInfo.title"))
+
+		const contextWindowInput = screen.getByLabelText("settings:providers.customModelInfo.contextWindow.label")
+		fireEvent.input(contextWindowInput, { target: { value: "" } })
+
+		expect(setApiConfigurationField).toHaveBeenCalledWith("customModelInfo", undefined)
+	})
+
+	it("accumulates capability overrides across toggles with rerender", () => {
+		const setApiConfigurationField = vi.fn()
+		const baseConfig: ProviderSettings = {
+			apiProvider: "unbound",
+			customModelInfo: { contextWindow: 1000, maxTokens: 2000 },
+		}
+
+		const { rerender } = render(
+			<CustomModelInfoSettings
+				apiConfiguration={baseConfig}
 				setApiConfigurationField={setApiConfigurationField}
 				selectedModelInfo={modelInfo}
 			/>,
@@ -85,6 +134,7 @@ describe("CustomModelInfoSettings", () => {
 
 		expect(screen.getByText("settings:providers.customModelInfo.maxTokensWarning")).toBeInTheDocument()
 
+		// Toggle 1: enable supportsImages
 		fireEvent.click(screen.getByText("settings:providers.customModelInfo.supportsImages.label"))
 		expect(setApiConfigurationField).toHaveBeenCalledTimes(1)
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", {
@@ -93,14 +143,25 @@ describe("CustomModelInfoSettings", () => {
 			supportsImages: true,
 		})
 
-		// Note: the component reads customModelInfo from apiConfiguration props, which
-		// doesn't re-render with the updated value — so the second toggle operates on
-		// the original prop state. This tests each toggle independently.
+		// Re-render with the updated configuration so toggle 2 sees toggle 1's effect
+		rerender(
+			<CustomModelInfoSettings
+				apiConfiguration={{
+					...baseConfig,
+					customModelInfo: setApiConfigurationField.mock.calls[0][1],
+				}}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={modelInfo}
+			/>,
+		)
+
+		// Toggle 2: disable supportsPromptCache — should accumulate with supportsImages: true
 		fireEvent.click(screen.getByText("settings:providers.customModelInfo.supportsPromptCache.label"))
 		expect(setApiConfigurationField).toHaveBeenCalledTimes(2)
 		expect(setApiConfigurationField).toHaveBeenLastCalledWith("customModelInfo", {
 			contextWindow: 1000,
 			maxTokens: 2000,
+			supportsImages: true,
 			supportsPromptCache: false,
 		})
 	})
