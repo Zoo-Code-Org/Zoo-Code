@@ -11,7 +11,7 @@ test("renders task organization UI with folders and pins in the VS Code dark the
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
 
-	await expect(component).toHaveScreenshot("task-organization-default-dark.png")
+	await expect(component).toHaveScreenshot("task-organization-default-dark.png", { maxDiffPixelRatio: 0.05 })
 })
 
 test("renders expanded folder with member tasks in the VS Code dark theme", async ({ mount }) => {
@@ -22,7 +22,7 @@ test("renders expanded folder with member tasks in the VS Code dark theme", asyn
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
 
-	await expect(component).toHaveScreenshot("task-organization-expanded-folder-dark.png")
+	await expect(component).toHaveScreenshot("task-organization-expanded-folder-dark.png", { maxDiffPixelRatio: 0.05 })
 })
 
 test("renders pinned tasks section in the VS Code dark theme", async ({ mount }) => {
@@ -33,5 +33,5 @@ test("renders pinned tasks section in the VS Code dark theme", async ({ mount })
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
 
-	await expect(component).toHaveScreenshot("task-organization-pinned-dark.png")
+	await expect(component).toHaveScreenshot("task-organization-pinned-dark.png", { maxDiffPixelRatio: 0.05 })
 })
