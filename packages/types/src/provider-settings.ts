@@ -336,14 +336,7 @@ const minimaxSchema = apiModelIdProviderModelSchema.extend({
 })
 
 const mimoSchema = apiModelIdProviderModelSchema.extend({
-	mimoBaseUrl: z
-		.union([
-			z.literal("https://api.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-cn.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-sgp.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-ams.xiaomimimo.com/v1"),
-		])
-		.optional(),
+	mimoBaseUrl: z.string().url().optional(),
 	mimoApiKey: z.string().optional(),
 })
 

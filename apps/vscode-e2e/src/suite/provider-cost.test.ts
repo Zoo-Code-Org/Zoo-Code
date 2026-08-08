@@ -171,12 +171,7 @@ suite("Provider Cost Metrics (B17)", function () {
 			await api.setConfiguration({
 				apiProvider: "mimo" as const,
 				mimoApiKey: "stub-key",
-				// The zod schema restricts mimoBaseUrl to Xiaomi's hosted endpoints,
-				// but the runtime provider accepts any OpenAI-compatible base URL
-				// (options.mimoBaseUrl || default). A local stub URL is required to
-				// exercise the streaming/usage path without network access, so this
-				// test intentionally widens the type.
-				mimoBaseUrl: baseUrl as "https://api.xiaomimimo.com/v1",
+				mimoBaseUrl: baseUrl,
 				apiModelId: MIMO_MODEL_ID,
 			})
 
