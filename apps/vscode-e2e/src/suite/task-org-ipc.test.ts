@@ -67,7 +67,14 @@ async function sendMutation(
 		}
 	}
 
-	return provider.getTaskOrganizationStore().mutate(parseResult.data.mutation, parseResult.data.baseRevision)
+	const rawResult = await provider
+		.getTaskOrganizationStore()
+		.mutate(parseResult.data.mutation, parseResult.data.baseRevision)
+
+	return {
+		...rawResult,
+		requestId: parseResult.data.requestId,
+	}
 }
 
 suite("Task Organization IPC Bridge", function () {
