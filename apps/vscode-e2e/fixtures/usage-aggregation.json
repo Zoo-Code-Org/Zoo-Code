@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "USAGE_AGGREGATION_E2E_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"My name is Zoo.\"}",
+						"id": "call_usage_aggregation_e2e_smoke_001"
+					}
+				]
+			}
+		}
+	]
+}
