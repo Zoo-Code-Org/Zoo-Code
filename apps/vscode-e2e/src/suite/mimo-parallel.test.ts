@@ -289,13 +289,12 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 						apiModelId: MIMO_MODEL_ID,
 					})
 
-					const taskId = await api.startNewTask({
+					await api.startNewTask({
 						configuration: {
 							mode: "code",
 							autoApprovalEnabled: true,
 							alwaysAllowWrite: true,
 							alwaysAllowReadOnly: true,
-							enableToolUse: true,
 						},
 						text: `${PROBE_TAG}: call write_to_file twice in parallel to create mimo-first.txt and mimo-second.txt`,
 					})
@@ -310,7 +309,7 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 									m.say === "tool" ||
 									m.say === "error" ||
 									m.say === "completion_result" ||
-									m.say === "api_req_failed",
+									m.ask === "api_req_failed",
 							)
 							return sawRequest && sawToolMessage
 						},
@@ -353,8 +352,8 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 					// violation, not about forcing the first call through. We assert
 					// only that the task did not crash with an unhandled stream error.
 					const fatal = messages.find(
-						(m) => m.say === "api_req_failed" && (m.text ?? "").includes("500"),
-					)
+							(m) => m.ask === "api_req_failed" && (m.text ?? "").includes("500"),
+						)
 					assert.ok(
 						!fatal,
 						`Task should not hit a mock 500. Got: ${fatal?.text ?? "none"}`,

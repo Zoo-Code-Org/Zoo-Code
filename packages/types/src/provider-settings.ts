@@ -336,14 +336,16 @@ const minimaxSchema = apiModelIdProviderModelSchema.extend({
 })
 
 const mimoSchema = apiModelIdProviderModelSchema.extend({
+	// Any http(s) URL is accepted so tests can point the handler at a local
+	// mock server. The four literals below are the documented MiMo endpoints;
+	// the handler defaults to the Singapore endpoint when this is unset.
 	mimoBaseUrl: z
-		.union([
-			z.literal("https://api.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-cn.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-sgp.xiaomimimo.com/v1"),
-			z.literal("https://token-plan-ams.xiaomimimo.com/v1"),
-		])
-		.optional(),
+		.string()
+		.url()
+		.optional()
+		.describe(
+			"MiMo API base URL. Common values: https://api.xiaomimimo.com/v1, https://token-plan-cn.xiaomimimo.com/v1, https://token-plan-sgp.xiaomimimo.com/v1, https://token-plan-ams.xiaomimimo.com/v1",
+		),
 	mimoApiKey: z.string().optional(),
 })
 
