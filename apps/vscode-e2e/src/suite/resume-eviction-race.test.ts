@@ -87,11 +87,10 @@ suite("Resume eviction race (title clobber regression)", function () {
 		assert.ok(afterEviction, "Task should still be in history after eviction")
 
 		// Before the fix this would be "Task #N (No messages)" / "工作 #N (無訊息)".
-		assert.ok(
-			afterEviction.task?.includes("RESUME_EVICTION_RACE_SMOKE"),
-			`Title must not be clobbered by eviction mid-resume.\n` +
-				`  Expected to contain: "RESUME_EVICTION_RACE_SMOKE"\n` +
-				`  Got:                 "${afterEviction.task}"`,
+		assert.strictEqual(
+			afterEviction.task,
+			beforeResume.task,
+			`Title must not change during resume eviction. Got: "${afterEviction.task}"`,
 		)
 	})
 })

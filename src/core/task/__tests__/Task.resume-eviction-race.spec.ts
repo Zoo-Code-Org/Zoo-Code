@@ -102,11 +102,29 @@ function createDeferred<T>() {
 	return { promise, resolve }
 }
 
-function makeMockProvider(updateTaskHistory: ReturnType<typeof vi.fn>): ClineProvider {
+/**
+ * Minimal slice of ClineProvider that Task reads during construction and abort.
+ * All types are derived from ClineProvider so TypeScript validates property
+ * names and signatures without requiring the full class to be satisfied.
+ */
+type MockProvider = Pick<ClineProvider, "log" | "updateTaskHistory"> & {
+	taskHistoryStore: Pick<ClineProvider["taskHistoryStore"], "get">
+	context: {
+		globalStorageUri: Pick<ClineProvider["context"]["globalStorageUri"], "fsPath">
+		globalState: Pick<ClineProvider["context"]["globalState"], "get" | "update" | "keys">
+		workspaceState: Pick<ClineProvider["context"]["workspaceState"], "get" | "update" | "keys">
+		secrets: Pick<ClineProvider["context"]["secrets"], "get" | "store" | "delete">
+		extensionUri: Pick<ClineProvider["context"]["extensionUri"], "fsPath">
+		extension: Pick<ClineProvider["context"]["extension"], "packageJSON">
+	}
+}
+
+function makeMockProvider(updateTaskHistory: ReturnType<typeof vi.fn>): MockProvider {
 	return {
 		log: vi.fn(),
 		taskHistoryStore: { get: () => undefined },
-		updateTaskHistory,
+		// vi.fn() is not directly assignable to the typed method signature.
+		updateTaskHistory: updateTaskHistory as unknown as ClineProvider["updateTaskHistory"],
 		context: {
 			globalStorageUri: { fsPath: path.join(os.tmpdir(), "test-storage") },
 			globalState: {
@@ -127,7 +145,7 @@ function makeMockProvider(updateTaskHistory: ReturnType<typeof vi.fn>): ClinePro
 			extensionUri: { fsPath: "/mock/extension/path" },
 			extension: { packageJSON: { version: "1.0.0" } },
 		},
-	} as unknown as ClineProvider
+	}
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -172,7 +190,7 @@ describe("Task resume/eviction race (Work #1 (no message) regression)", () => {
 		const mockProvider = makeMockProvider(updateTaskHistory)
 
 		const task = new Task({
-			provider: mockProvider,
+			provider: mockProvider as unknown as ClineProvider,
 			apiConfiguration: mockApiConfig,
 			historyItem,
 			taskNumber: historyItem.number,
@@ -191,11 +209,9 @@ describe("Task resume/eviction race (Work #1 (no message) regression)", () => {
 		await task.abortTask(true)
 
 		// The fix: saveClineMessages() must not be called for a history task
-		// with clineMessages still empty. No "no_messages" write must reach
-		// the history store.
-		expect(updateTaskHistory).not.toHaveBeenCalledWith(
-			expect.objectContaining({ task: expect.stringContaining("no_messages") }),
-		)
+		// with clineMessages still empty. Verify the call was skipped entirely,
+		// not just that the specific "no_messages" key was not written.
+		expect(updateTaskHistory).not.toHaveBeenCalled()
 
 		// Let the read resolve so the promise does not leak into the next test.
 		readDeferred.resolve([
