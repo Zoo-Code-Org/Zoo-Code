@@ -314,7 +314,9 @@ describe("searchReplaceTool", () => {
 
 			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
 			expect(mockCline.didEditFile).toBe(true)
-			expect(mockCline.recordToolUsage).toHaveBeenCalledWith("search_replace")
+			// Usage is recorded once at the central presentAssistantMessage
+			// attribution point, not locally by the handler.
+			expect(mockCline.recordToolUsage).not.toHaveBeenCalled()
 		})
 
 		it("reverts changes when user rejects", async () => {

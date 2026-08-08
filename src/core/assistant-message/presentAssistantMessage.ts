@@ -42,6 +42,31 @@ import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
 
 /**
+ * Maps a raw, potentially model-controlled tool name to a safe analytics key.
+ * Never returns the raw name unless it is a known static tool, so an
+ * arbitrary model-supplied string can never become a `toolsUsed` property key.
+ */
+export function toTelemetryToolName(
+	toolName: string,
+	isCustomTool: boolean,
+	experiments?: Record<string, boolean>,
+): ToolName {
+	if (isCustomTool) {
+		return "custom_tool"
+	}
+
+	if (toolName.startsWith("mcp_")) {
+		return "use_mcp_tool"
+	}
+
+	if (isValidToolName(toolName, experiments)) {
+		return toolName
+	}
+
+	return "invalid_tool_call"
+}
+
+/**
  * Processes and presents assistant message content to the user interface.
  *
  * This function is the core message handling system that:
@@ -233,10 +258,6 @@ export async function presentAssistantMessage(cline: Task) {
 				pushToolResult(formatResponse.toolError(errorString))
 			}
 
-			if (!mcpBlock.partial) {
-				cline.recordToolUsage("use_mcp_tool") // Record as use_mcp_tool for analytics
-			}
-
 			// Resolve sanitized server name back to original server name
 			// The serverName from parsing is sanitized (e.g., "my_server" from "my server")
 			// We need the original name to find the actual MCP connection
@@ -272,6 +293,12 @@ export async function presentAssistantMessage(cline: Task) {
 				askApproval,
 				handleError,
 				pushToolResult,
+				onValidated: mcpBlock.partial
+					? undefined
+					: () => {
+							cline.recordToolUsage("use_mcp_tool")
+							TelemetryService.instance.captureToolUsage(cline.taskId, "use_mcp_tool")
+						},
 			})
 			break
 		}
@@ -301,14 +328,10 @@ export async function presentAssistantMessage(cline: Task) {
 			if (!toolCallId) {
 				const errorMessage =
 					"Invalid tool call: missing tool_use.id. XML tool calls are no longer supported. Remove any XML tool markup (e.g. <read_file>...</read_file>) and use native tool calling instead."
-				// Record a tool error for visibility/telemetry. Use the reported tool name if present.
+				// Record a safe, static analytics key. Never key telemetry on the
+				// model-reported tool name, which is untrusted here.
 				try {
-					if (
-						typeof (cline as any).recordToolError === "function" &&
-						typeof (block as any).name === "string"
-					) {
-						;(cline as any).recordToolError((block as any).name as ToolName, errorMessage)
-					}
+					cline.recordToolError("invalid_tool_call", errorMessage)
 				} catch {
 					// Best-effort only
 				}
@@ -424,7 +447,7 @@ export async function presentAssistantMessage(cline: Task) {
 
 					cline.consecutiveMistakeCount++
 					try {
-						cline.recordToolError(block.name as ToolName, errorMessage)
+						cline.recordToolError(toTelemetryToolName(block.name, false, stateExperiments), errorMessage)
 					} catch {
 						// Best-effort only
 					}
@@ -552,22 +575,6 @@ export async function presentAssistantMessage(cline: Task) {
 				pushToolResult(formatResponse.toolError(errorString))
 			}
 
-			if (!block.partial) {
-				// Check if this is a custom tool - if so, record as "custom_tool" (like MCP tools)
-				const isCustomTool = stateExperiments?.customTools && customToolRegistry.has(block.name)
-				const recordName = isCustomTool ? "custom_tool" : block.name
-				cline.recordToolUsage(recordName)
-
-				// Track legacy format usage for read_file tool (for migration monitoring)
-				if (block.name === "read_file" && block.usedLegacyFormat) {
-					const modelInfo = cline.api.getModel()
-					TelemetryService.instance.captureEvent(TelemetryEventName.READ_FILE_LEGACY_FORMAT_USED, {
-						taskId: cline.taskId,
-						model: modelInfo?.id,
-					})
-				}
-			}
-
 			// Validate tool use before execution - ONLY for complete (non-partial) blocks.
 			// Validating partial blocks would cause validation errors to be thrown repeatedly
 			// during streaming, pushing multiple tool_results for the same tool_use_id and
@@ -579,6 +586,8 @@ export async function presentAssistantMessage(cline: Task) {
 				const rawIncludedTools = modelInfo?.info?.includedTools
 				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
 				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
+
+				const isCustomTool = Boolean(stateExperiments?.customTools && customToolRegistry.has(block.name))
 
 				try {
 					const toolRequirements =
@@ -617,7 +626,29 @@ export async function presentAssistantMessage(cline: Task) {
 						is_error: true,
 					})
 
+					// Record a safe failure key. Never key telemetry on the raw,
+					// model-controlled tool name.
+					cline.recordToolError(
+						toTelemetryToolName(block.name, isCustomTool, stateExperiments),
+						error.message,
+					)
+
 					break
+				}
+
+				// Validation passed: record exactly one attempt at this single
+				// central point. Individual tool handlers must not also record
+				// usage, or the attempt would be double-counted.
+				const recordName = toTelemetryToolName(block.name, isCustomTool, stateExperiments)
+				cline.recordToolUsage(recordName)
+				TelemetryService.instance.captureToolUsage(cline.taskId, recordName)
+
+				// Track legacy format usage for read_file tool (for migration monitoring)
+				if (block.name === "read_file" && block.usedLegacyFormat) {
+					TelemetryService.instance.captureEvent(TelemetryEventName.READ_FILE_LEGACY_FORMAT_USED, {
+						taskId: cline.taskId,
+						model: modelInfo?.id,
+					})
 				}
 			}
 
@@ -901,7 +932,7 @@ export async function presentAssistantMessage(cline: Task) {
 					// Not a custom tool - handle as unknown tool error
 					const errorMessage = `Unknown tool "${block.name}". This tool does not exist. Please use one of the available tools.`
 					cline.consecutiveMistakeCount++
-					cline.recordToolError(block.name as ToolName, errorMessage)
+					cline.recordToolError("invalid_tool_call", errorMessage)
 					await cline.say("error", t("tools:unknownToolError", { toolName: block.name }))
 					// Push tool_result directly WITHOUT setting didAlreadyUseTool
 					// This prevents the stream from being interrupted with "Response interrupted by tool use result"
