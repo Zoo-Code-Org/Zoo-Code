@@ -1,0 +1,5 @@
+<function_calls>
+<invoke name="read_file">
+<parameter name="path">c:/git/Zoo-Code/package.json</parameter>
+</invoke>
+</function_calls>

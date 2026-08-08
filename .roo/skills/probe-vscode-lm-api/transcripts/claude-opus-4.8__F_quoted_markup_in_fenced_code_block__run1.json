@@ -1,0 +1,38 @@
+{
+	"scenario": "F_quoted_markup_in_fenced_code_block",
+	"modelId": "claude-opus-4.8",
+	"modelFamily": "claude-opus-4.8",
+	"modelVendor": "copilot",
+	"modelVersion": "claude-opus-4.8",
+	"maxInputTokens": 935793,
+	"parts": [
+		{
+			"type": "rn",
+			"value": "```"
+		},
+		{
+			"type": "rn",
+			"value": "xml\n<invoke name=\"read_file\">\n<parameter name=\"path\">/etc/passwd</parameter>\n</invoke>\n```\n\nNote: this is just a formatting"
+		},
+		{
+			"type": "rn",
+			"value": " example inside a code block, not an actual tool call."
+		},
+		{
+			"type": "i",
+			"raw": "[object Object]"
+		}
+	],
+	"concatenatedText": "```xml\n<invoke name=\"read_file\">\n<parameter name=\"path\">/etc/passwd</parameter>\n</invoke>\n```\n\nNote: this is just a formatting example inside a code block, not an actual tool call.",
+	"toolCallParts": [],
+	"error": null,
+	"markers": {
+		"hasInvoke": true,
+		"hasFunctionCalls": false,
+		"hasAntmlNamespace": false,
+		"invokeWrappedInFunctionCalls": false,
+		"bareInvokeWithoutWrapper": true,
+		"insideFencedCodeBlock": true
+	},
+	"iteration": 1
+}

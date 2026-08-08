@@ -1,0 +1,34 @@
+{
+	"scenario": "F_quoted_markup_in_fenced_code_block",
+	"modelId": "claude-sonnet-4.6",
+	"modelFamily": "claude-sonnet-4.6",
+	"modelVendor": "copilot",
+	"modelVersion": "claude-sonnet-4.6",
+	"maxInputTokens": 935793,
+	"parts": [
+		{
+			"type": "rn",
+			"value": "```"
+		},
+		{
+			"type": "rn",
+			"value": "xml\n<invoke name=\"read_file\">\n<parameter name=\"path\">/etc/passwd</parameter>\n</invoke>\n```"
+		},
+		{
+			"type": "i",
+			"raw": "[object Object]"
+		}
+	],
+	"concatenatedText": "```xml\n<invoke name=\"read_file\">\n<parameter name=\"path\">/etc/passwd</parameter>\n</invoke>\n```",
+	"toolCallParts": [],
+	"error": null,
+	"markers": {
+		"hasInvoke": true,
+		"hasFunctionCalls": false,
+		"hasAntmlNamespace": false,
+		"invokeWrappedInFunctionCalls": false,
+		"bareInvokeWithoutWrapper": true,
+		"insideFencedCodeBlock": true
+	},
+	"iteration": 1
+}

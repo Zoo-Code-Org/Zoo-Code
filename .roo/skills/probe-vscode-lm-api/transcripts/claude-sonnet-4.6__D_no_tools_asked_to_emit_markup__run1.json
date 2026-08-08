@@ -1,0 +1,34 @@
+{
+	"scenario": "D_no_tools_asked_to_emit_markup",
+	"modelId": "claude-sonnet-4.6",
+	"modelFamily": "claude-sonnet-4.6",
+	"modelVendor": "copilot",
+	"modelVersion": "claude-sonnet-4.6",
+	"maxInputTokens": 935793,
+	"parts": [
+		{
+			"type": "rn",
+			"value": "<function"
+		},
+		{
+			"type": "rn",
+			"value": "_calls>\n<invoke name=\"read_file\">\n<parameter name=\"path\">c:/git/Zoo-Code/package.json</parameter>\n</invoke>\n</function_calls>"
+		},
+		{
+			"type": "i",
+			"raw": "[object Object]"
+		}
+	],
+	"concatenatedText": "<function_calls>\n<invoke name=\"read_file\">\n<parameter name=\"path\">c:/git/Zoo-Code/package.json</parameter>\n</invoke>\n</function_calls>",
+	"toolCallParts": [],
+	"error": null,
+	"markers": {
+		"hasInvoke": true,
+		"hasFunctionCalls": true,
+		"hasAntmlNamespace": false,
+		"invokeWrappedInFunctionCalls": true,
+		"bareInvokeWithoutWrapper": false,
+		"insideFencedCodeBlock": false
+	},
+	"iteration": 1
+}

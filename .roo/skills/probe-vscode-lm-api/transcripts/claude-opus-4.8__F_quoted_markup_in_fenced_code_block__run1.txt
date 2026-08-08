@@ -1,0 +1,7 @@
+```xml
+<invoke name="read_file">
+<parameter name="path">/etc/passwd</parameter>
+</invoke>
+```
+
+Note: this is just a formatting example inside a code block, not an actual tool call.

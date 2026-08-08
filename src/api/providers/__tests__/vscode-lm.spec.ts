@@ -303,6 +303,35 @@ describe("VsCodeLmHandler", () => {
 				})
 			}
 
+			const streamMixedParts = (parts: Array<string | { name: string; input: object }>) => {
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							yield typeof part === "string"
+								? new vscode.LanguageModelTextPart(part)
+								: new vscode.LanguageModelToolCallPart("native-1", part.name, part.input)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+			}
+
+			const drain = async () => {
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+				const chunks = []
+				for await (const chunk of stream) {
+					chunks.push(chunk)
+				}
+				return chunks
+			}
+
 			const collect = async (parts: string[]) => {
 				streamTextParts(parts)
 				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
@@ -375,6 +404,54 @@ describe("VsCodeLmHandler", () => {
 
 				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: block }])
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("emits prose before the recovered tool call", async () => {
+				const chunks = await collect([
+					"Thinking. ",
+					'<invoke name="calculator"><parameter name="operation">add</parameter></invoke>',
+				])
+
+				expect(chunks.map((chunk) => chunk.type)).toEqual(["text", "tool_call", "usage"])
+			})
+
+			it("flushes buffered text before a native tool call so no text follows a tool_use", async () => {
+				streamMixedParts([
+					'partial <invoke name="calculator">',
+					{ name: "calculator", input: { operation: "div" } },
+				])
+				const chunks = await drain()
+
+				const lastText = chunks.map((chunk) => chunk.type).lastIndexOf("text")
+				const firstToolCall = chunks.map((chunk) => chunk.type).indexOf("tool_call")
+				expect(firstToolCall).toBeGreaterThan(lastText)
+			})
+
+			it("does not latch buffering on prose that merely mentions the tag", async () => {
+				const chunks = await collect(["never emit <invoke> markup as text. ", "Streaming continues."])
+
+				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([
+					{ type: "text", text: "never emit <invoke> markup as text. " },
+					{ type: "text", text: "Streaming continues." },
+				])
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("does not recover an invoke block quoted inside a fenced code block", async () => {
+				const block = '<invoke name="calculator"><parameter name="operation">add</parameter></invoke>'
+				const chunks = await collect(["Do NOT do this:\n```\n" + block + "\n```\n"])
+
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+			})
+
+			it("sanitizes lone surrogates in the system prompt", async () => {
+				streamTextParts(["ok"])
+				const stream = handler.createMessage("sys\uD800tem", [{ role: "user" as const, content: "hi" }])
+				for await (const _chunk of stream) {
+					// drain
+				}
+
+				expect(vscode.LanguageModelChatMessage.Assistant).toHaveBeenCalledWith("sys\uFFFDtem")
 			})
 		})
 
@@ -1245,6 +1322,33 @@ describe("leaked tool-call recovery", () => {
 			expect(trailingPartialToolMarkerLength("hello world")).toBe(0)
 			expect(trailingPartialToolMarkerLength("a < b")).toBe(0)
 			expect(trailingPartialToolMarkerLength("text <function_calls>")).toBe(0)
+		})
+
+		it("holds back an invoke tag whose name attribute has not arrived", () => {
+			expect(trailingPartialToolMarkerLength("text <invoke ")).toBe(8)
+		})
+
+		it("does not hold back an over-long trailing fragment", () => {
+			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(200))).toBe(0)
+		})
+	})
+
+	describe("quoted markup", () => {
+		it("does not recover an invoke block inside a fenced code block", () => {
+			const text = "```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toContain("invoke")
+		})
+
+		it("does not recover an invoke block inside an inline code span", () => {
+			const text = "avoid `" + invoke("update_todo_list", param("todos", "x")) + "`"
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
 		})
 	})
 })

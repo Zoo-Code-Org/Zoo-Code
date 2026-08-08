@@ -8,8 +8,12 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared/vsCodeSelectorUtils"
 import { normalizeToolSchema } from "../../utils/json-schema"
 
-import { ApiStream } from "../transform/stream"
-import { convertToVsCodeLmMessages, extractTextCountFromMessage } from "../transform/vscode-lm-format"
+import { ApiStream, ApiStreamChunk } from "../transform/stream"
+import {
+	convertToVsCodeLmMessages,
+	extractTextCountFromMessage,
+	sanitizeSurrogates,
+} from "../transform/vscode-lm-format"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -72,18 +76,43 @@ function convertToVsCodeLmTools(tools: OpenAI.Chat.ChatCompletionTool[]): vscode
  * tool we actually offered this turn are treated as calls; everything else is passed through
  * unchanged as text.
  */
-const LEAKED_TOOL_CALL_START = /<(?:antml:)?(?:function_calls|invoke)\b/i
+// Latching on a bare `<invoke` would let any prose mentioning the tag stop real-time streaming for
+// the rest of the response, so the marker only counts once the `name="` attribute has arrived.
+const LEAKED_TOOL_CALL_START = /<(?:antml:)?(?:function_calls\s*>|invoke\s+name=")/i
 const LEAKED_INVOKE_BLOCK = /<(?:antml:)?invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?invoke\s*>/gi
 const LEAKED_INVOKE_PARAM = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?)<\/(?:antml:)?parameter\s*>/gi
 
+/** Upper bound on an incomplete `<invoke ...` tail held back between chunks. */
+const MAX_PARTIAL_INVOKE_CARRY = 64
+
 /**
- * Returns the length of a trailing `<partial-tag` fragment that might be the start of a
- * leaked tool-call marker split across stream chunks. Such a tail is held back until more
- * text arrives so the marker can be detected intact.
+ * Returns the length of a trailing fragment that might be the start of a leaked tool-call marker
+ * split across stream chunks. Such a tail is held back until more text arrives so the marker can
+ * be detected intact.
  */
 export function trailingPartialToolMarkerLength(text: string): number {
-	const match = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
-	return match ? match[0].length : 0
+	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
+	if (partialTag) {
+		return partialTag[0].length
+	}
+	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
+	// latch on the next chunk, bounded so ordinary prose is never swallowed.
+	const partialInvoke = text.match(/<(?:antml:)?invoke\b[^<>]*$/i)
+	return partialInvoke && partialInvoke[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialInvoke[0].length : 0
+}
+
+/**
+ * True when `index` falls inside a fenced code block or an inline code span, where `<invoke>`
+ * markup is being quoted (e.g. a file excerpt or a "do NOT emit this" example) rather than
+ * actually invoked.
+ */
+function isQuotedAsCode(text: string, index: number): boolean {
+	const before = text.slice(0, index)
+	if ((before.match(/```/g)?.length ?? 0) % 2 === 1) {
+		return true
+	}
+	const lineStart = before.lastIndexOf("\n") + 1
+	return (before.slice(lineStart).match(/`/g)?.length ?? 0) % 2 === 1
 }
 
 function parseLeakedInvokeParams(body: string): Record<string, string> {
@@ -104,6 +133,7 @@ function parseLeakedInvokeParams(body: string): Record<string, string> {
 export function extractLeakedToolCalls(
 	text: string,
 	validToolNames: ReadonlySet<string>,
+	precedingText = "",
 ): { calls: Array<{ name: string; input: Record<string, string> }>; leftoverText: string } {
 	const calls: Array<{ name: string; input: Record<string, string> }> = []
 	let leftover = ""
@@ -114,10 +144,11 @@ export function extractLeakedToolCalls(
 	while ((match = LEAKED_INVOKE_BLOCK.exec(text)) !== null) {
 		leftover += text.slice(lastIndex, match.index)
 		const name = match[1]
-		if (validToolNames.has(name)) {
+		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
+		if (validToolNames.has(name) && !isQuotedAsCode(precedingText + text, precedingText.length + match.index)) {
 			calls.push({ name, input: parseLeakedInvokeParams(match[2]) })
 		} else {
-			// Not one of our tools — keep the block as literal text.
+			// Not one of our tools, or quoted as code — keep the block as literal text.
 			leftover += match[0]
 		}
 		lastIndex = match.index + match[0].length
@@ -643,7 +674,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Convert Anthropic messages to VS Code LM messages
 		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(systemPrompt),
+			vscode.LanguageModelChatMessage.Assistant(sanitizeSurrogates(systemPrompt)),
 			...convertToVsCodeLmMessages(cleanedMessages),
 		]
 
@@ -668,7 +699,52 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		let salvageBuffering = false
 		let salvageBuffer = ""
 		let salvageCarry = ""
+		let salvageEmittedText = ""
 		let salvagedToolCallIndex = 0
+
+		// Drains the salvage state into ordered chunks: prose first, then any recovered calls. Must
+		// run before a native tool_call is yielded — text after a tool_use block is rejected by
+		// Anthropic once the turn is serialized back into history.
+		const flushSalvage = (): ApiStreamChunk[] => {
+			const flushed: ApiStreamChunk[] = []
+			if (!salvageLeakedToolCalls) {
+				return flushed
+			}
+
+			if (!salvageBuffering) {
+				if (salvageCarry) {
+					flushed.push({ type: "text", text: salvageCarry })
+					salvageCarry = ""
+				}
+				return flushed
+			}
+
+			const buffered = salvageBuffer
+			salvageBuffering = false
+			salvageBuffer = ""
+			if (!buffered) {
+				return flushed
+			}
+
+			const { calls, leftoverText } = extractLeakedToolCalls(buffered, providedToolNames, salvageEmittedText)
+			salvageEmittedText += buffered
+			if (leftoverText) {
+				flushed.push({ type: "text", text: leftoverText })
+			}
+			for (const call of calls) {
+				console.warn(
+					"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
+					{ name: call.name, params: Object.keys(call.input) },
+				)
+				flushed.push({
+					type: "tool_call",
+					id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
+					name: call.name,
+					arguments: JSON.stringify(call.input),
+				})
+			}
+			return flushed
+		}
 
 		try {
 			// Create the response stream with required options
@@ -715,6 +791,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					if (markerMatch) {
 						const before = combined.slice(0, markerMatch.index)
 						if (before) {
+							salvageEmittedText += before
 							yield { type: "text", text: before }
 						}
 						salvageBuffering = true
@@ -725,10 +802,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 						const emit = carryLength > 0 ? combined.slice(0, combined.length - carryLength) : combined
 						salvageCarry = carryLength > 0 ? combined.slice(combined.length - carryLength) : ""
 						if (emit) {
+							salvageEmittedText += emit
 							yield { type: "text", text: emit }
 						}
 					}
 				} else if (chunk instanceof vscode.LanguageModelToolCallPart) {
+					yield* flushSalvage()
 					try {
 						// Validate tool call parameters
 						if (!chunk.name || typeof chunk.name !== "string") {
@@ -776,35 +855,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			}
 
 			// Flush any leaked tool-call recovery state accumulated during streaming.
-			if (salvageLeakedToolCalls) {
-				// A carried tail that never became a marker is just ordinary text.
-				if (!salvageBuffering && salvageCarry) {
-					yield { type: "text", text: salvageCarry }
-				}
-
-				if (salvageBuffering && salvageBuffer) {
-					const { calls, leftoverText } = extractLeakedToolCalls(salvageBuffer, providedToolNames)
-
-					// Emit surrounding prose first so recovered tool calls come last, matching the
-					// ordering of a normal native tool-calling turn.
-					if (leftoverText) {
-						yield { type: "text", text: leftoverText }
-					}
-
-					for (const call of calls) {
-						console.warn(
-							"Zoo Code <Language Model API>: Recovered a tool call the model emitted as text instead of a structured tool call:",
-							{ name: call.name, params: Object.keys(call.input) },
-						)
-						yield {
-							type: "tool_call",
-							id: `vscodelm-salvaged-${Date.now()}-${salvagedToolCallIndex++}`,
-							name: call.name,
-							arguments: JSON.stringify(call.input),
-						}
-					}
-				}
-			}
+			yield* flushSalvage()
 
 			// Count tokens in the accumulated text after stream completion
 			const totalOutputTokens: number = await this.internalCountTokens(accumulatedText)

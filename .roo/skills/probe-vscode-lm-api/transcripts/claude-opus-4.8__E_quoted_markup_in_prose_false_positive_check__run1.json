@@ -1,0 +1,70 @@
+{
+	"scenario": "E_quoted_markup_in_prose_false_positive_check",
+	"modelId": "claude-opus-4.8",
+	"modelFamily": "claude-opus-4.8",
+	"modelVendor": "copilot",
+	"modelVersion": "claude-opus-4.8",
+	"maxInputTokens": 935793,
+	"parts": [
+		{
+			"type": "rn",
+			"value": "An"
+		},
+		{
+			"type": "rn",
+			"value": " inv"
+		},
+		{
+			"type": "rn",
+			"value": "oke block is"
+		},
+		{
+			"type": "rn",
+			"value": " the"
+		},
+		{
+			"type": "rn",
+			"value": " m"
+		},
+		{
+			"type": "rn",
+			"value": "echanism used to call a tool. It's written as an XML-like structure containing a function invocation with named parameters."
+		},
+		{
+			"type": "rn",
+			"value": " Here's a literal example, written as plain text:\n\n```xml\n<invoke name=\"read_file\">\n<parameter name=\"path\">src/example.txt</parameter"
+		},
+		{
+			"type": "rn",
+			"value": ">\n</invoke>\n```\n\nThe structure works like this:\n\n- An outer `invoke` tag carries a `name` attribute identifying which tool to call (here"
+		},
+		{
+			"type": "rn",
+			"value": ", `read_file`).\n- Inside it, one or more `parameter` tags each carry a `name` attribute identifying the argument (here, `path`).\n- The value of each parameter goes between the opening and closing `parameter"
+		},
+		{
+			"type": "rn",
+			"value": "` tags (here, `src/example.txt`).\n\nFor string and scalar parameters, the value is written as-is between the tags. For lists or objects, the value would be formatted as JSON instead.\n\nNote that I've shown this as plain,"
+		},
+		{
+			"type": "rn",
+			"value": " inert text for illustration only — I have not actually called any tool, per your request."
+		},
+		{
+			"type": "i",
+			"raw": "[object Object]"
+		}
+	],
+	"concatenatedText": "An invoke block is the mechanism used to call a tool. It's written as an XML-like structure containing a function invocation with named parameters. Here's a literal example, written as plain text:\n\n```xml\n<invoke name=\"read_file\">\n<parameter name=\"path\">src/example.txt</parameter>\n</invoke>\n```\n\nThe structure works like this:\n\n- An outer `invoke` tag carries a `name` attribute identifying which tool to call (here, `read_file`).\n- Inside it, one or more `parameter` tags each carry a `name` attribute identifying the argument (here, `path`).\n- The value of each parameter goes between the opening and closing `parameter` tags (here, `src/example.txt`).\n\nFor string and scalar parameters, the value is written as-is between the tags. For lists or objects, the value would be formatted as JSON instead.\n\nNote that I've shown this as plain, inert text for illustration only — I have not actually called any tool, per your request.",
+	"toolCallParts": [],
+	"error": null,
+	"markers": {
+		"hasInvoke": true,
+		"hasFunctionCalls": false,
+		"hasAntmlNamespace": false,
+		"invokeWrappedInFunctionCalls": false,
+		"bareInvokeWithoutWrapper": true,
+		"insideFencedCodeBlock": true
+	},
+	"iteration": 1
+}

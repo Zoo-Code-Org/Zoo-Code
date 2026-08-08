@@ -1,0 +1,5 @@
+```xml
+<invoke name="read_file">
+<parameter name="path">/etc/passwd</parameter>
+</invoke>
+```

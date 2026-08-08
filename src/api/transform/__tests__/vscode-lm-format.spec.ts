@@ -361,6 +361,48 @@ describe("sanitizeSurrogates", () => {
 	})
 })
 
+describe("convertToVsCodeLmMessages surrogate sanitization", () => {
+	const lone = "bad\uD800end"
+	const sanitized = "bad\uFFFDend"
+
+	const textValues = (message: { content: unknown }) =>
+		(message.content as MockLanguageModelTextPart[]).map((part) => part.value)
+
+	it("sanitizes a simple string message", () => {
+		const result = convertToVsCodeLmMessages([{ role: "user", content: lone }])
+		expect(textValues(result[0])).toEqual([sanitized])
+	})
+
+	it("sanitizes string tool_result content", () => {
+		const result = convertToVsCodeLmMessages([
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: lone }] },
+		])
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
+		expect(toolResult.content[0].value).toBe(sanitized)
+	})
+
+	it("sanitizes tool_result text blocks", () => {
+		const result = convertToVsCodeLmMessages([
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "tool-1", content: [{ type: "text", text: lone }] }],
+			},
+		])
+		const toolResult = result[0].content[0] as MockLanguageModelToolResultPart
+		expect(toolResult.content[0].value).toBe(sanitized)
+	})
+
+	it("sanitizes user text blocks", () => {
+		const result = convertToVsCodeLmMessages([{ role: "user", content: [{ type: "text", text: lone }] }])
+		expect(textValues(result[0])).toContain(sanitized)
+	})
+
+	it("sanitizes assistant text blocks", () => {
+		const result = convertToVsCodeLmMessages([{ role: "assistant", content: [{ type: "text", text: lone }] }])
+		expect(textValues(result[0])).toContain(sanitized)
+	})
+})
+
 describe("convertToAnthropicRole", () => {
 	it("should convert assistant role correctly", () => {
 		const result = convertToAnthropicRole(vscode.LanguageModelChatMessageRole.Assistant)
