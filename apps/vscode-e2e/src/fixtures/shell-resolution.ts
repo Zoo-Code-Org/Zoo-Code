@@ -13,9 +13,31 @@ import { toolResultContains } from "./tool-result"
  */
 export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 	const markers = [
-		{ tag: "shell-resolution-override-ok", callId: "call_shell_resolution_override_001", doneId: "call_shell_resolution_override_002" },
-		{ tag: "shell-resolution-fallback-ok", callId: "call_shell_resolution_fallback_001", doneId: "call_shell_resolution_fallback_002" },
-		{ tag: "shell-resolution-legacy-ok", callId: "call_shell_resolution_legacy_001", doneId: "call_shell_resolution_legacy_002" },
+		{
+			tag: "shell-resolution-override-ok",
+			callId: "call_shell_resolution_override_001",
+			doneId: "call_shell_resolution_override_002",
+		},
+		{
+			tag: "shell-resolution-fallback-ok",
+			callId: "call_shell_resolution_fallback_001",
+			doneId: "call_shell_resolution_fallback_002",
+		},
+		{
+			tag: "shell-resolution-disallowed-ok",
+			callId: "call_shell_resolution_disallowed_001",
+			doneId: "call_shell_resolution_disallowed_002",
+		},
+		{
+			tag: "shell-resolution-legacy-ok",
+			callId: "call_shell_resolution_legacy_001",
+			doneId: "call_shell_resolution_legacy_002",
+		},
+		{
+			tag: "shell-resolution-cleared-ok",
+			callId: "call_shell_resolution_cleared_001",
+			doneId: "call_shell_resolution_cleared_002",
+		},
 	]
 
 	for (const { tag, callId, doneId } of markers) {

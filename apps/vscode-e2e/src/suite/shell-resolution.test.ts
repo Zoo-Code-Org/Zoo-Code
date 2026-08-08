@@ -39,7 +39,9 @@ import { setDefaultSuiteTimeout } from "./test-utils"
 const TEST_DIR_NAME = "shell-resolution-e2e"
 const MARKER_OVERRIDE = "shell-resolution-override-ok"
 const MARKER_FALLBACK = "shell-resolution-fallback-ok"
+const MARKER_DISALLOWED = "shell-resolution-disallowed-ok"
 const MARKER_LEGACY = "shell-resolution-legacy-ok"
+const MARKER_CLEARED = "shell-resolution-cleared-ok"
 
 /**
  * Returns the platform-appropriate valid shell path for override tests.
@@ -139,7 +141,7 @@ suite("Shell Resolution", function () {
 		}
 
 		// Clean any marker files from previous tests.
-		for (const marker of [MARKER_OVERRIDE, MARKER_FALLBACK, MARKER_LEGACY]) {
+		for (const marker of [MARKER_OVERRIDE, MARKER_FALLBACK, MARKER_DISALLOWED, MARKER_LEGACY, MARKER_CLEARED]) {
 			await fs.rm(path.join(testDir, `${marker}.txt`), { force: true })
 		}
 		await sleep(100)
@@ -264,11 +266,11 @@ suite("Shell Resolution", function () {
 			terminalShellSelection: { kind: "path", path: badPath },
 		})
 
-		const messages = await runCommandTask(MARKER_FALLBACK)
+		const messages = await runCommandTask(MARKER_DISALLOWED)
 
 		// The disallowed path should NOT produce a successful marker file
 		// from that shell. If a marker exists, it came from the fallback shell.
-		const markerPath = path.join(testDir, `${MARKER_FALLBACK}.txt`)
+		const markerPath = path.join(testDir, `${MARKER_DISALLOWED}.txt`)
 		const markerExists = await fs
 			.access(markerPath)
 			.then(() => true)
@@ -312,14 +314,14 @@ suite("Shell Resolution", function () {
 			terminalShellSelection: undefined,
 		})
 
-		const messages = await runCommandTask(MARKER_FALLBACK)
+		const messages = await runCommandTask(MARKER_CLEARED)
 
 		assertNoShellErrors(messages, "cleared selection -> default chain")
 
-		const content = await fs.readFile(path.join(testDir, `${MARKER_FALLBACK}.txt`), "utf-8")
+		const content = await fs.readFile(path.join(testDir, `${MARKER_CLEARED}.txt`), "utf-8")
 		assert.ok(
-			content.includes(MARKER_FALLBACK),
-			`Default-chain marker file should contain "${MARKER_FALLBACK}", got: ${content}`,
+			content.includes(MARKER_CLEARED),
+			`Default-chain marker file should contain "${MARKER_CLEARED}", got: ${content}`,
 		)
 	})
 })
