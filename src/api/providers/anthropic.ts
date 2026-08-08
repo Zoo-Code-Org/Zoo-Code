@@ -277,6 +277,9 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						type: "usage",
 						inputTokens: 0,
 						outputTokens: chunk.usage.output_tokens || 0,
+						// thread stop_reason through so Task.ts can surface it in
+						// empty-response diagnostics.
+						finishReason: chunk.delta.stop_reason || undefined,
 					}
 
 					break

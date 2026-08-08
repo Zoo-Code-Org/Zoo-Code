@@ -141,6 +141,12 @@ const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+// Hard cap on consecutive empty-assistant-message retries. Before this, the empty-response
+// retry loop had NO upper bound and could resend the same unchanged oversized request forever
+// at the maximum backoff delay with no give-up condition. We observed this live requiring
+// ~4 retries (~7 min) before the provider recovered on its own; 5 gives one margin round
+// without letting the loop run indefinitely.
+const MAX_EMPTY_RESPONSE_RETRIES = 5 // Maximum consecutive empty-response retries before giving up
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -321,6 +327,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	consecutiveMistakeCountForEditFile: Map<string, number> = new Map()
 	consecutiveNoToolUseCount: number = 0
 	consecutiveNoAssistantMessagesCount: number = 0
+	// timestamp (performance.now()) when the empty-assistant-message retry loop started,
+	// used to surface total elapsed time in the terminal error toast.
+	emptyResponseRetryLoopStartTimeMs: number = 0
 	toolUsage: ToolUsage = {}
 
 	// Conversation message counts, summarized once per Task Completed
@@ -2246,6 +2255,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Reset consecutive error counters on abort (manual intervention)
 		this.consecutiveNoToolUseCount = 0
 		this.consecutiveNoAssistantMessagesCount = 0
+		// Also reset the empty-response retry loop timer so a later run starts fresh
+		this.emptyResponseRetryLoopStartTimeMs = 0
 
 		// Force final token usage update before abort event
 		this.emitFinalTokenUsageUpdate()
@@ -2772,6 +2783,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, { skipProviderRateLimit: true })
 				let assistantMessage = ""
 				let reasoningMessage = ""
+				// finish/stop reason surfaced by the provider stream (when available), included
+				// in empty-response diagnostics. Only the Anthropic provider populates this
+				// today, so the diagnostic below omits finish_reason when it is unknown.
+				let finishReason: string | undefined
 				const pendingGroundingSources: GroundingSource[] = []
 				this.isStreaming = true
 
@@ -2838,6 +2853,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
+								// capture finish_reason if the provider surfaces it
+								finishReason = chunk.finishReason ?? finishReason
 								break
 							case "grounding":
 								// Handle grounding sources separately from regular content
@@ -3423,6 +3440,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (hasTextContent || hasToolUses) {
 					// Reset counter when we get a successful response with content
 					this.consecutiveNoAssistantMessagesCount = 0
+					// Reset the empty-response retry loop timer on success
+					this.emptyResponseRetryLoopStartTimeMs = 0
 					// Display grounding sources to the user if they exist
 					if (pendingGroundingSources.length > 0) {
 						const citationLinks = pendingGroundingSources.map((source, i) => `[${i + 1}](${source.url})`)
@@ -3670,6 +3689,63 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 					}
 
+					// Enforce a hard cap on consecutive empty responses. Previously this loop
+					// had NO upper bound — it could retry the same unchanged oversized request
+					// forever at the maximum backoff delay. Now, after
+					// MAX_EMPTY_RESPONSE_RETRIES consecutive empty responses we stop retrying
+					// and surface a terminal error instead of looping indefinitely.
+					if (this.emptyResponseRetryLoopStartTimeMs === 0) {
+						this.emptyResponseRetryLoopStartTimeMs = performance.now()
+					}
+					const emptyResponseElapsedSec = Math.round(
+						(performance.now() - this.emptyResponseRetryLoopStartTimeMs) / 1000,
+					)
+					// Diagnostic detail surfaced in the live toast so the failure is diagnosable
+					// without grepping sidecar logs afterward. Only the Anthropic provider
+					// surfaces finish_reason today, so omit the field when it is unknown instead
+					// of printing "unknown" for every other provider.
+					const finishReasonDetail = finishReason ? `, finish_reason: ${finishReason}` : ""
+					const emptyResponseDetail =
+						`(consecutive empty responses: ${this.consecutiveNoAssistantMessagesCount}, ` +
+						`retryAttempt: ${currentItem.retryAttempt ?? 0}, elapsed: ${emptyResponseElapsedSec}s` +
+						`${finishReasonDetail})`
+
+					if (this.consecutiveNoAssistantMessagesCount >= MAX_EMPTY_RESPONSE_RETRIES) {
+						// Give up: the user message was already removed above, so re-add it, surface
+						// a clear terminal error, and end the turn cleanly (mirrors the "user declined
+						// to retry" terminal path below so the task does not hang).
+						await this.addToApiConversationHistory({
+							role: "user",
+							content: currentUserContent,
+						})
+						// Append the Failure marker immediately after the user message so the
+						// persisted history never ends with a trailing user message, even if an
+						// abort lands while the user message is being persisted.
+						await this.addToApiConversationHistory({
+							role: "assistant",
+							content: [{ type: "text", text: "Failure: I repeatedly did not provide a response." }],
+						})
+						// Abort check after the history is consistent: if the user hit Stop mid
+						// give-up, bail before announcing the terminal error.
+						if (this.abort) {
+							console.log(
+								`[Task#${this.taskId}.${this.instanceId}] Task aborted during empty-response give-up; history finalized`,
+							)
+							return false
+						}
+						await this.say(
+							"error",
+							`Unexpected API Response: The language model repeatedly returned no response after ` +
+								`${MAX_EMPTY_RESPONSE_RETRIES} consecutive attempts. ${emptyResponseDetail}`,
+						)
+						// Reset the retry counters on the terminal give-up path so a later Stop on
+						// the same task takes the normal graceful path in cancelTask rather than the
+						// hard-abort gate.
+						this.consecutiveNoAssistantMessagesCount = 0
+						this.emptyResponseRetryLoopStartTimeMs = 0
+						return false
+					}
+
 					// Check if we should auto-retry or prompt the user
 					// Reuse the state variable from above
 					if (state?.autoApprovalEnabled) {
@@ -3677,7 +3753,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						await this.backoffAndAnnounce(
 							currentItem.retryAttempt ?? 0,
 							new Error(
-								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
+								`Unexpected API Response: The language model did not provide any assistant messages. ` +
+									`This may indicate an issue with the API or the model's output. ${emptyResponseDetail}`,
 							),
 						)
 
@@ -3705,7 +3782,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// Prompt the user for retry decision
 						const { response } = await this.ask(
 							"api_req_failed",
-							"The model returned no assistant messages. This may indicate an issue with the API or the model's output.",
+							`The model returned no assistant messages. This may indicate an issue with the API or the model's output. ${emptyResponseDetail}`,
 						)
 
 						if (response === "yesButtonClicked") {
@@ -3735,7 +3812,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 							await this.say(
 								"error",
-								"Unexpected API Response: The language model did not provide any assistant messages. This may indicate an issue with the API or the model's output.",
+								`Unexpected API Response: The language model did not provide any assistant messages. ` +
+									`This may indicate an issue with the API or the model's output. ${emptyResponseDetail}`,
 							)
 
 							// Synthetic assistant message recording the failure -- increment
@@ -3746,6 +3824,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								content: [{ type: "text", text: "Failure: I did not provide a response." }],
 							})
 							this.messageCounts.assistant++
+							// Reset the retry counters on the user-declined terminal path so a later
+							// Stop on the same task takes the normal graceful path in cancelTask
+							// rather than the hard-abort gate.
+							this.consecutiveNoAssistantMessagesCount = 0
+							this.emptyResponseRetryLoopStartTimeMs = 0
 						}
 					}
 				}
@@ -4496,6 +4579,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				headerText = error.message
 			} else {
 				headerText = "Unknown error"
+			}
+
+			// Surface a curated errorDetails summary so a live "Provider Error" toast is
+			// diagnosable without grepping sidecar logs afterward. The raw array can include
+			// provider-internal metadata (e.g. google.rpc.RetryInfo with its retryDelay, already
+			// parsed above for the backoff) that is opaque in a user-facing toast, so filter that
+			// entry out before serializing the remainder.
+			const backoffDetailLines: string[] = []
+			if (Array.isArray(error?.errorDetails) && error.errorDetails.length > 0) {
+				const sanitizedDetails = error.errorDetails.filter(
+					(d: { "@type"?: string }) => d?.["@type"] !== "type.googleapis.com/google.rpc.RetryInfo",
+				)
+				if (sanitizedDetails.length > 0) {
+					backoffDetailLines.push(`errorDetails: ${JSON.stringify(sanitizedDetails)}`)
+				}
+			}
+			if (backoffDetailLines.length > 0) {
+				headerText = `${headerText}\n${backoffDetailLines.join("\n")}`
 			}
 
 			headerText = headerText ? `${headerText}\n` : ""
