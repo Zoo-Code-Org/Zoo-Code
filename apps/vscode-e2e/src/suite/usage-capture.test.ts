@@ -114,6 +114,48 @@ suite("Roo Code Usage Capture", function () {
 	suiteSetup(async function () {
 		const extension = vscode.extensions.getExtension("ZooCodeOrganization.zoo-code")
 		assert.ok(extension, "Extension not found")
+
+		const aimockUrl = process.env.AIMOCK_URL
+		const isRecord = process.env.AIMOCK_RECORD === "true"
+
+		await globalThis.api.setConfiguration({
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
+			openRouterModelId: "openai/gpt-4.1",
+			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+		})
+	})
+
+	setup(async () => {
+		try {
+			await globalThis.api.cancelCurrentTask()
+		} catch {
+			// task may not be running
+		}
+	})
+
+	teardown(async () => {
+		try {
+			await globalThis.api.cancelCurrentTask()
+		} catch {
+			// task may not be running
+		}
+	})
+
+	suiteTeardown(async () => {
+		try {
+			await globalThis.api.cancelCurrentTask()
+		} catch {
+			// task may not be running
+		}
+		const aimockUrl = process.env.AIMOCK_URL
+		const isRecord = process.env.AIMOCK_RECORD === "true"
+		await globalThis.api.setConfiguration({
+			apiProvider: "openrouter" as const,
+			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
+			openRouterModelId: "openai/gpt-4.1",
+			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+		})
 	})
 
 	test("captures a usage event when an API call completes", async () => {
