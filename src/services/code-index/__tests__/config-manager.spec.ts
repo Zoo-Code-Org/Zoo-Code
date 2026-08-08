@@ -3,6 +3,8 @@
 import { CodeIndexConfigManager } from "../config-manager"
 import { PreviousConfigSnapshot } from "../interfaces/config"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock ContextProxy
 vi.mock("../../../core/config/ContextProxy")
 
@@ -23,7 +25,7 @@ describe("CodeIndexConfigManager", () => {
 
 	beforeEach(() => {
 		// Reset mocks
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		// Setup mock ContextProxy
 		mockContextProxy = {
@@ -1790,7 +1792,7 @@ describe("CodeIndexConfigManager", () => {
 
 		describe("currentModelDimension", () => {
 			beforeEach(() => {
-				vi.clearAllMocks()
+				clearAllMocks()
 			})
 
 			it("should return model's built-in dimension when available", async () => {
