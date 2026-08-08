@@ -659,8 +659,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					})
 				})
 			}
-		} catch (err) {
-			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
+		} catch {
+			// Usage recording is best-effort: when the provider does not expose a
+			// UsageStatsService (e.g. mocked providers in unit tests), the recorder
+			// stays disabled. Do NOT log here — a console.warn during construction
+			// surfaces as an unhandled EnvironmentTeardownError under vitest workers
+			// ("Closing rpc while onUserConsoleLog was pending") and fails coverage.
 		}
 
 		this.parentTask = parentTask

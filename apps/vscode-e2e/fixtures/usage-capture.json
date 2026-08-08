@@ -1,0 +1,32 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "USAGE_CAPTURE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"My name is Zoo.\"}",
+						"id": "call_usage_capture_smoke_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "USAGE_CAPTURE_HOOK_2"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"My name is Zoo.\"}",
+						"id": "call_usage_capture_hook_2_001"
+					}
+				]
+			}
+		}
+	]
+}
