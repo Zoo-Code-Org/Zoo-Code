@@ -103,7 +103,7 @@ function buildToolCallSseBody(model: string, behavior: MockBehavior): string {
 
 	// ── First tool call (index 0) ────────────────────────────────────────────
 	const first = baseChunk(model)
-	first.choices[0].delta = {
+	first.choices[0]!.delta = {
 		role: "assistant",
 		tool_calls: [
 			toolCallDelta(0, {
@@ -116,7 +116,7 @@ function buildToolCallSseBody(model: string, behavior: MockBehavior): string {
 	chunks.push(sseChunk(first))
 
 	const firstArgs = baseChunk(model)
-	firstArgs.choices[0].delta = {
+	firstArgs.choices[0]!.delta = {
 		tool_calls: [
 			toolCallDelta(0, {
 				function: {
@@ -134,7 +134,7 @@ function buildToolCallSseBody(model: string, behavior: MockBehavior): string {
 		const secondIndex = behavior.disguisedSecondCall ? 0 : 1
 		// ── Second (parallel) tool call ────────────────────────────────────────
 		const second = baseChunk(model)
-		second.choices[0].delta = {
+		second.choices[0]!.delta = {
 			tool_calls: [
 				toolCallDelta(secondIndex, {
 					id: "call_second_bbb",
@@ -147,7 +147,7 @@ function buildToolCallSseBody(model: string, behavior: MockBehavior): string {
 
 		// Id-less argument continuation owned by the second call.
 		const secondArgs = baseChunk(model)
-		secondArgs.choices[0].delta = {
+		secondArgs.choices[0]!.delta = {
 			tool_calls: [
 				toolCallDelta(secondIndex, {
 					function: {
@@ -164,8 +164,8 @@ function buildToolCallSseBody(model: string, behavior: MockBehavior): string {
 
 	// ── Finish ───────────────────────────────────────────────────────────────
 	const finish = baseChunk(model)
-	finish.choices[0].delta = {}
-	;(finish.choices[0] as { finish_reason: string | null }).finish_reason = "tool_calls"
+	finish.choices[0]!.delta = {}
+	;(finish.choices[0]! as { finish_reason: string | null }).finish_reason = "tool_calls"
 	chunks.push(sseChunk(finish))
 	chunks.push("data: [DONE]\n\n")
 
@@ -182,7 +182,7 @@ async function withMimoMockServer<T>(
 	const server: Server = createServer(async (req, res: ServerResponse) => {
 		try {
 			const url = req.url ?? "/"
-			if (!url.endsWith(CHAT_COMPLETIONS_PATH)) {
+			if (!url.endsWith(CHAT_COMPLETIONS_PATH) && !url.endsWith("/chat/completions")) {
 				res.writeHead(404)
 				res.end("Not found")
 				return
@@ -198,9 +198,7 @@ async function withMimoMockServer<T>(
 
 			const lastUser = [...(body.messages ?? [])].reverse().find((m) => m.role === "user")
 			const lastUserMessage =
-				typeof lastUser?.content === "string"
-					? lastUser.content
-					: JSON.stringify(lastUser?.content ?? "")
+				typeof lastUser?.content === "string" ? lastUser.content : JSON.stringify(lastUser?.content ?? "")
 
 			requests.push({
 				model: body.model,
@@ -233,15 +231,13 @@ async function withMimoMockServer<T>(
 		throw new Error("Failed to start MiMo mock server")
 	}
 
-	const baseUrl = `http://127.0.0.1:${address.port}`
+	const baseUrl = `http://127.0.0.1:${address.port}/v1`
 	try {
 		const result = await run({ baseUrl, requests })
 		if (serverError) throw serverError
 		return result
 	} finally {
-		await new Promise<void>((resolve, reject) =>
-			server.close((err) => (err ? reject(err) : resolve())),
-		)
+		await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())))
 	}
 }
 
@@ -260,9 +256,7 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 	})
 
 	for (const disguised of [false, true] as const) {
-		const label = disguised
-			? "disguised second call reusing index 0"
-			: "explicit parallel calls at index 0 and 1"
+		const label = disguised ? "disguised second call reusing index 0" : "explicit parallel calls at index 0 and 1"
 
 		test(`Should enforce single-call policy when mock emits ${label}`, async function () {
 			const api = globalThis.api
@@ -338,9 +332,7 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 					// The second parallel call MUST NOT have produced a tool say with
 					// its target file. We scan the rendered text of every tool/error
 					// message for the second call's marker.
-					const rendered = messages
-						.map((m) => `${m.say ?? ""}:${m.text ?? ""}`)
-						.join("\n")
+					const rendered = messages.map((m) => `${m.say ?? ""}:${m.text ?? ""}`).join("\n")
 
 					assert.ok(
 						!rendered.includes("MIMO_SECOND_CALL_SHOULD_NOT_EXECUTE"),
@@ -351,13 +343,8 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 					// it to succeed — enforcement is about suppressing the parallel
 					// violation, not about forcing the first call through. We assert
 					// only that the task did not crash with an unhandled stream error.
-					const fatal = messages.find(
-							(m) => m.ask === "api_req_failed" && (m.text ?? "").includes("500"),
-						)
-					assert.ok(
-						!fatal,
-						`Task should not hit a mock 500. Got: ${fatal?.text ?? "none"}`,
-					)
+					const fatal = messages.find((m) => m.ask === "api_req_failed" && (m.text ?? "").includes("500"))
+					assert.ok(!fatal, `Task should not hit a mock 500. Got: ${fatal?.text ?? "none"}`)
 				})
 			} finally {
 				api.off(RooCodeEventName.Message, messageHandler)
