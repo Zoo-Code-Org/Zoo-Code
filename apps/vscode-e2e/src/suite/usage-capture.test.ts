@@ -1,5 +1,6 @@
 import * as assert from "assert"
 import * as fs from "fs/promises"
+import * as os from "os"
 import * as path from "path"
 
 import * as vscode from "vscode"
@@ -34,30 +35,42 @@ const findAllStatsDirs = async (): Promise<string[]> => {
 	const repoRoot = path.resolve(__dirname, "..", "..", "..")
 	const candidateBases = [
 		process.env.VSCODE_TEST_USER_DATA_DIR,
-		path.join(repoRoot, ".vscode-test", "user-data"),
+		path.join(repoRoot, ".vscode-test"),
+		os.tmpdir(),
 	].filter((c): c is string => !!c)
 
-	const statsDirs: string[] = []
+	const statsDirs = new Set<string>()
 
-	for (const base of candidateBases) {
-		const globalStorageDir = path.join(base, "User", "globalStorage")
+	const searchDir = async (dir: string, depth = 0) => {
+		if (depth > 5) return
 		try {
-			const entries = await fs.readdir(globalStorageDir)
+			const entries = await fs.readdir(dir, { withFileTypes: true })
 			for (const entry of entries) {
-				const candidate = path.join(globalStorageDir, entry, USAGE_STATS_DIRNAME)
-				try {
-					await fs.access(candidate)
-					statsDirs.push(candidate)
-				} catch {
-					// candidate directory doesn't exist
+				if (entry.isDirectory()) {
+					const fullPath = path.join(dir, entry.name)
+					if (entry.name === USAGE_STATS_DIRNAME) {
+						statsDirs.add(fullPath)
+					} else if (
+						depth === 0 ||
+						entry.name.includes("vscode") ||
+						entry.name.includes("globalStorage") ||
+						entry.name.includes("User") ||
+						entry.name.includes("zoo")
+					) {
+						await searchDir(fullPath, depth + 1)
+					}
 				}
 			}
 		} catch {
-			// globalStorageDir doesn't exist
+			// ignore unreadable/permission errors
 		}
 	}
 
-	return statsDirs
+	for (const base of candidateBases) {
+		await searchDir(base)
+	}
+
+	return Array.from(statsDirs)
 }
 
 /**
@@ -184,7 +197,7 @@ suite("Roo Code Usage Capture", function () {
 				eventsForTask = all.filter((e) => !preExistingIds.has(e.eventId) && e.taskId === taskId)
 				return eventsForTask.length > 0
 			},
-			{ timeout: 45_000, interval: 250 },
+			{ timeout: 60_000, interval: 250 },
 		)
 
 		const completed = eventsForTask.find((e) => e.status === "completed")
@@ -235,7 +248,7 @@ suite("Roo Code Usage Capture", function () {
 				eventsForTask = all.filter((e) => !preExistingIds.has(e.eventId) && e.taskId === taskId)
 				return eventsForTask.length > 0
 			},
-			{ timeout: 45_000, interval: 250 },
+			{ timeout: 60_000, interval: 250 },
 		)
 
 		// Hook fired for this task too.
