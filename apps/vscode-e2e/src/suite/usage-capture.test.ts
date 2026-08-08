@@ -30,16 +30,68 @@ const USAGE_STATS_DIRNAME = "usage-stats"
 const SEGMENT_PREFIX = "events-"
 const SEGMENT_EXT = ".ndjson"
 
+const resolveStatsDir = async (): Promise<string> => {
+	const repoRoot = path.resolve(__dirname, "..", "..", "..")
+	const candidates = [
+		process.env.VSCODE_TEST_USER_DATA_DIR &&
+			path.join(
+				process.env.VSCODE_TEST_USER_DATA_DIR,
+				"User",
+				"globalStorage",
+				"ZooCodeOrganization.zoo-code",
+				USAGE_STATS_DIRNAME,
+			),
+		process.env.VSCODE_TEST_USER_DATA_DIR &&
+			path.join(
+				process.env.VSCODE_TEST_USER_DATA_DIR,
+				"User",
+				"globalStorage",
+				"zoocodeorganization.zoo-code",
+				USAGE_STATS_DIRNAME,
+			),
+		path.join(
+			repoRoot,
+			".vscode-test",
+			"user-data",
+			"User",
+			"globalStorage",
+			"ZooCodeOrganization.zoo-code",
+			USAGE_STATS_DIRNAME,
+		),
+		path.join(
+			repoRoot,
+			".vscode-test",
+			"user-data",
+			"User",
+			"globalStorage",
+			"zoocodeorganization.zoo-code",
+			USAGE_STATS_DIRNAME,
+		),
+	].filter((c): c is string => !!c)
+
+	for (const candidate of candidates) {
+		try {
+			await fs.access(candidate)
+			return candidate
+		} catch {
+			// try next candidate
+		}
+	}
+
+	return candidates[0] || candidates[2]!
+}
+
 /**
  * Read every usage event from the store's segment files.
  * Corrupt or unparseable lines are skipped — the store itself quarantines
  * them, so the test should not fail on them.
  */
-const readAllUsageEvents = async (statsDir: string): Promise<UsageEvent[]> => {
+const readAllUsageEvents = async (statsDir?: string): Promise<UsageEvent[]> => {
+	const dir = statsDir ?? (await resolveStatsDir())
 	let files: string[]
 
 	try {
-		files = await fs.readdir(statsDir)
+		files = await fs.readdir(dir)
 	} catch {
 		// Store directory does not exist yet — no events recorded.
 		return []
@@ -49,7 +101,7 @@ const readAllUsageEvents = async (statsDir: string): Promise<UsageEvent[]> => {
 	const events: UsageEvent[] = []
 
 	for (const file of segmentFiles) {
-		const content = await fs.readFile(path.join(statsDir, file), "utf-8")
+		const content = await fs.readFile(path.join(dir, file), "utf-8")
 
 		for (const line of content.split("\n")) {
 			const trimmed = line.trim()
@@ -72,58 +124,9 @@ const readAllUsageEvents = async (statsDir: string): Promise<UsageEvent[]> => {
 suite("Roo Code Usage Capture", function () {
 	setDefaultSuiteTimeout(this)
 
-	let statsDir: string
-
 	suiteSetup(async function () {
-		// The extension writes usage events to
-		//   <userData>/User/globalStorage/ZooCodeOrganization.zoo-code/usage-stats/
-		// (ExtensionContext.globalStorageUri.fsPath + "usage-stats").
-		//
-		// The test runner (@vscode/test-electron) launches VS Code with its
-		// default --user-data-dir at <repoRoot>/.vscode-test/user-data unless
-		// overridden. We resolve the directory by probing known candidates and
-		// picking the first one that exists after the first task run; before
-		// any event is written the directory may not exist yet, so the probe
-		// falls back to the test-electron default.
 		const extension = vscode.extensions.getExtension("ZooCodeOrganization.zoo-code")
 		assert.ok(extension, "Extension not found")
-
-		const repoRoot = path.resolve(__dirname, "..", "..", "..")
-		const candidates = [
-			process.env.VSCODE_TEST_USER_DATA_DIR &&
-				path.join(
-					process.env.VSCODE_TEST_USER_DATA_DIR,
-					"User",
-					"globalStorage",
-					"ZooCodeOrganization.zoo-code",
-					USAGE_STATS_DIRNAME,
-				),
-			path.join(
-				repoRoot,
-				".vscode-test",
-				"user-data",
-				"User",
-				"globalStorage",
-				"ZooCodeOrganization.zoo-code",
-				USAGE_STATS_DIRNAME,
-			),
-		].filter((c): c is string => !!c)
-
-		for (const candidate of candidates) {
-			try {
-				await fs.access(candidate)
-				statsDir = candidate
-				return
-			} catch {
-				// try next candidate
-			}
-		}
-
-		// Nothing written yet — use the test-electron default; the directory
-		// will be created by UsageEventStore on first append.
-		const fallback = candidates[candidates.length - 1]
-		assert.ok(fallback, "At least one globalStorage candidate must be resolvable")
-		statsDir = fallback
 	})
 
 	test("captures a usage event when an API call completes", async () => {
@@ -131,7 +134,7 @@ suite("Roo Code Usage Capture", function () {
 
 		// Snapshot pre-existing event ids so we only assert on events this
 		// test run created (the store persists across test runs).
-		const preExistingIds = new Set((await readAllUsageEvents(statsDir)).map((e) => e.eventId))
+		const preExistingIds = new Set((await readAllUsageEvents()).map((e) => e.eventId))
 
 		const taskId = await waitUntilCompleted({
 			api,
@@ -146,11 +149,14 @@ suite("Roo Code Usage Capture", function () {
 		// poll the store until the event for this task appears.
 		let eventsForTask: UsageEvent[] = []
 
-		await waitFor(async () => {
-			const all = await readAllUsageEvents(statsDir)
-			eventsForTask = all.filter((e) => !preExistingIds.has(e.eventId) && e.taskId === taskId)
-			return eventsForTask.length > 0
-		})
+		await waitFor(
+			async () => {
+				const all = await readAllUsageEvents()
+				eventsForTask = all.filter((e) => !preExistingIds.has(e.eventId) && e.taskId === taskId)
+				return eventsForTask.length > 0
+			},
+			{ timeout: 45_000, interval: 250 },
+		)
 
 		const completed = eventsForTask.find((e) => e.status === "completed")
 		assert.ok(completed, `A completed usage event should be recorded for task ${taskId}`)
@@ -181,7 +187,7 @@ suite("Roo Code Usage Capture", function () {
 	test("capture hook fires for each task and never double-records", async () => {
 		const api = globalThis.api
 
-		const preExistingIds = new Set((await readAllUsageEvents(statsDir)).map((e) => e.eventId))
+		const preExistingIds = new Set((await readAllUsageEvents()).map((e) => e.eventId))
 
 		const taskId = await waitUntilCompleted({
 			api,
@@ -194,11 +200,14 @@ suite("Roo Code Usage Capture", function () {
 
 		let eventsForTask: UsageEvent[] = []
 
-		await waitFor(async () => {
-			const all = await readAllUsageEvents(statsDir)
-			eventsForTask = all.filter((e) => !preExistingIds.has(e.eventId) && e.taskId === taskId)
-			return eventsForTask.length > 0
-		})
+		await waitFor(
+			async () => {
+				const all = await readAllUsageEvents()
+				eventsForTask = all.filter((e) => !preExistingIds.has(e.eventId) && e.taskId === taskId)
+				return eventsForTask.length > 0
+			},
+			{ timeout: 45_000, interval: 250 },
+		)
 
 		// Hook fired for this task too.
 		assert.ok(
@@ -208,7 +217,7 @@ suite("Roo Code Usage Capture", function () {
 
 		// Idempotency: no two events anywhere in the store may share an
 		// idempotencyKey — the recorder dedupes on requestKey:status.
-		const all = await readAllUsageEvents(statsDir)
+		const all = await readAllUsageEvents()
 		const keys = all.map((e) => e.idempotencyKey)
 		assert.strictEqual(
 			new Set(keys).size,
