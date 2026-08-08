@@ -1,0 +1,46 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "ORG_E2E_TASK_A"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"hello\"}",
+						"id": "call_org_e2e_task_a_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "ORG_E2E_TASK_B"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"hello\"}",
+						"id": "call_org_e2e_task_b_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "ORG_E2E_TASK_C"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"hello\"}",
+						"id": "call_org_e2e_task_c_001"
+					}
+				]
+			}
+		}
+	]
+}
