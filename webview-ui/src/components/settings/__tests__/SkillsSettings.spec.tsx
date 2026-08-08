@@ -1,9 +1,7 @@
-import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent, waitFor } from "@/utils/test-utils"
 
 import type { SkillMetadata } from "@roo-code/types"
 
-import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { vscode } from "@/utils/vscode"
 
 import { SkillsSettings } from "../SkillsSettings"
@@ -167,13 +165,6 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 
 const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string) => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: { retry: false },
-			mutations: { retry: false },
-		},
-	})
-
 	// Update the mock state before rendering
 	mockExtensionState = {
 		skills,
@@ -181,13 +172,7 @@ const renderSkillsSettings = (skills: SkillMetadata[] = mockSkills, cwd?: string
 		customModes: [],
 	}
 
-	return render(
-		<QueryClientProvider client={queryClient}>
-			<ExtensionStateContextProvider>
-				<SkillsSettings />
-			</ExtensionStateContextProvider>
-		</QueryClientProvider>,
-	)
+	return renderWithExtensionState(<SkillsSettings />)
 }
 
 describe("SkillsSettings", () => {
