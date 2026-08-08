@@ -268,7 +268,7 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 
 			const messages: ClineMessage[] = []
 			const messageHandler = ({ message }: { message: ClineMessage }) => {
-				if (message.type === "say" && message.partial === false) {
+				if (message.type === "say" && message.partial !== true) {
 					messages.push(message)
 				}
 			}
