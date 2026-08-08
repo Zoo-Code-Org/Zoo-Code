@@ -43,9 +43,7 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 	for (const { tag, callId, doneId } of markers) {
 		mock.addFixture({
 			match: {
-				predicate: (req) =>
-					toolResultContains(req, callId, [`${tag}.txt`, '"operation":"created"']) ||
-					toolResultContains(req, callId, [`${tag}.txt`, "created"]),
+				predicate: (req) => toolResultContains(req, callId, [tag]),
 			},
 			response: {
 				toolCalls: [

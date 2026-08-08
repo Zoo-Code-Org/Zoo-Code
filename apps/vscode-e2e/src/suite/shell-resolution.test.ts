@@ -160,7 +160,7 @@ suite("Shell Resolution", function () {
 	 * Starts a task that writes a marker file via execute_command, then asserts
 	 * the task completed without a shell_integration_warning or error message.
 	 */
-	async function runCommandTask(markerName: string, timeoutMs = 90_000): Promise<ClineMessage[]> {
+	async function runCommandTask(markerName: string, timeoutMs = 30_000): Promise<ClineMessage[]> {
 		const api = globalThis.api
 		const messages: ClineMessage[] = []
 
