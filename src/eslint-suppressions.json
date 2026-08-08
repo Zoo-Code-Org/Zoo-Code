@@ -659,16 +659,6 @@
 			"count": 1
 		}
 	},
-	"core/config/__tests__/CustomModesSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/config/__tests__/ModeConfig.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
 	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
