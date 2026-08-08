@@ -4,6 +4,8 @@ import { createHash } from "crypto"
 import debounce from "lodash.debounce"
 import { CacheManager } from "../cache-manager"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock safeWriteJson utility
 vitest.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: vitest.fn().mockResolvedValue(undefined),
@@ -50,7 +52,7 @@ describe("CacheManager", () => {
 
 	beforeEach(() => {
 		// Reset all mocks
-		vitest.clearAllMocks()
+		clearAllMocks()
 
 		// Mock context
 		mockWorkspacePath = "/mock/workspace"
