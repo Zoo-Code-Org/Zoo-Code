@@ -13,6 +13,7 @@ import {
 	type ExtensionMessage,
 	type ExtensionState,
 	type WebviewMessage,
+	type TerminalShellOption,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
@@ -31,6 +32,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 import { ClineProvider } from "../ClineProvider"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { Terminal } from "../../../integrations/terminal/Terminal"
+import { CommandEnvironmentService } from "../../../integrations/terminal/shell/CommandEnvironmentService"
 import { MessageManager } from "../../message-manager"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/providers/fetchers/lmstudio"
 
@@ -4597,6 +4599,352 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
+		})
+	})
+})
+
+describe("ClineProvider - CommandEnvironmentService and terminal shell options", () => {
+	let provider: ClineProvider
+	let mockContext: vscode.ExtensionContext
+	let mockOutputChannel: vscode.OutputChannel
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+
+		mockContext = {
+			extensionPath: "/test/path",
+			extensionUri: { fsPath: "/test/path" } as vscode.Uri,
+			globalState: {
+				get: vi.fn(),
+				update: vi.fn(),
+				keys: vi.fn().mockReturnValue([]),
+			},
+			secrets: {
+				get: vi.fn(),
+				store: vi.fn(),
+				delete: vi.fn(),
+			},
+			workspaceState: {
+				get: vi.fn().mockReturnValue(undefined),
+				update: vi.fn().mockResolvedValue(undefined),
+				keys: vi.fn().mockReturnValue([]),
+			},
+			subscriptions: [],
+			extension: {
+				packageJSON: { version: "1.0.0" },
+			},
+			globalStorageUri: {
+				fsPath: "/test/storage/path",
+			},
+		} as unknown as vscode.ExtensionContext
+
+		mockOutputChannel = {
+			appendLine: vi.fn(),
+			clear: vi.fn(),
+			dispose: vi.fn(),
+		} as unknown as vscode.OutputChannel
+
+		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+	})
+
+	describe("getCommandEnvironmentService", () => {
+		it("lazily creates and caches the service", () => {
+			const service = provider.getCommandEnvironmentService()
+
+			expect(service).toBeDefined()
+			expect(provider.getCommandEnvironmentService()).toBe(service)
+		})
+
+		it("returns undefined and logs when construction fails", async () => {
+			const { TerminalProfileResolver } = await import(
+				"../../../integrations/terminal/shell/TerminalProfileResolver"
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const forRuntimeSpy = vi
+				.spyOn(TerminalProfileResolver, "forRuntime")
+				.mockImplementation(() => {
+					throw new Error("resolver construction failed")
+				})
+
+			try {
+				expect(provider.getCommandEnvironmentService()).toBeUndefined()
+				expect(errorSpy).toHaveBeenCalledWith(
+					"[ClineProvider] Failed to create CommandEnvironmentService:",
+					expect.any(Error),
+				)
+			} finally {
+				forRuntimeSpy.mockRestore()
+				errorSpy.mockRestore()
+			}
+		})
+	})
+
+	describe("handleRequestTerminalShellOptions", () => {
+		it("posts an error when the service is unavailable", async () => {
+			vi.spyOn(provider, "getCommandEnvironmentService").mockReturnValue(undefined)
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider.handleRequestTerminalShellOptions()
+
+			expect(postSpy).toHaveBeenCalledWith({
+				type: "terminalShellOptions",
+				terminalShellOptions: {
+					options: [],
+					error: "SHELL/handleRequestTerminalShellOptions/001: CommandEnvironmentService unavailable",
+				},
+			})
+		})
+
+		it("posts sanitized options and the effective shell", async () => {
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider.handleRequestTerminalShellOptions()
+
+			expect(postSpy).toHaveBeenCalledTimes(1)
+			const call = postSpy.mock.calls[0][0] as unknown as {
+				type: string
+				terminalShellOptions: {
+					options: { id: string; label: string; family: string; source: string; available: boolean }[]
+					effectiveShell: { label: string; family: string; source: string }
+				}
+			}
+			expect(call.type).toBe("terminalShellOptions")
+			// Auto option is always first.
+			expect(call.terminalShellOptions.options[0]).toEqual({
+				id: "auto",
+				label: "Auto (follows trusted terminal profile)",
+				family: "powershell",
+				source: "auto",
+				available: true,
+			})
+			// On Windows, cmd.exe is always offered as a fallback option.
+			if (process.platform === "win32") {
+				expect(call.terminalShellOptions.options.some((o) => o.id === "cmd")).toBe(true)
+			}
+			// The effective shell resolves to a real shell on this platform.
+			expect(call.terminalShellOptions.effectiveShell).toBeDefined()
+			expect(call.terminalShellOptions.effectiveShell.label).toBeTruthy()
+		})
+
+		it("posts a typed error when resolution throws", async () => {
+			const fakeService = {
+				getEnvironment: vi.fn().mockImplementation(() => {
+					throw new Error("resolution exploded")
+				}),
+				invalidate: vi.fn(),
+			}
+			vi.spyOn(provider, "getCommandEnvironmentService").mockReturnValue(
+				fakeService as unknown as CommandEnvironmentService,
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			try {
+				await provider.handleRequestTerminalShellOptions()
+
+				expect(postSpy).toHaveBeenCalledWith({
+					type: "terminalShellOptions",
+					terminalShellOptions: {
+						options: [],
+						error: "SHELL/handleRequestTerminalShellOptions/002: Failed to resolve shell options",
+					},
+				})
+			} finally {
+				errorSpy.mockRestore()
+			}
+		})
+	})
+
+	describe("handleSetTerminalShellSelection", () => {
+		it("posts an error when the service is unavailable", async () => {
+			vi.spyOn(provider, "getCommandEnvironmentService").mockReturnValue(undefined)
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider.handleSetTerminalShellSelection({ kind: "auto" })
+
+			expect(postSpy).toHaveBeenCalledWith({
+				type: "terminalShellOptions",
+				terminalShellOptions: {
+					options: [],
+					error: "SHELL/handleSetTerminalShellSelection/001: CommandEnvironmentService unavailable",
+				},
+			})
+		})
+
+		it("persists a valid selection, invalidates the cache, and responds", async () => {
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.handleSetTerminalShellSelection({ kind: "auto" })
+
+			expect(setValueSpy).toHaveBeenCalledWith("terminalShellSelection", { kind: "auto" })
+			expect(postStateSpy).toHaveBeenCalled()
+			expect(postSpy).toHaveBeenCalledTimes(1)
+			const call = postSpy.mock.calls[0][0] as unknown as {
+				type: string
+				terminalShellOptions: {
+					options: { id: string }[]
+					effectiveShell: { label: string; family: string; source: string }
+				}
+			}
+			expect(call.type).toBe("terminalShellOptions")
+			expect(call.terminalShellOptions.effectiveShell).toBeDefined()
+			expect(call.terminalShellOptions.options[0].id).toBe("auto")
+		})
+
+		it("keeps the previous setting and posts a typed error on validation failure", async () => {
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue").mockResolvedValue(undefined)
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			await provider.handleSetTerminalShellSelection({ kind: "path", path: "/nonexistent/evil.exe" })
+
+			expect(setValueSpy).not.toHaveBeenCalled()
+			expect(postSpy).toHaveBeenCalledTimes(1)
+			const call = postSpy.mock.calls[0][0] as unknown as {
+				terminalShellOptions: { error: string }
+			}
+			expect(call.terminalShellOptions.error).toContain("SHELL/handleSetTerminalShellSelection/003")
+		})
+
+		it("posts a typed error when persistence throws", async () => {
+			const fakeService = {
+				getEnvironment: vi.fn().mockReturnValue({
+					primaryPlan: { family: "powershell", provider: "vscode" },
+					promptDescriptor: { shellExecutableName: "powershell.exe", sourceLabel: "OS Default" },
+				}),
+				invalidate: vi.fn(),
+			}
+			vi.spyOn(provider, "getCommandEnvironmentService").mockReturnValue(
+				fakeService as unknown as CommandEnvironmentService,
+			)
+			vi.spyOn(provider.contextProxy, "setValue").mockRejectedValue(new Error("persist failed"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			const postSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+			try {
+				await provider.handleSetTerminalShellSelection({ kind: "auto" })
+
+				expect(postSpy).toHaveBeenCalledWith({
+					type: "terminalShellOptions",
+					terminalShellOptions: {
+						options: [],
+						error: "SHELL/handleSetTerminalShellSelection/002: Failed to set shell selection",
+					},
+				})
+			} finally {
+				errorSpy.mockRestore()
+			}
+		})
+	})
+
+	describe("buildTerminalShellOptions", () => {
+		it("includes trusted profiles grouped by shell family", () => {
+			const profileResolver = {
+				getAvailableProfiles: vi.fn().mockReturnValue([
+					{
+						name: "PowerShell",
+						shell: { family: "powershell", executable: "pwsh.exe" },
+					},
+					{
+						name: "Git Bash",
+						shell: { family: "posix", executable: "/usr/bin/bash" },
+					},
+				]),
+			}
+
+			const options = (provider as unknown as {
+				buildTerminalShellOptions(resolver: unknown): TerminalShellOption[]
+			}).buildTerminalShellOptions(profileResolver)
+
+			expect(options[0].id).toBe("auto")
+			expect(options.some((o) => o.id === "profile:PowerShell" && o.family === "powershell")).toBe(true)
+			expect(options.some((o) => o.id === "profile:Git Bash" && o.family === "posix")).toBe(true)
+			// cmd.exe is never duplicated when a cmd profile already exists.
+			expect(options.filter((o) => o.family === "cmd").length).toBeLessThanOrEqual(1)
+		})
+
+		it("keeps the Auto option when profile discovery throws", () => {
+			const profileResolver = {
+				getAvailableProfiles: vi.fn().mockImplementation(() => {
+					throw new Error("profile discovery failed")
+				}),
+			}
+
+			const options = (provider as unknown as {
+				buildTerminalShellOptions(resolver: unknown): TerminalShellOption[]
+			}).buildTerminalShellOptions(profileResolver)
+
+			expect(options.length).toBeGreaterThanOrEqual(1)
+			expect(options[0].id).toBe("auto")
+		})
+	})
+
+	describe("resolveWebviewView shell hydration", () => {
+		it("skips hydration when the service is unavailable", async () => {
+			vi.spyOn(provider, "getCommandEnvironmentService").mockReturnValue(undefined)
+
+			const mockWebviewView = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn(),
+				onDidChangeVisibility: vi.fn(),
+			}
+
+			await expect(
+				provider.resolveWebviewView(mockWebviewView as unknown as vscode.WebviewView),
+			).resolves.toBeUndefined()
+			await new Promise((resolve) => setImmediate(resolve))
+		})
+
+		it("logs and continues when eager hydration resolution throws", async () => {
+			const fakeService = {
+				getEnvironment: vi.fn().mockImplementation(() => {
+					throw new Error("hydration exploded")
+				}),
+				invalidate: vi.fn(),
+			}
+			vi.spyOn(provider, "getCommandEnvironmentService").mockReturnValue(
+				fakeService as unknown as CommandEnvironmentService,
+			)
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const mockWebviewView = {
+				webview: {
+					postMessage: vi.fn(),
+					html: "",
+					options: {},
+					onDidReceiveMessage: vi.fn(),
+					asWebviewUri: vi.fn(),
+					cspSource: "vscode-webview://test-csp-source",
+				},
+				visible: true,
+				onDidDispose: vi.fn(),
+				onDidChangeVisibility: vi.fn(),
+			}
+
+			try {
+				await provider.resolveWebviewView(mockWebviewView as unknown as vscode.WebviewView)
+				await new Promise((resolve) => setImmediate(resolve))
+
+				expect(errorSpy).toHaveBeenCalledWith(
+					"[ClineProvider] Failed to hydrate CommandEnvironmentService on startup:",
+					expect.any(Error),
+				)
+			} finally {
+				errorSpy.mockRestore()
+			}
 		})
 	})
 })

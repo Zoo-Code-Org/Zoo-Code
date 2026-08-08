@@ -7,6 +7,7 @@ import { Terminal } from "../Terminal"
 import { TerminalProcess } from "../TerminalProcess"
 import { TerminalRegistry } from "../TerminalRegistry"
 import { CommandScheduler } from "../CommandScheduler"
+import type { RooTerminalProcess } from "../types"
 import type { ResolvedCommandEnvironment } from "../shell/types"
 import type { ShellInvocationPlan } from "../shell/types"
 
@@ -737,6 +738,361 @@ describe("TerminalRegistry", () => {
 
 			expect(() => TerminalRegistry.releaseTerminalsForTask("task-throw")).not.toThrow()
 			expect(terminal.taskId).toBeUndefined()
+		})
+	})
+
+	describe("getTerminals", () => {
+		it("filters by busy state and task id", () => {
+			const busy = TerminalRegistry.createTerminal("/busy", "vscode")
+			const idle = TerminalRegistry.createTerminal("/idle", "vscode")
+			const otherTask = TerminalRegistry.createTerminal("/other", "vscode")
+			busy.lifecycle.acquireOwner("exec-1")
+			busy.lifecycle._setStateForTest("running", "exec-1")
+			busy.taskId = "task-1"
+			idle.lifecycle.resetToIdle()
+			idle.taskId = "task-1"
+			otherTask.lifecycle.resetToIdle()
+			otherTask.taskId = "task-2"
+
+			expect(TerminalRegistry.getTerminals(true, "task-1")).toEqual([busy])
+			expect(TerminalRegistry.getTerminals(false, "task-1")).toEqual([idle])
+			expect(TerminalRegistry.getTerminals(false)).toEqual([idle, otherTask])
+		})
+	})
+
+	describe("getBackgroundTerminals", () => {
+		it("returns only terminals without a task id", () => {
+			const background = TerminalRegistry.createTerminal("/bg", "vscode")
+			const owned = TerminalRegistry.createTerminal("/owned", "vscode")
+			background.lifecycle.resetToIdle()
+			background.taskId = undefined
+			background.process = {
+				hasUnretrievedOutput: vi.fn().mockReturnValue(true),
+			} as unknown as RooTerminalProcess
+			owned.lifecycle.resetToIdle()
+			owned.taskId = "task-1"
+
+			expect(TerminalRegistry.getBackgroundTerminals()).toEqual([background])
+		})
+
+		it("filters background terminals by busy state", () => {
+			const busy = TerminalRegistry.createTerminal("/bg-busy", "vscode")
+			const idle = TerminalRegistry.createTerminal("/bg-idle", "vscode")
+			busy.lifecycle.acquireOwner("exec-1")
+			busy.lifecycle._setStateForTest("running", "exec-1")
+			idle.lifecycle.resetToIdle()
+
+			expect(TerminalRegistry.getBackgroundTerminals(true)).toEqual([busy])
+			expect(TerminalRegistry.getBackgroundTerminals(false)).toEqual([idle])
+		})
+
+		it("includes background terminals with unretrieved output when busy is undefined", () => {
+			const withOutput = TerminalRegistry.createTerminal("/bg-output", "vscode")
+			withOutput.lifecycle.resetToIdle()
+			withOutput.process = {
+				hasUnretrievedOutput: vi.fn().mockReturnValue(true),
+			} as unknown as RooTerminalProcess
+
+			expect(TerminalRegistry.getBackgroundTerminals()).toEqual([withOutput])
+		})
+	})
+
+	describe("closeTerminalForCwd", () => {
+		it("disposes only idle terminals matching cwd, task, and provider", () => {
+			const match = TerminalRegistry.createTerminal("/match", "vscode") as Terminal
+			const wrongCwd = TerminalRegistry.createTerminal("/other", "vscode") as Terminal
+			const wrongTask = TerminalRegistry.createTerminal("/match", "vscode") as Terminal
+			const busy = TerminalRegistry.createTerminal("/match", "vscode") as Terminal
+			match.lifecycle.resetToIdle()
+			match.taskId = "task-1"
+			wrongCwd.lifecycle.resetToIdle()
+			wrongCwd.taskId = "task-1"
+			wrongTask.lifecycle.resetToIdle()
+			wrongTask.taskId = "task-2"
+			busy.lifecycle.acquireOwner("exec-1")
+			busy.lifecycle._setStateForTest("running", "exec-1")
+			busy.taskId = "task-1"
+
+			const disposeSpy = vi.spyOn(match.terminal, "dispose")
+			const cleanupSpy = vi.spyOn(ShellIntegrationManager, "zshCleanupTmpDir")
+
+			TerminalRegistry.closeTerminalForCwd("/match", "task-1", "vscode")
+
+			expect(disposeSpy).toHaveBeenCalledTimes(1)
+			expect(cleanupSpy).toHaveBeenCalledWith(match.id)
+			expect(TerminalRegistry["terminals"]).toEqual([wrongCwd, wrongTask, busy])
+		})
+
+		it("does not dispose Execa terminals but still removes them from the registry", () => {
+			const execa = TerminalRegistry.createTerminal("/match", "execa") as ExecaTerminal
+			execa.lifecycle.resetToIdle()
+			execa.taskId = "task-1"
+
+			TerminalRegistry.closeTerminalForCwd("/match", "task-1", "execa")
+
+			expect(TerminalRegistry["terminals"]).not.toContain(execa)
+		})
+	})
+
+	describe("getUnretrievedOutput and isProcessHot", () => {
+		it("returns empty string for an unknown terminal id", () => {
+			expect(TerminalRegistry.getUnretrievedOutput(999)).toBe("")
+		})
+
+		it("returns false for an unknown terminal id", () => {
+			expect(TerminalRegistry.isProcessHot(999)).toBe(false)
+		})
+
+		it("returns the unretrieved output of the matching terminal", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
+			terminal.process = {
+				isHot: true,
+				hasUnretrievedOutput: vi.fn().mockReturnValue(true),
+				getUnretrievedOutput: vi.fn().mockReturnValue("pending output"),
+			} as unknown as RooTerminalProcess
+
+			expect(TerminalRegistry.getUnretrievedOutput(terminal.id)).toBe("pending output")
+			expect(TerminalRegistry.isProcessHot(terminal.id)).toBe(true)
+		})
+	})
+
+	describe("Execa shell family reuse keying", () => {
+		it("does not reuse an idle Execa terminal created with a different shell family", async () => {
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+
+			TerminalRegistry.setExecaShellFamily("powershell")
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+
+			expect(second).not.toBe(first)
+		})
+
+		it("reuses an idle Execa terminal when the shell family matches", async () => {
+			TerminalRegistry.setExecaShellFamily("bash")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+
+			expect(second).toBe(first)
+		})
+
+		it("does not reuse a family-keyed terminal after the family is cleared", async () => {
+			TerminalRegistry.setExecaShellFamily("bash")
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+
+			// Clearing the family changes the reuse key from "execa:bash" back
+			// to "execa", so the family-keyed terminal must not be reused.
+			TerminalRegistry.setExecaShellFamily(undefined)
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+
+			expect(second).not.toBe(first)
+		})
+
+		it("reuses a bare-key terminal after the family is cleared", async () => {
+			TerminalRegistry.setExecaShellFamily(undefined)
+			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+			first.lifecycle.resetToIdle()
+			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
+
+			const second = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
+
+			expect(second).toBe(first)
+		})
+	})
+
+	describe("recoverStaleTerminal", () => {
+		it("is a no-op when the terminal does not exist", () => {
+			expect(() => TerminalRegistry.recoverStaleTerminal(999, "exec-1", "TERMINAL_BUSY_STALE")).not.toThrow()
+		})
+
+		it("skips recovery when the owner changed", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("running", "exec-1")
+			const disposeSpy = vi.spyOn(terminal.terminal, "dispose")
+
+			TerminalRegistry.recoverStaleTerminal(terminal.id, "exec-2", "TERMINAL_BUSY_STALE")
+
+			expect(disposeSpy).not.toHaveBeenCalled()
+			expect(terminal.lifecycle.state).toBe("running")
+		})
+
+		it("resets an idle Execa terminal when no process is attached", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "execa") as ExecaTerminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("fallback-ready", "exec-1")
+			terminal.taskId = "task-1"
+
+			TerminalRegistry.recoverStaleTerminal(terminal.id, "exec-1", "TERMINAL_BUSY_STALE")
+
+			expect(terminal.lifecycle.state).toBe("idle")
+			expect(terminal.taskId).toBeUndefined()
+		})
+
+		it("aborts a stale process belonging to a different execution", () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "execa") as ExecaTerminal
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("running", "exec-1")
+			const abort = vi.fn()
+			terminal.process = { abort, executionId: "exec-2" } as unknown as RooTerminalProcess
+
+			TerminalRegistry.recoverStaleTerminal(terminal.id, "exec-1", "TERMINAL_BUSY_STALE")
+
+			expect(abort).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	describe("provider-switch validation errors", () => {
+		const fallbackPlan: ShellInvocationPlan = {
+			executable: "/bin/bash",
+			args: ["-c", ""],
+			family: "posix",
+			provider: "execa",
+			env: {},
+		}
+		const resolvedEnv: ResolvedCommandEnvironment = {
+			version: 1,
+			primaryPlan: fallbackPlan,
+			fallbackPlan,
+			chainOperator: ";",
+			promptDescriptor: {
+				providerLabel: "Inline Terminal",
+				shellFamilyLabel: "Bash",
+				shellExecutableName: "bash",
+				sourceLabel: "Test",
+				isNonInteractive: true,
+				supportsFishSyntax: false,
+				supportsPosixSyntax: true,
+			},
+			warnings: [],
+		}
+
+		it("rejects a non-vscode source provider", async () => {
+			await expect(
+				TerminalRegistry.prepareProviderSwitch({
+					terminalId: 1,
+					executionId: "exec-1",
+					fromProvider: "execa",
+					toProvider: "execa",
+					reasonCode: "SI_NEVER_AVAILABLE",
+					commandSubmitted: false,
+					resolvedEnv,
+				}),
+			).rejects.toThrow("TERMINAL/PROVIDER_SWITCH/001")
+		})
+
+		it("rejects a non-execa target provider", async () => {
+			await expect(
+				TerminalRegistry.prepareProviderSwitch({
+					terminalId: 1,
+					executionId: "exec-1",
+					fromProvider: "vscode",
+					toProvider: "vscode",
+					reasonCode: "SI_NEVER_AVAILABLE",
+					commandSubmitted: false,
+					resolvedEnv,
+				}),
+			).rejects.toThrow("TERMINAL/PROVIDER_SWITCH/002")
+		})
+
+		it("rejects when the fallback plan is missing", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("creating", "exec-1")
+
+			await expect(
+				TerminalRegistry.prepareProviderSwitch({
+					terminalId: terminal.id,
+					executionId: "exec-1",
+					fromProvider: "vscode",
+					toProvider: "execa",
+					reasonCode: "SI_NEVER_AVAILABLE",
+					commandSubmitted: false,
+					resolvedEnv: { ...resolvedEnv, fallbackPlan: undefined },
+				}),
+			).rejects.toThrow("TERMINAL/PROVIDER_SWITCH/003")
+		})
+
+		it("rejects when the source terminal is not found", async () => {
+			await expect(
+				TerminalRegistry.prepareProviderSwitch({
+					terminalId: 999,
+					executionId: "exec-1",
+					fromProvider: "vscode",
+					toProvider: "execa",
+					reasonCode: "SI_NEVER_AVAILABLE",
+					commandSubmitted: false,
+					resolvedEnv,
+				}),
+			).rejects.toThrow("TERMINAL/PROVIDER_SWITCH/004")
+		})
+
+		it("rejects when the source terminal is not a VS Code terminal", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "execa")
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("fallback-ready", "exec-1")
+
+			await expect(
+				TerminalRegistry.prepareProviderSwitch({
+					terminalId: terminal.id,
+					executionId: "exec-1",
+					fromProvider: "vscode",
+					toProvider: "execa",
+					reasonCode: "SI_NEVER_AVAILABLE",
+					commandSubmitted: false,
+					resolvedEnv,
+				}),
+			).rejects.toThrow("TERMINAL/PROVIDER_SWITCH/005")
+		})
+
+		it("rejects when the owner execution does not match", async () => {
+			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
+			terminal.lifecycle.acquireOwner("exec-1")
+			terminal.lifecycle._setStateForTest("creating", "exec-1")
+
+			await expect(
+				TerminalRegistry.prepareProviderSwitch({
+					terminalId: terminal.id,
+					executionId: "exec-other",
+					fromProvider: "vscode",
+					toProvider: "execa",
+					reasonCode: "SI_NEVER_AVAILABLE",
+					commandSubmitted: false,
+					resolvedEnv,
+				}),
+			).rejects.toThrow("TERMINAL/PROVIDER_SWITCH/006")
+		})
+	})
+
+	describe("initialize guard", () => {
+		it("throws when initialize is called twice", () => {
+			TerminalRegistry["isInitialized"] = false
+			;(vscode.window as unknown as Record<string, unknown>).onDidCloseTerminal ??= () => ({ dispose: () => {} })
+			;(vscode.window as unknown as Record<string, unknown>).onDidStartTerminalShellExecution ??= () => ({
+				dispose: () => {},
+			})
+			;(vscode.window as unknown as Record<string, unknown>).onDidEndTerminalShellExecution ??= () => ({
+				dispose: () => {},
+			})
+			vi.spyOn(vscode.window, "onDidCloseTerminal" as unknown as keyof typeof vscode.window).mockReturnValue({
+				dispose: vi.fn(),
+			})
+			vi.spyOn(
+				vscode.window,
+				"onDidStartTerminalShellExecution" as unknown as keyof typeof vscode.window,
+			).mockReturnValue({ dispose: vi.fn() })
+			vi.spyOn(
+				vscode.window,
+				"onDidEndTerminalShellExecution" as unknown as keyof typeof vscode.window,
+			).mockReturnValue({ dispose: vi.fn() })
+
+			TerminalRegistry.initialize()
+			expect(() => TerminalRegistry.initialize()).toThrow("should only be called once")
 		})
 	})
 })
