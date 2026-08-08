@@ -93,7 +93,7 @@ suite("Error Interception — Integration (e2e)", function () {
 		// Load the structuredError module from the built bundle. The bundle
 		// exposes its internal modules via a loader keyed by module path; we
 		// resolve the exact submodule so we test the real artifact.
-		// eslint-disable-next-line @typescript-eslint/no-var-requires
+		// eslint-disable-next-line @typescript-eslint/no-require-imports
 		const bundle = require(entry) as { __structuredError?: StructuredErrorModule } & Record<string, unknown>
 
 		// Prefer an explicit re-export if the bundle surfaces one; otherwise
@@ -103,7 +103,7 @@ suite("Error Interception — Integration (e2e)", function () {
 		} else {
 			const subPath = path.join(workspaceRoot, "src", "dist", "core", "assistant-message", "structuredError.js")
 			if (fs.existsSync(subPath)) {
-				// eslint-disable-next-line @typescript-eslint/no-var-requires
+				// eslint-disable-next-line @typescript-eslint/no-require-imports
 				se = require(subPath) as StructuredErrorModule
 			}
 		}
