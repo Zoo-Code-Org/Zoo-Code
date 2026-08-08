@@ -53,7 +53,9 @@ async function sendMutation(
 	const parseResult = taskOrganizationMutationRequestSchema.safeParse(request)
 
 	if (!parseResult.success) {
-		const sanitized = parseResult.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+		const sanitized = parseResult.error.issues
+			.map((issue) => `${issue.path.join(".")}: ${issue.message}`)
+			.join("; ")
 
 		return {
 			requestId: typeof request?.requestId === "string" ? request.requestId : "",
@@ -100,7 +102,11 @@ suite("Task Organization IPC Bridge", function () {
 		// Spy on postMessageToWebview to capture the result.
 		const originalPostMessage = provider.postMessageToWebview.bind(provider)
 		provider.postMessageToWebview = async (message: unknown) => {
-			const msg = message as { type?: string; requestId?: string; taskOrganizationMutationResult?: TaskOrganizationMutationResultV1 }
+			const msg = message as {
+				type?: string
+				requestId?: string
+				taskOrganizationMutationResult?: TaskOrganizationMutationResultV1
+			}
 			if (msg.type === "taskOrganizationMutationResult" && msg.requestId === request.requestId) {
 				results.push(msg.taskOrganizationMutationResult!)
 			}
@@ -270,15 +276,27 @@ suite("Task Organization IPC Bridge", function () {
 		const provider = getProvider()
 
 		const state = await getTaskOrganizationState(provider)
-		const currentRevision = state.revision
+		const validBase = state.revision
 
-		// Send a mutation with a deliberately stale revision. When the store has
-		// only committed one revision (currentRevision = 1), currentRevision - 1
-		// is 0, which is a VALID base (no committed mutations yet) and would
-		// incorrectly succeed. Subtracting 2 always yields a stale revision.
+		// Perform an initial mutation with baseRevision: validBase so the store revision increments.
+		const initialResult = await sendMutationAndWaitForResult(provider, {
+			requestId: "e2e-stale-init-001",
+			baseRevision: validBase,
+			mutation: {
+				kind: "createFolder",
+				folderId: "e2e-folder-stale-init",
+				name: "Stale Init Folder",
+				source: { kind: "task", taskId: "e2e-task-stale-init" },
+				destination: { kind: "folder", folderId: "e2e-folder-stale-init" },
+			},
+		})
+		assert.strictEqual(initialResult.success, true)
+
+		// Send a second mutation with validBase, which is a valid non-negative integer >= 0,
+		// but now stale because store revision incremented.
 		const result = await sendMutationAndWaitForResult(provider, {
 			requestId: "e2e-stale-001",
-			baseRevision: currentRevision - 2,
+			baseRevision: validBase,
 			mutation: {
 				kind: "createFolder",
 				folderId: "e2e-folder-stale",
