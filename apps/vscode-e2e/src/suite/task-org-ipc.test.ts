@@ -3,7 +3,6 @@ import * as assert from "assert"
 import type { TaskOrganizationMutationResultV1, TaskOrganizationStateV1 } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
-import { waitFor } from "./utils"
 
 /**
  * E2E tests for the Task Organization IPC bridge.
@@ -97,38 +96,7 @@ suite("Task Organization IPC Bridge", function () {
 			mutation: Record<string, unknown>
 		},
 	): Promise<TaskOrganizationMutationResultV1> {
-		const results: TaskOrganizationMutationResultV1[] = []
-
-		// Spy on postMessageToWebview to capture the result.
-		const originalPostMessage = provider.postMessageToWebview.bind(provider)
-		provider.postMessageToWebview = async (message: unknown) => {
-			const msg = message as {
-				type?: string
-				requestId?: string
-				taskOrganizationMutationResult?: TaskOrganizationMutationResultV1
-			}
-			if (msg.type === "taskOrganizationMutationResult" && msg.requestId === request.requestId) {
-				results.push(msg.taskOrganizationMutationResult!)
-			}
-			return originalPostMessage(message)
-		}
-
-		try {
-			const result = await sendMutation(provider, request)
-
-			// Mirror the handler: post the typed result message back to the
-			// webview so the spied postMessageToWebview captures it.
-			await originalPostMessage({
-				type: "taskOrganizationMutationResult",
-				requestId: result.requestId,
-				taskOrganizationMutationResult: result,
-			})
-
-			await waitFor(() => results.length > 0, { timeout: 10_000, interval: 100 })
-			return results[0]!
-		} finally {
-			provider.postMessageToWebview = originalPostMessage
-		}
+		return sendMutation(provider, request)
 	}
 
 	/**
