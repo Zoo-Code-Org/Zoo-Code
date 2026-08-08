@@ -80,7 +80,7 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 				toolCalls: [
 					{
 						name: "write_to_file",
-						arguments: JSON.stringify({ path: `${tag}.txt`, content: tag }),
+						arguments: JSON.stringify({ path: `shell-resolution-e2e/${tag}.txt`, content: tag }),
 						id: callId,
 					},
 				],
@@ -109,14 +109,19 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 
 	// Scoped fallback fixture: guarantees Turn 2 completion for shell-resolution
 	// marker tasks and prevents aimock 404 retry loops. It MUST be scoped to the
-	// shell-resolution marker tags — an unscoped "any tool result" wildcard is
-	// registered before the DeepSeek Turn-2 fixtures (registration order breaks
-	// ties) and steals their requests, serving a generic attempt_completion
-	// instead of the expected marker.
+	// shell-resolution marker tags AND the OpenRouter model — without the model
+	// guard, DeepSeek V4 tests (which use deepseek-v4-flash/pro) can match when
+	// the workspace directory listing contains shell-resolution marker filenames,
+	// causing the fallback to steal DeepSeek Turn-2 requests and return a generic
+	// "Task completed via fallback fixture" instead of the expected marker.
 	mock.addFixture({
 		match: {
 			predicate: (req: Record<string, unknown>) => {
 				if (!hasToolResultMessage(req)) return false
+				// Only handle OpenRouter requests (shell-resolution tests use openai/gpt-4.1).
+				// DeepSeek tests use deepseek-v4-flash/pro and must NOT match this fallback.
+				const model = typeof req?.model === "string" ? req.model : ""
+				if (!model.includes("gpt-4.1")) return false
 				// Only handle requests that belong to a shell-resolution marker task.
 				return markers.some(({ tag }) => requestContainsTag(req, tag))
 			},
