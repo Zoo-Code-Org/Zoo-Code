@@ -771,11 +771,7 @@ describe("MimoHandler", () => {
 				{ role: "user", content: [{ type: "text", text: "Hello" }] },
 			]
 
-			const chunks: any[] = []
-			const stream = handler.createMessage("System", messages, { taskId: "test", tools })
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("System", messages, { taskId: "test", tools }))
 
 			const toolChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			const readChunks = toolChunks.filter((c) => c.name === "read_file")
@@ -783,7 +779,6 @@ describe("MimoHandler", () => {
 			expect(readChunks.length).toBeGreaterThan(0)
 			expect(listChunks.length).toBe(0)
 		})
-
 
 		it("should handle stream interruption gracefully", async () => {
 			mockCreate.mockImplementationOnce(async () =>

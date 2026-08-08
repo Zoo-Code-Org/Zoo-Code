@@ -229,9 +229,13 @@ describe("UsageStatsMigration", () => {
 
 	describe("migration restart after interruption", () => {
 		it("should resume from checkpoint after interruption", () => {
-			// Create 2500 events (exceeds batch size of 1000)
+			// Create 1200 events — just enough to exceed the 1000-event batch
+			// boundary so resume must continue into a second batch. Kept small to
+			// stay well under the test timeout on slower CI runners (SQLite write
+			// cost dominates; 2500 events previously timed out at 60s on
+			// windows-latest under parallel load).
 			const events: UsageEventV1[] = []
-			for (let i = 0; i < 2500; i++) {
+			for (let i = 0; i < 1200; i++) {
 				events.push(
 					makeEvent({
 						eventId: `evt-${i}`,
@@ -259,12 +263,12 @@ describe("UsageStatsMigration", () => {
 			const result = migration.migrate()
 
 			expect(result.complete).toBe(true)
-			// totalMigrated is cumulative from checkpoint (1000 already + 1500 new = 2500)
-			expect(result.totalMigrated).toBe(2500)
+			// totalMigrated is cumulative from checkpoint (1000 already + 200 new = 1200)
+			expect(result.totalMigrated).toBe(1200)
 
-			// Database should have all 2500 events
+			// Database should have all 1200 events
 			const dbEvents = db.readAllEvents()
-			expect(dbEvents).toHaveLength(2500)
+			expect(dbEvents).toHaveLength(1200)
 		}, 60000)
 
 		it("should handle checkpoint at segment boundary", () => {
