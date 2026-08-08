@@ -31,18 +31,49 @@ const USAGE_STATS_DIRNAME = "usage-stats"
 const SEGMENT_PREFIX = "events-"
 const SEGMENT_EXT = ".ndjson"
 
-const findAllStatsDirs = async (): Promise<string[]> => {
+let cachedStatsDirs: string[] | null = null
+
+const getStatsDirs = async (): Promise<string[]> => {
+	if (cachedStatsDirs && cachedStatsDirs.length > 0) {
+		return cachedStatsDirs
+	}
+
 	const repoRoot = path.resolve(__dirname, "..", "..", "..")
 	const candidateBases = [
 		process.env.VSCODE_TEST_USER_DATA_DIR,
 		path.join(repoRoot, ".vscode-test"),
+		path.join(repoRoot, ".vscode-test", "user-data"),
 		os.tmpdir(),
 	].filter((c): c is string => !!c)
 
 	const statsDirs = new Set<string>()
 
+	// Direct candidate check first (fast path)
+	for (const base of candidateBases) {
+		const candidates = [
+			path.join(base, "User", "globalStorage", "ZooCodeOrganization.zoo-code", USAGE_STATS_DIRNAME),
+			path.join(base, "User", "globalStorage", "zoocodeorganization.zoo-code", USAGE_STATS_DIRNAME),
+			path.join(base, "user-data", "User", "globalStorage", "ZooCodeOrganization.zoo-code", USAGE_STATS_DIRNAME),
+			path.join(base, "user-data", "User", "globalStorage", "zoocodeorganization.zoo-code", USAGE_STATS_DIRNAME),
+		]
+		for (const candidate of candidates) {
+			try {
+				await fs.access(candidate)
+				statsDirs.add(candidate)
+			} catch {
+				// doesn't exist
+			}
+		}
+	}
+
+	if (statsDirs.size > 0) {
+		cachedStatsDirs = Array.from(statsDirs)
+		return cachedStatsDirs
+	}
+
+	// Shallow search fallback if direct paths were not found
 	const searchDir = async (dir: string, depth = 0) => {
-		if (depth > 5) return
+		if (depth > 4) return
 		try {
 			const entries = await fs.readdir(dir, { withFileTypes: true })
 			for (const entry of entries) {
@@ -70,7 +101,8 @@ const findAllStatsDirs = async (): Promise<string[]> => {
 		await searchDir(base)
 	}
 
-	return Array.from(statsDirs)
+	cachedStatsDirs = Array.from(statsDirs)
+	return cachedStatsDirs
 }
 
 /**
@@ -79,7 +111,7 @@ const findAllStatsDirs = async (): Promise<string[]> => {
  * them, so the test should not fail on them.
  */
 const readAllUsageEvents = async (): Promise<UsageEvent[]> => {
-	const dirs = await findAllStatsDirs()
+	const dirs = await getStatsDirs()
 	const events: UsageEvent[] = []
 	const seenIds = new Set<string>()
 
@@ -140,6 +172,7 @@ suite("Roo Code Usage Capture", function () {
 	})
 
 	setup(async () => {
+		cachedStatsDirs = null
 		try {
 			await globalThis.api.cancelCurrentTask()
 		} catch {
