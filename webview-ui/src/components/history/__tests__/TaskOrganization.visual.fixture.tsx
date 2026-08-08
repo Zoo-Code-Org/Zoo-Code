@@ -1,7 +1,8 @@
 import React from "react"
 
 import { TranslationContext } from "@src/i18n/TranslationContext"
-import type { DisplayHistoryItem, TaskGroup } from "../types"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import type { DisplayHistoryItem } from "../types"
 import { ManualFolderItem } from "../ManualFolderItem"
 import { PinnedHistoryItem } from "../PinnedHistoryItem"
 import TaskItem from "../TaskItem"
@@ -35,12 +36,6 @@ const createTask = (id: string, task: string, isSubtask = false): DisplayHistory
 	isSubtask,
 })
 
-const taskGroup = (parent: DisplayHistoryItem, subtasks: DisplayHistoryItem[] = []): TaskGroup => ({
-	parent,
-	subtasks: subtasks.map((t) => ({ item: t, children: [], isExpanded: false })),
-	isExpanded: false,
-})
-
 interface TaskOrganizationFixtureProps {
 	expandFolder?: boolean
 	showPinned?: boolean
@@ -62,6 +57,7 @@ export const TaskOrganizationFixture: React.FC<TaskOrganizationFixtureProps> = (
 				t: (key) => translations[key] ?? key,
 				i18n: null as unknown as typeof import("../../../i18n/setup").default,
 			}}>
+			<TooltipProvider>
 			<div className="w-[480px] bg-vscode-editor-background p-4 text-vscode-foreground">
 				{showPinned && (
 					<div className="mb-4">
@@ -111,6 +107,7 @@ export const TaskOrganizationFixture: React.FC<TaskOrganizationFixtureProps> = (
 
 				<TaskItem item={task1} variant="full" showPin isPinned={false} canPin />
 			</div>
+			</TooltipProvider>
 		</TranslationContext.Provider>
 	)
 }

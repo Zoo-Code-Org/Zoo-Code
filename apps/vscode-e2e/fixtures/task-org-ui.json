@@ -1,0 +1,74 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "TASK_ORG_TEST"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Created the hello world function for task organization testing.\"}",
+						"id": "call_task_org_test_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "TASK_PIN_TEST"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"The capital of France is Paris.\"}",
+						"id": "call_task_pin_test_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "FOLDER_TEST_1"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Created the calculator function.\"}",
+						"id": "call_folder_test_1_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "FOLDER_TEST_2"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Created the todo list component.\"}",
+						"id": "call_folder_test_2_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "PERSISTENCE_TEST"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"State persistence test complete.\"}",
+						"id": "call_persistence_test_001"
+					}
+				]
+			}
+		}
+	]
+}
