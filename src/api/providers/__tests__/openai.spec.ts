@@ -21,62 +21,61 @@ const mockCreate = vitest.fn()
 vitest.mock("openai", () => {
 	const mockConstructor = vitest.fn()
 	const mockAzureConstructor = vitest.fn()
-	function createClient() {
-		return {
-			chat: {
-				completions: {
-					create: mockCreate.mockImplementation(async (options) => {
-						if (!options.stream) {
-							return {
-								id: "test-completion",
-								choices: [
-									{
-										message: { role: "assistant", content: "Test response", refusal: null },
-										finish_reason: "stop",
-										index: 0,
-									},
-								],
-								usage: {
-									prompt_tokens: 10,
-									completion_tokens: 5,
-									total_tokens: 15,
-								},
-							}
-						}
-
-						return asyncStreamFrom([
-							{
-								choices: [
-									{
-										delta: { content: "Test response" },
-										index: 0,
-									},
-								],
-								usage: null,
-							},
-							{
-								choices: [
-									{
-										delta: {},
-										index: 0,
-									},
-								],
-								usage: {
-									prompt_tokens: 10,
-									completion_tokens: 5,
-									total_tokens: 15,
-								},
-							},
-						])
-					}),
-				},
-			},
-		}
-	}
 	return {
 		__esModule: true,
-		default: mockConstructor.mockImplementation(createClient),
-		AzureOpenAI: mockAzureConstructor.mockImplementation(createClient),
+		default: mockConstructor.mockImplementation(function () {
+			return {
+				chat: {
+					completions: {
+						create: mockCreate.mockImplementation(async (options) => {
+							if (!options.stream) {
+								return {
+									id: "test-completion",
+									choices: [
+										{
+											message: { role: "assistant", content: "Test response", refusal: null },
+											finish_reason: "stop",
+											index: 0,
+										},
+									],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
+									},
+								}
+							}
+
+							return asyncStreamFrom([
+								{
+									choices: [
+										{
+											delta: { content: "Test response" },
+											index: 0,
+										},
+									],
+									usage: null,
+								},
+								{
+									choices: [
+										{
+											delta: {},
+											index: 0,
+										},
+									],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
+									},
+								},
+							])
+						}),
+					},
+				},
+			}
+		}),
+		AzureOpenAI: mockAzureConstructor,
 	}
 })
 
