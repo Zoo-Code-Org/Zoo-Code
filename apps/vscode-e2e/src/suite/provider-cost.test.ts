@@ -43,20 +43,31 @@ function readRequestBody(req: IncomingMessage): Promise<string> {
 }
 
 function buildSsePayload(modelId: string): string {
-	const textChunk = {
+	const toolChunk = {
 		id: "chatcmpl-stub",
 		object: "chat.completion.chunk",
-		created: 0,
+		created: Math.floor(Date.now() / 1000),
 		model: modelId,
-		choices: [{ index: 0, delta: { role: "assistant", content: "4" }, finish_reason: null }],
-	}
-
-	const finalChunk = {
-		id: "chatcmpl-stub",
-		object: "chat.completion.chunk",
-		created: 0,
-		model: modelId,
-		choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+		choices: [
+			{
+				index: 0,
+				delta: {
+					role: "assistant",
+					tool_calls: [
+						{
+							index: 0,
+							id: "call_stub_001",
+							type: "function",
+							function: {
+								name: "attempt_completion",
+								arguments: JSON.stringify({ result: "4" }),
+							},
+						},
+					],
+				},
+				finish_reason: "tool_calls",
+			},
+		],
 		usage: {
 			prompt_tokens: STUB_INPUT_TOKENS,
 			completion_tokens: STUB_OUTPUT_TOKENS,
@@ -64,7 +75,7 @@ function buildSsePayload(modelId: string): string {
 		},
 	}
 
-	return `data: ${JSON.stringify(textChunk)}\n\ndata: ${JSON.stringify(finalChunk)}\n\ndata: [DONE]\n\n`
+	return `data: ${JSON.stringify(toolChunk)}\n\ndata: [DONE]\n\n`
 }
 
 function isChatCompletionsUrl(rawUrl: string): boolean {
@@ -177,7 +188,7 @@ suite("Provider Cost Metrics (B17)", function () {
 
 			const apiReqMessages: ClineMessage[] = []
 			const onMessage = ({ message }: { message: ClineMessage }) => {
-				if (message.type === "say" && message.say === "api_req_started" && message.partial === false) {
+				if (message.type === "say" && message.say === "api_req_started" && message.partial !== true) {
 					apiReqMessages.push(message)
 				}
 			}
