@@ -5,11 +5,15 @@ import { toolResultContains } from "./tool-result"
 /**
  * Shell resolution fixtures (PR #1125).
  *
- * Each task asks the model to write a marker file via execute_command. The
- * initial fixture (loaded from fixtures/shell-resolution.json) issues a
- * write_to_file tool call; once the tool result lands (path + created), we
- * complete the task. The write_to_file path is used so the marker file is
- * produced deterministically regardless of which shell resolved.
+ * Each task asks the model to write a marker file via execute_command.
+ * Turn 1: The initial user message contains the marker tag; we return a
+ *   write_to_file tool call so the extension writes the marker file.
+ * Turn 2: The extension sends back the tool result; we match on the
+ *   tool_call_id and marker tag, then return attempt_completion.
+ *
+ * Both turns use predicate-based matching (not JSON userMessage substring
+ * matching) because the tool result content on Turn 2 includes the marker
+ * tag, which would cause a JSON userMessage fixture to re-match and loop.
  */
 export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 	const markers = [
@@ -41,6 +45,41 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 	]
 
 	for (const { tag, callId, doneId } of markers) {
+		// Turn 1: Initial user message contains the marker tag AND there are
+		// no tool results yet. Returns write_to_file to create the marker file.
+		mock.addFixture({
+			match: {
+				predicate: (req: Record<string, unknown>) => {
+					const messages = Array.isArray(req?.messages) ? req.messages : []
+					// Only match when there are NO tool-result messages (i.e. Turn 1)
+					const hasToolResult = messages.some(
+						(m: Record<string, unknown>) =>
+							m?.role === "tool" ||
+							(m?.role === "user" && JSON.stringify(m).includes("tool_result")),
+					)
+					if (hasToolResult) return false
+
+					// Check if the last user message contains the marker tag
+					const lastUserMsg = messages.filter((m: Record<string, unknown>) => m?.role === "user").pop()
+					if (!lastUserMsg) return false
+					const content = JSON.stringify(lastUserMsg)
+					return content.includes(tag)
+				},
+			},
+			response: {
+				toolCalls: [
+					{
+						name: "write_to_file",
+						arguments: JSON.stringify({ path: `${tag}.txt`, content: tag }),
+						id: callId,
+					},
+				],
+			},
+			...({ repeat: true } as unknown as Record<string, boolean>),
+		})
+
+		// Turn 2: Tool result contains the callId and marker tag. Returns
+		// attempt_completion to end the task.
 		mock.addFixture({
 			match: {
 				predicate: (req: Parameters<typeof toolResultContains>[0]) => toolResultContains(req, callId, [tag]),

@@ -1,1767 +1,1767 @@
 {
-	"__mocks__/fs/promises.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"__tests__/abandonSubtask.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"__tests__/api-subtask.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"__tests__/delegation-concurrent.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"__tests__/delegation-events.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"__tests__/extension.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"__tests__/history-resume-delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 72
-		}
-	},
-	"__tests__/migrateSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"__tests__/nested-delegation-resume.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"__tests__/new-task-delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"__tests__/provider-delegation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"activate/CodeActionProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"activate/__tests__/CodeActionProvider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"activate/__tests__/handleUri.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
-	"activate/__tests__/registerCommands.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"activate/registerCodeActions.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"activate/registerCommands.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"activate/registerTerminalActions.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/anthropic-vertex.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 31
-		}
-	},
-	"api/providers/__tests__/anthropic.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"api/providers/__tests__/base-openai-compatible-provider-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/providers/__tests__/base-openai-compatible-provider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/base-provider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"api/providers/__tests__/bedrock-custom-arn.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"api/providers/__tests__/bedrock-error-handling.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"api/providers/__tests__/bedrock-inference-profiles.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 27
-		}
-	},
-	"api/providers/__tests__/bedrock-native-tools.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 19
-		}
-	},
-	"api/providers/__tests__/bedrock-reasoning.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/bedrock.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 38
-		}
-	},
-	"api/providers/__tests__/deepseek.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"api/providers/__tests__/gemini-handler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
-	"api/providers/__tests__/gemini.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 33
-		}
-	},
-	"api/providers/__tests__/kenari.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/kimi-code.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/lite-llm.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 36
-		}
-	},
-	"api/providers/__tests__/lm-studio-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/__tests__/mimo.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
-	"api/providers/__tests__/minimax.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/__tests__/moonshot.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 22
-		}
-	},
-	"api/providers/__tests__/native-ollama.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 21
-		}
-	},
-	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 23
-		}
-	},
-	"api/providers/__tests__/openai-codex.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"api/providers/__tests__/openai-native-tools.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
-	"api/providers/__tests__/openai-native-usage.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"api/providers/__tests__/openai-native.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 74
-		}
-	},
-	"api/providers/__tests__/openai-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/providers/__tests__/openai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"api/providers/__tests__/opencode-go.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/__tests__/openrouter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 34
-		}
-	},
-	"api/providers/__tests__/poe.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/qwen-code-native-tools.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/__tests__/sambanova.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/__tests__/unbound.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/providers/__tests__/vercel-ai-gateway.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/__tests__/vertex.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/providers/__tests__/zai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/anthropic-vertex.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/anthropic.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/base-openai-compatible-provider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"api/providers/base-provider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"api/providers/bedrock.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 34
-		}
-	},
-	"api/providers/deepseek.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/fetchers/__tests__/kenari.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/fetchers/__tests__/kimi-code.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/fetchers/__tests__/lmstudio.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/fetchers/__tests__/modelEndpointCache.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"api/providers/fetchers/__tests__/moonshot.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/fetchers/__tests__/ollama.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"api/providers/fetchers/__tests__/opencode-go.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/fetchers/__tests__/openrouter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/fetchers/__tests__/vercel-ai-gateway.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/fetchers/__tests__/zoo-gateway.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"api/providers/fetchers/litellm.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/gemini.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/lite-llm.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"api/providers/lm-studio.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/mimo.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/providers/moonshot.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/native-ollama.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/openai-codex.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
-	"api/providers/openai-native.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 31
-		}
-	},
-	"api/providers/openai.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/openrouter.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"api/providers/poe.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/qwen-code.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/requesty.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/unbound.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/providers/utils/__tests__/error-handler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
-	"api/providers/utils/__tests__/image-generation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
-	"api/providers/utils/__tests__/timeout-config.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/providers/utils/error-handler.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"api/providers/xai.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"api/transform/__tests__/ai-sdk.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/transform/__tests__/anthropic-filter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"api/transform/__tests__/bedrock-converse-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/transform/__tests__/gemini-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"api/transform/__tests__/mistral-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/transform/__tests__/model-params.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"api/transform/__tests__/openai-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 49
-		}
-	},
-	"api/transform/__tests__/r1-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"api/transform/__tests__/reasoning.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/transform/__tests__/responses-api-input.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/transform/__tests__/responses-api-stream.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/transform/__tests__/zai-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"api/transform/ai-sdk.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/transform/bedrock-converse-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"api/transform/cache-strategy/__tests__/cache-strategy.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
-	"api/transform/caching/__tests__/gemini.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/transform/gemini-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/transform/openai-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"api/transform/r1-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"api/transform/responses-api-input.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"api/transform/responses-api-stream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"api/transform/zai-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/assistant-message/NativeToolCallParser.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/assistant-message/__tests__/presentAssistantMessage-custom-tool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"core/assistant-message/presentAssistantMessage.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/auto-approval/__tests__/AutoApprovalHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/checkpoints/__tests__/checkpoint.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/checkpoints/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/condense/__tests__/condense.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/condense/__tests__/foldedFileContext.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"core/condense/__tests__/index.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 24
-		}
-	},
-	"core/config/ContextProxy.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/config/CustomModesManager.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/config/ProviderSettingsManager.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/config/__tests__/ContextProxy.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/config/__tests__/CustomModesManager.exportImportSlugChange.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/config/__tests__/CustomModesManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"core/config/__tests__/CustomModesManager.yamlEdgeCases.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/context-management/__tests__/context-management.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/context-tracking/__tests__/FileContextTracker.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/context/context-management/__tests__/context-error-handling.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/context/context-management/context-error-handling.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/diff/stats.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/environment/__tests__/getEnvironmentDetails.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/ignore/__tests__/RooIgnoreController.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/mentions/__tests__/processUserContentMentions.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/mentions/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/mentions/processUserContentMentions.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/message-manager/index.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 21
-		}
-	},
-	"core/message-manager/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/prompts/__tests__/add-custom-instructions.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/prompts/__tests__/get-prompt-component.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/prompts/__tests__/responses-rooignore.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"core/prompts/__tests__/system-prompt.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/prompts/sections/__tests__/custom-instructions-global.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
-	"core/prompts/sections/__tests__/custom-instructions.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 55
-		}
-	},
-	"core/prompts/sections/__tests__/system-info.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
-	"core/prompts/tools/filter-tools-for-mode.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/prompts/tools/native-tools/__tests__/read_file.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/task-persistence/__tests__/TaskHistoryStore.crossInstance.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/task-persistence/__tests__/TaskHistoryStore.reconciliation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/task-persistence/__tests__/importRooTaskHistory.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/task-persistence/__tests__/taskMessages.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/task-persistence/apiMessages.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/task/Task.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 19
-		}
-	},
-	"core/task/__tests__/Task.dispose.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/task/__tests__/Task.persistence.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"core/task/__tests__/Task.sticky-profile-race.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/task/__tests__/Task.throttle.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 24
-		}
-	},
-	"core/task/__tests__/apiConversationHistory.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 23
-		}
-	},
-	"core/task/__tests__/ask-clear-approval-buttons.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 19
-		}
-	},
-	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 32
-		}
-	},
-	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
-	"core/task/__tests__/grace-retry-errors.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/task/__tests__/grounding-sources.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/task/__tests__/native-tools-filtering.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/task/__tests__/new-task-isolation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/task/__tests__/reasoning-preservation.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"core/task/__tests__/task-tool-history.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/task/apiConversationHistory.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"core/tools/BaseTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/CodebaseSearchTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/GenerateImageTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/NewTaskTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/ReadFileTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/tools/ToolRepetitionDetector.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/UpdateTodoListTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/UseMcpToolTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/tools/__tests__/ReadCommandOutputTool.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"core/tools/__tests__/ToolRepetitionDetector.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/tools/__tests__/askFollowupQuestionTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"core/tools/__tests__/attemptCompletionTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 11
-		}
-	},
-	"core/tools/__tests__/editFileTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/tools/__tests__/editTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/__tests__/executeCommand.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"core/tools/__tests__/executeCommandTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"core/tools/__tests__/generateImageTool.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"core/tools/__tests__/listFilesTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"core/tools/__tests__/mcpServerRestriction.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"core/tools/__tests__/newTaskTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 31
-		}
-	},
-	"core/tools/__tests__/readFileTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 98
-		}
-	},
-	"core/tools/__tests__/runSlashCommandTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/tools/__tests__/searchReplaceTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/tools/__tests__/skillTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/tools/__tests__/updateTodoListTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/tools/__tests__/useMcpToolTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 21
-		}
-	},
-	"core/tools/__tests__/validateToolUse.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/tools/__tests__/writeToFileTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/tools/helpers/toolResultFormatting.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/tools/validateToolUse.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/webview/ClineProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 34
-		}
-	},
-	"core/webview/__tests__/ClineProvider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 198
-		}
-	},
-	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 37
-		}
-	},
-	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"core/webview/__tests__/ClineProvider.taskHistory.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"core/webview/__tests__/checkpointRestoreHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/webview/__tests__/diagnosticsHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"core/webview/__tests__/messageEnhancer.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"core/webview/__tests__/skillsMessageHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/webview/__tests__/telemetrySettingsTracking.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.checkpoint.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.cloudAuth.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.delete.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.edit.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.importRooHistory.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 13
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.readFileContent.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.routerModels.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 56
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.searchFiles.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"core/webview/__tests__/webviewMessageHandler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
-	"core/webview/messageEnhancer.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/webview/webviewMessageHandler.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"extension.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"extension/__tests__/api-delete-queued-message.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"extension/__tests__/api-send-message.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"extension/api.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"i18n/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"i18n/setup.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/editor/DiffViewProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 310
-		}
-	},
-	"integrations/editor/__tests__/EditorUtils.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"integrations/kimi-code/__tests__/oauth.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/misc/__tests__/export-markdown.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/misc/__tests__/extract-text.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"integrations/misc/__tests__/line-counter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/misc/__tests__/open-file.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 11
-		}
-	},
-	"integrations/misc/__tests__/performance/processCarriageReturns.benchmark.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
-	"integrations/terminal/__tests__/OutputInterceptor.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcess.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcess.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessExec.bash.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessExec.cmd.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessExec.pwsh.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProcessInterpretExitCode.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"integrations/terminal/__tests__/TerminalProfile.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 39
-		}
-	},
-	"integrations/terminal/__tests__/TerminalRegistry.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 33
-		}
-	},
-	"integrations/terminal/__tests__/setupTerminalTests.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/bashStream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/cmdStream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"integrations/terminal/__tests__/streamUtils/pwshStream.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"integrations/theme/getTheme.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"services/__tests__/zoo-code-auth.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/checkpoints/__tests__/ShadowCheckpointService.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/code-index/__tests__/config-manager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/code-index/__tests__/manager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 89
-		}
-	},
-	"services/code-index/__tests__/orchestrator.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"services/code-index/__tests__/service-factory.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 43
-		}
-	},
-	"services/code-index/embedders/__tests__/bedrock.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"services/code-index/embedders/__tests__/gemini.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/code-index/embedders/__tests__/mistral.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/code-index/embedders/__tests__/ollama.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/code-index/embedders/__tests__/openai-compatible-rate-limit.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 15
-		}
-	},
-	"services/code-index/embedders/__tests__/openai-compatible.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 28
-		}
-	},
-	"services/code-index/embedders/__tests__/openai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"services/code-index/embedders/__tests__/openrouter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/code-index/embedders/__tests__/vercel-ai-gateway.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/code-index/embedders/bedrock.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/code-index/embedders/ollama.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/code-index/embedders/openai-compatible.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/code-index/embedders/openai.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/code-index/embedders/openrouter.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/code-index/interfaces/vector-store.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/orchestrator.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/processors/__tests__/file-watcher.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"services/code-index/processors/__tests__/parser.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 22
-		}
-	},
-	"services/code-index/processors/__tests__/scanner.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 26
-		}
-	},
-	"services/code-index/processors/file-watcher.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/processors/scanner.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/semble/__tests__/provider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"services/code-index/semble/__tests__/semble-cli.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/code-index/semble/__tests__/semble-downloader.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 61
-		}
-	},
-	"services/code-index/semble/provider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/code-index/semble/semble-cli.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/code-index/shared/__tests__/validation-helpers.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/code-index/shared/validation-helpers.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"services/code-index/vector-store/__tests__/qdrant-client.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 87
-		}
-	},
-	"services/code-index/vector-store/qdrant-client.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"services/glob/__tests__/gitignore-integration.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/glob/__tests__/gitignore-test.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/glob/__tests__/list-files-limit.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"services/glob/__tests__/list-files.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 22
-		}
-	},
-	"services/marketplace/MarketplaceManager.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/marketplace/SimpleInstaller.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"services/marketplace/__tests__/MarketplaceManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/marketplace/__tests__/SimpleInstaller.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
-	"services/marketplace/__tests__/marketplace-setting-check.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/mcp/McpHub.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 10
-		}
-	},
-	"services/mcp/McpOAuthClientProvider.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/mcp/McpServerManager.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/mcp/__tests__/McpHub.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 150
-		}
-	},
-	"services/mcp/__tests__/McpOAuthClientProvider.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"services/mcp/__tests__/SecretStorageService.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/mcp/utils/__tests__/callbackServer.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/mcp/utils/__tests__/oauth.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 9
-		}
-	},
-	"services/mcp/utils/callbackServer.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/mcp/utils/oauth.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/mdm/__tests__/MdmService.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"services/ripgrep/__tests__/diagnostic.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"services/roo-config/__tests__/index.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 20
-		}
-	},
-	"services/roo-config/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/rules/__tests__/rules.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/search/__tests__/file-search.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"services/skills/__tests__/SkillsManager.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"services/tree-sitter/__tests__/helpers.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"services/tree-sitter/__tests__/markdownParser.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"shared/__tests__/api.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
-	"shared/__tests__/embeddingModels.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/__tests__/modes-empty-prompt-component.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/api.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"shared/checkExistApiConfig.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/cost.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/parse-command.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/support-prompt.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
-	"shared/tools.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"shared/utils/__tests__/requesty.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/__tests__/autoImportSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"utils/__tests__/enhance-prompt.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
-		}
-	},
-	"utils/__tests__/git.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 95
-		}
-	},
-	"utils/__tests__/json-schema.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
-	"utils/__tests__/migrateSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"utils/__tests__/outputChannelLogger.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"utils/__tests__/safeWriteJson.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 27
-		}
-	},
-	"utils/__tests__/shell.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 46
-		}
-	},
-	"utils/__tests__/storage.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"utils/__tests__/tiktoken.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/config.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/export.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"utils/safeWriteJson.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"utils/tts.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"vitest.setup.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"core/prompts/__tests__/shell-environment-prompt.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	},
-	"core/webview/__tests__/terminal-shell-messages.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"integrations/terminal/__tests__/ShellResolver.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 4
-		}
-	}
+  "__mocks__/fs/promises.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "__tests__/abandonSubtask.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 20
+    }
+  },
+  "__tests__/api-subtask.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "__tests__/delegation-concurrent.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "__tests__/delegation-events.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "__tests__/extension.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "__tests__/history-resume-delegation.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 72
+    }
+  },
+  "__tests__/migrateSettings.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "__tests__/nested-delegation-resume.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 20
+    }
+  },
+  "__tests__/new-task-delegation.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "__tests__/provider-delegation.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "activate/CodeActionProvider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "activate/__tests__/CodeActionProvider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 10
+    }
+  },
+  "activate/__tests__/handleUri.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 14
+    }
+  },
+  "activate/__tests__/registerCommands.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "activate/registerCodeActions.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "activate/registerCommands.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "activate/registerTerminalActions.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/__tests__/anthropic-vertex.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 31
+    }
+  },
+  "api/providers/__tests__/anthropic.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "api/providers/__tests__/base-openai-compatible-provider-timeout.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/providers/__tests__/base-openai-compatible-provider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/__tests__/base-provider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "api/providers/__tests__/bedrock-custom-arn.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "api/providers/__tests__/bedrock-error-handling.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "api/providers/__tests__/bedrock-inference-profiles.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 27
+    }
+  },
+  "api/providers/__tests__/bedrock-native-tools.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 19
+    }
+  },
+  "api/providers/__tests__/bedrock-reasoning.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/__tests__/bedrock.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 38
+    }
+  },
+  "api/providers/__tests__/deepseek.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "api/providers/__tests__/gemini-handler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 18
+    }
+  },
+  "api/providers/__tests__/gemini.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 33
+    }
+  },
+  "api/providers/__tests__/kenari.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/__tests__/kimi-code.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/__tests__/lite-llm.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 36
+    }
+  },
+  "api/providers/__tests__/lm-studio-timeout.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/__tests__/mimo.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 18
+    }
+  },
+  "api/providers/__tests__/minimax.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/__tests__/moonshot.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 22
+    }
+  },
+  "api/providers/__tests__/native-ollama.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 21
+    }
+  },
+  "api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 23
+    }
+  },
+  "api/providers/__tests__/openai-codex.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 16
+    }
+  },
+  "api/providers/__tests__/openai-native-tools.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 14
+    }
+  },
+  "api/providers/__tests__/openai-native-usage.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 25
+    }
+  },
+  "api/providers/__tests__/openai-native.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 74
+    }
+  },
+  "api/providers/__tests__/openai-timeout.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/providers/__tests__/openai.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "api/providers/__tests__/opencode-go.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/__tests__/openrouter.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 34
+    }
+  },
+  "api/providers/__tests__/poe.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/__tests__/qwen-code-native-tools.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/__tests__/sambanova.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/__tests__/unbound.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/providers/__tests__/vercel-ai-gateway.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/__tests__/vertex.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/providers/__tests__/zai.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/anthropic-vertex.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/anthropic.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/base-openai-compatible-provider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "api/providers/base-provider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "api/providers/bedrock.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 34
+    }
+  },
+  "api/providers/deepseek.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/fetchers/__tests__/kenari.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/fetchers/__tests__/kimi-code.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/fetchers/__tests__/lmstudio.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/fetchers/__tests__/modelEndpointCache.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "api/providers/fetchers/__tests__/moonshot.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/fetchers/__tests__/ollama.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "api/providers/fetchers/__tests__/opencode-go.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/fetchers/__tests__/openrouter.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/fetchers/__tests__/vercel-ai-gateway.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/fetchers/__tests__/zoo-gateway.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "api/providers/fetchers/litellm.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/gemini.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/lite-llm.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "api/providers/lm-studio.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/mimo.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/providers/moonshot.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/native-ollama.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/openai-codex.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 35
+    }
+  },
+  "api/providers/openai-native.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 31
+    }
+  },
+  "api/providers/openai.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/openrouter.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "api/providers/poe.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/qwen-code.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/providers/requesty.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/unbound.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/providers/utils/__tests__/error-handler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 35
+    }
+  },
+  "api/providers/utils/__tests__/image-generation.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 17
+    }
+  },
+  "api/providers/utils/__tests__/timeout-config.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/providers/utils/error-handler.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "api/providers/xai.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "api/transform/__tests__/ai-sdk.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/transform/__tests__/anthropic-filter.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "api/transform/__tests__/bedrock-converse-format.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/transform/__tests__/gemini-format.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "api/transform/__tests__/mistral-format.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/transform/__tests__/model-params.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "api/transform/__tests__/openai-format.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 49
+    }
+  },
+  "api/transform/__tests__/r1-format.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "api/transform/__tests__/reasoning.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/transform/__tests__/responses-api-input.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/transform/__tests__/responses-api-stream.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/transform/__tests__/zai-format.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "api/transform/ai-sdk.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/transform/bedrock-converse-format.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "api/transform/cache-strategy/__tests__/cache-strategy.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 17
+    }
+  },
+  "api/transform/caching/__tests__/gemini.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/transform/gemini-format.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "api/transform/openai-format.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "api/transform/r1-format.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "api/transform/responses-api-input.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "api/transform/responses-api-stream.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "api/transform/zai-format.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/assistant-message/NativeToolCallParser.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/assistant-message/__tests__/presentAssistantMessage-custom-tool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 16
+    }
+  },
+  "core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "core/assistant-message/presentAssistantMessage.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/auto-approval/__tests__/AutoApprovalHandler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/checkpoints/__tests__/checkpoint.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/checkpoints/index.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/condense/__tests__/condense.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/condense/__tests__/foldedFileContext.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 10
+    }
+  },
+  "core/condense/__tests__/index.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 24
+    }
+  },
+  "core/config/ContextProxy.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/config/CustomModesManager.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/config/ProviderSettingsManager.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/config/__tests__/ContextProxy.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/config/__tests__/CustomModesManager.exportImportSlugChange.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/config/__tests__/CustomModesManager.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "core/config/__tests__/CustomModesManager.yamlEdgeCases.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/config/__tests__/ProviderSettingsManager.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/context-management/__tests__/context-management.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/context-tracking/__tests__/FileContextTracker.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/context/context-management/__tests__/context-error-handling.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/context/context-management/context-error-handling.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/diff/stats.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/environment/__tests__/getEnvironmentDetails.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/ignore/__tests__/RooIgnoreController.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/mentions/__tests__/processUserContentMentions.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/mentions/index.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/mentions/processUserContentMentions.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/message-manager/index.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 21
+    }
+  },
+  "core/message-manager/index.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/prompts/__tests__/add-custom-instructions.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/prompts/__tests__/get-prompt-component.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/prompts/__tests__/responses-rooignore.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "core/prompts/__tests__/shell-environment-prompt.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/prompts/__tests__/system-prompt.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/prompts/sections/__tests__/custom-instructions-global.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 18
+    }
+  },
+  "core/prompts/sections/__tests__/custom-instructions.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 55
+    }
+  },
+  "core/prompts/sections/__tests__/system-info.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 14
+    }
+  },
+  "core/prompts/tools/filter-tools-for-mode.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/prompts/tools/native-tools/__tests__/converters.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/prompts/tools/native-tools/__tests__/read_file.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/task-persistence/__tests__/TaskHistoryStore.crossInstance.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/task-persistence/__tests__/TaskHistoryStore.reconciliation.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/task-persistence/__tests__/importRooTaskHistory.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/task-persistence/__tests__/taskMessages.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/task-persistence/apiMessages.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/task/Task.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 19
+    }
+  },
+  "core/task/__tests__/Task.dispose.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/task/__tests__/Task.persistence.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "core/task/__tests__/Task.sticky-profile-race.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/task/__tests__/Task.throttle.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 24
+    }
+  },
+  "core/task/__tests__/apiConversationHistory.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 23
+    }
+  },
+  "core/task/__tests__/ask-clear-approval-buttons.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 19
+    }
+  },
+  "core/task/__tests__/ask-queued-message-drain.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 32
+    }
+  },
+  "core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 14
+    }
+  },
+  "core/task/__tests__/grace-retry-errors.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/task/__tests__/grounding-sources.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/task/__tests__/native-tools-filtering.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/task/__tests__/new-task-isolation.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/task/__tests__/reasoning-preservation.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 20
+    }
+  },
+  "core/task/__tests__/task-tool-history.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/task/apiConversationHistory.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "core/tools/BaseTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/CodebaseSearchTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/GenerateImageTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/NewTaskTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/ReadFileTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/tools/ToolRepetitionDetector.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/UpdateTodoListTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/UseMcpToolTool.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/tools/__tests__/ReadCommandOutputTool.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 16
+    }
+  },
+  "core/tools/__tests__/ToolRepetitionDetector.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/tools/__tests__/askFollowupQuestionTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 20
+    }
+  },
+  "core/tools/__tests__/attemptCompletionTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 11
+    }
+  },
+  "core/tools/__tests__/editFileTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/tools/__tests__/editTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/__tests__/executeCommand.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "core/tools/__tests__/executeCommandTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 25
+    }
+  },
+  "core/tools/__tests__/generateImageTool.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "core/tools/__tests__/listFilesTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 10
+    }
+  },
+  "core/tools/__tests__/mcpServerRestriction.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "core/tools/__tests__/newTaskTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 31
+    }
+  },
+  "core/tools/__tests__/readFileTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 98
+    }
+  },
+  "core/tools/__tests__/runSlashCommandTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/tools/__tests__/searchReplaceTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/tools/__tests__/skillTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/tools/__tests__/updateTodoListTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/tools/__tests__/useMcpToolTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 21
+    }
+  },
+  "core/tools/__tests__/validateToolUse.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/tools/__tests__/writeToFileTool.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/tools/helpers/toolResultFormatting.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/tools/validateToolUse.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "core/webview/ClineProvider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 34
+    }
+  },
+  "core/webview/__tests__/ClineProvider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 198
+    }
+  },
+  "core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 37
+    }
+  },
+  "core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 16
+    }
+  },
+  "core/webview/__tests__/ClineProvider.taskHistory.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "core/webview/__tests__/checkpointRestoreHandler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/webview/__tests__/diagnosticsHandler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "core/webview/__tests__/messageEnhancer.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "core/webview/__tests__/skillsMessageHandler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/webview/__tests__/telemetrySettingsTracking.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "core/webview/__tests__/terminal-shell-messages.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 16
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.checkpoint.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.cloudAuth.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.delete.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.edit.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.importRooHistory.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 13
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.readFileContent.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.routerModels.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 56
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.searchFiles.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "core/webview/__tests__/webviewMessageHandler.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 35
+    }
+  },
+  "core/webview/messageEnhancer.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "core/webview/webviewMessageHandler.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "extension.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "extension/__tests__/api-delete-queued-message.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "extension/__tests__/api-send-message.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "extension/api.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "i18n/index.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "i18n/setup.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/editor/DiffViewProvider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/editor/__tests__/DiffViewProvider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 310
+    }
+  },
+  "integrations/editor/__tests__/EditorUtils.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "integrations/kimi-code/__tests__/oauth.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/misc/__tests__/export-markdown.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/misc/__tests__/extract-text.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "integrations/misc/__tests__/line-counter.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "integrations/misc/__tests__/open-file.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 11
+    }
+  },
+  "integrations/misc/__tests__/performance/processCarriageReturns.benchmark.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 18
+    }
+  },
+  "integrations/terminal/__tests__/OutputInterceptor.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "integrations/terminal/__tests__/ShellResolver.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProcess.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProcess.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProcessExec.bash.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProcessExec.cmd.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProcessExec.pwsh.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProcessInterpretExitCode.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "integrations/terminal/__tests__/TerminalProfile.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 39
+    }
+  },
+  "integrations/terminal/__tests__/TerminalRegistry.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 33
+    }
+  },
+  "integrations/terminal/__tests__/setupTerminalTests.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/terminal/__tests__/streamUtils/bashStream.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/terminal/__tests__/streamUtils/cmdStream.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/terminal/__tests__/streamUtils/index.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "integrations/terminal/__tests__/streamUtils/pwshStream.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "integrations/theme/getTheme.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "services/__tests__/zoo-code-auth.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/checkpoints/__tests__/ShadowCheckpointService.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/code-index/__tests__/config-manager.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/code-index/__tests__/manager.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 89
+    }
+  },
+  "services/code-index/__tests__/orchestrator.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 25
+    }
+  },
+  "services/code-index/__tests__/service-factory.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 43
+    }
+  },
+  "services/code-index/embedders/__tests__/bedrock.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "services/code-index/embedders/__tests__/gemini.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/code-index/embedders/__tests__/mistral.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/code-index/embedders/__tests__/ollama.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/code-index/embedders/__tests__/openai-compatible-rate-limit.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 15
+    }
+  },
+  "services/code-index/embedders/__tests__/openai-compatible.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 28
+    }
+  },
+  "services/code-index/embedders/__tests__/openai.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 10
+    }
+  },
+  "services/code-index/embedders/__tests__/openrouter.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/code-index/embedders/__tests__/vercel-ai-gateway.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/code-index/embedders/bedrock.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/code-index/embedders/ollama.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/code-index/embedders/openai-compatible.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/code-index/embedders/openai.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/code-index/embedders/openrouter.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/code-index/interfaces/vector-store.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/code-index/orchestrator.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/code-index/processors/__tests__/file-watcher.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 25
+    }
+  },
+  "services/code-index/processors/__tests__/parser.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 22
+    }
+  },
+  "services/code-index/processors/__tests__/scanner.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 26
+    }
+  },
+  "services/code-index/processors/file-watcher.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/code-index/processors/scanner.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/code-index/semble/__tests__/provider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 12
+    }
+  },
+  "services/code-index/semble/__tests__/semble-cli.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/code-index/semble/__tests__/semble-downloader.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 61
+    }
+  },
+  "services/code-index/semble/provider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/code-index/semble/semble-cli.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/code-index/shared/__tests__/validation-helpers.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/code-index/shared/validation-helpers.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "services/code-index/vector-store/__tests__/qdrant-client.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 87
+    }
+  },
+  "services/code-index/vector-store/qdrant-client.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "services/glob/__tests__/gitignore-integration.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/glob/__tests__/gitignore-test.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/glob/__tests__/list-files-limit.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "services/glob/__tests__/list-files.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 22
+    }
+  },
+  "services/marketplace/MarketplaceManager.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/marketplace/SimpleInstaller.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 7
+    }
+  },
+  "services/marketplace/__tests__/MarketplaceManager.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/marketplace/__tests__/SimpleInstaller.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 17
+    }
+  },
+  "services/marketplace/__tests__/marketplace-setting-check.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/mcp/McpHub.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 10
+    }
+  },
+  "services/mcp/McpOAuthClientProvider.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/mcp/McpServerManager.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/mcp/__tests__/McpHub.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 150
+    }
+  },
+  "services/mcp/__tests__/McpOAuthClientProvider.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 20
+    }
+  },
+  "services/mcp/__tests__/SecretStorageService.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/mcp/utils/__tests__/callbackServer.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/mcp/utils/__tests__/oauth.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 9
+    }
+  },
+  "services/mcp/utils/callbackServer.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/mcp/utils/oauth.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/mdm/__tests__/MdmService.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "services/ripgrep/__tests__/diagnostic.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "services/roo-config/__tests__/index.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 20
+    }
+  },
+  "services/roo-config/index.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/rules/__tests__/rules.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/search/__tests__/file-search.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "services/skills/__tests__/SkillsManager.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "services/tree-sitter/__tests__/helpers.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "services/tree-sitter/__tests__/markdownParser.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "shared/__tests__/api.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 8
+    }
+  },
+  "shared/__tests__/embeddingModels.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "shared/__tests__/modes-empty-prompt-component.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "shared/api.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "shared/checkExistApiConfig.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "shared/cost.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "shared/parse-command.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "shared/support-prompt.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 5
+    }
+  },
+  "shared/tools.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "shared/utils/__tests__/requesty.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "utils/__tests__/autoImportSettings.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 16
+    }
+  },
+  "utils/__tests__/enhance-prompt.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 6
+    }
+  },
+  "utils/__tests__/git.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 95
+    }
+  },
+  "utils/__tests__/json-schema.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 3
+    }
+  },
+  "utils/__tests__/migrateSettings.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "utils/__tests__/outputChannelLogger.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "utils/__tests__/safeWriteJson.test.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 27
+    }
+  },
+  "utils/__tests__/shell.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 46
+    }
+  },
+  "utils/__tests__/storage.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 25
+    }
+  },
+  "utils/__tests__/tiktoken.spec.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "utils/config.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "utils/export.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 2
+    }
+  },
+  "utils/safeWriteJson.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 4
+    }
+  },
+  "utils/tts.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  },
+  "vitest.setup.ts": {
+    "@typescript-eslint/no-explicit-any": {
+      "count": 1
+    }
+  }
 }

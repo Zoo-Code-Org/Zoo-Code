@@ -941,8 +941,8 @@ describe("executeCommandTool", () => {
 				makeTerminal((callbacks) => {
 					callbacks?.onShellExecutionStarted?.(123, {} as RooTerminalProcess)
 					callbacks?.onLine?.("hello world\n", {} as RooTerminalProcess)
-					callbacks?.onShellExecutionComplete?.({ exitCode: 0 })
-					callbacks?.onCompleted?.("hello world\n")
+					callbacks?.onShellExecutionComplete?.({ exitCode: 0 }, {} as RooTerminalProcess)
+					callbacks?.onCompleted?.("hello world\n", {} as RooTerminalProcess)
 				}),
 			)
 
@@ -970,8 +970,8 @@ describe("executeCommandTool", () => {
 		it("reports signal-based termination", async () => {
 			await runWithTerminal(
 				makeTerminal((callbacks) => {
-					callbacks?.onShellExecutionComplete?.({ signalName: "SIGKILL", coreDumpPossible: true })
-					callbacks?.onCompleted?.("")
+					callbacks?.onShellExecutionComplete?.({ exitCode: undefined, signalName: "SIGKILL", coreDumpPossible: true }, {} as RooTerminalProcess)
+					callbacks?.onCompleted?.("", {} as RooTerminalProcess)
 				}),
 			)
 
@@ -982,8 +982,8 @@ describe("executeCommandTool", () => {
 		it("reports an undefined exit code", async () => {
 			await runWithTerminal(
 				makeTerminal((callbacks) => {
-					callbacks?.onShellExecutionComplete?.({ exitCode: undefined })
-					callbacks?.onCompleted?.("")
+					callbacks?.onShellExecutionComplete?.({ exitCode: undefined }, {} as RooTerminalProcess)
+					callbacks?.onCompleted?.("", {} as RooTerminalProcess)
 				}),
 			)
 
@@ -994,8 +994,8 @@ describe("executeCommandTool", () => {
 		it("reports a non-zero exit code", async () => {
 			await runWithTerminal(
 				makeTerminal((callbacks) => {
-					callbacks?.onShellExecutionComplete?.({ exitCode: 1 })
-					callbacks?.onCompleted?.("")
+					callbacks?.onShellExecutionComplete?.({ exitCode: 1 }, {} as RooTerminalProcess)
+					callbacks?.onCompleted?.("", {} as RooTerminalProcess)
 				}),
 			)
 
@@ -1079,7 +1079,7 @@ describe("executeCommandTool", () => {
 						message: "startup failed",
 						commandSubmitted: false,
 						code: "SI_ACTIVATION_TIMEOUT",
-					})
+					}, {} as RooTerminalProcess)
 					const p = Promise.resolve()
 					return Object.assign(p, { continue: () => {}, abort: () => {} })
 				}),
@@ -1128,7 +1128,7 @@ describe("executeCommandTool", () => {
 						message: "startup failed",
 						commandSubmitted: false,
 						code: "SI_ACTIVATION_TIMEOUT",
-					})
+					}, {} as RooTerminalProcess)
 					const p = Promise.resolve()
 					return Object.assign(p, { continue: () => {}, abort: () => {} })
 				}),

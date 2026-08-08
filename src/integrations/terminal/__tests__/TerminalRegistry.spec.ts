@@ -871,7 +871,7 @@ describe("TerminalRegistry", () => {
 		})
 
 		it("reuses an idle Execa terminal when the shell family matches", async () => {
-			TerminalRegistry.setExecaShellFamily("bash")
+			TerminalRegistry.setExecaShellFamily("posix")
 			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
 			first.lifecycle.resetToIdle()
 			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
@@ -882,7 +882,7 @@ describe("TerminalRegistry", () => {
 		})
 
 		it("does not reuse a family-keyed terminal after the family is cleared", async () => {
-			TerminalRegistry.setExecaShellFamily("bash")
+			TerminalRegistry.setExecaShellFamily("posix")
 			const first = await TerminalRegistry.getOrCreateTerminal("/test/path", "task", nextExecutionId(), "execa")
 			first.lifecycle.resetToIdle()
 			first.lifecycle.releaseOwner(first.lifecycle.ownerExecutionId!)
@@ -916,7 +916,7 @@ describe("TerminalRegistry", () => {
 			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
 			terminal.lifecycle.acquireOwner("exec-1")
 			terminal.lifecycle._setStateForTest("running", "exec-1")
-			const disposeSpy = vi.spyOn(terminal.terminal, "dispose")
+			const disposeSpy = vi.spyOn((terminal as Terminal).terminal, "dispose")
 
 			TerminalRegistry.recoverStaleTerminal(terminal.id, "exec-2", "TERMINAL_BUSY_STALE")
 
@@ -1074,24 +1074,10 @@ describe("TerminalRegistry", () => {
 	describe("initialize guard", () => {
 		it("throws when initialize is called twice", () => {
 			TerminalRegistry["isInitialized"] = false
-			;(vscode.window as unknown as Record<string, unknown>).onDidCloseTerminal ??= () => ({ dispose: () => {} })
-			;(vscode.window as unknown as Record<string, unknown>).onDidStartTerminalShellExecution ??= () => ({
-				dispose: () => {},
-			})
-			;(vscode.window as unknown as Record<string, unknown>).onDidEndTerminalShellExecution ??= () => ({
-				dispose: () => {},
-			})
-			vi.spyOn(vscode.window, "onDidCloseTerminal" as unknown as keyof typeof vscode.window).mockReturnValue({
-				dispose: vi.fn(),
-			})
-			vi.spyOn(
-				vscode.window,
-				"onDidStartTerminalShellExecution" as unknown as keyof typeof vscode.window,
-			).mockReturnValue({ dispose: vi.fn() })
-			vi.spyOn(
-				vscode.window,
-				"onDidEndTerminalShellExecution" as unknown as keyof typeof vscode.window,
-			).mockReturnValue({ dispose: vi.fn() })
+			const windowMock = vscode.window as unknown as Record<string, ReturnType<typeof vi.fn>>
+			windowMock.onDidCloseTerminal = vi.fn().mockReturnValue({ dispose: vi.fn() })
+			windowMock.onDidStartTerminalShellExecution = vi.fn().mockReturnValue({ dispose: vi.fn() })
+			windowMock.onDidEndTerminalShellExecution = vi.fn().mockReturnValue({ dispose: vi.fn() })
 
 			TerminalRegistry.initialize()
 			expect(() => TerminalRegistry.initialize()).toThrow("should only be called once")
