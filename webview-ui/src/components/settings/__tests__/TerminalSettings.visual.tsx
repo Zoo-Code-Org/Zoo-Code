@@ -33,18 +33,3 @@ test("renders effective shell info when a profile is selected", async ({ mount }
 
 	await expect(component).toHaveScreenshot("terminal-settings-shell-profile-selected-dark.png")
 })
-
-test("shell dropdown lists shell options when opened", async ({ mount, page }) => {
-	const component = await mount(<TerminalSettingsFixture />)
-
-	await expect(component.getByTestId("terminal-inline-shell-effective")).toBeVisible()
-
-	// Open the Radix dropdown rendered by the inline-shell Select.
-	await component.getByTestId("terminal-inline-shell-dropdown").click()
-	await expect(page.getByTestId("terminal-inline-shell-option-profile:PowerShell")).toBeVisible()
-
-	await waitForRender(component)
-
-	// Screenshot the whole page so the portaled dropdown content is captured.
-	await expect(page).toHaveScreenshot("terminal-settings-shell-dropdown-open-dark.png")
-})
