@@ -14,10 +14,16 @@ import { toolResultContains } from "./tool-result"
  */
 export function addTerminalLifecycleFixtures(mock: InstanceType<typeof LLMock>) {
 	// First command completed -> issue a second command on the (reused) terminal.
+	// Guard: once a result for call_terminal_lifecycle_002 exists in the conversation,
+	// this fixture must stop matching. Both tool results stay in the request history,
+	// so without this guard the second execute_command would be re-issued forever.
 	mock.addFixture({
 		match: {
 			predicate: (req) =>
-				toolResultContains(req, "call_terminal_lifecycle_001", ["lifecycle-first", "Exit code: 0"]),
+				toolResultContains(req, "call_terminal_lifecycle_001", ["lifecycle-first", "Exit code: 0"]) &&
+				!req.messages.some(
+					(message) => message?.role === "tool" && message.tool_call_id === "call_terminal_lifecycle_002",
+				),
 		},
 		response: {
 			toolCalls: [
