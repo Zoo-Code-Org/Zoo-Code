@@ -172,6 +172,45 @@ function buildToolCallSseBody(model: string, behavior: MockBehavior): string {
 	return chunks.join("")
 }
 
+function buildCompletionSseBody(model: string): string {
+	const chunks: string[] = []
+
+	const first = baseChunk(model)
+	first.choices[0]!.delta = {
+		role: "assistant",
+		tool_calls: [
+			toolCallDelta(0, {
+				id: "call_completion_ccc",
+				type: "function",
+				function: { name: "attempt_completion", arguments: "" },
+			}),
+		],
+	}
+	chunks.push(sseChunk(first))
+
+	const firstArgs = baseChunk(model)
+	firstArgs.choices[0]!.delta = {
+		tool_calls: [
+			toolCallDelta(0, {
+				function: {
+					arguments: JSON.stringify({
+						result: "MIMO_PARALLEL_TEST_COMPLETE",
+					}),
+				},
+			}),
+		],
+	}
+	chunks.push(sseChunk(firstArgs))
+
+	const finish = baseChunk(model)
+	finish.choices[0]!.delta = {}
+	;(finish.choices[0]! as { finish_reason: string | null }).finish_reason = "tool_calls"
+	chunks.push(sseChunk(finish))
+	chunks.push("data: [DONE]\n\n")
+
+	return chunks.join("")
+}
+
 async function withMimoMockServer<T>(
 	behavior: MockBehavior,
 	run: (args: { baseUrl: string; requests: CapturedMimoRequest[] }) => Promise<T>,
@@ -209,7 +248,10 @@ async function withMimoMockServer<T>(
 				rawBody: bodyText,
 			})
 
-			const sse = buildToolCallSseBody(body.model ?? MIMO_MODEL_ID, behavior)
+			const sse =
+				requests.length >= 2
+					? buildCompletionSseBody(body.model ?? MIMO_MODEL_ID)
+					: buildToolCallSseBody(body.model ?? MIMO_MODEL_ID, behavior)
 			res.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				"Cache-Control": "no-cache",
@@ -268,7 +310,7 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 
 			const messages: ClineMessage[] = []
 			const messageHandler = ({ message }: { message: ClineMessage }) => {
-				if (message.type === "say" && message.partial !== true) {
+				if (message && message.partial !== true) {
 					messages.push(message)
 				}
 			}
@@ -301,6 +343,7 @@ suite("MiMo Parallel Tool Call Enforcement", function () {
 							const sawToolMessage = messages.some(
 								(m) =>
 									m.say === "tool" ||
+									m.ask === "tool" ||
 									m.say === "error" ||
 									m.say === "completion_result" ||
 									m.ask === "api_req_failed",
