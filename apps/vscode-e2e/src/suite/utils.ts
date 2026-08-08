@@ -42,12 +42,25 @@ export const waitFor = (
 type WaitUntilAbortedOptions = WaitForOptions & {
 	api: RooCodeAPI
 	taskId: string
+	action?: () => Promise<void>
 }
 
-export const waitUntilAborted = async ({ api, taskId, ...options }: WaitUntilAbortedOptions) => {
+export const waitUntilAborted = async ({ api, taskId, action, ...options }: WaitUntilAbortedOptions) => {
 	const set = new Set<string>()
-	api.on(RooCodeEventName.TaskAborted, (taskId) => set.add(taskId))
-	await waitFor(() => set.has(taskId), options)
+	const handler = (id: string) => set.add(id)
+	api.on(RooCodeEventName.TaskAborted, handler)
+	try {
+		if (action) {
+			await action()
+		}
+		await waitFor(async () => {
+			if (set.has(taskId)) return true
+			const item = await api.getTaskHistoryItem(taskId)
+			return (item?.status as string) === "cancelled" || item?.status === "interrupted"
+		}, options)
+	} finally {
+		api.off(RooCodeEventName.TaskAborted, handler)
+	}
 }
 
 type WaitUntilCompletedOptions = WaitForOptions & {

@@ -83,10 +83,7 @@ suite("Terminal lifecycle (creation, reuse, queue, cancellation)", function () {
 			const completionMessage = messages.find(
 				(message) => message.type === "say" && message.say === "completion_result",
 			)
-			assert.ok(
-				completionMessage,
-				"Task should have completed both commands and reached attempt_completion",
-			)
+			assert.ok(completionMessage, "Task should have completed both commands and reached attempt_completion")
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
 		}
@@ -111,11 +108,14 @@ suite("Terminal lifecycle (creation, reuse, queue, cancellation)", function () {
 		// Give the task a moment to start the long-running command before cancelling.
 		await new Promise((resolve) => setTimeout(resolve, 2_000))
 
-		await api.cancelCurrentTask()
-
 		// Cancellation must surface as a TaskAborted event for this task. If the
 		// terminal lifecycle left the terminal busy/undisposed, the abort path would
 		// hang and this would time out instead.
-		await waitUntilAborted({ api, taskId, timeout: 30_000 })
+		await waitUntilAborted({
+			api,
+			taskId,
+			action: () => api.cancelCurrentTask(),
+			timeout: 30_000,
+		})
 	})
 })
