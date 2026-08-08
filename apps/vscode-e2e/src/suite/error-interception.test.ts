@@ -59,6 +59,7 @@ interface ErrorInterceptionModule {
 
 function findBuiltExtensionEntry(workspaceRoot: string): string | undefined {
 	const candidates = [
+		path.join(workspaceRoot, "src", "dist", "core", "tools", "error-interception", "index.js"),
 		path.join(workspaceRoot, "src", "dist", "extension.js"),
 		path.join(workspaceRoot, "dist", "extension.js"),
 		path.join(workspaceRoot, "src", "dist", "extension.cjs"),
@@ -66,20 +67,28 @@ function findBuiltExtensionEntry(workspaceRoot: string): string | undefined {
 	return candidates.find((p) => fs.existsSync(p))
 }
 
-async function loadModuleFromBundle(workspaceRoot: string, entry: string): Promise<ErrorInterceptionModule | undefined> {
-	// Load the built bundle via dynamic import. The bundle may surface the
-	// error-interception contract as an explicit re-export; otherwise we fall
-	// back to importing the submodule path within the same output directory.
-	const entryUrl = pathToFileURL(entry).href
-	const bundle = (await import(entryUrl)) as { __errorInterception?: ErrorInterceptionModule } & Record<string, unknown>
+async function loadModuleFromBundle(
+	workspaceRoot: string,
+	entry: string,
+): Promise<ErrorInterceptionModule | undefined> {
+	// Import the error-interception submodule path directly. We intentionally
+	// do NOT import the main extension bundle (dist/extension.js) directly as
+	// re-evaluating top-level extension code inside the running Extension Host
+	// process re-initializes singletons and corrupts host event listeners.
+	const subPathCandidates = [
+		path.join(workspaceRoot, "src", "dist", "core", "tools", "error-interception", "index.js"),
+		path.join(workspaceRoot, "dist", "core", "tools", "error-interception", "index.js"),
+		path.join(workspaceRoot, "src", "dist", "core", "tools", "error-interception", "index.cjs"),
+	]
 
-	if (bundle.__errorInterception) {
-		return bundle.__errorInterception
+	for (const subPath of subPathCandidates) {
+		if (fs.existsSync(subPath)) {
+			return (await import(pathToFileURL(subPath).href)) as ErrorInterceptionModule
+		}
 	}
 
-	const subPath = path.join(workspaceRoot, "src", "dist", "core", "tools", "error-interception", "index.js")
-	if (fs.existsSync(subPath)) {
-		return (await import(pathToFileURL(subPath).href)) as ErrorInterceptionModule
+	if (entry && !entry.endsWith("extension.js") && !entry.endsWith("extension.cjs") && fs.existsSync(entry)) {
+		return (await import(pathToFileURL(entry).href)) as ErrorInterceptionModule
 	}
 
 	return undefined
@@ -110,8 +119,7 @@ suite("Error Interception — Bundled Artifact Smoke Test (e2e)", function () {
 			ei = await loadModuleFromBundle(workspaceRoot, entry)
 		} catch (e) {
 			console.warn(
-				"[error-interception e2e] failed to load module from bundle; " +
-					"skipping contract assertions.",
+				"[error-interception e2e] failed to load module from bundle; " + "skipping contract assertions.",
 				e instanceof Error ? e.message : e,
 			)
 			return
