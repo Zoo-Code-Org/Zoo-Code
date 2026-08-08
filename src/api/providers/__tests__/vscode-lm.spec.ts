@@ -65,6 +65,8 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 const mockLanguageModelChat = {
 	id: "test-model",
 	name: "Test Model",
@@ -86,7 +88,7 @@ describe("VsCodeLmHandler", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up a default successful mock for selectChatModels before creating the handler
 		const mockModels = [{ ...mockLanguageModelChat }]
 		;(vscode.lm.selectChatModels as Mock).mockResolvedValue(mockModels)

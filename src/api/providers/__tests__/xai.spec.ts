@@ -24,12 +24,13 @@ import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("XAIHandler", () => {
 	let handler: XAIHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockResponsesCreate.mockClear()
 		mockCaptureException.mockClear()
 		handler = new XAIHandler({})
@@ -44,7 +45,7 @@ describe("XAIHandler", () => {
 	})
 
 	it("should use the provided API key", () => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		const xaiApiKey = "test-api-key"
 		new XAIHandler({ xaiApiKey })
 		expect(OpenAI).toHaveBeenCalledWith(

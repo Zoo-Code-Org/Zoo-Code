@@ -7,6 +7,7 @@ import type { ModelInfo } from "@roo-code/types"
 
 import { BaseOpenAiCompatibleProvider } from "../base-openai-compatible-provider"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -52,7 +53,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 	let handler: TestOpenAiCompatibleProvider
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		handler = new TestOpenAiCompatibleProvider("test-api-key")
 	})
 
