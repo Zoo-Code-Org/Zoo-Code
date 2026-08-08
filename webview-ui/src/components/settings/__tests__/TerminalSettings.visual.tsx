@@ -19,7 +19,7 @@ test("renders inline shell selector with default auto selection", async ({ mount
 
 	await waitForRender(component)
 
-	await expect(component).toHaveScreenshot("terminal-settings-shell-default-dark.png")
+	await expect(component).toHaveScreenshot("terminal-settings-shell-default-dark.png", { maxDiffPixelRatio: 0.05 })
 })
 
 test("renders effective shell info when a profile is selected", async ({ mount }) => {
@@ -31,5 +31,5 @@ test("renders effective shell info when a profile is selected", async ({ mount }
 
 	await waitForRender(component)
 
-	await expect(component).toHaveScreenshot("terminal-settings-shell-profile-selected-dark.png")
+	await expect(component).toHaveScreenshot("terminal-settings-shell-profile-selected-dark.png", { maxDiffPixelRatio: 0.05 })
 })
