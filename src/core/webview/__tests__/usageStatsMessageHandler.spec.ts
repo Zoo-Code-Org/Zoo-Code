@@ -44,6 +44,7 @@ import {
 	handleGetUsageStats,
 	handleClearUsageStats,
 	handleExportUsageStats,
+	handleRebuildUsageStats,
 	handleRequestClearNonce,
 	handleGetDashboardSessions,
 	handleGetDashboardSessionDetail,
@@ -1688,6 +1689,98 @@ describe("usageStatsMessageHandler", () => {
 		})
 	})
 
+	// ── handleRebuildUsageStats ───────────────────────────────────────────────
+
+	describe("handleRebuildUsageStats", () => {
+		it("rebuilds rollups and posts success result", async () => {
+			const rebuildRollupsFromEvents = vi.fn()
+			const getDatabase = vi.fn(() => ({ rebuildRollupsFromEvents }))
+			const provider = createMockProvider({ getDatabase } as any)
+
+			const message: WebviewMessage = {
+				type: "rebuildUsageStats",
+				requestId: "req-rebuild-1",
+			}
+
+			await handleRebuildUsageStats(provider, message)
+
+			expect(rebuildRollupsFromEvents).toHaveBeenCalledTimes(1)
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "usageStatsChanged",
+			})
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "rebuildUsageStatsResponse",
+				requestId: "req-rebuild-1",
+				rebuildUsageStatsResult: { success: true },
+			})
+		})
+
+		it("returns error when service is unavailable", async () => {
+			const provider = createMockProvider(undefined)
+
+			const message: WebviewMessage = {
+				type: "rebuildUsageStats",
+				requestId: "req-rebuild-2",
+			}
+
+			await handleRebuildUsageStats(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "rebuildUsageStatsResponse",
+				requestId: "req-rebuild-2",
+				rebuildUsageStatsResult: {
+					success: false,
+					error: expect.stringContaining("STATS_HANDLER/rebuild/002"),
+				},
+			})
+		})
+
+		it("returns error when database is not initialized", async () => {
+			const getDatabase = vi.fn(() => null)
+			const provider = createMockProvider({ getDatabase } as any)
+
+			const message: WebviewMessage = {
+				type: "rebuildUsageStats",
+				requestId: "req-rebuild-3",
+			}
+
+			await handleRebuildUsageStats(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "rebuildUsageStatsResponse",
+				requestId: "req-rebuild-3",
+				rebuildUsageStatsResult: {
+					success: false,
+					error: expect.stringContaining("STATS_HANDLER/rebuild/001"),
+				},
+			})
+		})
+
+		it("returns error when rebuild throws", async () => {
+			const rebuildRollupsFromEvents = vi.fn(() => {
+				throw new Error("disk full")
+			})
+			const getDatabase = vi.fn(() => ({ rebuildRollupsFromEvents }))
+			const provider = createMockProvider({ getDatabase } as any)
+
+			const message: WebviewMessage = {
+				type: "rebuildUsageStats",
+				requestId: "req-rebuild-4",
+			}
+
+			await handleRebuildUsageStats(provider, message)
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "rebuildUsageStatsResponse",
+				requestId: "req-rebuild-4",
+				rebuildUsageStatsResult: {
+					success: false,
+					error: expect.stringContaining("STATS_HANDLER/rebuild/003"),
+				},
+			})
+		})
+	})
+
 	// ── History-first Dashboard task handlers ──────────────────────────────────
 
 	describe("handleGetDashboardTaskDetail", () => {
@@ -1764,6 +1857,71 @@ describe("usageStatsMessageHandler", () => {
 			expect(mockDb.queryEventsByTaskIds).toHaveBeenCalledWith(["root", "child"], {
 				fromMs: Date.parse("2026-07-15T00:00:00.000Z"),
 				toMs: Date.parse("2026-08-15T00:00:00.000Z"),
+			})
+		})
+
+		it("returns error when taskId is missing", async () => {
+			const provider = createMockProvider({ getDatabase: () => null } as any)
+
+			await handleGetDashboardTaskDetail(provider, {
+				type: "getDashboardTaskDetail",
+				requestId: "task-detail-missing",
+				// No taskId or text
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "dashboardTaskDetailResponse",
+				requestId: "task-detail-missing",
+				dashboardTaskDetail: null,
+				error: expect.stringContaining("STATS_HANDLER/taskDetail/001"),
+			})
+		})
+
+		it("returns error when database or task catalog is unavailable", async () => {
+			const provider = createMockProvider({
+				getDatabase: () => null,
+				getTaskCatalog: () => null,
+			} as any)
+
+			await handleGetDashboardTaskDetail(provider, {
+				type: "getDashboardTaskDetail",
+				requestId: "task-detail-unavailable",
+				taskId: "root",
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "dashboardTaskDetailResponse",
+				requestId: "task-detail-unavailable",
+				dashboardTaskDetail: null,
+				error: expect.stringContaining("STATS_HANDLER/taskDetail/002"),
+			})
+		})
+
+		it("returns error when the projection throws", async () => {
+			const mockDb = createMockDatabase()
+			const taskCatalog = {
+				byId: new Map([["root", { id: "root", task: "History root", ts: 123 }]]),
+				getDescendantTaskIds: vi.fn(() => {
+					throw new Error("catalog corrupted")
+				}),
+			}
+			const provider = createMockProvider({
+				getDatabase: () => mockDb,
+				getTaskCatalog: () => taskCatalog,
+				getCoordinator: () => null,
+			} as any)
+
+			await handleGetDashboardTaskDetail(provider, {
+				type: "getDashboardTaskDetail",
+				requestId: "task-detail-throw",
+				taskId: "root",
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "dashboardTaskDetailResponse",
+				requestId: "task-detail-throw",
+				dashboardTaskDetail: null,
+				error: expect.stringContaining("STATS_HANDLER/taskDetail/003"),
 			})
 		})
 	})

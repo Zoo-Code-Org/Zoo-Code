@@ -93,8 +93,8 @@ export const ProviderBreakdownFixture = () => {
 	]
 
 	return (
-		<div style={{ width: 480, padding: 8 }} data-testid="provider-breakdown">
-			<table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+		<div style={{ width: 480, padding: 8 }}>
+			<table data-testid="provider-breakdown" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
 				<thead>
 					<tr style={{ textAlign: "left", opacity: 0.7 }}>
 						<th style={{ padding: "4px 8px" }}>Provider</th>
