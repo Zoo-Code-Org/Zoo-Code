@@ -843,5 +843,61 @@ describe("UsageStatsProjection", () => {
 				]),
 			)
 		})
+
+		it("falls back to event scan when cacheRatio is specified (> 0)", () => {
+			db.append(
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						cacheReadTokens: { value: 300, source: "provider" },
+					},
+				}),
+			)
+
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.5 }))
+
+			expect(snapshot.totals.cacheReadTokens).toBe(300)
+			expect(snapshot.buckets[0].cacheReadTokens).toBe(300)
+		})
+	})
+
+	describe("cacheRatio estimation bug fix", () => {
+		it("never increases cacheReadTokens for events/rows with pre-existing cacheReadTokens > 0", () => {
+			// Event 1: Provider reports 300 cached tokens out of 1000 input tokens
+			const evtReported = makeEvent({
+				eventId: "evt-reported",
+				idempotencyKey: "idem-reported",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 200, source: "provider" },
+					cacheReadTokens: { value: 300, source: "provider" },
+				},
+			})
+
+			// Event 2: Provider does NOT report cacheReadTokens (0 or unassigned)
+			const evtUnreported = makeEvent({
+				eventId: "evt-unreported",
+				idempotencyKey: "idem-unreported",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 200, source: "provider" },
+				},
+			})
+
+			db.append(evtReported)
+			db.append(evtUnreported)
+
+			// Query with cacheRatio = 0.5 (50%)
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.5 }))
+
+			// For evtReported: cacheReadTokens should remain 300 (NOT 300 + 500 = 800)
+			// For evtUnreported: cacheReadTokens estimated as Math.round(1000 * 0.5) = 500
+			// Total cacheReadTokens = 300 + 500 = 800
+			expect(snapshot.totals.cacheReadTokens).toBe(800)
+			expect(snapshot.buckets[0].cacheReadTokens).toBe(800)
+		})
 	})
 })

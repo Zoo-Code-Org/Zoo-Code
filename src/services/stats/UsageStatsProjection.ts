@@ -211,6 +211,10 @@ const ROLLUP_SUPPORTED_AXES = new Set(["model", "provider", "mode", "day"])
  * per event, so we cannot use pre-aggregated rollup values.
  */
 function canUseRollupFastPath(query: StatsQuery): boolean {
+	if (query.cacheRatio !== undefined && query.cacheRatio > 0) {
+		return false
+	}
+
 	// Check all axes are supported
 	for (const axis of query.groupBy) {
 		if (!ROLLUP_SUPPORTED_AXES.has(axis)) {
@@ -234,10 +238,10 @@ function canUseRollupFastPath(query: StatsQuery): boolean {
  */
 function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?: number): StatsBucket {
 	let cacheReadTokens = row.cacheReadTokens
-	if (cacheRatio !== undefined && cacheRatio > 0) {
-		const uncached = row.uncachedInputTokens ?? (row.cacheReadTokens === 0 ? row.inputTokens : 0)
+	if (cacheRatio !== undefined && cacheRatio > 0 && row.cacheReadTokens === 0) {
+		const uncached = row.uncachedInputTokens ?? row.inputTokens
 		if (uncached > 0) {
-			cacheReadTokens += Math.round(uncached * cacheRatio)
+			cacheReadTokens = Math.round(uncached * cacheRatio)
 		}
 	}
 	return {
@@ -262,10 +266,10 @@ function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?
  */
 function dailyRowToBucket(row: DailyRollupDetailedRow, cacheRatio?: number): StatsBucket {
 	let cacheReadTokens = row.cacheReadTokens
-	if (cacheRatio !== undefined && cacheRatio > 0) {
-		const uncached = row.uncachedInputTokens ?? (row.cacheReadTokens === 0 ? row.inputTokens : 0)
+	if (cacheRatio !== undefined && cacheRatio > 0 && row.cacheReadTokens === 0) {
+		const uncached = row.uncachedInputTokens ?? row.inputTokens
 		if (uncached > 0) {
-			cacheReadTokens += Math.round(uncached * cacheRatio)
+			cacheReadTokens = Math.round(uncached * cacheRatio)
 		}
 	}
 	return {
@@ -298,10 +302,10 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[], cacheRatio?: numbe
 		totals.inputTokens += row.inputTokens
 		totals.outputTokens += row.outputTokens
 		let cacheReadTokens = row.cacheReadTokens
-		if (cacheRatio !== undefined && cacheRatio > 0) {
-			const uncached = row.uncachedInputTokens ?? (row.cacheReadTokens === 0 ? row.inputTokens : 0)
+		if (cacheRatio !== undefined && cacheRatio > 0 && row.cacheReadTokens === 0) {
+			const uncached = row.uncachedInputTokens ?? row.inputTokens
 			if (uncached > 0) {
-				cacheReadTokens += Math.round(uncached * cacheRatio)
+				cacheReadTokens = Math.round(uncached * cacheRatio)
 			}
 		}
 		totals.cacheReadTokens += cacheReadTokens
@@ -334,10 +338,10 @@ function lifetimeTotalsToBucket(
 	cacheRatio?: number,
 ): StatsBucket {
 	let cacheReadTokens = totals.cacheReadTokens
-	if (cacheRatio !== undefined && cacheRatio > 0) {
-		const uncached = totals.uncachedInputTokens ?? (totals.cacheReadTokens === 0 ? totals.inputTokens : 0)
+	if (cacheRatio !== undefined && cacheRatio > 0 && totals.cacheReadTokens === 0) {
+		const uncached = totals.uncachedInputTokens ?? totals.inputTokens
 		if (uncached > 0) {
-			cacheReadTokens += Math.round(uncached * cacheRatio)
+			cacheReadTokens = Math.round(uncached * cacheRatio)
 		}
 	}
 	return {

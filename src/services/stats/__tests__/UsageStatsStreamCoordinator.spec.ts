@@ -1223,15 +1223,15 @@ describe("UsageStatsStreamCoordinator", () => {
 		})
 
 		it("logs and swallows drain failure when readEventsAfter throws", () => {
-			const readSpy = vi.spyOn(db, "readEventsAfter").mockImplementation(() => {
-				throw new Error("read failed")
-			})
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-
 			const coordinator = new UsageStatsStreamCoordinator(db)
 			const sink = new MockSink()
 			coordinator.subscribe(sink, makeSubscription())
 			sink.messages.length = 0
+
+			const readSpy = vi.spyOn(db, "readEventsAfter").mockImplementation(() => {
+				throw new Error("read failed")
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			db.append(makeEvent())
 			coordinator.notifyEventAppended(makeEvent())
