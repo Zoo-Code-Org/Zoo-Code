@@ -184,7 +184,9 @@ describe("Task resume/eviction race (Work #1 (no message) regression)", () => {
 		// Hold the disk read open so the task is aborted while clineMessages is
 		// still empty — the same window a user hits by navigating away quickly.
 		const readDeferred = createDeferred<ClineMessage[]>()
-		mockReadTaskMessages.mockReturnValueOnce(readDeferred.promise)
+		mockReadTaskMessages
+			.mockReturnValueOnce(readDeferred.promise) // first read: held open to simulate the race window
+			.mockResolvedValue([]) // second read (resumeTaskFromHistory:2023): post-abort, safe fallback
 
 		const updateTaskHistory = vi.fn().mockResolvedValue([])
 		const mockProvider = makeMockProvider(updateTaskHistory)
