@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { OpenAI } from "openai"
 import { OpenRouterEmbedder, OPENROUTER_DEFAULT_PROVIDER_NAME } from "../openrouter"
 import { getModelDimension, getDefaultModelId } from "../../../../shared/embeddingModels"
+import { clearAllMocks, restoreGlobals } from "../../../../test-utils/reset"
 
 // Mock the OpenAI SDK
 vi.mock("openai")
@@ -42,7 +43,7 @@ describe("OpenRouterEmbedder", () => {
 	let mockOpenAIInstance: any
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.spyOn(console, "warn").mockImplementation(function () {})
 		vi.spyOn(console, "error").mockImplementation(function () {})
 
@@ -60,7 +61,7 @@ describe("OpenRouterEmbedder", () => {
 	})
 
 	afterEach(() => {
-		vi.restoreAllMocks()
+		restoreGlobals()
 	})
 
 	describe("constructor", () => {
