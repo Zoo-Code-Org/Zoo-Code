@@ -21,6 +21,7 @@ import { addSearchFilesResultFixtures } from "./fixtures/search-files"
 import { addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
+import { addShellResolutionFixtures } from "./fixtures/shell-resolution"
 
 function getCliFlagValue(flag: string) {
 	return process.argv.find((arg, index) => process.argv[index - 1] === flag)
@@ -128,6 +129,7 @@ async function main() {
 				addSubtaskFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
+				addShellResolutionFixtures(mock)
 				addDeepSeekV4Fixtures(mock)
 
 				// The modes test (switch_mode → ask) triggers a second API call whose last

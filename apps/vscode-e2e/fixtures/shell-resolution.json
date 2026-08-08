@@ -1,0 +1,46 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "shell-resolution-override-ok"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "write_to_file",
+						"arguments": "{\"path\":\"shell-resolution-override-ok.txt\",\"content\":\"shell-resolution-override-ok\"}",
+						"id": "call_shell_resolution_override_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "shell-resolution-fallback-ok"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "write_to_file",
+						"arguments": "{\"path\":\"shell-resolution-fallback-ok.txt\",\"content\":\"shell-resolution-fallback-ok\"}",
+						"id": "call_shell_resolution_fallback_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "shell-resolution-legacy-ok"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "write_to_file",
+						"arguments": "{\"path\":\"shell-resolution-legacy-ok.txt\",\"content\":\"shell-resolution-legacy-ok\"}",
+						"id": "call_shell_resolution_legacy_001"
+					}
+				]
+			}
+		}
+	]
+}

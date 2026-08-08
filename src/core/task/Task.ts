@@ -3817,8 +3817,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.cwd,
 				)
 			}
-		} catch (error) {
-			console.error("[Task] Failed to resolve command environment:", error)
+		} catch {
+			// Resolution is best-effort: the system prompt falls back to the
+			// legacy getShell() line when no environment is resolved. Do NOT log
+			// here — in unit tests with mocked providers this async continuation
+			// can fire after the test finishes, producing an unhandled
+			// EnvironmentTeardownError ("Closing rpc while onUserConsoleLog was
+			// pending") that fails the whole coverage run.
 		}
 	}
 
