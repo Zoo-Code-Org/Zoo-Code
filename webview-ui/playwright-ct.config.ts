@@ -89,6 +89,9 @@ export default defineConfig({
 	expect: {
 		toHaveScreenshot: {
 			animations: "disabled",
+			// Allow minor anti-aliasing differences between local and CI
+			// rendering environments (different OS / font stacks).
+			maxDiffPixelRatio: 0.02,
 		},
 	},
 	projects: [
