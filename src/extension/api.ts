@@ -513,6 +513,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				),
 			)
 		}
+		// Invalidate the cached command environment when shell-related settings
+		// change so the next task resolves against the updated selection. The
+		// service caches by version and would otherwise keep serving the
+		// startup-hydrated (auto) environment.
+		if (
+			values.terminalShellSelection !== undefined ||
+			values.execaShellPath !== undefined ||
+			values.terminalProfile !== undefined
+		) {
+			this.sidebarProvider.getCommandEnvironmentService?.()?.invalidate()
+		}
 		await this.sidebarProvider.postStateToWebview()
 	}
 

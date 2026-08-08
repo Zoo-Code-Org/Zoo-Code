@@ -42,6 +42,55 @@ describe("API - configuration", () => {
 		expect(postStateToWebview).toHaveBeenCalledOnce()
 	})
 
+	it("invalidates the command environment cache when terminalShellSelection changes", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("default-id")
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const invalidate = vi.fn()
+		const getCommandEnvironmentService = vi.fn().mockReturnValue({ invalidate })
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			contextProxy: { setValues },
+			providerSettingsManager: { saveConfig, setModeConfig },
+			postStateToWebview,
+			getCommandEnvironmentService,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider)
+
+		await api.setConfiguration({
+			currentApiConfigName: "default",
+			terminalShellSelection: { kind: "path", path: "/bin/bash" },
+		})
+
+		expect(invalidate).toHaveBeenCalledOnce()
+	})
+
+	it("does not invalidate the command environment cache for unrelated settings", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("default-id")
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const invalidate = vi.fn()
+		const getCommandEnvironmentService = vi.fn().mockReturnValue({ invalidate })
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			contextProxy: { setValues },
+			providerSettingsManager: { saveConfig, setModeConfig },
+			postStateToWebview,
+			getCommandEnvironmentService,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider)
+
+		await api.setConfiguration({ currentApiConfigName: "default" })
+
+		expect(invalidate).not.toHaveBeenCalled()
+	})
+
 	it("does not persist mode mappings when none are supplied", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("default-id")
