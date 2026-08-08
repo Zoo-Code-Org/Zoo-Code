@@ -30,90 +30,77 @@ const USAGE_STATS_DIRNAME = "usage-stats"
 const SEGMENT_PREFIX = "events-"
 const SEGMENT_EXT = ".ndjson"
 
-const resolveStatsDir = async (): Promise<string> => {
+const findAllStatsDirs = async (): Promise<string[]> => {
 	const repoRoot = path.resolve(__dirname, "..", "..", "..")
-	const candidates = [
-		process.env.VSCODE_TEST_USER_DATA_DIR &&
-			path.join(
-				process.env.VSCODE_TEST_USER_DATA_DIR,
-				"User",
-				"globalStorage",
-				"ZooCodeOrganization.zoo-code",
-				USAGE_STATS_DIRNAME,
-			),
-		process.env.VSCODE_TEST_USER_DATA_DIR &&
-			path.join(
-				process.env.VSCODE_TEST_USER_DATA_DIR,
-				"User",
-				"globalStorage",
-				"zoocodeorganization.zoo-code",
-				USAGE_STATS_DIRNAME,
-			),
-		path.join(
-			repoRoot,
-			".vscode-test",
-			"user-data",
-			"User",
-			"globalStorage",
-			"ZooCodeOrganization.zoo-code",
-			USAGE_STATS_DIRNAME,
-		),
-		path.join(
-			repoRoot,
-			".vscode-test",
-			"user-data",
-			"User",
-			"globalStorage",
-			"zoocodeorganization.zoo-code",
-			USAGE_STATS_DIRNAME,
-		),
+	const candidateBases = [
+		process.env.VSCODE_TEST_USER_DATA_DIR,
+		path.join(repoRoot, ".vscode-test", "user-data"),
 	].filter((c): c is string => !!c)
 
-	for (const candidate of candidates) {
+	const statsDirs: string[] = []
+
+	for (const base of candidateBases) {
+		const globalStorageDir = path.join(base, "User", "globalStorage")
 		try {
-			await fs.access(candidate)
-			return candidate
+			const entries = await fs.readdir(globalStorageDir)
+			for (const entry of entries) {
+				const candidate = path.join(globalStorageDir, entry, USAGE_STATS_DIRNAME)
+				try {
+					await fs.access(candidate)
+					statsDirs.push(candidate)
+				} catch {
+					// candidate directory doesn't exist
+				}
+			}
 		} catch {
-			// try next candidate
+			// globalStorageDir doesn't exist
 		}
 	}
 
-	return candidates[0] || candidates[2]!
+	return statsDirs
 }
 
 /**
- * Read every usage event from the store's segment files.
+ * Read every usage event from the store's segment files across all stats dirs.
  * Corrupt or unparseable lines are skipped — the store itself quarantines
  * them, so the test should not fail on them.
  */
-const readAllUsageEvents = async (statsDir?: string): Promise<UsageEvent[]> => {
-	const dir = statsDir ?? (await resolveStatsDir())
-	let files: string[]
-
-	try {
-		files = await fs.readdir(dir)
-	} catch {
-		// Store directory does not exist yet — no events recorded.
-		return []
-	}
-
-	const segmentFiles = files.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
+const readAllUsageEvents = async (): Promise<UsageEvent[]> => {
+	const dirs = await findAllStatsDirs()
 	const events: UsageEvent[] = []
+	const seenIds = new Set<string>()
 
-	for (const file of segmentFiles) {
-		const content = await fs.readFile(path.join(dir, file), "utf-8")
+	for (const dir of dirs) {
+		let files: string[]
+		try {
+			files = await fs.readdir(dir)
+		} catch {
+			continue
+		}
 
-		for (const line of content.split("\n")) {
-			const trimmed = line.trim()
-			if (!trimmed) continue
+		const segmentFiles = files.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
 
+		for (const file of segmentFiles) {
+			let content: string
 			try {
-				const parsed = UsageEventV1.safeParse(JSON.parse(trimmed))
-				if (parsed.success) {
-					events.push(parsed.data)
-				}
+				content = await fs.readFile(path.join(dir, file), "utf-8")
 			} catch {
-				// skip corrupt line
+				continue
+			}
+
+			for (const line of content.split("\n")) {
+				const trimmed = line.trim()
+				if (!trimmed) continue
+
+				try {
+					const parsed = UsageEventV1.safeParse(JSON.parse(trimmed))
+					if (parsed.success && !seenIds.has(parsed.data.eventId)) {
+						seenIds.add(parsed.data.eventId)
+						events.push(parsed.data)
+					}
+				} catch {
+					// skip corrupt line
+				}
 			}
 		}
 	}
