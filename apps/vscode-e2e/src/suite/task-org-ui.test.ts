@@ -27,23 +27,13 @@ suite("Task Organization UI", function () {
 
 		await waitUntilCompleted({ api, taskId })
 
-		// Verify task was created
+		// Verify task was created and is tracked by the host.
 		assert.ok(taskId, "Task should be created")
+		assert.ok(await api.isTaskInHistory(taskId), "Task should be in history")
 
-		// Test task organization state management
-		const state = await api.getState()
-		assert.ok(state, "Should be able to get extension state")
-
-		// Verify task history is accessible
-		const taskHistory = state.taskHistory || []
-		assert.ok(Array.isArray(taskHistory), "Task history should be an array")
-
-		// Check if task organization data structure exists
-		if (state.taskOrganization) {
-			assert.ok(typeof state.taskOrganization === "object", "Task organization should be an object")
-			assert.ok(Array.isArray(state.taskOrganization.folders || []), "Folders should be an array")
-			assert.ok(Array.isArray(state.taskOrganization.pins || []), "Pins should be an array")
-		}
+		const item = await api.getTaskHistoryItem(taskId)
+		assert.ok(item, "History item should exist for the created task")
+		assert.strictEqual(item.id, taskId, "History item id should match the created task id")
 	})
 
 	test("Should support task pinning workflow", async () => {
@@ -57,19 +47,14 @@ suite("Task Organization UI", function () {
 
 		await waitUntilCompleted({ api, taskId })
 
-		// Verify task exists in history
-		const state = await api.getState()
-		const taskHistory = state.taskHistory || []
-		const task = taskHistory.find((t) => t.id === taskId)
-		assert.ok(task, "Task should exist in history")
+		// Verify task exists in history.
+		assert.ok(await api.isTaskInHistory(taskId), "Task should exist in history")
 
-		// Test pin functionality would be available through UI
-		// Note: Actual UI interactions would require Playwright or similar
-		// This test verifies the underlying data structures support pinning
-		if (state.taskOrganization) {
-			const pins = state.taskOrganization.pins || []
-			assert.ok(Array.isArray(pins), "Pins array should exist")
-		}
+		const item = await api.getTaskHistoryItem(taskId)
+		assert.ok(item, "History item should exist for the pinned task")
+
+		// Note: Actual pin UI interactions are exercised by webview tests.
+		// This test verifies the underlying task data structures exist.
 	})
 
 	test("Should support folder creation and task assignment", async () => {
@@ -90,28 +75,23 @@ suite("Task Organization UI", function () {
 
 		await waitUntilCompleted({ api, taskId: taskId2 })
 
-		// Verify both tasks exist
-		const state = await api.getState()
-		const taskHistory = state.taskHistory || []
-		const task1 = taskHistory.find((t) => t.id === taskId1)
-		const task2 = taskHistory.find((t) => t.id === taskId2)
+		// Verify both tasks exist in history.
+		assert.ok(await api.isTaskInHistory(taskId1), "First task should exist in history")
+		assert.ok(await api.isTaskInHistory(taskId2), "Second task should exist in history")
 
-		assert.ok(task1, "First task should exist")
-		assert.ok(task2, "Second task should exist")
+		const item1 = await api.getTaskHistoryItem(taskId1)
+		const item2 = await api.getTaskHistoryItem(taskId2)
 
-		// Verify folder structure supports organization
-		if (state.taskOrganization) {
-			const folders = state.taskOrganization.folders || []
-			assert.ok(Array.isArray(folders), "Folders array should exist")
-		}
+		assert.ok(item1, "First task history item should exist")
+		assert.ok(item2, "Second task history item should exist")
 	})
 
 	test("Should handle task organization state persistence", async () => {
 		const api = globalThis.api
 
-		// Get initial state
-		const initialState = await api.getState()
-		assert.ok(initialState, "Should have initial state")
+		// Capture the current task stack before creating a task.
+		const initialStack = api.getCurrentTaskStack()
+		assert.ok(Array.isArray(initialStack), "Initial task stack should be an array")
 
 		// Create a task
 		const taskId = await api.startNewTask({
@@ -121,16 +101,11 @@ suite("Task Organization UI", function () {
 
 		await waitUntilCompleted({ api, taskId })
 
-		// Verify state after task creation
-		const finalState = await api.getState()
-		assert.ok(finalState, "Should have final state")
+		// Verify the task persists in history after completion.
+		assert.ok(await api.isTaskInHistory(taskId), "Task should persist in history after completion")
 
-		// Check that task organization state is maintained
-		if (initialState.taskOrganization && finalState.taskOrganization) {
-			assert.ok(
-				typeof finalState.taskOrganization === "object",
-				"Task organization state should persist after task creation",
-			)
-		}
+		const item = await api.getTaskHistoryItem(taskId)
+		assert.ok(item, "History item should persist after task completion")
+		assert.strictEqual(item.id, taskId, "Persisted history item id should match")
 	})
 })

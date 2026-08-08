@@ -58,7 +58,12 @@ export default defineConfig({
 			],
 			resolve: {
 				alias: {
+					// Both alias forms must point at the mock so components that import
+					// `useAppTranslation` via `@/i18n/...` (rather than `@src/i18n/...`)
+					// don't drag the real TranslationContext (and its ExtensionStateContext
+					// → @roo-code/types barrel/zod chain) into the CT bundle.
 					"@src/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
+					"@/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
 					"@": path.resolve(dirname, "./src"),
 					"@src": path.resolve(dirname, "./src"),
 					"@roo": path.resolve(dirname, "../src/shared"),
