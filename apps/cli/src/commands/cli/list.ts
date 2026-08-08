@@ -6,7 +6,7 @@ import pWaitFor from "p-wait-for"
 
 import type { TaskSessionEntry } from "@roo-code/core/cli"
 import type { Command, ModelRecord, WebviewMessage } from "@roo-code/types"
-import { openRouterDefaultModelId } from "@roo-code/types"
+import { openRouterDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { ExtensionHost, type ExtensionHostOptions } from "@/agent/index.js"
 import { readWorkspaceTaskSessions } from "@/lib/task-history/index.js"
@@ -105,13 +105,13 @@ function outputSessionsText(sessions: SessionLike[]): void {
 async function createListHost(options: BaseListOptions, hostOptions: ListHostOptions): Promise<ExtensionHost> {
 	const workspacePath = resolveWorkspacePath(options.workspace)
 	const extensionPath = resolveExtensionPath(options.extension)
-	const apiKey = options.apiKey || getApiKeyFromEnv("openrouter")
+	const apiKey = options.apiKey || getApiKeyFromEnv(providerIdentifiers.openrouter)
 
 	const extensionHostOptions: ExtensionHostOptions = {
 		mode: "code",
 		reasoningEffort: undefined,
 		user: null,
-		provider: "openrouter",
+		provider: providerIdentifiers.openrouter,
 		model: openRouterDefaultModelId,
 		apiKey,
 		workspacePath,
@@ -217,14 +217,14 @@ function requestModes(host: ExtensionHost): Promise<ModeLike[]> {
 function requestOpenRouterModels(host: ExtensionHost): Promise<ModelRecord> {
 	return requestFromExtension(
 		host,
-		{ type: "requestRouterModels", values: { provider: "openrouter" } },
+		{ type: "requestRouterModels", values: { provider: providerIdentifiers.openrouter } },
 		(message) => {
 			if (message.type !== "routerModels") {
 				return undefined
 			}
 
 			const routerModels = isRecord(message.routerModels) ? message.routerModels : {}
-			const openRouterModels = routerModels.openrouter
+			const openRouterModels = routerModels[providerIdentifiers.openrouter]
 			return isRecord(openRouterModels) ? (openRouterModels as ModelRecord) : {}
 		},
 	)
