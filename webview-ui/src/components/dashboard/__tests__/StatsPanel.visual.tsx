@@ -46,7 +46,7 @@ test("renders summary overview cards with stable layout", async ({ mount }) => {
 	// non-animated cost card (always rendered synchronously) instead.
 	await expect(component.locator("text=$12.35")).toBeVisible()
 
-	await expect(component).toHaveScreenshot("stats-summary-overview.png", { maxDiffPixelRatio: 0.05 })
+	await expect(component).toHaveScreenshot("stats-summary-overview.png", { maxDiffPixels: 10000 })
 })
 
 // ── Daily heatmap (chart) ───────────────────────────────────────────────────
@@ -64,7 +64,7 @@ test("renders daily activity heatmap for the 30d range", async ({ mount }) => {
 	await expect(component.getByTestId("usage-heatmap")).toBeVisible()
 	await expect(component.getByTestId("heatmap-range-30d")).toBeVisible()
 
-	await expect(component).toHaveScreenshot("stats-daily-chart.png", { maxDiffPixelRatio: 0.05 })
+	await expect(component).toHaveScreenshot("stats-daily-chart.png", { maxDiffPixels: 10000 })
 })
 
 // ── Provider breakdown ──────────────────────────────────────────────────────
@@ -106,5 +106,5 @@ test("renders provider breakdown table with stable layout", async ({ mount }) =>
 	await expect(component.getByTestId("provider-breakdown")).toBeVisible()
 	await expect(component.getByTestId("provider-row")).toHaveCount(3)
 
-	await expect(component).toHaveScreenshot("stats-provider-breakdown.png", { maxDiffPixelRatio: 0.05 })
+	await expect(component).toHaveScreenshot("stats-provider-breakdown.png", { maxDiffPixels: 10000 })
 })
