@@ -1,8 +1,6 @@
 import React from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import { render, screen } from "@/utils/test-utils"
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
+import { renderWithExtensionState, screen } from "@/utils/test-utils"
 
 import { ChatRowContent } from "../ChatRow"
 
@@ -26,30 +24,24 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 }))
 
 const renderCommand = (autoApprovalDecision?: "approve" | "deny") => {
-	const queryClient = new QueryClient()
-
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatRowContent
-					message={{
-						type: "ask",
-						ask: "command",
-						ts: 1,
-						text: "rm -rf /tmp/example",
-						autoApprovalDecision,
-					}}
-					isExpanded={false}
-					isLast={false}
-					isStreaming={false}
-					onToggleExpand={vi.fn()}
-					onSuggestionClick={vi.fn()}
-					onBatchFileResponse={vi.fn()}
-					onFollowUpUnmount={vi.fn()}
-					isFollowUpAnswered={false}
-				/>
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
+	return renderWithExtensionState(
+		<ChatRowContent
+			message={{
+				type: "ask",
+				ask: "command",
+				ts: 1,
+				text: "rm -rf /tmp/example",
+				autoApprovalDecision,
+			}}
+			isExpanded={false}
+			isLast={false}
+			isStreaming={false}
+			onToggleExpand={vi.fn()}
+			onSuggestionClick={vi.fn()}
+			onBatchFileResponse={vi.fn()}
+			onFollowUpUnmount={vi.fn()}
+			isFollowUpAnswered={false}
+		/>,
 	)
 }
 

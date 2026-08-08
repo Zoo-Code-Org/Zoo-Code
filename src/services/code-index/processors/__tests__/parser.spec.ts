@@ -6,6 +6,8 @@ import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
 import { Node } from "web-tree-sitter"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock TelemetryService
 vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 	TelemetryService: {
@@ -58,7 +60,7 @@ describe("CodeParser", () => {
 	let parser: CodeParser
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		parser = new CodeParser()
 		;(loadRequiredLanguageParsers as any).mockResolvedValue(mockLanguageParser as any)
 		// Set up default fs.readFile mock return value
@@ -325,7 +327,7 @@ describe("CodeParser", () => {
 
 	describe("Markdown Support", () => {
 		beforeEach(() => {
-			vi.clearAllMocks()
+			clearAllMocks()
 		})
 
 		it("should generate unique segment hashes for each markdown block", async () => {
@@ -917,7 +919,7 @@ This content verifies that processing continues after multiple oversized lines.`
 
 	describe("Edge case: Single oversized line in markdown", () => {
 		beforeEach(() => {
-			vi.clearAllMocks()
+			clearAllMocks()
 		})
 
 		it("should properly chunk a markdown file with a single very long line", async () => {

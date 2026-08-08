@@ -3,6 +3,7 @@
 import * as vscode from "vscode"
 import { execSync } from "child_process"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -298,7 +299,7 @@ describe("TerminalProcess with Bash Command Output", () => {
 	beforeEach(() => {
 		// Reset the terminals array before each test
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses Bash-specific commands to test the same functionality

@@ -15,6 +15,18 @@ interface UseMcpToolParams {
 	arguments?: Record<string, unknown>
 }
 
+/**
+ * Extends the shared callbacks with a hook invoked once this tool's own
+ * internal validation (params, tool existence, server allow-list) has
+ * passed, before side-effecting execution begins. Native MCP tool calls
+ * (presentAssistantMessage's mcp_tool_use branch) use this to defer telemetry
+ * attribution past validation that lives inside this class rather than the
+ * shared validateToolUse path.
+ */
+export interface UseMcpToolCallbacks extends ToolCallbacks {
+	onValidated?: () => void
+}
+
 type ValidationResult =
 	| { isValid: false }
 	| {
@@ -27,8 +39,8 @@ type ValidationResult =
 export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 	readonly name = "use_mcp_tool" as const
 
-	async execute(params: UseMcpToolParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { askApproval, handleError, pushToolResult } = callbacks
+	async execute(params: UseMcpToolParams, task: Task, callbacks: UseMcpToolCallbacks): Promise<void> {
+		const { askApproval, handleError, pushToolResult, onValidated } = callbacks
 
 		try {
 			// Validate parameters
@@ -65,6 +77,10 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 
 			// Reset mistake count on successful validation
 			task.consecutiveMistakeCount = 0
+
+			// All internal validation (params, tool existence, server allow-list) has
+			// passed. Only now is it safe to attribute this as an attempted tool use.
+			onValidated?.()
 
 			// Get user approval
 			const completeMessage = JSON.stringify({

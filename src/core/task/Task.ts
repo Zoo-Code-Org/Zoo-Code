@@ -2258,9 +2258,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
 			// Don't rethrow - we want abort to always succeed
 		}
-		// Save the countdown message in the automatic retry or other content.
+		// Guard: a history task whose message load has not finished yet has
+		// clineMessages = []. Saving now would call taskMetadata() with an
+		// empty array, which writes the "no messages" placeholder as the
+		// title and permanently clobbers the real title in the history store
+		// (the "Work #1 (no message)" / "工作 #1 (無訊息)" bug, v3.76.0).
+		// The on-disk data is still correct at this point, so skip the save.
+		if (this._isHistoryTask && this.clineMessages.length === 0) {
+			return
+		}
 		try {
-			// Save the countdown message in the automatic retry or other content.
 			await this.saveClineMessages()
 		} catch (error) {
 			console.error(`Error saving messages during abort for task ${this.taskId}.${this.instanceId}:`, error)

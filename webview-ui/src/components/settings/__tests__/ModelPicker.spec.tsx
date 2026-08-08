@@ -4,7 +4,7 @@ import { screen, fireEvent, render } from "@/utils/test-utils"
 import { act } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import { ModelInfo } from "@roo-code/types"
+import { ModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { ModelPicker } from "../ModelPicker"
 
@@ -257,7 +257,7 @@ describe("ModelPicker", () => {
 			await act(async () => {
 				render(
 					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "mimo" }} />
+						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: providerIdentifiers.mimo }} />
 					</QueryClientProvider>,
 				)
 			})
@@ -269,7 +269,7 @@ describe("ModelPicker", () => {
 			await act(async () => {
 				render(
 					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "openai" }} />
+						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: providerIdentifiers.openai }} />
 					</QueryClientProvider>,
 				)
 			})
