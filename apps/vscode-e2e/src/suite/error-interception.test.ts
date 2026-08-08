@@ -1,6 +1,7 @@
 import * as assert from "assert"
 import * as path from "path"
 import * as fs from "fs"
+import { pathToFileURL } from "node:url"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
 
@@ -69,7 +70,8 @@ async function loadModuleFromBundle(workspaceRoot: string, entry: string): Promi
 	// Load the built bundle via dynamic import. The bundle may surface the
 	// error-interception contract as an explicit re-export; otherwise we fall
 	// back to importing the submodule path within the same output directory.
-	const bundle = (await import(entry)) as { __errorInterception?: ErrorInterceptionModule } & Record<string, unknown>
+	const entryUrl = pathToFileURL(entry).href
+	const bundle = (await import(entryUrl)) as { __errorInterception?: ErrorInterceptionModule } & Record<string, unknown>
 
 	if (bundle.__errorInterception) {
 		return bundle.__errorInterception
@@ -77,7 +79,7 @@ async function loadModuleFromBundle(workspaceRoot: string, entry: string): Promi
 
 	const subPath = path.join(workspaceRoot, "src", "dist", "core", "tools", "error-interception", "index.js")
 	if (fs.existsSync(subPath)) {
-		return (await import(subPath)) as ErrorInterceptionModule
+		return (await import(pathToFileURL(subPath).href)) as ErrorInterceptionModule
 	}
 
 	return undefined
