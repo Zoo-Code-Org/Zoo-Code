@@ -89,7 +89,7 @@ suite("Shell Resolution", function () {
 		await globalThis.api.setConfiguration({
 			apiProvider: "openrouter" as const,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
-			openRouterModelId: "anthropic/claude-sonnet-4.5",
+			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 		})
 
@@ -296,7 +296,10 @@ suite("Shell Resolution", function () {
 		assertNoShellErrors(messages, "legacy execaShellPath")
 
 		const content = await fs.readFile(path.join(testDir, `${MARKER_LEGACY}.txt`), "utf-8")
-		assert.ok(content.includes(MARKER_LEGACY), `Legacy marker file should contain "${MARKER_LEGACY}", got: ${content}`)
+		assert.ok(
+			content.includes(MARKER_LEGACY),
+			`Legacy marker file should contain "${MARKER_LEGACY}", got: ${content}`,
+		)
 	})
 
 	test("clearing shell selection re-resolves to default chain", async function () {
