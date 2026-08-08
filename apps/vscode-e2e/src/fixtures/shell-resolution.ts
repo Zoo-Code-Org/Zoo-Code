@@ -15,6 +15,24 @@ import { toolResultContains } from "./tool-result"
  * matching) because the tool result content on Turn 2 includes the marker
  * tag, which would cause a JSON userMessage fixture to re-match and loop.
  */
+// Matches when the request contains the marker tag in ANY message (not just the
+// last user message). The extension appends an <environment_details> user
+// message after the task text, so checking only the LAST user message is
+// fragile and misses the tag. Whole-request JSON matching (the proven pattern
+// used by subtasks.ts) is robust to message ordering.
+function requestContainsTag(req: Record<string, unknown>, tag: string): boolean {
+	return JSON.stringify(req).includes(tag)
+}
+
+// True when the request carries at least one tool-result message (Turn 2+).
+function hasToolResultMessage(req: Record<string, unknown>): boolean {
+	const messages = Array.isArray(req?.messages) ? req.messages : []
+	return messages.some(
+		(m: Record<string, unknown>) =>
+			m?.role === "tool" || (m?.role === "user" && JSON.stringify(m).includes("tool_result")),
+	)
+}
+
 export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 	const markers = [
 		{
@@ -45,25 +63,17 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 	]
 
 	for (const { tag, callId, doneId } of markers) {
-		// Turn 1: Initial user message contains the marker tag AND there are
-		// no tool results yet. Returns write_to_file to create the marker file.
+		// Turn 1: The request contains the marker tag AND there are no tool
+		// results yet. Returns write_to_file to create the marker file.
 		mock.addFixture({
 			match: {
 				predicate: (req: Record<string, unknown>) => {
-					const messages = Array.isArray(req?.messages) ? req.messages : []
 					// Only match when there are NO tool-result messages (i.e. Turn 1)
-					const hasToolResult = messages.some(
-						(m: Record<string, unknown>) =>
-							m?.role === "tool" ||
-							(m?.role === "user" && JSON.stringify(m).includes("tool_result")),
-					)
-					if (hasToolResult) return false
+					if (hasToolResultMessage(req)) return false
 
-					// Check if the last user message contains the marker tag
-					const lastUserMsg = messages.filter((m: Record<string, unknown>) => m?.role === "user").pop()
-					if (!lastUserMsg) return false
-					const content = JSON.stringify(lastUserMsg)
-					return content.includes(tag)
+					// Match the tag anywhere in the request so a trailing
+					// <environment_details> user message cannot hide it.
+					return requestContainsTag(req, tag)
 				},
 			},
 			response: {
@@ -97,15 +107,18 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 		})
 	}
 
-	// Wildcard fallback fixture to guarantee Turn 2 completion and prevent aimock 404 retries
+	// Scoped fallback fixture: guarantees Turn 2 completion for shell-resolution
+	// marker tasks and prevents aimock 404 retry loops. It MUST be scoped to the
+	// shell-resolution marker tags — an unscoped "any tool result" wildcard is
+	// registered before the DeepSeek Turn-2 fixtures (registration order breaks
+	// ties) and steals their requests, serving a generic attempt_completion
+	// instead of the expected marker.
 	mock.addFixture({
 		match: {
 			predicate: (req: Record<string, unknown>) => {
-				const messages = Array.isArray(req?.messages) ? req.messages : []
-				return messages.some(
-					(m: Record<string, unknown>) =>
-						m?.role === "tool" || (m?.role === "user" && JSON.stringify(m).includes("tool_result")),
-				)
+				if (!hasToolResultMessage(req)) return false
+				// Only handle requests that belong to a shell-resolution marker task.
+				return markers.some(({ tag }) => requestContainsTag(req, tag))
 			},
 		},
 		response: {
