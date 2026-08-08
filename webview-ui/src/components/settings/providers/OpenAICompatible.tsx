@@ -42,6 +42,18 @@ export const OpenAICompatible = ({
 	simplifySettings,
 }: OpenAICompatibleProps) => {
 	const { t } = useAppTranslation()
+	const isAzureOpenAi = (() => {
+		if (apiConfiguration?.openAiUseAzure) {
+			return true
+		}
+
+		try {
+			const host = new URL(apiConfiguration?.openAiBaseUrl || "").host
+			return host === "azure.com" || host.endsWith(".azure.com")
+		} catch {
+			return false
+		}
+	})()
 
 	const [azureApiVersionSelected, setAzureApiVersionSelected] = useState(!!apiConfiguration?.azureApiVersion)
 
@@ -129,7 +141,11 @@ export const OpenAICompatible = ({
 				value={apiConfiguration?.openAiBaseUrl || ""}
 				type="url"
 				onInput={handleInputChange("openAiBaseUrl")}
-				placeholder={t("settings:placeholders.baseUrl")}
+				placeholder={
+					isAzureOpenAi
+						? t("settings:providers.azureOpenAiBaseUrlPlaceholder")
+						: t("settings:placeholders.baseUrl")
+				}
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.openAiBaseUrl")}</label>
 			</VSCodeTextField>
@@ -147,12 +163,18 @@ export const OpenAICompatible = ({
 				defaultModelId="gpt-4o"
 				models={openAiModels}
 				modelIdKey="openAiModelId"
+				label={isAzureOpenAi ? t("settings:providers.azureOpenAiDeploymentName") : undefined}
 				serviceName="OpenAI"
 				serviceUrl="https://platform.openai.com"
 				organizationAllowList={organizationAllowList}
 				errorMessage={modelValidationError}
 				simplifySettings={simplifySettings}
 			/>
+			{isAzureOpenAi && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.azureOpenAiDeploymentNameDescription")}
+				</div>
+			)}
 			<R1FormatSetting
 				onChange={handleInputChange("openAiR1FormatEnabled", noTransform)}
 				openAiR1FormatEnabled={apiConfiguration?.openAiR1FormatEnabled ?? false}

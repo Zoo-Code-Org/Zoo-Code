@@ -60,8 +60,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		} else if (isAzureOpenAi) {
 			// Azure API shape slightly differs from the core API shape:
 			// https://github.com/openai/openai-node?tab=readme-ov-file#microsoft-azure-openai
+			const azureBaseURL = `${baseURL.replace(/\/openai\/?$/, "").replace(/\/$/, "")}/openai`
 			this.client = new AzureOpenAI({
-				baseURL,
+				baseURL: azureBaseURL,
 				apiKey,
 				apiVersion: this.options.azureApiVersion || azureOpenAiDefaultApiVersion,
 				defaultHeaders: headers,
