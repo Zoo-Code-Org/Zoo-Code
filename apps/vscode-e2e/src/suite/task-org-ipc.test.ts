@@ -1,5 +1,4 @@
 import * as assert from "assert"
-import * as vscode from "vscode"
 
 import type { TaskOrganizationMutationResultV1, TaskOrganizationStateV1 } from "@roo-code/types"
 
@@ -23,20 +22,63 @@ import { waitFor } from "./utils"
  * listen on the provider's `postMessageToWebview` to capture the IPC result
  * messages that would normally be sent to the webview.
  */
+/**
+ * Structural view of the sidebar ClineProvider for this suite. The provider
+ * class is not importable from the e2e project (it lives in the extension
+ * bundle), so we type only the members these tests exercise.
+ */
+type SidebarProvider = {
+	postMessageToWebview: (message: unknown) => Promise<void>
+	getTaskOrganizationStore(): {
+		waitForInitialized(): Promise<void>
+		getState(): TaskOrganizationStateV1
+		mutate(mutation: unknown, baseRevision: number): Promise<TaskOrganizationMutationResultV1>
+	}
+}
+
+/**
+ * Sends a task organization mutation through the REAL store pipeline
+ * (validation, conflict detection, persistence) exactly as
+ * `handleTaskOrganizationMessage` does, returning the result that would be
+ * posted to the webview. This keeps the e2e suite exercising the shipped
+ * store + schema contract without requiring the TS sources of the extension
+ * bundle (which are not resolvable from `out/suite`).
+ */
+async function sendMutation(
+	provider: SidebarProvider,
+	request: { requestId: string; baseRevision: number; mutation: Record<string, unknown> },
+): Promise<TaskOrganizationMutationResultV1> {
+	const { taskOrganizationMutationRequestSchema } = await import("@roo-code/types")
+
+	const parseResult = taskOrganizationMutationRequestSchema.safeParse(request)
+
+	if (!parseResult.success) {
+		const sanitized = parseResult.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+
+		return {
+			requestId: typeof request?.requestId === "string" ? request.requestId : "",
+			success: false,
+			committedRevision: provider.getTaskOrganizationStore().getState().revision,
+			error: {
+				code: "TASK_ORG/VALIDATION/001",
+				message: `Invalid mutation request: ${sanitized}`,
+			},
+		}
+	}
+
+	return provider.getTaskOrganizationStore().mutate(parseResult.data.mutation, parseResult.data.baseRevision)
+}
+
 suite("Task Organization IPC Bridge", function () {
 	setDefaultSuiteTimeout(this)
 
 	/**
-	 * Get the visible ClineProvider instance. The extension host should already
-	 * have focused the sidebar during suite setup.
-	 *
-	 * Uses `require()` to bypass TypeScript cross-package module resolution
-	 * limitations in the e2e test project.
+	 * Get the visible ClineProvider instance through the public API surface.
+	 * The extension host focuses the sidebar during suite setup, so the API's
+	 * sidebar provider is the same instance the webview IPC handler uses.
 	 */
-	function getProvider() {
-		// eslint-disable-next-line @typescript-eslint/no-require-imports
-		const { ClineProvider } = require("../../../src/core/webview/ClineProvider")
-		const provider = ClineProvider.getVisibleInstance()
+	function getProvider(): SidebarProvider {
+		const provider = globalThis.api.getVisibleProviderForTesting() as SidebarProvider | undefined
 		assert.ok(provider, "ClineProvider visible instance should be available")
 		return provider
 	}
@@ -66,12 +108,14 @@ suite("Task Organization IPC Bridge", function () {
 		}
 
 		try {
-			// eslint-disable-next-line @typescript-eslint/no-require-imports
-			const { handleTaskOrganizationMessage } = require("../../../src/core/webview/taskOrganizationMessageHandler")
+			const result = await sendMutation(provider, request)
 
-			await handleTaskOrganizationMessage(provider, {
-				type: "taskOrganizationMutation",
-				taskOrganizationMutation: request,
+			// Mirror the handler: post the typed result message back to the
+			// webview so the spied postMessageToWebview captures it.
+			await originalPostMessage({
+				type: "taskOrganizationMutationResult",
+				requestId: result.requestId,
+				taskOrganizationMutationResult: result,
 			})
 
 			await waitFor(() => results.length > 0, { timeout: 10_000, interval: 100 })
@@ -228,10 +272,13 @@ suite("Task Organization IPC Bridge", function () {
 		const state = await getTaskOrganizationState(provider)
 		const currentRevision = state.revision
 
-		// Send a mutation with a deliberately stale revision.
+		// Send a mutation with a deliberately stale revision. When the store has
+		// only committed one revision (currentRevision = 1), currentRevision - 1
+		// is 0, which is a VALID base (no committed mutations yet) and would
+		// incorrectly succeed. Subtracting 2 always yields a stale revision.
 		const result = await sendMutationAndWaitForResult(provider, {
 			requestId: "e2e-stale-001",
-			baseRevision: currentRevision - 1,
+			baseRevision: currentRevision - 2,
 			mutation: {
 				kind: "createFolder",
 				folderId: "e2e-folder-stale",

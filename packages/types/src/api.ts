@@ -167,6 +167,12 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+	/**
+	 * Returns the sidebar (visible) ClineProvider instance for in-process
+	 * integration tests running inside the extension host. Typed as unknown
+	 * because the ClineProvider class is not part of the public package API.
+	 */
+	getVisibleProviderForTesting(): unknown
 }
 
 export interface RooCodeIpcServer extends EventEmitter<IpcServerEvents> {

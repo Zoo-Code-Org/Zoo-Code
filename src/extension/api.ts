@@ -525,6 +525,14 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	/**
+	 * Returns the sidebar ClineProvider for in-process e2e tests running
+	 * inside the extension host. Not part of the supported external API.
+	 */
+	public getVisibleProviderForTesting(): ClineProvider {
+		return this.sidebarProvider
+	}
+
 	// Provider Profile Management
 
 	public getProfiles(): string[] {
