@@ -748,4 +748,48 @@ describe("useDashboardStatsStream", () => {
 			)
 		})
 	})
+
+	describe("loading timeout guard", () => {
+		it("should dispatch ERROR when no snapshot arrives within the timeout", () => {
+			const { result } = renderHook(() =>
+				useDashboardStatsStream({
+					range: makeQuery(),
+					heatmapRangeDays: 30,
+				}),
+			)
+
+			// Still loading; advance past the 10s guard.
+			expect(result.current.state.isLoading).toBe(true)
+
+			act(() => {
+				vi.advanceTimersByTime(10_001)
+			})
+
+			expect(result.current.state.status).toBe("error")
+			expect(result.current.state.isLoading).toBe(false)
+			expect(result.current.state.backgroundError?.code).toBe("STATS_HANDLER/stream/timeout")
+		})
+	})
+
+	describe("requestTaskPage guards", () => {
+		it("should not post a message when there is no active cursor", () => {
+			const { result } = renderHook(() =>
+				useDashboardStatsStream({
+					range: makeQuery(),
+					heatmapRangeDays: 30,
+				}),
+			)
+
+			postMessageMock.mockClear()
+
+			act(() => {
+				// No cursor and no state.taskCursor yet -> early return.
+				result.current.requestTaskPage()
+			})
+
+			expect(postMessageMock).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "getDashboardTaskPage" }),
+			)
+		})
+	})
 })
