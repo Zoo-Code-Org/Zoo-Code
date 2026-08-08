@@ -2,6 +2,7 @@
 
 import * as vscode from "vscode"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -251,7 +252,7 @@ describePlatform("TerminalProcess with CMD Command Output", () => {
 	beforeEach(() => {
 		// Reset state between tests
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses CMD-specific commands to test the same functionality

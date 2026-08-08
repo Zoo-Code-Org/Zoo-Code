@@ -1,13 +1,14 @@
 // npx vitest src/core/config/__tests__/ProviderSettingsManager.spec.ts
 
-import { ExtensionContext } from "vscode"
-
 import {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	OpenAiCodexServiceTier,
 	providerIdentifiers,
 	type ProviderSettings,
 } from "@roo-code/types"
+
+import { clearAllMocks } from "../../../test-utils/reset"
+import { makeExtensionContext } from "../../../test-utils/vscode"
 
 import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
 
@@ -38,7 +39,6 @@ vi.mock("../../../api", async () => {
 	}
 })
 
-// Mock VSCode ExtensionContext
 const mockSecrets = {
 	get: vi.fn(),
 	store: vi.fn(),
@@ -50,16 +50,17 @@ const mockGlobalState = {
 	update: vi.fn(),
 }
 
-const mockContext = {
-	secrets: mockSecrets,
-	globalState: mockGlobalState,
-} as unknown as ExtensionContext
+const baseContext = makeExtensionContext()
+const mockContext = makeExtensionContext({
+	secrets: { ...baseContext.secrets, ...mockSecrets },
+	globalState: { ...baseContext.globalState, ...mockGlobalState },
+})
 
 describe("ProviderSettingsManager", () => {
 	let providerSettingsManager: ProviderSettingsManager
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Reset all mock implementations to default successful behavior
 		mockSecrets.get.mockResolvedValue(null)
 		mockSecrets.store.mockResolvedValue(undefined)
