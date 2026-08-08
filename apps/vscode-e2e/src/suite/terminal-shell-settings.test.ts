@@ -1,12 +1,13 @@
 /**
- * E2E test for the unified terminal shell selection setting (PR #1120).
+ * E2E smoke test for the unified terminal shell selection setting (PR #1120).
  *
- * Proves that:
- *  1. `terminalShellSelection` set via the extension API round-trips through
- *     configuration persistence (set → get returns the same discriminated
- *     union value).
- *  2. Switching between selection kinds (auto → profile → path → auto)
- *     persists each value without loss.
+ * Scope note (CodeRabbit review): the profile/path/auto round-trip permutations
+ * are pure configuration-persistence concerns and are covered by unit tests in
+ * `packages/types/src/__tests__/terminal-shell-settings.spec.ts` (schema
+ * validation) and `webview-ui/src/components/settings/__tests__/SettingsView.shell-selection.spec.tsx`
+ * (Save → setTerminalShellSelection message wiring). This E2E file keeps only a
+ * minimal smoke test proving the setting survives a real extension-host
+ * set → get round-trip end to end.
  *
  * This test is platform-independent: it exercises the settings contract, not
  * actual shell invocation, so it runs on Windows/macOS/Linux without a real
@@ -57,34 +58,12 @@ suite("Terminal Shell Settings", function () {
 		})
 	})
 
-	test("persists an explicit profile shell selection", async () => {
+	test("smoke: terminal shell selection round-trips through the extension host", async () => {
 		const selection: TerminalShellSelection = { kind: "profile", profileName: "Zoo E2E Bash" }
 
 		await globalThis.api.setConfiguration({ terminalShellSelection: selection })
 
 		const persisted = globalThis.api.getConfiguration().terminalShellSelection
-		assert.deepStrictEqual(persisted, selection, "Profile shell selection should round-trip through configuration")
-	})
-
-	test("persists an explicit path shell selection", async () => {
-		const selection: TerminalShellSelection = { kind: "path", path: "/bin/zsh" }
-
-		await globalThis.api.setConfiguration({ terminalShellSelection: selection })
-
-		const persisted = globalThis.api.getConfiguration().terminalShellSelection
-		assert.deepStrictEqual(persisted, selection, "Path shell selection should round-trip through configuration")
-	})
-
-	test("persists a reset back to auto shell selection", async () => {
-		// Start from a non-auto value so the reset is a real transition.
-		await globalThis.api.setConfiguration({
-			terminalShellSelection: { kind: "profile", profileName: "Zoo E2E Bash" },
-		})
-
-		const selection: TerminalShellSelection = { kind: "auto" }
-		await globalThis.api.setConfiguration({ terminalShellSelection: selection })
-
-		const persisted = globalThis.api.getConfiguration().terminalShellSelection
-		assert.deepStrictEqual(persisted, selection, "Auto shell selection should round-trip through configuration")
+		assert.deepStrictEqual(persisted, selection, "Shell selection should round-trip through configuration")
 	})
 })
