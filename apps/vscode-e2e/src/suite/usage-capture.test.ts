@@ -38,15 +38,33 @@ const getStatsDirs = async (): Promise<string[]> => {
 		return cachedStatsDirs
 	}
 
-	const repoRoot = path.resolve(__dirname, "..", "..", "..")
+	const statsDirs = new Set<string>()
+
+	// Primary source of truth: the extension's own globalStorageUri. The test
+	// runs inside the same extension-host process as the extension under test,
+	// so this is the exact directory UsageStatsService writes to — regardless of
+	// where @vscode/test-electron placed the user-data dir on this platform.
+	try {
+		const extension = vscode.extensions.getExtension("ZooCodeOrganization.zoo-code")
+		const globalStorageFsPath = (extension as unknown as { globalStorageUri?: { fsPath?: string } } | undefined)
+			?.globalStorageUri?.fsPath
+		if (globalStorageFsPath) {
+			statsDirs.add(path.join(globalStorageFsPath, USAGE_STATS_DIRNAME))
+		}
+	} catch {
+		// fall through to path-guessing candidates below
+	}
+
+	// Fallback candidates for environments where the extension context is not
+	// reachable. NOTE: __dirname here is apps/vscode-e2e/out/suite at runtime,
+	// so resolve up to apps/vscode-e2e (one level), not the repo root.
+	const e2ePackageDir = path.resolve(__dirname, "..", "..")
 	const candidateBases = [
 		process.env.VSCODE_TEST_USER_DATA_DIR,
-		path.join(repoRoot, ".vscode-test"),
-		path.join(repoRoot, ".vscode-test", "user-data"),
+		path.join(e2ePackageDir, ".vscode-test"),
+		path.join(e2ePackageDir, ".vscode-test", "user-data"),
 		os.tmpdir(),
 	].filter((c): c is string => !!c)
-
-	const statsDirs = new Set<string>()
 
 	// Direct candidate check first (fast path)
 	for (const base of candidateBases) {
