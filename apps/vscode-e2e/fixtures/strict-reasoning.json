@@ -1,0 +1,88 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "strict-reasoning-e2e-default"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_strict_reasoning_default_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "strict-reasoning-e2e-disabled"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_strict_reasoning_disabled_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "strict-reasoning-e2e-enabled"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_strict_reasoning_enabled_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "strict-reasoning-e2e-roundtrip-on"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_strict_reasoning_roundtrip_on_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "strict-reasoning-e2e-roundtrip-off"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_strict_reasoning_roundtrip_off_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"userMessage": "strict-reasoning-e2e-output"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"4\"}",
+						"id": "call_strict_reasoning_output_001"
+					}
+				]
+			}
+		}
+	]
+}
