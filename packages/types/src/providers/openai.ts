@@ -705,3 +705,19 @@ export const azureOpenAiDefaultApiVersion = "2024-08-01-preview"
 export const OPENAI_NATIVE_DEFAULT_TEMPERATURE = 0
 
 export const OPENAI_AZURE_AI_INFERENCE_PATH = "/models/chat/completions"
+
+/**
+ * Returns true when the base URL and/or flag indicate an Azure OpenAI endpoint.
+ * Azure AI Inference endpoints (*.services.ai.azure.com) return false — the
+ * backend routes those through the plain OpenAI client, not AzureOpenAI.
+ */
+export function isAzureOpenAiBaseUrl(baseUrl?: string, useAzure?: boolean): boolean {
+	if (useAzure) return true
+
+	try {
+		const host = new URL(baseUrl ?? "").host
+		return (host === "azure.com" || host.endsWith(".azure.com")) && !host.endsWith(".services.ai.azure.com")
+	} catch {
+		return false
+	}
+}

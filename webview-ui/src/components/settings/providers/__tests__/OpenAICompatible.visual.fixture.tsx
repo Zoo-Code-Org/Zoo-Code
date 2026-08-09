@@ -8,24 +8,22 @@ import { TranslationContext as AppTranslationContext } from "@/i18n/TranslationC
 import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
 import { TooltipProvider } from "@src/components/ui/tooltip"
 import { OpenAICompatible } from "../OpenAICompatible"
+import enSettings from "@/i18n/locales/en/settings.json"
 
-const translations: Record<string, string> = {
-	"settings:providers.openAiBaseUrl": "Base URL",
-	"settings:providers.azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
-	"settings:providers.apiKey": "API Key",
-	"settings:placeholders.apiKey": "Enter API key",
-	"settings:providers.azureOpenAiDeploymentName": "Azure deployment name",
-	"settings:providers.azureOpenAiDeploymentNameDescription":
-		"Enter the deployment name from Azure AI Studio, not the underlying model name.",
-	"settings:modelPicker.simplifiedExplanation": "You can adjust detailed model settings later.",
-	"settings:modelInfo.enableR1Format": "Enable R1 model parameters",
-	"settings:modelInfo.enableR1FormatTips": "Enable this only for R1-compatible models.",
-	"settings:modelInfo.enableStreaming": "Enable streaming",
-	"settings:includeMaxOutputTokens": "Include max output tokens",
-	"settings:includeMaxOutputTokensDescription": "Send the configured maximum output token limit.",
-	"settings:modelInfo.useAzure": "Use Azure",
-	"settings:modelInfo.azureApiVersion": "Set Azure API version",
+function flattenTranslations(obj: Record<string, unknown>, prefix = "settings:"): Record<string, string> {
+	const result: Record<string, string> = {}
+	for (const [key, value] of Object.entries(obj)) {
+		const fullKey = `${prefix}${key}`
+		if (typeof value === "string") {
+			result[fullKey] = value
+		} else if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+			Object.assign(result, flattenTranslations(value as Record<string, unknown>, `${fullKey}.`))
+		}
+	}
+	return result
 }
+
+const translations = flattenTranslations(enSettings as Record<string, unknown>)
 
 const queryClient = new QueryClient({
 	defaultOptions: {

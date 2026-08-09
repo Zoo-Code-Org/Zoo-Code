@@ -4,7 +4,11 @@ import { OpenAiHandler, getOpenAiModels } from "../openai"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI, { AzureOpenAI } from "openai"
-import { openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import {
+	openAiModelInfoSaneDefaults,
+	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	azureOpenAiDefaultApiVersion,
+} from "@roo-code/types"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -138,7 +142,13 @@ describe("OpenAiHandler", () => {
 			new OpenAiHandler({ ...mockOptions, openAiBaseUrl })
 
 			expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
-				expect.objectContaining({ baseURL: expectedBaseUrl }),
+				expect.objectContaining({
+					baseURL: expectedBaseUrl,
+					apiKey: mockOptions.openAiApiKey,
+					apiVersion: azureOpenAiDefaultApiVersion,
+					defaultHeaders: expect.any(Object),
+					timeout: MOCK_TIMEOUT_MS,
+				}),
 			)
 		})
 
@@ -150,7 +160,13 @@ describe("OpenAiHandler", () => {
 			})
 
 			expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
-				expect.objectContaining({ baseURL: "https://models.example.com/azure/openai" }),
+				expect.objectContaining({
+					baseURL: "https://models.example.com/azure/openai",
+					apiKey: mockOptions.openAiApiKey,
+					apiVersion: azureOpenAiDefaultApiVersion,
+					defaultHeaders: expect.any(Object),
+					timeout: MOCK_TIMEOUT_MS,
+				}),
 			)
 		})
 	})

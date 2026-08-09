@@ -10,6 +10,7 @@ import {
 	type OrganizationAllowList,
 	type ExtensionMessage,
 	azureOpenAiDefaultApiVersion,
+	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 
@@ -42,18 +43,7 @@ export const OpenAICompatible = ({
 	simplifySettings,
 }: OpenAICompatibleProps) => {
 	const { t } = useAppTranslation()
-	const isAzureOpenAi = (() => {
-		if (apiConfiguration?.openAiUseAzure) {
-			return true
-		}
-
-		try {
-			const host = new URL(apiConfiguration?.openAiBaseUrl || "").host
-			return host === "azure.com" || host.endsWith(".azure.com")
-		} catch {
-			return false
-		}
-	})()
+	const isAzureOpenAi = isAzureOpenAiBaseUrl(apiConfiguration?.openAiBaseUrl, apiConfiguration?.openAiUseAzure)
 
 	const [azureApiVersionSelected, setAzureApiVersionSelected] = useState(!!apiConfiguration?.azureApiVersion)
 
