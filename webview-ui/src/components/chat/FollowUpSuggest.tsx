@@ -36,14 +36,15 @@ export const FollowUpSuggest = ({
 	// Start countdown timer when auto-approval is enabled for follow-up questions
 	useEffect(() => {
 		// Only start countdown if auto-approval is enabled for follow-up questions and no suggestion has been selected
-		// Also stop countdown if the question has been answered or auto-approval is paused (user is typing)
+		// Also stop countdown if the question has been answered or auto-approval is paused (user is typing) or timer is disabled (set to 0)
 		if (
 			autoApprovalEnabled &&
 			alwaysAllowFollowupQuestions &&
 			suggestions.length > 0 &&
 			!suggestionSelected &&
 			!isAnswered &&
-			!isFollowUpAutoApprovalPaused
+			!isFollowUpAutoApprovalPaused &&
+			(followupAutoApproveTimeoutMs ?? DEFAULT_FOLLOWUP_TIMEOUT_MS) > 0
 		) {
 			// Start with the configured timeout in seconds
 			const timeoutMs =

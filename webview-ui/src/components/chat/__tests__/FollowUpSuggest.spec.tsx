@@ -74,6 +74,13 @@ describe("FollowUpSuggest", () => {
 		followupAutoApproveTimeoutMs: 3000, // 3 seconds for testing
 	}
 
+	// Test state with timeout disabled (0)
+	const disabledTimeoutState: TestExtensionState = {
+		autoApprovalEnabled: true,
+		alwaysAllowFollowupQuestions: true,
+		followupAutoApproveTimeoutMs: 0, // Disabled
+	}
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.useFakeTimers()
@@ -215,6 +222,22 @@ describe("FollowUpSuggest", () => {
 		expect(screen.getByText("Second suggestion")).toBeInTheDocument()
 
 		// Should not show countdown
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+	})
+
+	// Should not show countdown when timeout is disabled (set to 0)
+	it("should not show countdown when timeout is disabled (set to 0)", () => {
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={1}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			disabledTimeoutState,
+		)
+
+		// Should not show countdown when timeout is disabled
 		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
 	})
 
