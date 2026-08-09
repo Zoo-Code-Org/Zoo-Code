@@ -1,7 +1,5 @@
 import { LLMock } from "@copilotkit/aimock"
 
-import { toolResultContains } from "./tool-result"
-
 /**
  * Shell resolution fixtures (PR #1125).
  *
@@ -88,11 +86,22 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 			...({ repeat: true } as unknown as Record<string, boolean>),
 		})
 
-		// Turn 2: Tool result contains the callId and marker tag. Returns
-		// attempt_completion to end the task.
+		// Turn 2: The request now carries a tool-result message (Turn 1's write_to_file
+		// result). We match on: (a) the request has a tool-result message, AND (b) the
+		// callId appears anywhere in the request (the extension may rewrite tool_call IDs
+		// on resume, so we also accept the tag alone as a fallback). This is more robust
+		// than toolResultContains which requires the exact tool_call_id on the last tool
+		// message — Roo Code appends <environment_details> as a user message after tool
+		// results, and the tool result content may not contain the tag verbatim.
 		mock.addFixture({
 			match: {
-				predicate: (req: Parameters<typeof toolResultContains>[0]) => toolResultContains(req, callId, [tag]),
+				predicate: (req: Record<string, unknown>) => {
+					if (!hasToolResultMessage(req)) return false
+					// Preferred: the callId is present in the serialized request.
+					if (requestContainsTag(req, callId)) return true
+					// Fallback: the tag itself is present alongside a tool result.
+					return requestContainsTag(req, tag)
+				},
 			},
 			response: {
 				toolCalls: [
