@@ -844,7 +844,7 @@ describe("OpenAiHandler", () => {
 				openAiR1FormatEnabled: true,
 			})
 			const model = r1Handler.getModel()
-			expect(model.info.preserveReasoning).toBe(true)
+			expect(model.info).toEqual({ ...openAiModelInfoSaneDefaults, preserveReasoning: true })
 		})
 
 		it("should not set preserveReasoning by default", () => {
