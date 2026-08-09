@@ -10,19 +10,11 @@ vitest.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-const mockResponsesCreate = vitest.fn()
+const mockResponsesCreate = vitest.hoisted(() => vitest.fn())
 
-vitest.mock("openai", () => {
-	const mockConstructor = vitest.fn()
-
-	return {
-		__esModule: true,
-		default: mockConstructor.mockImplementation(function () {
-			return {
-				responses: { create: mockResponsesCreate },
-			}
-		}),
-	}
+vitest.mock("openai", async () => {
+	const { mockOpenAiResponsesClient } = await import("../../../test-utils/api")
+	return mockOpenAiResponsesClient(mockResponsesCreate)
 })
 
 import OpenAI from "openai"
@@ -32,12 +24,13 @@ import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("XAIHandler", () => {
 	let handler: XAIHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockResponsesCreate.mockClear()
 		mockCaptureException.mockClear()
 		handler = new XAIHandler({})
@@ -52,7 +45,7 @@ describe("XAIHandler", () => {
 	})
 
 	it("should use the provided API key", () => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		const xaiApiKey = "test-api-key"
 		new XAIHandler({ xaiApiKey })
 		expect(OpenAI).toHaveBeenCalledWith(

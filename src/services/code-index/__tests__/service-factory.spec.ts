@@ -6,6 +6,8 @@ import { OpenAICompatibleEmbedder } from "../embedders/openai-compatible"
 import { GeminiEmbedder } from "../embedders/gemini"
 import { QdrantVectorStore } from "../vector-store/qdrant-client"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock the embedders and vector store
 vitest.mock("../embedders/openai")
 vitest.mock("../embedders/ollama")
@@ -45,7 +47,7 @@ describe("CodeIndexServiceFactory", () => {
 	let mockCacheManager: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 
 		mockConfigManager = {
 			getConfig: vitest.fn(),
@@ -371,7 +373,7 @@ describe("CodeIndexServiceFactory", () => {
 
 	describe("createVectorStore", () => {
 		beforeEach(() => {
-			vitest.clearAllMocks()
+			clearAllMocks()
 			mockGetDefaultModelId.mockReturnValue("default-model")
 		})
 

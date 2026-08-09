@@ -10,6 +10,7 @@ vi.mock("node:fs", () => ({
 
 const mockCreate = vi.fn()
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -54,7 +55,7 @@ describe("QwenCodeHandler Native Tools", () => {
 	]
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		// Mock credentials file
 		const mockCredentials = {

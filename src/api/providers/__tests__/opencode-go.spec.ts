@@ -18,6 +18,7 @@ import { OpencodeGoHandler } from "../opencode-go"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -64,7 +65,7 @@ describe("OpencodeGoHandler", () => {
 	}
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate.mockClear()
 		mockAnthropicCreate.mockClear()
 	})

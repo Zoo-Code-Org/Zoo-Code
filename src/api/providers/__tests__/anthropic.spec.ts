@@ -3,6 +3,7 @@
 import { AnthropicHandler } from "../anthropic"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock TelemetryService
 vitest.mock("@roo-code/telemetry", () => ({
@@ -85,7 +86,7 @@ describe("AnthropicHandler", () => {
 			apiModelId: "claude-3-5-sonnet-20241022",
 		}
 		handler = new AnthropicHandler(mockOptions)
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

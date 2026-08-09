@@ -35,6 +35,7 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -119,7 +120,7 @@ describe("ZooGatewayHandler", () => {
 	}
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockSessionCleared.value = false
 		mockGetCachedZooCodeToken.mockReturnValue(undefined)
 		mockCreate.mockClear()
