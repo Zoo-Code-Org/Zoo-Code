@@ -185,16 +185,59 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(repaired?.completionResultSummary).toBe("Task completed (recovered after interruption)")
 	})
 
-	it("leaves delegated parent alone when child is still active", async () => {
-		const child = makeItem({ id: "child-4", status: "active" })
-		const parent = makeItem({ id: "parent-4", status: "delegated", awaitingChildId: "child-4" })
+	it("repairs a delegated parent with an active orphaned child", async () => {
+		const child = makeItem({
+			id: "child-4",
+			status: "active",
+			parentTaskId: "parent-4",
+			rootTaskId: "parent-4",
+			childIds: ["grandchild-4"],
+		})
+		const parent = makeItem({
+			id: "parent-4",
+			status: "delegated",
+			awaitingChildId: "child-4",
+			delegatedToId: "child-4",
+			childIds: ["child-4"],
+		})
 		await seedItems([parent, child])
 
 		await store.initialize()
 
-		const unchanged = store.get("parent-4")
-		expect(unchanged?.status).toBe("delegated")
-		expect(unchanged?.awaitingChildId).toBe("child-4")
+		const repairedParent = store.get("parent-4")
+		const repairedChild = store.get("child-4")
+		expect(repairedChild).toMatchObject({
+			id: "child-4",
+			status: "interrupted",
+			parentTaskId: "parent-4",
+			rootTaskId: "parent-4",
+			childIds: ["grandchild-4"],
+		})
+		expect(repairedParent).toMatchObject({
+			id: "parent-4",
+			status: "active",
+			childIds: ["child-4"],
+		})
+		expect(repairedParent?.awaitingChildId).toBeUndefined()
+		expect(repairedParent?.delegatedToId).toBeUndefined()
+
+		const tasksDir = path.join(tmpDir, "tasks")
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tasksDir, "child-4", "history_item.json"), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tasksDir, "parent-4", "history_item.json"), "utf8"),
+		) as HistoryItem
+		expect(persistedChild).toMatchObject({
+			id: "child-4",
+			status: "interrupted",
+			parentTaskId: "parent-4",
+			rootTaskId: "parent-4",
+			childIds: ["grandchild-4"],
+		})
+		expect(persistedParent).toMatchObject({ id: "parent-4", status: "active" })
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
 	it("repairs invalid delegation: delegated parent with no awaitingChildId → active (clears delegatedToId and awaitingChildId)", async () => {
@@ -239,9 +282,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(store.get("parent-b")?.status).toBe("active")
 	})
 
-	it("handles chained delegation (A→B→C): repairs B first, then A sees B as active and is left delegated", async () => {
+	it("handles chained delegation (A→B→C) until all orphaned links converge", async () => {
 		// C doesn't exist (orphaned). B is delegated waiting for C → repaired to active.
-		// A is delegated waiting for B → left delegated (B is now active, resumable by user).
+		// A then sees B as an orphaned active child and is repaired as well.
 		const parentA = makeItem({ id: "parent-a-chain", status: "delegated", awaitingChildId: "parent-b-chain" })
 		const parentB = makeItem({
 			id: "parent-b-chain",
@@ -254,9 +297,39 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		// B is repaired: its child (C) was missing
 		expect(store.get("parent-b-chain")?.status).toBe("active")
-		// A stays delegated: its child (B) is now active, which is a valid state
+		// A stays delegated: B was repaired from delegated to active and remains
+		// resumable rather than being mistaken for an active orphan from disk.
 		expect(store.get("parent-a-chain")?.status).toBe("delegated")
 		expect(store.get("parent-a-chain")?.awaitingChildId).toBe("parent-b-chain")
+		expect(store.get("parent-b-chain")?.status).toBe("active")
+		expect(store.get("parent-b-chain")?.awaitingChildId).toBeUndefined()
+	})
+
+	it("is idempotent when recovering an active child", async () => {
+		const child = makeItem({ id: "child-active-idempotent", status: "active" })
+		const parent = makeItem({
+			id: "parent-active-idempotent",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+
+		await store.initialize()
+		const afterFirstParent = { ...store.get(parent.id) }
+		const afterFirstChild = { ...store.get(child.id) }
+
+		store.dispose()
+		const store2 = new TaskHistoryStore(tmpDir)
+		await store2.initialize()
+		const afterSecondParent = { ...store2.get(parent.id) }
+		const afterSecondChild = { ...store2.get(child.id) }
+		store2.dispose()
+
+		expect(afterFirstParent).toMatchObject({ status: "active" })
+		expect(afterSecondParent).toEqual(afterFirstParent)
+		expect(afterFirstChild).toMatchObject({ status: "interrupted" })
+		expect(afterSecondChild).toEqual(afterFirstChild)
 	})
 
 	it("is idempotent: running initialize twice produces the same result", async () => {
@@ -407,7 +480,7 @@ describe("TaskHistoryStore upsert transition guard", () => {
 
 	it("rejects delegated → completed transition", async () => {
 		// Must include a live active child so reconciliation doesn't repair the parent to active
-		const child = makeItem({ id: "child-guard-2", status: "active" })
+		const child = makeItem({ id: "child-guard-2", status: "interrupted" })
 		const item = makeItem({ id: "task-guard-2", status: "delegated", awaitingChildId: "child-guard-2" })
 		await seedItems([child, item])
 		store.dispose()
