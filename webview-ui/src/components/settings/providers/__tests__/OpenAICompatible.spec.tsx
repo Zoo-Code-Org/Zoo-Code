@@ -68,8 +68,13 @@ vi.mock("@src/components/ui", () => ({
 }))
 
 // Mock other components
+const { mockModelPicker } = vi.hoisted(() => ({ mockModelPicker: vi.fn() }))
+
 vi.mock("../../ModelPicker", () => ({
-	ModelPicker: () => <div data-testid="model-picker">Model Picker</div>,
+	ModelPicker: (props: any) => {
+		mockModelPicker(props)
+		return <div data-testid="model-picker">Model Picker</div>
+	},
 }))
 
 vi.mock("../../R1FormatSetting", () => ({
@@ -141,6 +146,78 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 
 			// Check that the correct translation key is used for the description
 			expect(screen.getByText("settings:includeMaxOutputTokensDescription")).toBeInTheDocument()
+		})
+	})
+
+	describe("Azure OpenAI guidance", () => {
+		it.each([
+			{ openAiBaseUrl: "https://resource.openai.azure.com/" },
+			{ openAiBaseUrl: "https://models.example.com", openAiUseAzure: true },
+		])("shows Azure-specific endpoint and deployment guidance", (apiConfiguration) => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:providers.azureOpenAiBaseUrlPlaceholder")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(
+				expect.objectContaining({ label: "settings:providers.azureOpenAiDeploymentName" }),
+			)
+			expect(screen.getByText("settings:providers.azureOpenAiDeploymentNameDescription")).toBeInTheDocument()
+		})
+
+		it("keeps generic OpenAI-compatible guidance for non-Azure endpoints", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiBaseUrl: "https://models.example.com/v1" } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+			expect(
+				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
+			).not.toBeInTheDocument()
+		})
+
+		it("keeps generic OpenAI-compatible guidance for Azure AI Inference endpoints", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{ openAiBaseUrl: "https://my-resource.services.ai.azure.com/models" } as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+			expect(
+				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
+			).not.toBeInTheDocument()
+		})
+
+		it("keeps generic guidance when Azure AI Inference uses the Azure compatibility flag", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{
+							openAiBaseUrl: "https://my-resource.services.ai.azure.com/models",
+							openAiUseAzure: true,
+						} as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
 		})
 	})
 
