@@ -13,19 +13,19 @@ import { LLMock } from "@copilotkit/aimock"
  * matching) because the tool result content on Turn 2 includes the marker
  * tag, which would cause a JSON userMessage fixture to re-match and loop.
  */
-// Matches when the marker tag appears in a user message that is NOT an
+// Matches when the marker tag appears in user message content that is NOT an
 // <environment_details> block. The extension appends <environment_details>
-// (which includes workspace directory listings) as a separate user message
-// after the task text. If we search the entire serialized request, marker
-// filenames from prior tests appear in the directory listing and cause
-// cross-test fixture contamination — Test 2's request matches Test 1's
-// fixture because the <environment_details> block lists
+// (which includes workspace directory listings) as a content part WITHIN the
+// last user message — not as a separate message. If we concatenate all content
+// parts and search the combined text, marker filenames from prior tests appear
+// in the directory listing and cause cross-test fixture contamination — Test 2's
+// request matches Test 1's fixture because the <environment_details> part lists
 // shell-resolution-override-ok.txt.
 //
-// This function inspects each user message's text content individually and
-// skips any message whose content starts with "<environment_details>".
-// Tool-result messages (role "tool") are also searched because Turn 2's
-// tool result contains the tag in the file path.
+// This function inspects EACH content part of a user message individually and
+// skips any part whose text starts with "<environment_details>". Other parts
+// (the task text) are searched normally. Tool-result messages (role "tool") are
+// also searched because Turn 2's tool result contains the tag in the file path.
 function requestContainsTag(req: Record<string, unknown>, tag: string): boolean {
 	const messages = Array.isArray(req?.messages) ? (req.messages as unknown[]) : []
 	for (const msg of messages) {
@@ -38,20 +38,37 @@ function requestContainsTag(req: Record<string, unknown>, tag: string): boolean 
 			if (JSON.stringify(m).includes(tag)) return true
 			continue
 		}
-		// Search user messages, but skip <environment_details> blocks.
+		// Search user messages, but skip <environment_details> content.
+		//
+		// The extension appends <environment_details> as a content part
+		// WITHIN the last user message (not as a separate message). So a
+		// single user message can contain:
+		//   [{type:"text", text:"Write the text..."}, {type:"text", text:"<environment_details>..."}]
+		//
+		// We must check EACH content part individually and skip parts that
+		// start with "<environment_details>". If we concatenate all parts
+		// first, the combined text starts with the task text (not
+		// "<environment_details>"), so the skip logic never triggers and
+		// marker filenames from prior tests (appearing in the workspace
+		// directory listing inside <environment_details>) cause the wrong
+		// fixture to match.
 		if (role === "user") {
 			const content = m?.content
-			// content can be a string or an array of content parts
-			const text = typeof content === "string"
-				? content
-				: Array.isArray(content)
-					? content
-							.filter((p: unknown) => typeof p === "object" && p !== null && (p as Record<string, unknown>)?.type === "text")
-							.map((p: unknown) => ((p as Record<string, unknown>)?.text ?? "") as string)
-							.join("")
-					: ""
-			if (text.startsWith("<environment_details>")) continue
-			if (text.includes(tag)) return true
+			if (typeof content === "string") {
+				// String content: skip if it's an <environment_details> block
+				if (!content.startsWith("<environment_details>") && content.includes(tag)) return true
+			} else if (Array.isArray(content)) {
+				// Array content: check each text part individually
+				for (const part of content) {
+					if (typeof part !== "object" || part === null) continue
+					const p = part as Record<string, unknown>
+					if (p?.type !== "text") continue
+					const partText = typeof p.text === "string" ? p.text : ""
+					// Skip <environment_details> content parts
+					if (partText.startsWith("<environment_details>")) continue
+					if (partText.includes(tag)) return true
+				}
+			}
 		}
 	}
 	return false
