@@ -11,6 +11,16 @@ vi.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 		releaseTerminalsForTask: vi.fn(),
 	},
 }))
+// Task.dispose() starts this storage/output cleanup without awaiting it. Keep the
+// teardown path in memory so it cannot log after Vitest closes the console RPC.
+vi.mock("../../../utils/storage", () => ({
+	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/path/tasks/test-task"),
+}))
+vi.mock("../../../integrations/terminal/OutputInterceptor", () => ({
+	OutputInterceptor: {
+		cleanup: vi.fn().mockResolvedValue(undefined),
+	},
+}))
 vi.mock("../../ignore/RooIgnoreController")
 vi.mock("../../protect/RooProtectedController")
 vi.mock("../../context-tracking/FileContextTracker")
