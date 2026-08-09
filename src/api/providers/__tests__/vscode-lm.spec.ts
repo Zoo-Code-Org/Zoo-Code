@@ -1331,6 +1331,10 @@ describe("leaked tool-call recovery", () => {
 		it("does not hold back an over-long trailing fragment", () => {
 			expect(trailingPartialToolMarkerLength("<invoke " + "x".repeat(200))).toBe(0)
 		})
+
+		it("does not hold back an over-long generic tag fragment", () => {
+			expect(trailingPartialToolMarkerLength("text <" + "a".repeat(200))).toBe(0)
+		})
 	})
 
 	describe("quoted markup", () => {
@@ -1349,6 +1353,24 @@ describe("leaked tool-call recovery", () => {
 			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
 			expect(calls).toHaveLength(0)
+		})
+
+		it("does not recover an invoke block quoted in unfenced, backtick-free prose", () => {
+			const text = "You must never emit " + invoke("update_todo_list", param("todos", "x")) + " directly."
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("keeps wrapper tags around a block that was not recovered", () => {
+			const text = `<function_calls>${invoke("some_other_tool", param("x", "1"))}</function_calls>`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
 		})
 	})
 })

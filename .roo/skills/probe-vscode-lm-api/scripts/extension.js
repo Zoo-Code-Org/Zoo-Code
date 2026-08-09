@@ -51,8 +51,8 @@ async function runOnce(model, scenario) {
 	if (scenario.tools) {
 		options.tools = [READ_TOOL]
 	}
+	const source = new vscode.CancellationTokenSource()
 	try {
-		const source = new vscode.CancellationTokenSource()
 		const response = await model.sendRequest(messages, options, source.token)
 		for await (const chunk of response.stream) {
 			const typeName = chunk && chunk.constructor ? chunk.constructor.name : typeof chunk
@@ -69,6 +69,8 @@ async function runOnce(model, scenario) {
 		}
 	} catch (error) {
 		record.error = { name: error && error.name, message: error && error.message, stack: error && error.stack }
+	} finally {
+		source.dispose()
 	}
 
 	const text = record.concatenatedText

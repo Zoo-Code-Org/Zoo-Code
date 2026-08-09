@@ -8,17 +8,17 @@ description: How to empirically probe the VS Code Language Model API (`vscode.lm
 ## When to Use This Skill
 
 - A claim is being made about what a Copilot-backed model _actually_ emits over `vscode.lm` (tool-call parts vs. text), and it needs evidence rather than inference.
-- Changing [`extractLeakedToolCalls()`](src/api/providers/vscode-lm.ts) or its guards, and you need a false-positive corpus.
+- Changing [`extractLeakedToolCalls()`](../../../src/api/providers/vscode-lm.ts) or its guards, and you need a false-positive corpus.
 - Any question that can only be answered by real `model.sendRequest()` traffic — the mocked unit tests cannot answer it.
 
 ## When NOT to Use This Skill
 
-- Ordinary provider work covered by [`src/api/providers/__tests__/vscode-lm.spec.ts`](src/api/providers/__tests__/vscode-lm.spec.ts). Live probing is slow and burns Copilot quota.
+- Ordinary provider work covered by [`src/api/providers/__tests__/vscode-lm.spec.ts`](../../../src/api/providers/__tests__/vscode-lm.spec.ts). Live probing is slow and burns Copilot quota.
 - Anything about non-`vscode-lm` providers. Anthropic-API behavior does not transfer.
 
 ## Running the Probe
 
-Scripts live in [`scripts/`](.roo/skills/probe-vscode-lm-api/scripts/) next to this file.
+Scripts live in [`scripts/`](scripts/) next to this file.
 
 1. Copy `scripts/package.json` and `scripts/extension.js` into a scratch directory, e.g. `<repo>\.tmp\lmprobe\`. No build, no `npm install` — it is plain CommonJS against the `vscode` module.
 2. Adjust `OUT_DIR` at the top of `extension.js` to the transcript output directory.
@@ -65,7 +65,7 @@ Never `npx vitest` — it resolves a wrong hoisted 3.2.4 instead of the pinned 4
 
 ## Measured Findings
 
-Sample: 210 live requests, 7 Copilot Claude models x 6 scenarios x 5 repeats, 0 errors. Raw evidence in [`transcripts/`](.roo/skills/probe-vscode-lm-api/transcripts/).
+Sample: 210 live requests, 7 Copilot Claude models x 6 scenarios x 5 repeats, 0 errors. Raw evidence in [`transcripts/`](transcripts/).
 
 | Scenario | Setup                                     | Runs | `<invoke` in text |
 | -------- | ----------------------------------------- | ---- | ----------------- |
@@ -90,7 +90,7 @@ Observations:
 
 ## Reproducing the False-Positive Replay
 
-`scripts/probe-false-positives.spec.ts` replays [`extractLeakedToolCalls()`](src/api/providers/vscode-lm.ts) over a transcript directory and writes a `RECOVERED`/`passthrough` report. Drop it into `src/api/providers/__tests__/`, point `TRANSCRIPTS` at the transcript directory, then:
+[`scripts/probe-false-positives.spec.ts`](scripts/probe-false-positives.spec.ts) replays [`extractLeakedToolCalls()`](../../../src/api/providers/vscode-lm.ts) over a transcript directory and writes a `RECOVERED`/`passthrough` report. Drop it into `src/api/providers/__tests__/`, point `TRANSCRIPTS` at the transcript directory, then:
 
 ```
 pnpm --dir src exec vitest run api/providers/__tests__/probe-false-positives.spec.ts

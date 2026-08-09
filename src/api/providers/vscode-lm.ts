@@ -93,7 +93,7 @@ const MAX_PARTIAL_INVOKE_CARRY = 64
 export function trailingPartialToolMarkerLength(text: string): number {
 	const partialTag = text.match(/<(?:antml:)?[a-zA-Z_]*$/)
 	if (partialTag) {
-		return partialTag[0].length
+		return partialTag[0].length <= MAX_PARTIAL_INVOKE_CARRY ? partialTag[0].length : 0
 	}
 	// An `<invoke` whose `name="` attribute hasn't arrived yet: hold it back so the marker can
 	// latch on the next chunk, bounded so ordinary prose is never swallowed.
@@ -102,17 +102,25 @@ export function trailingPartialToolMarkerLength(text: string): number {
 }
 
 /**
- * True when `index` falls inside a fenced code block or an inline code span, where `<invoke>`
- * markup is being quoted (e.g. a file excerpt or a "do NOT emit this" example) rather than
- * actually invoked.
+ * True when the block spanning `[index, endIndex)` is being quoted — inside a fenced code block,
+ * inside an inline code span, or embedded mid-sentence in plain prose — rather than invoked.
  */
-function isQuotedAsCode(text: string, index: number): boolean {
+function isQuotedAsCode(text: string, index: number, endIndex: number): boolean {
 	const before = text.slice(0, index)
 	if ((before.match(/```/g)?.length ?? 0) % 2 === 1) {
 		return true
 	}
 	const lineStart = before.lastIndexOf("\n") + 1
-	return (before.slice(lineStart).match(/`/g)?.length ?? 0) % 2 === 1
+	if ((before.slice(lineStart).match(/`/g)?.length ?? 0) % 2 === 1) {
+		return true
+	}
+	// A genuine leak ends the turn's line — nothing follows it but the optional closing wrapper.
+	// Narrative words after the block on the same line mean the markup is being talked about
+	// (e.g. "never emit <invoke ...> directly"), which must not be replayed as a live call.
+	const after = text.slice(endIndex)
+	const lineEnd = after.indexOf("\n")
+	const restOfLine = lineEnd === -1 ? after : after.slice(0, lineEnd)
+	return restOfLine.replace(/<[^<>]*>/g, "").trim().length > 0
 }
 
 function parseLeakedInvokeParams(body: string): Record<string, string> {
@@ -136,28 +144,54 @@ export function extractLeakedToolCalls(
 	precedingText = "",
 ): { calls: Array<{ name: string; input: Record<string, string> }>; leftoverText: string } {
 	const calls: Array<{ name: string; input: Record<string, string> }> = []
-	let leftover = ""
+	// Text between recovered/passed-through blocks, kept as segments so the wrapper cleanup below
+	// only touches segments adjacent to a block that was actually recovered.
+	const segments: Array<{ text: string; nearRecovery: boolean }> = []
+	let pending = ""
 	let lastIndex = 0
 
 	LEAKED_INVOKE_BLOCK.lastIndex = 0
 	let match: RegExpExecArray | null
 	while ((match = LEAKED_INVOKE_BLOCK.exec(text)) !== null) {
-		leftover += text.slice(lastIndex, match.index)
+		pending += text.slice(lastIndex, match.index)
 		const name = match[1]
 		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
-		if (validToolNames.has(name) && !isQuotedAsCode(precedingText + text, precedingText.length + match.index)) {
+		if (
+			validToolNames.has(name) &&
+			!isQuotedAsCode(
+				precedingText + text,
+				precedingText.length + match.index,
+				precedingText.length + match.index + match[0].length,
+			)
+		) {
 			calls.push({ name, input: parseLeakedInvokeParams(match[2]) })
+			segments.push({ text: pending, nearRecovery: true })
+			pending = ""
+			// The segment that follows a recovery also holds that call's closing wrapper.
+			segments.push({ text: "", nearRecovery: true })
 		} else {
 			// Not one of our tools, or quoted as code — keep the block as literal text.
-			leftover += match[0]
+			pending += match[0]
 		}
 		lastIndex = match.index + match[0].length
 	}
-	leftover += text.slice(lastIndex)
+	pending += text.slice(lastIndex)
+	const trailing =
+		segments.length > 0 && segments[segments.length - 1].nearRecovery && segments[segments.length - 1].text === ""
+	if (trailing) {
+		segments[segments.length - 1].text = pending
+	} else {
+		segments.push({ text: pending, nearRecovery: false })
+	}
 
-	// Remove bare function-call wrapper tags left behind (cosmetic; also avoids re-teaching
-	// the model this format when the turn is later sent back as history).
-	leftover = leftover.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "")
+	// Remove the wrapper tags belonging to a recovered call (cosmetic; also avoids re-teaching the
+	// model this format when the turn is sent back as history). Wrappers around blocks that were
+	// NOT recovered are user-visible text and must survive verbatim.
+	const leftover = segments
+		.map((segment) =>
+			segment.nearRecovery ? segment.text.replace(/<\/?(?:antml:)?function_calls\s*>/gi, "") : segment.text,
+		)
+		.join("")
 
 	return { calls, leftoverText: leftover }
 }
