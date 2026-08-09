@@ -65,7 +65,7 @@ Never `npx vitest` — it resolves a wrong hoisted 3.2.4 instead of the pinned 4
 
 ## Measured Findings
 
-Sample: 210 live requests, 7 Copilot Claude models x 6 scenarios x 5 repeats, 0 errors. Raw evidence in [`transcripts/`](transcripts/).
+Sample: 210 live requests, 7 Copilot Claude models x 6 scenarios x 5 repeats, 0 errors. The raw transcripts were not retained; the counts below are the retained record of that run, and re-running the probe is the way to regenerate the underlying evidence.
 
 | Scenario | Setup                                     | Runs | `<invoke` in text |
 | -------- | ----------------------------------------- | ---- | ----------------- |
@@ -90,7 +90,7 @@ Observations:
 
 ## Reproducing the False-Positive Replay
 
-[`scripts/probe-false-positives.spec.ts`](scripts/probe-false-positives.spec.ts) replays [`extractLeakedToolCalls()`](../../../src/api/providers/vscode-lm.ts) over a transcript directory and writes a `RECOVERED`/`passthrough` report. Drop it into `src/api/providers/__tests__/`, point `TRANSCRIPTS` at the transcript directory, then:
+[`scripts/probe-false-positives.spec.ts`](scripts/probe-false-positives.spec.ts) replays [`extractLeakedToolCalls()`](../../../src/api/providers/vscode-lm.ts) over a transcript directory and writes a `RECOVERED`/`passthrough` report. It has no committed inputs — run the probe first to produce them. Drop it into `src/api/providers/__tests__/`, point `TRANSCRIPTS` (or `LM_PROBE_TRANSCRIPTS`) at the probe's `OUT_DIR`, then:
 
 ```
 pnpm --dir src exec vitest run api/providers/__tests__/probe-false-positives.spec.ts
