@@ -6,18 +6,23 @@ import * as os from "os"
 
 import type { HistoryItem } from "@roo-code/types"
 
+import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => defaultPath),
 }))
 
-vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
-		await fs.mkdir(path.dirname(filePath), { recursive: true })
-		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
-	}),
-}))
+const writeJson = async (filePath: string, data: unknown): Promise<void> => {
+	await fs.mkdir(path.dirname(filePath), { recursive: true })
+	await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
+}
+
+const safeWriteJsonMock = vi.hoisted(() => vi.fn())
+
+vi.mock("../../../utils/safeWriteJson", () => ({ safeWriteJson: safeWriteJsonMock }))
+
+safeWriteJsonMock.mockImplementation(writeJson)
 
 function makeItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
 	return {
@@ -29,6 +34,28 @@ function makeItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
 		tokensOut: 0,
 		totalCost: 0,
 		...overrides,
+	}
+}
+
+function makeRepairIntent(parent: HistoryItem, child: HistoryItem): object {
+	return {
+		version: 1,
+		operationId: "delegation-repair-test",
+		parentTaskId: parent.id,
+		childTaskId: child.id,
+		expected: {
+			parent: {
+				status: "delegated",
+				awaitingChildId: child.id,
+				delegatedToId: parent.delegatedToId,
+			},
+			child: {
+				status: "active",
+				parentTaskId: child.parentTaskId,
+				rootTaskId: child.rootTaskId,
+			},
+		},
+		target: { childStatus: "interrupted", parentStatus: "active" },
 	}
 }
 
@@ -134,6 +161,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	})
 
 	afterEach(async () => {
+		safeWriteJsonMock.mockImplementation(writeJson)
 		store.dispose()
 		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
 	})
@@ -240,6 +268,153 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
+	it("repairs a delegated child with an omitted status as implicit active", async () => {
+		const child = makeItem({
+			id: "child-implicit-active",
+			parentTaskId: "parent-implicit-active",
+			rootTaskId: "parent-implicit-active",
+		})
+		const parent = makeItem({
+			id: "parent-implicit-active",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+
+		await store.initialize()
+
+		expect(store.get(child.id)).toMatchObject({ id: child.id, status: "interrupted" })
+		expect(store.get(parent.id)).toMatchObject({ id: parent.id, status: "active" })
+		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
+		expect(store.get(parent.id)?.delegatedToId).toBeUndefined()
+
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("interrupted")
+	})
+
+	it("replays an intent after a child-only write and removes it after completion", async () => {
+		const child = makeItem({ id: "child-replay", status: "active", parentTaskId: "parent-replay" })
+		const parent = makeItem({
+			id: "parent-replay",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		await fs.writeFile(
+			path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem),
+			JSON.stringify({ ...child, status: "interrupted" }),
+		)
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)?.status).toBe("active")
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
+	it("replays an intent after a failure before the child write", async () => {
+		const child = makeItem({
+			id: "child-fault-before-child",
+			status: "active",
+			parentTaskId: "parent-fault-before-child",
+		})
+		const parent = makeItem({
+			id: "parent-fault-before-child",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
+			if (filePath.includes(child.id) && filePath.endsWith(GlobalFileNames.historyItem))
+				throw new Error("fault before child write")
+			await writeJson(filePath, data)
+		})
+		await expect(store.initialize()).rejects.toThrow("fault before child write")
+		store.dispose()
+		safeWriteJsonMock.mockImplementation(writeJson)
+		const replayedStore = new TaskHistoryStore(tmpDir)
+		await replayedStore.initialize()
+		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
+		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		replayedStore.dispose()
+	})
+
+	it("replays an intent after a failure before the parent write", async () => {
+		const child = makeItem({
+			id: "child-fault-before-parent",
+			status: "active",
+			parentTaskId: "parent-fault-before-parent",
+		})
+		const parent = makeItem({
+			id: "parent-fault-before-parent",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
+			if (filePath.includes(parent.id) && filePath.endsWith(GlobalFileNames.historyItem))
+				throw new Error("fault before parent write")
+			await writeJson(filePath, data)
+		})
+		await expect(store.initialize()).rejects.toThrow("fault before parent write")
+		store.dispose()
+		safeWriteJsonMock.mockImplementation(writeJson)
+		const replayedStore = new TaskHistoryStore(tmpDir)
+		await replayedStore.initialize()
+		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
+		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		replayedStore.dispose()
+	})
+
+	it("retains an intent when the callback fails after both writes", async () => {
+		const child = makeItem({ id: "child-fault-cleanup", status: "active", parentTaskId: "parent-fault-cleanup" })
+		const parent = makeItem({
+			id: "parent-fault-cleanup",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		store.dispose()
+		store = new TaskHistoryStore(tmpDir, { onWrite: vi.fn().mockRejectedValue(new Error("fault before cleanup")) })
+		await expect(store.initialize()).rejects.toThrow("fault before cleanup")
+		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+		expect(await fs.readFile(intentPath, "utf8")).toContain(child.id)
+		store.dispose()
+		safeWriteJsonMock.mockImplementation(writeJson)
+		const replayedStore = new TaskHistoryStore(tmpDir)
+		await replayedStore.initialize()
+		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
+		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		replayedStore.dispose()
+	})
+
+	it("quarantines malformed and stale intents without blocking unrelated startup", async () => {
+		const unrelated = makeItem({ id: "unrelated-startup", status: "active" })
+		await seedItems([unrelated])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify({ malformed: true }))
+
+		await store.initialize()
+
+		expect(store.get(unrelated.id)?.status).toBe("active")
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(true)
+	})
+
 	it("repairs invalid delegation: delegated parent with no awaitingChildId → active (clears delegatedToId and awaitingChildId)", async () => {
 		// awaitingChildId is falsy but explicitly set (empty string), delegatedToId is stale
 		const parent = makeItem({
@@ -247,7 +422,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			status: "delegated",
 			delegatedToId: "stale-child",
 			awaitingChildId: "",
-		} as any)
+		})
 		await seedItems([parent])
 
 		await store.initialize()
@@ -543,8 +718,8 @@ describe("TaskHistoryStore upsert transition guard", () => {
 		// Legacy items pre-dating the status field have status: undefined, which normalizes
 		// to "active". Writing status: "active" must not throw as an invalid self-loop.
 		const item = makeItem({ id: "task-guard-legacy" })
-		delete (item as any).status
-		await seedItems([item])
+		const { status: _status, ...legacyItem } = item
+		await seedItems([legacyItem])
 		store.dispose()
 		store = new TaskHistoryStore(tmpDir)
 		await store.initialize()

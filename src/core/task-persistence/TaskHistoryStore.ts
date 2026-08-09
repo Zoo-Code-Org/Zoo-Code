@@ -41,6 +41,34 @@ interface HistoryIndex {
 }
 
 /**
+ * Durable intent for the one repair that spans an active delegated child and
+ * its parent. Task files remain authoritative; this file only records the
+ * guarded target transition that must be completed after a crash.
+ */
+interface DelegationRepairIntent {
+	version: 1
+	operationId: string
+	parentTaskId: string
+	childTaskId: string
+	expected: {
+		parent: {
+			status: "delegated"
+			awaitingChildId: string
+			delegatedToId?: string
+		}
+		child: {
+			status: "active"
+			parentTaskId?: string
+			rootTaskId?: string
+		}
+	}
+	target: {
+		childStatus: "interrupted"
+		parentStatus: "active"
+	}
+}
+
+/**
  * TaskHistoryStore encapsulates all task history persistence logic.
  *
  * Each task's HistoryItem is stored as an individual JSON file in its
@@ -111,13 +139,16 @@ export class TaskHistoryStore {
 			// 2. Reconcile cache against actual task directories on disk
 			await this.reconcile()
 
-			// 3. Repair delegation inconsistencies left by a previous crash
+			// 3. Complete any two-record repair interrupted after its intent was durable.
+			await this.replayDelegationRepairIntent()
+
+			// 4. Repair delegation inconsistencies left by a previous crash
 			await this.reconcileDelegationState()
 
-			// 4. Start fs.watch for cross-instance reactivity
+			// 5. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
 
-			// 5. Start periodic reconciliation as a defensive fallback
+			// 6. Start periodic reconciliation as a defensive fallback
 			this.startPeriodicReconciliation()
 		} finally {
 			// Mark initialization as complete so callers awaiting `initialized` can proceed
@@ -309,18 +340,17 @@ export class TaskHistoryStore {
 			const cacheIds = new Set(this.cache.keys())
 			let changed = false
 
-			// Tasks on disk but not in cache: read their history_item.json
+			// Task files are authoritative. Always refresh entries from disk so a stale
+			// index cannot overwrite a repair or another instance's newer task state.
 			for (const taskId of onDiskIds) {
-				if (!cacheIds.has(taskId)) {
-					try {
-						const item = await this.readTaskFile(taskId)
-						if (item) {
-							this.cache.set(taskId, item)
-							changed = true
-						}
-					} catch {
-						// Corrupted or missing file, skip
+				try {
+					const item = await this.readTaskFile(taskId)
+					if (item) {
+						this.cache.set(taskId, item)
+						changed = true
 					}
+				} catch {
+					// Corrupted or missing file, skip
 				}
 			}
 
@@ -369,7 +399,7 @@ export class TaskHistoryStore {
 			// child in a delegation chain.
 			const persistedActiveIds = new Set(
 				Array.from(this.cache.values())
-					.filter((item) => item.status === "active")
+					.filter((item) => (item.status ?? "active") === "active")
 					.map((item) => item.id),
 			)
 			let repairsInThisPass: number
@@ -412,21 +442,12 @@ export class TaskHistoryStore {
 							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
 						)
 						repairsInThisPass++
-					} else if (child.status === "active" && persistedActiveIds.has(child.id)) {
+					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
 						// An active child persisted across startup cannot have a live task session
 						// behind it. Mark it interrupted before releasing the parent's delegation
 						// link so the normal resume/re-delegate flow can take over. This is an
 						// administrative recovery, not a runtime delegation transition.
-						await this.upsertCore({ ...child, status: "interrupted" }, { skipTransitionCheck: true })
-						await this.upsertCore(
-							{
-								...item,
-								status: "active",
-								awaitingChildId: undefined,
-								delegatedToId: undefined,
-							},
-							{ skipTransitionCheck: true },
-						)
+						await this.repairActiveDelegation(item, child)
 						console.warn(
 							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
 						)
@@ -453,6 +474,242 @@ export class TaskHistoryStore {
 				}
 			} while (repairsInThisPass > 0)
 		})
+	}
+
+	/**
+	 * Replay the durable active-child repair intent, if one was left by a crash.
+	 * The expected fields are guards: an intent may update only the missing side
+	 * when the other side is already at its target, or when both records still
+	 * describe the original delegated handoff.
+	 */
+	private async replayDelegationRepairIntent(): Promise<void> {
+		return this.withLock(async () => {
+			const intent = await this.readDelegationRepairIntent()
+			if (!intent) {
+				return
+			}
+
+			const child = this.cache.get(intent.childTaskId)
+			const parent = this.cache.get(intent.parentTaskId)
+			if (!child || !parent) {
+				await this.quarantineDelegationRepairIntent(
+					intent,
+					`missing ${!child ? "child" : "parent"} task record`,
+				)
+				return
+			}
+
+			const childAtTarget = child.status === intent.target.childStatus
+			const parentAtTarget =
+				parent.status === intent.target.parentStatus &&
+				parent.awaitingChildId === undefined &&
+				parent.delegatedToId === undefined
+			const childMatchesExpected = this.matchesDelegationRepairChildPreconditions(intent, child)
+			const parentMatchesExpected = this.matchesDelegationRepairParentPreconditions(intent, parent)
+
+			if ((!childAtTarget && !childMatchesExpected) || (!parentAtTarget && !parentMatchesExpected)) {
+				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
+				return
+			}
+
+			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
+			const repairedParent = parentAtTarget
+				? parent
+				: {
+						...parent,
+						status: intent.target.parentStatus,
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+					}
+
+			if (!childAtTarget) await this.writeTaskFile(repairedChild)
+			if (!parentAtTarget) await this.writeTaskFile(repairedParent)
+
+			this.cache.set(repairedChild.id, repairedChild)
+			this.cache.set(repairedParent.id, repairedParent)
+			this.scheduleIndexWrite()
+
+			// The journal is retained until the write-through callback succeeds.
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			await this.removeDelegationRepairIntent()
+		})
+	}
+
+	/**
+	 * Start and complete a guarded active-child repair while already holding the
+	 * store lock. The intent is durable before either task file is touched.
+	 */
+	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<void> {
+		const intent: DelegationRepairIntent = {
+			version: 1,
+			operationId: `delegation-repair-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			parentTaskId: parent.id,
+			childTaskId: child.id,
+			expected: {
+				parent: {
+					status: "delegated",
+					awaitingChildId: child.id,
+					delegatedToId: parent.delegatedToId,
+				},
+				child: {
+					status: "active",
+					parentTaskId: child.parentTaskId,
+					rootTaskId: child.rootTaskId,
+				},
+			},
+			target: { childStatus: "interrupted", parentStatus: "active" },
+		}
+
+		await this.writeDelegationRepairIntent(intent)
+		await this.applyDelegationRepairIntent(intent, child, parent)
+	}
+
+	private async applyDelegationRepairIntent(
+		intent: DelegationRepairIntent,
+		child: HistoryItem,
+		parent: HistoryItem,
+	): Promise<void> {
+		const repairedChild = { ...child, status: intent.target.childStatus }
+		const repairedParent = {
+			...parent,
+			status: intent.target.parentStatus,
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		}
+
+		await this.writeTaskFile(repairedChild)
+		await this.writeTaskFile(repairedParent)
+
+		this.cache.set(repairedChild.id, repairedChild)
+		this.cache.set(repairedParent.id, repairedParent)
+		this.scheduleIndexWrite()
+
+		if (this.onWrite) {
+			await this.onWrite(this.getAll())
+		}
+		await this.removeDelegationRepairIntent()
+	}
+
+	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
+		return (
+			parent.status === intent.expected.parent.status &&
+			parent.awaitingChildId === intent.expected.parent.awaitingChildId &&
+			parent.delegatedToId === intent.expected.parent.delegatedToId
+		)
+	}
+
+	private matchesDelegationRepairChildPreconditions(intent: DelegationRepairIntent, child: HistoryItem): boolean {
+		return (
+			(child.status ?? "active") === intent.expected.child.status &&
+			child.parentTaskId === intent.expected.child.parentTaskId &&
+			child.rootTaskId === intent.expected.child.rootTaskId
+		)
+	}
+
+	private async readDelegationRepairIntent(): Promise<DelegationRepairIntent | null> {
+		const intentPath = await this.getDelegationRepairIntentPath()
+		let parsed: unknown
+		try {
+			parsed = JSON.parse(await fs.readFile(intentPath, "utf8")) as unknown
+		} catch {
+			try {
+				await fs.access(intentPath)
+			} catch {
+				return null
+			}
+			await this.quarantineDelegationRepairIntent(null, "malformed JSON")
+			return null
+		}
+
+		if (!this.isDelegationRepairIntent(parsed)) {
+			await this.quarantineDelegationRepairIntent(null, "malformed intent")
+			return null
+		}
+		return parsed
+	}
+
+	private isDelegationRepairIntent(value: unknown): value is DelegationRepairIntent {
+		if (!value || typeof value !== "object") {
+			return false
+		}
+		const candidate = value as Record<string, unknown>
+		const expected = candidate.expected
+		const expectedRecord = expected && typeof expected === "object" ? (expected as Record<string, unknown>) : null
+		const expectedParent =
+			expectedRecord?.parent && typeof expectedRecord.parent === "object"
+				? (expectedRecord.parent as Record<string, unknown>)
+				: null
+		const expectedChild =
+			expectedRecord?.child && typeof expectedRecord.child === "object"
+				? (expectedRecord.child as Record<string, unknown>)
+				: null
+		const target = candidate.target
+		return (
+			candidate.version === 1 &&
+			typeof candidate.operationId === "string" &&
+			this.isSafeTaskId(candidate.parentTaskId) &&
+			this.isSafeTaskId(candidate.childTaskId) &&
+			candidate.parentTaskId !== candidate.childTaskId &&
+			!!expectedParent &&
+			expectedParent.status === "delegated" &&
+			typeof expectedParent.awaitingChildId === "string" &&
+			expectedParent.awaitingChildId === candidate.childTaskId &&
+			(expectedParent.delegatedToId === undefined || typeof expectedParent.delegatedToId === "string") &&
+			!!expectedChild &&
+			expectedChild.status === "active" &&
+			(expectedChild.parentTaskId === undefined || typeof expectedChild.parentTaskId === "string") &&
+			(expectedChild.rootTaskId === undefined || typeof expectedChild.rootTaskId === "string") &&
+			!!target &&
+			typeof target === "object" &&
+			(target as Record<string, unknown>).childStatus === "interrupted" &&
+			(target as Record<string, unknown>).parentStatus === "active"
+		)
+	}
+
+	private async writeDelegationRepairIntent(intent: DelegationRepairIntent): Promise<void> {
+		await safeWriteJson(await this.getDelegationRepairIntentPath(), intent)
+	}
+
+	private async removeDelegationRepairIntent(): Promise<void> {
+		try {
+			await fs.unlink(await this.getDelegationRepairIntentPath())
+		} catch (error) {
+			console.warn("[TaskHistoryStore] Failed to remove completed delegation repair intent:", error)
+		}
+	}
+
+	private async quarantineDelegationRepairIntent(
+		intent: DelegationRepairIntent | null,
+		reason: string,
+	): Promise<void> {
+		const intentPath = await this.getDelegationRepairIntentPath()
+		const quarantinePath = `${intentPath}.quarantine-${Date.now()}-${Math.random().toString(36).slice(2)}`
+		try {
+			await fs.rename(intentPath, quarantinePath)
+		} catch (error) {
+			console.warn("[TaskHistoryStore] Failed to quarantine delegation repair intent:", error)
+		}
+		console.warn(
+			`[TaskHistoryStore] Ignored ${intent ? `stale delegation repair intent ${intent.operationId}` : "malformed delegation repair intent"}: ${reason}`,
+		)
+	}
+
+	private isSafeTaskId(value: unknown): value is string {
+		return (
+			typeof value === "string" &&
+			value.length > 0 &&
+			value !== "." &&
+			value !== ".." &&
+			!value.includes("/") &&
+			!value.includes("\\")
+		)
+	}
+
+	private async getDelegationRepairIntentPath(): Promise<string> {
+		const tasksDir = await this.getTasksDir()
+		return path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 	}
 
 	// ────────────────────────────── Cache invalidation ──────────────────────────────

@@ -64,7 +64,7 @@ describe("providerModelConfig", () => {
 		})
 
 		it("returns fallback config for unknown provider", () => {
-			const config = getProviderServiceConfig("unknown-provider" as any)
+			const config = getProviderServiceConfig("unknown-provider")
 			expect(config.serviceName).toBe("unknown-provider")
 			expect(config.serviceUrl).toBe("")
 		})
@@ -88,7 +88,7 @@ describe("providerModelConfig", () => {
 		})
 
 		it("returns empty string for unknown provider", () => {
-			const defaultId = getDefaultModelIdForProvider("unknown" as any)
+			const defaultId = getDefaultModelIdForProvider("unknown")
 			expect(defaultId).toBe("")
 		})
 
@@ -152,7 +152,7 @@ describe("providerModelConfig", () => {
 		})
 
 		it("returns undefined for a provider with no model config entry", () => {
-			expect(getProviderModelConfig("unknown-provider" as any)).toBeUndefined()
+			expect(getProviderModelConfig("unknown-provider")).toBeUndefined()
 		})
 
 		it("returns the static field config for a non-zai provider", () => {
