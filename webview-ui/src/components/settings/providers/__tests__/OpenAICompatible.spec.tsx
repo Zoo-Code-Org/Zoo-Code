@@ -201,6 +201,24 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
 			).not.toBeInTheDocument()
 		})
+
+		it("keeps generic guidance when Azure AI Inference uses the Azure compatibility flag", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{
+							openAiBaseUrl: "https://my-resource.services.ai.azure.com/models",
+							openAiUseAzure: true,
+						} as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+		})
 	})
 
 	describe("Initial State", () => {

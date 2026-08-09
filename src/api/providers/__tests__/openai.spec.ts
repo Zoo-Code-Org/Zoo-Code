@@ -897,6 +897,16 @@ describe("OpenAiHandler", () => {
 			expect(azureHandler.getModel().id).toBe(azureOptions.openAiModelId)
 		})
 
+		it("should keep Azure AI Inference precedence when Azure mode is enabled", () => {
+			vi.mocked(OpenAI).mockClear()
+			vi.mocked(AzureOpenAI).mockClear()
+
+			new OpenAiHandler({ ...azureOptions, openAiUseAzure: true })
+
+			expect(vi.mocked(OpenAI)).toHaveBeenCalled()
+			expect(vi.mocked(AzureOpenAI)).not.toHaveBeenCalled()
+		})
+
 		it("should handle streaming responses with Azure AI Inference Service", async () => {
 			const azureHandler = new OpenAiHandler(azureOptions)
 			const systemPrompt = "You are a helpful assistant."

@@ -5,6 +5,7 @@ import axios from "axios"
 import {
 	type ModelInfo,
 	azureOpenAiDefaultApiVersion,
+	isAzureAiInferenceBaseUrl,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
@@ -521,8 +522,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	protected _isAzureAiInference(baseUrl?: string): boolean {
-		const urlHost = this._getUrlHost(baseUrl)
-		return urlHost.endsWith(".services.ai.azure.com")
+		return isAzureAiInferenceBaseUrl(baseUrl)
 	}
 
 	/**
