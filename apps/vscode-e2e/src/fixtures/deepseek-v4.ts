@@ -75,12 +75,22 @@ export function addDeepSeekV4Fixtures(mock: InstanceType<typeof LLMock>) {
 		})
 
 		// Turn 2: Tool result with our readId. Return attempt_completion with marker.
+		// We match on: (a) the model matches, AND (b) the last tool message's
+		// tool_call_id matches our readId. As a fallback (when the extension
+		// rewrites tool_call IDs on resume), we also accept the probeTag being
+		// present in the request alongside a tool-result message.
 		mock.addFixture({
 			match: {
 				predicate: (req: ChatCompletionRequest) => {
 					const messages = Array.isArray(req?.messages) ? req.messages : []
-					const lastToolMsg = messages.filter((m) => m?.role === "tool").at(-1)
-					return req?.model === fixture.model && lastToolMsg?.tool_call_id === fixture.readId
+					const toolMsgs = messages.filter((m) => m?.role === "tool")
+					if (toolMsgs.length === 0) return false
+					if (req?.model !== fixture.model) return false
+					// Preferred: exact tool_call_id match on the last tool message.
+					const lastToolMsg = toolMsgs.at(-1)
+					if (lastToolMsg?.tool_call_id === fixture.readId) return true
+					// Fallback: probeTag is present alongside a tool result.
+					return JSON.stringify(req).includes(fixture.probeTag)
 				},
 			},
 			response: {

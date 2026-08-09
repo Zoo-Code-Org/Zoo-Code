@@ -22,6 +22,21 @@ function requestContainsTag(req: Record<string, unknown>, tag: string): boolean 
 	return JSON.stringify(req).includes(tag)
 }
 
+// Guard: only match shell-resolution requests. Shell-resolution tests use the
+// OpenRouter model "openai/gpt-4.1". DeepSeek V4 tests use "deepseek-v4-flash"
+// or "deepseek-v4-pro" and carry a "deepseek-v4-e2e" probeTag. Without this
+// guard, shell-resolution marker filenames appearing in the workspace directory
+// listing (<environment_details>) cause DeepSeek requests to match
+// shell-resolution fixtures, stealing the response and returning the wrong
+// completion text.
+function isShellResolutionRequest(req: Record<string, unknown>): boolean {
+	const model = typeof req?.model === "string" ? req.model : ""
+	if (!model.includes("gpt-4.1")) return false
+	// Belt-and-suspenders: exclude any request carrying the DeepSeek probeTag.
+	if (JSON.stringify(req).includes("deepseek-v4-e2e")) return false
+	return true
+}
+
 // True when the request carries at least one tool-result message (Turn 2+).
 function hasToolResultMessage(req: Record<string, unknown>): boolean {
 	const messages = Array.isArray(req?.messages) ? req.messages : []
@@ -66,6 +81,10 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 		mock.addFixture({
 			match: {
 				predicate: (req: Record<string, unknown>) => {
+					// Only match shell-resolution requests (OpenRouter gpt-4.1).
+					// DeepSeek V4 requests must NOT match here.
+					if (!isShellResolutionRequest(req)) return false
+
 					// Only match when there are NO tool-result messages (i.e. Turn 1)
 					if (hasToolResultMessage(req)) return false
 
@@ -96,6 +115,10 @@ export function addShellResolutionFixtures(mock: InstanceType<typeof LLMock>) {
 		mock.addFixture({
 			match: {
 				predicate: (req: Record<string, unknown>) => {
+					// Only match shell-resolution requests (OpenRouter gpt-4.1).
+					// DeepSeek V4 requests must NOT match here.
+					if (!isShellResolutionRequest(req)) return false
+
 					if (!hasToolResultMessage(req)) return false
 					// Preferred: the callId is present in the serialized request.
 					if (requestContainsTag(req, callId)) return true
