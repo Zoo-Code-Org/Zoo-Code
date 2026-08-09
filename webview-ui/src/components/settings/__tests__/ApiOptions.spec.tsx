@@ -1,13 +1,9 @@
 // npx vitest src/components/settings/__tests__/ApiOptions.spec.tsx
 
-import { render, screen, fireEvent, within } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
 import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
-
-import * as ExtensionStateContext from "@src/context/ExtensionStateContext"
-const { ExtensionStateContextProvider } = ExtensionStateContext
 
 import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
@@ -278,21 +274,15 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 }))
 
 const renderApiOptions = (props: Partial<ApiOptionsProps> = {}) => {
-	const queryClient = new QueryClient()
-
-	render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ApiOptions
-					errorMessage={undefined}
-					setErrorMessage={() => {}}
-					uriScheme={undefined}
-					apiConfiguration={{}}
-					setApiConfigurationField={() => {}}
-					{...props}
-				/>
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
+	renderWithExtensionState(
+		<ApiOptions
+			errorMessage={undefined}
+			setErrorMessage={() => {}}
+			uriScheme={undefined}
+			apiConfiguration={{}}
+			setApiConfigurationField={() => {}}
+			{...props}
+		/>,
 	)
 }
 

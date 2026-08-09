@@ -5,6 +5,7 @@ import { LiteLLMHandler } from "../lite-llm"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock vscode first to avoid import errors
 vi.mock("vscode", () => ({
@@ -65,7 +66,7 @@ describe("LiteLLMHandler", () => {
 	let mockOptions: ApiHandlerOptions
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockOptions = {
 			litellmApiKey: "test-key",
 			litellmBaseUrl: "http://localhost:4000",
@@ -220,7 +221,7 @@ describe("LiteLLMHandler", () => {
 			]
 
 			for (const modelId of gpt5Variations) {
-				vi.clearAllMocks()
+				clearAllMocks()
 
 				const optionsWithGPT5: ApiHandlerOptions = {
 					...mockOptions,
@@ -261,7 +262,7 @@ describe("LiteLLMHandler", () => {
 			const nonGPT5Models = ["gpt-4", "claude-3-opus", "llama-3", "gpt-4-turbo"]
 
 			for (const modelId of nonGPT5Models) {
-				vi.clearAllMocks()
+				clearAllMocks()
 
 				const options: ApiHandlerOptions = {
 					...mockOptions,

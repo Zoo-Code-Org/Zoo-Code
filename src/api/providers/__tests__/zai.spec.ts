@@ -15,6 +15,7 @@ import {
 
 import { ZAiHandler } from "../zai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -30,7 +31,7 @@ describe("ZAiHandler", () => {
 	let mockCreate: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate = (OpenAI as unknown as any)().chat.completions.create
 	})
 

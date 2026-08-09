@@ -18,6 +18,7 @@ import { KenariHandler } from "../kenari"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({ default: vitest.fn(() => Promise.resolve()) }))
@@ -51,7 +52,7 @@ describe("KenariHandler", () => {
 	}
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate.mockClear()
 	})
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { CodeIndexOrchestrator } from "../orchestrator"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock vscode workspace so startIndexing passes workspace check
 vi.mock("vscode", () => {
 	const path = require("path")
@@ -60,7 +62,7 @@ describe("CodeIndexOrchestrator - error path cleanup gating", () => {
 	let fileWatcher: any
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		configManager = {
 			isFeatureConfigured: true,
@@ -234,7 +236,7 @@ describe("CodeIndexOrchestrator - stopIndexing", () => {
 	let fileWatcher: any
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		configManager = {
 			isFeatureConfigured: true,

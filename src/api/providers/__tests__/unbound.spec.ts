@@ -3,6 +3,7 @@ import OpenAI from "openai"
 
 import { UnboundHandler } from "../unbound"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vi.mock("openai", () => {
 	const createMock = vi.fn()
@@ -35,7 +36,7 @@ vi.mock("../fetchers/modelCache", () => ({
 
 describe("UnboundHandler", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("identifies itself as Zoo Code in the Unbound request headers", () => {

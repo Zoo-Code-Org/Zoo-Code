@@ -1,14 +1,15 @@
 // npx vitest src/components/settings/__tests__/ModelPicker.spec.tsx
 
-import { screen, fireEvent, render } from "@/utils/test-utils"
+import { screen, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
 import { act } from "react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
 
-import { ModelInfo } from "@roo-code/types"
+import { ModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { ModelPicker } from "../ModelPicker"
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: vi.fn(),
 }))
 
@@ -48,11 +49,7 @@ describe("ModelPicker", () => {
 	const queryClient = new QueryClient()
 
 	const renderModelPicker = () => {
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<ModelPicker {...defaultProps} />
-			</QueryClientProvider>,
-		)
+		return renderWithExtensionState(<ModelPicker {...defaultProps} />, { queryClient })
 	}
 
 	beforeEach(() => {
@@ -154,11 +151,7 @@ describe("ModelPicker", () => {
 			}
 
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...propsWithError} />
-					</QueryClientProvider>,
-				)
+				renderWithExtensionState(<ModelPicker {...propsWithError} />, { queryClient })
 			})
 
 			// Check that the error message is displayed
@@ -181,11 +174,7 @@ describe("ModelPicker", () => {
 			}
 
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...propsWithError} />
-					</QueryClientProvider>,
-				)
+				renderWithExtensionState(<ModelPicker {...propsWithError} />, { queryClient })
 			})
 
 			// Check that both the model selector and error message are present
@@ -203,10 +192,9 @@ describe("ModelPicker", () => {
 			const initialError = "Initial error"
 			const updatedError = "Updated error"
 
-			const { rerender } = render(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={initialError} />
-				</QueryClientProvider>,
+			const { rerender } = renderWithExtensionState(
+				<ModelPicker {...defaultProps} errorMessage={initialError} />,
+				{ queryClient },
 			)
 
 			// Check initial error is displayed
@@ -214,11 +202,7 @@ describe("ModelPicker", () => {
 			expect(screen.getByText(initialError)).toBeInTheDocument()
 
 			// Update the error message
-			rerender(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={updatedError} />
-				</QueryClientProvider>,
-			)
+			rerender(<ModelPicker {...defaultProps} errorMessage={updatedError} />)
 
 			// Check that the error message has been updated
 			expect(screen.getByTestId("api-error-message")).toBeInTheDocument()
@@ -229,10 +213,9 @@ describe("ModelPicker", () => {
 		it("removes error message when errorMessage prop becomes undefined", async () => {
 			const errorMessage = "Temporary error"
 
-			const { rerender } = render(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={errorMessage} />
-				</QueryClientProvider>,
+			const { rerender } = renderWithExtensionState(
+				<ModelPicker {...defaultProps} errorMessage={errorMessage} />,
+				{ queryClient },
 			)
 
 			// Check error is initially displayed
@@ -240,11 +223,7 @@ describe("ModelPicker", () => {
 			expect(screen.getByText(errorMessage)).toBeInTheDocument()
 
 			// Remove the error message
-			rerender(
-				<QueryClientProvider client={queryClient}>
-					<ModelPicker {...defaultProps} errorMessage={undefined} />
-				</QueryClientProvider>,
-			)
+			rerender(<ModelPicker {...defaultProps} errorMessage={undefined} />)
 
 			// Check that the error message has been removed
 			expect(screen.queryByTestId("api-error-message")).not.toBeInTheDocument()
@@ -255,10 +234,9 @@ describe("ModelPicker", () => {
 	describe("automaticFetch hint", () => {
 		it("hides the automatic fetch hint for MiMo provider", async () => {
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "mimo" }} />
-					</QueryClientProvider>,
+				renderWithExtensionState(
+					<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: providerIdentifiers.mimo }} />,
+					{ queryClient },
 				)
 			})
 
@@ -267,10 +245,9 @@ describe("ModelPicker", () => {
 
 		it("shows the automatic fetch hint for non-MiMo providers", async () => {
 			await act(async () => {
-				render(
-					<QueryClientProvider client={queryClient}>
-						<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: "openai" }} />
-					</QueryClientProvider>,
+				renderWithExtensionState(
+					<ModelPicker {...defaultProps} apiConfiguration={{ apiProvider: providerIdentifiers.openai }} />,
+					{ queryClient },
 				)
 			})
 

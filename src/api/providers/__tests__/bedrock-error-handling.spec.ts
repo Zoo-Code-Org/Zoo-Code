@@ -34,12 +34,13 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 import { AwsBedrockHandler } from "../bedrock"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("AwsBedrockHandler Error Handling", () => {
 	let handler: AwsBedrockHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockCaptureException.mockClear()
 		handler = new AwsBedrockHandler({
 			apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",

@@ -28,13 +28,15 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 import { AwsBedrockHandler } from "../bedrock"
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Get access to the mocked functions
 const mockBedrockRuntimeClient = vi.mocked(BedrockRuntimeClient)
 
 describe("Amazon Bedrock VPC Endpoint Functionality", () => {
 	beforeEach(() => {
 		// Clear all mocks before each test
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Test Scenario 1: Input Validation Test

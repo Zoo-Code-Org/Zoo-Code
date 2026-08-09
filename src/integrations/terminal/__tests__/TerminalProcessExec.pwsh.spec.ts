@@ -2,6 +2,7 @@
 
 import * as vscode from "vscode"
 
+import { clearAllMocks } from "../../../test-utils/reset"
 import { ExitCodeDetails } from "../types"
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
@@ -245,7 +246,7 @@ describePlatform("TerminalProcess with PowerShell Command Output", () => {
 	beforeEach(() => {
 		// Reset state between tests
 		TerminalRegistry["terminals"] = []
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Each test uses PowerShell-specific commands to test the same functionality

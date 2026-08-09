@@ -68,6 +68,8 @@ import { NodeHttpHandler } from "@smithy/node-http-handler"
 import { HttpProxyAgent } from "http-proxy-agent"
 import { HttpsProxyAgent } from "https-proxy-agent"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Get access to the mocked functions
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
 const mockBedrockRuntimeClient = vi.mocked(BedrockRuntimeClient)
@@ -81,7 +83,7 @@ describe("AwsBedrockHandler", () => {
 
 	beforeEach(() => {
 		// Clear all mocks before each test
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		handler = new AwsBedrockHandler({
 			apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",

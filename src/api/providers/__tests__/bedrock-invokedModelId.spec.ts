@@ -2,6 +2,7 @@
 
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 import { AwsBedrockHandler, StreamEvent } from "../bedrock"
 
@@ -76,7 +77,7 @@ vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
 
 describe("AwsBedrockHandler with invokedModelId", () => {
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	// Helper function to create a mock async iterable stream

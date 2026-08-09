@@ -1,4 +1,18 @@
+import { providerIdentifiers } from "@roo-code/types"
+
 import { isSupportedProvider, supportedProviders } from "../types.js"
+
+describe("supportedProviders", () => {
+	it("contains the canonical identifiers for the CLI provider subset", () => {
+		expect(supportedProviders).toEqual([
+			providerIdentifiers.anthropic,
+			providerIdentifiers.openaiNative,
+			providerIdentifiers.gemini,
+			providerIdentifiers.openrouter,
+			providerIdentifiers.vercelAiGateway,
+		])
+	})
+})
 
 describe("isSupportedProvider", () => {
 	it.each(supportedProviders)("returns true for supported provider '%s'", (provider) => {
@@ -22,25 +36,25 @@ describe("provider resolution fallback", () => {
 	it("defaults to openrouter when no flag or setting is provided", () => {
 		const flagProvider = undefined
 		const settingsProvider = undefined
-		const effectiveProvider = flagProvider ?? settingsProvider ?? "openrouter"
+		const effectiveProvider = flagProvider ?? settingsProvider ?? providerIdentifiers.openrouter
 
-		expect(effectiveProvider).toBe("openrouter")
+		expect(effectiveProvider).toBe(providerIdentifiers.openrouter)
 		expect(isSupportedProvider(effectiveProvider)).toBe(true)
 	})
 
 	it("uses flag provider over settings and default", () => {
-		const flagProvider = "anthropic"
-		const settingsProvider = "gemini"
-		const effectiveProvider = flagProvider ?? settingsProvider ?? "openrouter"
+		const flagProvider = providerIdentifiers.anthropic
+		const settingsProvider = providerIdentifiers.gemini
+		const effectiveProvider = flagProvider ?? settingsProvider ?? providerIdentifiers.openrouter
 
-		expect(effectiveProvider).toBe("anthropic")
+		expect(effectiveProvider).toBe(providerIdentifiers.anthropic)
 	})
 
 	it("uses settings provider when flag is not provided", () => {
 		const flagProvider = undefined
-		const settingsProvider = "gemini"
-		const effectiveProvider = flagProvider ?? settingsProvider ?? "openrouter"
+		const settingsProvider = providerIdentifiers.gemini
+		const effectiveProvider = flagProvider ?? settingsProvider ?? providerIdentifiers.openrouter
 
-		expect(effectiveProvider).toBe("gemini")
+		expect(effectiveProvider).toBe(providerIdentifiers.gemini)
 	})
 })

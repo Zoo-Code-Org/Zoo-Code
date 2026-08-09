@@ -1,5 +1,6 @@
 // Mocks must come first, before imports
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 const mockCreate = vi.fn()
 vi.mock("openai", () => {
@@ -144,7 +145,7 @@ describe("DeepSeekHandler", () => {
 			deepSeekBaseUrl: "https://api.deepseek.com",
 		}
 		handler = new DeepSeekHandler(mockOptions)
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

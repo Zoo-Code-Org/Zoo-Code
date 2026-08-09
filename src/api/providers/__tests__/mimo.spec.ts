@@ -55,7 +55,7 @@ describe("MimoHandler", () => {
 			mimoBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
 		}
 		handler = new MimoHandler(mockOptions)
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {
