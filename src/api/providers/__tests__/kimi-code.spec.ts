@@ -1,6 +1,8 @@
 import { buildApiHandler } from "../../index"
 import { KimiCodeHandler } from "../kimi-code"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
 	mockGetAccessToken: vi.fn(),
 	mockForceRefreshAccessToken: vi.fn(),
@@ -18,7 +20,7 @@ vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
 
 describe("KimiCodeHandler", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockGetAccessToken.mockResolvedValue("oauth-token")
 		mockForceRefreshAccessToken.mockResolvedValue("refreshed-token")
 		mockGetModels.mockRejectedValue(new Error("offline"))

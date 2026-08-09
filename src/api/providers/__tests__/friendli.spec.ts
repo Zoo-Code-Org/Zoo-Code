@@ -9,6 +9,7 @@ import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
 import { FriendliHandler } from "../friendli"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -30,7 +31,7 @@ describe("FriendliHandler", () => {
 	let handler: FriendliHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([
@@ -368,7 +369,7 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 
 describe("FriendliHandler — Friendli-specific reasoning params", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("should include reasoning_effort, chat_template_kwargs, parse_reasoning for GLM-5.2 with reasoning enabled", async () => {

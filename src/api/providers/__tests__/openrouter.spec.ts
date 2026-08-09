@@ -22,6 +22,7 @@ import { getModelEndpoints } from "../fetchers/modelEndpointCache"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -113,7 +114,7 @@ describe("OpenRouterHandler", () => {
 	})
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		// Reset getModelEndpoints to its default empty-object return so per-test
 		// overrides (e.g. specific-provider test) don't leak into subsequent tests.
 		vitest.mocked(getModelEndpoints).mockResolvedValue({})

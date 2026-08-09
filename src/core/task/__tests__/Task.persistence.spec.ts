@@ -4,12 +4,29 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
-import type { GlobalState, ProviderSettings } from "@roo-code/types"
+import type { ClineMessage, GlobalState, ProviderSettings } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+
+type TaskPersistenceAccess = {
+	resumeTaskFromHistory: () => Promise<void>
+	saveClineMessages: () => Promise<boolean>
+}
+
+function getTaskPersistenceAccess(task: Task): TaskPersistenceAccess {
+	return task as unknown as TaskPersistenceAccess
+}
+
+function createDeferred<T>() {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise
+	})
+	return { promise, resolve }
+}
 
 // ─── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -467,6 +484,102 @@ describe("Task persistence", () => {
 					tokensIn: 10,
 				}),
 			)
+		})
+	})
+
+	// ── abortTask history hydration guard ─────────────────────────────────
+
+	describe("abortTask", () => {
+		it("skips persistence when a history task aborts before messages load", async () => {
+			const messagesDeferred = createDeferred<ClineMessage[]>()
+			mockReadTaskMessages.mockReturnValueOnce(messagesDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "history-task",
+					number: 1,
+					ts: Date.now(),
+					task: "Original task title",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+
+			const resumePromise = task.run().catch(() => {})
+
+			await task.abortTask()
+
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+
+			messagesDeferred.resolve([])
+			await resumePromise
+		})
+
+		it("persists a history task when messages load before abort", async () => {
+			const messages = [
+				{
+					ts: Date.now(),
+					type: "say" as const,
+					say: "text" as const,
+					text: "Loaded task message",
+				},
+			] satisfies ClineMessage[]
+			const messagesDeferred = createDeferred<typeof messages>()
+			mockReadTaskMessages.mockReturnValueOnce(messagesDeferred.promise).mockResolvedValue(messages)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "history-task",
+					number: 1,
+					ts: Date.now(),
+					task: "Original task title",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "user",
+					content: [{ type: "text", text: "Original task" }],
+				},
+			])
+
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			messagesDeferred.resolve(messages)
+			await resumePromise
+
+			const saveCallsBeforeAbort = mockSaveTaskMessages.mock.calls.length
+			expect(saveCallsBeforeAbort).toBeGreaterThan(0)
+			expect(mockProvider.updateTaskHistory).toHaveBeenCalled()
+
+			await task.abortTask()
+			expect(mockSaveTaskMessages.mock.calls.length).toBeGreaterThan(saveCallsBeforeAbort)
+		})
+
+		it("persists an empty non-history task when aborted", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "New task",
+				startTask: false,
+			})
+			const saveClineMessagesSpy = vi.spyOn(getTaskPersistenceAccess(task), "saveClineMessages")
+
+			await task.abortTask()
+
+			expect(saveClineMessagesSpy).toHaveBeenCalledTimes(1)
+			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
 		})
 	})
 

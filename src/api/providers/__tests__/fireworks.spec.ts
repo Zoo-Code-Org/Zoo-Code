@@ -7,6 +7,7 @@ import { type FireworksModelId, fireworksDefaultModelId, fireworksModels } from 
 
 import { FireworksHandler } from "../fireworks"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -28,7 +29,7 @@ describe("FireworksHandler", () => {
 	let handler: FireworksHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([

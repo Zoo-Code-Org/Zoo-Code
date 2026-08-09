@@ -14,6 +14,7 @@ import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 const mockCreate = vitest.fn()
 
@@ -103,7 +104,7 @@ describe("RequestyHandler", () => {
 		requestyModelId: "coding/claude-4-sonnet",
 	})
 
-	beforeEach(() => vitest.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("initializes with correct options", () => {
 		const handler = new RequestyHandler(mockOptions)

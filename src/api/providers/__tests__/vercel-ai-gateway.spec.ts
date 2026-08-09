@@ -15,6 +15,7 @@ import OpenAI from "openai"
 import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { vercelAiGatewayDefaultModelId, VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
 // Mock dependencies
@@ -132,7 +133,7 @@ describe("VercelAiGatewayHandler", () => {
 	})
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate.mockClear()
 		mockConstructor.mockClear()
 	})

@@ -3,6 +3,8 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import { EventEmitter } from "events"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock crypto — verifyChecksum reads the archive file (mocked via createReadStream)
 // and computes a SHA-256. We make digest() dynamically return the expected checksum
 // for the current process.platform/arch so verification always passes in unit tests.
@@ -111,7 +113,7 @@ describe("SEMBLE_SHA256 checksum fixture", () => {
 
 describe("semble-downloader", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		closeHandler = undefined
 		mockWriteStream.on = vi.fn(onWriteStreamEvent)
 		mockWriteStream.close = vi.fn(() => closeHandler?.())

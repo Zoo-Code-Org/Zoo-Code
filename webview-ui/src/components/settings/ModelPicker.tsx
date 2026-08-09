@@ -3,7 +3,13 @@ import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
 import { ChevronsUpDown, Check, X, Info } from "lucide-react"
 
-import { type ProviderSettings, type ModelInfo, type OrganizationAllowList, isRetiredProvider } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	type ModelInfo,
+	type OrganizationAllowList,
+	isRetiredProvider,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
@@ -305,7 +311,7 @@ export const ModelPicker = ({
 							hidePricing={hidePricing}
 						/>
 					)}
-					{!hidePricing && apiConfiguration.apiProvider !== "mimo" && (
+					{!hidePricing && apiConfiguration.apiProvider !== providerIdentifiers.mimo && (
 						<div className="text-sm text-vscode-descriptionForeground" data-testid="automatic-fetch-hint">
 							<Trans
 								i18nKey="settings:modelPicker.automaticFetch"

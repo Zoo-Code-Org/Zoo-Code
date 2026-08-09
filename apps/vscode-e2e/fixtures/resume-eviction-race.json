@@ -1,0 +1,18 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"userMessage": "RESUME_EVICTION_RACE_SMOKE"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\":\"Resume eviction smoke completed.\"}",
+						"id": "call_resume_eviction_001"
+					}
+				]
+			}
+		}
+	]
+}
