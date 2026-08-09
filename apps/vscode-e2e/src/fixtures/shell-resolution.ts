@@ -13,13 +13,48 @@ import { LLMock } from "@copilotkit/aimock"
  * matching) because the tool result content on Turn 2 includes the marker
  * tag, which would cause a JSON userMessage fixture to re-match and loop.
  */
-// Matches when the request contains the marker tag in ANY message (not just the
-// last user message). The extension appends an <environment_details> user
-// message after the task text, so checking only the LAST user message is
-// fragile and misses the tag. Whole-request JSON matching (the proven pattern
-// used by subtasks.ts) is robust to message ordering.
+// Matches when the marker tag appears in a user message that is NOT an
+// <environment_details> block. The extension appends <environment_details>
+// (which includes workspace directory listings) as a separate user message
+// after the task text. If we search the entire serialized request, marker
+// filenames from prior tests appear in the directory listing and cause
+// cross-test fixture contamination — Test 2's request matches Test 1's
+// fixture because the <environment_details> block lists
+// shell-resolution-override-ok.txt.
+//
+// This function inspects each user message's text content individually and
+// skips any message whose content starts with "<environment_details>".
+// Tool-result messages (role "tool") are also searched because Turn 2's
+// tool result contains the tag in the file path.
 function requestContainsTag(req: Record<string, unknown>, tag: string): boolean {
-	return JSON.stringify(req).includes(tag)
+	const messages = Array.isArray(req?.messages) ? (req.messages as unknown[]) : []
+	for (const msg of messages) {
+		if (typeof msg !== "object" || msg === null) continue
+		const m = msg as Record<string, unknown>
+		const role = m?.role
+		// Search tool-result messages (Turn 2+). The tool result content
+		// includes the file path which contains the tag.
+		if (role === "tool") {
+			if (JSON.stringify(m).includes(tag)) return true
+			continue
+		}
+		// Search user messages, but skip <environment_details> blocks.
+		if (role === "user") {
+			const content = m?.content
+			// content can be a string or an array of content parts
+			const text = typeof content === "string"
+				? content
+				: Array.isArray(content)
+					? content
+							.filter((p: unknown) => typeof p === "object" && p !== null && (p as Record<string, unknown>)?.type === "text")
+							.map((p: unknown) => ((p as Record<string, unknown>)?.text ?? "") as string)
+							.join("")
+					: ""
+			if (text.startsWith("<environment_details>")) continue
+			if (text.includes(tag)) return true
+		}
+	}
+	return false
 }
 
 // Guard: only match shell-resolution requests. Shell-resolution tests use the
