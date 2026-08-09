@@ -46,4 +46,26 @@ export default [
 			"no-undef": "off",
 		},
 	},
+	{
+		// Test-utils rollout guardrail: component specs render through the shared
+		// renderWithExtensionState helper instead of hand-wrapping providers.
+		// Scoped to .tsx component specs; .ts hook specs keep local renderHook
+		// wrappers since they pass a specific QueryClient instance to the hook.
+		files: ["src/components/**/__tests__/**/*.tsx"],
+		rules: {
+			"no-restricted-imports": [
+				"error",
+				{
+					paths: [
+						{
+							name: "@tanstack/react-query",
+							importNames: ["QueryClientProvider"],
+							message:
+								"Use renderWithExtensionState from @/utils/test-utils instead of hand-wrapping QueryClientProvider in component specs.",
+						},
+					],
+				},
+			],
+		},
+	},
 ]
