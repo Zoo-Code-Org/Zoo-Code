@@ -1,6 +1,8 @@
 import fs from "fs"
 import path from "path"
 
+// Paths here are written for the copy destination `src/api/providers/__tests__/`, not for this
+// file's committed location — it is a template to be copied there, never run in place.
 import { extractLeakedToolCalls } from "../vscode-lm"
 
 // Point this at the probe's OUT_DIR. Scratch harness: not a committed test.

@@ -18,10 +18,10 @@ description: How to empirically probe the VS Code Language Model API (`vscode.lm
 
 ## Running the Probe
 
-Scripts live in [`scripts/`](scripts/) next to this file.
+Scripts live in [`scripts/probe-vscode-lm-api/`](../../../scripts/probe-vscode-lm-api/) at the repo root.
 
-1. Copy `scripts/package.json` and `scripts/extension.js` into a scratch directory, e.g. `<repo>\.tmp\lmprobe\`. No build, no `npm install` — it is plain CommonJS against the `vscode` module.
-2. Adjust `OUT_DIR` at the top of `extension.js` to the transcript output directory.
+1. Copy `scripts/probe-vscode-lm-api/package.json` and `scripts/probe-vscode-lm-api/extension.js` into a scratch directory, e.g. `<repo>\.tmp\lmprobe\`. No build, no `npm install` — it is plain CommonJS against the `vscode` module.
+2. Adjust `OUT_DIR` at the top of the copied `extension.js` (or set `LM_PROBE_OUT_DIR`) to the transcript output directory.
 3. Launch a **new** extension host window:
 
 ```
@@ -90,7 +90,7 @@ Observations:
 
 ## Reproducing the False-Positive Replay
 
-[`scripts/probe-false-positives.spec.ts`](scripts/probe-false-positives.spec.ts) replays [`extractLeakedToolCalls()`](../../../src/api/providers/vscode-lm.ts) over a transcript directory and writes a `RECOVERED`/`passthrough` report. It has no committed inputs — run the probe first to produce them. Drop it into `src/api/providers/__tests__/`, point `TRANSCRIPTS` (or `LM_PROBE_TRANSCRIPTS`) at the probe's `OUT_DIR`, then:
+[`scripts/probe-vscode-lm-api/probe-false-positives.spec.ts`](../../../scripts/probe-vscode-lm-api/probe-false-positives.spec.ts) replays [`extractLeakedToolCalls()`](../../../src/api/providers/vscode-lm.ts) over a transcript directory and writes a `RECOVERED`/`passthrough` report. It has no committed inputs — run the probe first to produce them. Its `../vscode-lm` import and `TRANSCRIPTS` default are written for the copy destination, not for where it is committed. Drop it into `src/api/providers/__tests__/`, point `TRANSCRIPTS` (or `LM_PROBE_TRANSCRIPTS`) at the probe's `OUT_DIR`, then:
 
 ```
 pnpm --dir src exec vitest run api/providers/__tests__/probe-false-positives.spec.ts
