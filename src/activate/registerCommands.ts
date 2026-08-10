@@ -152,6 +152,15 @@ const getCommandsMap = ({
 				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
 			)
 	},
+	dashboardButtonClicked: () => {
+		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		if (!visibleProvider) return
+		void visibleProvider
+			.postMessageToWebview({ type: "action", action: "dashboardButtonClicked" })
+			.catch((error) =>
+				outputChannel.appendLine(`[dashboardButtonClicked] postMessageToWebview failed: ${error}`),
+			)
+	},
 	newTask: handleNewTask,
 	setCustomStoragePath: async () => {
 		const { promptForCustomStoragePath } = await import("../utils/storage")
