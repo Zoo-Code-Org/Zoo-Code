@@ -211,7 +211,7 @@ describe("Task dispose method", () => {
 	})
 })
 
-describe("Task.run() idempotency", () => {
+describe("Task.start() idempotency", () => {
 	// Reuses the mock setup from the outer describe block above.
 	let mockProvider: ReturnType<typeof buildMockProvider>
 	let mockApiConfiguration: ProviderSettings
@@ -242,7 +242,7 @@ describe("Task.run() idempotency", () => {
 		})
 
 		const callsBefore = startTaskSpy.mock.calls.length // constructor fired it once
-		void t.run()
+		void t.start()
 		expect(startTaskSpy.mock.calls.length).toBe(callsBefore) // run() must not add a second call
 		t.dispose()
 		startTaskSpy.mockRestore()
@@ -260,7 +260,7 @@ describe("Task.run() idempotency", () => {
 		t.start()
 		const callsAfterStart = startTaskSpy.mock.calls.length // start() fired it once
 
-		void t.run()
+		void t.start()
 		expect(startTaskSpy.mock.calls.length).toBe(callsAfterStart) // no additional call
 		t.dispose()
 		startTaskSpy.mockRestore()
@@ -276,8 +276,8 @@ describe("Task.run() idempotency", () => {
 			startTask: false,
 		})
 
-		const p1 = t.run()
-		const p2 = t.run()
+		const p1 = t.start()
+		const p2 = t.start()
 		expect(p1).toBe(p2)
 		await p1
 		t.dispose()
