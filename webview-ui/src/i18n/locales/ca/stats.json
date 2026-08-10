@@ -1,0 +1,82 @@
+{
+	"title": "Estadístiques d'ús",
+	"done": "Torna al xat",
+	"range": {
+		"today": "Avui",
+		"7d": "Últims 7 dies",
+		"30d": "Últims 30 dies",
+		"all": "Tot el període"
+	},
+	"summary": {
+		"totalTokens": "Tokens totals",
+		"inputTokens": "Tokens d'entrada",
+		"outputTokens": "Tokens de sortida",
+		"cacheTokens": "Tokens de memòria cau",
+		"costUsd": "Cost total"
+	},
+	"breakdown": {
+		"title": "Desglossament",
+		"groupBy": "Agrupa per",
+		"model": "Model",
+		"provider": "Proveïdor",
+		"mode": "Mode",
+		"status": "Estat",
+		"day": "Dia",
+		"week": "Setmana",
+		"month": "Mes",
+		"events": "Esdeveniments",
+		"completed": "Completats",
+		"failed": "Fallits",
+		"cancelled": "Cancel·lats",
+		"inputTokens": "Entrada",
+		"outputTokens": "Sortida",
+		"cacheReadTokens": "Lectura de memòria cau",
+		"cacheWriteTokens": "Escriptura de memòria cau",
+		"reasoningTokens": "Raonament",
+		"totalTokens": "Total",
+		"costUsd": "Cost (USD)",
+		"unknown": "Desconegut",
+		"empty": "Sense dades d'ús per a aquest interval."
+	},
+	"heatmap": {
+		"title": "Activitat diària",
+		"30d": "30 dies",
+		"60d": "60 dies",
+		"120d": "120 dies",
+		"360d": "360 dies",
+		"less": "Menys",
+		"more": "Més",
+		"noData": "Sense dades",
+		"loading": "Carregant..."
+	},
+	"coverage": {
+		"title": "Cobertura de dades",
+		"liveFrom": "Enregistrament des de",
+		"backfilledEvents": "Esdeveniments retroactius",
+		"paused": "L'enregistrament està en pausa",
+		"notAvailable": "No disponible"
+	},
+	"actions": {
+		"exportJson": "Exporta JSON",
+		"exportCsv": "Exporta CSV",
+		"clear": "Esborra totes les dades",
+		"refresh": "Actualitza"
+	},
+	"clearDialog": {
+		"title": "Voleu esborrar totes les estadístiques d'ús?",
+		"description": "Això eliminarà permanentment tots els esdeveniments d'ús registrats de l'emmagatzematge local. Aquesta acció no es pot desfer.",
+		"confirm": "Elimina",
+		"cancel": "Cancel·la"
+	},
+	"states": {
+		"loading": "Carregant estadístiques...",
+		"error": "No s'han pogut carregar les estadístiques",
+		"empty": "Encara no hi ha dades d'ús. Les estadístiques apareixeran aquí després de fer crides a l'API LLM.",
+		"emptyHint": "Proveu d'enviar un missatge al vostre assistent d'IA per començar a recopilar dades d'ús."
+	},
+	"source": {
+		"provider": "Reportat pel proveïdor",
+		"estimated": "Estimat",
+		"backfilled": "Retroactiu"
+	}
+}

@@ -1,0 +1,93 @@
+{
+	"title": "Dashboard",
+	"done": "Zurück",
+	"range": {
+		"today": "Heute",
+		"7d": "7 Tage",
+		"30d": "30 Tage",
+		"custom": "Benutzerdefiniert",
+		"all": "Alle"
+	},
+	"summary": {
+		"totalTokens": "Token gesamt",
+		"inputTokens": "Eingabe-Token",
+		"outputTokens": "Ausgabe-Token",
+		"cacheTokens": "Cache-Token",
+		"cost": "Kosten"
+	},
+	"states": {
+		"loading": "Wird geladen...",
+		"error": "Statistiken konnten nicht geladen werden",
+		"empty": "Noch keine Nutzungsdaten vorhanden",
+		"emptyHint": "Starten Sie eine Unterhaltung, um Statistiken anzuzeigen"
+	},
+	"actions": {
+		"refresh": "Aktualisieren",
+		"exportJson": "JSON exportieren",
+		"exportCsv": "CSV exportieren",
+		"clear": "Statistiken löschen",
+		"rebuild": "Statistiken neu erstellen"
+	},
+	"breakdown": {
+		"title": "Aufschlüsselung",
+		"model": "Modell",
+		"provider": "Anbieter",
+		"mode": "Modus",
+		"events": "Ereignisse",
+		"inputTokens": "Eingabe",
+		"outputTokens": "Ausgabe",
+		"cacheReadTokens": "Cache-Lese",
+		"cacheWriteTokens": "Cache-Schreib",
+		"reasoningTokens": "Reasoning",
+		"totalTokens": "Gesamt",
+		"costUsd": "Kosten",
+		"unknown": "Unbekannt"
+	},
+	"coverage": {
+		"title": "Datenabdeckung",
+		"liveFrom": "Live seit",
+		"lastUpdated": "Zuletzt aktualisiert",
+		"backfilledEvents": "Zurückgefüllte Ereignisse",
+		"paused": "Aufzeichnung pausiert (Speicherlimit erreicht)"
+	},
+	"clearDialog": {
+		"title": "Statistiken löschen",
+		"description": "Möchten Sie wirklich alle Nutzungsstatistiken löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+		"cancel": "Abbrechen",
+		"confirm": "Löschen"
+	},
+	"customRange": {
+		"from": "Von",
+		"to": "Bis"
+	},
+	"cacheRatio": {
+		"label": "Cache-Verhältnis zur Schätzung",
+		"hint": "Wird angewendet, wenn der Anbieter keine Cache-Daten meldet"
+	},
+	"sessionDetail": {
+		"summary": "Sitzungsübersicht",
+		"apiCalls": "API-Aufrufe",
+		"noApiCalls": "Keine API-Aufrufe aufgezeichnet",
+		"input": "Eingabe",
+		"output": "Ausgabe",
+		"cost": "Kosten",
+		"model": "Modell",
+		"mode": "Modus",
+		"time": "Zeit",
+		"status": "Status"
+	},
+	"time": {
+		"justNow": "gerade eben",
+		"minutesAgo": "vor {{count}} Min.",
+		"hoursAgo": "vor {{count}} Std.",
+		"yesterday": "gestern",
+		"daysAgo": "vor {{count}} Tagen"
+	},
+	"tasks": {
+		"title": "Aufgaben",
+		"noTasks": "Keine Aufgaben aufgezeichnet",
+		"filterModel": "Alle Modelle",
+		"filterProvider": "Alle Anbieter",
+		"callCount": "{{count}} Aufrufe"
+	}
+}

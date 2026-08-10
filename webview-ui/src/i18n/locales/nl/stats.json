@@ -1,0 +1,82 @@
+{
+	"title": "Gebruiksstatistieken",
+	"done": "Terug naar chat",
+	"range": {
+		"today": "Vandaag",
+		"7d": "Laatste 7 dagen",
+		"30d": "Laatste 30 dagen",
+		"all": "Volledige periode"
+	},
+	"summary": {
+		"totalTokens": "Totale tokens",
+		"inputTokens": "Invoer-tokens",
+		"outputTokens": "Uitvoer-tokens",
+		"cacheTokens": "Cache-tokens",
+		"costUsd": "Totale kosten"
+	},
+	"breakdown": {
+		"title": "Uitsplitsing",
+		"groupBy": "Groeperen op",
+		"model": "Model",
+		"provider": "Provider",
+		"mode": "Modus",
+		"status": "Status",
+		"day": "Dag",
+		"week": "Week",
+		"month": "Maand",
+		"events": "Gebeurtenissen",
+		"completed": "Voltooid",
+		"failed": "Mislukt",
+		"cancelled": "Geannuleerd",
+		"inputTokens": "Invoer",
+		"outputTokens": "Uitvoer",
+		"cacheReadTokens": "Cache-lezen",
+		"cacheWriteTokens": "Cache-schrijven",
+		"reasoningTokens": "Redenering",
+		"totalTokens": "Totaal",
+		"costUsd": "Kosten (USD)",
+		"unknown": "Onbekend",
+		"empty": "Geen gebruiksgegevens voor dit bereik."
+	},
+	"heatmap": {
+		"title": "Dagelijkse activiteit",
+		"30d": "30 dagen",
+		"60d": "60 dagen",
+		"120d": "120 dagen",
+		"360d": "360 dagen",
+		"less": "Minder",
+		"more": "Meer",
+		"noData": "Geen gegevens",
+		"loading": "Laden..."
+	},
+	"coverage": {
+		"title": "Gegevensdekking",
+		"liveFrom": "Opname sinds",
+		"backfilledEvents": "Achteraf ingevoerde gebeurtenissen",
+		"paused": "Opname is gepauzeerd",
+		"notAvailable": "Niet beschikbaar"
+	},
+	"actions": {
+		"exportJson": "JSON exporteren",
+		"exportCsv": "CSV exporteren",
+		"clear": "Alle gegevens wissen",
+		"refresh": "Vernieuwen"
+	},
+	"clearDialog": {
+		"title": "Alle gebruiksstatistieken wissen?",
+		"description": "Hiermee worden alle geregistreerde gebruiksgebeurtenissen permanent verwijderd uit de lokale opslag. Deze actie kan niet ongedaan worden gemaakt.",
+		"confirm": "Verwijderen",
+		"cancel": "Annuleren"
+	},
+	"states": {
+		"loading": "Statistieken laden...",
+		"error": "Statistieken laden mislukt",
+		"empty": "Nog geen gebruiksgegevens. Statistieken verschijnen hier nadat u LLM API-aanroepen hebt gedaan.",
+		"emptyHint": "Stuur een bericht naar uw AI-assistent om te beginnen met het verzamelen van gebruiksgegevens."
+	},
+	"source": {
+		"provider": "Door provider gerapporteerd",
+		"estimated": "Geschat",
+		"backfilled": "Achteraf ingevoerd"
+	}
+}

@@ -1,0 +1,93 @@
+{
+	"title": "डैशबोर्ड",
+	"done": "वापस",
+	"range": {
+		"today": "आज",
+		"7d": "7 दिन",
+		"30d": "30 दिन",
+		"custom": "कस्टम",
+		"all": "सभी"
+	},
+	"summary": {
+		"totalTokens": "कुल टोकन",
+		"inputTokens": "इनपुट टोकन",
+		"outputTokens": "आउटपुट टोकन",
+		"cacheTokens": "कैश टोकन",
+		"cost": "लागत"
+	},
+	"states": {
+		"loading": "लोड हो रहा है...",
+		"error": "आँकड़े लोड करने में विफल",
+		"empty": "अभी तक कोई उपयोग डेटा नहीं",
+		"emptyHint": "आँकड़े देखने के लिए एक बातचीत शुरू करें"
+	},
+	"actions": {
+		"refresh": "ताज़ा करें",
+		"exportJson": "JSON निर्यात करें",
+		"exportCsv": "CSV निर्यात करें",
+		"clear": "आँकड़े साफ़ करें",
+		"rebuild": "आंकड़े पुनः बनाएं"
+	},
+	"breakdown": {
+		"title": "विवरण",
+		"model": "मॉडल",
+		"provider": "प्रदाता",
+		"mode": "मोड",
+		"events": "घटनाएँ",
+		"inputTokens": "इनपुट",
+		"outputTokens": "आउटपुट",
+		"cacheReadTokens": "कैश पढ़ें",
+		"cacheWriteTokens": "कैश लिखें",
+		"reasoningTokens": "तर्क",
+		"totalTokens": "कुल",
+		"costUsd": "लागत",
+		"unknown": "अज्ञात"
+	},
+	"coverage": {
+		"title": "डेटा कवरेज",
+		"liveFrom": "से लाइव",
+		"lastUpdated": "अंतिम अपडेट",
+		"backfilledEvents": "बैकफिल की गई घटनाएँ",
+		"paused": "रिकॉर्डिंग रुकी हुई है (भंडारण सीमा पहुँच गई)"
+	},
+	"clearDialog": {
+		"title": "आँकड़े साफ़ करें",
+		"description": "क्या आप वाकई सभी उपयोग आँकड़े साफ़ करना चाहते हैं? यह क्रिया पूर्ववत नहीं की जा सकती।",
+		"cancel": "रद्द करें",
+		"confirm": "साफ़ करें"
+	},
+	"customRange": {
+		"from": "से",
+		"to": "तक"
+	},
+	"cacheRatio": {
+		"label": "अनुमान के लिए कैश अनुपात",
+		"hint": "जब प्रदाता कैश डेटा की रिपोर्ट नहीं करता है तो लागू होता है"
+	},
+	"sessionDetail": {
+		"summary": "सत्र सारांश",
+		"apiCalls": "API कॉल",
+		"noApiCalls": "कोई API कॉल रिकॉर्ड नहीं",
+		"input": "इनपुट",
+		"output": "आउटपुट",
+		"cost": "लागत",
+		"model": "मॉडल",
+		"mode": "मोड",
+		"time": "समय",
+		"status": "स्थिति"
+	},
+	"time": {
+		"justNow": "अभी",
+		"minutesAgo": "{{count}} मिनट पहले",
+		"hoursAgo": "{{count}} घंटे पहले",
+		"yesterday": "कल",
+		"daysAgo": "{{count}} दिन पहले"
+	},
+	"tasks": {
+		"title": "कार्य",
+		"noTasks": "कोई कार्य दर्ज नहीं है",
+		"filterModel": "सभी मॉडल",
+		"filterProvider": "सभी प्रदाता",
+		"callCount": "{{count}} कॉल"
+	}
+}

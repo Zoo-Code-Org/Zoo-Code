@@ -1,0 +1,93 @@
+{
+	"title": "Dashboard",
+	"done": "Indietro",
+	"range": {
+		"today": "Oggi",
+		"7d": "7 giorni",
+		"30d": "30 giorni",
+		"custom": "Personalizzato",
+		"all": "Tutto"
+	},
+	"summary": {
+		"totalTokens": "Token totali",
+		"inputTokens": "Token di input",
+		"outputTokens": "Token di output",
+		"cacheTokens": "Token cache",
+		"cost": "Costo"
+	},
+	"states": {
+		"loading": "Caricamento...",
+		"error": "Caricamento delle statistiche non riuscito",
+		"empty": "Nessun dato di utilizzo ancora",
+		"emptyHint": "Avvia una conversazione per vedere le statistiche"
+	},
+	"actions": {
+		"refresh": "Aggiorna",
+		"exportJson": "Esporta JSON",
+		"exportCsv": "Esporta CSV",
+		"clear": "Cancella statistiche",
+		"rebuild": "Ricostruisci statistiche"
+	},
+	"breakdown": {
+		"title": "Dettaglio",
+		"model": "Modello",
+		"provider": "Provider",
+		"mode": "Modalità",
+		"events": "Eventi",
+		"inputTokens": "Input",
+		"outputTokens": "Output",
+		"cacheReadTokens": "Lettura cache",
+		"cacheWriteTokens": "Scrittura cache",
+		"reasoningTokens": "Ragionamento",
+		"totalTokens": "Totale",
+		"costUsd": "Costo",
+		"unknown": "Sconosciuto"
+	},
+	"coverage": {
+		"title": "Copertura dati",
+		"liveFrom": "In diretta da",
+		"lastUpdated": "Ultimo aggiornamento",
+		"backfilledEvents": "Eventi retrodatati",
+		"paused": "Registrazione in pausa (limite di archiviazione raggiunto)"
+	},
+	"clearDialog": {
+		"title": "Cancella statistiche",
+		"description": "Sei sicuro di voler cancellare tutte le statistiche di utilizzo? Questa azione non può essere annullata.",
+		"cancel": "Annulla",
+		"confirm": "Cancella"
+	},
+	"customRange": {
+		"from": "Da",
+		"to": "A"
+	},
+	"cacheRatio": {
+		"label": "Rapporto cache per stima",
+		"hint": "Applicato quando il provider non segnala i dati della cache"
+	},
+	"sessionDetail": {
+		"summary": "Riepilogo sessione",
+		"apiCalls": "Chiamate API",
+		"noApiCalls": "Nessuna chiamata API registrata",
+		"input": "Input",
+		"output": "Output",
+		"cost": "Costo",
+		"model": "Modello",
+		"mode": "Modalità",
+		"time": "Ora",
+		"status": "Stato"
+	},
+	"time": {
+		"justNow": "adesso",
+		"minutesAgo": "{{count}} min fa",
+		"hoursAgo": "{{count}} ora fa",
+		"yesterday": "ieri",
+		"daysAgo": "{{count}} giorni fa"
+	},
+	"tasks": {
+		"title": "Attività",
+		"noTasks": "Nessuna attività registrata",
+		"filterModel": "Tutti i modelli",
+		"filterProvider": "Tutti i provider",
+		"callCount": "{{count}} chiamate"
+	}
+}

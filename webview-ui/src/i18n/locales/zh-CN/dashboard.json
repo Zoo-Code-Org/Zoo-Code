@@ -1,0 +1,93 @@
+{
+	"title": "仪表盘",
+	"done": "返回",
+	"range": {
+		"today": "今天",
+		"7d": "7 天",
+		"30d": "30 天",
+		"custom": "自定义",
+		"all": "全部"
+	},
+	"summary": {
+		"totalTokens": "总 Token",
+		"inputTokens": "输入 Token",
+		"outputTokens": "输出 Token",
+		"cacheTokens": "缓存 Token",
+		"cost": "费用"
+	},
+	"states": {
+		"loading": "加载中...",
+		"error": "加载统计数据失败",
+		"empty": "暂无使用数据",
+		"emptyHint": "开始对话即可查看统计数据"
+	},
+	"actions": {
+		"refresh": "刷新",
+		"exportJson": "导出 JSON",
+		"exportCsv": "导出 CSV",
+		"clear": "清除统计",
+		"rebuild": "重新构建统计"
+	},
+	"breakdown": {
+		"title": "明细",
+		"model": "模型",
+		"provider": "提供商",
+		"mode": "模式",
+		"events": "事件",
+		"inputTokens": "输入",
+		"outputTokens": "输出",
+		"cacheReadTokens": "缓存读取",
+		"cacheWriteTokens": "缓存写入",
+		"reasoningTokens": "推理",
+		"totalTokens": "总计",
+		"costUsd": "费用",
+		"unknown": "未知"
+	},
+	"coverage": {
+		"title": "数据覆盖范围",
+		"liveFrom": "实时记录自",
+		"lastUpdated": "最后更新",
+		"backfilledEvents": "回填事件",
+		"paused": "记录已暂停（已达到存储上限）"
+	},
+	"clearDialog": {
+		"title": "清除统计",
+		"description": "确定要清除所有使用统计吗？此操作无法撤销。",
+		"cancel": "取消",
+		"confirm": "清除"
+	},
+	"customRange": {
+		"from": "从",
+		"to": "到"
+	},
+	"cacheRatio": {
+		"label": "缓存比率估计",
+		"hint": "当提供商未报告缓存数据时应用"
+	},
+	"sessionDetail": {
+		"summary": "会话摘要",
+		"apiCalls": "API 调用",
+		"noApiCalls": "没有记录的 API 调用",
+		"input": "输入",
+		"output": "输出",
+		"cost": "费用",
+		"model": "模型",
+		"mode": "模式",
+		"time": "时间",
+		"status": "状态"
+	},
+	"time": {
+		"justNow": "刚刚",
+		"minutesAgo": "{{count}}分钟前",
+		"hoursAgo": "{{count}}小时前",
+		"yesterday": "昨天",
+		"daysAgo": "{{count}}天前"
+	},
+	"tasks": {
+		"title": "任务",
+		"noTasks": "尚未记录任务",
+		"filterModel": "所有模型",
+		"filterProvider": "所有提供商",
+		"callCount": "{{count}} 次调用"
+	}
+}
