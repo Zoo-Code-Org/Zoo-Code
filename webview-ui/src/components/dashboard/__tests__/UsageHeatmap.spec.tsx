@@ -1,4 +1,4 @@
-// npx vitest run src/components/stats/__tests__/UsageHeatmap.spec.tsx
+// npx vitest run src/components/dashboard/__tests__/UsageHeatmap.spec.tsx
 
 import { render, fireEvent } from "@/utils/test-utils"
 

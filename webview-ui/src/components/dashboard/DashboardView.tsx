@@ -28,7 +28,7 @@ import {
 import { Tab, TabHeader, TabContent } from "../common/Tab"
 import DashboardSummary from "./DashboardSummary"
 import TaskList from "@/components/dashboard/TaskList"
-import UsageHeatmap from "../stats/UsageHeatmap"
+import UsageHeatmap from "./UsageHeatmap"
 import { useDashboardStatsStream } from "@/components/dashboard/useDashboardStatsStream"
 
 // ── Types ───────────────────────────────────────────────────────────────────

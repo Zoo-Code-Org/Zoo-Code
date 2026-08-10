@@ -119,7 +119,7 @@ vi.mock("@/components/dashboard/TaskList", () => ({
 	),
 }))
 
-vi.mock("../../stats/UsageHeatmap", () => ({
+vi.mock("../UsageHeatmap", () => ({
 	default: () => <div data-testid="usage-heatmap" />,
 }))
 
