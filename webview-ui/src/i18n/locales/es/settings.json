@@ -356,6 +356,11 @@
 	},
 	"providers": {
 		"providerDocumentation": "Documentación de {{provider}}",
+		"commitMessageModel": {
+			"label": "Modelo para mensajes de confirmación",
+			"description": "Perfil utilizado para generar mensajes de confirmación desde el panel de control de código fuente. Normalmente basta con un modelo pequeño y rápido. Déjalo sin seleccionar para usar el perfil activo.",
+			"useCurrentConfig": "Usar la configuración de API seleccionada actualmente"
+		},
 		"configProfile": "Perfil de configuración",
 		"description": "Guarde diferentes configuraciones de API para cambiar rápidamente entre proveedores y ajustes.",
 		"apiProvider": "Proveedor de API",

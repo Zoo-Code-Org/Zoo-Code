@@ -44,6 +44,8 @@
 		"update_support_prompt": "Ha fallat l'actualització del missatge de suport",
 		"reset_support_prompt": "Ha fallat el restabliment del missatge de suport",
 		"enhance_prompt": "Ha fallat la millora del missatge",
+		"commit_message_no_repository": "No s'ha trobat cap repositori Git al plafó de control de codi font.",
+		"commit_message_failed": "No s'ha pogut generar el missatge de comissió: {{error}}",
 		"get_system_prompt": "Ha fallat l'obtenció del missatge del sistema",
 		"search_commits": "Ha fallat la cerca de commits",
 		"save_api_config": "Ha fallat el desament de la configuració de l'API",
@@ -164,6 +166,8 @@
 	},
 	"info": {
 		"no_changes": "No s'han trobat canvis.",
+		"commit_message_generating": "Generant el missatge de comissió...",
+		"commit_message_no_changes": "No hi ha canvis per confirmar.",
 		"clipboard_copy": "Missatge del sistema copiat correctament al portapapers",
 		"history_cleanup": "S'han netejat {{count}} tasques amb fitxers que falten de l'historial.",
 		"custom_storage_path_set": "Ruta d'emmagatzematge personalitzada establerta: {{path}}",

@@ -40,6 +40,8 @@
 		"update_support_prompt": "Erreur lors de la mise à jour du prompt de support",
 		"reset_support_prompt": "Erreur lors de la réinitialisation du prompt de support",
 		"enhance_prompt": "Erreur lors de l'amélioration du prompt",
+		"commit_message_no_repository": "Aucun dépôt Git trouvé dans le panneau de contrôle de code source.",
+		"commit_message_failed": "Échec de la génération du message de commit : {{error}}",
 		"get_system_prompt": "Erreur lors de l'obtention du prompt système",
 		"search_commits": "Erreur lors de la recherche des commits",
 		"save_api_config": "Erreur lors de l'enregistrement de la configuration API",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Aucun changement trouvé.",
+		"commit_message_generating": "Génération du message de commit...",
+		"commit_message_no_changes": "Aucune modification à valider.",
 		"clipboard_copy": "Prompt système copié dans le presse-papiers",
 		"history_cleanup": "{{count}} tâche(s) avec des fichiers introuvables ont été supprimés de l'historique.",
 		"custom_storage_path_set": "Chemin de stockage personnalisé défini : {{path}}",

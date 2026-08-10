@@ -12,6 +12,17 @@ const execAsync = promisify(exec)
 
 const GIT_OUTPUT_LINE_LIMIT = 500
 
+// Node's default `exec` buffer is 1MB, which real-world diffs routinely exceed.
+const GIT_DIFF_MAX_BUFFER = 10 * 1024 * 1024
+
+// A commit message needs to know what changed, not every line of how. One line of surrounding
+// context per hunk is enough to tell the model where an edit landed, and shrinking the prompt is
+// the one latency factor we control without affecting the model's output.
+//
+// Deliberately no `:(exclude)` pathspecs here: `exec` goes through cmd.exe on Windows, which does
+// not strip the single quotes those require. Oversized diffs are handled by `truncateOutput`.
+const COMMIT_DIFF_ARGS = "--unified=1"
+
 /**
  * Extracts git repository information from the workspace's .git directory
  * @param workspaceRoot The root path of the workspace
@@ -344,6 +355,49 @@ export async function getWorkingState(cwd: string): Promise<string> {
 		console.error("Error getting working state:", error)
 		return `Failed to get working state: ${error instanceof Error ? error.message : String(error)}`
 	}
+}
+
+/**
+ * Collects the changes to describe in a commit message.
+ *
+ * Prefers staged changes, since that is what a commit will actually contain. When nothing is
+ * staged, falls back to the whole working tree so the caller still has something to summarize.
+ *
+ * @param cwd The repository root to inspect
+ * @returns A summary + diff suitable for a prompt, or null if there is nothing to commit
+ */
+export async function getCommitContext(cwd: string): Promise<string | null> {
+	const isInstalled = await checkGitInstalled()
+	if (!isInstalled) {
+		return null
+	}
+
+	const isRepo = await checkGitRepo(cwd)
+	if (!isRepo) {
+		return null
+	}
+
+	const options = { cwd, maxBuffer: GIT_DIFF_MAX_BUFFER }
+
+	const { stdout: stagedSummary } = await execAsync("git diff --cached --stat", options)
+
+	if (stagedSummary.trim()) {
+		const { stdout: stagedDiff } = await execAsync(`git diff --cached ${COMMIT_DIFF_ARGS}`, options)
+		const output = `Staged changes:\n\n${stagedSummary.trim()}\n\n${stagedDiff.trim()}`
+		return truncateOutput(output, GIT_OUTPUT_LINE_LIMIT)
+	}
+
+	// Nothing staged - describe the working tree instead. `git status --short` is used rather than
+	// `--stat` here because it also lists untracked files, which no diff would show.
+	const { stdout: status } = await execAsync("git status --short", options)
+
+	if (!status.trim()) {
+		return null
+	}
+
+	const { stdout: diff } = await execAsync(`git diff HEAD ${COMMIT_DIFF_ARGS}`, options)
+	const output = `Unstaged changes:\n\n${status.trim()}\n\n${diff.trim()}`.trim()
+	return truncateOutput(output, GIT_OUTPUT_LINE_LIMIT)
 }
 
 /**

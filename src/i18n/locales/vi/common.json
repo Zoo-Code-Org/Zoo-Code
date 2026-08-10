@@ -40,6 +40,8 @@
 		"update_support_prompt": "Không thể cập nhật lời nhắc hỗ trợ",
 		"reset_support_prompt": "Không thể đặt lại lời nhắc hỗ trợ",
 		"enhance_prompt": "Không thể nâng cao lời nhắc",
+		"commit_message_no_repository": "Không tìm thấy kho Git nào trong bảng Source Control.",
+		"commit_message_failed": "Không thể tạo thông điệp commit: {{error}}",
 		"get_system_prompt": "Không thể lấy lời nhắc hệ thống",
 		"search_commits": "Không thể tìm kiếm các commit",
 		"save_api_config": "Không thể lưu cấu hình API",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Không tìm thấy thay đổi nào.",
+		"commit_message_generating": "Đang tạo thông điệp commit...",
+		"commit_message_no_changes": "Không có thay đổi nào để commit.",
 		"clipboard_copy": "Lời nhắc hệ thống đã được sao chép thành công vào clipboard",
 		"history_cleanup": "Đã dọn dẹp {{count}} nhiệm vụ có tệp bị thiếu khỏi lịch sử.",
 		"custom_storage_path_set": "Đã thiết lập đường dẫn lưu trữ tùy chỉnh: {{path}}",

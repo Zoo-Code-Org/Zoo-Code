@@ -13,6 +13,7 @@ import {
 	getWorkspaceGitInfo,
 	convertGitUrlToHttps,
 	getGitStatus,
+	getCommitContext,
 } from "../git"
 import { truncateOutput } from "../../integrations/misc/extract-text"
 
@@ -348,6 +349,121 @@ describe("git utils", () => {
 
 			const result = await getCommitInfo("abc123", cwd)
 			expect(result).toBe("Not a git repository")
+		})
+	})
+
+	describe("getCommitContext", () => {
+		const mockDiff = "@@ -1,1 +1,2 @@\n-old line\n+new line"
+
+		type ExecResult = { stdout: string; stderr: string }
+
+		const mockExec = (responses: Map<string, ExecResult>) => {
+			const implementation = (
+				command: string,
+				_options: unknown,
+				callback: (error: Error | null, result?: ExecResult) => void,
+			) => {
+				const response = responses.get(command)
+
+				if (response) {
+					callback(null, response)
+				} else {
+					callback(new Error("Unexpected command"))
+				}
+
+				// `exec` returns a ChildProcess that none of these tests inspect.
+				return {} as ReturnType<typeof exec>
+			}
+
+			vitest.mocked(exec).mockImplementation(implementation as unknown as typeof exec)
+		}
+
+		const gitAvailable: Array<[string, { stdout: string; stderr: string }]> = [
+			["git --version", { stdout: "git version 2.39.2", stderr: "" }],
+			["git rev-parse --git-dir", { stdout: ".git", stderr: "" }],
+		]
+
+		it("should use staged changes when something is staged", async () => {
+			mockExec(
+				new Map([
+					...gitAvailable,
+					["git diff --cached --stat", { stdout: " src/file1.ts | 2 +-", stderr: "" }],
+					["git diff --cached --unified=1", { stdout: mockDiff, stderr: "" }],
+				]),
+			)
+
+			const result = await getCommitContext(cwd)
+			expect(result).toContain("Staged changes:")
+			expect(result).toContain("src/file1.ts")
+			expect(result).toContain("+new line")
+		})
+
+		// These tests mock `exec`, so they cannot catch a diff flag that real git rejects. `exec`
+		// runs through cmd.exe on Windows, which does not strip the single quotes that
+		// `:(exclude)` pathspecs need - keep the argument string free of shell metacharacters.
+		it("should build diff arguments that need no shell quoting", async () => {
+			const commands: string[] = []
+
+			vitest.mocked(exec).mockImplementation(((
+				command: string,
+				_options: unknown,
+				callback: (error: Error | null, result?: ExecResult) => void,
+			) => {
+				commands.push(command)
+				const stdout = command.includes("--stat") ? " src/file1.ts | 2 +-" : mockDiff
+				callback(null, { stdout, stderr: "" })
+				return {} as ReturnType<typeof exec>
+			}) as unknown as typeof exec)
+
+			await getCommitContext(cwd)
+
+			const diffCommands = commands.filter((c) => c.startsWith("git diff"))
+			expect(diffCommands.length).toBeGreaterThan(0)
+
+			for (const command of diffCommands) {
+				expect(command).not.toMatch(/['"()]/)
+			}
+		})
+
+		it("should fall back to the working tree when nothing is staged", async () => {
+			mockExec(
+				new Map([
+					...gitAvailable,
+					["git diff --cached --stat", { stdout: "", stderr: "" }],
+					["git status --short", { stdout: " M src/file1.ts\n?? src/untracked.ts", stderr: "" }],
+					["git diff HEAD --unified=1", { stdout: mockDiff, stderr: "" }],
+				]),
+			)
+
+			const result = await getCommitContext(cwd)
+			expect(result).toContain("Unstaged changes:")
+			// `git status --short` is used here specifically so untracked files are visible.
+			expect(result).toContain("src/untracked.ts")
+			expect(result).toContain("+new line")
+		})
+
+		it("should return null when the tree is clean", async () => {
+			mockExec(
+				new Map([
+					...gitAvailable,
+					["git diff --cached --stat", { stdout: "", stderr: "" }],
+					["git status --short", { stdout: "", stderr: "" }],
+				]),
+			)
+
+			expect(await getCommitContext(cwd)).toBeNull()
+		})
+
+		it("should return null when git is not installed", async () => {
+			mockExec(new Map())
+
+			expect(await getCommitContext(cwd)).toBeNull()
+		})
+
+		it("should return null when not in a git repository", async () => {
+			mockExec(new Map([gitAvailable[0]]))
+
+			expect(await getCommitContext(cwd)).toBeNull()
 		})
 	})
 

@@ -40,6 +40,8 @@
 		"update_support_prompt": "Destek istemi güncellenemedi",
 		"reset_support_prompt": "Destek istemi sıfırlanamadı",
 		"enhance_prompt": "İstem geliştirilemedi",
+		"commit_message_no_repository": "Kaynak Denetimi panelinde Git deposu bulunamadı.",
+		"commit_message_failed": "Commit mesajı oluşturulamadı: {{error}}",
 		"get_system_prompt": "Sistem istemi alınamadı",
 		"search_commits": "Taahhütler aranamadı",
 		"save_api_config": "API yapılandırması kaydedilemedi",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Değişiklik bulunamadı.",
+		"commit_message_generating": "Commit mesajı oluşturuluyor...",
+		"commit_message_no_changes": "Commit edilecek değişiklik yok.",
 		"clipboard_copy": "Sistem istemi panoya başarıyla kopyalandı",
 		"history_cleanup": "Geçmişten eksik dosyaları olan {{count}} görev temizlendi.",
 		"custom_storage_path_set": "Özel depolama yolu ayarlandı: {{path}}",

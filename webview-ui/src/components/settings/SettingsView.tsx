@@ -68,6 +68,7 @@ import { SetCachedStateField, SetExperimentEnabled } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import ApiConfigManager from "./ApiConfigManager"
 import ApiOptions from "./ApiOptions"
+import { CommitMessageModelSelect } from "./CommitMessageModelSelect"
 import { AutoApproveSettings } from "./AutoApproveSettings"
 import { CheckpointSettings } from "./CheckpointSettings"
 import { NotificationSettings } from "./NotificationSettings"
@@ -217,6 +218,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		autoCloseZooOpenedFiles,
 		autoCloseZooOpenedFilesAfterUserEdited,
 		autoCloseZooOpenedNewFiles,
+		commitMessageApiConfigId,
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
@@ -448,6 +450,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					openRouterImageGenerationSelectedModel,
 					experiments,
 					customSupportPrompts,
+					commitMessageApiConfigId,
 				},
 			})
 
@@ -799,6 +802,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 										setApiConfigurationField={setApiConfigurationField}
 										errorMessage={errorMessage}
 										setErrorMessage={setErrorMessage}
+									/>
+									<CommitMessageModelSelect
+										listApiConfigMeta={listApiConfigMeta ?? []}
+										commitMessageApiConfigId={commitMessageApiConfigId}
+										setCachedStateField={setCachedStateField}
 									/>
 								</Section>
 							</div>

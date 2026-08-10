@@ -40,6 +40,8 @@
 		"update_support_prompt": "Bijwerken van ondersteuningsprompt mislukt",
 		"reset_support_prompt": "Resetten van ondersteuningsprompt mislukt",
 		"enhance_prompt": "Verbeteren van prompt mislukt",
+		"commit_message_no_repository": "Geen Git-repository gevonden in het paneel Broncodebeheer.",
+		"commit_message_failed": "Genereren van het commitbericht is mislukt: {{error}}",
 		"get_system_prompt": "Ophalen van systeemprompt mislukt",
 		"search_commits": "Zoeken naar commits mislukt",
 		"save_api_config": "Opslaan van API-configuratie mislukt",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Geen wijzigingen gevonden.",
+		"commit_message_generating": "Commitbericht genereren...",
+		"commit_message_no_changes": "Geen wijzigingen om vast te leggen.",
 		"clipboard_copy": "Systeemprompt succesvol gekopieerd naar klembord",
 		"history_cleanup": "{{count}} taak/taken met ontbrekende bestanden uit geschiedenis verwijderd.",
 		"custom_storage_path_set": "Aangepast opslagpad ingesteld: {{path}}",

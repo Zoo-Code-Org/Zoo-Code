@@ -40,6 +40,8 @@
 		"update_support_prompt": "Fehler beim Aktualisieren der Support-Nachricht",
 		"reset_support_prompt": "Fehler beim Zurücksetzen der Support-Nachricht",
 		"enhance_prompt": "Fehler beim Verbessern der Nachricht",
+		"commit_message_no_repository": "Kein Git-Repository in der Quellcodeverwaltung gefunden.",
+		"commit_message_failed": "Commit-Nachricht konnte nicht generiert werden: {{error}}",
 		"get_system_prompt": "Fehler beim Abrufen der Systemnachricht",
 		"search_commits": "Fehler beim Suchen von Commits",
 		"save_api_config": "Fehler beim Speichern der API-Konfiguration",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Keine Änderungen gefunden.",
+		"commit_message_generating": "Commit-Nachricht wird generiert...",
+		"commit_message_no_changes": "Keine Änderungen zum Committen.",
 		"clipboard_copy": "Systemnachricht erfolgreich in die Zwischenablage kopiert",
 		"history_cleanup": "{{count}} Aufgabe(n) mit fehlenden Dateien aus dem Verlauf bereinigt.",
 		"custom_storage_path_set": "Benutzerdefinierter Speicherpfad festgelegt: {{path}}",

@@ -356,6 +356,11 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}}-Dokumentation",
+		"commitMessageModel": {
+			"label": "Modell für Commit-Nachrichten",
+			"description": "Profil zum Generieren von Commit-Nachrichten aus der Quellcodeverwaltung. Ein kleines, schnelles Modell reicht in der Regel aus. Nicht ausgewählt lassen, um das aktuell aktive Profil zu verwenden.",
+			"useCurrentConfig": "Aktuell ausgewählte API-Konfiguration verwenden"
+		},
 		"configProfile": "Konfigurationsprofil",
 		"description": "Speichern Sie verschiedene API-Konfigurationen, um schnell zwischen Anbietern und Einstellungen zu wechseln.",
 		"apiProvider": "API-Anbieter",

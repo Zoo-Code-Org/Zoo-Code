@@ -40,6 +40,8 @@
 		"update_support_prompt": "サポートメッセージの更新に失敗しました",
 		"reset_support_prompt": "サポートメッセージのリセットに失敗しました",
 		"enhance_prompt": "メッセージの強化に失敗しました",
+		"commit_message_no_repository": "ソース管理パネルに Git リポジトリが見つかりません。",
+		"commit_message_failed": "コミットメッセージの生成に失敗しました: {{error}}",
 		"get_system_prompt": "システムメッセージの取得に失敗しました",
 		"search_commits": "コミットの検索に失敗しました",
 		"save_api_config": "API設定の保存に失敗しました",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "変更は見つかりませんでした。",
+		"commit_message_generating": "コミットメッセージを生成しています...",
+		"commit_message_no_changes": "コミットする変更がありません。",
 		"clipboard_copy": "システムメッセージがクリップボードに正常にコピーされました",
 		"history_cleanup": "履歴から不足ファイルのある{{count}}個のタスクをクリーンアップしました。",
 		"custom_storage_path_set": "カスタムストレージパスが設定されました：{{path}}",

@@ -45,6 +45,8 @@
 		"update_support_prompt": "更新支持消息失败",
 		"reset_support_prompt": "重置支持消息失败",
 		"enhance_prompt": "增强消息失败",
+		"commit_message_no_repository": "在源代码管理面板中未找到 Git 仓库。",
+		"commit_message_failed": "生成提交信息失败：{{error}}",
 		"get_system_prompt": "获取系统消息失败",
 		"search_commits": "搜索提交失败",
 		"save_api_config": "保存API配置失败",
@@ -165,6 +167,8 @@
 	},
 	"info": {
 		"no_changes": "未找到更改。",
+		"commit_message_generating": "正在生成提交信息...",
+		"commit_message_no_changes": "没有可提交的更改。",
 		"clipboard_copy": "系统消息已成功复制到剪贴板",
 		"history_cleanup": "已从历史记录中清理{{count}}个缺少文件的任务。",
 		"custom_storage_path_set": "自定义存储路径已设置：{{path}}",

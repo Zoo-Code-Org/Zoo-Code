@@ -104,6 +104,10 @@
 				"label": "Mejorar solicitud",
 				"description": "Utiliza la mejora de solicitudes para obtener sugerencias o mejoras personalizadas para tus entradas. Esto asegura que Zoo entienda tu intención y proporcione las mejores respuestas posibles. Disponible a través del icono ✨ en el chat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Mensaje de confirmación",
+				"description": "Resume tus cambios en un mensaje de confirmación. Disponible mediante el icono de Zoo Code en el panel de control de código fuente, que escribe el resultado directamente en el campo del mensaje de confirmación."
+			},
 			"CONDENSE": {
 				"label": "Condensación de contexto",
 				"description": "Configura cómo se condensa el contexto de la conversación para gestionar los límites de tokens. Este prompt se utiliza tanto para operaciones de condensación de contexto manuales como automáticas."

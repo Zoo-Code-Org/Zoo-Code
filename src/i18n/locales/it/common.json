@@ -40,6 +40,8 @@
 		"update_support_prompt": "Errore durante l'aggiornamento del messaggio di supporto",
 		"reset_support_prompt": "Errore durante il ripristino del messaggio di supporto",
 		"enhance_prompt": "Errore durante il miglioramento del messaggio",
+		"commit_message_no_repository": "Nessun repository Git trovato nel pannello Controllo del codice sorgente.",
+		"commit_message_failed": "Impossibile generare il messaggio di commit: {{error}}",
 		"get_system_prompt": "Errore durante l'ottenimento del messaggio di sistema",
 		"search_commits": "Errore durante la ricerca dei commit",
 		"save_api_config": "Errore durante il salvataggio della configurazione API",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Nessuna modifica trovata.",
+		"commit_message_generating": "Generazione del messaggio di commit...",
+		"commit_message_no_changes": "Nessuna modifica da confermare.",
 		"clipboard_copy": "Messaggio di sistema copiato con successo negli appunti",
 		"history_cleanup": "Pulite {{count}} attività con file mancanti dalla cronologia.",
 		"custom_storage_path_set": "Percorso di archiviazione personalizzato impostato: {{path}}",

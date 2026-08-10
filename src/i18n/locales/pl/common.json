@@ -40,6 +40,8 @@
 		"update_support_prompt": "Nie udało się zaktualizować komunikatu wsparcia",
 		"reset_support_prompt": "Nie udało się zresetować komunikatu wsparcia",
 		"enhance_prompt": "Nie udało się ulepszyć komunikatu",
+		"commit_message_no_repository": "Nie znaleziono repozytorium Git w panelu kontroli źródła.",
+		"commit_message_failed": "Nie udało się wygenerować komunikatu zatwierdzenia: {{error}}",
 		"get_system_prompt": "Nie udało się pobrać komunikatu systemowego",
 		"search_commits": "Nie udało się wyszukać commitów",
 		"save_api_config": "Nie udało się zapisać konfiguracji API",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "Nie znaleziono zmian.",
+		"commit_message_generating": "Generowanie komunikatu zatwierdzenia...",
+		"commit_message_no_changes": "Brak zmian do zatwierdzenia.",
 		"clipboard_copy": "Komunikat systemowy został pomyślnie skopiowany do schowka",
 		"history_cleanup": "Wyczyszczono {{count}} zadań z brakującymi plikami z historii.",
 		"custom_storage_path_set": "Ustawiono niestandardową ścieżkę przechowywania: {{path}}",

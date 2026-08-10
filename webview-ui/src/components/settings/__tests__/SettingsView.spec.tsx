@@ -373,6 +373,30 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	it("includes the commit message model in the saved settings", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			commitMessageApiConfigId: "config2",
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		// Any edit will do - this asserts the field survives the cachedState round trip rather than
+		// being dropped from the `updateSettings` payload.
+		activateTab("notifications")
+		fireEvent.click(await within(getSettingsContent()).findByTestId("sound-enabled-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({
+						commitMessageApiConfigId: "config2",
+					}),
+				}),
+			),
+		)
+	})
+
 	it("toggles sound setting and sends message to VSCode", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()

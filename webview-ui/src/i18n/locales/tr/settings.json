@@ -356,6 +356,11 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}} Dokümantasyonu",
+		"commitMessageModel": {
+			"label": "Commit Mesajı Modeli",
+			"description": "Kaynak Denetimi panelinden commit mesajları oluşturmak için kullanılan profil. Genellikle küçük ve hızlı bir model yeterlidir. Etkin profili kullanmak için seçimsiz bırakın.",
+			"useCurrentConfig": "Şu anda seçili API yapılandırmasını kullan"
+		},
 		"configProfile": "Yapılandırma Profili",
 		"description": "Sağlayıcılar ve ayarlar arasında hızlıca geçiş yapmak için farklı API yapılandırmalarını kaydedin.",
 		"apiProvider": "API Sağlayıcı",

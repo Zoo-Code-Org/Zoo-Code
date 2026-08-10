@@ -40,6 +40,8 @@
 		"update_support_prompt": "सपोर्ट प्रॉम्प्ट अपडेट करने में विफल",
 		"reset_support_prompt": "सपोर्ट प्रॉम्प्ट रीसेट करने में विफल",
 		"enhance_prompt": "प्रॉम्प्ट को बेहतर बनाने में विफल",
+		"commit_message_no_repository": "स्रोत नियंत्रण पैनल में कोई Git रिपॉजिटरी नहीं मिली।",
+		"commit_message_failed": "कमिट संदेश जनरेट करने में विफल: {{error}}",
 		"get_system_prompt": "सिस्टम प्रॉम्प्ट प्राप्त करने में विफल",
 		"search_commits": "कमिट्स खोजने में विफल",
 		"save_api_config": "API कॉन्फ़िगरेशन सहेजने में विफल",
@@ -160,6 +162,8 @@
 	},
 	"info": {
 		"no_changes": "कोई परिवर्तन नहीं मिला।",
+		"commit_message_generating": "कमिट संदेश जनरेट किया जा रहा है...",
+		"commit_message_no_changes": "कमिट करने के लिए कोई परिवर्तन नहीं है।",
 		"clipboard_copy": "सिस्टम प्रॉम्प्ट क्लिपबोर्ड पर सफलतापूर्वक कॉपी किया गया",
 		"history_cleanup": "इतिहास से गायब फाइलों वाले {{count}} टास्क साफ किए गए।",
 		"custom_storage_path_set": "कस्टम स्टोरेज पाथ सेट किया गया: {{path}}",
