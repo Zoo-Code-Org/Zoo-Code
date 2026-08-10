@@ -1,6 +1,4 @@
-import { kimiCodeDefaultModelInfo, kimiCodeModelDefaults } from "@roo-code/types"
-
-import { getKimiCodeModels, mapKimiCodeModel } from "../kimi-code"
+import { getKimiCodeModels, kimiCodeModelSchema, mapKimiCodeModel } from "../kimi-code"
 
 describe("Kimi Code model discovery", () => {
 	beforeEach(() => vi.restoreAllMocks())
@@ -121,15 +119,35 @@ describe("Kimi Code model discovery", () => {
 		expect(models["kimi-for-coding"].maxTokens).toBe(200_000)
 	})
 
-	it("falls back to per-model defaults from kimiCodeModelDefaults", () => {
-		for (const [modelId, defaults] of Object.entries(kimiCodeModelDefaults)) {
+	it("falls back to per-model defaults for known model ids", () => {
+		const expected: Record<string, number> = {
+			k3: 131_072,
+			"k3-256k": 131_072,
+			"kimi-for-coding": 131_072,
+			"kimi-for-coding-highspeed": 131_072,
+		}
+		for (const [modelId, maxTokens] of Object.entries(expected)) {
 			const mapped = mapKimiCodeModel({ id: modelId })
-			expect(mapped.maxTokens).toBe(defaults.maxTokens)
+			expect(mapped.maxTokens).toBe(maxTokens)
 		}
 	})
 
 	it("falls back to kimiCodeDefaultModelInfo.maxTokens for unknown model ids", () => {
 		const mapped = mapKimiCodeModel({ id: "unknown-model" })
-		expect(mapped.maxTokens).toBe(kimiCodeDefaultModelInfo.maxTokens)
+		expect(mapped.maxTokens).toBe(131_072)
+	})
+
+	it("rejects fractional max_tokens from server response", () => {
+		const mapped = mapKimiCodeModel({
+			id: "kimi-for-coding",
+			max_tokens: 131072.5,
+		})
+		// Zod .int() would reject at schema level, but mapKimiCodeModel receives
+		// already-parsed data. Verify the schema rejects fractional values.
+		const result = kimiCodeModelSchema.safeParse({
+			id: "kimi-for-coding",
+			max_tokens: 131072.5,
+		})
+		expect(result.success).toBe(false)
 	})
 })

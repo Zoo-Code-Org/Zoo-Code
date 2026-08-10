@@ -9,10 +9,10 @@ import {
 	type ModelRecord,
 } from "@roo-code/types"
 
-const kimiCodeModelSchema = z.object({
+export const kimiCodeModelSchema = z.object({
 	id: z.string().min(1),
 	context_length: z.number().positive().optional(),
-	max_tokens: z.number().positive().optional(),
+	max_tokens: z.number().int().positive().optional(),
 	supports_reasoning: z.boolean().optional(),
 	supports_image_in: z.boolean().optional(),
 	display_name: z.string().optional(),
