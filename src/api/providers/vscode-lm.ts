@@ -86,6 +86,67 @@ const LEAKED_INVOKE_PARAM = /<(?:antml:)?parameter\s+name="([^"]+)"\s*>([\s\S]*?
 const MAX_PARTIAL_INVOKE_CARRY = 64
 
 /**
+ * Upper bound on buffered text held while waiting for a leaked `<invoke>` block to close. Markup
+ * that never closes would otherwise withhold the whole response from the user until the stream
+ * ended, so past this size the buffer is released as ordinary text.
+ */
+const MAX_SALVAGE_BUFFER_CHARS = 64 * MAX_PARTIAL_INVOKE_CARRY
+
+/**
+ * Same-line prose that introduces markup as an example rather than invoking it. This is a
+ * deliberately narrow lexical cue: a quoted invoke that ENDS its line is otherwise
+ * indistinguishable from a genuine leak, which is just as often preceded by prose.
+ */
+const QUOTING_CUE =
+	/\b(?:never|not|do not|don't|does not|doesn't|must not|mustn't|avoid|instead of|rather than|for example|e\.g\.|such as|like this|as follows)\b[^.!?\n]*$/i
+
+/**
+ * True when `before` ends inside an open Markdown code fence. Tracks the fence character and its
+ * width so tilde fences and fences of 4+ backticks (which may legally contain shorter fences) are
+ * recognized, rather than counting three-backtick runs for parity.
+ */
+function isInsideCodeFence(before: string): boolean {
+	let openFence: { marker: string; width: number } | null = null
+	for (const line of before.split("\n")) {
+		const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/)
+		if (!fenceMatch) {
+			continue
+		}
+		const marker = fenceMatch[1][0]
+		const width = fenceMatch[1].length
+		if (!openFence) {
+			openFence = { marker, width }
+		} else if (marker === openFence.marker && width >= openFence.width) {
+			openFence = null
+		}
+	}
+	return openFence !== null
+}
+
+/**
+ * Strips well-formed tags repeatedly until the result stops changing. A single pass is unsafe:
+ * `<<invoke>>` reassembles into a live-looking tag after one replacement.
+ */
+/** True when `text` already contains a closed `<invoke>` block, so buffering is still productive. */
+function hasCompleteInvokeBlock(text: string): boolean {
+	LEAKED_INVOKE_BLOCK.lastIndex = 0
+	const found = LEAKED_INVOKE_BLOCK.test(text)
+	LEAKED_INVOKE_BLOCK.lastIndex = 0
+	return found
+}
+
+function stripTagsCompletely(text: string): string {
+	let current = text
+	for (;;) {
+		const stripped = current.replace(/<[^<>]*>/g, "")
+		if (stripped === current) {
+			return stripped
+		}
+		current = stripped
+	}
+}
+
+/**
  * Returns the length of a trailing fragment that might be the start of a leaked tool-call marker
  * split across stream chunks. Such a tail is held back until more text arrives so the marker can
  * be detected intact.
@@ -107,20 +168,28 @@ export function trailingPartialToolMarkerLength(text: string): number {
  */
 function isQuotedAsCode(text: string, index: number, endIndex: number): boolean {
 	const before = text.slice(0, index)
-	if ((before.match(/```/g)?.length ?? 0) % 2 === 1) {
+	if (isInsideCodeFence(before)) {
 		return true
 	}
 	const lineStart = before.lastIndexOf("\n") + 1
-	if ((before.slice(lineStart).match(/`/g)?.length ?? 0) % 2 === 1) {
+	const sameLineBefore = before.slice(lineStart)
+	if ((sameLineBefore.match(/`/g)?.length ?? 0) % 2 === 1) {
 		return true
 	}
-	// A genuine leak ends the turn's line — nothing follows it but the optional closing wrapper.
 	// Narrative words after the block on the same line mean the markup is being talked about
 	// (e.g. "never emit <invoke ...> directly"), which must not be replayed as a live call.
 	const after = text.slice(endIndex)
 	const lineEnd = after.indexOf("\n")
 	const restOfLine = lineEnd === -1 ? after : after.slice(0, lineEnd)
-	return restOfLine.replace(/<[^<>]*>/g, "").trim().length > 0
+	if (stripTagsCompletely(restOfLine).trim().length > 0) {
+		return true
+	}
+	// A quoted invoke that ENDS its line leaves no trailing text to judge. Keying off the mere
+	// presence of leading prose was tried and regressed genuine recoveries, because a real leak is
+	// commonly preceded by narration too ("Working on it.\n"), so only an explicit quoting cue
+	// immediately before the markup suppresses it. Heuristic: prose that quotes markup without
+	// such a cue still reads as a live call.
+	return QUOTING_CUE.test(stripTagsCompletely(sameLineBefore))
 }
 
 function parseLeakedInvokeParams(body: string): Record<string, string> {
@@ -815,6 +884,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					// stream so the full markup can be parsed and replayed as a structured call.
 					if (salvageBuffering) {
 						salvageBuffer += chunk.value
+						// Markup that never closes must not withhold the response indefinitely; past the
+						// cap the buffer is released as plain text and buffering stops for the turn.
+						if (salvageBuffer.length > MAX_SALVAGE_BUFFER_CHARS && !hasCompleteInvokeBlock(salvageBuffer)) {
+							const overflowed = salvageBuffer
+							salvageBuffering = false
+							salvageBuffer = ""
+							salvageEmittedText += overflowed
+							yield { type: "text", text: overflowed }
+						}
 						continue
 					}
 

@@ -444,6 +444,26 @@ describe("VsCodeLmHandler", () => {
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
 			})
 
+			it("flushes an over-long never-closing invoke as plain text", async () => {
+				// Defect 4: without a cap, markup that never closes buffers to the end of the stream
+				// and the user sees nothing.
+				const filler = "x".repeat(5000)
+				const parts = ['<invoke name="calculator">']
+				for (let iter = 0; iter < 4; iter++) {
+					parts.push(filler)
+				}
+				const chunks = await collect(parts)
+
+				const streamedText = chunks
+					.filter((chunk) => chunk.type === "text")
+					.map((chunk) => (chunk as { text: string }).text)
+					.join("")
+
+				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+				expect(streamedText).toContain('<invoke name="calculator">')
+				expect(streamedText).toContain(filler)
+			})
+
 			it("sanitizes lone surrogates in the system prompt", async () => {
 				streamTextParts(["ok"])
 				const stream = handler.createMessage("sys\uD800tem", [{ role: "user" as const, content: "hi" }])
@@ -1362,6 +1382,44 @@ describe("leaked tool-call recovery", () => {
 
 			expect(calls).toHaveLength(0)
 			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover a quoted invoke block that ends its line", () => {
+			// Defect 3: an empty rest-of-line previously made this look like a genuine leak.
+			const text = "You must never emit " + invoke("update_todo_list", param("todos", "x"))
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke block inside a tilde fence", () => {
+			const text = "~~~\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n~~~"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke block inside a four-backtick fence", () => {
+			const text = "````\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n````"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not treat doubled angle brackets as trailing prose after stripping", () => {
+			// Defect 1: a single strip pass turns `<<x>>` into a tag-looking `<x>`, so the
+			// trailing-text check must strip repeatedly until stable.
+			const text = invoke("update_todo_list", param("todos", "x")) + "<<script>>"
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "x" } }])
 		})
 
 		it("keeps wrapper tags around a block that was not recovered", () => {
