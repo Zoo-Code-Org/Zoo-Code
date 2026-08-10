@@ -444,22 +444,46 @@ describe("VsCodeLmHandler", () => {
 				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
 			})
 
-			it("flushes an over-long never-closing invoke as plain text", async () => {
-				// Defect 4: without a cap, markup that never closes buffers to the end of the stream
-				// and the user sees nothing.
+			it("flushes an over-long never-closing invoke as plain text before the stream ends", async () => {
+				// Defect 4: without a cap the buffer is only drained once the stream finishes, so the
+				// user sees nothing until then. Releasing it at the end looks identical in content —
+				// only the timing distinguishes the fix, so track how much of the source has been
+				// produced at the moment each text chunk reaches the consumer.
 				const filler = "x".repeat(5000)
-				const parts = ['<invoke name="calculator">']
-				for (let iter = 0; iter < 4; iter++) {
-					parts.push(filler)
+				const parts = ['<invoke name="calculator">', filler, filler, filler, filler]
+				let partsProduced = 0
+
+				mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+					stream: (async function* () {
+						for (const part of parts) {
+							partsProduced++
+							yield new vscode.LanguageModelTextPart(part)
+						}
+						return
+					})(),
+					text: (async function* () {
+						yield ""
+						return
+					})(),
+				})
+
+				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
+					taskId: "test-task",
+					tools: salvageTools,
+				})
+
+				let sawTextBeforeStreamEnd = false
+				let streamedText = ""
+				for await (const chunk of stream) {
+					if (chunk.type === "text") {
+						streamedText += chunk.text
+						if (partsProduced < parts.length) {
+							sawTextBeforeStreamEnd = true
+						}
+					}
 				}
-				const chunks = await collect(parts)
 
-				const streamedText = chunks
-					.filter((chunk) => chunk.type === "text")
-					.map((chunk) => (chunk as { text: string }).text)
-					.join("")
-
-				expect(chunks.some((chunk) => chunk.type === "tool_call")).toBe(false)
+				expect(sawTextBeforeStreamEnd).toBe(true)
 				expect(streamedText).toContain('<invoke name="calculator">')
 				expect(streamedText).toContain(filler)
 			})
