@@ -1,3 +1,5 @@
+import { kimiCodeDefaultModelInfo, kimiCodeModelDefaults } from "@roo-code/types"
+
 import { getKimiCodeModels, mapKimiCodeModel } from "../kimi-code"
 
 describe("Kimi Code model discovery", () => {
@@ -96,5 +98,38 @@ describe("Kimi Code model discovery", () => {
 		await result
 		expect(vi.mocked(fetch).mock.calls[0][1]?.signal?.aborted).toBe(true)
 		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("overrides maxTokens from server max_tokens in mapKimiCodeModel", () => {
+		const mapped = mapKimiCodeModel({
+			id: "kimi-for-coding",
+			max_tokens: 200_000,
+		})
+		expect(mapped.maxTokens).toBe(200_000)
+	})
+
+	it("overrides maxTokens from server max_tokens at fetcher level in getKimiCodeModels", async () => {
+		vi.spyOn(globalThis, "fetch").mockResolvedValue(
+			new Response(
+				JSON.stringify({
+					data: [{ id: "kimi-for-coding", context_length: 262144, max_tokens: 200_000 }],
+				}),
+				{ status: 200 },
+			),
+		)
+		const models = await getKimiCodeModels("token")
+		expect(models["kimi-for-coding"].maxTokens).toBe(200_000)
+	})
+
+	it("falls back to per-model defaults from kimiCodeModelDefaults", () => {
+		for (const [modelId, defaults] of Object.entries(kimiCodeModelDefaults)) {
+			const mapped = mapKimiCodeModel({ id: modelId })
+			expect(mapped.maxTokens).toBe(defaults.maxTokens)
+		}
+	})
+
+	it("falls back to kimiCodeDefaultModelInfo.maxTokens for unknown model ids", () => {
+		const mapped = mapKimiCodeModel({ id: "unknown-model" })
+		expect(mapped.maxTokens).toBe(kimiCodeDefaultModelInfo.maxTokens)
 	})
 })
