@@ -130,6 +130,7 @@ describe("OpenAiHandler with usage tracking fix", () => {
 				type: "usage",
 				inputTokens: 10,
 				outputTokens: 5,
+				totalCost: 0,
 			})
 
 			// Check the usage chunk is the last one reported from the API
@@ -178,6 +179,7 @@ describe("OpenAiHandler with usage tracking fix", () => {
 				type: "usage",
 				inputTokens: 10,
 				outputTokens: 5,
+				totalCost: 0,
 			})
 		})
 

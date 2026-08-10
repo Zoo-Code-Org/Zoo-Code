@@ -203,6 +203,8 @@ describe("OpenAiHandler", () => {
 			expect(usageChunk).toBeDefined()
 			expect(usageChunk?.inputTokens).toBe(10)
 			expect(usageChunk?.outputTokens).toBe(5)
+			expect(usageChunk?.totalCost).toBeDefined()
+			expect(typeof usageChunk?.totalCost).toBe("number")
 		})
 
 		it("should handle tool calls in non-streaming mode", async () => {
@@ -973,6 +975,8 @@ describe("OpenAiHandler", () => {
 			expect(usageChunk).toBeDefined()
 			expect(usageChunk?.inputTokens).toBe(10)
 			expect(usageChunk?.outputTokens).toBe(5)
+			expect(usageChunk?.totalCost).toBeDefined()
+			expect(typeof usageChunk?.totalCost).toBe("number")
 
 			// Verify the API call was made with correct Azure AI Inference Service path
 			expect(mockCreate).toHaveBeenCalledWith(

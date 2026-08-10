@@ -10,6 +10,7 @@ import {
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
+import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
@@ -107,11 +108,16 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 			}
 
 			if (chunk.usage) {
+				const inputTokens = chunk.usage.prompt_tokens || 0
+				const outputTokens = chunk.usage.completion_tokens || 0
+				const cacheReadTokens = chunk.usage.prompt_tokens_details?.cached_tokens || undefined
+
 				yield {
 					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
+					inputTokens,
+					outputTokens,
+					cacheReadTokens,
+					totalCost: calculateApiCostOpenAI(info, inputTokens, outputTokens, 0, cacheReadTokens).totalCost,
 				}
 			}
 		}

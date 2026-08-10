@@ -144,6 +144,7 @@ describe("KenariHandler", () => {
 				inputTokens: 12,
 				outputTokens: 7,
 				cacheReadTokens: 4,
+				totalCost: 0,
 			})
 		})
 
@@ -204,6 +205,7 @@ describe("KenariHandler", () => {
 					inputTokens: 3,
 					outputTokens: 2,
 					cacheReadTokens: undefined,
+					totalCost: 0,
 				},
 			])
 		})
@@ -299,6 +301,7 @@ describe("KenariHandler", () => {
 				inputTokens: 0,
 				outputTokens: 0,
 				cacheReadTokens: undefined,
+				totalCost: 0,
 			})
 		})
 
