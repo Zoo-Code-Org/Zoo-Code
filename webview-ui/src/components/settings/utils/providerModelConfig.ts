@@ -90,11 +90,11 @@ export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> =
 	[providerIdentifiers.baseten]: basetenDefaultModelId,
 }
 
-export const getProviderServiceConfig = (provider: string): ProviderServiceConfig => {
-	return PROVIDER_SERVICE_CONFIG[provider as ProviderName] ?? { serviceName: provider, serviceUrl: "" }
+export const getProviderServiceConfig = (provider: ProviderName): ProviderServiceConfig => {
+	return PROVIDER_SERVICE_CONFIG[provider] ?? { serviceName: provider, serviceUrl: "" }
 }
 
-export const getDefaultModelIdForProvider = (provider: string, apiConfiguration?: ProviderSettings): string => {
+export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {
 	// Handle Z.ai's China/International entrypoint distinction
 	if (provider === providerIdentifiers.zai && apiConfiguration) {
 		return apiConfiguration.zaiApiLine === "china_coding"
@@ -102,7 +102,7 @@ export const getDefaultModelIdForProvider = (provider: string, apiConfiguration?
 			: internationalZAiDefaultModelId
 	}
 
-	return PROVIDER_DEFAULT_MODEL_IDS[provider as ProviderName] ?? ""
+	return PROVIDER_DEFAULT_MODEL_IDS[provider] ?? ""
 }
 
 export type ProviderModelConfig = {

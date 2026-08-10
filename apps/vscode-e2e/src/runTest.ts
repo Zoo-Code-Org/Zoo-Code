@@ -45,8 +45,12 @@ function isBedrockTargetedRun(testFile?: string, testGrep?: string) {
 	return testGrep?.toLowerCase().includes("bedrock") ?? false
 }
 
-function isRestartPersistenceTargetedRun(testFile?: string): boolean {
-	return testFile?.toLowerCase().includes("restart-persistence") ?? false
+function isRestartPersistenceTargetedRun(testFile?: string, testGrep?: string): boolean {
+	if (testFile?.toLowerCase().includes("restart-persistence")) {
+		return true
+	}
+
+	return testGrep?.toLowerCase().includes("restart persistence") ?? false
 }
 
 async function main() {
@@ -56,7 +60,7 @@ async function main() {
 	const isDeepSeekTest = isDeepSeekTargetedRun(testFile, testGrep)
 	const isGeminiTest = testFile?.toLowerCase().includes("gemini.test") ?? false
 	const isBedrockTest = isBedrockTargetedRun(testFile, testGrep)
-	const isRestartPersistenceTest = isRestartPersistenceTargetedRun(testFile)
+	const isRestartPersistenceTest = isRestartPersistenceTargetedRun(testFile, testGrep)
 
 	if (isRecord && isDeepSeekTest && !process.env.DEEPSEEK_API_KEY) {
 		throw new Error("AIMOCK_RECORD=true requires DEEPSEEK_API_KEY to record DeepSeek fixtures")
