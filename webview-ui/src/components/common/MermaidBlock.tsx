@@ -44,7 +44,8 @@ const MERMAID_THEME = {
 
 mermaid.initialize({
 	startOnLoad: false,
-	securityLevel: "loose",
+	// "strict" is required: mermaid renders LLM-generated source, and looser modes allow HTML injection through diagram labels.
+	securityLevel: "strict",
 	theme: "dark",
 	suppressErrorRendering: true,
 	themeVariables: {

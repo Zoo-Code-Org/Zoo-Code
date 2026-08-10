@@ -6,6 +6,8 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 
 import { MoonshotHandler } from "../moonshot"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 describe("MoonshotHandler", () => {
 	let handler: MoonshotHandler
 	let mockOptions: ApiHandlerOptions
@@ -17,7 +19,7 @@ describe("MoonshotHandler", () => {
 			moonshotBaseUrl: "https://api.moonshot.ai/v1",
 		}
 		handler = new MoonshotHandler(mockOptions)
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("constructor", () => {

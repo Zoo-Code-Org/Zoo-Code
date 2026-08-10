@@ -101,9 +101,10 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 		// Verify consecutiveMistakeCount was incremented
 		expect(mockTask.consecutiveMistakeCount).toBe(1)
 
-		// Verify recordToolError was called
+		// Verify recordToolError was called with a safe static key, never the
+		// raw model-controlled tool name.
 		expect(mockTask.recordToolError).toHaveBeenCalledWith(
-			"nonexistent_tool",
+			"invalid_tool_call",
 			expect.stringContaining("Unknown tool"),
 		)
 
@@ -135,8 +136,9 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 		// Verify consecutiveMistakeCount was incremented
 		expect(mockTask.consecutiveMistakeCount).toBe(1)
 
-		// Verify recordToolError was called
-		expect(mockTask.recordToolError).toHaveBeenCalled()
+		// Verify recordToolError was called with a safe static key, never the
+		// raw model-reported tool name ("fake_tool_that_does_not_exist").
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("invalid_tool_call", expect.anything())
 
 		// Verify error message was shown to user
 		expect(mockTask.say).toHaveBeenCalledWith("error", expect.anything())

@@ -74,12 +74,14 @@ vitest.mock("../fetchers/modelCache", () => ({
 import { poeDefaultModelId } from "@roo-code/types"
 import { PoeHandler } from "../poe"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 describe("PoeHandler", () => {
 	const mockLanguageModel = { modelId: "test-model" }
 	const mockPoeProvider = vitest.fn().mockReturnValue(mockLanguageModel)
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreatePoe.mockReturnValue(mockPoeProvider)
 	})
 

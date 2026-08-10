@@ -21,6 +21,7 @@ import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -107,7 +108,7 @@ describe("OpenRouterHandler", () => {
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	})
 
-	beforeEach(() => vitest.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)

@@ -3,6 +3,7 @@
 // Mock OpenAI client - must come before other imports
 const mockCreate = vi.fn()
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
 		__esModule: true,
@@ -44,7 +45,7 @@ describe("LmStudioHandler Native Tools", () => {
 	]
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		mockOptions = {
 			apiModelId: "local-model",

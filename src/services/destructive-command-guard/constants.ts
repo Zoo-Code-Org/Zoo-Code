@@ -7,6 +7,11 @@ export type DcgArchiveInfo = Readonly<{
 }>
 
 export const DCG_ARCHIVES: Readonly<Record<string, DcgArchiveInfo>> = {
+	"darwin-x64": {
+		archive: "dcg-x86_64-apple-darwin.tar.xz",
+		binary: "dcg",
+		sha256: "15b42fbbbeab47123899e6328d90cd593e14999f3d275f71294815ad8ed9479c",
+	},
 	"darwin-arm64": {
 		archive: "dcg-aarch64-apple-darwin.tar.xz",
 		binary: "dcg",

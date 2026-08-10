@@ -1,16 +1,25 @@
+import { anthropicDefaultModelId, mainlandZAiDefaultModelId, providerIdentifiers } from "@roo-code/types"
+
 import {
 	PROVIDER_SERVICE_CONFIG,
 	PROVIDER_DEFAULT_MODEL_IDS,
 	getProviderServiceConfig,
+	getProviderModelConfig,
 	getDefaultModelIdForProvider,
 	getStaticModelsForProvider,
 	isStaticModelProvider,
 	PROVIDERS_WITH_CUSTOM_MODEL_UI,
 	shouldUseGenericModelPicker,
+	handleModelChangeSideEffects,
 } from "../providerModelConfig"
 
 describe("providerModelConfig", () => {
 	describe("PROVIDER_SERVICE_CONFIG", () => {
+		it("uses canonical provider identifiers as registry keys", () => {
+			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.openaiNative]?.serviceName).toBe("OpenAI")
+			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.vscodeLm]?.serviceName).toBe("VS Code LM")
+		})
+
 		it("contains service config for anthropic", () => {
 			expect(PROVIDER_SERVICE_CONFIG.anthropic).toEqual({
 				serviceName: "Anthropic",
@@ -40,7 +49,7 @@ describe("providerModelConfig", () => {
 		})
 
 		it("contains service config for vscode-lm", () => {
-			expect(PROVIDER_SERVICE_CONFIG["vscode-lm"]).toEqual({
+			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.vscodeLm]).toEqual({
 				serviceName: "VS Code LM",
 				serviceUrl: "https://code.visualstudio.com/api/extension-guides/language-model",
 			})
@@ -63,10 +72,10 @@ describe("providerModelConfig", () => {
 
 	describe("PROVIDER_DEFAULT_MODEL_IDS", () => {
 		it("contains default model IDs for static providers", () => {
-			expect(PROVIDER_DEFAULT_MODEL_IDS.anthropic).toBeDefined()
-			expect(PROVIDER_DEFAULT_MODEL_IDS.bedrock).toBeDefined()
-			expect(PROVIDER_DEFAULT_MODEL_IDS.gemini).toBeDefined()
-			expect(PROVIDER_DEFAULT_MODEL_IDS["openai-native"]).toBeDefined()
+			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.anthropic]).toBeDefined()
+			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.bedrock]).toBeDefined()
+			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.gemini]).toBeDefined()
+			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.openaiNative]).toBeDefined()
 		})
 	})
 
@@ -129,6 +138,29 @@ describe("providerModelConfig", () => {
 		})
 	})
 
+	describe("getProviderModelConfig", () => {
+		it("selects the Z.ai default for the configured API line", () => {
+			const config = getProviderModelConfig(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
+				zaiApiLine: "china_coding",
+			})
+
+			expect(config).toEqual({
+				field: "apiModelId",
+				default: mainlandZAiDefaultModelId,
+			})
+		})
+
+		it("returns undefined for a provider with no model config entry", () => {
+			expect(getProviderModelConfig("unknown-provider" as any)).toBeUndefined()
+		})
+
+		it("returns the static field config for a non-zai provider", () => {
+			const config = getProviderModelConfig(providerIdentifiers.anthropic)
+			expect(config).toEqual({ field: "apiModelId", default: anthropicDefaultModelId })
+		})
+	})
+
 	describe("getStaticModelsForProvider", () => {
 		it("returns models for anthropic provider", () => {
 			const models = getStaticModelsForProvider("anthropic")
@@ -152,7 +184,7 @@ describe("providerModelConfig", () => {
 			expect(isStaticModelProvider("anthropic")).toBe(true)
 			expect(isStaticModelProvider("bedrock")).toBe(true)
 			expect(isStaticModelProvider("gemini")).toBe(true)
-			expect(isStaticModelProvider("openai-native")).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.openaiNative)).toBe(true)
 		})
 
 		it("returns false for providers without static models", () => {
@@ -164,10 +196,10 @@ describe("providerModelConfig", () => {
 
 	describe("PROVIDERS_WITH_CUSTOM_MODEL_UI", () => {
 		it("includes providers that have their own model selection UI", () => {
-			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("openrouter")
-			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("ollama")
-			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("lmstudio")
-			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain("vscode-lm")
+			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain(providerIdentifiers.openrouter)
+			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain(providerIdentifiers.ollama)
+			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain(providerIdentifiers.lmstudio)
+			expect(PROVIDERS_WITH_CUSTOM_MODEL_UI).toContain(providerIdentifiers.vscodeLm)
 		})
 
 		it("does not include static providers using generic picker", () => {
@@ -189,11 +221,46 @@ describe("providerModelConfig", () => {
 			expect(shouldUseGenericModelPicker("openrouter")).toBe(false)
 			expect(shouldUseGenericModelPicker("ollama")).toBe(false)
 			expect(shouldUseGenericModelPicker("lmstudio")).toBe(false)
-			expect(shouldUseGenericModelPicker("vscode-lm")).toBe(false)
+			expect(shouldUseGenericModelPicker(providerIdentifiers.vscodeLm)).toBe(false)
 		})
 
 		it("returns false for providers without static models", () => {
 			expect(shouldUseGenericModelPicker("openai")).toBe(false)
+		})
+	})
+
+	describe("handleModelChangeSideEffects", () => {
+		it("clears awsCustomArn and resets reasoning settings for a non-custom-arn Bedrock model", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.bedrock, "anthropic.claude", setApiConfigurationField)
+
+			expect(setApiConfigurationField).toHaveBeenCalledWith("awsCustomArn", "")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
+		})
+
+		it("does not clear awsCustomArn and resets reasoning settings for the custom-arn Bedrock model", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.bedrock, "custom-arn", setApiConfigurationField)
+
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
+		})
+
+		it("does not clear awsCustomArn and resets reasoning settings for a non-Bedrock provider", () => {
+			const setApiConfigurationField = vi.fn()
+
+			handleModelChangeSideEffects(providerIdentifiers.anthropic, "claude-sonnet", setApiConfigurationField)
+
+			expect(setApiConfigurationField).not.toHaveBeenCalledWith("awsCustomArn", expect.anything())
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
 		})
 	})
 })
