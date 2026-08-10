@@ -1,6 +1,7 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
+import crypto from "crypto"
 
 import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
@@ -140,6 +141,10 @@ export class TaskHistoryStore {
 
 			// 2. Reconcile cache against actual task directories on disk
 			await this.reconcile({ forceRefresh: true })
+			// Capture which active tasks were present in persisted state before replay can
+			// change any statuses. Reconciliation must not treat a replay-repaired parent
+			// as an orphaned active child in the same startup pass.
+			const persistedActiveIds = this.getPersistedActiveIds()
 
 			// 3. Complete any two-record repair interrupted after its intent was durable.
 			try {
@@ -149,7 +154,7 @@ export class TaskHistoryStore {
 			}
 
 			// 4. Repair delegation inconsistencies left by a previous crash
-			await this.reconcileDelegationState()
+			await this.reconcileDelegationState(persistedActiveIds)
 
 			// 5. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
@@ -276,6 +281,7 @@ export class TaskHistoryStore {
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
 			this.cache.delete(taskId)
+			this.taskFileMtimes.delete(taskId)
 
 			// Remove per-task file (best-effort)
 			try {
@@ -301,6 +307,7 @@ export class TaskHistoryStore {
 		return this.withLock(async () => {
 			for (const taskId of taskIds) {
 				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
 
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
@@ -413,94 +420,107 @@ export class TaskHistoryStore {
 	 * resumable. An `active` child is treated as orphaned during startup recovery because
 	 * no live task session exists to own it.
 	 */
-	private async reconcileDelegationState(): Promise<void> {
-		return this.withLock(async () => {
-			// Only statuses loaded from persistence represent sessions that could have
-			// been orphaned by a crash. A delegated parent repaired to active earlier in
-			// this pass remains resumable and must not be mistaken for a second orphaned
-			// child in a delegation chain.
-			const persistedActiveIds = new Set(
-				Array.from(this.cache.values())
-					.filter((item) => (item.status ?? "active") === "active")
-					.map((item) => item.id),
-			)
-			let repairsInThisPass: number
-			do {
-				repairsInThisPass = 0
-				// Rebuild the lookup map each pass so repairs from the previous pass
-				// are visible when evaluating chained delegations.
-				const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
+	private async reconcileDelegationState(persistedActiveIds: ReadonlySet<string>): Promise<void> {
+		return this.withLock(() => this.reconcileDelegationStateCore(persistedActiveIds))
+	}
 
-				for (const [, item] of byId) {
-					if (item.status !== "delegated") {
+	/**
+	 * Reconcile delegation state while the store lock is already held.
+	 *
+	 * Callers that do not hold the lock must use `reconcileDelegationState()`.
+	 * Migration uses this core method so its cache/file/index updates and the
+	 * follow-up repair remain one serialized operation without re-entering the
+	 * non-reentrant lock.
+	 */
+	private async reconcileDelegationStateCore(persistedActiveIds: ReadonlySet<string>): Promise<void> {
+		// Only statuses loaded from persistence represent sessions that could have
+		// been orphaned by a crash. A delegated parent repaired to active earlier in
+		// this pass remains resumable and must not be mistaken for a second orphaned
+		// child in a delegation chain. The snapshot is intentionally captured before
+		// repair-intent replay and remains unchanged for the entire reconciliation.
+		let repairsInThisPass: number
+		do {
+			repairsInThisPass = 0
+			// Rebuild the lookup map each pass so repairs from the previous pass
+			// are visible when evaluating chained delegations.
+			const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
+
+			for (const [, item] of byId) {
+				if (item.status !== "delegated") {
+					continue
+				}
+
+				try {
+					if (!item.awaitingChildId) {
+						await this.upsertCore(
+							{ ...item, status: "active", awaitingChildId: undefined, delegatedToId: undefined },
+							{ skipTransitionCheck: true },
+						)
+						console.warn(
+							`[TaskHistoryStore] Reconciled invalid delegation: task ${item.id} → active (no awaitingChildId)`,
+						)
+						repairsInThisPass++
 						continue
 					}
 
-					try {
-						if (!item.awaitingChildId) {
-							await this.upsertCore(
-								{ ...item, status: "active", awaitingChildId: undefined, delegatedToId: undefined },
-								{ skipTransitionCheck: true },
-							)
-							console.warn(
-								`[TaskHistoryStore] Reconciled invalid delegation: task ${item.id} → active (no awaitingChildId)`,
-							)
-							repairsInThisPass++
-							continue
-						}
+					const child = byId.get(item.awaitingChildId)
 
-						const child = byId.get(item.awaitingChildId)
-
-						if (!child) {
-							await this.upsertCore(
-								{
-									...item,
-									status: "active",
-									awaitingChildId: undefined,
-									delegatedToId: undefined,
-								},
-								{ skipTransitionCheck: true },
-							)
-							console.warn(
-								`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
-							)
-							repairsInThisPass++
-						} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
-							// An active child persisted across startup cannot have a live task session
-							// behind it. Mark it interrupted before releasing the parent's delegation
-							// link so the normal resume/re-delegate flow can take over. This is an
-							// administrative recovery, not a runtime delegation transition.
-							await this.repairActiveDelegation(item, child)
-							console.warn(
-								`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
-							)
-							repairsInThisPass++
-						} else if (child.status === "completed") {
-							await this.upsertCore(
-								{
-									...item,
-									status: "active",
-									awaitingChildId: undefined,
-									delegatedToId: undefined,
-									completedByChildId: child.id,
-									completionResultSummary:
-										child.completionResultSummary ??
-										"Task completed (recovered after interruption)",
-								},
-								{ skipTransitionCheck: true },
-							)
-							console.warn(
-								`[TaskHistoryStore] Reconciled interrupted handoff: task ${item.id} → active (child ${item.awaitingChildId} already completed)`,
-							)
-							repairsInThisPass++
-						}
-					} catch (error) {
-						console.error(`[TaskHistoryStore] Failed to reconcile delegation for task ${item.id}:`, error)
+					if (!child) {
+						await this.upsertCore(
+							{
+								...item,
+								status: "active",
+								awaitingChildId: undefined,
+								delegatedToId: undefined,
+							},
+							{ skipTransitionCheck: true },
+						)
+						console.warn(
+							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
+						)
+						repairsInThisPass++
+					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
+						// An active child persisted across startup cannot have a live task session
+						// behind it. Mark it interrupted before releasing the parent's delegation
+						// link so the normal resume/re-delegate flow can take over. This is an
+						// administrative recovery, not a runtime delegation transition.
+						await this.repairActiveDelegation(item, child)
+						console.warn(
+							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+						)
+						repairsInThisPass++
+					} else if (child.status === "completed") {
+						await this.upsertCore(
+							{
+								...item,
+								status: "active",
+								awaitingChildId: undefined,
+								delegatedToId: undefined,
+								completedByChildId: child.id,
+								completionResultSummary:
+									child.completionResultSummary ?? "Task completed (recovered after interruption)",
+							},
+							{ skipTransitionCheck: true },
+						)
+						console.warn(
+							`[TaskHistoryStore] Reconciled interrupted handoff: task ${item.id} → active (child ${item.awaitingChildId} already completed)`,
+						)
+						repairsInThisPass++
 					}
-					// child.status === "interrupted" or "delegated" → leave as-is this pass
+				} catch (error) {
+					console.error(`[TaskHistoryStore] Failed to reconcile delegation for task ${item.id}:`, error)
 				}
-			} while (repairsInThisPass > 0)
-		})
+				// child.status === "interrupted" or "delegated" → leave as-is this pass
+			}
+		} while (repairsInThisPass > 0)
+	}
+
+	private getPersistedActiveIds(): ReadonlySet<string> {
+		return new Set(
+			Array.from(this.cache.values())
+				.filter((item) => (item.status ?? "active") === "active")
+				.map((item) => item.id),
+		)
 	}
 
 	/**
@@ -508,6 +528,10 @@ export class TaskHistoryStore {
 	 * The expected fields are guards: an intent may update only the missing side
 	 * when the other side is already at its target, or when both records still
 	 * describe the original delegated handoff.
+	 *
+	 * This method acquires the store's non-reentrant promise-chain lock. It must be
+	 * called outside an existing `withLock` callback; locked callers must use the
+	 * corresponding core methods directly instead of awaiting this method.
 	 */
 	private async replayDelegationRepairIntent(): Promise<void> {
 		return this.withLock(async () => {
@@ -527,20 +551,20 @@ export class TaskHistoryStore {
 			}
 
 			const childAtTarget = child.status === intent.target.childStatus
-			const parentAtTarget =
+			const parentMatchesTargetState =
 				parent.status === intent.target.parentStatus &&
 				parent.awaitingChildId === undefined &&
 				parent.delegatedToId === undefined
 			const childMatchesExpected = this.matchesDelegationRepairChildPreconditions(intent, child)
 			const parentMatchesExpected = this.matchesDelegationRepairParentPreconditions(intent, parent)
 
-			if ((!childAtTarget && !childMatchesExpected) || (!parentAtTarget && !parentMatchesExpected)) {
+			if ((!childAtTarget && !childMatchesExpected) || (!parentMatchesTargetState && !parentMatchesExpected)) {
 				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
 				return
 			}
 
 			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
-			const repairedParent = parentAtTarget
+			const repairedParent = parentMatchesTargetState
 				? parent
 				: {
 						...parent,
@@ -550,17 +574,22 @@ export class TaskHistoryStore {
 					}
 
 			if (!childAtTarget) await this.writeTaskFile(repairedChild)
-			if (!parentAtTarget) await this.writeTaskFile(repairedParent)
+			if (!parentMatchesTargetState) await this.writeTaskFile(repairedParent)
 
 			this.cache.set(repairedChild.id, repairedChild)
 			this.cache.set(repairedParent.id, repairedParent)
-			this.scheduleIndexWrite()
 
 			// The journal is retained until the write-through callback succeeds.
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
 			}
 			await this.removeDelegationRepairIntent()
+			// Task files are authoritative and the intent is the recovery journal.
+			// Clean up the journal before scheduling the derived index: a crash after
+			// cleanup but before the index write is safe because startup rebuilds the
+			// index from task files, while the reverse ordering could make the index
+			// appear durable before recovery metadata is settled.
+			this.scheduleIndexWrite()
 		})
 	}
 
@@ -571,7 +600,7 @@ export class TaskHistoryStore {
 	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<void> {
 		const intent: DelegationRepairIntent = {
 			version: 1,
-			operationId: `delegation-repair-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+			operationId: crypto.randomUUID(),
 			parentTaskId: parent.id,
 			childTaskId: child.id,
 			expected: {
@@ -611,12 +640,14 @@ export class TaskHistoryStore {
 
 		this.cache.set(repairedChild.id, repairedChild)
 		this.cache.set(repairedParent.id, repairedParent)
-		this.scheduleIndexWrite()
 
 		if (this.onWrite) {
 			await this.onWrite(this.getAll())
 		}
 		await this.removeDelegationRepairIntent()
+		// The index is derived state; keep the intent until authoritative task-file
+		// writes and write-through have completed, then schedule the index update.
+		this.scheduleIndexWrite()
 	}
 
 	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
@@ -640,10 +671,8 @@ export class TaskHistoryStore {
 		let parsed: unknown
 		try {
 			parsed = JSON.parse(await fs.readFile(intentPath, "utf8")) as unknown
-		} catch {
-			try {
-				await fs.access(intentPath)
-			} catch {
+		} catch (error) {
+			if (this.isFileNotFoundError(error)) {
 				return null
 			}
 			await this.quarantineDelegationRepairIntent(null, "malformed JSON")
@@ -673,6 +702,7 @@ export class TaskHistoryStore {
 				? (expectedRecord.child as Record<string, unknown>)
 				: null
 		const target = candidate.target
+		const targetRecord = target && typeof target === "object" ? (target as Record<string, unknown>) : null
 		return (
 			candidate.version === 1 &&
 			typeof candidate.operationId === "string" &&
@@ -688,10 +718,9 @@ export class TaskHistoryStore {
 			expectedChild.status === "active" &&
 			(expectedChild.parentTaskId === undefined || typeof expectedChild.parentTaskId === "string") &&
 			(expectedChild.rootTaskId === undefined || typeof expectedChild.rootTaskId === "string") &&
-			!!target &&
-			typeof target === "object" &&
-			(target as Record<string, unknown>).childStatus === "interrupted" &&
-			(target as Record<string, unknown>).parentStatus === "active"
+			!!targetRecord &&
+			targetRecord.childStatus === "interrupted" &&
+			targetRecord.parentStatus === "active"
 		)
 	}
 
@@ -732,6 +761,10 @@ export class TaskHistoryStore {
 			!value.includes("/") &&
 			!value.includes("\\")
 		)
+	}
+
+	private isFileNotFoundError(error: unknown): boolean {
+		return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
 	}
 
 	private async getDelegationRepairIntentPath(): Promise<string> {
@@ -782,40 +815,43 @@ export class TaskHistoryStore {
 			return
 		}
 
-		for (const item of taskHistoryEntries) {
-			if (!item.id) {
-				continue
-			}
-
-			// Check if task directory exists on disk
+		await this.withLock(async () => {
 			const tasksDir = await this.getTasksDir()
-			const taskDir = path.join(tasksDir, item.id)
 
-			try {
-				await fs.access(taskDir)
-			} catch {
-				// Task directory doesn't exist; skip this entry as it's orphaned in globalState
-				continue
+			for (const item of taskHistoryEntries) {
+				if (!item.id) {
+					continue
+				}
+
+				// Check if task directory exists on disk
+				const taskDir = path.join(tasksDir, item.id)
+
+				try {
+					await fs.access(taskDir)
+				} catch {
+					// Task directory doesn't exist; skip this entry as it's orphaned in globalState
+					continue
+				}
+
+				// Write history_item.json if it doesn't exist yet
+				const filePath = path.join(taskDir, GlobalFileNames.historyItem)
+				try {
+					await fs.access(filePath)
+					// File already exists, skip (don't overwrite existing per-task files)
+				} catch {
+					// File doesn't exist, write it
+					await safeWriteJson(filePath, item)
+					this.cache.set(item.id, item)
+				}
 			}
 
-			// Write history_item.json if it doesn't exist yet
-			const filePath = path.join(taskDir, GlobalFileNames.historyItem)
-			try {
-				await fs.access(filePath)
-				// File already exists, skip (don't overwrite existing per-task files)
-			} catch {
-				// File doesn't exist, write it
-				await safeWriteJson(filePath, item)
-				this.cache.set(item.id, item)
-			}
-		}
+			// Write the index
+			await this.writeIndex()
 
-		// Write the index
-		await this.writeIndex()
-
-		// Repair any delegation inconsistencies introduced by the migrated entries.
-		// reconcileDelegationState() is idempotent so running it again is safe.
-		await this.reconcileDelegationState()
+			// Repair any delegation inconsistencies introduced by the migrated entries.
+			// Run the lock-free core because migration already holds the store lock.
+			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
+		})
 	}
 
 	// ────────────────────────────── Private: Index management ──────────────────────────────

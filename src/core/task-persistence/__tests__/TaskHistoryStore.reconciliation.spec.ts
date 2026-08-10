@@ -322,6 +322,16 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 		expect(store.get(child.id)?.status).toBe("interrupted")
 		expect(store.get(parent.id)?.status).toBe("active")
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
+		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.delegatedToId).toBeUndefined()
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
@@ -350,6 +360,16 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await replayedStore.initialize()
 		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
 		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
+		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
 	it("replays an intent after a failure before the parent write", async () => {
@@ -377,6 +397,16 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await replayedStore.initialize()
 		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
 		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
+		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
 	it("retains an intent when the callback fails after both writes", async () => {
@@ -401,6 +431,70 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await replayedStore.initialize()
 		expect(replayedStore.get(child.id)?.status).toBe("interrupted")
 		expect(replayedStore.get(parent.id)?.status).toBe("active")
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
+		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.delegatedToId).toBeUndefined()
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
+	it("replays a both-at-target intent without writing task files", async () => {
+		const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
+		const parent = makeItem({ id: "parent-at-target", status: "active" })
+		await seedItems([parent, child])
+		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(
+			intentPath,
+			JSON.stringify(makeRepairIntent({ ...parent, status: "delegated", awaitingChildId: child.id }, child)),
+		)
+
+		const writeCalls: string[] = []
+		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
+			writeCalls.push(filePath)
+			await writeJson(filePath, data)
+		})
+		await store.initialize()
+
+		expect(writeCalls.filter((filePath) => filePath.endsWith(GlobalFileNames.historyItem))).toEqual([])
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
+	it("does not schedule the derived index before repair-intent cleanup succeeds", async () => {
+		const child = makeItem({ id: "child-deferred-index", status: "active", parentTaskId: "parent-deferred-index" })
+		const parent = makeItem({
+			id: "parent-deferred-index",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		await store.reconcile({ forceRefresh: true })
+
+		const events: string[] = []
+		const storeInternals = store as unknown as {
+			scheduleIndexWrite: () => void
+			removeDelegationRepairIntent: () => Promise<void>
+			replayDelegationRepairIntent: () => Promise<void>
+		}
+		vi.spyOn(storeInternals, "removeDelegationRepairIntent").mockImplementation(async () => {
+			events.push("cleanup")
+			await fs.unlink(intentPath)
+		})
+		vi.spyOn(storeInternals, "scheduleIndexWrite").mockImplementation(() => {
+			events.push("schedule")
+		})
+
+		await storeInternals.replayDelegationRepairIntent()
+
+		expect(events).toEqual(["cleanup", "schedule"])
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
@@ -419,6 +513,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
 			),
 		).toBe(true)
+		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
 	it("quarantines an intent with a missing task record without changing unrelated startup", async () => {
@@ -439,6 +534,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
 			),
 		).toBe(true)
+		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
 	it("quarantines an intent when the parent no longer matches its repair guard", async () => {
@@ -468,6 +564,48 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(store.get(parent.id)?.status).toBe("completed")
 		expect(await fs.readFile(childPath, "utf8")).toBe(beforeChild)
 		expect(await fs.readFile(parentPath, "utf8")).toBe(beforeParent)
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(true)
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
+	it("quarantines an intent when the child no longer matches its repair guard", async () => {
+		const child = makeItem({
+			id: "child-mismatched-intent",
+			status: "completed",
+			parentTaskId: "mismatched-child-parent",
+		})
+		const parent = makeItem({
+			id: "parent-mismatched-child-intent",
+			status: "active",
+		})
+		await seedItems([parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(
+			intentPath,
+			JSON.stringify(
+				makeRepairIntent(
+					{ ...parent, status: "delegated", awaitingChildId: child.id, delegatedToId: child.id },
+					{ ...child, status: "active" },
+				),
+			),
+		)
+		const childPath = path.join(tasksDir, child.id, GlobalFileNames.historyItem)
+		const parentPath = path.join(tasksDir, parent.id, GlobalFileNames.historyItem)
+		const beforeChild = await fs.readFile(childPath, "utf8")
+		const beforeParent = await fs.readFile(parentPath, "utf8")
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("completed")
+		expect(store.get(parent.id)?.status).toBe("active")
+		expect(await fs.readFile(childPath, "utf8")).toBe(beforeChild)
+		expect(await fs.readFile(parentPath, "utf8")).toBe(beforeParent)
+		await expect(fs.access(intentPath)).rejects.toThrow()
 		expect(
 			(await fs.readdir(tasksDir)).some((name) =>
 				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
@@ -517,9 +655,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(store.get("parent-b")?.status).toBe("active")
 	})
 
-	it("handles chained delegation (A→B→C) until all orphaned links converge", async () => {
+	it("repairs an orphaned link in a chained delegation without repairing its grandparent", async () => {
 		// C doesn't exist (orphaned). B is delegated waiting for C → repaired to active.
-		// A then sees B as an orphaned active child and is repaired as well.
+		// A sees B as delegated in the persisted startup snapshot and remains delegated.
 		const parentA = makeItem({ id: "parent-a-chain", status: "delegated", awaitingChildId: "parent-b-chain" })
 		const parentB = makeItem({
 			id: "parent-b-chain",
@@ -538,6 +676,68 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(store.get("parent-a-chain")?.awaitingChildId).toBe("parent-b-chain")
 		expect(store.get("parent-b-chain")?.status).toBe("active")
 		expect(store.get("parent-b-chain")?.awaitingChildId).toBeUndefined()
+	})
+
+	it("does not repair a grandparent when replay repairs the middle node", async () => {
+		const grandparent = makeItem({
+			id: "grandparent-replay-chain",
+			status: "delegated",
+			awaitingChildId: "parent-replay-chain",
+			delegatedToId: "parent-replay-chain",
+		})
+		const parent = makeItem({
+			id: "parent-replay-chain",
+			status: "delegated",
+			awaitingChildId: "child-replay-chain",
+			delegatedToId: "child-replay-chain",
+			parentTaskId: grandparent.id,
+			rootTaskId: grandparent.id,
+		})
+		const child = makeItem({
+			id: "child-replay-chain",
+			status: "active",
+			parentTaskId: parent.id,
+			rootTaskId: grandparent.id,
+		})
+		await seedItems([grandparent, parent, child])
+		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+
+		await store.initialize()
+
+		// Replay repairs B/C, but B was delegated at the persisted startup snapshot.
+		// A must remain delegated to the now-interrupted/resumable B.
+		expect(store.get(grandparent.id)).toMatchObject({
+			id: grandparent.id,
+			status: "delegated",
+			awaitingChildId: parent.id,
+			delegatedToId: parent.id,
+		})
+		expect(store.get(parent.id)).toMatchObject({ id: parent.id, status: "active" })
+		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
+		expect(store.get(parent.id)?.delegatedToId).toBeUndefined()
+		expect(store.get(child.id)).toMatchObject({ id: child.id, status: "interrupted" })
+
+		const persistedGrandparent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", grandparent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", parent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedGrandparent).toMatchObject({
+			id: grandparent.id,
+			status: "delegated",
+			awaitingChildId: parent.id,
+			delegatedToId: parent.id,
+		})
+		expect(persistedParent).toMatchObject({ id: parent.id, status: "active" })
+		expect(persistedParent.awaitingChildId).toBeUndefined()
+		expect(persistedParent.delegatedToId).toBeUndefined()
+		expect(persistedChild).toMatchObject({ id: child.id, status: "interrupted" })
+		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
 	it("is idempotent when recovering an active child", async () => {
