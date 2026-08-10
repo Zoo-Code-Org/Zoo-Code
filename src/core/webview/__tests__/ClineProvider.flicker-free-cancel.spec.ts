@@ -44,8 +44,9 @@ vi.mock("vscode", () => {
 		},
 		EventEmitter: vi.fn().mockImplementation(function () {
 			return {
-				event: vi.fn(),
+				event: vi.fn(() => ({ dispose: vi.fn() })),
 				fire: vi.fn(),
+				dispose: vi.fn(),
 			}
 		}),
 		Disposable: {
@@ -267,6 +268,7 @@ vi.mock("../../task-persistence", async (importOriginal) => {
 				delete: vi.fn().mockResolvedValue(undefined),
 				deleteMany: vi.fn().mockResolvedValue(undefined),
 				migrateFromGlobalState: vi.fn().mockResolvedValue(undefined),
+				onDidChange: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 			}
 		}),
 		readApiMessages: vi.fn().mockResolvedValue([]),

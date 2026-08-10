@@ -88,6 +88,9 @@ import { CodeIndexManager } from "../../services/code-index/manager"
 import type { IndexProgressUpdate } from "../../services/code-index/interfaces/manager"
 import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
+import { UsageStatsService } from "../../services/stats"
+import type { StatsStreamSink } from "../../services/stats"
+import { DashboardTaskCatalog } from "../../services/stats/DashboardTaskCatalog"
 
 import { fileExistsAtPath } from "../../utils/fs"
 import { setTtsEnabled, setTtsSpeed } from "../../utils/tts"
@@ -202,6 +205,8 @@ export class ClineProvider
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
 	protected mcpHub?: McpHub // Change from private to protected
 	protected skillsManager?: SkillsManager
+	private usageStatsService?: UsageStatsService
+	private readonly dashboardTaskCatalog: DashboardTaskCatalog
 	private marketplaceManager: MarketplaceManager
 	private mdmService?: MdmService
 	private taskCreationCallback: (task: Task) => void
@@ -338,6 +343,7 @@ export class ClineProvider
 				this.scheduleGlobalStateWriteThrough()
 			},
 		})
+		this.dashboardTaskCatalog = new DashboardTaskCatalog(this.taskHistoryStore)
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
@@ -372,6 +378,29 @@ export class ClineProvider
 		this.skillsManager.initialize().catch((error) => {
 			this.log(`Failed to initialize Skills Manager: ${error}`)
 		})
+
+		// Initialize Usage Stats Service for local token usage tracking.
+		// Initialization failure is non-fatal — the service becomes unavailable
+		// and stats handlers return "service unavailable" errors gracefully.
+		try {
+			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+			this.usageStatsService = new UsageStatsService(globalStoragePath, this.dashboardTaskCatalog)
+			this.usageStatsService.initialize().catch((error) => {
+				this.log(`Failed to initialize Usage Stats Service: ${error}`)
+				this.usageStatsService = undefined
+			})
+
+			// Subscribe to cross-window file changes so this window's dashboard
+			// refreshes when another VS Code window records new usage events.
+			this.usageStatsService.onDidChange(() => {
+				this.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
+					// View disposed, drop message silently
+				})
+			})
+		} catch (error) {
+			this.log(`Failed to create Usage Stats Service: ${error}`)
+			this.usageStatsService = undefined
+		}
 
 		this.marketplaceManager = new MarketplaceManager(this.context, this.customModesManager)
 
@@ -802,6 +831,15 @@ export class ClineProvider
 	*/
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
+
+		// Release the dashboard stats stream subscription held on behalf of this
+		// webview, so a dead webview stops receiving coordinator drains.
+		const streamSink = (this as unknown as { _streamSink?: StatsStreamSink })._streamSink
+		if (streamSink) {
+			this.getUsageStatsService()?.getCoordinator()?.unsubscribe(streamSink)
+			;(this as unknown as { _streamSink?: StatsStreamSink })._streamSink = undefined
+		}
+
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -867,6 +905,8 @@ export class ClineProvider
 		this.skillsManager = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
+		this.usageStatsService?.dispose()
+		this.dashboardTaskCatalog.dispose()
 		this.taskHistoryStore.dispose()
 		this.flushGlobalStateWriteThrough()
 		this.log("Disposed all disposables")
@@ -3247,6 +3287,14 @@ export class ClineProvider
 
 	public getSkillsManager(): SkillsManager | undefined {
 		return this.skillsManager
+	}
+
+	/**
+	 * Returns the UsageStatsService instance, or undefined if initialization failed.
+	 * The service provides local token usage statistics: query, export, clear.
+	 */
+	public getUsageStatsService(): UsageStatsService | undefined {
+		return this.usageStatsService
 	}
 
 	/**
