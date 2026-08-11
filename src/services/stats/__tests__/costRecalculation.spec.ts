@@ -13,6 +13,7 @@ import {
 	providerReportsCache,
 	computeCacheDiscountBase,
 	applyCacheDiscount,
+	customPricingKey,
 } from "../costRecalculation"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
@@ -616,6 +617,136 @@ describe("costRecalculation", () => {
 			// Anthropic semantic: inputTokens does NOT include cached tokens
 			// cost = (1000 / 1M) * 3.0 + (500 / 1M) * 15.0 = 0.003 + 0.0075 = 0.0105
 			expect(getEffectiveCost(event)).toBeCloseTo(0.0105, 10)
+		})
+
+		// ── Query-time CustomModelPricingMap tests ──────────────────────────
+
+		it("lookupModelInfo should use customPricing map when model is not in static registry", () => {
+			const map = new Map([["openai|my-custom-model", { inputPrice: 2.0, outputPrice: 6.0 }]])
+			const info = lookupModelInfo("openai", "my-custom-model", undefined, map)
+			expect(info).toBeDefined()
+			expect(info?.inputPrice).toBe(2.0)
+			expect(info?.outputPrice).toBe(6.0)
+		})
+
+		it("lookupModelInfo should prefer static registry over customPricing map", () => {
+			// anthropic/claude-sonnet-4-5 is in the static registry.
+			// Even if customPricing has a different price, static wins.
+			const map = new Map([["anthropic|claude-sonnet-4-5", { inputPrice: 99.0, outputPrice: 99.0 }]])
+			const info = lookupModelInfo("anthropic", "claude-sonnet-4-5", undefined, map)
+			expect(info?.inputPrice).toBe(3.0) // from static registry, not 99.0
+		})
+
+		it("lookupModelInfo should prefer event modelPricing over customPricing map", () => {
+			// Event-level modelPricing (capture-time) takes precedence over
+			// the query-time customPricing map.
+			const map = new Map([["openai|my-custom-model", { inputPrice: 99.0, outputPrice: 99.0 }]])
+			const info = lookupModelInfo("openai", "my-custom-model", { inputPrice: 2.0, outputPrice: 6.0 }, map)
+			expect(info?.inputPrice).toBe(2.0) // from modelPricing, not 99.0
+		})
+
+		it("computeCacheDiscountBase should return 0 for custom model with cacheReadsPrice via customPricing", () => {
+			// Custom model with cacheReadsPrice → providerReportsCache returns true
+			// → discountBase = 0 (slider should NOT affect cost, same as static registry)
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				// modelPricing intentionally absent — simulating post-revert events
+				usage: {
+					inputTokens: { value: 1_000_000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			const map = new Map([["openai|my-custom-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+			expect(computeCacheDiscountBase(event, map)).toBe(0)
+		})
+
+		it("computeCacheDiscountBase should return 0 for reporting provider even with customPricing", () => {
+			// Custom model WITH cacheReadsPrice → providerReportsCache returns true
+			// → discountBase = 0 (slider should NOT affect cost)
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-reporting-model",
+				usage: {
+					inputTokens: { value: 1_000_000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			const map = new Map([["openai|my-reporting-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+			expect(computeCacheDiscountBase(event, map)).toBe(0)
+		})
+
+		it("computeCacheDiscountBase should return 0 when customPricing has no cacheReadsPrice", () => {
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 1_000_000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			const map = new Map([["openai|my-custom-model", { inputPrice: 2.0, outputPrice: 6.0 }]])
+			// No cacheReadsPrice → guard check fails → 0
+			expect(computeCacheDiscountBase(event, map)).toBe(0)
+		})
+
+		it("computeCacheDiscountBase should return 0 when customPricing is absent", () => {
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 1_000_000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			// No modelPricing on event, no customPricing map → lookupModelInfo returns undefined
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+
+		it("getEffectiveCost should use customPricing when costUsd is missing", () => {
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// costUsd missing
+				},
+			})
+			const map = new Map([["openai|my-custom-model", { inputPrice: 2.0, outputPrice: 6.0 }]])
+			// (1000 / 1M) * 2.0 + (500 / 1M) * 6.0 = 0.002 + 0.003 = 0.005
+			expect(getEffectiveCost(event, map)).toBeCloseTo(0.005, 10)
+		})
+
+		it("customPricingKey should build correct map key", () => {
+			expect(customPricingKey("openai", "gpt-4")).toBe("openai|gpt-4")
+			expect(customPricingKey("anthropic", "claude-sonnet-4")).toBe("anthropic|claude-sonnet-4")
+		})
+
+		it("full chain: customPricing → getEffectiveCost → computeCacheDiscountBase → applyCacheDiscount", () => {
+			// Simulate the full query-time chain for a custom model:
+			// inputPrice=3.0, cacheReadsPrice=0.3 (same as anthropic, but custom)
+			// inputTokens=1_000_000, no costUsd, no modelPricing on event
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 1_000_000, source: "provider" },
+					outputTokens: { value: 0, source: "provider" },
+				},
+			})
+			const map = new Map([["openai|my-custom-model", { inputPrice: 3.0, cacheReadsPrice: 0.3 }]])
+			// Cost: (1_000_000 / 1M) * 3.0 = 3.0
+			const cost = getEffectiveCost(event, map)
+			expect(cost).toBeCloseTo(3.0, 10)
+
+			// Discount base: 0 because cacheReadsPrice is defined → providerReportsCache=true
+			const discountBase = computeCacheDiscountBase(event, map)
+			expect(discountBase).toBe(0)
+
+			// With cacheRatio=0.5: cost unchanged (discountBase=0)
+			const discounted = applyCacheDiscount(cost, discountBase, 0.5)
+			expect(discounted).toBeCloseTo(3.0, 10)
 		})
 	})
 })

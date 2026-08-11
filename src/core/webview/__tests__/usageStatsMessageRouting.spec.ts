@@ -199,7 +199,7 @@ describe("usageStatsMessageRouting", () => {
 
 			await webviewMessageHandler(provider, message)
 
-			expect(queryStats).toHaveBeenCalledWith(validQuery, { recordingPaused: false })
+			expect(queryStats).toHaveBeenCalledWith(validQuery, { recordingPaused: false, customPricing: undefined })
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 				type: "getUsageStatsResponse",
 				requestId: "route-1",

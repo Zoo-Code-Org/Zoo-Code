@@ -203,7 +203,7 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetUsageStats(provider, message)
 
-			expect(queryStats).toHaveBeenCalledWith(validQuery, { recordingPaused: false })
+			expect(queryStats).toHaveBeenCalledWith(validQuery, { recordingPaused: false, customPricing: undefined })
 			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
 				type: "getUsageStatsResponse",
 				requestId: "req-1",
@@ -306,7 +306,7 @@ describe("usageStatsMessageHandler", () => {
 
 			await handleGetUsageStats(provider, message)
 
-			expect(queryStats).toHaveBeenCalledWith(validQuery, { recordingPaused: true })
+			expect(queryStats).toHaveBeenCalledWith(validQuery, { recordingPaused: true, customPricing: undefined })
 		})
 	})
 

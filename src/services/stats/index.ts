@@ -34,7 +34,16 @@ export { resolveEndpoint } from "./UsageCapture"
 export { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
 export type { StatsStreamSink, StatsStreamErrorCode } from "./UsageStatsStreamCoordinator"
 
-export { getEffectiveCost, computeEventCost, lookupModelInfo, providerReportsCache } from "./costRecalculation"
+export {
+	getEffectiveCost,
+	computeEventCost,
+	lookupModelInfo,
+	providerReportsCache,
+	computeCacheDiscountBase,
+	applyCacheDiscount,
+	customPricingKey,
+} from "./costRecalculation"
+export type { CustomModelPricing, CustomModelPricingMap } from "./costRecalculation"
 
 export { resolveStatsQueryRangeMs, isStatsQueryRangeBounded, isWithinStatsQueryRange } from "./statsQueryRange"
 export type { StatsQueryRangeMs } from "./statsQueryRange"

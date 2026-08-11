@@ -39,6 +39,7 @@ import { computeTaskPage, computeTaskSummaries } from "./DashboardTaskProjection
 import type { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import { resolveTimeRange } from "./UsageAggregator"
 import { resolveStatsQueryRangeMs } from "./statsQueryRange"
+import type { CustomModelPricingMap } from "./costRecalculation"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -159,13 +160,21 @@ export class UsageStatsStreamCoordinator {
 	/** Optional History-first catalog. Undefined preserves legacy stream compatibility. */
 	private readonly taskCatalog?: DashboardTaskCatalog
 
+	/** Optional query-time custom model pricing provider. */
+	private readonly customPricingProvider?: () => CustomModelPricingMap | undefined
+
 	constructor(
 		database: UsageStatsDatabase | null,
-		options?: { recordingPaused?: () => boolean; taskCatalog?: DashboardTaskCatalog },
+		options?: {
+			recordingPaused?: () => boolean
+			taskCatalog?: DashboardTaskCatalog
+			customPricingProvider?: () => CustomModelPricingMap | undefined
+		},
 	) {
 		this.database = database
 		this.recordingPausedProvider = options?.recordingPaused
 		this.taskCatalog = options?.taskCatalog
+		this.customPricingProvider = options?.customPricingProvider
 
 		// Start rollover checker
 		this.rolloverTimer = setInterval(() => this.checkRollover(), ROLLOVER_CHECK_MS)
@@ -458,6 +467,7 @@ export class UsageStatsStreamCoordinator {
 				// Resolve the subscription range once per drain: task upserts filter
 				// membership (task creation ts) and figures (event occurredAt) to it.
 				const taskRangeMs = this.taskCatalog ? resolveStatsQueryRangeMs(sub.subscription.range) : undefined
+				const customPricing = this.customPricingProvider?.()
 				for (const event of unseenEvents) {
 					try {
 						const legacyDelta = applyEventToProjection(
@@ -468,6 +478,7 @@ export class UsageStatsStreamCoordinator {
 							sub.subscription.heatmapRangeDays,
 							sub.generation,
 							event.sequence,
+							customPricing,
 						)
 						if (this.taskCatalog) {
 							const ancestorTaskIds = this.taskCatalog.ancestorsByTaskId.get(event.taskId) ?? []
@@ -484,6 +495,7 @@ export class UsageStatsStreamCoordinator {
 									affectedTaskIds,
 									taskRangeMs,
 									sub.subscription.range.cacheRatio,
+									customPricing,
 								),
 							})
 						} else {
@@ -541,9 +553,10 @@ export class UsageStatsStreamCoordinator {
 		try {
 			const query: StatsQuery = state.subscription.range
 			const recordingPaused = this.recordingPausedProvider?.() ?? false
+			const customPricing = this.customPricingProvider?.()
 
 			// 1. Assemble the snapshot from whatever data currently exists
-			const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+			const stats = assembleRollupSnapshot(this.database, query, { recordingPaused, customPricing })
 			const heatmap = computeHeatmapSnapshot(this.database, state.subscription.heatmapRangeDays, query.timezone)
 
 			// 2. Get current generation and sequence
@@ -560,6 +573,7 @@ export class UsageStatsStreamCoordinator {
 							state.subscription.sessionPageSize,
 							resolveStatsQueryRangeMs(state.subscription.range),
 							state.subscription.range.cacheRatio,
+							customPricing,
 						)
 						state.visibleTaskIds = new Set(
 							[...tasks.tasks, ...(tasks.childTasks ?? [])].map((task) => task.taskId),
@@ -661,8 +675,9 @@ export class UsageStatsStreamCoordinator {
 					try {
 						const query: StatsQuery = state.subscription.range
 						const recordingPaused = this.recordingPausedProvider?.() ?? false
+						const customPricing = this.customPricingProvider?.()
 
-						const stats = assembleRollupSnapshot(this.database, query, { recordingPaused })
+						const stats = assembleRollupSnapshot(this.database, query, { recordingPaused, customPricing })
 						const heatmap = computeHeatmapSnapshot(
 							this.database,
 							state.subscription.heatmapRangeDays,
@@ -682,6 +697,7 @@ export class UsageStatsStreamCoordinator {
 										state.subscription.sessionPageSize,
 										resolveStatsQueryRangeMs(state.subscription.range),
 										state.subscription.range.cacheRatio,
+										customPricing,
 									)
 									state.visibleTaskIds = new Set(
 										[...tasks.tasks, ...(tasks.childTasks ?? [])].map((task) => task.taskId),

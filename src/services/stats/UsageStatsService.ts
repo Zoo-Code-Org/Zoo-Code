@@ -8,6 +8,7 @@ import { UsageStatsMigration } from "./UsageStatsMigration"
 import { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import { isWithinStatsQueryRange, resolveStatsQueryRangeMs } from "./statsQueryRange"
+import type { CustomModelPricingMap } from "./costRecalculation"
 
 // ── Export Format ───────────────────────────────────────────────────────────
 
@@ -102,6 +103,9 @@ export class UsageStatsService {
 	/** Read-only History-first task catalog supplied by the extension host. */
 	private readonly taskCatalog?: DashboardTaskCatalog
 
+	/** Optional provider for query-time custom model pricing. */
+	private readonly customPricingProvider?: () => CustomModelPricingMap | undefined
+
 	/** Demand-driven host stream coordinator for dashboard stats. */
 	private coordinator: UsageStatsStreamCoordinator | null = null
 	/** Releases the catalog change listener owned by this service. */
@@ -123,12 +127,17 @@ export class UsageStatsService {
 	 */
 	private readonly changeListeners: Array<() => void> = []
 
-	constructor(globalStoragePath: string, taskCatalog?: DashboardTaskCatalog) {
+	constructor(
+		globalStoragePath: string,
+		taskCatalog?: DashboardTaskCatalog,
+		customPricingProvider?: () => CustomModelPricingMap | undefined,
+	) {
 		this.storageDir = globalStoragePath
 		this.database = new UsageStatsDatabase(this.getStatsDir(globalStoragePath))
 		this.store = new UsageEventStore(globalStoragePath, this.database)
 		this.aggregator = new UsageAggregator()
 		this.taskCatalog = taskCatalog
+		this.customPricingProvider = customPricingProvider
 	}
 
 	// ── Public API ──────────────────────────────────────────────────────────
@@ -188,6 +197,7 @@ export class UsageStatsService {
 		// are readable. The catalog remains read-only from the stats boundary.
 		this.coordinator = new UsageStatsStreamCoordinator(this.database._isInitialized() ? this.database : null, {
 			taskCatalog: this.taskCatalog,
+			customPricingProvider: this.customPricingProvider,
 		})
 		this.taskCatalogSubscription =
 			this.taskCatalog?.onDidChange(() => this.coordinator?.notifyTaskCatalogChanged()) ?? null
@@ -283,7 +293,10 @@ export class UsageStatsService {
 	 * @param options Additional options
 	 * @returns Statistics snapshot
 	 */
-	async queryStats(query: StatsQuery, options: { recordingPaused?: boolean } = {}): Promise<StatsSnapshot> {
+	async queryStats(
+		query: StatsQuery,
+		options: { recordingPaused?: boolean; customPricing?: CustomModelPricingMap } = {},
+	): Promise<StatsSnapshot> {
 		const events = await this.store.readAll()
 		return this.aggregator.query(events, query, options)
 	}

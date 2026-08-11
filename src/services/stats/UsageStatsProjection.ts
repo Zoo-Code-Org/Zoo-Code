@@ -44,6 +44,7 @@ import {
 	type BucketDeltaValues,
 } from "./UsageAggregator"
 import { applyCacheDiscount } from "./costRecalculation"
+import type { CustomModelPricingMap } from "./costRecalculation"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -406,7 +407,7 @@ function lifetimeTotalsToBucket(
 export function assembleRollupSnapshot(
 	db: UsageStatsDatabase,
 	query: StatsQuery,
-	options: { recordingPaused?: boolean } = {},
+	options: { recordingPaused?: boolean; customPricing?: CustomModelPricingMap } = {},
 ): StatsSnapshot {
 	try {
 		// Check if we can use the fast rollup path
@@ -519,7 +520,7 @@ function assembleRollupSnapshotFast(
 function assembleRollupSnapshotFromEvents(
 	db: UsageStatsDatabase,
 	query: StatsQuery,
-	options: { recordingPaused?: boolean },
+	options: { recordingPaused?: boolean; customPricing?: CustomModelPricingMap },
 ): StatsSnapshot {
 	// Read only the events inside the query range (SQL-side filter riding the
 	// occurred_epoch_ms index); the JS range filter below stays as a safety
@@ -544,6 +545,7 @@ function assembleRollupSnapshotFromEvents(
 	// Compute bucket keys
 	const groupBy = query.groupBy
 	const cacheRatio = query.cacheRatio
+	const customPricing = options.customPricing
 	const bucketMap = new Map<string, StatsBucket>()
 
 	for (const event of visibleEvents) {
@@ -558,7 +560,7 @@ function assembleRollupSnapshotFromEvents(
 				bucket = createEmptyBucket(bucketKey)
 				bucketMap.set(mapKey, bucket)
 			}
-			const delta = computeEventDelta(event, cacheRatio)
+			const delta = computeEventDelta(event, cacheRatio, customPricing)
 			applyDeltaToBucket(bucket, delta)
 		}
 	}
@@ -566,7 +568,7 @@ function assembleRollupSnapshotFromEvents(
 	// Compute totals
 	const totals = createEmptyBucket()
 	for (const event of visibleEvents) {
-		const delta = computeEventDelta(event, cacheRatio)
+		const delta = computeEventDelta(event, cacheRatio, customPricing)
 		applyDeltaToBucket(totals, delta)
 	}
 
@@ -693,10 +695,11 @@ export function applyEventToProjection(
 	heatmapRangeDays: number,
 	generation: number,
 	sequence: number,
+	customPricing?: CustomModelPricingMap,
 ): DashboardStatsDelta {
 	try {
 		// 1. Compute the total delta (pure function, checks query filter)
-		const totalContribution = computeEventContribution(event, query)
+		const totalContribution = computeEventContribution(event, query, customPricing)
 
 		// If the event doesn't match the query filter, return a zero delta
 		if (totalContribution === null) {
@@ -714,7 +717,7 @@ export function applyEventToProjection(
 		// 2. Compute breakdown deltas for each group key
 		const groupKeys = computeGroupKeys(event, query.groupBy, query.timezone)
 		const breakdownDelta: StatsBucketDelta[] = groupKeys.map((key) => {
-			const delta = computeEventDelta(event, query.cacheRatio)
+			const delta = computeEventDelta(event, query.cacheRatio, customPricing)
 			return toBucketDelta(key, delta)
 		})
 
@@ -728,7 +731,7 @@ export function applyEventToProjection(
 		if (dayIndex >= 0) {
 			// The event falls within the heatmap range
 			// ST-3: Heatmap displays tokens, not cost — use totalTokens for consistency
-			const eventTokens = computeEventDelta(event, query.cacheRatio).totalTokens
+			const eventTokens = computeEventDelta(event, query.cacheRatio, customPricing).totalTokens
 			heatmapDayDelta = { dayIndex, delta: eventTokens }
 		}
 

@@ -21,11 +21,19 @@ import type { ClineProvider } from "./ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../services/stats"
 import { StatsServiceError } from "../../services/stats"
 import type { UsageStatsStreamCoordinator, StatsStreamSink } from "../../services/stats"
-import { getEffectiveCost, computeCacheDiscountBase, applyCacheDiscount } from "../../services/stats/costRecalculation"
+import {
+	getEffectiveCost,
+	computeCacheDiscountBase,
+	applyCacheDiscount,
+	customPricingKey,
+	type CustomModelPricingMap,
+	type CustomModelPricing,
+} from "../../services/stats/costRecalculation"
 import { computeTaskDetail, computeTaskPage } from "../../services/stats/DashboardTaskProjection"
 import { resolveStatsQueryRangeMs, type StatsQueryRangeMs } from "../../services/stats/statsQueryRange"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { readTaskMessages } from "../task-persistence/taskMessages"
+import type { ProviderSettings } from "@roo-code/types"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -54,6 +62,49 @@ export type UsageStatsHandlerErrorCode =
 	| "STATS_HANDLER/stream/003" // coordinator error
 	| "STATS_HANDLER/stream/004" // invalid page request (missing cursor or limit)
 	| "STATS_HANDLER/stream/005" // page query error
+
+// ── Custom Model Pricing Map Builder ──────────────────────────────────────────
+
+/**
+ * Builds a {@link CustomModelPricingMap} from the extension's current provider
+ * settings. This is called at query time (not capture time) so the dashboard
+ * can resolve pricing for custom/user-configured models without relying on
+ * `modelPricing` persisted on usage events.
+ *
+ * Currently, only the OpenAI Compatible provider exposes a `openAiCustomModelInfo`
+ * field. If the provider is `openai` and `openAiCustomModelInfo` is set with
+ * pricing fields, the map entry is `"openai|<openAiModelId>"`.
+ *
+ * Returns `undefined` when no custom pricing is configured (the query chain
+ * falls back to the static registry, then to 0).
+ *
+ * @param contextProxy The extension's ContextProxy for reading provider settings.
+ * @returns A CustomModelPricingMap, or undefined when no custom pricing exists.
+ */
+export function buildCustomPricingMap(contextProxy: {
+	getProviderSettings?: () => ProviderSettings
+}): CustomModelPricingMap | undefined {
+	// Defensive: test mocks may not implement getProviderSettings.
+	if (typeof contextProxy.getProviderSettings !== "function") return undefined
+	const settings = contextProxy.getProviderSettings()
+	const map: CustomModelPricingMap = new Map()
+
+	// OpenAI Compatible provider: openAiCustomModelInfo + openAiModelId
+	if (settings.apiProvider === "openai" && settings.openAiModelId && settings.openAiCustomModelInfo) {
+		const info = settings.openAiCustomModelInfo
+		const pricing: CustomModelPricing = {}
+		if (typeof info.inputPrice === "number") pricing.inputPrice = info.inputPrice
+		if (typeof info.outputPrice === "number") pricing.outputPrice = info.outputPrice
+		if (typeof info.cacheWritesPrice === "number") pricing.cacheWritesPrice = info.cacheWritesPrice
+		if (typeof info.cacheReadsPrice === "number") pricing.cacheReadsPrice = info.cacheReadsPrice
+		// Only add if at least one pricing field is present
+		if (Object.keys(pricing).length > 0) {
+			map.set(customPricingKey("openai", settings.openAiModelId), pricing)
+		}
+	}
+
+	return map.size > 0 ? map : undefined
+}
 
 // ── Stream Sink Adapter ──────────────────────────────────────────────────────
 
@@ -124,9 +175,11 @@ export async function handleGetUsageStats(provider: ClineProvider, message: Webv
 		const query: StatsQuery = queryResult.data
 
 		const recordingPaused = service.isCapped()
+		const customPricing = buildCustomPricingMap(provider.contextProxy)
 
 		const snapshot: StatsSnapshot = await service.queryStats(query, {
 			recordingPaused,
+			customPricing,
 		})
 
 		await provider.postMessageToWebview({
@@ -549,6 +602,7 @@ async function buildSessionSummaries(
 	events: UsageEventV1[],
 	globalStoragePath: string,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): Promise<SessionSummary[]> {
 	// Feature 2: Build parent map and group by root task ID.
 	const parentMap = buildParentMap(events)
@@ -584,7 +638,11 @@ async function buildSessionSummaries(
 		let totalCost = 0
 		for (const ev of sorted) {
 			totalTokens += ev.usage.totalTokens?.value ?? 0
-			totalCost += applyCacheDiscount(getEffectiveCost(ev), computeCacheDiscountBase(ev), cacheRatio)
+			totalCost += applyCacheDiscount(
+				getEffectiveCost(ev, customPricing),
+				computeCacheDiscountBase(ev, customPricing),
+				cacheRatio,
+			)
 		}
 
 		const title = await deriveSessionTitle(taskId, globalStoragePath)
@@ -672,7 +730,8 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
 
 		const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
 
-		let summaries = await buildSessionSummaries(events, globalStoragePath, query.cacheRatio)
+		const customPricing = buildCustomPricingMap(provider.contextProxy)
+		let summaries = await buildSessionSummaries(events, globalStoragePath, query.cacheRatio, customPricing)
 
 		// Apply optional model/provider filters (post-grouping).
 		// The model filter checks `models` (the full set used in the session)
@@ -720,7 +779,12 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
  * @param cacheRatio Dashboard cache-read ratio; discounts the cost when the
  *   event's cacheReadTokens are unreported.
  */
-function mapEventToApiCall(event: UsageEventV1, index: number, cacheRatio?: number): APICallRecord {
+function mapEventToApiCall(
+	event: UsageEventV1,
+	index: number,
+	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
+): APICallRecord {
 	return {
 		index,
 		mode: event.mode,
@@ -731,7 +795,11 @@ function mapEventToApiCall(event: UsageEventV1, index: number, cacheRatio?: numb
 		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
 		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
 		// Feature 1: Compute missing cost on-the-fly from model pricing.
-		costUsd: applyCacheDiscount(getEffectiveCost(event), computeCacheDiscountBase(event), cacheRatio),
+		costUsd: applyCacheDiscount(
+			getEffectiveCost(event, customPricing),
+			computeCacheDiscountBase(event, customPricing),
+			cacheRatio,
+		),
 		status: event.status,
 		model: event.model,
 	}
@@ -756,6 +824,7 @@ async function buildSessionDetail(
 	events: UsageEventV1[],
 	globalStoragePath: string,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): Promise<SessionDetail> {
 	// Sort events by occurredAt ascending so index reflects chronological order.
 	const sorted = [...events].sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime())
@@ -769,12 +838,18 @@ async function buildSessionDetail(
 	let totalCost = 0
 	for (const ev of sorted) {
 		totalTokens += ev.usage.totalTokens?.value ?? 0
-		totalCost += applyCacheDiscount(getEffectiveCost(ev), computeCacheDiscountBase(ev), cacheRatio)
+		totalCost += applyCacheDiscount(
+			getEffectiveCost(ev, customPricing),
+			computeCacheDiscountBase(ev, customPricing),
+			cacheRatio,
+		)
 	}
 
 	const title = await deriveSessionTitle(taskId, globalStoragePath)
 
-	const apiCalls: APICallRecord[] = sorted.map((event, i) => mapEventToApiCall(event, i + 1, cacheRatio))
+	const apiCalls: APICallRecord[] = sorted.map((event, i) =>
+		mapEventToApiCall(event, i + 1, cacheRatio, customPricing),
+	)
 
 	return {
 		taskId,
@@ -898,7 +973,8 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 		// provides one; without it costs stay verbatim.
 		const detailQueryResult = StatsQuerySchema.safeParse(message.usageStatsQuery)
 		const cacheRatio = detailQueryResult.success ? detailQueryResult.data.cacheRatio : undefined
-		const detail = await buildSessionDetail(taskId, taskEvents, globalStoragePath, cacheRatio)
+		const customPricing = buildCustomPricingMap(provider.contextProxy)
+		const detail = await buildSessionDetail(taskId, taskEvents, globalStoragePath, cacheRatio, customPricing)
 
 		await provider.postMessageToWebview({
 			type: "dashboardSessionDetailResponse",
@@ -991,6 +1067,7 @@ export async function handleGetDashboardTaskDetail(provider: ClineProvider, mess
 				requestId ?? "",
 				resolveTaskRangeMs(provider, service),
 				message.usageStatsQuery?.cacheRatio ?? resolveTaskCacheRatio(provider, service),
+				buildCustomPricingMap(provider.contextProxy),
 			),
 		})
 	} catch (error) {
@@ -1413,6 +1490,7 @@ export async function handleGetDashboardTaskPage(provider: ClineProvider, messag
 				limit,
 				resolveTaskRangeMs(provider, service),
 				message.usageStatsQuery?.cacheRatio ?? resolveTaskCacheRatio(provider, service),
+				buildCustomPricingMap(provider.contextProxy),
 			),
 		})
 	} catch (error) {

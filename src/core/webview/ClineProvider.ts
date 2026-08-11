@@ -90,6 +90,7 @@ import { MdmService } from "../../services/mdm/MdmService"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 import { UsageStatsService } from "../../services/stats"
 import type { StatsStreamSink } from "../../services/stats"
+import { buildCustomPricingMap } from "./usageStatsMessageHandler"
 import { DashboardTaskCatalog } from "../../services/stats/DashboardTaskCatalog"
 
 import { fileExistsAtPath } from "../../utils/fs"
@@ -384,7 +385,15 @@ export class ClineProvider
 		// and stats handlers return "service unavailable" errors gracefully.
 		try {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
-			this.usageStatsService = new UsageStatsService(globalStoragePath, this.dashboardTaskCatalog)
+			// Provide a query-time custom model pricing provider so the dashboard
+			// can resolve pricing for custom/user-configured models (e.g. OpenAI
+			// Compatible) without relying on capture-time persistence in Task.ts.
+			const customPricingProvider = () => buildCustomPricingMap(this.contextProxy)
+			this.usageStatsService = new UsageStatsService(
+				globalStoragePath,
+				this.dashboardTaskCatalog,
+				customPricingProvider,
+			)
 			this.usageStatsService.initialize().catch((error) => {
 				this.log(`Failed to initialize Usage Stats Service: ${error}`)
 				this.usageStatsService = undefined

@@ -15,6 +15,7 @@ import {
 	applyCacheDiscount,
 	providerReportsCache,
 } from "./costRecalculation"
+import type { CustomModelPricingMap } from "./costRecalculation"
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -404,9 +405,14 @@ export function computeGroupKeys(
  *
  * @param event The usage event
  * @param cacheRatio Optional cache ratio for estimating cacheReadTokens
+ * @param customPricing Optional query-time pricing map for custom models
  * @returns The delta values (without a bucket key)
  */
-export function computeEventDelta(event: UsageEventV1, cacheRatio?: number): BucketDeltaValues {
+export function computeEventDelta(
+	event: UsageEventV1,
+	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
+): BucketDeltaValues {
 	// Status count
 	const completedCalls = event.status === "completed" ? 1 : 0
 	const failedCalls = event.status === "failed" ? 1 : 0
@@ -420,16 +426,16 @@ export function computeEventDelta(event: UsageEventV1, cacheRatio?: number): Buc
 	const reasoningTokens = extractSourcedValue(event.usage.reasoningTokens)
 	// Feature 1: If costUsd is missing on old events, compute it on-the-fly
 	// from the model's pricing info. Never modifies the stored event.
-	let costUsd = getEffectiveCost(event)
+	let costUsd = getEffectiveCost(event, customPricing)
 
 	// Cache ratio cost discount: when the provider does NOT report cache
 	// info (capability check, not raw value), the estimated cache-read
 	// portion of the input is priced at the (cheaper) cache-read rate, so
 	// the cost is reduced by cacheRatio × discountBase. Providers that DO
 	// report cache keep their verbatim cost — cacheRead=0 is a true miss.
-	const isCacheReadUnreported = !providerReportsCache(event.provider, event.model, event.modelPricing)
+	const isCacheReadUnreported = !providerReportsCache(event.provider, event.model, event.modelPricing, customPricing)
 	if (isCacheReadUnreported && cacheRatio !== undefined && cacheRatio > 0) {
-		costUsd = applyCacheDiscount(costUsd, computeCacheDiscountBase(event), cacheRatio)
+		costUsd = applyCacheDiscount(costUsd, computeCacheDiscountBase(event, customPricing), cacheRatio)
 	}
 
 	// Cache ratio estimation: if provider doesn't report cache info
@@ -509,9 +515,14 @@ function applyDeltaToBucket(bucket: StatsBucket, delta: BucketDeltaValues): void
  *
  * @param event The usage event to evaluate
  * @param query The statistics query (provides time range, cancelled filter, cacheRatio)
+ * @param customPricing Optional query-time pricing map for custom models
  * @returns The bucket delta, or null if the event does not match the query filter
  */
-export function computeEventContribution(event: UsageEventV1, query: StatsQuery): StatsBucketDelta | null {
+export function computeEventContribution(
+	event: UsageEventV1,
+	query: StatsQuery,
+	customPricing?: CustomModelPricingMap,
+): StatsBucketDelta | null {
 	// 1. Time range filtering
 	const { from, to } = resolveTimeRange(query)
 	const eventTime = new Date(event.occurredAt).getTime()
@@ -523,7 +534,7 @@ export function computeEventContribution(event: UsageEventV1, query: StatsQuery)
 	if (!includeCancelled && event.status === "cancelled") return null
 
 	// 3. Compute delta values
-	const delta = computeEventDelta(event, query.cacheRatio)
+	const delta = computeEventDelta(event, query.cacheRatio, customPricing)
 
 	// 4. Return with empty key (caller assigns group-specific keys)
 	return { key: {}, ...delta }
@@ -548,9 +559,13 @@ export class UsageAggregator {
 	 *
 	 * @param events Array of events to aggregate (result of UsageEventStore.readAll())
 	 * @param query Statistics query
-	 * @param options Additional options (e.g. recordingPaused)
+	 * @param options Additional options (e.g. recordingPaused, customPricing)
 	 */
-	query(events: UsageEventV1[], query: StatsQuery, options: { recordingPaused?: boolean } = {}): StatsSnapshot {
+	query(
+		events: UsageEventV1[],
+		query: StatsQuery,
+		options: { recordingPaused?: boolean; customPricing?: CustomModelPricingMap } = {},
+	): StatsSnapshot {
 		// 1. Time range filtering
 		const { from, to } = resolveTimeRange(query)
 		const filtered = events.filter((event) => {
@@ -574,6 +589,7 @@ export class UsageAggregator {
 		const groupBy = query.groupBy
 		const bucketMap = new Map<string, StatsBucket>()
 		const cacheRatio = query.cacheRatio
+		const customPricing = options.customPricing
 
 		for (const item of aggregatable) {
 			const bucketKeys = getGroupKeysForItem(item, groupBy)
@@ -584,14 +600,14 @@ export class UsageAggregator {
 					bucket = createEmptyBucket(bucketKey)
 					bucketMap.set(mapKey, bucket)
 				}
-				this.accumulateIntoBucket(bucket, item.event, cacheRatio)
+				this.accumulateIntoBucket(bucket, item.event, cacheRatio, customPricing)
 			}
 		}
 
 		// 5. Compute totals
 		const totals = createEmptyBucket()
 		for (const item of aggregatable) {
-			this.accumulateIntoBucket(totals, item.event, cacheRatio)
+			this.accumulateIntoBucket(totals, item.event, cacheRatio, customPricing)
 		}
 
 		// 6. Sorting
@@ -615,8 +631,13 @@ export class UsageAggregator {
 	 * Accumulates the event's values into the bucket.
 	 * Delegates to the pure computeEventDelta function.
 	 */
-	private accumulateIntoBucket(bucket: StatsBucket, event: UsageEventV1, cacheRatio?: number): void {
-		const delta = computeEventDelta(event, cacheRatio)
+	private accumulateIntoBucket(
+		bucket: StatsBucket,
+		event: UsageEventV1,
+		cacheRatio?: number,
+		customPricing?: CustomModelPricingMap,
+	): void {
+		const delta = computeEventDelta(event, cacheRatio, customPricing)
 		applyDeltaToBucket(bucket, delta)
 	}
 

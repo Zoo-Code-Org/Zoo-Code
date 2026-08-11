@@ -14,6 +14,37 @@
 
 import type { ModelInfo, UsageEventV1 } from "@roo-code/types"
 
+// ── Custom Model Pricing (query-time) ──────────────────────────────────────
+
+/**
+ * Pricing fields for a custom/user-configured model.
+ *
+ * Used at query time when the model is NOT in the static provider registry.
+ * The dashboard builds a {@link CustomModelPricingMap} from extension
+ * settings (e.g. `openAiCustomModelInfo`) and threads it through the query
+ * chain so `computeCacheDiscountBase` and `getEffectiveCost` can resolve
+ * pricing for custom models without relying on capture-time persistence.
+ */
+export interface CustomModelPricing {
+	inputPrice?: number
+	cacheReadsPrice?: number
+	cacheWritesPrice?: number
+	outputPrice?: number
+}
+
+/**
+ * Map key: `"provider|model"`. Built by the message handler from
+ * `ContextProxy.getProviderSettings()` and passed through the query chain.
+ */
+export type CustomModelPricingMap = Map<string, CustomModelPricing>
+
+/**
+ * Builds the map key for a provider+model pair.
+ */
+export function customPricingKey(provider: string, model: string): string {
+	return `${provider}|${model}`
+}
+
 import {
 	anthropicModels,
 	openAiNativeModels,
@@ -94,16 +125,24 @@ const ANTHROPIC_SEMANTIC_PROVIDERS = new Set(["anthropic", "bedrock", "vertex"])
  *  2. If not found, attempt case-insensitive substring matching against
  *     known model IDs (handles versioned variants like
  *     "claude-sonnet-4-20250514" matching "claude-sonnet-4").
- *  3. If still not found, return `undefined` (cost stays 0).
+ *  3. Fallback to event-level `modelPricing` (capture-time snapshot for
+ *     custom models). Only used when the model is NOT in the static registry.
+ *  4. Fallback to query-time `customPricing` map (built from extension
+ *     settings at query time). Used when neither the static registry nor
+ *     the event-level snapshot has pricing.
+ *  5. If still not found, return `undefined` (cost stays 0).
  *
  * @param provider The provider name from the usage event.
  * @param model The model ID from the usage event.
+ * @param modelPricing Optional capture-time pricing snapshot from the event.
+ * @param customPricing Optional query-time pricing map (key: `"provider|model"`).
  * @returns The matching ModelInfo, or undefined if not found.
  */
 export function lookupModelInfo(
 	provider: string,
 	model: string,
 	modelPricing?: UsageEventV1["modelPricing"],
+	customPricing?: CustomModelPricingMap,
 ): ModelInfo | undefined {
 	const registry = PROVIDER_MODEL_REGISTRIES[provider]
 
@@ -123,7 +162,7 @@ export function lookupModelInfo(
 		}
 	}
 
-	// 2. Fallback to event-level modelPricing (custom/user-configured models)
+	// 2. Fallback to event-level modelPricing (capture-time snapshot)
 	//    Only used when the model is NOT in the static registry, so static
 	//    registry prices always take precedence.
 	if (modelPricing) {
@@ -135,7 +174,20 @@ export function lookupModelInfo(
 		} as ModelInfo
 	}
 
-	// 3. Not found
+	// 3. Fallback to query-time customPricing map (from extension settings)
+	if (customPricing) {
+		const cp = customPricing.get(customPricingKey(provider, model))
+		if (cp) {
+			return {
+				inputPrice: cp.inputPrice,
+				outputPrice: cp.outputPrice,
+				cacheWritesPrice: cp.cacheWritesPrice,
+				cacheReadsPrice: cp.cacheReadsPrice,
+			} as ModelInfo
+		}
+	}
+
+	// 4. Not found
 	return undefined
 }
 
@@ -157,14 +209,14 @@ export function lookupModelInfo(
  * @param event The usage event to compute cost for.
  * @returns The computed cost in USD, or 0 if it cannot be computed.
  */
-export function computeEventCost(event: UsageEventV1): number {
+export function computeEventCost(event: UsageEventV1, customPricing?: CustomModelPricingMap): number {
 	// If the event already has a cost, the caller should use it directly.
 	// This function is only for computing MISSING costs.
 	if (event.usage.costUsd !== undefined && event.usage.costUsd.value > 0) {
 		return event.usage.costUsd.value
 	}
 
-	const modelInfo = lookupModelInfo(event.provider, event.model, event.modelPricing)
+	const modelInfo = lookupModelInfo(event.provider, event.model, event.modelPricing, customPricing)
 	if (!modelInfo) return 0
 
 	const inputTokens = event.usage.inputTokens?.value ?? 0
@@ -199,11 +251,11 @@ export function computeEventCost(event: UsageEventV1): number {
  * @param event The usage event.
  * @returns The effective cost in USD (stored or computed; 0 if unresolvable).
  */
-export function getEffectiveCost(event: UsageEventV1): number {
+export function getEffectiveCost(event: UsageEventV1, customPricing?: CustomModelPricingMap): number {
 	if (event.usage.costUsd !== undefined) {
 		return event.usage.costUsd.value
 	}
-	return computeEventCost(event)
+	return computeEventCost(event, customPricing)
 }
 
 // ── Cache-Ratio Cost Discount ────────────────────────────────────────────────
@@ -230,8 +282,9 @@ export function providerReportsCache(
 	provider: string,
 	model: string,
 	modelPricing?: UsageEventV1["modelPricing"],
+	customPricing?: CustomModelPricingMap,
 ): boolean {
-	const modelInfo = lookupModelInfo(provider, model, modelPricing)
+	const modelInfo = lookupModelInfo(provider, model, modelPricing, customPricing)
 	if (!modelInfo) return false
 	return typeof modelInfo.cacheReadsPrice === "number" && Number.isFinite(modelInfo.cacheReadsPrice)
 }
@@ -261,14 +314,14 @@ export function providerReportsCache(
  * @param event The usage event to compute the discount base for.
  * @returns The discount base in USD (0 when not applicable).
  */
-export function computeCacheDiscountBase(event: UsageEventV1): number {
+export function computeCacheDiscountBase(event: UsageEventV1, customPricing?: CustomModelPricingMap): number {
 	// Capability check: if the provider+model is known to report cache info,
 	// cacheReadTokens == 0 is a true cache miss — no discount, no estimation.
-	if (providerReportsCache(event.provider, event.model, event.modelPricing)) {
+	if (providerReportsCache(event.provider, event.model, event.modelPricing, customPricing)) {
 		return 0
 	}
 
-	const modelInfo = lookupModelInfo(event.provider, event.model, event.modelPricing)
+	const modelInfo = lookupModelInfo(event.provider, event.model, event.modelPricing, customPricing)
 	if (!modelInfo) return 0
 
 	const { inputPrice, cacheReadsPrice } = modelInfo

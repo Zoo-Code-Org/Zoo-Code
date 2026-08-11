@@ -9,6 +9,7 @@ import type {
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import type { TaskIdentityAggregate, TaskUsageRow } from "./UsageStatsDatabase"
 import { getEffectiveCost, computeCacheDiscountBase, applyCacheDiscount } from "./costRecalculation"
+import type { CustomModelPricingMap } from "./costRecalculation"
 import { type StatsQueryRangeMs } from "./statsQueryRange"
 
 /** Error codes emitted by the History-first Dashboard task projection. */
@@ -66,6 +67,7 @@ export function computeTaskPage(
 	limit?: number,
 	rangeMs?: StatsQueryRangeMs,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): DashboardTaskPage {
 	const catalogPage = catalog.getPage(cursor, limit, rangeMs)
 	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, catalogPage.tasks)
@@ -81,10 +83,10 @@ export function computeTaskPage(
 		requestId,
 		catalogRevision: catalog.catalogRevision,
 		tasks: catalogPage.tasks.map((taskId) =>
-			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio),
+			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio, customPricing),
 		),
 		childTasks: childTaskIds.map((taskId) =>
-			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio),
+			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio, customPricing),
 		),
 		cursor: catalogPage.cursor,
 		totalEstimate: catalogPage.totalEstimate,
@@ -106,6 +108,7 @@ export function computeTaskSummaries(
 	taskIds: readonly string[],
 	rangeMs?: StatsQueryRangeMs,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): DashboardTaskSummary[] {
 	const knownTaskIds = [...new Set(taskIds)].filter(
 		(taskId) => catalog.byId.has(taskId) && catalog.isSubtreeWithinRange(rangeMs, taskId),
@@ -114,7 +117,7 @@ export function computeTaskSummaries(
 	const usageByTaskId = db.queryTaskUsageByTaskIds(subtreeTaskIds, rangeMs)
 	const identityByTaskId = db.queryTaskIdentityAggregates(subtreeTaskIds, rangeMs)
 	return knownTaskIds.map((taskId) =>
-		computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio),
+		computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio, customPricing),
 	)
 }
 
@@ -130,6 +133,7 @@ export function computeTaskDetail(
 	_requestId: string,
 	rangeMs?: StatsQueryRangeMs,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): DashboardTaskDetail {
 	const task = catalog.byId.get(taskId)
 	if (!task) {
@@ -151,11 +155,16 @@ export function computeTaskDetail(
 		totalTokens: sortedEvents.reduce((total, event) => total + getTotalTokens(event), 0),
 		totalCost: sortedEvents.reduce(
 			(total, event) =>
-				total + applyCacheDiscount(getEffectiveCost(event), computeCacheDiscountBase(event), cacheRatio),
+				total +
+				applyCacheDiscount(
+					getEffectiveCost(event, customPricing),
+					computeCacheDiscountBase(event, customPricing),
+					cacheRatio,
+				),
 			0,
 		),
 		callCount: sortedEvents.length,
-		apiCalls: sortedEvents.map((event, index) => eventToApiCall(event, index + 1, cacheRatio)),
+		apiCalls: sortedEvents.map((event, index) => eventToApiCall(event, index + 1, cacheRatio, customPricing)),
 	}
 }
 
@@ -176,6 +185,7 @@ function computeTaskSummary(
 	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): DashboardTaskSummary {
 	const task = catalog.byId.get(taskId)!
 	const subtreeUsage = summarizeSubtreeUsage(
@@ -183,6 +193,7 @@ function computeTaskSummary(
 		usageByTaskId,
 		identityByTaskId,
 		cacheRatio,
+		customPricing,
 	)
 
 	return {
@@ -210,6 +221,7 @@ function summarizeSubtreeUsage(
 	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
 ): SubtreeUsageSummary {
 	let totalCost = 0
 	let totalCacheDiscountBase = 0
@@ -277,7 +289,12 @@ function getTotalTokens(event: UsageEventV1): number {
 	)
 }
 
-function eventToApiCall(event: UsageEventV1, index: number, cacheRatio?: number): DashboardTaskApiCall {
+function eventToApiCall(
+	event: UsageEventV1,
+	index: number,
+	cacheRatio?: number,
+	customPricing?: CustomModelPricingMap,
+): DashboardTaskApiCall {
 	return {
 		index,
 		mode: event.mode,
@@ -287,7 +304,11 @@ function eventToApiCall(event: UsageEventV1, index: number, cacheRatio?: number)
 		cacheReadTokens: event.usage.cacheReadTokens?.value ?? 0,
 		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
 		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
-		costUsd: applyCacheDiscount(getEffectiveCost(event), computeCacheDiscountBase(event), cacheRatio),
+		costUsd: applyCacheDiscount(
+			getEffectiveCost(event, customPricing),
+			computeCacheDiscountBase(event, customPricing),
+			cacheRatio,
+		),
 		status: event.status,
 		model: event.model,
 	}
