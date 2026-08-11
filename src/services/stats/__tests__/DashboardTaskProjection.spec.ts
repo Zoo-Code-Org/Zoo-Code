@@ -290,7 +290,10 @@ describe("DashboardTaskProjection", () => {
 		catalog.dispose()
 	})
 
-	it("discounts computeTaskDetail per-call cost only for unreported-cacheRead events", () => {
+	it("keeps computeTaskDetail per-call cost invariant for reporting providers (cacheRead=0 is a true miss)", () => {
+		// Bug 1 fix: anthropic is a reporting provider. Both events use anthropic.
+		// evt-reported has cacheRead=300 (reported hit). evt-unreported has cacheRead=0
+		// (true cache miss). Both keep verbatim cost — slider has no effect.
 		const catalog = createCatalog([makeHistoryItem({ id: "root", ts: 300, task: "Root" })])
 		const reader = createUsageReader(new Map(), [
 			{
@@ -324,10 +327,10 @@ describe("DashboardTaskProjection", () => {
 
 		const detail = computeTaskDetail(catalog, reader, "root", "request-cdb-detail", undefined, 0.5)
 
-		// Reported call: verbatim 0.01. Unreported call: 0.01 − 0.5 × 0.0027 = 0.00865.
+		// Both calls keep verbatim cost — reporting provider, true cache miss.
 		expect(detail.apiCalls[0]!.costUsd).toBe(0.01)
-		expect(detail.apiCalls[1]!.costUsd).toBeCloseTo(0.00865, 10)
-		expect(detail.totalCost).toBeCloseTo(0.01865, 10)
+		expect(detail.apiCalls[1]!.costUsd).toBe(0.01)
+		expect(detail.totalCost).toBeCloseTo(0.02, 10)
 
 		// Without a ratio both calls stay verbatim.
 		const verbatim = computeTaskDetail(catalog, reader, "root", "request-cdb-detail")

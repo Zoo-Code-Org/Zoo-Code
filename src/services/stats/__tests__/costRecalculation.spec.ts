@@ -376,18 +376,18 @@ describe("costRecalculation", () => {
 			expect(computeCacheDiscountBase(event)).toBe(0)
 		})
 
-		it("should compute (inputTokens / 1M) × (inputPrice − cacheReadsPrice) for unreported events", () => {
+		it("should return 0 for cache-reporting provider with cacheRead=0 (true cache miss)", () => {
+			// Bug 1 fix: anthropic reports cache. cacheRead=0 is a TRUE cache miss,
+			// not "unreported". The slider must NOT vary the cost.
 			const event = makeEvent({
 				provider: "anthropic",
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
-					// cacheReadTokens missing → unreported
+					// cacheReadTokens missing → cache miss for a reporting provider
 				},
 			})
-			// claude-sonnet-4-5: inputPrice=$3.0/1M, cacheReadsPrice=$0.30/1M
-			// 1000/1M × (3.0 − 0.3) = 0.0027
-			expect(computeCacheDiscountBase(event)).toBeCloseTo(0.0027, 10)
+			expect(computeCacheDiscountBase(event)).toBe(0)
 		})
 
 		it("should return 0 when inputPrice is not cheaper than cacheReadsPrice", () => {
@@ -399,6 +399,72 @@ describe("costRecalculation", () => {
 					inputTokens: { value: 0, source: "provider" },
 				},
 			})
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+	})
+
+	// ── Contract Tests: cacheRatio slider behavior ───────────────────────────
+
+	describe("cacheRatio slider contract", () => {
+		it("reported-provider event with cacheRead=0: cost invariant under ratio 0 vs 0.94", () => {
+			// Bug 1: anthropic reports cache. cacheRead=0 is a true cache miss.
+			// The slider must NOT vary the cost, and tokens must NOT be estimated.
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+					// cacheReadTokens missing → cache miss for a reporting provider
+				},
+			})
+
+			// computeCacheDiscountBase must be 0 (no discount to apply).
+			expect(computeCacheDiscountBase(event)).toBe(0)
+
+			// Cost is invariant under any ratio.
+			const baseCost = getEffectiveCost(event)
+			expect(applyCacheDiscount(baseCost, computeCacheDiscountBase(event), 0)).toBe(baseCost)
+			expect(applyCacheDiscount(baseCost, computeCacheDiscountBase(event), 0.94)).toBe(baseCost)
+			expect(applyCacheDiscount(baseCost, computeCacheDiscountBase(event), 1)).toBe(baseCost)
+		})
+
+		it("unreported-provider event with unknown pricing: cost unchanged under any ratio", () => {
+			// Bug 2: custom endpoint model not in static registry.
+			// No pricing → discountBase = 0 → cost stays as-is.
+			const event = makeEvent({
+				provider: "unknown-provider",
+				model: "custom-endpoint-model",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			})
+
+			expect(computeCacheDiscountBase(event)).toBe(0)
+
+			const baseCost = getEffectiveCost(event)
+			expect(applyCacheDiscount(baseCost, computeCacheDiscountBase(event), 0)).toBe(baseCost)
+			expect(applyCacheDiscount(baseCost, computeCacheDiscountBase(event), 0.94)).toBe(baseCost)
+		})
+
+		it("reported-provider event: tokens unestimated (cacheRead stays 0)", () => {
+			// Bug 1: for reporting providers, cacheReadTokens must NOT be estimated.
+			// This is tested at the computeEventDelta level in UsageAggregator.spec.ts.
+			// Here we verify the discount base is 0, which prevents estimation.
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					// cacheReadTokens missing
+				},
+			})
+			// If discountBase is 0, the aggregator's isCacheReadUnreported check
+			// determines whether to estimate. With the fix, isCacheReadUnreported
+			// is false for reporting providers, so no estimation occurs.
 			expect(computeCacheDiscountBase(event)).toBe(0)
 		})
 	})

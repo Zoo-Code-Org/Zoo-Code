@@ -10,7 +10,7 @@ import * as path from "path"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
-import { getEffectiveCost, computeCacheDiscountBase } from "./costRecalculation"
+import { getEffectiveCost, computeCacheDiscountBase, providerReportsCache } from "./costRecalculation"
 import { isStatsQueryRangeBounded, type StatsQueryRangeMs } from "./statsQueryRange"
 
 // ── Lazy node:sqlite loader ──────────────────────────────────────────────────
@@ -880,12 +880,13 @@ export class UsageStatsDatabase {
 					const totalTokens = usage.totalTokens?.value ?? inputTokens + outputTokens
 					const costUsd = usage.costUsd?.value ?? 0
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
-					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 					const eventForCost = {
 						provider,
 						model,
 						usage: { ...usage },
 					} as UsageEventV1
+					const unreportedCacheInputTokens =
+						providerReportsCache(provider, model) || cacheReadTokens > 0 ? 0 : inputTokens
 					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 
 					const completedCalls = status === "completed" ? 1 : 0
@@ -1036,7 +1037,8 @@ export class UsageStatsDatabase {
 					const costUsd = getEffectiveCost(eventForCost)
 					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
-					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+					const unreportedCacheInputTokens =
+						providerReportsCache(provider, model) || cacheReadTokens > 0 ? 0 : inputTokens
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -1427,7 +1429,8 @@ export class UsageStatsDatabase {
 					const costUsd = getEffectiveCost(eventForCost)
 					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
-					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+					const unreportedCacheInputTokens =
+						providerReportsCache(provider, model) || cacheReadTokens > 0 ? 0 : inputTokens
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -1844,7 +1847,8 @@ export class UsageStatsDatabase {
 		// Use getEffectiveCost for rollup consistency with computeEventDelta
 		const costUsd = getEffectiveCost(event)
 		const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
-		const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+		const unreportedCacheInputTokens =
+			providerReportsCache(event.provider, event.model) || cacheReadTokens > 0 ? 0 : inputTokens
 		const cacheDiscountBase = computeCacheDiscountBase(event)
 
 		const status = event.status
@@ -2090,7 +2094,8 @@ export class UsageStatsDatabase {
 				// Use getEffectiveCost for rollup consistency with computeEventDelta
 				const costUsd = getEffectiveCost(event)
 				const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
-				const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+				const unreportedCacheInputTokens =
+					providerReportsCache(event.provider, event.model) || cacheReadTokens > 0 ? 0 : inputTokens
 				const cacheDiscountBase = computeCacheDiscountBase(event)
 
 				const status = event.status

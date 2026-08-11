@@ -191,6 +191,30 @@ export function getEffectiveCost(event: UsageEventV1): number {
 // ── Cache-Ratio Cost Discount ────────────────────────────────────────────────
 
 /**
+ * Determines whether a provider+model combination is KNOWN to report
+ * cache-read tokens in its usage response.
+ *
+ * This is a capability check based on the static model registry: if the
+ * model is found in the registry AND has a `cacheReadsPrice` defined, the
+ * provider reports cache info. For such providers, `cacheReadTokens == 0`
+ * is a TRUE cache miss (not "unreported"), so the slider must NOT vary
+ * the cost.
+ *
+ * For providers/models not in the static registry (custom endpoints,
+ * dynamic providers), this returns false — the provider is treated as
+ * non-reporting, and the slider may estimate cache reads.
+ *
+ * @param provider The provider name from the usage event.
+ * @param model The model ID from the usage event.
+ * @returns True if the provider+model is known to report cache info.
+ */
+export function providerReportsCache(provider: string, model: string): boolean {
+	const modelInfo = lookupModelInfo(provider, model)
+	if (!modelInfo) return false
+	return typeof modelInfo.cacheReadsPrice === "number" && Number.isFinite(modelInfo.cacheReadsPrice)
+}
+
+/**
  * Computes the per-event discount base for the dashboard cacheRatio
  * simulation, in USD.
  *
@@ -203,7 +227,9 @@ export function getEffectiveCost(event: UsageEventV1): number {
  *   discountBase = (inputTokens / 1_000_000) × max(0, inputPrice − cacheReadsPrice)
  *
  * Returns 0 when:
- *  - The event reports cacheReadTokens (value > 0) — cost stays verbatim.
+ *  - The provider+model is KNOWN to report cache info (via
+ *    {@link providerReportsCache}). For such providers, `cacheReadTokens == 0`
+ *    is a true cache miss — cost stays verbatim, slider has no effect.
  *  - The model info cannot be resolved for the provider/model combination.
  *  - The model's input or cache-read price is missing or not a finite number.
  *
@@ -214,8 +240,9 @@ export function getEffectiveCost(event: UsageEventV1): number {
  * @returns The discount base in USD (0 when not applicable).
  */
 export function computeCacheDiscountBase(event: UsageEventV1): number {
-	const cacheReadTokens = event.usage.cacheReadTokens?.value ?? 0
-	if (cacheReadTokens > 0) {
+	// Capability check: if the provider+model is known to report cache info,
+	// cacheReadTokens == 0 is a true cache miss — no discount, no estimation.
+	if (providerReportsCache(event.provider, event.model)) {
 		return 0
 	}
 

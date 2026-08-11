@@ -769,8 +769,10 @@ describe("UsageStatsDatabase", () => {
 		})
 
 		it("should self-heal stranded v7 databases on v8 migration (cache_discount_base backfill)", () => {
-			// Seed an event without cacheRead (provider does not report it) using a
-			// model with known pricing so the discount base is non-zero.
+			// Bug 1 fix: anthropic is a reporting provider (has cacheReadsPrice).
+			// cacheRead=0 is a true cache miss, so discountBase = 0.
+			// The v8 migration must still heal the columns (set them to the correct
+			// computed value, which is 0 for reporting providers).
 			db.append(
 				makeEvent({
 					eventId: "evt-v8-1",
@@ -807,18 +809,18 @@ describe("UsageStatsDatabase", () => {
 			db = new UsageStatsDatabase(tempDir)
 			db.initialize()
 
-			// claude-sonnet-4: inputPrice $3.0/1M, cacheReadsPrice $0.30/1M
-			// discountBase = 1000/1M × (3.0 − 0.3) = 0.0027
+			// anthropic is a reporting provider → cacheRead=0 is a true cache miss
+			// → discountBase = 0 (slider has no effect).
 			const breakdown = db.queryBreakdownRollups("lifetime", "all", "all", "provider", true)
 			expect(breakdown).toHaveLength(1)
 			expect(breakdown[0].axisValue).toBe("anthropic")
-			expect(breakdown[0].cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(breakdown[0].cacheDiscountBase).toBe(0)
 
 			// The task metadata path and the bounded events path both healed.
 			const allTime = db.queryTaskUsageByTaskIds(["task-v8-1"])
-			expect(allTime.get("task-v8-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(allTime.get("task-v8-1")?.cacheDiscountBase).toBe(0)
 			const ranged = db.queryTaskUsageByTaskIds(["task-v8-1"], { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER })
-			expect(ranged.get("task-v8-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(ranged.get("task-v8-1")?.cacheDiscountBase).toBe(0)
 
 			// Meta is now committed at v8.
 			const rawDb2 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
@@ -831,7 +833,10 @@ describe("UsageStatsDatabase", () => {
 	})
 
 	describe("cache discount base", () => {
-		it("should populate cache_discount_base on append for unreported-cacheRead events", () => {
+		it("should populate cache_discount_base as 0 for reporting providers (cacheRead=0 is a true miss)", () => {
+			// Bug 1 fix: anthropic is a reporting provider (has cacheReadsPrice).
+			// cacheRead=0 is a true cache miss, not "unreported".
+			// discountBase = 0 — slider has no effect.
 			db.append(
 				makeEvent({
 					eventId: "evt-cdb-1",
@@ -863,13 +868,13 @@ describe("UsageStatsDatabase", () => {
 				}),
 			)
 
-			// 1000/1M × (3.0 − 0.3) = 0.0027 for the unreported event; 0 for the reported one.
+			// Both events have discountBase = 0 (reporting provider: true miss or reported).
 			const breakdown = db.queryBreakdownRollups("lifetime", "all", "all", "model", true)
 			expect(breakdown).toHaveLength(1)
-			expect(breakdown[0].cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(breakdown[0].cacheDiscountBase).toBe(0)
 
 			const taskRows = db.queryTaskUsageByTaskIds(["task-cdb-1", "task-cdb-2"])
-			expect(taskRows.get("task-cdb-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(taskRows.get("task-cdb-1")?.cacheDiscountBase).toBe(0)
 			expect(taskRows.get("task-cdb-2")?.cacheDiscountBase).toBe(0)
 
 			// The bounded events path SUMs the stored column in SQL.
@@ -877,12 +882,12 @@ describe("UsageStatsDatabase", () => {
 				fromMs: 0,
 				toMs: Number.MAX_SAFE_INTEGER,
 			})
-			expect(rangedRows.get("task-cdb-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(rangedRows.get("task-cdb-1")?.cacheDiscountBase).toBe(0)
 			expect(rangedRows.get("task-cdb-2")?.cacheDiscountBase).toBe(0)
 
 			// Lifetime totals carry the summed base too.
 			const lifetime = db.queryLifetimeTotalsFiltered(true)
-			expect(lifetime.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(lifetime.cacheDiscountBase).toBe(0)
 		})
 
 		it("should leave the discount base at 0 for models without pricing", () => {

@@ -8,7 +8,13 @@ import type {
 	UsageValueSource,
 } from "@roo-code/types"
 
-import { getEffectiveCost, computeEventCost, computeCacheDiscountBase, applyCacheDiscount } from "./costRecalculation"
+import {
+	getEffectiveCost,
+	computeEventCost,
+	computeCacheDiscountBase,
+	applyCacheDiscount,
+	providerReportsCache,
+} from "./costRecalculation"
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -416,18 +422,20 @@ export function computeEventDelta(event: UsageEventV1, cacheRatio?: number): Buc
 	// from the model's pricing info. Never modifies the stored event.
 	let costUsd = getEffectiveCost(event)
 
-	// Cache ratio cost discount: when the provider does not report
-	// cacheReadTokens, the estimated cache-read portion of the input is
-	// priced at the (cheaper) cache-read rate, so the cost is reduced by
-	// cacheRatio × discountBase. Events with server-reported cacheReadTokens
-	// keep their verbatim cost.
-	const isCacheReadUnreported = cacheReadTokens === 0
+	// Cache ratio cost discount: when the provider does NOT report cache
+	// info (capability check, not raw value), the estimated cache-read
+	// portion of the input is priced at the (cheaper) cache-read rate, so
+	// the cost is reduced by cacheRatio × discountBase. Providers that DO
+	// report cache keep their verbatim cost — cacheRead=0 is a true miss.
+	const isCacheReadUnreported = !providerReportsCache(event.provider, event.model)
 	if (isCacheReadUnreported && cacheRatio !== undefined && cacheRatio > 0) {
 		costUsd = applyCacheDiscount(costUsd, computeCacheDiscountBase(event), cacheRatio)
 	}
 
-	// Cache ratio estimation: if provider doesn't report cacheReadTokens
-	// and cacheRatio is provided, estimate it as inputTokens * cacheRatio
+	// Cache ratio estimation: if provider doesn't report cache info
+	// (capability) and cacheRatio is provided, estimate cacheRead as
+	// inputTokens * cacheRatio. For reporting providers, cacheRead stays
+	// at the server-reported value (0 for a true cache miss).
 	const isCacheReadEstimated = isCacheReadUnreported && cacheRatio !== undefined && cacheRatio > 0
 	if (isCacheReadEstimated) {
 		cacheReadTokens = Math.round(inputTokens * cacheRatio)

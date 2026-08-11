@@ -449,7 +449,9 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 	// buckets via the persisted unreported-cache input sums.
 
 	describe("parity with cacheRatio: rollup snapshot vs UsageAggregator", () => {
-		it("unreported cacheRead: estimation matches within rounding tolerance", () => {
+		it("reporting provider with cacheRead=0: no estimation, verbatim cost (true cache miss)", () => {
+			// Bug 1 fix: openai/gpt-4o is a reporting provider (has cacheReadsPrice).
+			// cacheRead=0 is a true cache miss — no estimation, no discount.
 			const events = [
 				makeEvent({
 					eventId: "evt-cr-1",
@@ -484,27 +486,18 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			const aggregatorSnapshot = aggregator.query(events, query)
 			const dbSnapshot = assembleRollupSnapshot(db, query)
 
-			// Estimation is applied in BOTH paths: unreported cacheRead is
-			// estimated as input * 0.94 per event (aggregator) vs per bucket
-			// (rollup converter). Per-event rounding can drift by < 1 token
-			// per event, so allow tolerance = number of events.
+			// No estimation for reporting providers — cacheRead stays 0.
 			expect(dbSnapshot.totals.events).toBe(aggregatorSnapshot.totals.events)
 			expect(dbSnapshot.totals.inputTokens).toBe(aggregatorSnapshot.totals.inputTokens)
 			expect(dbSnapshot.totals.outputTokens).toBe(aggregatorSnapshot.totals.outputTokens)
-			expect(dbSnapshot.totals.costUsd).toBeCloseTo(aggregatorSnapshot.totals.costUsd, 10)
-			expect(
-				Math.abs(dbSnapshot.totals.cacheReadTokens - aggregatorSnapshot.totals.cacheReadTokens),
-			).toBeLessThanOrEqual(events.length)
-			// Both paths must estimate a non-zero cacheRead (~0.94 * 3000 = 2820).
-			expect(dbSnapshot.totals.cacheReadTokens).toBeGreaterThan(2800)
+			expect(dbSnapshot.totals.cacheReadTokens).toBe(0)
+			expect(aggregatorSnapshot.totals.cacheReadTokens).toBe(0)
 			expect(dbSnapshot.buckets.length).toBe(aggregatorSnapshot.buckets.length)
 
-			// Cost semantics: unreported events are discounted by ratio × discountBase.
-			// gpt-4o: inputPrice $2.5/1M, cacheReadsPrice $1.25/1M → per-event bases
-			// 1000/1M × 1.25 = 0.00125 and 2000/1M × 1.25 = 0.0025.
-			// total = 0.03 − 0.94 × 0.00375 = 0.026475 (both paths, within rounding).
-			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.026475, 10)
-			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.026475, 10)
+			// Cost is verbatim — no discount for reporting providers.
+			// total = 0.01 + 0.02 = 0.03 (both paths).
+			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.03, 10)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.03, 10)
 		})
 
 		it("server-reported cacheRead: exact match, no estimation applied", () => {
@@ -560,10 +553,9 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 		})
 
 		it("mixed-reporting bucket: exact parity between fast path and per-event path", () => {
-			// One event reports cacheRead, another (same bucket) does not.
-			// The rollup row persists the full input sum over unreported events,
-			// so the fast path estimates exactly those events — identical to
-			// the per-event path.
+			// Bug 1 fix: anthropic is a reporting provider. Both events use anthropic.
+			// evt-cr-5 reports cacheRead=400 (cache hit). evt-cr-6 has cacheRead=0
+			// (true cache miss). No estimation occurs for either — both keep verbatim cost.
 			const events = [
 				makeEvent({
 					eventId: "evt-cr-5",
@@ -599,18 +591,19 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			const aggregatorSnapshot = aggregator.query(events, query)
 			const dbSnapshot = assembleRollupSnapshot(db, query)
 
-			// Both paths: 400 reported + round(1000 * 0.94) estimated = 1340.
-			expect(aggregatorSnapshot.totals.cacheReadTokens).toBe(1340)
-			expect(dbSnapshot.totals.cacheReadTokens).toBe(1340)
+			// Both paths: 400 reported + 0 (true miss, no estimation) = 400.
+			expect(aggregatorSnapshot.totals.cacheReadTokens).toBe(400)
+			expect(dbSnapshot.totals.cacheReadTokens).toBe(400)
 
-			// Cost parity: the reported event keeps its verbatim 0.01; the
-			// unreported one is discounted by 0.94 × (1000/1M × (3.0 − 0.3))
-			// = 0.002538 → 0.01 + 0.007462 = 0.017462 in both paths.
-			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.017462, 10)
-			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.017462, 10)
+			// Cost parity: both events keep verbatim cost (reporting provider).
+			// total = 0.01 + 0.01 = 0.02 in both paths.
+			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.02, 10)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.02, 10)
 		})
 
-		it("day axis with cacheRatio: bucket parity within rounding tolerance", () => {
+		it("day axis with cacheRatio: bucket parity for reporting providers (no estimation)", () => {
+			// Bug 1 fix: anthropic is a reporting provider. cacheRead=0 is a true
+			// cache miss — no estimation, no discount. Both paths must match.
 			const events = [
 				makeEvent({
 					eventId: "evt-cr-7",
@@ -648,15 +641,15 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				expect(dbSnapshot.buckets[i].inputTokens).toBe(aggregatorSnapshot.buckets[i].inputTokens)
 				expect(dbSnapshot.buckets[i].outputTokens).toBe(aggregatorSnapshot.buckets[i].outputTokens)
 				expect(dbSnapshot.buckets[i].costUsd).toBeCloseTo(aggregatorSnapshot.buckets[i].costUsd, 10)
-				// Single-event buckets: per-event and per-row rounding are identical.
+				// No estimation — cacheRead stays 0 for reporting providers.
 				expect(dbSnapshot.buckets[i].cacheReadTokens).toBe(aggregatorSnapshot.buckets[i].cacheReadTokens)
 			}
 
-			// Per-bucket discounted costs (claude-sonnet-4: base = input/1M × 2.7):
-			// day 1: 0.01 − 0.94 × 0.0027 = 0.007462
-			// day 2: 0.02 − 0.94 × 0.0054 = 0.014924
-			expect(dbSnapshot.buckets[0].costUsd).toBeCloseTo(0.007462, 10)
-			expect(dbSnapshot.buckets[1].costUsd).toBeCloseTo(0.014924, 10)
+			// Per-bucket verbatim costs (reporting provider: no discount):
+			// day 1: 0.01 (verbatim)
+			// day 2: 0.02 (verbatim)
+			expect(dbSnapshot.buckets[0].costUsd).toBeCloseTo(0.01, 10)
+			expect(dbSnapshot.buckets[1].costUsd).toBeCloseTo(0.02, 10)
 		})
 	})
 

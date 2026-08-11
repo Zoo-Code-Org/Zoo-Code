@@ -1221,20 +1221,22 @@ describe("UsageAggregator", () => {
 			expect(delta!.unknownEventCount).toBe(1)
 		})
 
-		it("should estimate cacheReadTokens from cacheRatio", () => {
+		it("should NOT estimate cacheReadTokens for reporting providers (cacheRead=0 is a true miss)", () => {
+			// Bug 1 fix: anthropic reports cache. cacheRead=0 is a true cache miss,
+			// not "unreported". Tokens must NOT be estimated.
 			const event = makeEvent({
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
 					outputTokens: { value: 500, source: "provider" },
-					// cacheReadTokens missing
+					// cacheReadTokens missing → true cache miss for reporting provider
 				},
 			})
 			const query = makeQuery({ groupBy: [], cacheRatio: 0.5 })
 
 			const delta = computeEventContribution(event, query)
 			expect(delta).not.toBeNull()
-			// 1000 * 0.5 = 500
-			expect(delta!.cacheReadTokens).toBe(500)
+			// cacheReadTokens stays 0 — no estimation for reporting providers
+			expect(delta!.cacheReadTokens).toBe(0)
 		})
 
 		it("should not estimate cacheReadTokens when already present", () => {
@@ -1251,7 +1253,9 @@ describe("UsageAggregator", () => {
 			expect(delta!.cacheReadTokens).toBe(200)
 		})
 
-		it("should discount cost for unreported cacheRead events when cacheRatio is set", () => {
+		it("should keep cost invariant for reporting providers with cacheRead=0 (true cache miss)", () => {
+			// Bug 1 fix: anthropic reports cache. cacheRead=0 is a true cache miss.
+			// The slider must NOT vary the cost.
 			const event = makeEvent({
 				provider: "anthropic",
 				model: "claude-sonnet-4-20250514",
@@ -1259,19 +1263,16 @@ describe("UsageAggregator", () => {
 					inputTokens: { value: 1000, source: "provider" },
 					outputTokens: { value: 500, source: "provider" },
 					costUsd: { value: 0.01, source: "provider" },
-					// cacheReadTokens missing → unreported
+					// cacheReadTokens missing → true cache miss for reporting provider
 				},
 			})
 
-			// claude-sonnet-4: inputPrice=$3.0/1M, cacheReadsPrice=$0.30/1M
-			// discountBase = 1000/1M × 2.7 = 0.0027
-			// ratio 0.5 → 0.01 − 0.5 × 0.0027 = 0.00865
+			// Cost is invariant under any ratio — no discount for reporting providers.
 			const discounted = computeEventContribution(event, makeQuery({ groupBy: [], cacheRatio: 0.5 }))
-			expect(discounted!.costUsd).toBeCloseTo(0.00865, 10)
+			expect(discounted!.costUsd).toBe(0.01)
 
-			// ratio 1 → 0.01 − 0.0027 = 0.0073
 			const full = computeEventContribution(event, makeQuery({ groupBy: [], cacheRatio: 1 }))
-			expect(full!.costUsd).toBeCloseTo(0.0073, 10)
+			expect(full!.costUsd).toBe(0.01)
 
 			// No ratio → verbatim cost.
 			const verbatim = computeEventContribution(event, makeQuery({ groupBy: [] }))

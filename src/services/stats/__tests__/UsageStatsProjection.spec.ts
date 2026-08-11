@@ -865,8 +865,9 @@ describe("UsageStatsProjection", () => {
 	})
 
 	describe("cacheRatio estimation bug fix", () => {
-		it("never increases cacheReadTokens for events/rows with pre-existing cacheReadTokens > 0", () => {
-			// Event 1: Provider reports 300 cached tokens out of 1000 input tokens
+		it("never increases cacheReadTokens for reporting providers (cacheRead=0 is a true miss)", () => {
+			// Bug 1 fix: anthropic is a reporting provider (has cacheReadsPrice).
+			// Event 1: Provider reports 300 cached tokens (cache hit).
 			const evtReported = makeEvent({
 				eventId: "evt-reported",
 				idempotencyKey: "idem-reported",
@@ -877,7 +878,8 @@ describe("UsageStatsProjection", () => {
 				},
 			})
 
-			// Event 2: Provider does NOT report cacheReadTokens (0 or unassigned)
+			// Event 2: Same reporting provider, cacheRead=0 (true cache miss).
+			// No estimation should occur — cacheRead stays 0.
 			const evtUnreported = makeEvent({
 				eventId: "evt-unreported",
 				idempotencyKey: "idem-unreported",
@@ -893,18 +895,18 @@ describe("UsageStatsProjection", () => {
 			// Query with cacheRatio = 0.5 (50%)
 			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.5 }))
 
-			// For evtReported: cacheReadTokens should remain 300 (NOT 300 + 500 = 800)
-			// For evtUnreported: cacheReadTokens estimated as Math.round(1000 * 0.5) = 500
-			// Total cacheReadTokens = 300 + 500 = 800
-			expect(snapshot.totals.cacheReadTokens).toBe(800)
-			expect(snapshot.buckets[0].cacheReadTokens).toBe(800)
+			// For evtReported: cacheReadTokens = 300 (reported, no estimation).
+			// For evtUnreported: cacheReadTokens = 0 (true cache miss, no estimation).
+			// Total cacheReadTokens = 300 + 0 = 300.
+			expect(snapshot.totals.cacheReadTokens).toBe(300)
+			expect(snapshot.buckets[0].cacheReadTokens).toBe(300)
 
-			// Cost semantics: the reported event keeps its verbatim computed cost
-			// (0.006 + 300 × $0.30/1M = 0.00609); the unreported one (0.006) is
-			// discounted by 0.5 × (1000/1M × (3.0 − 0.3)) = 0.00135.
-			// Bucket/totals: 0.01209 − 0.00135 = 0.01074.
-			expect(snapshot.totals.costUsd).toBeCloseTo(0.01074, 10)
-			expect(snapshot.buckets[0].costUsd).toBeCloseTo(0.01074, 10)
+			// Cost semantics: both events keep verbatim cost (reporting provider).
+			// evtReported: 1000 × $3/1M + 200 × $15/1M + 300 × $0.30/1M = 0.00609
+			// evtUnreported: 1000 × $3/1M + 200 × $15/1M = 0.006
+			// Total: 0.01209 (no discount applied).
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.01209, 10)
+			expect(snapshot.buckets[0].costUsd).toBeCloseTo(0.01209, 10)
 		})
 	})
 })
