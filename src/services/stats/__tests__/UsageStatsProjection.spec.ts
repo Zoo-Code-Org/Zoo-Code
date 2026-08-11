@@ -844,7 +844,7 @@ describe("UsageStatsProjection", () => {
 			)
 		})
 
-		it("falls back to event scan when cacheRatio is specified (> 0)", () => {
+		it("uses rollup fast path with cacheRatio, keeping server-reported cacheRead", () => {
 			db.append(
 				makeEvent({
 					eventId: "evt-1",

@@ -38,7 +38,7 @@ function loadDatabaseSync(): typeof DatabaseSync {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 5
+const SCHEMA_VERSION = 6
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
@@ -73,6 +73,7 @@ export type StatsDbErrorCode =
 	| "STATS_DB/migrate/001" // Schema migration failed
 	| "STATS_DB/migrate/002" // Schema v4 migration failed (timezone offset fix)
 	| "STATS_DB/migrate/003" // Schema v5 migration failed (task usage projection)
+	| "STATS_DB/migrate/004" // Schema v6 migration failed (unreported cache input tokens)
 	| "STATS_DB/append/001" // Transaction failed
 	| "STATS_DB/read/001" // Query failed
 	| "STATS_DB/clear/001" // Clear failed
@@ -140,6 +141,17 @@ export interface TaskUsageRow {
 	provider: string
 }
 
+/**
+ * Per-task identity aggregates composed straight from usage_events:
+ * input/output token sums plus the distinct models and modes a task used.
+ */
+export interface TaskIdentityAggregate {
+	inputTokens: number
+	outputTokens: number
+	models: string[]
+	modes: string[]
+}
+
 /** A daily rollup row. */
 export interface DailyRollupRow {
 	day: string
@@ -163,6 +175,7 @@ export interface DailyRollupDetailedRow {
 	totalTokens: number
 	costUsd: number
 	uncachedInputTokens: number
+	unreportedCacheInputTokens?: number
 }
 
 /** A breakdown rollup row for a specific axis. */
@@ -180,6 +193,7 @@ export interface BreakdownRollupRow {
 	totalTokens: number
 	costUsd: number
 	uncachedInputTokens: number
+	unreportedCacheInputTokens?: number
 }
 
 /** Coverage statistics for a time range. */
@@ -219,6 +233,14 @@ function createZeroTaskUsageRow(taskId: string): TaskUsageRow {
 		model: "",
 		provider: "",
 	}
+}
+
+/** Splits a GROUP_CONCAT aggregate back into an array; NULL/empty yields []. */
+function splitGroupConcat(value: unknown): string[] {
+	if (typeof value !== "string" || value.length === 0) {
+		return []
+	}
+	return value.split(",")
 }
 
 /**
@@ -402,6 +424,7 @@ export class UsageStatsDatabase {
 				total_tokens INTEGER NOT NULL DEFAULT 0,
 				cost_usd REAL NOT NULL DEFAULT 0,
 				uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
+				unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0,
 				PRIMARY KEY (period_type, period_key, root_task_id, axis, axis_value)
 			);
 
@@ -458,6 +481,15 @@ export class UsageStatsDatabase {
 			// Column already exists
 		}
 
+		// Migration: add unreported_cache_input_tokens column to stats_rollup if it
+		// doesn't exist. This must run before any schema-version migration, since
+		// those rebuild rollups through updateRollup(), which writes this column.
+		try {
+			db.exec("ALTER TABLE stats_rollup ADD COLUMN unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
+
 		// Initialize singleton meta if absent
 		const existing = db.prepare("SELECT value FROM stats_meta WHERE key = ?").get(META_KEY) as
 			| { value: string }
@@ -505,6 +537,11 @@ export class UsageStatsDatabase {
 		const metaAfterV4 = this.readMetaInternal(db)
 		if (metaAfterV4.schemaVersion < 5) {
 			this.migrateToV5(db)
+		}
+
+		const metaAfterV5 = this.readMetaInternal(db)
+		if (metaAfterV5.schemaVersion < 6) {
+			this.migrateToV6(db)
 		}
 	}
 
@@ -603,6 +640,55 @@ export class UsageStatsDatabase {
 	}
 
 	/**
+	 * Migration v5 → v6: backfill unreported_cache_input_tokens on rollup rows.
+	 *
+	 * The new column stores, per rollup row, the sum of FULL input tokens over
+	 * events whose provider did not report cacheReadTokens. The dashboard
+	 * cacheRatio simulation uses it to estimate unreported cache reads with
+	 * per-event parity on mixed-reporting buckets (where the bucket-level
+	 * cacheRead sum is non-zero but some events report nothing).
+	 *
+	 * Idempotent: the ALTER is a no-op once the column exists, and the rebuild
+	 * recomputes every rollup row from the raw events.
+	 */
+	private migrateToV6(db: DatabaseSync): void {
+		try {
+			db.exec("BEGIN")
+
+			try {
+				db.exec("ALTER TABLE stats_rollup ADD COLUMN unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0")
+			} catch {
+				// Column already exists
+			}
+
+			this.updateMeta(db, { schemaVersion: 6 })
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/004",
+				"Failed to migrate to schema v6 (unreported cache input tokens)",
+				err,
+			)
+		}
+
+		// Rebuild rollups so existing rows carry the new column's values.
+		try {
+			this.rebuildRollupsFromEvents()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/migrate/004",
+				"Failed to rebuild rollups after schema v6 migration (unreported cache input tokens)",
+				err,
+			)
+		}
+	}
+
+	/**
 	 * Migration v1 → v2: Recompute day/month buckets using local timezone.
 	 *
 	 * In v1, dayBucket was derived from `occurredAt.slice(0, 10)` which is a UTC
@@ -677,6 +763,7 @@ export class UsageStatsDatabase {
 					const totalTokens = usage.totalTokens?.value ?? inputTokens + outputTokens
 					const costUsd = usage.costUsd?.value ?? 0
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
+					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -701,6 +788,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Rebuild monthly rollup
@@ -722,6 +810,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Rebuild session_activity (without touching session_metadata)
@@ -821,6 +910,7 @@ export class UsageStatsDatabase {
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
+					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -853,6 +943,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Monthly breakdown
@@ -874,6 +965,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Lifetime breakdown
@@ -895,6 +987,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 					}
 
@@ -919,6 +1012,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Monthly non-cancelled
@@ -940,6 +1034,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Lifetime non-cancelled
@@ -961,6 +1056,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Non-cancelled breakdown rows for each axis
@@ -988,6 +1084,7 @@ export class UsageStatsDatabase {
 								totalTokens,
 								costUsd,
 								uncachedInputTokens,
+								unreportedCacheInputTokens,
 							})
 
 							// Monthly non-cancelled breakdown
@@ -1009,6 +1106,7 @@ export class UsageStatsDatabase {
 								totalTokens,
 								costUsd,
 								uncachedInputTokens,
+								unreportedCacheInputTokens,
 							})
 
 							// Lifetime non-cancelled breakdown
@@ -1030,6 +1128,7 @@ export class UsageStatsDatabase {
 								totalTokens,
 								costUsd,
 								uncachedInputTokens,
+								unreportedCacheInputTokens,
 							})
 						}
 					}
@@ -1183,6 +1282,7 @@ export class UsageStatsDatabase {
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
+					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -1209,6 +1309,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Monthly aggregate
@@ -1230,6 +1331,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Lifetime aggregate
@@ -1251,6 +1353,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// ── Breakdown rollups (per axis) ──
@@ -1281,6 +1384,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Monthly breakdown
@@ -1302,6 +1406,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Lifetime breakdown
@@ -1323,6 +1428,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 					}
 
@@ -1348,6 +1454,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Monthly non-cancelled aggregate
@@ -1369,6 +1476,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Lifetime non-cancelled aggregate
@@ -1390,6 +1498,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 
 						// Non-cancelled breakdown rows for each axis
@@ -1413,6 +1522,7 @@ export class UsageStatsDatabase {
 								totalTokens,
 								costUsd,
 								uncachedInputTokens,
+								unreportedCacheInputTokens,
 							})
 
 							// Monthly non-cancelled breakdown
@@ -1434,6 +1544,7 @@ export class UsageStatsDatabase {
 								totalTokens,
 								costUsd,
 								uncachedInputTokens,
+								unreportedCacheInputTokens,
 							})
 
 							// Lifetime non-cancelled breakdown
@@ -1455,6 +1566,7 @@ export class UsageStatsDatabase {
 								totalTokens,
 								costUsd,
 								uncachedInputTokens,
+								unreportedCacheInputTokens,
 							})
 						}
 					}
@@ -1568,6 +1680,7 @@ export class UsageStatsDatabase {
 		// Use getEffectiveCost for rollup consistency with computeEventDelta
 		const costUsd = getEffectiveCost(event)
 		const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
+		const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
 		const status = event.status
 		const completedCalls = status === "completed" ? 1 : 0
@@ -1645,6 +1758,7 @@ export class UsageStatsDatabase {
 					totalTokens,
 					costUsd,
 					uncachedInputTokens,
+					unreportedCacheInputTokens,
 				})
 
 				// Update rollups: monthly
@@ -1666,6 +1780,7 @@ export class UsageStatsDatabase {
 					totalTokens,
 					costUsd,
 					uncachedInputTokens,
+					unreportedCacheInputTokens,
 				})
 
 				// Update rollups: lifetime
@@ -1687,6 +1802,7 @@ export class UsageStatsDatabase {
 					totalTokens,
 					costUsd,
 					uncachedInputTokens,
+					unreportedCacheInputTokens,
 				})
 
 				// Update breakdown rollups for each supported axis
@@ -1702,6 +1818,7 @@ export class UsageStatsDatabase {
 					totalTokens,
 					costUsd,
 					uncachedInputTokens,
+					unreportedCacheInputTokens,
 				})
 
 				// Update non-cancelled-only rollups (root_task_id = '__nc__')
@@ -1718,6 +1835,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 				}
 
@@ -1798,6 +1916,7 @@ export class UsageStatsDatabase {
 				// Use getEffectiveCost for rollup consistency with computeEventDelta
 				const costUsd = getEffectiveCost(event)
 				const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
+				const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
 				const status = event.status
 				const completedCalls = status === "completed" ? 1 : 0
@@ -1868,6 +1987,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Update rollups: monthly
@@ -1889,6 +2009,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Update rollups: lifetime
@@ -1910,6 +2031,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Update breakdown rollups for each supported axis
@@ -1925,6 +2047,7 @@ export class UsageStatsDatabase {
 						totalTokens,
 						costUsd,
 						uncachedInputTokens,
+						unreportedCacheInputTokens,
 					})
 
 					// Update non-cancelled-only rollups
@@ -1941,6 +2064,7 @@ export class UsageStatsDatabase {
 							totalTokens,
 							costUsd,
 							uncachedInputTokens,
+							unreportedCacheInputTokens,
 						})
 					}
 
@@ -2045,6 +2169,42 @@ export class UsageStatsDatabase {
 	}
 
 	/**
+	 * Reads events within a half-open occurred-time range [fromMs, toMs) as an
+	 * array, in ascending sequence order. Uses bounded batches internally; the
+	 * range filter rides the idx_usage_events_occurred index. Pass 0 /
+	 * Number.MAX_SAFE_INTEGER for an unbounded read.
+	 */
+	readEventsInRange(fromMs: number, toMs: number): Array<UsageEventV1 & { sequence: number }> {
+		const db = this.getDb()
+		const events: Array<UsageEventV1 & { sequence: number }> = []
+
+		try {
+			const stmt = db.prepare(
+				`SELECT * FROM usage_events
+				 WHERE occurred_epoch_ms >= ? AND occurred_epoch_ms < ? AND seq > ?
+				 ORDER BY seq ASC LIMIT ?`,
+			)
+
+			let afterSeq = 0
+			while (true) {
+				const rows = stmt.all(fromMs, toMs, afterSeq, MAX_BATCH_SIZE) as Array<Record<string, unknown>>
+				if (rows.length === 0) {
+					break
+				}
+				events.push(...rows.map((row) => this.rowToEvent(row)))
+				afterSeq = rows[rows.length - 1].seq as number
+				if (rows.length < MAX_BATCH_SIZE) {
+					break
+				}
+			}
+
+			return events
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", `Failed to read events in range [${fromMs}, ${toMs})`, err)
+		}
+	}
+
+	/**
 	 * Reads direct-task usage summaries without scanning the event log.
 	 * Each SQLite query is chunked below the parameter ceiling. The returned map
 	 * always contains every requested task ID, using zero metrics for no-event
@@ -2067,21 +2227,101 @@ export class UsageStatsDatabase {
 
 		if (isStatsQueryRangeBounded(rangeMs)) {
 			try {
-				// Events arrive in ascending sequence order, so per-task rows see
-				// the same event order the append-time metadata upsert saw.
-				for (const event of this.queryEventsByTaskIds(uniqueTaskIds, rangeMs)) {
-					const row = result.get(event.taskId)!
-					row.totalCost += getEffectiveCost(event)
-					row.totalTokens +=
-						event.usage.totalTokens?.value ??
-						(event.usage.inputTokens?.value ?? 0) + (event.usage.outputTokens?.value ?? 0)
-					row.eventCount += 1
-					const occurredMs = new Date(event.occurredAt).getTime()
-					if (occurredMs >= row.lastActivity) {
-						row.model = event.model
-						row.provider = event.provider
+				for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
+					const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
+					const placeholders = chunk.map(() => "?").join(", ")
+
+					let rangeSql = ""
+					const params: Array<string | number> = [...chunk]
+					if (rangeMs?.fromMs !== undefined) {
+						rangeSql += " AND occurred_epoch_ms >= ?"
+						params.push(rangeMs.fromMs)
 					}
-					row.lastActivity = occurredMs
+					if (rangeMs?.toMs !== undefined) {
+						rangeSql += " AND occurred_epoch_ms < ?"
+						params.push(rangeMs.toMs)
+					}
+
+					// Token/cost sums are aggregated in SQL straight off usage_json,
+					// so matching rows are never deserialized. The total_tokens
+					// expression mirrors the JS fallback chain exactly
+					// (totalTokens?.value ?? input + output).
+					const aggregateRows = db
+						.prepare(
+							`SELECT task_id,
+								COUNT(*) as event_count,
+								SUM(COALESCE(json_extract(usage_json, '$.totalTokens.value'),
+									COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0) +
+									COALESCE(json_extract(usage_json, '$.outputTokens.value'), 0))) as total_tokens,
+								SUM(COALESCE(json_extract(usage_json, '$.costUsd.value'), 0)) as stored_cost,
+								SUM(CASE WHEN json_extract(usage_json, '$.costUsd.value') IS NULL THEN 1 ELSE 0 END) as missing_cost_count
+							 FROM usage_events
+							 WHERE task_id IN (${placeholders})${rangeSql}
+							 GROUP BY task_id`,
+						)
+						.all(...params) as Array<Record<string, unknown>>
+
+					for (const row of aggregateRows) {
+						const taskRow = result.get(row.task_id as string)!
+						taskRow.eventCount = row.event_count as number
+						taskRow.totalTokens = row.total_tokens as number
+						taskRow.totalCost = row.stored_cost as number
+					}
+
+					// Latest-activity metadata mirrors the append-time upsert
+					// exactly: lastActivity comes from the highest-sequence in-range
+					// event (the upsert overwrites it unconditionally), while
+					// model/provider come from the last event whose occurred
+					// timestamp is >= its in-range sequence predecessor's (the
+					// upsert's >= comparison against the previously stored value).
+					const metaRows = db
+						.prepare(
+							`SELECT task_id,
+								MAX(CASE WHEN seq_rn = 1 THEN occurred_epoch_ms END) as last_activity,
+								MAX(CASE WHEN meta_rn = 1 THEN model END) as model,
+								MAX(CASE WHEN meta_rn = 1 THEN provider END) as provider
+							 FROM (
+								SELECT task_id, model, provider, occurred_epoch_ms,
+									ROW_NUMBER() OVER (PARTITION BY task_id ORDER BY seq DESC) as seq_rn,
+									ROW_NUMBER() OVER (
+										PARTITION BY task_id
+										ORDER BY CASE WHEN occurred_epoch_ms >= prev_occurred THEN 0 ELSE 1 END, seq DESC
+									) as meta_rn
+								FROM (
+									SELECT task_id, model, provider, occurred_epoch_ms, seq,
+										LAG(occurred_epoch_ms, 1, -1) OVER (PARTITION BY task_id ORDER BY seq ASC) as prev_occurred
+									FROM usage_events
+									WHERE task_id IN (${placeholders})${rangeSql}
+								)
+							 )
+							 GROUP BY task_id`,
+						)
+						.all(...params) as Array<Record<string, unknown>>
+
+					for (const row of metaRows) {
+						const taskRow = result.get(row.task_id as string)!
+						taskRow.lastActivity = row.last_activity as number
+						taskRow.model = row.model as string
+						taskRow.provider = row.provider as string
+					}
+
+					// Events without a stored cost need getEffectiveCost recalc
+					// (model pricing lookup) — deserialize only those rows.
+					if (aggregateRows.some((row) => (row.missing_cost_count as number) > 0)) {
+						const missingCostRows = db
+							.prepare(
+								`SELECT * FROM usage_events
+								 WHERE task_id IN (${placeholders})${rangeSql}
+								 AND json_extract(usage_json, '$.costUsd.value') IS NULL
+								 ORDER BY seq ASC`,
+							)
+							.all(...params) as Array<Record<string, unknown>>
+
+						for (const row of missingCostRows) {
+							const event = this.rowToEvent(row)
+							result.get(event.taskId)!.totalCost += getEffectiveCost(event)
+						}
+					}
 				}
 				return result
 			} catch (err) {
@@ -2118,6 +2358,74 @@ export class UsageStatsDatabase {
 			return result
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", "Failed to query task usage metadata", err)
+		}
+	}
+
+	/**
+	 * Reads per-task identity aggregates (input/output token sums plus the
+	 * distinct models and modes used) in one grouped pass over usage_events.
+	 * Each SQLite query is chunked below the parameter ceiling. The returned map
+	 * always contains every requested task ID, using zero metrics and empty
+	 * lists for no-event tasks so callers can compose task trees without
+	 * per-task fallbacks.
+	 *
+	 * When `rangeMs` carries bounds, only rows whose `occurred_epoch_ms` falls
+	 * inside the half-open range are aggregated. Distinct models/modes come
+	 * from GROUP_CONCAT, whose order is unspecified; callers that need
+	 * first-seen order must re-union the per-task lists deterministically.
+	 */
+	queryTaskIdentityAggregates(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskIdentityAggregate> {
+		const db = this.getDb()
+		const uniqueTaskIds = [...new Set(taskIds)]
+		const result = new Map<string, TaskIdentityAggregate>(
+			uniqueTaskIds.map((taskId) => [taskId, { inputTokens: 0, outputTokens: 0, models: [], modes: [] }]),
+		)
+
+		try {
+			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
+				const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
+				const placeholders = chunk.map(() => "?").join(", ")
+
+				let rangeSql = ""
+				const params: Array<string | number> = [...chunk]
+				if (rangeMs?.fromMs !== undefined) {
+					rangeSql += " AND occurred_epoch_ms >= ?"
+					params.push(rangeMs.fromMs)
+				}
+				if (rangeMs?.toMs !== undefined) {
+					rangeSql += " AND occurred_epoch_ms < ?"
+					params.push(rangeMs.toMs)
+				}
+
+				// NULLIF drops empty model/mode strings from the distinct lists
+				// (GROUP_CONCAT ignores NULLs). Model and mode names never contain
+				// commas, so the default ',' separator splits back unambiguously.
+				const rows = db
+					.prepare(
+						`SELECT task_id,
+							SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens,
+							SUM(COALESCE(json_extract(usage_json, '$.outputTokens.value'), 0)) as output_tokens,
+							GROUP_CONCAT(DISTINCT NULLIF(model, '')) as models,
+							GROUP_CONCAT(DISTINCT NULLIF(mode, '')) as modes
+						 FROM usage_events
+						 WHERE task_id IN (${placeholders})${rangeSql}
+						 GROUP BY task_id`,
+					)
+					.all(...params) as Array<Record<string, unknown>>
+
+				for (const row of rows) {
+					result.set(row.task_id as string, {
+						inputTokens: row.input_tokens as number,
+						outputTokens: row.output_tokens as number,
+						models: splitGroupConcat(row.models),
+						modes: splitGroupConcat(row.modes),
+					})
+				}
+			}
+
+			return result
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query task identity aggregates", err)
 		}
 	}
 
@@ -2365,7 +2673,8 @@ export class UsageStatsDatabase {
 					.prepare(
 						`SELECT axis_value, event_count, completed_calls, failed_calls, cancelled_calls,
 							input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-							reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens
+							reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens,
+							unreported_cache_input_tokens
 						 FROM stats_rollup
 						 WHERE period_type = 'lifetime' AND period_key = 'all'
 						 AND root_task_id = ? AND axis = ?
@@ -2387,7 +2696,8 @@ export class UsageStatsDatabase {
 							SUM(reasoning_tokens) as reasoning_tokens,
 							SUM(total_tokens) as total_tokens,
 							SUM(cost_usd) as cost_usd,
-							SUM(uncached_input_tokens) as uncached_input_tokens
+							SUM(uncached_input_tokens) as uncached_input_tokens,
+							SUM(unreported_cache_input_tokens) as unreported_cache_input_tokens
 						 FROM stats_rollup
 						 WHERE period_type = ? AND root_task_id = ? AND axis = ?
 						 AND period_key >= ? AND period_key <= ?
@@ -2411,6 +2721,7 @@ export class UsageStatsDatabase {
 				totalTokens: row.total_tokens as number,
 				costUsd: row.cost_usd as number,
 				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
+				unreportedCacheInputTokens: (row.unreported_cache_input_tokens as number) ?? 0,
 			}))
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", `Failed to query breakdown rollups for axis ${axis}`, err)
@@ -2438,7 +2749,8 @@ export class UsageStatsDatabase {
 				.prepare(
 					`SELECT period_key as day, event_count, completed_calls, failed_calls, cancelled_calls,
 						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-						reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens
+						reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens,
+						unreported_cache_input_tokens
 					 FROM stats_rollup
 					 WHERE period_type = 'daily' AND root_task_id = ? AND axis = ''
 					 AND period_key >= ? AND period_key <= ?
@@ -2460,6 +2772,7 @@ export class UsageStatsDatabase {
 				totalTokens: row.total_tokens as number,
 				costUsd: row.cost_usd as number,
 				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
+				unreportedCacheInputTokens: (row.unreported_cache_input_tokens as number) ?? 0,
 			}))
 		} catch (err) {
 			throw new StatsDbError(
@@ -2486,6 +2799,7 @@ export class UsageStatsDatabase {
 		failedCalls: number
 		cancelledCalls: number
 		uncachedInputTokens: number
+		unreportedCacheInputTokens: number
 	} {
 		const db = this.getDb()
 		const rootTaskId = includeCancelled ? "" : NON_CANCELLED_KEY
@@ -2496,7 +2810,7 @@ export class UsageStatsDatabase {
 					`SELECT event_count, cost_usd as total_cost, total_tokens,
 						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
 						reasoning_tokens, completed_calls, failed_calls, cancelled_calls,
-						uncached_input_tokens
+						uncached_input_tokens, unreported_cache_input_tokens
 					 FROM stats_rollup
 					 WHERE period_type = 'lifetime' AND root_task_id = ? AND axis = ''
 					 AND period_key = 'all'`,
@@ -2517,6 +2831,7 @@ export class UsageStatsDatabase {
 					failedCalls: 0,
 					cancelledCalls: 0,
 					uncachedInputTokens: 0,
+					unreportedCacheInputTokens: 0,
 				}
 			}
 
@@ -2533,6 +2848,7 @@ export class UsageStatsDatabase {
 				failedCalls: row.failed_calls as number,
 				cancelledCalls: row.cancelled_calls as number,
 				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
+				unreportedCacheInputTokens: (row.unreported_cache_input_tokens as number) ?? 0,
 			}
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", "Failed to query lifetime totals (filtered)", err)
@@ -2749,21 +3065,25 @@ export class UsageStatsDatabase {
 			totalTokens: number
 			costUsd: number
 			uncachedInputTokens?: number
+			unreportedCacheInputTokens?: number
 		},
 	): void {
 		const uncachedInputTokens = params.uncachedInputTokens ?? params.inputTokens
+		const unreportedCacheInputTokens = params.unreportedCacheInputTokens ?? 0
 
 		db.prepare(
 			`INSERT INTO stats_rollup (
 				period_type, period_key, root_task_id, axis, axis_value,
 				event_count, completed_calls, failed_calls, cancelled_calls,
 				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-				reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens
+				reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens,
+				unreported_cache_input_tokens
 			) VALUES (
 				@periodType, @periodKey, @rootTaskId, @axis, @axisValue,
 				@eventCount, @completedCalls, @failedCalls, @cancelledCalls,
 				@inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens,
-				@reasoningTokens, @totalTokens, @costUsd, @uncachedInputTokens
+				@reasoningTokens, @totalTokens, @costUsd, @uncachedInputTokens,
+				@unreportedCacheInputTokens
 			)
 			ON CONFLICT(period_type, period_key, root_task_id, axis, axis_value)
 			DO UPDATE SET
@@ -2778,7 +3098,8 @@ export class UsageStatsDatabase {
 				reasoning_tokens = reasoning_tokens + @reasoningTokens,
 				total_tokens = total_tokens + @totalTokens,
 				cost_usd = cost_usd + @costUsd,
-				uncached_input_tokens = uncached_input_tokens + @uncachedInputTokens`,
+				uncached_input_tokens = uncached_input_tokens + @uncachedInputTokens,
+				unreported_cache_input_tokens = unreported_cache_input_tokens + @unreportedCacheInputTokens`,
 		).run({
 			periodType: params.periodType,
 			periodKey: params.periodKey,
@@ -2797,6 +3118,7 @@ export class UsageStatsDatabase {
 			totalTokens: params.totalTokens,
 			costUsd: params.costUsd,
 			uncachedInputTokens,
+			unreportedCacheInputTokens,
 		})
 	}
 
@@ -2823,6 +3145,7 @@ export class UsageStatsDatabase {
 			totalTokens: number
 			costUsd: number
 			uncachedInputTokens?: number
+			unreportedCacheInputTokens?: number
 		},
 	): void {
 		const axisValueMap: Record<string, string> = {
@@ -2928,6 +3251,7 @@ export class UsageStatsDatabase {
 			totalTokens: number
 			costUsd: number
 			uncachedInputTokens?: number
+			unreportedCacheInputTokens?: number
 		},
 	): void {
 		// Daily non-cancelled

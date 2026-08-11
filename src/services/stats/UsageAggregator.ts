@@ -212,17 +212,36 @@ export function resolveTimeRange(query: StatsQuery): { from?: Date; to?: Date } 
 	return { from, to }
 }
 
+// ── Memoized date formatters ────────────────────────────────────────────────
+// Intl.DateTimeFormat construction is expensive; it happened once per event
+// (day + month + week buckets). Formatters are immutable and thread-safe for
+// reuse, so cache one per (timezone, kind) pair.
+const dateFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
+function getDateFormatter(timezone: string, kind: "day" | "month"): Intl.DateTimeFormat {
+	const key = `${timezone}|${kind}`
+	let formatter = dateFormatterCache.get(key)
+	if (!formatter) {
+		formatter =
+			kind === "day"
+				? new Intl.DateTimeFormat("en-CA", {
+						timeZone: timezone,
+						year: "numeric",
+						month: "2-digit",
+						day: "2-digit",
+					})
+				: new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit" })
+		dateFormatterCache.set(key, formatter)
+	}
+	return formatter
+}
+
 /**
  * Computes the ISO 8601 week number (YYYY-Www format).
  * Calculated based on the timezone.
  */
 function computeIsoWeekBucket(date: Date, timezone: string): string {
-	const formatter = new Intl.DateTimeFormat("en-CA", {
-		timeZone: timezone,
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-	})
+	const formatter = getDateFormatter(timezone, "day")
 	const parts = formatter.formatToParts(date)
 	const get = (type: string) => parseInt(parts.find((p) => p.type === type)?.value ?? "0", 10)
 	const year = get("year")
@@ -250,21 +269,10 @@ export function computeTimeBuckets(
 	const date = new Date(event.occurredAt)
 
 	// day bucket: YYYY-MM-DD (timezone-based)
-	const dayFormatter = new Intl.DateTimeFormat("en-CA", {
-		timeZone: timezone,
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-	})
-	const dayBucket = dayFormatter.format(date).replace(/\//g, "-")
+	const dayBucket = getDateFormatter(timezone, "day").format(date).replace(/\//g, "-")
 
 	// month bucket: YYYY-MM
-	const monthFormatter = new Intl.DateTimeFormat("en-CA", {
-		timeZone: timezone,
-		year: "numeric",
-		month: "2-digit",
-	})
-	const monthBucket = monthFormatter.format(date).replace(/\//g, "-")
+	const monthBucket = getDateFormatter(timezone, "month").format(date).replace(/\//g, "-")
 
 	// week bucket: YYYY-Www (ISO week)
 	const weekBucket = computeIsoWeekBucket(date, timezone)

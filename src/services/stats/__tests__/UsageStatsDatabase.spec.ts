@@ -1075,6 +1075,166 @@ describe("UsageStatsDatabase", () => {
 		})
 	})
 
+	describe("task identity aggregates", () => {
+		it("sums input/output tokens and collects distinct models and modes per task", () => {
+			db.bulkAppend([
+				makeEvent({
+					eventId: "evt-ident-a1",
+					idempotencyKey: "idem-ident-a1",
+					taskId: "ident-a",
+					model: "model-1",
+					mode: "code",
+					usage: {
+						inputTokens: { value: 100, source: "provider" },
+						outputTokens: { value: 50, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-ident-a2",
+					idempotencyKey: "idem-ident-a2",
+					taskId: "ident-a",
+					model: "model-2",
+					mode: "ask",
+					usage: {
+						inputTokens: { value: 200, source: "provider" },
+						outputTokens: { value: 70, source: "provider" },
+					},
+				}),
+				// Repeat model/mode and an event without token values: deduped, adds 0.
+				makeEvent({
+					eventId: "evt-ident-a3",
+					idempotencyKey: "idem-ident-a3",
+					taskId: "ident-a",
+					model: "model-1",
+					mode: "code",
+					usage: { costUsd: { value: 0.01, source: "provider" } },
+				}),
+				makeEvent({
+					eventId: "evt-ident-b1",
+					idempotencyKey: "idem-ident-b1",
+					taskId: "ident-b",
+					model: "model-9",
+					mode: "architect",
+					usage: {
+						inputTokens: { value: 11, source: "provider" },
+						outputTokens: { value: 13, source: "provider" },
+					},
+				}),
+			])
+
+			const aggregates = db.queryTaskIdentityAggregates(["ident-a", "ident-b", "ident-unused"])
+
+			const aggregateA = aggregates.get("ident-a")!
+			expect(aggregateA.inputTokens).toBe(300)
+			expect(aggregateA.outputTokens).toBe(120)
+			// GROUP_CONCAT order is unspecified; the projection owns union order.
+			expect(aggregateA.models).toHaveLength(2)
+			expect(aggregateA.models).toEqual(expect.arrayContaining(["model-1", "model-2"]))
+			expect(aggregateA.modes).toHaveLength(2)
+			expect(aggregateA.modes).toEqual(expect.arrayContaining(["code", "ask"]))
+
+			expect(aggregates.get("ident-b")).toEqual({
+				inputTokens: 11,
+				outputTokens: 13,
+				models: ["model-9"],
+				modes: ["architect"],
+			})
+			expect(aggregates.get("ident-unused")).toEqual({ inputTokens: 0, outputTokens: 0, models: [], modes: [] })
+		})
+
+		it("drops empty model and mode strings from the distinct lists", () => {
+			db.bulkAppend([
+				makeEvent({
+					eventId: "evt-ident-e1",
+					idempotencyKey: "idem-ident-e1",
+					taskId: "ident-empty",
+					model: "",
+					mode: "code",
+				}),
+				makeEvent({
+					eventId: "evt-ident-e2",
+					idempotencyKey: "idem-ident-e2",
+					taskId: "ident-empty",
+					model: "model-real",
+					mode: "",
+				}),
+				makeEvent({
+					eventId: "evt-ident-e3",
+					idempotencyKey: "idem-ident-e3",
+					taskId: "ident-empty",
+					model: "",
+					mode: "",
+				}),
+			])
+
+			const aggregate = db.queryTaskIdentityAggregates(["ident-empty"]).get("ident-empty")!
+			expect(aggregate.models).toEqual(["model-real"])
+			expect(aggregate.modes).toEqual(["code"])
+		})
+
+		it("aggregates only in-range events when the range is bounded", () => {
+			const FROM = Date.parse("2026-08-01T00:00:00.000Z")
+			const TO = Date.parse("2026-08-03T00:00:00.000Z")
+			db.bulkAppend([
+				// Out of range: before fromMs.
+				makeEvent({
+					eventId: "evt-ident-r1",
+					idempotencyKey: "idem-ident-r1",
+					taskId: "ident-ranged",
+					occurredAt: "2026-07-30T00:00:00.000Z",
+					model: "model-early",
+					mode: "ask",
+					usage: {
+						inputTokens: { value: 10, source: "provider" },
+						outputTokens: { value: 5, source: "provider" },
+					},
+				}),
+				// In range: exactly at fromMs (half-open lower bound is inclusive).
+				makeEvent({
+					eventId: "evt-ident-r2",
+					idempotencyKey: "idem-ident-r2",
+					taskId: "ident-ranged",
+					occurredAt: "2026-08-01T00:00:00.000Z",
+					model: "model-in",
+					mode: "code",
+					usage: {
+						inputTokens: { value: 100, source: "provider" },
+						outputTokens: { value: 50, source: "provider" },
+					},
+				}),
+				// Out of range: exactly at toMs (half-open upper bound is exclusive).
+				makeEvent({
+					eventId: "evt-ident-r3",
+					idempotencyKey: "idem-ident-r3",
+					taskId: "ident-ranged",
+					occurredAt: "2026-08-03T00:00:00.000Z",
+					model: "model-late",
+					mode: "architect",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+					},
+				}),
+			])
+
+			const ranged = db.queryTaskIdentityAggregates(["ident-ranged"], { fromMs: FROM, toMs: TO })
+			expect(ranged.get("ident-ranged")).toEqual({
+				inputTokens: 100,
+				outputTokens: 50,
+				models: ["model-in"],
+				modes: ["code"],
+			})
+
+			// One-sided bounds still filter; an absent range keeps all-time behavior.
+			const fromOnly = db.queryTaskIdentityAggregates(["ident-ranged"], { fromMs: FROM })
+			expect(fromOnly.get("ident-ranged")?.inputTokens).toBe(1100)
+
+			const allTime = db.queryTaskIdentityAggregates(["ident-ranged"])
+			expect(allTime.get("ident-ranged")?.inputTokens).toBe(1110)
+			expect(allTime.get("ident-ranged")?.models).toHaveLength(3)
+		})
+	})
+
 	describe("projection atomicity", () => {
 		it("should atomically insert event and update projections in one transaction", () => {
 			const event = makeEvent({

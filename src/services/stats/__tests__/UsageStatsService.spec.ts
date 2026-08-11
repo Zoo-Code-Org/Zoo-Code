@@ -646,6 +646,91 @@ describe("UsageStatsService", () => {
 		})
 	})
 
+	describe("exportStats - ranged database read", () => {
+		it("reads events via readEventsInRange limited to the query's time range", async () => {
+			const events = [
+				makeEvent({ eventId: "evt-in", idempotencyKey: "idem-in", occurredAt: "2026-07-20T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-out", idempotencyKey: "idem-out", occurredAt: "2026-07-25T10:00:00.000Z" }),
+			]
+			await service.backfillFromHistory(events)
+
+			const database = service.getDatabase()
+			expect(database).not.toBeNull()
+			const rangeSpy = vi.spyOn(database!, "readEventsInRange")
+			const readAllSpy = vi.spyOn(service["store"], "readAll")
+
+			const query = makeQuery({
+				from: "2026-07-20T00:00:00.000Z",
+				to: "2026-07-21T00:00:00.000Z",
+			})
+			const result = (await service.exportStats(query, "json")) as { events: UsageEventV1[] }
+
+			// The database read is scoped to the resolved query range...
+			expect(rangeSpy).toHaveBeenCalledWith(
+				new Date("2026-07-20T00:00:00.000Z").getTime(),
+				new Date("2026-07-21T00:00:00.000Z").getTime(),
+			)
+			// ...so the full NDJSON scan is never needed...
+			expect(readAllSpy).not.toHaveBeenCalled()
+			// ...and only in-range events are exported.
+			expect(result.events.map((e) => e.eventId)).toEqual(["evt-in"])
+
+			rangeSpy.mockRestore()
+			readAllSpy.mockRestore()
+		})
+
+		it("getFilteredEvents uses the ranged database read as well", async () => {
+			const events = [
+				makeEvent({ eventId: "evt-in", idempotencyKey: "idem-in", occurredAt: "2026-07-20T10:00:00.000Z" }),
+				makeEvent({ eventId: "evt-out", idempotencyKey: "idem-out", occurredAt: "2026-07-25T10:00:00.000Z" }),
+			]
+			await service.backfillFromHistory(events)
+
+			const database = service.getDatabase()
+			expect(database).not.toBeNull()
+			const rangeSpy = vi.spyOn(database!, "readEventsInRange")
+
+			const filtered = await service.getFilteredEvents(
+				makeQuery({
+					from: "2026-07-20T00:00:00.000Z",
+					to: "2026-07-21T00:00:00.000Z",
+				}),
+			)
+
+			expect(rangeSpy).toHaveBeenCalled()
+			expect(filtered.map((e) => e.eventId)).toEqual(["evt-in"])
+
+			rangeSpy.mockRestore()
+		})
+
+		it("falls back to the full store scan when the database is unavailable", async () => {
+			const freshDir = await createTempDir()
+			const svc = new UsageStatsService(freshDir)
+			const db = svc["database"] as UsageStatsDatabase
+
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(db, "initialize").mockImplementation(() => {
+				throw new Error("sqlite failed")
+			})
+			await svc.initialize()
+
+			await svc.backfillFromHistory([makeEvent({ eventId: "evt-fallback", idempotencyKey: "idem-fallback" })])
+
+			const readAllSpy = vi.spyOn(svc["store"], "readAll")
+			const result = (await svc.exportStats(makeQuery({ preset: "all" }), "json")) as {
+				events: UsageEventV1[]
+			}
+
+			expect(readAllSpy).toHaveBeenCalled()
+			expect(result.events.map((e) => e.eventId)).toEqual(["evt-fallback"])
+
+			readAllSpy.mockRestore()
+			warnSpy.mockRestore()
+			svc.dispose()
+			await fs.rm(freshDir, { recursive: true, force: true })
+		})
+	})
+
 	// ── issueClearNonce ─────────────────────────────────────────────────────
 
 	describe("issueClearNonce", () => {

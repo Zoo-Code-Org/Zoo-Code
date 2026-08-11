@@ -442,6 +442,200 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 		})
 	})
 
+	// ── Parity with cacheRatio: fast path (rollups) vs per-event aggregator ──
+	// Production queries always carry cacheRatio (0.94). These tests pin that
+	// the rollup fast path returns the same numbers as the per-event path for
+	// homogeneous reporting buckets, and exact parity for mixed-reporting
+	// buckets via the persisted unreported-cache input sums.
+
+	describe("parity with cacheRatio: rollup snapshot vs UsageAggregator", () => {
+		it("unreported cacheRead: estimation matches within rounding tolerance", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-cr-1",
+					idempotencyKey: "idem-cr-1",
+					provider: "openai",
+					model: "gpt-4o",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-cr-2",
+					idempotencyKey: "idem-cr-2",
+					provider: "openai",
+					model: "gpt-4o",
+					usage: {
+						inputTokens: { value: 2000, source: "provider" },
+						outputTokens: { value: 1000, source: "provider" },
+						costUsd: { value: 0.02, source: "provider" },
+					},
+				}),
+			]
+
+			for (const event of events) {
+				db.append(event)
+			}
+
+			const query = makeQuery({ preset: "all", groupBy: ["model"], cacheRatio: 0.94 })
+			const aggregator = new UsageAggregator()
+			const aggregatorSnapshot = aggregator.query(events, query)
+			const dbSnapshot = assembleRollupSnapshot(db, query)
+
+			// Estimation is applied in BOTH paths: unreported cacheRead is
+			// estimated as input * 0.94 per event (aggregator) vs per bucket
+			// (rollup converter). Per-event rounding can drift by < 1 token
+			// per event, so allow tolerance = number of events.
+			expect(dbSnapshot.totals.events).toBe(aggregatorSnapshot.totals.events)
+			expect(dbSnapshot.totals.inputTokens).toBe(aggregatorSnapshot.totals.inputTokens)
+			expect(dbSnapshot.totals.outputTokens).toBe(aggregatorSnapshot.totals.outputTokens)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(aggregatorSnapshot.totals.costUsd, 10)
+			expect(
+				Math.abs(dbSnapshot.totals.cacheReadTokens - aggregatorSnapshot.totals.cacheReadTokens),
+			).toBeLessThanOrEqual(events.length)
+			// Both paths must estimate a non-zero cacheRead (~0.94 * 3000 = 2820).
+			expect(dbSnapshot.totals.cacheReadTokens).toBeGreaterThan(2800)
+			expect(dbSnapshot.buckets.length).toBe(aggregatorSnapshot.buckets.length)
+		})
+
+		it("server-reported cacheRead: exact match, no estimation applied", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-cr-3",
+					idempotencyKey: "idem-cr-3",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						cacheReadTokens: { value: 400, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-cr-4",
+					idempotencyKey: "idem-cr-4",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 2000, source: "provider" },
+						outputTokens: { value: 1000, source: "provider" },
+						cacheReadTokens: { value: 800, source: "provider" },
+						costUsd: { value: 0.02, source: "provider" },
+					},
+				}),
+			]
+
+			for (const event of events) {
+				db.append(event)
+			}
+
+			const query = makeQuery({ preset: "all", groupBy: ["model"], cacheRatio: 0.94 })
+			const aggregator = new UsageAggregator()
+			const aggregatorSnapshot = aggregator.query(events, query)
+			const dbSnapshot = assembleRollupSnapshot(db, query)
+
+			// Server-reported values must be used verbatim in BOTH paths —
+			// cacheRatio estimation must not touch reported cacheRead.
+			expect(dbSnapshot.totals.cacheReadTokens).toBe(aggregatorSnapshot.totals.cacheReadTokens)
+			expect(dbSnapshot.totals.cacheReadTokens).toBe(1200)
+			expect(dbSnapshot.totals.inputTokens).toBe(aggregatorSnapshot.totals.inputTokens)
+			expect(dbSnapshot.totals.outputTokens).toBe(aggregatorSnapshot.totals.outputTokens)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(aggregatorSnapshot.totals.costUsd, 10)
+			expect(dbSnapshot.buckets[0]?.cacheReadTokens).toBe(aggregatorSnapshot.buckets[0]?.cacheReadTokens)
+		})
+
+		it("mixed-reporting bucket: exact parity between fast path and per-event path", () => {
+			// One event reports cacheRead, another (same bucket) does not.
+			// The rollup row persists the full input sum over unreported events,
+			// so the fast path estimates exactly those events — identical to
+			// the per-event path.
+			const events = [
+				makeEvent({
+					eventId: "evt-cr-5",
+					idempotencyKey: "idem-cr-5",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						cacheReadTokens: { value: 400, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-cr-6",
+					idempotencyKey: "idem-cr-6",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+			]
+
+			for (const event of events) {
+				db.append(event)
+			}
+
+			const query = makeQuery({ preset: "all", groupBy: ["model"], cacheRatio: 0.94 })
+			const aggregator = new UsageAggregator()
+			const aggregatorSnapshot = aggregator.query(events, query)
+			const dbSnapshot = assembleRollupSnapshot(db, query)
+
+			// Both paths: 400 reported + round(1000 * 0.94) estimated = 1340.
+			expect(aggregatorSnapshot.totals.cacheReadTokens).toBe(1340)
+			expect(dbSnapshot.totals.cacheReadTokens).toBe(1340)
+		})
+
+		it("day axis with cacheRatio: bucket parity within rounding tolerance", () => {
+			const events = [
+				makeEvent({
+					eventId: "evt-cr-7",
+					idempotencyKey: "idem-cr-7",
+					occurredAt: "2026-07-18T10:00:00.000Z",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				makeEvent({
+					eventId: "evt-cr-8",
+					idempotencyKey: "idem-cr-8",
+					occurredAt: "2026-07-19T10:00:00.000Z",
+					usage: {
+						inputTokens: { value: 2000, source: "provider" },
+						outputTokens: { value: 1000, source: "provider" },
+						costUsd: { value: 0.02, source: "provider" },
+					},
+				}),
+			]
+
+			for (const event of events) {
+				db.append(event)
+			}
+
+			const query = makeQuery({ preset: "all", groupBy: ["day"], cacheRatio: 0.94 })
+			const aggregator = new UsageAggregator()
+			const aggregatorSnapshot = aggregator.query(events, query)
+			const dbSnapshot = assembleRollupSnapshot(db, query)
+
+			expect(dbSnapshot.buckets.length).toBe(aggregatorSnapshot.buckets.length)
+			for (let i = 0; i < dbSnapshot.buckets.length; i++) {
+				expect(dbSnapshot.buckets[i].inputTokens).toBe(aggregatorSnapshot.buckets[i].inputTokens)
+				expect(dbSnapshot.buckets[i].outputTokens).toBe(aggregatorSnapshot.buckets[i].outputTokens)
+				expect(dbSnapshot.buckets[i].costUsd).toBeCloseTo(aggregatorSnapshot.buckets[i].costUsd, 10)
+				// Single-event buckets: per-event and per-row rounding are identical.
+				expect(dbSnapshot.buckets[i].cacheReadTokens).toBe(aggregatorSnapshot.buckets[i].cacheReadTokens)
+			}
+		})
+	})
+
 	// ── querySessionByRootTaskId ──────────────────────────────────────────
 
 	describe("querySessionByRootTaskId", () => {

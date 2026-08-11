@@ -11,8 +11,8 @@
 // ST-1 Optimization: assembleRollupSnapshot() now uses pre-computed rollup
 // tables instead of scanning all events. For single-axis queries on
 // model/provider/mode/day, the fast path reads O(distinct values) rows
-// instead of O(N) events. Multi-axis, week/month/source/status axes, or
-// cacheRatio estimation fall back to event scan.
+// instead of O(N) events. Multi-axis or week/month/source/status axes fall
+// back to a (range-bounded) event scan.
 
 import type {
 	UsageEventV1,
@@ -147,6 +147,24 @@ function toBucketDelta(key: Record<string, string>, delta: BucketDeltaValues): S
 	return { key, ...delta }
 }
 
+// Memoized per-timezone day formatter — see UsageAggregator for the same
+// pattern; Intl.DateTimeFormat construction is expensive per call.
+const dayFormatterCache = new Map<string, Intl.DateTimeFormat>()
+
+function getDayFormatter(timezone: string): Intl.DateTimeFormat {
+	let formatter = dayFormatterCache.get(timezone)
+	if (!formatter) {
+		formatter = new Intl.DateTimeFormat("en-CA", {
+			timeZone: timezone,
+			year: "numeric",
+			month: "2-digit",
+			day: "2-digit",
+		})
+		dayFormatterCache.set(timezone, formatter)
+	}
+	return formatter
+}
+
 /**
  * Computes the day bucket (YYYY-MM-DD) for a given timestamp in the
  * specified timezone. This is the edge-day correction function: it
@@ -154,13 +172,7 @@ function toBucketDelta(key: Record<string, string>, delta: BucketDeltaValues): S
  */
 export function computeDayBucket(occurredAt: string, timezone: string): string {
 	const date = new Date(occurredAt)
-	const formatter = new Intl.DateTimeFormat("en-CA", {
-		timeZone: timezone,
-		year: "numeric",
-		month: "2-digit",
-		day: "2-digit",
-	})
-	return formatter.format(date).replace(/\//g, "-")
+	return getDayFormatter(timezone).format(date).replace(/\//g, "-")
 }
 
 /**
@@ -203,18 +215,19 @@ const ROLLUP_SUPPORTED_AXES = new Set(["model", "provider", "mode", "day"])
  * Determines whether the fast rollup path can be used for the given query.
  *
  * The fast path is available when:
- * 1. No cacheRatio estimation is needed (cacheRatio is undefined or 0)
- * 2. All groupBy axes are supported by pre-computed rollups
- * 3. At most one non-day axis (multi-axis Cartesian products are not pre-computed)
+ * 1. All groupBy axes are supported by pre-computed rollups
+ * 2. At most one non-day axis (multi-axis Cartesian products are not pre-computed)
  *
- * When cacheRatio is set, the cacheReadTokens may be estimated differently
- * per event, so we cannot use pre-aggregated rollup values.
+ * cacheRatio estimation is compatible with rollups: rollup rows persist
+ * `unreportedCacheInputTokens` (the full input sum over events that did not
+ * report cacheReadTokens), and the row→bucket converters add
+ * `round(unreported * cacheRatio)` on top of the server-reported sum — the
+ * same per-event semantics as computeEventDelta, so mixed-reporting buckets
+ * match the event-scan path exactly. For rows built without the new column
+ * (hand-built test rows), the converters fall back to the legacy
+ * bucket-level estimate.
  */
 function canUseRollupFastPath(query: StatsQuery): boolean {
-	if (query.cacheRatio !== undefined && query.cacheRatio > 0) {
-		return false
-	}
-
 	// Check all axes are supported
 	for (const axis of query.groupBy) {
 		if (!ROLLUP_SUPPORTED_AXES.has(axis)) {
@@ -238,10 +251,12 @@ function canUseRollupFastPath(query: StatsQuery): boolean {
  */
 function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?: number): StatsBucket {
 	let cacheReadTokens = row.cacheReadTokens
-	if (cacheRatio !== undefined && cacheRatio > 0 && row.cacheReadTokens === 0) {
-		const uncached = row.uncachedInputTokens ?? row.inputTokens
-		if (uncached > 0) {
-			cacheReadTokens = Math.round(uncached * cacheRatio)
+	if (cacheRatio !== undefined && cacheRatio > 0) {
+		const unreported =
+			row.unreportedCacheInputTokens ??
+			(row.cacheReadTokens === 0 ? (row.uncachedInputTokens ?? row.inputTokens) : 0)
+		if (unreported > 0) {
+			cacheReadTokens += Math.round(unreported * cacheRatio)
 		}
 	}
 	return {
@@ -266,10 +281,12 @@ function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?
  */
 function dailyRowToBucket(row: DailyRollupDetailedRow, cacheRatio?: number): StatsBucket {
 	let cacheReadTokens = row.cacheReadTokens
-	if (cacheRatio !== undefined && cacheRatio > 0 && row.cacheReadTokens === 0) {
-		const uncached = row.uncachedInputTokens ?? row.inputTokens
-		if (uncached > 0) {
-			cacheReadTokens = Math.round(uncached * cacheRatio)
+	if (cacheRatio !== undefined && cacheRatio > 0) {
+		const unreported =
+			row.unreportedCacheInputTokens ??
+			(row.cacheReadTokens === 0 ? (row.uncachedInputTokens ?? row.inputTokens) : 0)
+		if (unreported > 0) {
+			cacheReadTokens += Math.round(unreported * cacheRatio)
 		}
 	}
 	return {
@@ -302,10 +319,12 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[], cacheRatio?: numbe
 		totals.inputTokens += row.inputTokens
 		totals.outputTokens += row.outputTokens
 		let cacheReadTokens = row.cacheReadTokens
-		if (cacheRatio !== undefined && cacheRatio > 0 && row.cacheReadTokens === 0) {
-			const uncached = row.uncachedInputTokens ?? row.inputTokens
-			if (uncached > 0) {
-				cacheReadTokens = Math.round(uncached * cacheRatio)
+		if (cacheRatio !== undefined && cacheRatio > 0) {
+			const unreported =
+				row.unreportedCacheInputTokens ??
+				(row.cacheReadTokens === 0 ? (row.uncachedInputTokens ?? row.inputTokens) : 0)
+			if (unreported > 0) {
+				cacheReadTokens += Math.round(unreported * cacheRatio)
 			}
 		}
 		totals.cacheReadTokens += cacheReadTokens
@@ -334,14 +353,17 @@ function lifetimeTotalsToBucket(
 		failedCalls: number
 		cancelledCalls: number
 		uncachedInputTokens?: number
+		unreportedCacheInputTokens?: number
 	},
 	cacheRatio?: number,
 ): StatsBucket {
 	let cacheReadTokens = totals.cacheReadTokens
-	if (cacheRatio !== undefined && cacheRatio > 0 && totals.cacheReadTokens === 0) {
-		const uncached = totals.uncachedInputTokens ?? totals.inputTokens
-		if (uncached > 0) {
-			cacheReadTokens = Math.round(uncached * cacheRatio)
+	if (cacheRatio !== undefined && cacheRatio > 0) {
+		const unreported =
+			totals.unreportedCacheInputTokens ??
+			(totals.cacheReadTokens === 0 ? (totals.uncachedInputTokens ?? totals.inputTokens) : 0)
+		if (unreported > 0) {
+			cacheReadTokens += Math.round(unreported * cacheRatio)
 		}
 	}
 	return {
@@ -369,11 +391,11 @@ function lifetimeTotalsToBucket(
  *
  * ST-1 Optimization: This function now uses pre-computed rollup tables
  * instead of scanning all events. For single-axis queries on
- * model/provider/mode/day without cacheRatio estimation, the fast path
- * reads O(distinct values) rows instead of O(N) events.
+ * model/provider/mode/day, the fast path reads O(distinct values) rows
+ * instead of O(N) events.
  *
- * For complex queries (multi-axis, week/month/source/status axes, or
- * cacheRatio estimation), it falls back to the original event-scan path.
+ * For complex queries (multi-axis, week/month/source/status axes), it falls
+ * back to the range-bounded event-scan path.
  *
  * @param db The initialized UsageStatsDatabase
  * @param query The statistics query
@@ -397,7 +419,7 @@ export function assembleRollupSnapshot(
 
 /**
  * Fast path: assembles a snapshot from pre-computed rollup tables.
- * Used for single-axis queries on model/provider/mode/day without cacheRatio.
+ * Used for single-axis queries on model/provider/mode/day.
  */
 function assembleRollupSnapshotFast(
 	db: UsageStatsDatabase,
@@ -489,19 +511,23 @@ function assembleRollupSnapshotFast(
 }
 
 /**
- * Fallback path: assembles a snapshot by scanning all events.
- * Used for multi-axis queries, week/month/source/status axes, or cacheRatio estimation.
+ * Fallback path: assembles a snapshot by scanning events in the query range.
+ * Used for multi-axis queries and week/month/source/status axes.
  */
 function assembleRollupSnapshotFromEvents(
 	db: UsageStatsDatabase,
 	query: StatsQuery,
 	options: { recordingPaused?: boolean },
 ): StatsSnapshot {
-	// Read all events from the database
-	const allEvents = db.readAllEvents()
-
-	// Filter by time range
+	// Read only the events inside the query range (SQL-side filter riding the
+	// occurred_epoch_ms index); the JS range filter below stays as a safety
+	// net and is now a no-op.
 	const { from, to } = resolveTimeRange(query)
+	const fromEpochMs = from?.getTime() ?? 0
+	const toEpochMs = to?.getTime() ?? Number.MAX_SAFE_INTEGER
+	const allEvents = db.readEventsInRange(fromEpochMs, toEpochMs)
+
+	// Filter by time range (safety net — the DB read is already range-bounded)
 	const filtered = allEvents.filter((event) => {
 		const eventTime = new Date(event.occurredAt).getTime()
 		if (from && eventTime < from.getTime()) return false
@@ -545,9 +571,8 @@ function assembleRollupSnapshotFromEvents(
 	// Sort buckets
 	const buckets = sortBuckets(Array.from(bucketMap.values()), groupBy)
 
-	// Compute coverage
-	const times = visibleEvents.map((e) => new Date(e.occurredAt).getTime()).sort((a, b) => a - b)
-	const backfilledEventCount = visibleEvents.filter((e) => e.provenance === "history-backfill").length
+	// Compute coverage from the DB (fast indexed query)
+	const coverageStats = db.queryCoverageStats(fromEpochMs, toEpochMs, includeCancelled)
 
 	return {
 		query,
@@ -555,10 +580,10 @@ function assembleRollupSnapshotFromEvents(
 		buckets,
 		totals,
 		coverage: {
-			firstEventAt: times.length > 0 ? new Date(times[0]).toISOString() : undefined,
-			lastEventAt: times.length > 0 ? new Date(times[times.length - 1]).toISOString() : undefined,
+			firstEventAt: coverageStats.firstEventAt,
+			lastEventAt: coverageStats.lastEventAt,
 			recordingPaused: options.recordingPaused ?? false,
-			backfilledEventCount,
+			backfilledEventCount: coverageStats.backfilledEventCount,
 		},
 	}
 }

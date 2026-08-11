@@ -296,7 +296,7 @@ export class UsageStatsService {
 	 * @returns Object for JSON, string for CSV
 	 */
 	async exportStats(query: StatsQuery, format: ExportFormat): Promise<JsonExport | string> {
-		const events = await this.store.readAll()
+		const events = await this.readEventsForQuery(query)
 
 		// Time range filtering
 		const filtered = this.filterEventsByQuery(events, query)
@@ -331,8 +331,23 @@ export class UsageStatsService {
 	 * @returns Filtered events
 	 */
 	async getFilteredEvents(query: StatsQuery): Promise<UsageEventV1[]> {
-		const events = await this.store.readAll()
+		const events = await this.readEventsForQuery(query)
 		return this.filterEventsByQuery(events, query)
+	}
+
+	/**
+	 * Reads the raw events for a query. When the SQLite database is available,
+	 * the read is limited to the query's time range via the
+	 * idx_usage_events_occurred index; otherwise it falls back to a full NDJSON
+	 * store scan. The result is still run through filterEventsByQuery by the
+	 * callers, which handles includeCancelled and acts as a safety net.
+	 */
+	private async readEventsForQuery(query: StatsQuery): Promise<UsageEventV1[]> {
+		if (this.database._isInitialized()) {
+			const rangeMs = resolveStatsQueryRangeMs(query)
+			return this.database.readEventsInRange(rangeMs.fromMs ?? 0, rangeMs.toMs ?? Number.MAX_SAFE_INTEGER)
+		}
+		return this.store.readAll()
 	}
 
 	/**
