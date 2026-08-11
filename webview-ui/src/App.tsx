@@ -262,7 +262,7 @@ const App = () => {
 				/>
 			)}
 			{tab === "dashboard" && (
-				<ErrorBoundary onRetry={() => switchTab("dashboard")}>
+				<ErrorBoundary>
 					<DashboardView onDone={() => switchTab("chat")} />
 				</ErrorBoundary>
 			)}

@@ -1,5 +1,5 @@
 import * as vscode from "vscode"
-import type { ClineProvider } from "../core/webview/ClineProvider"
+import { ClineProvider } from "../core/webview/ClineProvider"
 import { UsageStatsService } from "../services/stats"
 import { DashboardTaskCatalog } from "../services/stats/DashboardTaskCatalog"
 import { buildCustomPricingMap } from "../core/webview/usageStatsMessageHandler"
@@ -13,7 +13,8 @@ import { buildCustomPricingMap } from "../core/webview/usageStatsMessageHandler"
 export function activateDashboard(context: vscode.ExtensionContext, provider: ClineProvider): void {
 	// Register the dashboard button command
 	const commandDisposable = vscode.commands.registerCommand("zoo-code.dashboardButtonClicked", async () => {
-		await provider.postMessageToWebview({ action: "dashboardButtonClicked" })
+		const visibleProvider = ClineProvider.getVisibleInstance() ?? provider
+		await visibleProvider.postMessageToWebview({ type: "action", action: "dashboardButtonClicked" })
 	})
 	context.subscriptions.push(commandDisposable)
 
@@ -49,7 +50,8 @@ export function activateDashboard(context: vscode.ExtensionContext, provider: Cl
 
 		// Notify webview on cross-window/same-window stats updates
 		usageStatsService.onDidChange(() => {
-			provider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {})
+			const visibleProvider = ClineProvider.getVisibleInstance() ?? provider
+			visibleProvider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {})
 		})
 	} catch (error) {
 		provider.log(`Failed to activate Dashboard services: ${error}`)

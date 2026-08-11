@@ -7,7 +7,7 @@ import { isStatsQueryRangeBounded, isWithinStatsQueryRange, type StatsQueryRange
 /** The read-only TaskHistoryStore surface consumed by the task catalog. */
 export interface DashboardTaskCatalogSource {
 	getAll(): HistoryItem[]
-	onDidChange: vscode.Event<void>
+	onDidChange?: vscode.Event<void>
 	initialized?: Promise<void>
 }
 
@@ -71,7 +71,9 @@ export class DashboardTaskCatalog implements vscode.Disposable {
 
 	constructor(private readonly source: DashboardTaskCatalogSource) {
 		this.snapshot = this.createSnapshot(0)
-		this.sourceSubscription = this.source.onDidChange(() => this.scheduleRebuild())
+		this.sourceSubscription = this.source.onDidChange
+			? this.source.onDidChange(() => this.scheduleRebuild())
+			: { dispose: () => {} }
 	}
 
 	/** Current task-store-derived revision. */
