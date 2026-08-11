@@ -281,10 +281,31 @@ export function getEffectiveCost(event: UsageEventV1, customPricing?: CustomMode
 export function providerReportsCache(
 	provider: string,
 	model: string,
-	modelPricing?: UsageEventV1["modelPricing"],
-	customPricing?: CustomModelPricingMap,
+	_modelPricing?: UsageEventV1["modelPricing"],
+	_customPricing?: CustomModelPricingMap,
 ): boolean {
-	const modelInfo = lookupModelInfo(provider, model, modelPricing, customPricing)
+	// Only check the STATIC provider registry. Custom/user-configured models
+	// may define cacheReadsPrice (for cost estimation), but that does NOT mean
+	// the provider's API actually returns cacheReadTokens in its response.
+	// The slider should still work for those models.
+	const registry = PROVIDER_MODEL_REGISTRIES[provider]
+	if (!registry) return false
+
+	// Try exact match first, then case-insensitive substring match
+	let modelInfo: ModelInfo | undefined
+	if (model in registry) {
+		modelInfo = registry[model]
+	} else {
+		const lowerModel = model.toLowerCase()
+		const sortedIds = Object.keys(registry).sort((a, b) => b.length - a.length)
+		for (const knownId of sortedIds) {
+			if (lowerModel.includes(knownId.toLowerCase())) {
+				modelInfo = registry[knownId]
+				break
+			}
+		}
+	}
+
 	if (!modelInfo) return false
 	return typeof modelInfo.cacheReadsPrice === "number" && Number.isFinite(modelInfo.cacheReadsPrice)
 }

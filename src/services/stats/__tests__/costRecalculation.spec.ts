@@ -522,9 +522,12 @@ describe("costRecalculation", () => {
 			expect(info).toBeUndefined()
 		})
 
-		it("providerReportsCache should return true for custom model with cacheReadsPrice", () => {
+		it("providerReportsCache should return false for custom model with cacheReadsPrice (not in static registry)", () => {
+			// Custom models are NOT in the static registry, so even if they
+			// define cacheReadsPrice, the provider's API doesn't report
+			// cacheReadTokens. The slider should work for these models.
 			const pricing = { inputPrice: 2.0, cacheReadsPrice: 0.5 }
-			expect(providerReportsCache("openai", "my-custom-model", pricing)).toBe(true)
+			expect(providerReportsCache("openai", "my-custom-model", pricing)).toBe(false)
 		})
 
 		it("providerReportsCache should return false for custom model without cacheReadsPrice", () => {
@@ -536,9 +539,10 @@ describe("costRecalculation", () => {
 			expect(providerReportsCache("openai", "my-custom-model", undefined)).toBe(false)
 		})
 
-		it("computeCacheDiscountBase should return 0 for custom model with cacheReadsPrice (reporting)", () => {
-			// Custom model WITH cacheReadsPrice → providerReportsCache returns true
-			// → discountBase = 0 (slider should NOT affect cost)
+		it("computeCacheDiscountBase should return positive discount for custom model with cacheReadsPrice (non-reporting)", () => {
+			// Custom model NOT in static registry → providerReportsCache returns false
+			// → discountBase = (inputTokens/1M) × (inputPrice − cacheReadsPrice)
+			// = (1000/1M) × (2.0 − 0.5) = 0.001 × 1.5 = 0.0015
 			const event = makeEvent({
 				provider: "openai",
 				model: "my-custom-model",
@@ -548,7 +552,7 @@ describe("costRecalculation", () => {
 					outputTokens: { value: 500, source: "provider" },
 				},
 			})
-			expect(computeCacheDiscountBase(event)).toBe(0)
+			expect(computeCacheDiscountBase(event)).toBeCloseTo(0.0015, 10)
 		})
 
 		it("computeCacheDiscountBase should return 0 for custom model without cacheReadsPrice", () => {
@@ -645,9 +649,9 @@ describe("costRecalculation", () => {
 			expect(info?.inputPrice).toBe(2.0) // from modelPricing, not 99.0
 		})
 
-		it("computeCacheDiscountBase should return 0 for custom model with cacheReadsPrice via customPricing", () => {
-			// Custom model with cacheReadsPrice → providerReportsCache returns true
-			// → discountBase = 0 (slider should NOT affect cost, same as static registry)
+		it("computeCacheDiscountBase should return positive discount for custom model with cacheReadsPrice via customPricing", () => {
+			// Custom model NOT in static registry → providerReportsCache returns false
+			// → discountBase = (1_000_000/1M) × (2.0 − 0.5) = 1.5
 			const event = makeEvent({
 				provider: "openai",
 				model: "my-custom-model",
@@ -658,12 +662,12 @@ describe("costRecalculation", () => {
 				},
 			})
 			const map = new Map([["openai|my-custom-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
-			expect(computeCacheDiscountBase(event, map)).toBe(0)
+			expect(computeCacheDiscountBase(event, map)).toBeCloseTo(1.5, 10)
 		})
 
-		it("computeCacheDiscountBase should return 0 for reporting provider even with customPricing", () => {
-			// Custom model WITH cacheReadsPrice → providerReportsCache returns true
-			// → discountBase = 0 (slider should NOT affect cost)
+		it("computeCacheDiscountBase should return positive discount for non-registry model even with customPricing", () => {
+			// Custom model NOT in static registry → providerReportsCache returns false
+			// → discountBase = (1_000_000/1M) × (2.0 − 0.5) = 1.5
 			const event = makeEvent({
 				provider: "openai",
 				model: "my-reporting-model",
@@ -673,7 +677,7 @@ describe("costRecalculation", () => {
 				},
 			})
 			const map = new Map([["openai|my-reporting-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
-			expect(computeCacheDiscountBase(event, map)).toBe(0)
+			expect(computeCacheDiscountBase(event, map)).toBeCloseTo(1.5, 10)
 		})
 
 		it("computeCacheDiscountBase should return 0 when customPricing has no cacheReadsPrice", () => {
@@ -740,13 +744,14 @@ describe("costRecalculation", () => {
 			const cost = getEffectiveCost(event, map)
 			expect(cost).toBeCloseTo(3.0, 10)
 
-			// Discount base: 0 because cacheReadsPrice is defined → providerReportsCache=true
+			// Discount base: (1_000_000 / 1M) × (3.0 − 0.3) = 2.7
+			// Custom model NOT in static registry → providerReportsCache returns false
 			const discountBase = computeCacheDiscountBase(event, map)
-			expect(discountBase).toBe(0)
+			expect(discountBase).toBeCloseTo(2.7, 10)
 
-			// With cacheRatio=0.5: cost unchanged (discountBase=0)
+			// With cacheRatio=0.5: discounted = 3.0 − 0.5 × 2.7 = 1.65
 			const discounted = applyCacheDiscount(cost, discountBase, 0.5)
-			expect(discounted).toBeCloseTo(3.0, 10)
+			expect(discounted).toBeCloseTo(1.65, 10)
 		})
 	})
 })
