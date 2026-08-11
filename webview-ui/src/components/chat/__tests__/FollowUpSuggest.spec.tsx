@@ -241,6 +241,25 @@ describe("FollowUpSuggest", () => {
 		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
 	})
 
+	it("should not show countdown when timeout is negative", () => {
+		const negativeTimeoutState: TestExtensionState = {
+			...defaultTestState,
+			followupAutoApproveTimeoutMs: -1000,
+		}
+
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={1}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			negativeTimeoutState,
+		)
+
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+	})
+
 	it("should not render when no suggestions are provided", () => {
 		const { container } = renderWithTestProviders(
 			<FollowUpSuggest

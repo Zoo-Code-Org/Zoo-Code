@@ -323,7 +323,8 @@
 		"followupQuestions": {
 			"label": "Soru",
 			"description": "Yapılandırılan zaman aşımından sonra takip sorularına ilişkin ilk önerilen yanıtı otomatik olarak seç",
-			"timeoutLabel": "İlk yanıtı otomatik olarak seçmeden önce beklenecek süre"
+			"timeoutLabel": "İlk yanıtı otomatik olarak seçmeden önce beklenecek süre",
+			"timeoutDisabled": "Devre dışı"
 		},
 		"execute": {
 			"label": "Yürüt",

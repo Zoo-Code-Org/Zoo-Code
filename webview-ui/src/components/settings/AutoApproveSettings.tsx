@@ -265,7 +265,7 @@ export const AutoApproveSettings = ({
 								/>
 								<span className="w-20">
 									{followupAutoApproveTimeoutMs === 0
-										? "Disabled"
+										? t("settings:autoApprove.followupQuestions.timeoutDisabled")
 										: `${followupAutoApproveTimeoutMs / 1000}s`}
 								</span>
 							</div>
