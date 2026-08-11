@@ -572,33 +572,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 						</div>
 					)}
 				</div>
-
-				{/* Cache ratio estimation input */}
-				<div className="flex items-center gap-2" data-testid="dashboard-cache-ratio">
-					<label
-						htmlFor="dashboard-cache-ratio-input"
-						className="text-xs text-vscode-descriptionForeground whitespace-nowrap">
-						{t("dashboard:cacheRatio.label")}
-					</label>
-					<input
-						id="dashboard-cache-ratio-input"
-						type="number"
-						min="0"
-						max="100"
-						step="1"
-						value={Math.round(cacheRatio * 100)}
-						onChange={(e) => {
-							const value = parseInt(e.target.value, 10)
-							if (!isNaN(value) && value >= 0 && value <= 100) {
-								setCacheRatio(value / 100)
-							}
-						}}
-						className="w-16 rounded border border-vscode-panel-border bg-vscode-input-background px-1.5 py-0.5 text-xs text-vscode-input-foreground"
-						data-testid="dashboard-cache-ratio-input"
-					/>
-					<span className="text-xs text-vscode-descriptionForeground">%</span>
-					<span className="text-xs text-vscode-descriptionForeground">{t("dashboard:cacheRatio.hint")}</span>
-				</div>
 			</TabHeader>
 
 			<TabContent className="flex flex-col gap-4">
@@ -678,6 +651,35 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 									selectedRange={heatmapRange}
 									onRangeChange={handleHeatmapRangeChange}
 								/>
+
+								{/* Cache ratio estimation input */}
+								<div className="flex items-center gap-2" data-testid="dashboard-cache-ratio">
+									<label
+										htmlFor="dashboard-cache-ratio-input"
+										className="text-xs text-vscode-descriptionForeground whitespace-nowrap">
+										{t("dashboard:cacheRatio.label")}
+									</label>
+									<input
+										id="dashboard-cache-ratio-input"
+										type="number"
+										min="0"
+										max="100"
+										step="1"
+										value={Math.round(cacheRatio * 100)}
+										onChange={(e) => {
+											const value = parseInt(e.target.value, 10)
+											if (!isNaN(value) && value >= 0 && value <= 100) {
+												setCacheRatio(value / 100)
+											}
+										}}
+										className="w-16 rounded border border-vscode-panel-border bg-vscode-input-background px-1.5 py-0.5 text-xs text-vscode-input-foreground"
+										data-testid="dashboard-cache-ratio-input"
+									/>
+									<span className="text-xs text-vscode-descriptionForeground">%</span>
+									<span className="text-xs text-vscode-descriptionForeground">
+										{t("dashboard:cacheRatio.hint")}
+									</span>
+								</div>
 
 								{/* Breakdown table */}
 								<div className="flex flex-col gap-2" data-testid="dashboard-breakdown">
