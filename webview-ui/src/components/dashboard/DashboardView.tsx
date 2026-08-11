@@ -1,5 +1,5 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, Download, Trash2, RefreshCw, Database } from "lucide-react"
+import { ArrowLeft, Download, Trash2, RefreshCw } from "lucide-react"
 
 import type {
 	DashboardTaskDetail,
@@ -349,8 +349,9 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 
 			if (message.type === "requestClearNonceResponse") {
 				if (message.clearNonce) {
+					// The dialog is already open (handleClearRequest opens it
+					// immediately); the nonce only enables the confirm button.
 					setClearNonce(message.clearNonce)
-					setShowClearDialog(true)
 				} else {
 					setError(message.error || t("dashboard:states.error"))
 					setShowClearDialog(false)
@@ -376,15 +377,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 					setError(message.exportUsageStatsResult.error)
 				}
 			}
-
-			if (message.type === "rebuildUsageStatsResponse") {
-				if (message.rebuildUsageStatsResult?.success) {
-					// Trigger a resync after rebuild
-					replaceSubscription(buildQuery(preset, groupBy), HEATMAP_RANGE_DAYS[heatmapRange], 50)
-				} else {
-					setError(message.rebuildUsageStatsResult?.error || t("dashboard:states.error"))
-				}
-			}
 		}
 
 		window.addEventListener("message", handleMessage)
@@ -395,7 +387,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	// ── Export ───────────────────────────────────────────────────────────────
 
 	const handleExport = useCallback(
-		(format: "csv") => {
+		(format: "json") => {
 			const requestId = `dashboard-export-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 			const query = buildQuery(preset, groupBy)
 			vscode.postMessage({
@@ -411,6 +403,9 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 	// ── Clear ────────────────────────────────────────────────────────────────
 
 	const handleClearRequest = useCallback(() => {
+		// Open the confirmation dialog immediately; the nonce request goes out in
+		// parallel and only gates the confirm button (see dashboard-clear-confirm).
+		setShowClearDialog(true)
 		const requestId = `dashboard-clear-nonce-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 		vscode.postMessage({
 			type: "requestClearNonce",
@@ -426,16 +421,6 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 			clearUsageStatsNonce: clearNonce,
 		})
 	}, [clearNonce])
-
-	// ── Rebuild stats (rebuild rollup tables from raw events) ───────────────
-
-	const handleRebuildStats = useCallback(() => {
-		const requestId = `dashboard-rebuild-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-		vscode.postMessage({
-			type: "rebuildUsageStats",
-			requestId,
-		})
-	}, [])
 
 	// ── Derived data from stream state ──────────────────────────────────────
 
@@ -509,26 +494,15 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 								<RefreshCw className={isLoading ? "animate-spin" : ""} />
 							</Button>
 						</StandardTooltip>
-						<StandardTooltip content={t("dashboard:actions.exportCsv")}>
+						<StandardTooltip content={t("dashboard:actions.exportJson")}>
 							<Button
 								variant="ghost"
 								size="sm"
-								onClick={() => handleExport("csv")}
-								data-testid="dashboard-export-csv"
+								onClick={() => handleExport("json")}
+								data-testid="dashboard-export-json"
 								disabled={!hasData}>
 								<Download className="size-3.5" />
-								<span className="hidden sm:inline">{t("dashboard:actions.exportCsv")}</span>
-							</Button>
-						</StandardTooltip>
-						<StandardTooltip content={t("dashboard:actions.rebuild")}>
-							<Button
-								variant="ghost"
-								size="sm"
-								onClick={handleRebuildStats}
-								data-testid="dashboard-rebuild-button"
-								disabled={!hasData}>
-								<Database className="size-3.5" />
-								<span className="hidden sm:inline">{t("dashboard:actions.rebuild")}</span>
+								<span className="hidden sm:inline">{t("dashboard:actions.exportJson")}</span>
 							</Button>
 						</StandardTooltip>
 						<StandardTooltip content={t("dashboard:actions.clear")}>
@@ -871,6 +845,7 @@ const DashboardView = memo(({ onDone }: DashboardViewProps) => {
 						<AlertDialogAction
 							onClick={handleClearConfirm}
 							data-testid="dashboard-clear-confirm"
+							disabled={!clearNonce}
 							className="bg-vscode-errorForeground text-white hover:bg-vscode-errorForeground/90">
 							{t("dashboard:clearDialog.confirm")}
 						</AlertDialogAction>

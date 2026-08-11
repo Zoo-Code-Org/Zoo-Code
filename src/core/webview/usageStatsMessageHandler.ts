@@ -225,76 +225,6 @@ export async function handleClearUsageStats(provider: ClineProvider, message: We
 }
 
 /**
- * Handles the `rebuildUsageStats` message.
- * Rebuilds all derived tables (stats_rollup, session_metadata, session_activity)
- * from the raw usage_events table. This is a maintenance operation for fixing
- * stale or missing rollup data.
- */
-export async function handleRebuildUsageStats(provider: ClineProvider, message: WebviewMessage): Promise<void> {
-	const requestId = message.requestId
-
-	try {
-		const service = provider.getUsageStatsService()
-
-		if (!service) {
-			await provider.postMessageToWebview({
-				type: "rebuildUsageStatsResponse",
-				requestId,
-				rebuildUsageStatsResult: {
-					success: false,
-					error: "[STATS_HANDLER/rebuild/002] Usage stats service is unavailable",
-				},
-			})
-			return
-		}
-
-		const database = service.getDatabase()
-
-		if (!database) {
-			await provider.postMessageToWebview({
-				type: "rebuildUsageStatsResponse",
-				requestId,
-				rebuildUsageStatsResult: {
-					success: false,
-					error: "[STATS_HANDLER/rebuild/001] Database is not initialized",
-				},
-			})
-			return
-		}
-
-		database.rebuildRollupsFromEvents()
-
-		// Notify this window's webview that stats changed
-		await provider.postMessageToWebview({
-			type: "usageStatsChanged",
-		})
-
-		await provider.postMessageToWebview({
-			type: "rebuildUsageStatsResponse",
-			requestId,
-			rebuildUsageStatsResult: {
-				success: true,
-			},
-		})
-	} catch (error) {
-		const errorMessage = error instanceof Error ? error.message : String(error)
-
-		provider.log(
-			`[STATS_HANDLER/rebuild/003] Error rebuilding usage stats: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
-		)
-
-		await provider.postMessageToWebview({
-			type: "rebuildUsageStatsResponse",
-			requestId,
-			rebuildUsageStatsResult: {
-				success: false,
-				error: `[STATS_HANDLER/rebuild/003] Failed to rebuild usage stats: ${errorMessage}`,
-			},
-		})
-	}
-}
-
-/**
  * Handles the `exportUsageStats` message.
  * Validates the format and query, calls the service to generate export data,
  * opens a VS Code save dialog, writes the file, and posts the result back.
@@ -1485,9 +1415,6 @@ export async function routeUsageStatsMessage(provider: ClineProvider, message: W
 			return true
 		case "clearUsageStats":
 			await handleClearUsageStats(provider, message)
-			return true
-		case "rebuildUsageStats":
-			await handleRebuildUsageStats(provider, message)
 			return true
 		case "exportUsageStats":
 			await handleExportUsageStats(provider, message)

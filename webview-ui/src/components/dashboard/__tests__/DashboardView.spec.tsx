@@ -627,7 +627,7 @@ describe("DashboardView (streaming)", () => {
 	// ── 8. Export ─────────────────────────────────────────────────────────
 
 	describe("handleExport", () => {
-		it("sends exportUsageStats message with csv format", async () => {
+		it("sends exportUsageStats message with json format", async () => {
 			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
 
 			setConnectedState()
@@ -639,13 +639,13 @@ describe("DashboardView (streaming)", () => {
 
 			postMessageMock.mockClear()
 
-			const exportBtn = container.querySelector('[data-testid="dashboard-export-csv"]') as HTMLButtonElement
+			const exportBtn = container.querySelector('[data-testid="dashboard-export-json"]') as HTMLButtonElement
 			fireEvent.click(exportBtn)
 
 			expect(postMessageMock).toHaveBeenCalledTimes(1)
 			const msg = postMessageMock.mock.calls[0][0] as { type: string; exportUsageStatsFormat: string }
 			expect(msg.type).toBe("exportUsageStats")
-			expect(msg.exportUsageStatsFormat).toBe("csv")
+			expect(msg.exportUsageStatsFormat).toBe("json")
 		})
 
 		it("disables export button when no data", async () => {
@@ -664,8 +664,8 @@ describe("DashboardView (streaming)", () => {
 			rerender(<DashboardView onDone={() => {}} />)
 
 			await waitFor(() => {
-				const exportCsv = container.querySelector('[data-testid="dashboard-export-csv"]') as HTMLButtonElement
-				expect(exportCsv.disabled).toBe(true)
+				const exportJson = container.querySelector('[data-testid="dashboard-export-json"]') as HTMLButtonElement
+				expect(exportJson.disabled).toBe(true)
 			})
 		})
 	})
@@ -693,7 +693,30 @@ describe("DashboardView (streaming)", () => {
 			expect(msg.type).toBe("requestClearNonce")
 		})
 
-		it("opens clear dialog when nonce is received", async () => {
+		it("opens the clear dialog immediately on click, before the nonce response", async () => {
+			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
+
+			setConnectedState()
+			rerender(<DashboardView onDone={() => {}} />)
+
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
+			})
+
+			const clearBtn = container.querySelector('[data-testid="dashboard-clear-button"]') as HTMLButtonElement
+			fireEvent.click(clearBtn)
+
+			// The dialog opens synchronously — no IPC round trip required.
+			await waitFor(() => {
+				expect(container.querySelector('[data-testid="dashboard-clear-dialog"]')).toBeTruthy()
+			})
+
+			// Confirm stays disabled until the nonce arrives.
+			const confirmBtn = container.querySelector('[data-testid="dashboard-clear-confirm"]') as HTMLButtonElement
+			expect(confirmBtn.disabled).toBe(true)
+		})
+
+		it("enables the confirm button once the nonce is received", async () => {
 			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
 
 			setConnectedState()
@@ -707,10 +730,11 @@ describe("DashboardView (streaming)", () => {
 			fireEvent.click(clearBtn)
 
 			await waitFor(() => {
-				expect(
-					postMessageMock.mock.calls.some((c) => (c[0] as { type: string }).type === "requestClearNonce"),
-				).toBe(true)
+				expect(container.querySelector('[data-testid="dashboard-clear-dialog"]')).toBeTruthy()
 			})
+
+			const confirmBtn = container.querySelector('[data-testid="dashboard-clear-confirm"]') as HTMLButtonElement
+			expect(confirmBtn.disabled).toBe(true)
 
 			// Simulate nonce response
 			window.dispatchEvent(
@@ -724,7 +748,7 @@ describe("DashboardView (streaming)", () => {
 			)
 
 			await waitFor(() => {
-				expect(container.querySelector('[data-testid="dashboard-clear-dialog"]')).toBeTruthy()
+				expect(confirmBtn.disabled).toBe(false)
 			})
 		})
 
@@ -807,104 +831,7 @@ describe("DashboardView (streaming)", () => {
 		})
 	})
 
-	// ── 10. Rebuild Stats ────────────────────────────────────────────────
-
-	describe("handleRebuildStats", () => {
-		it("sends rebuildUsageStats message on rebuild button click", async () => {
-			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
-
-			setConnectedState()
-			rerender(<DashboardView onDone={() => {}} />)
-
-			await waitFor(() => {
-				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
-			})
-
-			postMessageMock.mockClear()
-
-			const rebuildBtn = container.querySelector('[data-testid="dashboard-rebuild-button"]') as HTMLButtonElement
-			fireEvent.click(rebuildBtn)
-
-			expect(postMessageMock).toHaveBeenCalledTimes(1)
-			const msg = postMessageMock.mock.calls[0][0] as { type: string; requestId: string }
-			expect(msg.type).toBe("rebuildUsageStats")
-			expect(msg.requestId).toContain("dashboard-rebuild-")
-		})
-
-		it("disables rebuild button when no data", async () => {
-			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
-
-			setStreamState({
-				isLoading: false,
-				status: "connected",
-				totals: makeBucket({ events: 0, totalTokens: 0 }),
-				bucketOrder: [],
-				buckets: {},
-				heatmapRangeDays: 30,
-				heatmapValues: [],
-				coverage: null,
-			})
-			rerender(<DashboardView onDone={() => {}} />)
-
-			await waitFor(() => {
-				const rebuildBtn = container.querySelector(
-					'[data-testid="dashboard-rebuild-button"]',
-				) as HTMLButtonElement
-				expect(rebuildBtn.disabled).toBe(true)
-			})
-		})
-
-		it("triggers replaceSubscription on rebuildUsageStatsResponse success", async () => {
-			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
-
-			setConnectedState()
-			rerender(<DashboardView onDone={() => {}} />)
-
-			await waitFor(() => {
-				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
-			})
-
-			replaceSubscriptionMock.mockClear()
-
-			// Simulate rebuild response message
-			const messageEvent = new MessageEvent("message", {
-				data: {
-					type: "rebuildUsageStatsResponse",
-					rebuildUsageStatsResult: { success: true },
-				},
-			})
-			window.dispatchEvent(messageEvent)
-
-			expect(replaceSubscriptionMock).toHaveBeenCalledTimes(1)
-		})
-
-		it("sets error on rebuildUsageStatsResponse failure", async () => {
-			const { container, rerender } = render(<DashboardView onDone={() => {}} />)
-
-			setConnectedState()
-			rerender(<DashboardView onDone={() => {}} />)
-
-			await waitFor(() => {
-				expect(container.querySelector('[data-testid="dashboard-breakdown"]')).toBeTruthy()
-			})
-
-			// Simulate rebuild failure response
-			const messageEvent = new MessageEvent("message", {
-				data: {
-					type: "rebuildUsageStatsResponse",
-					rebuildUsageStatsResult: { success: false, error: "Rebuild failed" },
-				},
-			})
-			window.dispatchEvent(messageEvent)
-
-			// setError is called, which renders dashboard-error-banner when hasData is true
-			await waitFor(() => {
-				expect(container.querySelector('[data-testid="dashboard-error-banner"]')).toBeTruthy()
-			})
-		})
-	})
-
-	// ── 11. onDone ────────────────────────────────────────────────────────
+	// ── 10. onDone ────────────────────────────────────────────────────────
 
 	describe("onDone", () => {
 		it("calls onDone when done button is clicked", () => {
