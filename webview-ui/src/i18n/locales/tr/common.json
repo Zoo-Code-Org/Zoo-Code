@@ -5,8 +5,7 @@
 		"githubText": "GitHub Issues sayfamızda",
 		"copyInstructions": "Gönderiminize dahil etmek için aşağıdaki hata mesajını kopyalayıp yapıştırın:",
 		"errorStack": "Hata Yığını:",
-		"componentStack": "Bileşen Yığını:",
-		"retry": "Yeniden dene"
+		"componentStack": "Bileşen Yığını:"
 	},
 	"answers": {
 		"yes": "Evet",

@@ -5,8 +5,7 @@
 		"githubText": "nossa página de Issues no GitHub",
 		"copyInstructions": "Copie e cole a seguinte mensagem de erro para incluí-la como parte do seu relatório:",
 		"errorStack": "Pilha de Erro:",
-		"componentStack": "Pilha de Componentes:",
-		"retry": "Tentar novamente"
+		"componentStack": "Pilha de Componentes:"
 	},
 	"number_format": {
 		"thousand_suffix": "k",

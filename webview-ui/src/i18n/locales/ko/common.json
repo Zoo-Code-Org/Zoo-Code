@@ -5,8 +5,7 @@
 		"githubText": "GitHub 이슈 페이지",
 		"copyInstructions": "다음 오류 메시지를 복사하여 보고서에 포함해 주세요:",
 		"errorStack": "오류 스택:",
-		"componentStack": "컴포넌트 스택:",
-		"retry": "다시 시도"
+		"componentStack": "컴포넌트 스택:"
 	},
 	"answers": {
 		"yes": "예",

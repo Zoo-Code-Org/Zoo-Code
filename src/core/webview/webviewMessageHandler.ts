@@ -124,6 +124,9 @@ export const webviewMessageHandler = async (
 	message: WebviewMessage,
 	marketplaceManager?: MarketplaceManager,
 ) => {
+	if (await routeUsageStatsMessage(provider, message)) {
+		return
+	}
 	// Utility functions provided for concise get/update of global state via contextProxy API.
 	const getGlobalState = <K extends keyof GlobalState>(key: K) => provider.contextProxy.getValue(key)
 	const updateGlobalState = async <K extends keyof GlobalState>(key: K, value: GlobalState[K]) =>
@@ -572,12 +575,6 @@ export const webviewMessageHandler = async (
 		} else if (operation === "edit" && editedContent) {
 			await handleEditOperation(messageTs, editedContent, images)
 		}
-	}
-
-	// Usage stats and dashboard messages are routed by the stats module's
-	// dispatcher, keeping this switch free of sixteen near-identical cases.
-	if (await routeUsageStatsMessage(provider, message)) {
-		return
 	}
 
 	switch (message.type) {

@@ -5,8 +5,7 @@
 		"githubText": "onze GitHub Issues-pagina",
 		"copyInstructions": "Kopieer en plak het volgende foutbericht om het als onderdeel van je melding op te nemen:",
 		"errorStack": "Foutstack:",
-		"componentStack": "Componentstack:",
-		"retry": "Opnieuw proberen"
+		"componentStack": "Componentstack:"
 	},
 	"answers": {
 		"yes": "Ja",

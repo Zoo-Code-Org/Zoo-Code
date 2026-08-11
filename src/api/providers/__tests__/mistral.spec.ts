@@ -53,12 +53,7 @@ import type OpenAI from "openai"
 import { MistralHandler } from "../mistral"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
-import type {
-	ApiStreamTextChunk,
-	ApiStreamReasoningChunk,
-	ApiStreamToolCallPartialChunk,
-	ApiStreamChunk,
-} from "../../transform/stream"
+import type { ApiStreamTextChunk, ApiStreamReasoningChunk, ApiStreamToolCallPartialChunk } from "../../transform/stream"
 
 describe("MistralHandler", () => {
 	let handler: MistralHandler
@@ -157,44 +152,6 @@ describe("MistralHandler", () => {
 		it("should handle errors gracefully", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow("API Error")
-		})
-
-		it("should yield usage chunk with totalCost from stream", async () => {
-			mockCreate.mockImplementationOnce(async (_options) => {
-				const stream = {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							data: {
-								choices: [
-									{
-										delta: { content: "Hello" },
-										index: 0,
-									},
-								],
-								usage: {
-									promptTokens: 100,
-									completionTokens: 50,
-									totalTokens: 150,
-								},
-							},
-						}
-					},
-				}
-				return stream
-			})
-
-			const iterator = handler.createMessage(systemPrompt, messages)
-			const chunks: ApiStreamChunk[] = []
-			for await (const chunk of iterator) {
-				chunks.push(chunk)
-			}
-
-			const usageChunks = chunks.filter((c) => c.type === "usage")
-			expect(usageChunks.length).toBe(1)
-			expect(usageChunks[0].inputTokens).toBe(100)
-			expect(usageChunks[0].outputTokens).toBe(50)
-			expect(usageChunks[0].totalCost).toBeDefined()
-			expect(typeof usageChunks[0].totalCost).toBe("number")
 		})
 
 		it("should handle thinking content as reasoning chunks", async () => {

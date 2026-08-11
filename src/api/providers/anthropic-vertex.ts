@@ -12,7 +12,6 @@ import {
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
-import { calculateApiCostAnthropic } from "../../shared/cost"
 
 import { ApiStream } from "../transform/stream"
 import { addCacheBreakpoints } from "../transform/caching/vertex"
@@ -123,24 +122,13 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			switch (chunk.type) {
 				case "message_start": {
 					const usage = chunk.message!.usage
-					const inputTokens = usage.input_tokens || 0
-					const outputTokens = usage.output_tokens || 0
-					const cacheWriteTokens = usage.cache_creation_input_tokens || undefined
-					const cacheReadTokens = usage.cache_read_input_tokens || undefined
 
 					yield {
 						type: "usage",
-						inputTokens,
-						outputTokens,
-						cacheWriteTokens,
-						cacheReadTokens,
-						totalCost: calculateApiCostAnthropic(
-							info,
-							inputTokens,
-							outputTokens,
-							cacheWriteTokens,
-							cacheReadTokens,
-						).totalCost,
+						inputTokens: usage.input_tokens || 0,
+						outputTokens: usage.output_tokens || 0,
+						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+						cacheReadTokens: usage.cache_read_input_tokens || undefined,
 					}
 
 					break

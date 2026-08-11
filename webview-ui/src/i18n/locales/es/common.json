@@ -5,8 +5,7 @@
 		"githubText": "nuestra página de Issues de GitHub",
 		"copyInstructions": "Copia y pega el siguiente mensaje de error para incluirlo como parte de tu informe:",
 		"errorStack": "Pila de errores:",
-		"componentStack": "Pila de componentes:",
-		"retry": "Reintentar"
+		"componentStack": "Pila de componentes:"
 	},
 	"answers": {
 		"yes": "Sí",

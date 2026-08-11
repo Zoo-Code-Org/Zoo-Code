@@ -10,7 +10,6 @@ import {
 	openAiCodexDefaultModelId,
 	OpenAiCodexModelId,
 	openAiCodexModels,
-	openAiNativeModels,
 	SERVICE_TIER_KEY,
 	type ReasoningEffort,
 	type ReasoningEffortExtended,
@@ -20,7 +19,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { Package } from "../../shared/package"
 import type { ApiHandlerOptions } from "../../shared/api"
-import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -211,20 +209,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				? usage.output_tokens_details.reasoning_tokens
 				: undefined
 
-		// Compute equivalent API cost using openAiNativeModels pricing.
-		// The actual charge is covered by the ChatGPT Plus/Pro subscription,
-		// but showing the equivalent API cost lets users compare usage value.
-		const nativeModelInfo = openAiNativeModels[model.id as keyof typeof openAiNativeModels]
-		const { totalCost } = nativeModelInfo
-			? calculateApiCostOpenAI(
-					nativeModelInfo,
-					totalInputTokens,
-					totalOutputTokens,
-					cacheWriteTokens,
-					cacheReadTokens,
-				)
-			: { totalCost: 0 }
-
+		// Subscription-based: no per-token costs
 		const out: ApiStreamUsageChunk = {
 			type: "usage",
 			inputTokens: totalInputTokens,
@@ -232,7 +217,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			cacheWriteTokens,
 			cacheReadTokens,
 			...(typeof reasoningTokens === "number" ? { reasoningTokens } : {}),
-			totalCost,
+			totalCost: 0, // Subscription-based pricing
 		}
 		return out
 	}

@@ -5,8 +5,7 @@
 		"githubText": "halaman GitHub Issues kami",
 		"copyInstructions": "Salin dan tempel pesan kesalahan berikut untuk menyertakannya sebagai bagian dari laporan Anda:",
 		"errorStack": "Stack Error:",
-		"componentStack": "Stack Komponen:",
-		"retry": "Coba Lagi"
+		"componentStack": "Stack Komponen:"
 	},
 	"answers": {
 		"yes": "Ya",

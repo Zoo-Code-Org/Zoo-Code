@@ -72,13 +72,11 @@ describe("costRecalculation", () => {
 			expect(info?.outputPrice).toBe(30.0)
 		})
 
-		it("should resolve qwen-code models to qwenCodeModels pricing (non-zero)", () => {
-			// Regression test for Bug 3: qwen-code models had all-zero prices.
-			// Now qwen3-coder-plus has inputPrice=$1.0/1M, outputPrice=$5.0/1M.
+		it("should resolve qwen-code models to qwenCodeModels pricing", () => {
 			const info = lookupModelInfo("qwen-code", "qwen3-coder-plus")
 			expect(info).toBeDefined()
-			expect(info?.inputPrice).toBe(1.0)
-			expect(info?.outputPrice).toBe(5.0)
+			expect(info?.inputPrice).toBe(0)
+			expect(info?.outputPrice).toBe(0)
 		})
 
 		it("should return undefined for an unknown provider", () => {
@@ -231,41 +229,37 @@ describe("costRecalculation", () => {
 			expect(cost).toBeCloseTo(3.5, 5)
 		})
 
-		it("should compute non-zero cost for qwen-code event with missing costUsd", () => {
-			// Regression test for Bug 3: qwen-code models had all-zero prices.
-			// Now qwen3-coder-plus has inputPrice=$1.0/1M, outputPrice=$5.0/1M.
+		it("should compute non-zero cost for anthropic event with missing costUsd", () => {
 			const event = makeEvent({
-				provider: "qwen-code",
-				model: "qwen3-coder-plus",
+				provider: "anthropic",
+				model: "claude-3-5-sonnet-20241022",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
 					outputTokens: { value: 0, source: "provider" },
 					// costUsd missing
 				},
 			})
-			// qwenCodeModels["qwen3-coder-plus"]: inputPrice=$1.0/1M
-			// 100K input tokens × $1.0/1M = $0.1
-			// This must NOT be 0 — that was the bug.
+			// anthropic claude-3-5-sonnet-20241022: inputPrice=$3.0/1M
+			// 100K input tokens × $3.0/1M = $0.3
 			const cost = computeEventCost(event)
 			expect(cost).toBeGreaterThan(0)
-			expect(cost).toBeCloseTo(0.1, 5)
+			expect(cost).toBeCloseTo(0.3, 5)
 		})
 
-		it("should compute non-zero cost for qwen-code with input + output tokens", () => {
+		it("should compute non-zero cost for anthropic with input + output tokens", () => {
 			const event = makeEvent({
-				provider: "qwen-code",
-				model: "qwen3-coder-plus",
+				provider: "anthropic",
+				model: "claude-3-5-sonnet-20241022",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
 					outputTokens: { value: 100_000, source: "provider" },
 					// costUsd missing
 				},
 			})
-			// qwenCodeModels["qwen3-coder-plus"]: inputPrice=$1.0/1M, outputPrice=$5.0/1M
-			// 100K input × $1/1M + 100K output × $5/1M = $0.1 + $0.5 = $0.6
+			// 100K input × $3/1M + 100K output × $15/1M = $0.3 + $1.5 = $1.8
 			const cost = computeEventCost(event)
 			expect(cost).toBeGreaterThan(0)
-			expect(cost).toBeCloseTo(0.6, 5)
+			expect(cost).toBeCloseTo(1.8, 5)
 		})
 	})
 

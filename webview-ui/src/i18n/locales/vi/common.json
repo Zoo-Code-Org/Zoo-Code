@@ -5,8 +5,7 @@
 		"githubText": "trang GitHub Issues của chúng tôi",
 		"copyInstructions": "Sao chép và dán thông báo lỗi sau đây để đưa vào báo cáo của bạn:",
 		"errorStack": "Stack lỗi:",
-		"componentStack": "Stack thành phần:",
-		"retry": "Thử lại"
+		"componentStack": "Stack thành phần:"
 	},
 	"answers": {
 		"yes": "Có",

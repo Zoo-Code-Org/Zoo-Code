@@ -12,7 +12,6 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ApiHandlerOptions } from "../../shared/api"
-import { calculateApiCostOpenAI } from "../../shared/cost"
 
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
@@ -156,14 +155,10 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			}
 
 			if (event.data.usage) {
-				const inputTokens = event.data.usage.promptTokens || 0
-				const outputTokens = event.data.usage.completionTokens || 0
-
 				yield {
 					type: "usage",
-					inputTokens,
-					outputTokens,
-					totalCost: calculateApiCostOpenAI(info, inputTokens, outputTokens).totalCost,
+					inputTokens: event.data.usage.promptTokens || 0,
+					outputTokens: event.data.usage.completionTokens || 0,
 				}
 			}
 		}

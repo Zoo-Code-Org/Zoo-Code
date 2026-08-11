@@ -46,6 +46,7 @@ import {
 	registerCodeActions,
 	registerTerminalActions,
 	CodeActionProvider,
+	activateDashboard,
 } from "./activate"
 import { initializeI18n } from "./i18n"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
@@ -220,6 +221,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize the provider *before* the Roo Code Cloud service.
 	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
+	activateDashboard(context, provider)
 
 	// Initialize Roo Code Cloud service.
 	settingsUpdatedHandler = () => {

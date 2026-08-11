@@ -172,6 +172,8 @@ function makeMockProvider(mockExtensionContext: vscode.ExtensionContext, mockOut
 	provider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 	provider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 	provider.getState = vi.fn().mockResolvedValue({})
+	const mockStore = new UsageEventStore(path.join(os.tmpdir(), "test-storage-usage-stats"))
+	provider.getUsageStatsService = vi.fn().mockReturnValue(mockStore)
 	return provider
 }
 

@@ -5,8 +5,7 @@
 		"githubText": "la nostra pàgina d'incidències de GitHub",
 		"copyInstructions": "Copia i enganxa el següent missatge d'error per incloure'l com a part de la teva presentació:",
 		"errorStack": "Pila d'errors:",
-		"componentStack": "Pila de components:",
-		"retry": "Reintenta"
+		"componentStack": "Pila de components:"
 	},
 	"answers": {
 		"yes": "Sí",

@@ -5,8 +5,7 @@
 		"githubText": "GitHub Issuesページ",
 		"copyInstructions": "以下のエラーメッセージをコピーして報告に含めてください：",
 		"errorStack": "エラースタック：",
-		"componentStack": "コンポーネントスタック：",
-		"retry": "再試行"
+		"componentStack": "コンポーネントスタック："
 	},
 	"answers": {
 		"yes": "はい",

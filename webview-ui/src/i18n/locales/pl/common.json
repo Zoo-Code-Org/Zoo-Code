@@ -5,8 +5,7 @@
 		"githubText": "naszej stronie GitHub Issues",
 		"copyInstructions": "Skopiuj i wklej poniższy komunikat o błędzie, aby dołączyć go do zgłoszenia:",
 		"errorStack": "Stos błędu:",
-		"componentStack": "Stos komponentów:",
-		"retry": "Spróbuj ponownie"
+		"componentStack": "Stos komponentów:"
 	},
 	"number_format": {
 		"thousand_suffix": "k",

@@ -5,8 +5,7 @@
 		"githubText": "нашей странице GitHub Issues",
 		"copyInstructions": "Скопируйте и вставьте следующее сообщение об ошибке, чтобы включить его в ваше сообщение:",
 		"errorStack": "Стек ошибки:",
-		"componentStack": "Стек компонентов:",
-		"retry": "Повторить"
+		"componentStack": "Стек компонентов:"
 	},
 	"number_format": {
 		"thousand_suffix": "тыс",
