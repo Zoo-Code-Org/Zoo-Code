@@ -909,4 +909,129 @@ describe("UsageStatsProjection", () => {
 			expect(snapshot.buckets[0].costUsd).toBeCloseTo(0.01209, 10)
 		})
 	})
+
+	describe("rollup fast path: customPricing cacheRatio fix", () => {
+		it("should apply cacheRatio discount for custom models on the rollup fast path", () => {
+			// Custom model NOT in the static registry → providerReportsCache returns false.
+			// At write time, computeCacheDiscountBase returns 0 (no pricing available).
+			// At query time with customPricing, the discount base should be recomputed.
+			const event = makeEvent({
+				eventId: "evt-custom-1",
+				idempotencyKey: "idem-custom-1",
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 10000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.02, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// customPricing: inputPrice=2.0, cacheReadsPrice=0.5
+			// discountBase = (10000 / 1_000_000) * (2.0 - 0.5) = 0.015
+			// With cacheRatio=0.5: cost = 0.02 - 0.5 * 0.015 = 0.0125
+			const customPricing = new Map([["openai|my-custom-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.5 }), {
+				customPricing,
+			})
+
+			// The fast path should have recomputed the discount base and applied it.
+			// Without the fix, cacheDiscountBase would be 0 (stored at write time)
+			// and costUsd would be 0.02 (no discount).
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.0125, 10)
+			expect(snapshot.buckets[0].costUsd).toBeCloseTo(0.0125, 10)
+		})
+
+		it("should apply cacheRatio discount for custom models on lifetime totals (no groupBy)", () => {
+			const event = makeEvent({
+				eventId: "evt-custom-2",
+				idempotencyKey: "idem-custom-2",
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 10000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.02, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			const customPricing = new Map([["openai|my-custom-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+
+			// No groupBy → uses lifetime totals path
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: [], cacheRatio: 0.5 }), { customPricing })
+
+			// discountBase = (10000 / 1_000_000) * (2.0 - 0.5) = 0.015
+			// cost = 0.02 - 0.5 * 0.015 = 0.0125
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.0125, 10)
+		})
+
+		it("should NOT apply discount for reporting providers even with customPricing", () => {
+			// anthropic is a reporting provider → providerReportsCache returns true
+			// → computeCacheDiscountBaseFromAggregated returns 0
+			const event = makeEvent({
+				eventId: "evt-anthropic-1",
+				idempotencyKey: "idem-anthropic-1",
+				provider: "anthropic",
+				model: "claude-sonnet-4-20250514",
+				usage: {
+					inputTokens: { value: 10000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.02, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			// Even with customPricing that has cacheReadsPrice, reporting providers
+			// keep their verbatim cost (cacheRead=0 is a true miss).
+			const customPricing = new Map([
+				["anthropic|claude-sonnet-4-20250514", { inputPrice: 3.0, cacheReadsPrice: 0.3 }],
+			])
+
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.5 }), {
+				customPricing,
+			})
+
+			// No discount applied — cost stays at 0.02
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.02, 10)
+		})
+
+		it("should produce same result as event-scan path for custom model with cacheRatio", () => {
+			const event = makeEvent({
+				eventId: "evt-custom-3",
+				idempotencyKey: "idem-custom-3",
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 20000, source: "provider" },
+					outputTokens: { value: 1000, source: "provider" },
+					costUsd: { value: 0.05, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			const customPricing = new Map([["openai|my-custom-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+
+			// Fast path (single-axis → uses rollup tables)
+			const fastSnapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.94 }), {
+				customPricing,
+			})
+
+			// Event-scan path (multi-axis → forces event scan)
+			const eventScanSnapshot = assembleRollupSnapshot(
+				db,
+				makeQuery({ groupBy: ["model", "provider"], cacheRatio: 0.94 }),
+				{ customPricing },
+			)
+
+			// Both paths should produce the same cost
+			expect(fastSnapshot.totals.costUsd).toBeCloseTo(eventScanSnapshot.totals.costUsd, 10)
+		})
+	})
 })

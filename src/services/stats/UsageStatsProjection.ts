@@ -43,7 +43,7 @@ import {
 	serializeBucketKey,
 	type BucketDeltaValues,
 } from "./UsageAggregator"
-import { applyCacheDiscount } from "./costRecalculation"
+import { applyCacheDiscount, computeCacheDiscountBaseFromAggregated } from "./costRecalculation"
 import type { CustomModelPricingMap } from "./costRecalculation"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
@@ -386,6 +386,92 @@ function lifetimeTotalsToBucket(
 	}
 }
 
+// ── Internal: Custom Pricing Recomputation ─────────────────────────────────
+
+/**
+ * Builds a map from axisValue → recomputed cache discount base, using the
+ * per-(provider, model) input token sums from `usage_events` and the current
+ * `customPricing` map.
+ *
+ * This is the query-time fix for the rollup fast path: the stored
+ * `cache_discount_base` was computed at write time without `customPricing`,
+ * so it's 0 for custom models. This function recomputes the correct value
+ * from the raw event data.
+ *
+ * @param db The database to query.
+ * @param fromEpochMs Time range start (inclusive).
+ * @param toEpochMs Time range end (exclusive).
+ * @param includeCancelled Whether to include cancelled events.
+ * @param axis The breakdown axis ("model", "provider", "mode").
+ * @param customPricing The query-time custom pricing map.
+ * @returns Map from axisValue → recomputed discount base (USD).
+ */
+function buildRecomputedDiscountBaseMap(
+	db: UsageStatsDatabase,
+	fromEpochMs: number,
+	toEpochMs: number,
+	includeCancelled: boolean,
+	axis: string,
+	customPricing: CustomModelPricingMap,
+): Map<string, number> {
+	const rows = db.queryInputTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
+	const result = new Map<string, number>()
+
+	for (const row of rows) {
+		const discountBase = computeCacheDiscountBaseFromAggregated(
+			row.provider,
+			row.model,
+			row.inputTokens,
+			customPricing,
+		)
+		if (discountBase === 0) continue
+
+		// Build the axisValue the same way updateBreakdownRollups does
+		let axisValue: string
+		if (axis === "model") {
+			axisValue = row.model
+		} else if (axis === "provider") {
+			axisValue = row.endpoint ? `${row.provider} (${row.endpoint})` : row.provider
+		} else {
+			// mode axis
+			axisValue = row.mode
+		}
+
+		result.set(axisValue, (result.get(axisValue) ?? 0) + discountBase)
+	}
+
+	return result
+}
+
+/**
+ * Computes the total recomputed cache discount base across all (provider,
+ * model) pairs, using the per-(provider, model) input token sums from
+ * `usage_events` and the current `customPricing` map.
+ *
+ * Used for the totals/lifetime path where there's no axis breakdown.
+ *
+ * @param db The database to query.
+ * @param fromEpochMs Time range start (inclusive).
+ * @param toEpochMs Time range end (exclusive).
+ * @param includeCancelled Whether to include cancelled events.
+ * @param customPricing The query-time custom pricing map.
+ * @returns Total recomputed discount base (USD).
+ */
+function computeTotalRecomputedDiscountBase(
+	db: UsageStatsDatabase,
+	fromEpochMs: number,
+	toEpochMs: number,
+	includeCancelled: boolean,
+	customPricing: CustomModelPricingMap,
+): number {
+	const rows = db.queryInputTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
+	let total = 0
+	for (const row of rows) {
+		total += computeCacheDiscountBaseFromAggregated(row.provider, row.model, row.inputTokens, customPricing)
+	}
+	return total
+}
+
 // ── Public API: assembleRollupSnapshot ──────────────────────────────────────
 
 /**
@@ -427,11 +513,12 @@ export function assembleRollupSnapshot(
 function assembleRollupSnapshotFast(
 	db: UsageStatsDatabase,
 	query: StatsQuery,
-	options: { recordingPaused?: boolean },
+	options: { recordingPaused?: boolean; customPricing?: CustomModelPricingMap },
 ): StatsSnapshot {
 	const includeCancelled = query.includeCancelled ?? false
 	const groupBy = query.groupBy
 	const cacheRatio = query.cacheRatio
+	const customPricing = options.customPricing
 	const { from, to } = resolveTimeRange(query)
 
 	// Determine the time range for rollup queries
@@ -454,14 +541,45 @@ function assembleRollupSnapshotFast(
 		toEpochMs = to.getTime()
 	}
 
+	// When customPricing is available, recompute cache_discount_base at query
+	// time from usage_events. The stored value was computed at write time
+	// without customPricing, so it's 0 for custom models not in the static
+	// registry. This overrides the stale stored value with the correct one.
+	const hasCustomPricing = customPricing !== undefined && customPricing.size > 0
+
+	// Compute the recomputed total discount base (for totals/lifetime path)
+	let recomputedTotalDiscountBase: number | undefined
+	if (hasCustomPricing) {
+		recomputedTotalDiscountBase = computeTotalRecomputedDiscountBase(
+			db,
+			fromEpochMs,
+			toEpochMs,
+			includeCancelled,
+			customPricing!,
+		)
+	}
+
 	// Compute totals
 	let totals: StatsBucket
 	if (isAllTime) {
 		const lifetimeTotals = db.queryLifetimeTotalsFiltered(includeCancelled)
 		totals = lifetimeTotalsToBucket(lifetimeTotals, cacheRatio)
+		// Override stale cacheDiscountBase with recomputed value
+		if (recomputedTotalDiscountBase !== undefined) {
+			totals.costUsd = applyCacheDiscount(lifetimeTotals.totalCost, recomputedTotalDiscountBase, cacheRatio)
+		}
 	} else {
 		const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
 		totals = sumDailyRowsToTotals(dailyRows, cacheRatio)
+		// Override stale cacheDiscountBase with recomputed value
+		if (recomputedTotalDiscountBase !== undefined) {
+			// Recompute the total cost from the raw daily cost sum + recomputed discount base
+			let rawCostSum = 0
+			for (const row of dailyRows) {
+				rawCostSum += row.costUsd
+			}
+			totals.costUsd = applyCacheDiscount(rawCostSum, recomputedTotalDiscountBase, cacheRatio)
+		}
 	}
 
 	// Compute breakdown buckets
@@ -477,6 +595,13 @@ function assembleRollupSnapshotFast(
 			// Day axis: use detailed daily rollups
 			const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
 			buckets = dailyRows.map((row) => dailyRowToBucket(row, cacheRatio))
+			// Note: For the day axis, we can't recompute per-day discount base
+			// from per-(provider, model) data because the day bucket uses a
+			// different timezone computation than the epoch ms range. The
+			// day-axis recomputation would require a per-day-per-provider-model
+			// query, which is a future optimization. For now, the day axis
+			// uses the stored value (which is correct for static-registry
+			// models and 0 for custom models).
 		} else {
 			// model/provider/mode axis: use breakdown rollups
 			let breakdownRows: BreakdownRollupRow[]
@@ -487,6 +612,24 @@ function assembleRollupSnapshotFast(
 				// Use daily rollups for date ranges — daily breakdown rows are written
 				// at append time and already handle per-day granularity correctly
 				breakdownRows = db.queryBreakdownRollups("daily", fromDay, toDay, axis, includeCancelled)
+			}
+
+			// Recompute cacheDiscountBase per axisValue when customPricing is available
+			if (hasCustomPricing) {
+				const recomputedMap = buildRecomputedDiscountBaseMap(
+					db,
+					fromEpochMs,
+					toEpochMs,
+					includeCancelled,
+					axis,
+					customPricing!,
+				)
+				for (const row of breakdownRows) {
+					const recomputed = recomputedMap.get(row.axisValue)
+					if (recomputed !== undefined) {
+						row.cacheDiscountBase = recomputed
+					}
+				}
 			}
 
 			buckets = breakdownRows.map((row) => breakdownRowToBucket(row, axis, cacheRatio))

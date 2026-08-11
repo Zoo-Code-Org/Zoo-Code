@@ -3202,6 +3202,56 @@ export class UsageStatsDatabase {
 	}
 
 	/**
+	 * Queries per-(provider, model, endpoint, mode) input token sums from
+	 * usage_events for a given time range. Used by the rollup fast path to
+	 * recompute `cache_discount_base` at query time when `customPricing` is
+	 * available, overriding the stale stored value (which was 0 for custom
+	 * models because pricing wasn't available at write time).
+	 *
+	 * The endpoint and mode columns are returned so the caller can build the
+	 * same axisValue strings used by `updateBreakdownRollups` (e.g.
+	 * `provider (endpoint)` for the provider axis).
+	 *
+	 * @param fromEpochMs Start epoch ms (inclusive). 0 for no lower bound.
+	 * @param toEpochMs End epoch ms (exclusive). MAX_SAFE_INTEGER for no upper bound.
+	 * @param includeCancelled If true, includes cancelled events.
+	 * @returns Array of { provider, model, endpoint, mode, inputTokens } rows.
+	 */
+	queryInputTokensByProviderModel(
+		fromEpochMs: number,
+		toEpochMs: number,
+		includeCancelled: boolean = false,
+	): Array<{ provider: string; model: string; endpoint: string | null; mode: string; inputTokens: number }> {
+		const db = this.getDb()
+
+		try {
+			let query = `SELECT provider, model, endpoint, mode,
+						SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens
+						FROM usage_events
+						WHERE occurred_epoch_ms >= ? AND occurred_epoch_ms < ?`
+			const params: Array<number | string> = [fromEpochMs, toEpochMs]
+
+			if (!includeCancelled) {
+				query += ` AND status != 'cancelled'`
+			}
+
+			query += ` GROUP BY provider, model, endpoint, mode`
+
+			const rows = db.prepare(query).all(...params) as Array<Record<string, unknown>>
+
+			return rows.map((row) => ({
+				provider: (row.provider as string) ?? "",
+				model: (row.model as string) ?? "",
+				endpoint: (row.endpoint as string | null) ?? null,
+				mode: (row.mode as string) ?? "",
+				inputTokens: (row.input_tokens as number) ?? 0,
+			}))
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query input tokens by provider+model", err)
+		}
+	}
+
+	/**
 	 * Queries coverage statistics (first/last event timestamps, backfill count)
 	 * for a given time range.
 	 *

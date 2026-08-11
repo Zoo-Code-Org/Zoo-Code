@@ -360,6 +360,55 @@ export function computeCacheDiscountBase(event: UsageEventV1, customPricing?: Cu
 }
 
 /**
+ * Computes the cache discount base from aggregated input tokens and a
+ * provider+model pair, using the same pricing lookup as
+ * {@link computeCacheDiscountBase}.
+ *
+ * This is the query-time counterpart for rollup rows: when the stored
+ * `cache_discount_base` is 0 (because it was computed at write time without
+ * `customPricing`), the fast path can recompute the correct value from the
+ * aggregated input token sum and the current `customPricing` map.
+ *
+ * Returns 0 when:
+ * - The provider+model is a reporting provider (cacheRead=0 is a true miss).
+ * - No pricing info is available (not in registry, no modelPricing, not in
+ *   customPricing).
+ * - `inputPrice` or `cacheReadsPrice` is missing or non-finite.
+ *
+ * @param provider The provider ID (e.g. "openai", "anthropic").
+ * @param model The model name.
+ * @param inputTokens The sum of input tokens for this provider+model pair.
+ * @param customPricing Optional query-time pricing map.
+ * @returns The discount base in USD (0 when not applicable).
+ */
+export function computeCacheDiscountBaseFromAggregated(
+	provider: string,
+	model: string,
+	inputTokens: number,
+	customPricing?: CustomModelPricingMap,
+): number {
+	// Capability check: reporting providers keep verbatim cost — no discount.
+	if (providerReportsCache(provider, model, undefined, customPricing)) {
+		return 0
+	}
+
+	const modelInfo = lookupModelInfo(provider, model, undefined, customPricing)
+	if (!modelInfo) return 0
+
+	const { inputPrice, cacheReadsPrice } = modelInfo
+	if (
+		typeof inputPrice !== "number" ||
+		!Number.isFinite(inputPrice) ||
+		typeof cacheReadsPrice !== "number" ||
+		!Number.isFinite(cacheReadsPrice)
+	) {
+		return 0
+	}
+
+	return (inputTokens / 1_000_000) * Math.max(0, inputPrice - cacheReadsPrice)
+}
+
+/**
  * Applies the cacheRatio cost discount to a cost value.
  *
  * The discount is proportional to the cache ratio:

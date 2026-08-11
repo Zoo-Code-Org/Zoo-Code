@@ -40,6 +40,7 @@ export {
 	lookupModelInfo,
 	providerReportsCache,
 	computeCacheDiscountBase,
+	computeCacheDiscountBaseFromAggregated,
 	applyCacheDiscount,
 	customPricingKey,
 } from "./costRecalculation"
