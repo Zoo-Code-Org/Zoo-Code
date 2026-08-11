@@ -161,4 +161,18 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 		expect(screen.getByTestId("allowed-commands-heading")).toBeInTheDocument()
 		expect(screen.getByTestId("denied-commands-heading")).toBeInTheDocument()
 	})
+
+	it("renders disabled timeout label when follow-up auto-approve timeout is 0", () => {
+		renderSettings({ alwaysAllowFollowupQuestions: true, followupAutoApproveTimeoutMs: 0 })
+
+		expect(screen.getByTestId("followup-timeout-slider")).toBeInTheDocument()
+		expect(screen.getByText("settings:autoApprove.followupQuestions.timeoutDisabled")).toBeInTheDocument()
+	})
+
+	it("renders timeout in seconds when follow-up auto-approve timeout is non-zero", () => {
+		renderSettings({ alwaysAllowFollowupQuestions: true, followupAutoApproveTimeoutMs: 5000 })
+
+		expect(screen.getByTestId("followup-timeout-slider")).toBeInTheDocument()
+		expect(screen.getByText("5s")).toBeInTheDocument()
+	})
 })
