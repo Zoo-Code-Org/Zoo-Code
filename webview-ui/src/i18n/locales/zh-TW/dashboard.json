@@ -25,8 +25,7 @@
 		"refresh": "重新整理",
 		"exportJson": "匯出 JSON",
 		"exportCsv": "匯出 CSV",
-		"clear": "清除統計",
-		"rebuild": "重新建構統計"
+		"clear": "清除統計"
 	},
 	"breakdown": {
 		"title": "明細",
@@ -89,5 +88,9 @@
 		"filterModel": "所有模型",
 		"filterProvider": "所有供應商",
 		"callCount": "{{count}} 次呼叫"
+	},
+	"taskAggregate": {
+		"modes": "模式",
+		"models": "模型"
 	}
 }

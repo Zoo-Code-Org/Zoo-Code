@@ -25,8 +25,7 @@
 		"refresh": "Odśwież",
 		"exportJson": "Eksportuj JSON",
 		"exportCsv": "Eksportuj CSV",
-		"clear": "Wyczyść statystyki",
-		"rebuild": "Przebuduj statystyki"
+		"clear": "Wyczyść statystyki"
 	},
 	"breakdown": {
 		"title": "Podział",
@@ -89,5 +88,9 @@
 		"filterModel": "Wszystkie modele",
 		"filterProvider": "Wszyscy dostawcy",
 		"callCount": "{{count}} wywołań"
+	},
+	"taskAggregate": {
+		"modes": "Tryby",
+		"models": "Modele"
 	}
 }

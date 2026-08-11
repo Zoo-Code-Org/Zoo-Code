@@ -73,8 +73,12 @@ const validTaskSummary: DashboardTaskSummary = {
 	lastUsageAt: 1722259200000,
 	totalCost: 0.15,
 	totalTokens: 12000,
+	inputTokens: 8000,
+	outputTokens: 4000,
 	model: "claude-sonnet-4-20250514",
 	provider: "anthropic",
+	models: ["claude-sonnet-4-20250514"],
+	modes: ["code"],
 	eventCount: 5,
 	childTaskIds: [],
 }

@@ -25,8 +25,7 @@
 		"refresh": "Vernieuwen",
 		"exportJson": "JSON exporteren",
 		"exportCsv": "CSV exporteren",
-		"clear": "Statistieken wissen",
-		"rebuild": "Statistieken opnieuw opbouwen"
+		"clear": "Statistieken wissen"
 	},
 	"breakdown": {
 		"title": "Uitsplitsing",
@@ -89,5 +88,9 @@
 		"filterModel": "Alle modellen",
 		"filterProvider": "Alle providers",
 		"callCount": "{{count}} aanroepen"
+	},
+	"taskAggregate": {
+		"modes": "Modi",
+		"models": "Modellen"
 	}
 }

@@ -166,6 +166,7 @@ const createMockDatabase = () => ({
 	readEventsAfter: vi.fn(() => ({ events: [], hasMore: false })),
 	querySessions: vi.fn(() => ({ sessions: [], cursor: undefined, totalEstimate: 0 })),
 	queryTaskUsageByTaskIds: vi.fn(() => new Map()),
+	queryTaskIdentityAggregates: vi.fn(() => new Map()),
 	queryEventsByTaskIds: vi.fn(() => []),
 	clearGeneration: vi.fn(() => 2),
 	_isInitialized: vi.fn(() => true),

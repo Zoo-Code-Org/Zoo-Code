@@ -25,8 +25,7 @@
 		"refresh": "새로 고침",
 		"exportJson": "JSON 내보내기",
 		"exportCsv": "CSV 내보내기",
-		"clear": "통계 삭제",
-		"rebuild": "통계 다시 빌드"
+		"clear": "통계 삭제"
 	},
 	"breakdown": {
 		"title": "세부 내역",
@@ -89,5 +88,9 @@
 		"filterModel": "모든 모델",
 		"filterProvider": "모든 공급자",
 		"callCount": "{{count}}회 호출"
+	},
+	"taskAggregate": {
+		"modes": "모드",
+		"models": "모델"
 	}
 }

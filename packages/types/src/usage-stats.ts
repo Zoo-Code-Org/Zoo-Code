@@ -277,7 +277,8 @@ export type DashboardSessionPage = z.infer<typeof DashboardSessionPage>
 
 /**
  * One History task and its aggregate usage for the task plus all descendants.
- * A missing usage row is represented by zero metrics and no `lastUsageAt`.
+ * A missing usage row is represented by zero metrics, empty `models`/`modes`
+ * lists, and no `lastUsageAt`.
  */
 export const DashboardTaskSummary = z.object({
 	taskId: z.string(),
@@ -290,9 +291,17 @@ export const DashboardTaskSummary = z.object({
 	lastUsageAt: z.number().optional(),
 	totalCost: z.number(),
 	totalTokens: z.number(),
+	/** Subtree-aggregated input tokens. */
+	inputTokens: z.number(),
+	/** Subtree-aggregated output tokens. */
+	outputTokens: z.number(),
 	/** Provider/model from the latest usage row in the subtree, or empty when unused. */
 	model: z.string(),
 	provider: z.string(),
+	/** Distinct models used in the subtree, in first-seen order. */
+	models: z.array(z.string()),
+	/** Distinct modes used in the subtree, in first-seen order. */
+	modes: z.array(z.string()),
 	eventCount: z.number().int().nonnegative(),
 	/** Direct children in catalog order; empty for childless tasks. */
 	childTaskIds: z.array(z.string()),

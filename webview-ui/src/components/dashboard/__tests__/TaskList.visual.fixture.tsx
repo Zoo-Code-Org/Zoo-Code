@@ -20,8 +20,12 @@ export function HierarchyFixture() {
 		lastUsageAt: Date.now() - 60_000,
 		totalCost: 0.02,
 		totalTokens: 500,
+		inputTokens: 300,
+		outputTokens: 200,
 		model: "claude-sonnet-4-20250514",
 		provider: "anthropic",
+		models: ["claude-sonnet-4-20250514"],
+		modes: ["code"],
 		eventCount: 1,
 		childTaskIds: [],
 	}

@@ -25,8 +25,7 @@
 		"refresh": "ताज़ा करें",
 		"exportJson": "JSON निर्यात करें",
 		"exportCsv": "CSV निर्यात करें",
-		"clear": "आँकड़े साफ़ करें",
-		"rebuild": "आंकड़े पुनः बनाएं"
+		"clear": "आँकड़े साफ़ करें"
 	},
 	"breakdown": {
 		"title": "विवरण",
@@ -89,5 +88,9 @@
 		"filterModel": "सभी मॉडल",
 		"filterProvider": "सभी प्रदाता",
 		"callCount": "{{count}} कॉल"
+	},
+	"taskAggregate": {
+		"modes": "मोड",
+		"models": "मॉडल"
 	}
 }

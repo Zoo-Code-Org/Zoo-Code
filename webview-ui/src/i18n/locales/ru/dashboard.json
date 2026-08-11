@@ -25,8 +25,7 @@
 		"refresh": "Обновить",
 		"exportJson": "Экспорт JSON",
 		"exportCsv": "Экспорт CSV",
-		"clear": "Очистить статистику",
-		"rebuild": "Перестроить статистику"
+		"clear": "Очистить статистику"
 	},
 	"breakdown": {
 		"title": "Детализация",
@@ -89,5 +88,9 @@
 		"filterModel": "Все модели",
 		"filterProvider": "Все поставщики",
 		"callCount": "{{count}} вызовов"
+	},
+	"taskAggregate": {
+		"modes": "Режимы",
+		"models": "Модели"
 	}
 }

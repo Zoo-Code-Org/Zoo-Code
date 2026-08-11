@@ -25,8 +25,7 @@
 		"refresh": "Làm mới",
 		"exportJson": "Xuất JSON",
 		"exportCsv": "Xuất CSV",
-		"clear": "Xóa thống kê",
-		"rebuild": "Xây dựng lại thống kê"
+		"clear": "Xóa thống kê"
 	},
 	"breakdown": {
 		"title": "Phân tích",
@@ -89,5 +88,9 @@
 		"filterModel": "Tất cả mô hình",
 		"filterProvider": "Tất cả nhà cung cấp",
 		"callCount": "{{count}} lượt gọi"
+	},
+	"taskAggregate": {
+		"modes": "Chế độ",
+		"models": "Mô hình"
 	}
 }

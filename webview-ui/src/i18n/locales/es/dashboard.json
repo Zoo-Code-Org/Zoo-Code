@@ -25,8 +25,7 @@
 		"refresh": "Actualizar",
 		"exportJson": "Exportar JSON",
 		"exportCsv": "Exportar CSV",
-		"clear": "Borrar estadísticas",
-		"rebuild": "Reconstruir estadísticas"
+		"clear": "Borrar estadísticas"
 	},
 	"breakdown": {
 		"title": "Desglose",
@@ -89,5 +88,9 @@
 		"filterModel": "Todos los modelos",
 		"filterProvider": "Todos los proveedores",
 		"callCount": "{{count}} llamadas"
+	},
+	"taskAggregate": {
+		"modes": "Modos",
+		"models": "Modelos"
 	}
 }

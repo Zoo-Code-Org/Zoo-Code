@@ -57,8 +57,12 @@ function makeTask(overrides: Partial<DashboardTaskSummary> = {}): DashboardTaskS
 		taskTimestamp: Date.now(),
 		totalCost: 0.05,
 		totalTokens: 1500,
+		inputTokens: 1000,
+		outputTokens: 500,
 		model: "gpt-4",
 		provider: "openai",
+		models: ["gpt-4"],
+		modes: ["code"],
 		lastUsageAt: Date.now(),
 		eventCount: 1,
 		childTaskIds: [],
@@ -233,6 +237,90 @@ describe("TaskList", () => {
 		expect(container.textContent).toContain("Child one")
 		// A root with subtasks expands into the list, not into its own detail.
 		expect(container.querySelector('[data-testid="dashboard-session-detail-no-calls"]')).toBeFalsy()
+	})
+
+	it("renders the subtree aggregate strip on an expanded root", () => {
+		const child = makeTask({ taskId: "child-1", rootTaskId: "root-1", parentTaskId: "root-1", title: "Child one" })
+		const root = makeTask({
+			taskId: "root-1",
+			title: "Root one",
+			childTaskIds: ["child-1"],
+			inputTokens: 2500,
+			outputTokens: 800,
+			totalCost: 0.07,
+			eventCount: 3,
+			models: ["gpt-4", "claude"],
+			modes: ["code", "architect"],
+		})
+		const { container } = render(
+			<TaskList
+				tasks={[root]}
+				{...defaultProps}
+				tasksById={toTasksById([root, child])}
+				expandedRootId="root-1"
+			/>,
+		)
+		const strip = container.querySelector('[data-testid="dashboard-task-aggregate"]')
+		expect(strip).toBeTruthy()
+		expect(strip?.textContent).toContain("dashboard:sessionDetail.input 2.5K")
+		expect(strip?.textContent).toContain("dashboard:sessionDetail.output 800")
+		expect(strip?.textContent).toContain("dashboard:sessionDetail.cost $0.07")
+		expect(strip?.textContent).toContain("dashboard:taskAggregate.modes code, architect")
+		expect(strip?.textContent).toContain("dashboard:taskAggregate.models gpt-4, claude")
+		// The strip sits above the subtask list inside the root's expansion area.
+		expect(
+			strip!.compareDocumentPosition(container.querySelector('[data-testid="dashboard-subtask-list"]')!) &
+				Node.DOCUMENT_POSITION_FOLLOWING,
+		).toBeTruthy()
+	})
+
+	it("does not render the aggregate strip on subtask rows", () => {
+		const child = makeTask({
+			taskId: "child-1",
+			rootTaskId: "root-1",
+			parentTaskId: "root-1",
+			title: "Child one",
+			models: ["child-model"],
+			modes: ["ask"],
+		})
+		const root = makeTask({ taskId: "root-1", title: "Root one", childTaskIds: ["child-1"] })
+		const { container } = render(
+			<TaskList
+				tasks={[root]}
+				{...defaultProps}
+				tasksById={toTasksById([root, child])}
+				expandedRootId="root-1"
+			/>,
+		)
+		// Exactly one strip, holding the root's aggregate values — not the child's.
+		const strips = container.querySelectorAll('[data-testid="dashboard-task-aggregate"]')
+		expect(strips).toHaveLength(1)
+		expect(strips[0].textContent).not.toContain("child-model")
+	})
+
+	it("hides the aggregate strip when the root has no usage events", () => {
+		const child = makeTask({ taskId: "child-1", rootTaskId: "root-1", parentTaskId: "root-1", title: "Child one" })
+		const root = makeTask({
+			taskId: "root-1",
+			title: "Root one",
+			childTaskIds: ["child-1"],
+			eventCount: 0,
+			inputTokens: 0,
+			outputTokens: 0,
+			models: [],
+			modes: [],
+		})
+		const { container } = render(
+			<TaskList
+				tasks={[root]}
+				{...defaultProps}
+				tasksById={toTasksById([root, child])}
+				expandedRootId="root-1"
+			/>,
+		)
+		expect(container.querySelector('[data-testid="dashboard-task-aggregate"]')).toBeFalsy()
+		// The subtask list itself still renders.
+		expect(container.querySelector('[data-testid="dashboard-subtask-list"]')).toBeTruthy()
 	})
 
 	it("calls onToggleTask with the subtask id when a subtask row is clicked", () => {

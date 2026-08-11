@@ -170,6 +170,39 @@ const TaskRow = memo(
 
 TaskRow.displayName = "TaskRow"
 
+// ── Subtree aggregate strip ──────────────────────────────────────────────────
+
+/**
+ * Compact aggregate strip for an expanded ROOT task, summarizing the whole
+ * subtree (the root plus all descendants): input/output tokens, cost, and the
+ * distinct modes and models used. Rendered above the subtask list; the
+ * per-subtask rows below it stay unchanged.
+ */
+const TaskAggregateStrip = memo(({ task }: { task: DashboardTaskSummary }) => {
+	const { t } = useAppTranslation()
+	const segments = [
+		`${t("dashboard:sessionDetail.input")} ${formatCompact(task.inputTokens)}`,
+		`${t("dashboard:sessionDetail.output")} ${formatCompact(task.outputTokens)}`,
+		`${t("dashboard:sessionDetail.cost")} ${formatCost(task.totalCost)}`,
+	]
+	if (task.modes.length > 0) {
+		segments.push(`${t("dashboard:taskAggregate.modes")} ${task.modes.join(", ")}`)
+	}
+	if (task.models.length > 0) {
+		segments.push(`${t("dashboard:taskAggregate.models")} ${task.models.join(", ")}`)
+	}
+
+	return (
+		<div
+			className="border-b border-vscode-panel-border px-2 py-1 pl-6 text-[10px] text-vscode-descriptionForeground"
+			data-testid="dashboard-task-aggregate">
+			{segments.join(" · ")}
+		</div>
+	)
+})
+
+TaskAggregateStrip.displayName = "TaskAggregateStrip"
+
 // ── Root task item (row + expansion) ─────────────────────────────────────────
 
 interface RootTaskItemProps {
@@ -222,26 +255,29 @@ const RootTaskItem = memo(
 						onToggle={onToggleTask}
 					/>
 					{isRootExpanded && (
-						<div data-testid="dashboard-subtask-list">
-							{childTasks.map((child) => {
-								const isDetailOpen = expandedDetailTaskId === child.taskId
-								return (
-									<TaskRow
-										key={child.taskId}
-										task={child}
-										indent
-										isExpanded={isDetailOpen}
-										detail={isDetailOpen ? taskDetails[child.taskId] : undefined}
-										detailError={
-											isDetailOpen ? (taskDetailErrors[child.taskId] ?? undefined) : undefined
-										}
-										detailLoading={isDetailOpen && taskDetailLoading.has(child.taskId)}
-										showDetail={isDetailOpen}
-										onToggle={onToggleTask}
-									/>
-								)
-							})}
-						</div>
+						<>
+							{task.eventCount > 0 && <TaskAggregateStrip task={task} />}
+							<div data-testid="dashboard-subtask-list">
+								{childTasks.map((child) => {
+									const isDetailOpen = expandedDetailTaskId === child.taskId
+									return (
+										<TaskRow
+											key={child.taskId}
+											task={child}
+											indent
+											isExpanded={isDetailOpen}
+											detail={isDetailOpen ? taskDetails[child.taskId] : undefined}
+											detailError={
+												isDetailOpen ? (taskDetailErrors[child.taskId] ?? undefined) : undefined
+											}
+											detailLoading={isDetailOpen && taskDetailLoading.has(child.taskId)}
+											showDetail={isDetailOpen}
+											onToggle={onToggleTask}
+										/>
+									)
+								})}
+							</div>
+						</>
 					)}
 				</div>
 			)

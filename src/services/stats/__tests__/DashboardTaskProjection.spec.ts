@@ -11,7 +11,7 @@ import {
 } from "../DashboardTaskProjection"
 import { DashboardTaskCatalog, type DashboardTaskCatalogSource } from "../DashboardTaskCatalog"
 import { isWithinStatsQueryRange, type StatsQueryRangeMs } from "../statsQueryRange"
-import type { TaskUsageRow } from "../UsageStatsDatabase"
+import type { TaskIdentityAggregate, TaskUsageRow } from "../UsageStatsDatabase"
 
 vi.mock("vscode", () => {
 	class EventEmitter<T> {
@@ -87,25 +87,42 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 function createUsageReader(
 	usageByTaskId: Map<string, TaskUsageRow> = new Map(),
 	events: Array<UsageEventV1 & { sequence: number }> = [],
+	identityByTaskId: Map<string, TaskIdentityAggregate> = new Map(),
 ): DashboardTaskUsageReader & {
 	queriedUsageTaskIds: string[][]
 	queriedEventTaskIds: string[][]
+	queriedIdentityTaskIds: string[][]
 	queriedUsageRanges: Array<StatsQueryRangeMs | undefined>
 	queriedEventRanges: Array<StatsQueryRangeMs | undefined>
+	queriedIdentityRanges: Array<StatsQueryRangeMs | undefined>
 } {
 	const queriedUsageTaskIds: string[][] = []
 	const queriedEventTaskIds: string[][] = []
+	const queriedIdentityTaskIds: string[][] = []
 	const queriedUsageRanges: Array<StatsQueryRangeMs | undefined> = []
 	const queriedEventRanges: Array<StatsQueryRangeMs | undefined> = []
+	const queriedIdentityRanges: Array<StatsQueryRangeMs | undefined> = []
 	return {
 		queriedUsageTaskIds,
 		queriedEventTaskIds,
+		queriedIdentityTaskIds,
 		queriedUsageRanges,
 		queriedEventRanges,
+		queriedIdentityRanges,
 		queryTaskUsageByTaskIds(taskIds, rangeMs) {
 			queriedUsageTaskIds.push(taskIds)
 			queriedUsageRanges.push(rangeMs)
 			return new Map(taskIds.map((taskId) => [taskId, usageByTaskId.get(taskId) ?? makeUsageRow({ taskId })]))
+		},
+		queryTaskIdentityAggregates(taskIds, rangeMs) {
+			queriedIdentityTaskIds.push(taskIds)
+			queriedIdentityRanges.push(rangeMs)
+			return new Map(
+				taskIds.map((taskId) => [
+					taskId,
+					identityByTaskId.get(taskId) ?? { inputTokens: 0, outputTokens: 0, models: [], modes: [] },
+				]),
+			)
 		},
 		queryEventsByTaskIds(taskIds, rangeMs) {
 			queriedEventTaskIds.push(taskIds)
@@ -235,6 +252,52 @@ describe("DashboardTaskProjection", () => {
 		catalog.dispose()
 	})
 
+	it("sums input/output tokens and unions subtree models/modes in first-seen order", () => {
+		const catalog = createCatalog([
+			makeHistoryItem({ id: "root", ts: 300, task: "Root" }),
+			makeHistoryItem({ id: "child", ts: 200, task: "Child", parentTaskId: "root" }),
+			makeHistoryItem({ id: "grandchild", ts: 100, task: "Grandchild", parentTaskId: "child" }),
+		])
+		const reader = createUsageReader(
+			new Map(),
+			[],
+			new Map([
+				["root", { inputTokens: 100, outputTokens: 10, models: ["model-root", "shared"], modes: ["code"] }],
+				[
+					"child",
+					{ inputTokens: 200, outputTokens: 20, models: ["shared", "model-child"], modes: ["ask", "code"] },
+				],
+				["grandchild", { inputTokens: 300, outputTokens: 30, models: ["model-grand"], modes: ["architect"] }],
+			]),
+		)
+
+		const page = computeTaskPage(catalog, reader, "request-ident")
+
+		const root = page.tasks[0]!
+		expect(root.inputTokens).toBe(600)
+		expect(root.outputTokens).toBe(60)
+		// Union order: the task itself first, then descendants in getDescendantTaskIds order.
+		expect(root.models).toEqual(["model-root", "shared", "model-child", "model-grand"])
+		expect(root.modes).toEqual(["code", "ask", "architect"])
+
+		const child = page.childTasks![0]!
+		expect(child.inputTokens).toBe(500)
+		expect(child.outputTokens).toBe(50)
+		expect(child.models).toEqual(["shared", "model-child", "model-grand"])
+		expect(child.modes).toEqual(["ask", "code", "architect"])
+		catalog.dispose()
+	})
+
+	it("emits zero tokens and empty model/mode lists for tasks without usage", () => {
+		const catalog = createCatalog([makeHistoryItem({ id: "unused", ts: 100, task: "Unused" })])
+		const reader = createUsageReader()
+
+		const page = computeTaskPage(catalog, reader, "request-ident-empty")
+
+		expect(page.tasks[0]).toMatchObject({ inputTokens: 0, outputTokens: 0, models: [], modes: [] })
+		catalog.dispose()
+	})
+
 	it("keeps upsert summaries for a root whose descendant was created inside the range", () => {
 		const catalog = createCatalog([
 			makeHistoryItem({ id: "old-root", ts: 50, task: "Old root" }),
@@ -312,6 +375,7 @@ describe("DashboardTaskProjection", () => {
 		expect(page.totalEstimate).toBe(1)
 		expect(page.tasks[0]).toMatchObject({ totalTokens: 42, eventCount: 2 })
 		expect(reader.queriedUsageRanges).toEqual([rangeMs])
+		expect(reader.queriedIdentityRanges).toEqual([rangeMs])
 		catalog.dispose()
 	})
 

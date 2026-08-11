@@ -25,8 +25,7 @@
 		"refresh": "Actualitza",
 		"exportJson": "Exporta JSON",
 		"exportCsv": "Exporta CSV",
-		"clear": "Esborra les estadístiques",
-		"rebuild": "Reconstrueix estadístiques"
+		"clear": "Esborra les estadístiques"
 	},
 	"breakdown": {
 		"title": "Desglossament",
@@ -89,5 +88,9 @@
 		"filterModel": "Tots els models",
 		"filterProvider": "Tots els proveïdors",
 		"callCount": "{{count}} trucades"
+	},
+	"taskAggregate": {
+		"modes": "Modes",
+		"models": "Models"
 	}
 }

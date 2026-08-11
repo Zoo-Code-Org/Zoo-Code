@@ -25,8 +25,7 @@
 		"refresh": "Segarkan",
 		"exportJson": "Ekspor JSON",
 		"exportCsv": "Ekspor CSV",
-		"clear": "Hapus Statistik",
-		"rebuild": "Bangun Ulang Statistik"
+		"clear": "Hapus Statistik"
 	},
 	"breakdown": {
 		"title": "Rincian",
@@ -89,5 +88,9 @@
 		"filterModel": "Semua Model",
 		"filterProvider": "Semua Penyedia",
 		"callCount": "{{count}} panggilan"
+	},
+	"taskAggregate": {
+		"modes": "Mode",
+		"models": "Model"
 	}
 }

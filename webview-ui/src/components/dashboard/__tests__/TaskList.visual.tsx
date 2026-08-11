@@ -23,8 +23,12 @@ function makeTasks(count: number): DashboardTaskSummary[] {
 		lastUsageAt: Date.now() - i * 60_000,
 		totalCost: 0.01 * (i + 1),
 		totalTokens: 1000 * (i + 1),
+		inputTokens: 700 * (i + 1),
+		outputTokens: 300 * (i + 1),
 		model: "claude-sonnet-4-20250514",
 		provider: "anthropic",
+		models: ["claude-sonnet-4-20250514"],
+		modes: ["code"],
 		eventCount: i + 1,
 		childTaskIds: [],
 	}))

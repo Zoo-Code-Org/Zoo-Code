@@ -7,7 +7,7 @@ import type {
 } from "@roo-code/types"
 
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
-import type { TaskUsageRow } from "./UsageStatsDatabase"
+import type { TaskIdentityAggregate, TaskUsageRow } from "./UsageStatsDatabase"
 import { getEffectiveCost } from "./costRecalculation"
 import { type StatsQueryRangeMs } from "./statsQueryRange"
 
@@ -28,15 +28,20 @@ export class DashboardTaskProjectionError extends Error {
 interface SubtreeUsageSummary {
 	totalCost: number
 	totalTokens: number
+	inputTokens: number
+	outputTokens: number
 	eventCount: number
 	lastUsageAt?: number
 	model: string
 	provider: string
+	models: string[]
+	modes: string[]
 }
 
 /** Read-only usage queries required by the Dashboard task projection. */
 export interface DashboardTaskUsageReader {
 	queryTaskUsageByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskUsageRow>
+	queryTaskIdentityAggregates(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskIdentityAggregate>
 	queryEventsByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Array<UsageEventV1 & { sequence: number }>
 }
 
@@ -58,7 +63,9 @@ export function computeTaskPage(
 	rangeMs?: StatsQueryRangeMs,
 ): DashboardTaskPage {
 	const catalogPage = catalog.getPage(cursor, limit, rangeMs)
-	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, catalogPage.tasks), rangeMs)
+	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, catalogPage.tasks)
+	const usageByTaskId = db.queryTaskUsageByTaskIds(subtreeTaskIds, rangeMs)
+	const identityByTaskId = db.queryTaskIdentityAggregates(subtreeTaskIds, rangeMs)
 
 	// Direct children of this page's roots ride along so the client can render
 	// an expanded root without an extra round-trip. Their usage rows are
@@ -68,8 +75,8 @@ export function computeTaskPage(
 	return {
 		requestId,
 		catalogRevision: catalog.catalogRevision,
-		tasks: catalogPage.tasks.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId)),
-		childTasks: childTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId)),
+		tasks: catalogPage.tasks.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId)),
+		childTasks: childTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId)),
 		cursor: catalogPage.cursor,
 		totalEstimate: catalogPage.totalEstimate,
 	}
@@ -93,8 +100,10 @@ export function computeTaskSummaries(
 	const knownTaskIds = [...new Set(taskIds)].filter(
 		(taskId) => catalog.byId.has(taskId) && catalog.isSubtreeWithinRange(rangeMs, taskId),
 	)
-	const usageByTaskId = db.queryTaskUsageByTaskIds(collectPageSubtreeTaskIds(catalog, knownTaskIds), rangeMs)
-	return knownTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId))
+	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, knownTaskIds)
+	const usageByTaskId = db.queryTaskUsageByTaskIds(subtreeTaskIds, rangeMs)
+	const identityByTaskId = db.queryTaskIdentityAggregates(subtreeTaskIds, rangeMs)
+	return knownTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId))
 }
 
 /**
@@ -148,9 +157,14 @@ function computeTaskSummary(
 	catalog: DashboardTaskCatalog,
 	taskId: string,
 	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
+	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 ): DashboardTaskSummary {
 	const task = catalog.byId.get(taskId)!
-	const subtreeUsage = summarizeSubtreeUsage([taskId, ...catalog.getDescendantTaskIds(taskId)], usageByTaskId)
+	const subtreeUsage = summarizeSubtreeUsage(
+		[taskId, ...catalog.getDescendantTaskIds(taskId)],
+		usageByTaskId,
+		identityByTaskId,
+	)
 
 	return {
 		taskId,
@@ -161,8 +175,12 @@ function computeTaskSummary(
 		lastUsageAt: subtreeUsage.lastUsageAt,
 		totalCost: subtreeUsage.totalCost,
 		totalTokens: subtreeUsage.totalTokens,
+		inputTokens: subtreeUsage.inputTokens,
+		outputTokens: subtreeUsage.outputTokens,
 		model: subtreeUsage.model,
 		provider: subtreeUsage.provider,
+		models: subtreeUsage.models,
+		modes: subtreeUsage.modes,
 		eventCount: subtreeUsage.eventCount,
 		childTaskIds: [...(catalog.childrenByParentId.get(taskId) ?? [])],
 	}
@@ -171,13 +189,29 @@ function computeTaskSummary(
 function summarizeSubtreeUsage(
 	taskIds: readonly string[],
 	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
+	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 ): SubtreeUsageSummary {
 	let totalCost = 0
 	let totalTokens = 0
+	let inputTokens = 0
+	let outputTokens = 0
 	let eventCount = 0
 	let latestUsage: TaskUsageRow | undefined
+	const subtreeModels: string[] = []
+	const subtreeModes: string[] = []
 
+	// taskIds arrive in subtree order (the task itself first, then descendants
+	// in getDescendantTaskIds order), so concatenating each task's lists in
+	// iteration order and deduping first-seen keeps that order in the union.
 	for (const taskId of taskIds) {
+		const identity = identityByTaskId.get(taskId)
+		if (identity) {
+			inputTokens += identity.inputTokens
+			outputTokens += identity.outputTokens
+			subtreeModels.push(...identity.models)
+			subtreeModes.push(...identity.modes)
+		}
+
 		const usage = usageByTaskId.get(taskId)
 		if (!usage) {
 			continue
@@ -199,10 +233,14 @@ function summarizeSubtreeUsage(
 	return {
 		totalCost,
 		totalTokens,
+		inputTokens,
+		outputTokens,
 		eventCount,
 		lastUsageAt: latestUsage?.lastActivity,
 		model: latestUsage?.model ?? "",
 		provider: latestUsage?.provider ?? "",
+		models: uniqueInFirstSeenOrder(subtreeModels),
+		modes: uniqueInFirstSeenOrder(subtreeModes),
 	}
 }
 

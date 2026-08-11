@@ -7,6 +7,7 @@ import {
 	StatsQuery,
 	StatsBucket,
 	StatsSnapshot,
+	DashboardTaskSummary,
 } from "../usage-stats.js"
 
 describe("usage-stats schemas", () => {
@@ -328,6 +329,55 @@ describe("usage-stats schemas", () => {
 		it("should reject missing totals", () => {
 			const { totals: _totals, ...withoutTotals } = validSnapshot
 			expect(() => StatsSnapshot.parse(withoutTotals)).toThrow()
+		})
+	})
+
+	// ── DashboardTaskSummary ──────────────────────────────────────────────
+
+	describe("DashboardTaskSummary", () => {
+		const validSummary = {
+			taskId: "task-001",
+			rootTaskId: "task-001",
+			title: "Root task",
+			taskTimestamp: 1722259100000,
+			totalCost: 0.15,
+			totalTokens: 12000,
+			inputTokens: 8000,
+			outputTokens: 4000,
+			model: "claude-sonnet-4-20250514",
+			provider: "anthropic",
+			models: ["claude-sonnet-4-20250514", "gpt-4"],
+			modes: ["code", "architect"],
+			eventCount: 5,
+			childTaskIds: [],
+		}
+
+		it("should accept the subtree identity aggregate fields", () => {
+			const result = DashboardTaskSummary.parse(validSummary)
+			expect(result.inputTokens).toBe(8000)
+			expect(result.outputTokens).toBe(4000)
+			expect(result.models).toEqual(["claude-sonnet-4-20250514", "gpt-4"])
+			expect(result.modes).toEqual(["code", "architect"])
+		})
+
+		it("should accept zero tokens and empty model/mode lists for unused tasks", () => {
+			const result = DashboardTaskSummary.parse({
+				...validSummary,
+				inputTokens: 0,
+				outputTokens: 0,
+				models: [],
+				modes: [],
+			})
+			expect(result.inputTokens).toBe(0)
+			expect(result.outputTokens).toBe(0)
+			expect(result.models).toEqual([])
+			expect(result.modes).toEqual([])
+		})
+
+		it.each(["inputTokens", "outputTokens", "models", "modes"] as const)("should reject a missing %s", (field) => {
+			const without = { ...validSummary } as Record<string, unknown>
+			delete without[field]
+			expect(() => DashboardTaskSummary.parse(without)).toThrow()
 		})
 	})
 })
