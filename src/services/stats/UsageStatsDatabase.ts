@@ -10,7 +10,7 @@ import * as path from "path"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
-import { getEffectiveCost, computeCacheDiscountBase, providerReportsCache } from "./costRecalculation"
+import { getEffectiveCost, computeCacheDiscountBase, providerReportsCache, lookupModelInfo } from "./costRecalculation"
 import { isStatsQueryRangeBounded, type StatsQueryRangeMs } from "./statsQueryRange"
 
 // ── Lazy node:sqlite loader ──────────────────────────────────────────────────
@@ -38,7 +38,7 @@ function loadDatabaseSync(): typeof DatabaseSync {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 8
+const SCHEMA_VERSION = 9
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
@@ -76,6 +76,7 @@ export type StatsDbErrorCode =
 	| "STATS_DB/migrate/004" // Schema v6 migration failed (unreported cache input tokens)
 	| "STATS_DB/migrate/005" // Schema v7 migration failed (rollup self-heal rebuild)
 	| "STATS_DB/migrate/006" // Schema v8 migration failed (cache discount base backfill)
+	| "STATS_DB/migrate/007" // Schema v9 migration failed (model_pricing_json backfill)
 	| "STATS_DB/append/001" // Transaction failed
 	| "STATS_DB/read/001" // Query failed
 	| "STATS_DB/clear/001" // Clear failed
@@ -592,6 +593,11 @@ export class UsageStatsDatabase {
 		if (metaAfterV7.schemaVersion < 8) {
 			this.migrateToV8(db)
 		}
+
+		const metaAfterV8 = this.readMetaInternal(db)
+		if (metaAfterV8.schemaVersion < 9) {
+			this.migrateToV9(db)
+		}
 	}
 
 	/**
@@ -807,6 +813,116 @@ export class UsageStatsDatabase {
 			throw new StatsDbError(
 				"STATS_DB/migrate/006",
 				"Failed to migrate to schema v8 (cache discount base backfill)",
+				err,
+			)
+		}
+	}
+
+	/**
+	 * Migration v8 → v9: backfill model_pricing_json on existing events.
+	 *
+	 * Events recorded before the modelPricing capture feature (commit 03b7bb08e)
+	 * have `model_pricing_json = NULL`. For models in the static registry, this
+	 * is fine — `lookupModelInfo` resolves them at query time. But for custom
+	 * models NOT in the static registry, the pricing was never persisted, so
+	 * `computeCacheDiscountBase` returns 0 (no pricing → no discount base).
+	 *
+	 * This migration scans events with NULL `model_pricing_json` and attempts to
+	 * resolve pricing from the static registry via `lookupModelInfo(provider,
+	 * model)`. If found, the pricing is serialized into `model_pricing_json`.
+	 * If not found (custom model), the column stays NULL — a known limitation.
+	 *
+	 * After backfilling, the rollups are rebuilt so `cache_discount_base` is
+	 * recomputed with the now-available pricing data.
+	 *
+	 * Known limitation: for custom models configured via extension settings,
+	 * the pricing is NOT available in the DB at query time. These events will
+	 * still have `model_pricing_json = NULL`. The slider only works for models
+	 * that are either (a) in the static registry, or (b) had their pricing
+	 * captured via the `modelPricing` field at recording time.
+	 *
+	 * Rebuild-then-commit (same pattern as v7/v8): if the rebuild fails, the
+	 * meta stays at v8 and the migration is retried on the next activation.
+	 */
+	private migrateToV9(db: DatabaseSync): void {
+		// 1. Backfill model_pricing_json for events that don't have it.
+		//    Only fill in pricing for models resolvable via the static registry.
+		//    Custom models without a registry match stay NULL (known limitation).
+		try {
+			const updateStmt = db.prepare(`
+				UPDATE usage_events SET model_pricing_json = @pricingJson
+				WHERE seq = @seq AND model_pricing_json IS NULL
+			`)
+
+			let afterSeq = 0
+			const batchSize = 1000
+
+			while (true) {
+				const rows = db
+					.prepare(
+						`SELECT seq, provider, model FROM usage_events
+						 WHERE seq > ? AND model_pricing_json IS NULL
+						 ORDER BY seq ASC LIMIT ?`,
+					)
+					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
+
+				if (rows.length === 0) {
+					break
+				}
+
+				for (const row of rows) {
+					const provider = row.provider as string
+					const model = row.model as string
+					const modelInfo = lookupModelInfo(provider, model)
+
+					if (modelInfo) {
+						const pricingJson = JSON.stringify({
+							inputPrice: modelInfo.inputPrice,
+							outputPrice: modelInfo.outputPrice,
+							cacheWritesPrice: modelInfo.cacheWritesPrice,
+							cacheReadsPrice: modelInfo.cacheReadsPrice,
+						})
+						updateStmt.run({
+							seq: row.seq as number,
+							pricingJson,
+						})
+					}
+					// If modelInfo is undefined (custom model not in registry),
+					// leave model_pricing_json as NULL — known limitation.
+				}
+
+				afterSeq = (rows[rows.length - 1].seq as number) ?? afterSeq
+			}
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/migrate/007", "Failed to backfill model_pricing_json for schema v9", err)
+		}
+
+		// 2. Rebuild rollups so cache_discount_base is recomputed with the
+		//    now-available pricing data.
+		try {
+			this.rebuildRollupsFromEvents()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/migrate/007",
+				"Failed to rebuild rollups for schema v9 (model_pricing_json backfill)",
+				err,
+			)
+		}
+
+		// 3. Commit the version marker.
+		try {
+			db.exec("BEGIN")
+			this.updateMeta(db, { schemaVersion: 9 })
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/007",
+				"Failed to migrate to schema v9 (model_pricing_json backfill)",
 				err,
 			)
 		}

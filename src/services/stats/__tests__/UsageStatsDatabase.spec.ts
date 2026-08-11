@@ -764,7 +764,7 @@ describe("UsageStatsDatabase", () => {
 			const row2 = rawDb2.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
 				value: string
 			}
-			expect(JSON.parse(row2.value).schemaVersion).toBe(8)
+			expect(JSON.parse(row2.value).schemaVersion).toBe(9)
 			rawDb2.close()
 		})
 
@@ -822,14 +822,173 @@ describe("UsageStatsDatabase", () => {
 			const ranged = db.queryTaskUsageByTaskIds(["task-v8-1"], { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER })
 			expect(ranged.get("task-v8-1")?.cacheDiscountBase).toBe(0)
 
-			// Meta is now committed at v8.
+			// Meta is now committed at the current schema version (v9 after v8+v9 migrations).
 			const rawDb2 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
 			const row2 = rawDb2.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
 				value: string
 			}
-			expect(JSON.parse(row2.value).schemaVersion).toBe(8)
+			expect(JSON.parse(row2.value).schemaVersion).toBe(9)
 			rawDb2.close()
 		})
+	})
+
+	it("should backfill model_pricing_json on v9 migration for static-registry models", () => {
+		// Seed an event with a known static-registry model but NULL model_pricing_json.
+		// openai/gpt-4o is in the static registry with cacheReadsPrice defined.
+		db.append(
+			makeEvent({
+				eventId: "evt-v9-1",
+				idempotencyKey: "idem-v9-1",
+				taskId: "task-v9-1",
+				provider: "openai",
+				model: "gpt-4o",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			}),
+		)
+		db.close()
+
+		// Simulate a pre-v9 database: clear model_pricing_json and set meta to v8.
+		const { DatabaseSync } = require("node:sqlite")
+		const rawDb = new DatabaseSync(path.join(tempDir, "usage.db"))
+		const row = rawDb.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+			value: string
+		}
+		const meta = JSON.parse(row.value)
+		meta.schemaVersion = 8
+		rawDb.prepare("UPDATE stats_meta SET value = ? WHERE key = ?").run(JSON.stringify(meta), "singleton")
+		rawDb.prepare("UPDATE usage_events SET model_pricing_json = NULL").run()
+		rawDb.close()
+
+		// Re-open — v9 migration must backfill model_pricing_json from the static registry.
+		db = new UsageStatsDatabase(tempDir)
+		db.initialize()
+
+		// Verify model_pricing_json was backfilled.
+		const rawDb2 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
+		const eventRow = rawDb2
+			.prepare("SELECT model_pricing_json FROM usage_events WHERE event_id = ?")
+			.get("evt-v9-1") as { model_pricing_json: string | null }
+		expect(eventRow.model_pricing_json).not.toBeNull()
+		const pricing = JSON.parse(eventRow.model_pricing_json as string)
+		// openAiNativeModels["gpt-4o"] has cacheReadsPrice defined.
+		expect(pricing.cacheReadsPrice).toBeDefined()
+		rawDb2.close()
+
+		// Meta is now committed at v9.
+		const rawDb3 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
+		const row3 = rawDb3.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+			value: string
+		}
+		expect(JSON.parse(row3.value).schemaVersion).toBe(9)
+		rawDb3.close()
+	})
+
+	it("should leave model_pricing_json NULL on v9 migration for custom (non-registry) models", () => {
+		// Custom model not in any static registry — pricing cannot be resolved.
+		db.append(
+			makeEvent({
+				eventId: "evt-v9-2",
+				idempotencyKey: "idem-v9-2",
+				taskId: "task-v9-2",
+				provider: "unknown-provider",
+				model: "custom-model-xyz",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			}),
+		)
+		db.close()
+
+		// Simulate a pre-v9 database: clear model_pricing_json and set meta to v8.
+		const { DatabaseSync } = require("node:sqlite")
+		const rawDb = new DatabaseSync(path.join(tempDir, "usage.db"))
+		const row = rawDb.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+			value: string
+		}
+		const meta = JSON.parse(row.value)
+		meta.schemaVersion = 8
+		rawDb.prepare("UPDATE stats_meta SET value = ? WHERE key = ?").run(JSON.stringify(meta), "singleton")
+		rawDb.prepare("UPDATE usage_events SET model_pricing_json = NULL").run()
+		rawDb.close()
+
+		// Re-open — v9 migration runs but cannot resolve custom model pricing.
+		db = new UsageStatsDatabase(tempDir)
+		db.initialize()
+
+		// model_pricing_json stays NULL (known limitation for custom models).
+		const rawDb2 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
+		const eventRow = rawDb2
+			.prepare("SELECT model_pricing_json FROM usage_events WHERE event_id = ?")
+			.get("evt-v9-2") as { model_pricing_json: string | null }
+		expect(eventRow.model_pricing_json).toBeNull()
+		rawDb2.close()
+
+		// Meta is still committed at v9 (migration ran, just couldn't fill pricing).
+		const rawDb3 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
+		const row3 = rawDb3.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+			value: string
+		}
+		expect(JSON.parse(row3.value).schemaVersion).toBe(9)
+		rawDb3.close()
+	})
+
+	it("should recompute cache_discount_base after v9 model_pricing_json backfill", () => {
+		// Seed an event with a static-registry model that has cacheReadsPrice.
+		// openai/gpt-4o is a reporting provider → discountBase = 0.
+		// We use openai/gpt-4o here to verify the backfill populates pricing
+		// and the rebuild recomputes the discount base correctly.
+		db.append(
+			makeEvent({
+				eventId: "evt-v9-3",
+				idempotencyKey: "idem-v9-3",
+				taskId: "task-v9-3",
+				provider: "openai",
+				model: "gpt-4o",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			}),
+		)
+		db.close()
+
+		// Simulate a pre-v9 database: clear model_pricing_json, zero out
+		// cache_discount_base, and set meta to v8.
+		const { DatabaseSync } = require("node:sqlite")
+		const rawDb = new DatabaseSync(path.join(tempDir, "usage.db"))
+		const row = rawDb.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+			value: string
+		}
+		const meta = JSON.parse(row.value)
+		meta.schemaVersion = 8
+		rawDb.prepare("UPDATE stats_meta SET value = ? WHERE key = ?").run(JSON.stringify(meta), "singleton")
+		rawDb.prepare("UPDATE usage_events SET model_pricing_json = NULL").run()
+		rawDb.prepare("UPDATE usage_events SET cache_discount_base = 0").run()
+		rawDb.prepare("UPDATE stats_rollup SET cache_discount_base = 0").run()
+		rawDb.prepare("UPDATE task_usage_metadata SET cache_discount_base = 0").run()
+		rawDb.close()
+
+		// Re-open — v9 migration must backfill pricing and rebuild rollups.
+		db = new UsageStatsDatabase(tempDir)
+		db.initialize()
+
+		// openai/gpt-4o is a reporting provider (has cacheReadsPrice).
+		// cacheRead=0 is a true cache miss → discountBase = 0.
+		// The rebuild must have recomputed this correctly.
+		const breakdown = db.queryBreakdownRollups("lifetime", "all", "all", "provider", true)
+		expect(breakdown).toHaveLength(1)
+		expect(breakdown[0].axisValue).toBe("openai")
+		expect(breakdown[0].cacheDiscountBase).toBe(0)
+
+		// Task metadata path also healed.
+		const taskRows = db.queryTaskUsageByTaskIds(["task-v9-3"])
+		expect(taskRows.get("task-v9-3")?.cacheDiscountBase).toBe(0)
 	})
 
 	describe("cache discount base", () => {
