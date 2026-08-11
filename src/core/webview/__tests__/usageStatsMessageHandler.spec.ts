@@ -1757,7 +1757,7 @@ describe("usageStatsMessageHandler", () => {
 				getCoordinator: () => coordinator,
 			} as any)
 			;(provider as any)._streamSink = { marker: "sink" }
-
+	
 			await handleGetDashboardTaskDetail(provider, {
 				type: "getDashboardTaskDetail",
 				requestId: "task-detail-2",
@@ -1835,7 +1835,7 @@ describe("usageStatsMessageHandler", () => {
 				getCoordinator: () => coordinator,
 			} as any)
 			;(provider as any)._streamSink = { marker: "sink" }
-
+	
 			await handleGetDashboardTaskPage(provider, {
 				type: "getDashboardTaskPage",
 				requestId: "task-page-2",
