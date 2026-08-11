@@ -719,6 +719,54 @@ describe("UsageStatsDatabase", () => {
 			const totals = db.queryLifetimeTotals()
 			expect(totals.eventCount).toBe(0)
 		})
+
+		it("should self-heal stale v6 rollups on v7 migration (rebuild + retry-safe ordering)", () => {
+			// Seed an event without cacheRead (provider does not report it)
+			db.append(
+				makeEvent({
+					eventId: "evt-v7-1",
+					idempotencyKey: "idem-v7-1",
+					provider: "openai",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+			)
+			db.close()
+
+			// Simulate the stranded-v6 production state: meta already at v6 but
+			// rollup rows carrying pre-v6 values (unreported_cache_input_tokens
+			// zeroed, as if the v6 rebuild had failed after the meta commit).
+			const { DatabaseSync } = require("node:sqlite")
+			const rawDb = new DatabaseSync(path.join(tempDir, "usage.db"))
+			const row = rawDb.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+				value: string
+			}
+			const meta = JSON.parse(row.value)
+			meta.schemaVersion = 6
+			rawDb.prepare("UPDATE stats_meta SET value = ? WHERE key = ?").run(JSON.stringify(meta), "singleton")
+			rawDb.prepare("UPDATE stats_rollup SET unreported_cache_input_tokens = 0").run()
+			rawDb.close()
+
+			// Re-open — v7 migration must rebuild rollups and heal the column
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			const breakdown = db.queryBreakdownRollups("lifetime", "all", "all", "provider", true)
+			expect(breakdown).toHaveLength(1)
+			expect(breakdown[0].axisValue).toBe("openai")
+			expect(breakdown[0].unreportedCacheInputTokens).toBe(1000)
+
+			// Meta is now committed at the current schema version
+			const rawDb2 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
+			const row2 = rawDb2.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+				value: string
+			}
+			expect(JSON.parse(row2.value).schemaVersion).toBe(7)
+			rawDb2.close()
+		})
 	})
 
 	describe("session projections", () => {

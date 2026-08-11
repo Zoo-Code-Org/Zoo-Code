@@ -38,7 +38,7 @@ function loadDatabaseSync(): typeof DatabaseSync {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 6
+const SCHEMA_VERSION = 7
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
@@ -74,6 +74,7 @@ export type StatsDbErrorCode =
 	| "STATS_DB/migrate/002" // Schema v4 migration failed (timezone offset fix)
 	| "STATS_DB/migrate/003" // Schema v5 migration failed (task usage projection)
 	| "STATS_DB/migrate/004" // Schema v6 migration failed (unreported cache input tokens)
+	| "STATS_DB/migrate/005" // Schema v7 migration failed (rollup self-heal rebuild)
 	| "STATS_DB/append/001" // Transaction failed
 	| "STATS_DB/read/001" // Query failed
 	| "STATS_DB/clear/001" // Clear failed
@@ -543,6 +544,11 @@ export class UsageStatsDatabase {
 		if (metaAfterV5.schemaVersion < 6) {
 			this.migrateToV6(db)
 		}
+
+		const metaAfterV6 = this.readMetaInternal(db)
+		if (metaAfterV6.schemaVersion < 7) {
+			this.migrateToV7(db)
+		}
 	}
 
 	/**
@@ -653,14 +659,27 @@ export class UsageStatsDatabase {
 	 */
 	private migrateToV6(db: DatabaseSync): void {
 		try {
+			db.exec("ALTER TABLE stats_rollup ADD COLUMN unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
+
+		// Rebuild rollups so existing rows carry the new column's values.
+		// This runs BEFORE the version marker is committed: if the rebuild
+		// fails, the meta stays at v5 and the migration is retried on the next
+		// activation instead of being permanently skipped with stale rollups.
+		try {
+			this.rebuildRollupsFromEvents()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/migrate/004",
+				"Failed to rebuild rollups after schema v6 migration (unreported cache input tokens)",
+				err,
+			)
+		}
+
+		try {
 			db.exec("BEGIN")
-
-			try {
-				db.exec("ALTER TABLE stats_rollup ADD COLUMN unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0")
-			} catch {
-				// Column already exists
-			}
-
 			this.updateMeta(db, { schemaVersion: 6 })
 			db.exec("COMMIT")
 		} catch (err) {
@@ -675,16 +694,34 @@ export class UsageStatsDatabase {
 				err,
 			)
 		}
+	}
 
-		// Rebuild rollups so existing rows carry the new column's values.
+	/**
+	 * Migration v6 → v7: Self-heal rebuild for databases stranded on v6 with
+	 * stale rollups. v6 committed its version marker before rebuilding, so a
+	 * failed rebuild (lock contention, a corrupt event row, an interrupted
+	 * activation) left the meta at v6 with pre-v6 rollup values — every later
+	 * activation then skipped the migration entirely. v7 rebuilds the rollups
+	 * (idempotent) and only then commits the version marker.
+	 */
+	private migrateToV7(db: DatabaseSync): void {
 		try {
 			this.rebuildRollupsFromEvents()
 		} catch (err) {
-			throw new StatsDbError(
-				"STATS_DB/migrate/004",
-				"Failed to rebuild rollups after schema v6 migration (unreported cache input tokens)",
-				err,
-			)
+			throw new StatsDbError("STATS_DB/migrate/005", "Failed to rebuild rollups for schema v7 (self-heal)", err)
+		}
+
+		try {
+			db.exec("BEGIN")
+			this.updateMeta(db, { schemaVersion: 7 })
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError("STATS_DB/migrate/005", "Failed to migrate to schema v7 (self-heal)", err)
 		}
 	}
 
