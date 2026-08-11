@@ -43,8 +43,9 @@ export {
 	computeCacheDiscountBaseFromAggregated,
 	applyCacheDiscount,
 	customPricingKey,
+	buildCustomPricingMapFromAllProfiles,
 } from "./costRecalculation"
-export type { CustomModelPricing, CustomModelPricingMap } from "./costRecalculation"
+export type { CustomModelPricing, CustomModelPricingMap, ProviderSettingsManagerLike } from "./costRecalculation"
 
 export { resolveStatsQueryRangeMs, isStatsQueryRangeBounded, isWithinStatsQueryRange } from "./statsQueryRange"
 export type { StatsQueryRangeMs } from "./statsQueryRange"

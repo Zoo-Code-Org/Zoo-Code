@@ -26,6 +26,7 @@ import {
 	computeCacheDiscountBase,
 	applyCacheDiscount,
 	customPricingKey,
+	buildCustomPricingMapFromAllProfiles,
 	type CustomModelPricingMap,
 	type CustomModelPricing,
 } from "../../services/stats/costRecalculation"
@@ -175,7 +176,7 @@ export async function handleGetUsageStats(provider: ClineProvider, message: Webv
 		const query: StatsQuery = queryResult.data
 
 		const recordingPaused = service.isCapped()
-		const customPricing = buildCustomPricingMap(provider.contextProxy)
+		const customPricing = await buildCustomPricingMapFromAllProfiles(provider.providerSettingsManager)
 
 		const snapshot: StatsSnapshot = await service.queryStats(query, {
 			recordingPaused,
@@ -730,7 +731,7 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
 
 		const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
 
-		const customPricing = buildCustomPricingMap(provider.contextProxy)
+		const customPricing = await buildCustomPricingMapFromAllProfiles(provider.providerSettingsManager)
 		let summaries = await buildSessionSummaries(events, globalStoragePath, query.cacheRatio, customPricing)
 
 		// Apply optional model/provider filters (post-grouping).
@@ -973,7 +974,7 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 		// provides one; without it costs stay verbatim.
 		const detailQueryResult = StatsQuerySchema.safeParse(message.usageStatsQuery)
 		const cacheRatio = detailQueryResult.success ? detailQueryResult.data.cacheRatio : undefined
-		const customPricing = buildCustomPricingMap(provider.contextProxy)
+		const customPricing = await buildCustomPricingMapFromAllProfiles(provider.providerSettingsManager)
 		const detail = await buildSessionDetail(taskId, taskEvents, globalStoragePath, cacheRatio, customPricing)
 
 		await provider.postMessageToWebview({
@@ -1067,7 +1068,7 @@ export async function handleGetDashboardTaskDetail(provider: ClineProvider, mess
 				requestId ?? "",
 				resolveTaskRangeMs(provider, service),
 				message.usageStatsQuery?.cacheRatio ?? resolveTaskCacheRatio(provider, service),
-				buildCustomPricingMap(provider.contextProxy),
+				await buildCustomPricingMapFromAllProfiles(provider.providerSettingsManager),
 			),
 		})
 	} catch (error) {
@@ -1490,7 +1491,7 @@ export async function handleGetDashboardTaskPage(provider: ClineProvider, messag
 				limit,
 				resolveTaskRangeMs(provider, service),
 				message.usageStatsQuery?.cacheRatio ?? resolveTaskCacheRatio(provider, service),
-				buildCustomPricingMap(provider.contextProxy),
+				await buildCustomPricingMapFromAllProfiles(provider.providerSettingsManager),
 			),
 		})
 	} catch (error) {

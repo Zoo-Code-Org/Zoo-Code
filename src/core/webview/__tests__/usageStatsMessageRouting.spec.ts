@@ -42,6 +42,7 @@ vi.mock("../../../services/stats/costRecalculation", () => ({
 	getEffectiveCost: vi.fn(() => 0),
 	computeCacheDiscountBase: vi.fn(() => 0),
 	applyCacheDiscount: vi.fn((costUsd: number) => costUsd),
+	buildCustomPricingMapFromAllProfiles: vi.fn(async () => undefined),
 }))
 
 vi.mock("../../../services/stats/UsageStatsProjection", () => ({

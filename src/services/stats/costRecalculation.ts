@@ -12,7 +12,7 @@
 // Key constraint: This module NEVER modifies the NDJSON file. It only
 // computes a derived cost value at query/display time.
 
-import type { ModelInfo, UsageEventV1 } from "@roo-code/types"
+import type { ModelInfo, UsageEventV1, ProviderSettings } from "@roo-code/types"
 
 // ── Custom Model Pricing (query-time) ──────────────────────────────────────
 
@@ -43,6 +43,65 @@ export type CustomModelPricingMap = Map<string, CustomModelPricing>
  */
 export function customPricingKey(provider: string, model: string): string {
 	return `${provider}|${model}`
+}
+
+/**
+ * Interface for a provider settings manager that can list and read profiles.
+ * Used by {@link buildCustomPricingMapFromAllProfiles} to iterate all profiles.
+ */
+export interface ProviderSettingsManagerLike {
+	listConfig: () => Promise<Array<{ name: string; apiProvider?: string }>>
+	getProfile: (params: { name: string }) => Promise<ProviderSettings>
+}
+
+/**
+ * Builds a {@link CustomModelPricingMap} from ALL provider profiles, not just
+ * the active one. This is necessary because usage events may have been recorded
+ * under a different profile than the currently active one. Each profile may
+ * configure a different custom model with different pricing.
+ *
+ * Iterates all profiles via `listConfig` and `getProfile`, extracting pricing
+ * fields from each profile's `openAiCustomModelInfo` (for OpenAI Compatible
+ * providers).
+ *
+ * @param providerSettingsManager The extension's ProviderSettingsManager.
+ * @returns A CustomModelPricingMap, or undefined when no custom pricing exists.
+ */
+export async function buildCustomPricingMapFromAllProfiles(
+	providerSettingsManager: ProviderSettingsManagerLike,
+): Promise<CustomModelPricingMap | undefined> {
+	const map: CustomModelPricingMap = new Map()
+
+	try {
+		const profiles = await providerSettingsManager.listConfig()
+		for (const entry of profiles) {
+			// Skip profiles without a provider or with non-openai providers
+			if (!entry.apiProvider || entry.apiProvider !== "openai") continue
+
+			try {
+				const settings = await providerSettingsManager.getProfile({ name: entry.name })
+				if (!settings.openAiModelId || !settings.openAiCustomModelInfo) continue
+
+				const info = settings.openAiCustomModelInfo
+				const pricing: CustomModelPricing = {}
+				if (typeof info.inputPrice === "number") pricing.inputPrice = info.inputPrice
+				if (typeof info.outputPrice === "number") pricing.outputPrice = info.outputPrice
+				if (typeof info.cacheWritesPrice === "number") pricing.cacheWritesPrice = info.cacheWritesPrice
+				if (typeof info.cacheReadsPrice === "number") pricing.cacheReadsPrice = info.cacheReadsPrice
+				// Only add if at least one pricing field is present
+				if (Object.keys(pricing).length > 0) {
+					map.set(customPricingKey("openai", settings.openAiModelId), pricing)
+				}
+			} catch {
+				// Skip profiles that fail to load
+			}
+		}
+	} catch {
+		// If listConfig fails, return undefined
+		return undefined
+	}
+
+	return map.size > 0 ? map : undefined
 }
 
 import {

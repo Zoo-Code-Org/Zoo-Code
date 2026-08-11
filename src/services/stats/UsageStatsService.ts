@@ -1,5 +1,5 @@
 import * as vscode from "vscode"
-import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
+import type { UsageEventV1, StatsQuery, StatsSnapshot, ProviderSettings } from "@roo-code/types"
 
 import { UsageEventStore, StatsStoreError } from "./UsageEventStore"
 import { UsageAggregator } from "./UsageAggregator"
@@ -8,7 +8,8 @@ import { UsageStatsMigration } from "./UsageStatsMigration"
 import { UsageStatsStreamCoordinator } from "./UsageStatsStreamCoordinator"
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import { isWithinStatsQueryRange, resolveStatsQueryRangeMs } from "./statsQueryRange"
-import type { CustomModelPricingMap } from "./costRecalculation"
+import type { CustomModelPricingMap, ProviderSettingsManagerLike } from "./costRecalculation"
+import { buildCustomPricingMapFromAllProfiles } from "./costRecalculation"
 
 // ── Export Format ───────────────────────────────────────────────────────────
 
@@ -127,17 +128,42 @@ export class UsageStatsService {
 	 */
 	private readonly changeListeners: Array<() => void> = []
 
+	/** Timer for periodic custom pricing map refresh. */
+	private pricingRefreshTimer: ReturnType<typeof setInterval> | null = null
+
 	constructor(
 		globalStoragePath: string,
 		taskCatalog?: DashboardTaskCatalog,
 		customPricingProvider?: () => CustomModelPricingMap | undefined,
+		providerSettingsManager?: ProviderSettingsManagerLike,
 	) {
 		this.storageDir = globalStoragePath
 		this.database = new UsageStatsDatabase(this.getStatsDir(globalStoragePath))
 		this.store = new UsageEventStore(globalStoragePath, this.database)
 		this.aggregator = new UsageAggregator()
 		this.taskCatalog = taskCatalog
-		this.customPricingProvider = customPricingProvider
+
+		// If a providerSettingsManager is available, build a cached pricing
+		// map from ALL profiles (not just the active one) and refresh it
+		// periodically. This ensures events from non-active profiles get
+		// correct pricing for the cacheRatio slider.
+		if (providerSettingsManager) {
+			let cachedPricing: CustomModelPricingMap | undefined = undefined
+			const refreshPricing = async () => {
+				try {
+					cachedPricing = await buildCustomPricingMapFromAllProfiles(providerSettingsManager)
+				} catch {
+					// Keep the previous cache on error
+				}
+			}
+			// Initial async refresh (non-blocking)
+			void refreshPricing()
+			// Periodic refresh to pick up profile changes (every 10s)
+			this.pricingRefreshTimer = setInterval(() => void refreshPricing(), 10_000)
+			this.customPricingProvider = () => cachedPricing
+		} else if (customPricingProvider) {
+			this.customPricingProvider = customPricingProvider
+		}
 	}
 
 	// ── Public API ──────────────────────────────────────────────────────────
@@ -213,6 +239,10 @@ export class UsageStatsService {
 	 * Disposes the service, releasing the file system watcher and database.
 	 */
 	dispose(): void {
+		if (this.pricingRefreshTimer) {
+			clearInterval(this.pricingRefreshTimer)
+			this.pricingRefreshTimer = null
+		}
 		this.coordinator?.dispose()
 		this.coordinator = null
 		this.taskCatalogSubscription?.dispose()

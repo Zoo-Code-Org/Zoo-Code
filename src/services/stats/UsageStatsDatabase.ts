@@ -3252,6 +3252,74 @@ export class UsageStatsDatabase {
 	}
 
 	/**
+	 * Queries per-(task_id, provider, model) input token sums from
+	 * usage_events for a given set of task IDs. Used by the task projection
+	 * to recompute `cache_discount_base` at query time when `customPricing`
+	 * is available, overriding the stale stored value (which was 0 for custom
+	 * models because pricing wasn't available at write time).
+	 *
+	 * @param taskIds The task IDs to query.
+	 * @param rangeMs Optional time range filter.
+	 * @param includeCancelled If true, includes cancelled events.
+	 * @returns Array of { taskId, provider, model, inputTokens } rows.
+	 */
+	queryInputTokensByTaskId(
+		taskIds: string[],
+		rangeMs?: StatsQueryRangeMs,
+		includeCancelled: boolean = false,
+	): Array<{ taskId: string; provider: string; model: string; inputTokens: number }> {
+		const db = this.getDb()
+		const uniqueTaskIds = [...new Set(taskIds)]
+
+		if (uniqueTaskIds.length === 0) return []
+
+		try {
+			const result: Array<{ taskId: string; provider: string; model: string; inputTokens: number }> = []
+
+			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
+				const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
+				const placeholders = chunk.map(() => "?").join(", ")
+
+				let query = `SELECT task_id, provider, model,
+							SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens
+							FROM usage_events
+							WHERE task_id IN (${placeholders})`
+				const params: Array<string | number> = [...chunk]
+
+				if (rangeMs?.fromMs !== undefined) {
+					query += ` AND occurred_epoch_ms >= ?`
+					params.push(rangeMs.fromMs)
+				}
+				if (rangeMs?.toMs !== undefined) {
+					query += ` AND occurred_epoch_ms < ?`
+					params.push(rangeMs.toMs)
+				}
+
+				if (!includeCancelled) {
+					query += ` AND status != 'cancelled'`
+				}
+
+				query += ` GROUP BY task_id, provider, model`
+
+				const rows = db.prepare(query).all(...params) as Array<Record<string, unknown>>
+
+				for (const row of rows) {
+					result.push({
+						taskId: (row.task_id as string) ?? "",
+						provider: (row.provider as string) ?? "",
+						model: (row.model as string) ?? "",
+						inputTokens: (row.input_tokens as number) ?? 0,
+					})
+				}
+			}
+
+			return result
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query input tokens by task_id", err)
+		}
+	}
+
+	/**
 	 * Queries coverage statistics (first/last event timestamps, backfill count)
 	 * for a given time range.
 	 *

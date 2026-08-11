@@ -133,6 +133,9 @@ function createUsageReader(
 					isWithinStatsQueryRange(rangeMs, new Date(event.occurredAt).getTime()),
 			)
 		},
+		queryInputTokensByTaskId() {
+			return []
+		},
 	}
 }
 

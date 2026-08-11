@@ -8,7 +8,12 @@ import type {
 
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import type { TaskIdentityAggregate, TaskUsageRow } from "./UsageStatsDatabase"
-import { getEffectiveCost, computeCacheDiscountBase, applyCacheDiscount } from "./costRecalculation"
+import {
+	getEffectiveCost,
+	computeCacheDiscountBase,
+	computeCacheDiscountBaseFromAggregated,
+	applyCacheDiscount,
+} from "./costRecalculation"
 import type { CustomModelPricingMap } from "./costRecalculation"
 import { type StatsQueryRangeMs } from "./statsQueryRange"
 
@@ -44,6 +49,11 @@ export interface DashboardTaskUsageReader {
 	queryTaskUsageByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskUsageRow>
 	queryTaskIdentityAggregates(taskIds: string[], rangeMs?: StatsQueryRangeMs): Map<string, TaskIdentityAggregate>
 	queryEventsByTaskIds(taskIds: string[], rangeMs?: StatsQueryRangeMs): Array<UsageEventV1 & { sequence: number }>
+	queryInputTokensByTaskId(
+		taskIds: string[],
+		rangeMs?: StatsQueryRangeMs,
+		includeCancelled?: boolean,
+	): Array<{ taskId: string; provider: string; model: string; inputTokens: number }>
 }
 
 /**
@@ -73,6 +83,8 @@ export function computeTaskPage(
 	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, catalogPage.tasks)
 	const usageByTaskId = db.queryTaskUsageByTaskIds(subtreeTaskIds, rangeMs)
 	const identityByTaskId = db.queryTaskIdentityAggregates(subtreeTaskIds, rangeMs)
+	// Query per-(task, provider, model) input tokens for cacheDiscountBase recomputation
+	const inputTokensByTaskId = customPricing ? db.queryInputTokensByTaskId(subtreeTaskIds, rangeMs) : []
 
 	// Direct children of this page's roots ride along so the client can render
 	// an expanded root without an extra round-trip. Their usage rows are
@@ -83,10 +95,26 @@ export function computeTaskPage(
 		requestId,
 		catalogRevision: catalog.catalogRevision,
 		tasks: catalogPage.tasks.map((taskId) =>
-			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio, customPricing),
+			computeTaskSummary(
+				catalog,
+				taskId,
+				usageByTaskId,
+				identityByTaskId,
+				cacheRatio,
+				customPricing,
+				inputTokensByTaskId,
+			),
 		),
 		childTasks: childTaskIds.map((taskId) =>
-			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio, customPricing),
+			computeTaskSummary(
+				catalog,
+				taskId,
+				usageByTaskId,
+				identityByTaskId,
+				cacheRatio,
+				customPricing,
+				inputTokensByTaskId,
+			),
 		),
 		cursor: catalogPage.cursor,
 		totalEstimate: catalogPage.totalEstimate,
@@ -116,8 +144,18 @@ export function computeTaskSummaries(
 	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, knownTaskIds)
 	const usageByTaskId = db.queryTaskUsageByTaskIds(subtreeTaskIds, rangeMs)
 	const identityByTaskId = db.queryTaskIdentityAggregates(subtreeTaskIds, rangeMs)
+	// Query per-(task, provider, model) input tokens for cacheDiscountBase recomputation
+	const inputTokensByTaskId = customPricing ? db.queryInputTokensByTaskId(subtreeTaskIds, rangeMs) : []
 	return knownTaskIds.map((taskId) =>
-		computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio, customPricing),
+		computeTaskSummary(
+			catalog,
+			taskId,
+			usageByTaskId,
+			identityByTaskId,
+			cacheRatio,
+			customPricing,
+			inputTokensByTaskId,
+		),
 	)
 }
 
@@ -186,6 +224,7 @@ function computeTaskSummary(
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 	cacheRatio?: number,
 	customPricing?: CustomModelPricingMap,
+	inputTokensByTaskId: Array<{ taskId: string; provider: string; model: string; inputTokens: number }> = [],
 ): DashboardTaskSummary {
 	const task = catalog.byId.get(taskId)!
 	const subtreeUsage = summarizeSubtreeUsage(
@@ -194,6 +233,7 @@ function computeTaskSummary(
 		identityByTaskId,
 		cacheRatio,
 		customPricing,
+		inputTokensByTaskId,
 	)
 
 	return {
@@ -222,6 +262,7 @@ function summarizeSubtreeUsage(
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 	cacheRatio?: number,
 	customPricing?: CustomModelPricingMap,
+	inputTokensByTaskId: Array<{ taskId: string; provider: string; model: string; inputTokens: number }> = [],
 ): SubtreeUsageSummary {
 	let totalCost = 0
 	let totalCacheDiscountBase = 0
@@ -232,6 +273,16 @@ function summarizeSubtreeUsage(
 	let latestUsage: TaskUsageRow | undefined
 	const subtreeModels: string[] = []
 	const subtreeModes: string[] = []
+
+	// Build a lookup map for per-(task, provider, model) input tokens
+	// so we can recompute cacheDiscountBase at query time when customPricing
+	// is available (the stored value was 0 for custom models).
+	const inputTokensLookup = new Map<string, Array<{ provider: string; model: string; inputTokens: number }>>()
+	for (const row of inputTokensByTaskId) {
+		const existing = inputTokensLookup.get(row.taskId) ?? []
+		existing.push({ provider: row.provider, model: row.model, inputTokens: row.inputTokens })
+		inputTokensLookup.set(row.taskId, existing)
+	}
 
 	// taskIds arrive in subtree order (the task itself first, then descendants
 	// in getDescendantTaskIds order), so concatenating each task's lists in
@@ -251,7 +302,26 @@ function summarizeSubtreeUsage(
 		}
 
 		totalCost += usage.totalCost
-		totalCacheDiscountBase += usage.cacheDiscountBase ?? 0
+
+		// When customPricing is available and the stored cacheDiscountBase
+		// is 0, recompute it from per-(provider, model) input token sums.
+		// This matches the rollup fast path's buildRecomputedDiscountBaseMap.
+		if (customPricing && (usage.cacheDiscountBase ?? 0) === 0 && usage.eventCount > 0) {
+			const perModelRows = inputTokensLookup.get(taskId)
+			if (perModelRows) {
+				for (const row of perModelRows) {
+					totalCacheDiscountBase += computeCacheDiscountBaseFromAggregated(
+						row.provider,
+						row.model,
+						row.inputTokens,
+						customPricing,
+					)
+				}
+			}
+		} else {
+			totalCacheDiscountBase += usage.cacheDiscountBase ?? 0
+		}
+
 		totalTokens += usage.totalTokens
 		eventCount += usage.eventCount
 		if (
