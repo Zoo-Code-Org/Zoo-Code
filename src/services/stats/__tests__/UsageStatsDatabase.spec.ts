@@ -764,8 +764,144 @@ describe("UsageStatsDatabase", () => {
 			const row2 = rawDb2.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
 				value: string
 			}
-			expect(JSON.parse(row2.value).schemaVersion).toBe(7)
+			expect(JSON.parse(row2.value).schemaVersion).toBe(8)
 			rawDb2.close()
+		})
+
+		it("should self-heal stranded v7 databases on v8 migration (cache_discount_base backfill)", () => {
+			// Seed an event without cacheRead (provider does not report it) using a
+			// model with known pricing so the discount base is non-zero.
+			db.append(
+				makeEvent({
+					eventId: "evt-v8-1",
+					idempotencyKey: "idem-v8-1",
+					taskId: "task-v8-1",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+			)
+			db.close()
+
+			// Simulate a stranded v7 database: meta already at v7 but the
+			// cache_discount_base columns zeroed, as if the events were
+			// appended before the column existed.
+			const { DatabaseSync } = require("node:sqlite")
+			const rawDb = new DatabaseSync(path.join(tempDir, "usage.db"))
+			const row = rawDb.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+				value: string
+			}
+			const meta = JSON.parse(row.value)
+			meta.schemaVersion = 7
+			rawDb.prepare("UPDATE stats_meta SET value = ? WHERE key = ?").run(JSON.stringify(meta), "singleton")
+			rawDb.prepare("UPDATE usage_events SET cache_discount_base = 0").run()
+			rawDb.prepare("UPDATE stats_rollup SET cache_discount_base = 0").run()
+			rawDb.prepare("UPDATE task_usage_metadata SET cache_discount_base = 0").run()
+			rawDb.close()
+
+			// Re-open — v8 migration must rebuild and heal all three tables.
+			db = new UsageStatsDatabase(tempDir)
+			db.initialize()
+
+			// claude-sonnet-4: inputPrice $3.0/1M, cacheReadsPrice $0.30/1M
+			// discountBase = 1000/1M × (3.0 − 0.3) = 0.0027
+			const breakdown = db.queryBreakdownRollups("lifetime", "all", "all", "provider", true)
+			expect(breakdown).toHaveLength(1)
+			expect(breakdown[0].axisValue).toBe("anthropic")
+			expect(breakdown[0].cacheDiscountBase).toBeCloseTo(0.0027, 10)
+
+			// The task metadata path and the bounded events path both healed.
+			const allTime = db.queryTaskUsageByTaskIds(["task-v8-1"])
+			expect(allTime.get("task-v8-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			const ranged = db.queryTaskUsageByTaskIds(["task-v8-1"], { fromMs: 0, toMs: Number.MAX_SAFE_INTEGER })
+			expect(ranged.get("task-v8-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+
+			// Meta is now committed at v8.
+			const rawDb2 = new DatabaseSync(path.join(tempDir, "usage.db"), { readOnly: true })
+			const row2 = rawDb2.prepare("SELECT value FROM stats_meta WHERE key = ?").get("singleton") as {
+				value: string
+			}
+			expect(JSON.parse(row2.value).schemaVersion).toBe(8)
+			rawDb2.close()
+		})
+	})
+
+	describe("cache discount base", () => {
+		it("should populate cache_discount_base on append for unreported-cacheRead events", () => {
+			db.append(
+				makeEvent({
+					eventId: "evt-cdb-1",
+					idempotencyKey: "idem-cdb-1",
+					taskId: "task-cdb-1",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+			)
+			// Reported-cacheRead event: discount base stays 0.
+			db.append(
+				makeEvent({
+					eventId: "evt-cdb-2",
+					idempotencyKey: "idem-cdb-2",
+					taskId: "task-cdb-2",
+					provider: "anthropic",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						cacheReadTokens: { value: 300, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+			)
+
+			// 1000/1M × (3.0 − 0.3) = 0.0027 for the unreported event; 0 for the reported one.
+			const breakdown = db.queryBreakdownRollups("lifetime", "all", "all", "model", true)
+			expect(breakdown).toHaveLength(1)
+			expect(breakdown[0].cacheDiscountBase).toBeCloseTo(0.0027, 10)
+
+			const taskRows = db.queryTaskUsageByTaskIds(["task-cdb-1", "task-cdb-2"])
+			expect(taskRows.get("task-cdb-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(taskRows.get("task-cdb-2")?.cacheDiscountBase).toBe(0)
+
+			// The bounded events path SUMs the stored column in SQL.
+			const rangedRows = db.queryTaskUsageByTaskIds(["task-cdb-1", "task-cdb-2"], {
+				fromMs: 0,
+				toMs: Number.MAX_SAFE_INTEGER,
+			})
+			expect(rangedRows.get("task-cdb-1")?.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+			expect(rangedRows.get("task-cdb-2")?.cacheDiscountBase).toBe(0)
+
+			// Lifetime totals carry the summed base too.
+			const lifetime = db.queryLifetimeTotalsFiltered(true)
+			expect(lifetime.cacheDiscountBase).toBeCloseTo(0.0027, 10)
+		})
+
+		it("should leave the discount base at 0 for models without pricing", () => {
+			db.append(
+				makeEvent({
+					eventId: "evt-cdb-3",
+					idempotencyKey: "idem-cdb-3",
+					taskId: "task-cdb-3",
+					provider: "unknown-provider",
+					model: "unknown-model",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+			)
+
+			const taskRows = db.queryTaskUsageByTaskIds(["task-cdb-3"])
+			expect(taskRows.get("task-cdb-3")?.cacheDiscountBase).toBe(0)
 		})
 	})
 
@@ -929,6 +1065,7 @@ describe("UsageStatsDatabase", () => {
 				lastActivity: 0,
 				model: "",
 				provider: "",
+				cacheDiscountBase: 0,
 			})
 
 			const rootSession = db.querySessionByRootTaskId("root-task")
@@ -1067,6 +1204,7 @@ describe("UsageStatsDatabase", () => {
 					lastActivity: Date.parse("2026-08-02T12:00:00.000Z"),
 					model: "model-in-3",
 					provider: "anthropic",
+					cacheDiscountBase: 0,
 				})
 				// A task without in-range events stays a zero row.
 				expect(rows.get("outside-task")).toEqual({
@@ -1077,6 +1215,7 @@ describe("UsageStatsDatabase", () => {
 					lastActivity: 0,
 					model: "",
 					provider: "",
+					cacheDiscountBase: 0,
 				})
 			})
 
@@ -1362,6 +1501,7 @@ describe("UsageStatsDatabase", () => {
 							lastActivity: 0,
 							model: "",
 							provider: "",
+							cacheDiscountBase: 0,
 						},
 					],
 				]),
@@ -1571,6 +1711,7 @@ describe("UsageStatsDatabase", () => {
 				lastActivity: new Date(occurredAt).getTime(),
 				model: "model-second",
 				provider: "provider-second",
+				cacheDiscountBase: 0,
 			})
 		})
 

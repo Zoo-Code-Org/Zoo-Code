@@ -8,7 +8,7 @@ import type {
 	UsageValueSource,
 } from "@roo-code/types"
 
-import { getEffectiveCost, computeEventCost } from "./costRecalculation"
+import { getEffectiveCost, computeEventCost, computeCacheDiscountBase, applyCacheDiscount } from "./costRecalculation"
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -414,11 +414,21 @@ export function computeEventDelta(event: UsageEventV1, cacheRatio?: number): Buc
 	const reasoningTokens = extractSourcedValue(event.usage.reasoningTokens)
 	// Feature 1: If costUsd is missing on old events, compute it on-the-fly
 	// from the model's pricing info. Never modifies the stored event.
-	const costUsd = getEffectiveCost(event)
+	let costUsd = getEffectiveCost(event)
+
+	// Cache ratio cost discount: when the provider does not report
+	// cacheReadTokens, the estimated cache-read portion of the input is
+	// priced at the (cheaper) cache-read rate, so the cost is reduced by
+	// cacheRatio × discountBase. Events with server-reported cacheReadTokens
+	// keep their verbatim cost.
+	const isCacheReadUnreported = cacheReadTokens === 0
+	if (isCacheReadUnreported && cacheRatio !== undefined && cacheRatio > 0) {
+		costUsd = applyCacheDiscount(costUsd, computeCacheDiscountBase(event), cacheRatio)
+	}
 
 	// Cache ratio estimation: if provider doesn't report cacheReadTokens
 	// and cacheRatio is provided, estimate it as inputTokens * cacheRatio
-	const isCacheReadEstimated = cacheReadTokens === 0 && cacheRatio !== undefined && cacheRatio > 0
+	const isCacheReadEstimated = isCacheReadUnreported && cacheRatio !== undefined && cacheRatio > 0
 	if (isCacheReadEstimated) {
 		cacheReadTokens = Math.round(inputTokens * cacheRatio)
 	}

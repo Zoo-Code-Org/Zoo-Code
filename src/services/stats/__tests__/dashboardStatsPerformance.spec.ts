@@ -498,6 +498,13 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			// Both paths must estimate a non-zero cacheRead (~0.94 * 3000 = 2820).
 			expect(dbSnapshot.totals.cacheReadTokens).toBeGreaterThan(2800)
 			expect(dbSnapshot.buckets.length).toBe(aggregatorSnapshot.buckets.length)
+
+			// Cost semantics: unreported events are discounted by ratio × discountBase.
+			// gpt-4o: inputPrice $2.5/1M, cacheReadsPrice $1.25/1M → per-event bases
+			// 1000/1M × 1.25 = 0.00125 and 2000/1M × 1.25 = 0.0025.
+			// total = 0.03 − 0.94 × 0.00375 = 0.026475 (both paths, within rounding).
+			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.026475, 10)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.026475, 10)
 		})
 
 		it("server-reported cacheRead: exact match, no estimation applied", () => {
@@ -545,6 +552,11 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			expect(dbSnapshot.totals.outputTokens).toBe(aggregatorSnapshot.totals.outputTokens)
 			expect(dbSnapshot.totals.costUsd).toBeCloseTo(aggregatorSnapshot.totals.costUsd, 10)
 			expect(dbSnapshot.buckets[0]?.cacheReadTokens).toBe(aggregatorSnapshot.buckets[0]?.cacheReadTokens)
+
+			// Server-reported events keep verbatim costs — no ratio discount in
+			// either path. Exact match: 0.01 + 0.02 = 0.03.
+			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.03, 10)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.03, 10)
 		})
 
 		it("mixed-reporting bucket: exact parity between fast path and per-event path", () => {
@@ -590,6 +602,12 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 			// Both paths: 400 reported + round(1000 * 0.94) estimated = 1340.
 			expect(aggregatorSnapshot.totals.cacheReadTokens).toBe(1340)
 			expect(dbSnapshot.totals.cacheReadTokens).toBe(1340)
+
+			// Cost parity: the reported event keeps its verbatim 0.01; the
+			// unreported one is discounted by 0.94 × (1000/1M × (3.0 − 0.3))
+			// = 0.002538 → 0.01 + 0.007462 = 0.017462 in both paths.
+			expect(aggregatorSnapshot.totals.costUsd).toBeCloseTo(0.017462, 10)
+			expect(dbSnapshot.totals.costUsd).toBeCloseTo(0.017462, 10)
 		})
 
 		it("day axis with cacheRatio: bucket parity within rounding tolerance", () => {
@@ -633,6 +651,12 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				// Single-event buckets: per-event and per-row rounding are identical.
 				expect(dbSnapshot.buckets[i].cacheReadTokens).toBe(aggregatorSnapshot.buckets[i].cacheReadTokens)
 			}
+
+			// Per-bucket discounted costs (claude-sonnet-4: base = input/1M × 2.7):
+			// day 1: 0.01 − 0.94 × 0.0027 = 0.007462
+			// day 2: 0.02 − 0.94 × 0.0054 = 0.014924
+			expect(dbSnapshot.buckets[0].costUsd).toBeCloseTo(0.007462, 10)
+			expect(dbSnapshot.buckets[1].costUsd).toBeCloseTo(0.014924, 10)
 		})
 	})
 

@@ -21,7 +21,7 @@ import type { ClineProvider } from "./ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../services/stats"
 import { StatsServiceError } from "../../services/stats"
 import type { UsageStatsStreamCoordinator, StatsStreamSink } from "../../services/stats"
-import { getEffectiveCost } from "../../services/stats/costRecalculation"
+import { getEffectiveCost, computeCacheDiscountBase, applyCacheDiscount } from "../../services/stats/costRecalculation"
 import { computeTaskDetail, computeTaskPage } from "../../services/stats/DashboardTaskProjection"
 import { resolveStatsQueryRangeMs, type StatsQueryRangeMs } from "../../services/stats/statsQueryRange"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
@@ -541,8 +541,15 @@ function buildParentMap(events: UsageEventV1[]): Map<string, string | undefined>
  * @param events Filtered usage events (already scoped to the requested time
  *   range and `includeCancelled` policy).
  * @param globalStoragePath Used to read task messages for title extraction.
+ * @param cacheRatio Dashboard cache-read ratio; discounts costs of events
+ *   whose cacheReadTokens are unreported (estimated cache reads priced at the
+ *   cache-read rate). Server-reported events keep their verbatim cost.
  */
-async function buildSessionSummaries(events: UsageEventV1[], globalStoragePath: string): Promise<SessionSummary[]> {
+async function buildSessionSummaries(
+	events: UsageEventV1[],
+	globalStoragePath: string,
+	cacheRatio?: number,
+): Promise<SessionSummary[]> {
 	// Feature 2: Build parent map and group by root task ID.
 	const parentMap = buildParentMap(events)
 
@@ -577,7 +584,7 @@ async function buildSessionSummaries(events: UsageEventV1[], globalStoragePath: 
 		let totalCost = 0
 		for (const ev of sorted) {
 			totalTokens += ev.usage.totalTokens?.value ?? 0
-			totalCost += getEffectiveCost(ev)
+			totalCost += applyCacheDiscount(getEffectiveCost(ev), computeCacheDiscountBase(ev), cacheRatio)
 		}
 
 		const title = await deriveSessionTitle(taskId, globalStoragePath)
@@ -665,7 +672,7 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
 
 		const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
 
-		let summaries = await buildSessionSummaries(events, globalStoragePath)
+		let summaries = await buildSessionSummaries(events, globalStoragePath, query.cacheRatio)
 
 		// Apply optional model/provider filters (post-grouping).
 		// The model filter checks `models` (the full set used in the session)
@@ -710,8 +717,10 @@ export async function handleGetDashboardSessions(provider: ClineProvider, messag
  *
  * @param event The raw usage event.
  * @param index The 1-based index of the event within its task (for display).
+ * @param cacheRatio Dashboard cache-read ratio; discounts the cost when the
+ *   event's cacheReadTokens are unreported.
  */
-function mapEventToApiCall(event: UsageEventV1, index: number): APICallRecord {
+function mapEventToApiCall(event: UsageEventV1, index: number, cacheRatio?: number): APICallRecord {
 	return {
 		index,
 		mode: event.mode,
@@ -722,7 +731,7 @@ function mapEventToApiCall(event: UsageEventV1, index: number): APICallRecord {
 		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
 		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
 		// Feature 1: Compute missing cost on-the-fly from model pricing.
-		costUsd: getEffectiveCost(event),
+		costUsd: applyCacheDiscount(getEffectiveCost(event), computeCacheDiscountBase(event), cacheRatio),
 		status: event.status,
 		model: event.model,
 	}
@@ -739,11 +748,14 @@ function mapEventToApiCall(event: UsageEventV1, index: number): APICallRecord {
  * @param taskId The task identifier to build the detail for.
  * @param events The raw usage events filtered to this task.
  * @param globalStoragePath Used to read task messages for title extraction.
+ * @param cacheRatio Dashboard cache-read ratio; discounts costs of events
+ *   whose cacheReadTokens are unreported.
  */
 async function buildSessionDetail(
 	taskId: string,
 	events: UsageEventV1[],
 	globalStoragePath: string,
+	cacheRatio?: number,
 ): Promise<SessionDetail> {
 	// Sort events by occurredAt ascending so index reflects chronological order.
 	const sorted = [...events].sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime())
@@ -757,12 +769,12 @@ async function buildSessionDetail(
 	let totalCost = 0
 	for (const ev of sorted) {
 		totalTokens += ev.usage.totalTokens?.value ?? 0
-		totalCost += getEffectiveCost(ev)
+		totalCost += applyCacheDiscount(getEffectiveCost(ev), computeCacheDiscountBase(ev), cacheRatio)
 	}
 
 	const title = await deriveSessionTitle(taskId, globalStoragePath)
 
-	const apiCalls: APICallRecord[] = sorted.map((event, i) => mapEventToApiCall(event, i + 1))
+	const apiCalls: APICallRecord[] = sorted.map((event, i) => mapEventToApiCall(event, i + 1, cacheRatio))
 
 	return {
 		taskId,
@@ -882,7 +894,11 @@ export async function handleGetDashboardSessionDetail(provider: ClineProvider, m
 		}
 
 		const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
-		const detail = await buildSessionDetail(taskId, taskEvents, globalStoragePath)
+		// The cacheRatio rides the dashboard's stats query when the caller
+		// provides one; without it costs stay verbatim.
+		const detailQueryResult = StatsQuerySchema.safeParse(message.usageStatsQuery)
+		const cacheRatio = detailQueryResult.success ? detailQueryResult.data.cacheRatio : undefined
+		const detail = await buildSessionDetail(taskId, taskEvents, globalStoragePath, cacheRatio)
 
 		await provider.postMessageToWebview({
 			type: "dashboardSessionDetailResponse",
@@ -917,6 +933,19 @@ function resolveTaskRangeMs(provider: ClineProvider, service: UsageStatsService 
 	const sink = (provider as unknown as { _streamSink?: ProviderStreamSink })._streamSink
 	const subscription = sink && coordinator ? coordinator.getSubscription(sink) : undefined
 	return subscription ? resolveStatsQueryRangeMs(subscription.range) : {}
+}
+
+/**
+ * Resolves the active dashboard stream subscription's cacheRatio for one-off
+ * task reads (page/detail), so their costs agree with the streamed task list.
+ * Mirrors {@link resolveTaskRangeMs}; falls back to undefined (no discount)
+ * when there is no active subscription.
+ */
+function resolveTaskCacheRatio(provider: ClineProvider, service: UsageStatsService | undefined): number | undefined {
+	const coordinator = service?.getCoordinator()
+	const sink = (provider as unknown as { _streamSink?: ProviderStreamSink })._streamSink
+	const subscription = sink && coordinator ? coordinator.getSubscription(sink) : undefined
+	return subscription?.range.cacheRatio
 }
 
 /**
@@ -961,6 +990,7 @@ export async function handleGetDashboardTaskDetail(provider: ClineProvider, mess
 				taskId,
 				requestId ?? "",
 				resolveTaskRangeMs(provider, service),
+				message.usageStatsQuery?.cacheRatio ?? resolveTaskCacheRatio(provider, service),
 			),
 		})
 	} catch (error) {
@@ -1382,6 +1412,7 @@ export async function handleGetDashboardTaskPage(provider: ClineProvider, messag
 				message.dashboardTaskCursor,
 				limit,
 				resolveTaskRangeMs(provider, service),
+				message.usageStatsQuery?.cacheRatio ?? resolveTaskCacheRatio(provider, service),
 			),
 		})
 	} catch (error) {

@@ -187,3 +187,68 @@ export function getEffectiveCost(event: UsageEventV1): number {
 	}
 	return computeEventCost(event)
 }
+
+// ── Cache-Ratio Cost Discount ────────────────────────────────────────────────
+
+/**
+ * Computes the per-event discount base for the dashboard cacheRatio
+ * simulation, in USD.
+ *
+ * When the provider does NOT report cacheReadTokens, the dashboard estimates
+ * that `cacheRatio` of the input tokens were cache reads. Those estimated
+ * tokens should be priced at the (cheaper) cache-read rate instead of the
+ * full input rate, so the event's cost is reduced by
+ * `cacheRatio × discountBase`, where:
+ *
+ *   discountBase = (inputTokens / 1_000_000) × max(0, inputPrice − cacheReadsPrice)
+ *
+ * Returns 0 when:
+ *  - The event reports cacheReadTokens (value > 0) — cost stays verbatim.
+ *  - The model info cannot be resolved for the provider/model combination.
+ *  - The model's input or cache-read price is missing or not a finite number.
+ *
+ * Prices come from the same static registries used by {@link computeEventCost}
+ * (via {@link lookupModelInfo}); no prices are invented here.
+ *
+ * @param event The usage event to compute the discount base for.
+ * @returns The discount base in USD (0 when not applicable).
+ */
+export function computeCacheDiscountBase(event: UsageEventV1): number {
+	const cacheReadTokens = event.usage.cacheReadTokens?.value ?? 0
+	if (cacheReadTokens > 0) {
+		return 0
+	}
+
+	const modelInfo = lookupModelInfo(event.provider, event.model)
+	if (!modelInfo) return 0
+
+	const { inputPrice, cacheReadsPrice } = modelInfo
+	if (
+		typeof inputPrice !== "number" ||
+		!Number.isFinite(inputPrice) ||
+		typeof cacheReadsPrice !== "number" ||
+		!Number.isFinite(cacheReadsPrice)
+	) {
+		return 0
+	}
+
+	const inputTokens = event.usage.inputTokens?.value ?? 0
+	return (inputTokens / 1_000_000) * Math.max(0, inputPrice - cacheReadsPrice)
+}
+
+/**
+ * Applies the cacheRatio cost discount to a cost value.
+ *
+ * The discount is proportional to the cache ratio:
+ * `cost(ratio) = costUsd − cacheRatio × discountBase`, floored at 0.
+ * A missing or non-positive ratio leaves the cost unchanged.
+ *
+ * @param costUsd The undiscounted cost (stored or computed).
+ * @param discountBase The discount base from {@link computeCacheDiscountBase}
+ *   (or a sum of per-event bases for rollup rows).
+ * @param cacheRatio The dashboard cache-read ratio (0–1).
+ * @returns The discounted cost in USD.
+ */
+export function applyCacheDiscount(costUsd: number, discountBase: number, cacheRatio?: number): number {
+	return cacheRatio !== undefined && cacheRatio > 0 ? Math.max(0, costUsd - cacheRatio * discountBase) : costUsd
+}

@@ -8,7 +8,7 @@ import type {
 
 import { DashboardTaskCatalog } from "./DashboardTaskCatalog"
 import type { TaskIdentityAggregate, TaskUsageRow } from "./UsageStatsDatabase"
-import { getEffectiveCost } from "./costRecalculation"
+import { getEffectiveCost, computeCacheDiscountBase, applyCacheDiscount } from "./costRecalculation"
 import { type StatsQueryRangeMs } from "./statsQueryRange"
 
 /** Error codes emitted by the History-first Dashboard task projection. */
@@ -53,6 +53,10 @@ export interface DashboardTaskUsageReader {
  * When `rangeMs` is bounded, the catalog pages only roots whose subtree has a
  * task created inside the range, and per-task figures aggregate only in-range
  * usage events. An absent or unbounded range keeps all-time behavior.
+ *
+ * When `cacheRatio` is provided, subtree costs are discounted by
+ * `cacheRatio × Σ cacheDiscountBase` (floored at 0), matching the stats
+ * snapshot semantics: estimated cache reads are priced at the cache-read rate.
  */
 export function computeTaskPage(
 	catalog: DashboardTaskCatalog,
@@ -61,6 +65,7 @@ export function computeTaskPage(
 	cursor?: string,
 	limit?: number,
 	rangeMs?: StatsQueryRangeMs,
+	cacheRatio?: number,
 ): DashboardTaskPage {
 	const catalogPage = catalog.getPage(cursor, limit, rangeMs)
 	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, catalogPage.tasks)
@@ -75,8 +80,12 @@ export function computeTaskPage(
 	return {
 		requestId,
 		catalogRevision: catalog.catalogRevision,
-		tasks: catalogPage.tasks.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId)),
-		childTasks: childTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId)),
+		tasks: catalogPage.tasks.map((taskId) =>
+			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio),
+		),
+		childTasks: childTaskIds.map((taskId) =>
+			computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio),
+		),
 		cursor: catalogPage.cursor,
 		totalEstimate: catalogPage.totalEstimate,
 	}
@@ -96,6 +105,7 @@ export function computeTaskSummaries(
 	db: DashboardTaskUsageReader,
 	taskIds: readonly string[],
 	rangeMs?: StatsQueryRangeMs,
+	cacheRatio?: number,
 ): DashboardTaskSummary[] {
 	const knownTaskIds = [...new Set(taskIds)].filter(
 		(taskId) => catalog.byId.has(taskId) && catalog.isSubtreeWithinRange(rangeMs, taskId),
@@ -103,7 +113,9 @@ export function computeTaskSummaries(
 	const subtreeTaskIds = collectPageSubtreeTaskIds(catalog, knownTaskIds)
 	const usageByTaskId = db.queryTaskUsageByTaskIds(subtreeTaskIds, rangeMs)
 	const identityByTaskId = db.queryTaskIdentityAggregates(subtreeTaskIds, rangeMs)
-	return knownTaskIds.map((taskId) => computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId))
+	return knownTaskIds.map((taskId) =>
+		computeTaskSummary(catalog, taskId, usageByTaskId, identityByTaskId, cacheRatio),
+	)
 }
 
 /**
@@ -117,6 +129,7 @@ export function computeTaskDetail(
 	taskId: string,
 	_requestId: string,
 	rangeMs?: StatsQueryRangeMs,
+	cacheRatio?: number,
 ): DashboardTaskDetail {
 	const task = catalog.byId.get(taskId)
 	if (!task) {
@@ -136,9 +149,13 @@ export function computeTaskDetail(
 		models: uniqueInFirstSeenOrder(sortedEvents.map((event) => event.model)),
 		modes: uniqueInFirstSeenOrder(sortedEvents.map((event) => event.mode)),
 		totalTokens: sortedEvents.reduce((total, event) => total + getTotalTokens(event), 0),
-		totalCost: sortedEvents.reduce((total, event) => total + getEffectiveCost(event), 0),
+		totalCost: sortedEvents.reduce(
+			(total, event) =>
+				total + applyCacheDiscount(getEffectiveCost(event), computeCacheDiscountBase(event), cacheRatio),
+			0,
+		),
 		callCount: sortedEvents.length,
-		apiCalls: sortedEvents.map((event, index) => eventToApiCall(event, index + 1)),
+		apiCalls: sortedEvents.map((event, index) => eventToApiCall(event, index + 1, cacheRatio)),
 	}
 }
 
@@ -158,12 +175,14 @@ function computeTaskSummary(
 	taskId: string,
 	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
+	cacheRatio?: number,
 ): DashboardTaskSummary {
 	const task = catalog.byId.get(taskId)!
 	const subtreeUsage = summarizeSubtreeUsage(
 		[taskId, ...catalog.getDescendantTaskIds(taskId)],
 		usageByTaskId,
 		identityByTaskId,
+		cacheRatio,
 	)
 
 	return {
@@ -190,8 +209,10 @@ function summarizeSubtreeUsage(
 	taskIds: readonly string[],
 	usageByTaskId: ReadonlyMap<string, TaskUsageRow>,
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
+	cacheRatio?: number,
 ): SubtreeUsageSummary {
 	let totalCost = 0
+	let totalCacheDiscountBase = 0
 	let totalTokens = 0
 	let inputTokens = 0
 	let outputTokens = 0
@@ -218,6 +239,7 @@ function summarizeSubtreeUsage(
 		}
 
 		totalCost += usage.totalCost
+		totalCacheDiscountBase += usage.cacheDiscountBase ?? 0
 		totalTokens += usage.totalTokens
 		eventCount += usage.eventCount
 		if (
@@ -231,7 +253,7 @@ function summarizeSubtreeUsage(
 	}
 
 	return {
-		totalCost,
+		totalCost: applyCacheDiscount(totalCost, totalCacheDiscountBase, cacheRatio),
 		totalTokens,
 		inputTokens,
 		outputTokens,
@@ -255,7 +277,7 @@ function getTotalTokens(event: UsageEventV1): number {
 	)
 }
 
-function eventToApiCall(event: UsageEventV1, index: number): DashboardTaskApiCall {
+function eventToApiCall(event: UsageEventV1, index: number, cacheRatio?: number): DashboardTaskApiCall {
 	return {
 		index,
 		mode: event.mode,
@@ -265,7 +287,7 @@ function eventToApiCall(event: UsageEventV1, index: number): DashboardTaskApiCal
 		cacheReadTokens: event.usage.cacheReadTokens?.value ?? 0,
 		cacheWriteTokens: event.usage.cacheWriteTokens?.value ?? 0,
 		reasoningTokens: event.usage.reasoningTokens?.value ?? 0,
-		costUsd: getEffectiveCost(event),
+		costUsd: applyCacheDiscount(getEffectiveCost(event), computeCacheDiscountBase(event), cacheRatio),
 		status: event.status,
 		model: event.model,
 	}

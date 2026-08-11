@@ -898,6 +898,13 @@ describe("UsageStatsProjection", () => {
 			// Total cacheReadTokens = 300 + 500 = 800
 			expect(snapshot.totals.cacheReadTokens).toBe(800)
 			expect(snapshot.buckets[0].cacheReadTokens).toBe(800)
+
+			// Cost semantics: the reported event keeps its verbatim computed cost
+			// (0.006 + 300 × $0.30/1M = 0.00609); the unreported one (0.006) is
+			// discounted by 0.5 × (1000/1M × (3.0 − 0.3)) = 0.00135.
+			// Bucket/totals: 0.01209 − 0.00135 = 0.01074.
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.01074, 10)
+			expect(snapshot.buckets[0].costUsd).toBeCloseTo(0.01074, 10)
 		})
 	})
 })

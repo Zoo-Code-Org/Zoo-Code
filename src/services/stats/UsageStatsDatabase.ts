@@ -10,7 +10,7 @@ import * as path from "path"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
-import { getEffectiveCost } from "./costRecalculation"
+import { getEffectiveCost, computeCacheDiscountBase } from "./costRecalculation"
 import { isStatsQueryRangeBounded, type StatsQueryRangeMs } from "./statsQueryRange"
 
 // ── Lazy node:sqlite loader ──────────────────────────────────────────────────
@@ -38,7 +38,7 @@ function loadDatabaseSync(): typeof DatabaseSync {
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Current schema version for the SQLite database. */
-const SCHEMA_VERSION = 7
+const SCHEMA_VERSION = 8
 
 /** Singleton key in stats_meta for the single metadata row. */
 const META_KEY = "singleton"
@@ -75,6 +75,7 @@ export type StatsDbErrorCode =
 	| "STATS_DB/migrate/003" // Schema v5 migration failed (task usage projection)
 	| "STATS_DB/migrate/004" // Schema v6 migration failed (unreported cache input tokens)
 	| "STATS_DB/migrate/005" // Schema v7 migration failed (rollup self-heal rebuild)
+	| "STATS_DB/migrate/006" // Schema v8 migration failed (cache discount base backfill)
 	| "STATS_DB/append/001" // Transaction failed
 	| "STATS_DB/read/001" // Query failed
 	| "STATS_DB/clear/001" // Clear failed
@@ -140,6 +141,8 @@ export interface TaskUsageRow {
 	lastActivity: number
 	model: string
 	provider: string
+	/** Sum of per-event cacheRatio discount bases (USD) for this task. */
+	cacheDiscountBase?: number
 }
 
 /**
@@ -177,6 +180,7 @@ export interface DailyRollupDetailedRow {
 	costUsd: number
 	uncachedInputTokens: number
 	unreportedCacheInputTokens?: number
+	cacheDiscountBase?: number
 }
 
 /** A breakdown rollup row for a specific axis. */
@@ -195,6 +199,7 @@ export interface BreakdownRollupRow {
 	costUsd: number
 	uncachedInputTokens: number
 	unreportedCacheInputTokens?: number
+	cacheDiscountBase?: number
 }
 
 /** Coverage statistics for a time range. */
@@ -233,6 +238,7 @@ function createZeroTaskUsageRow(taskId: string): TaskUsageRow {
 		lastActivity: 0,
 		model: "",
 		provider: "",
+		cacheDiscountBase: 0,
 	}
 }
 
@@ -396,6 +402,7 @@ export class UsageStatsDatabase {
 				semantics_json TEXT NOT NULL,
 				provenance TEXT NOT NULL,
 				schema_version INTEGER NOT NULL DEFAULT 1,
+				cache_discount_base REAL NOT NULL DEFAULT 0,
 				created_at TEXT NOT NULL DEFAULT (datetime('now'))
 			);
 
@@ -426,6 +433,7 @@ export class UsageStatsDatabase {
 				cost_usd REAL NOT NULL DEFAULT 0,
 				uncached_input_tokens INTEGER NOT NULL DEFAULT 0,
 				unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0,
+				cache_discount_base REAL NOT NULL DEFAULT 0,
 				PRIMARY KEY (period_type, period_key, root_task_id, axis, axis_value)
 			);
 
@@ -452,7 +460,8 @@ export class UsageStatsDatabase {
 				event_count INTEGER NOT NULL DEFAULT 0,
 				last_activity_ms INTEGER NOT NULL DEFAULT 0,
 				model TEXT NOT NULL DEFAULT '',
-				provider TEXT NOT NULL DEFAULT ''
+				provider TEXT NOT NULL DEFAULT '',
+				cache_discount_base REAL NOT NULL DEFAULT 0
 			);
 
 			CREATE TABLE IF NOT EXISTS session_activity (
@@ -487,6 +496,25 @@ export class UsageStatsDatabase {
 		// those rebuild rollups through updateRollup(), which writes this column.
 		try {
 			db.exec("ALTER TABLE stats_rollup ADD COLUMN unreported_cache_input_tokens INTEGER NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
+
+		// Migration: add cache_discount_base columns if they don't exist. These
+		// must also run before any schema-version migration: the v8 rebuild
+		// writes all three through the shared per-event write paths.
+		try {
+			db.exec("ALTER TABLE usage_events ADD COLUMN cache_discount_base REAL NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
+		try {
+			db.exec("ALTER TABLE stats_rollup ADD COLUMN cache_discount_base REAL NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
+		try {
+			db.exec("ALTER TABLE task_usage_metadata ADD COLUMN cache_discount_base REAL NOT NULL DEFAULT 0")
 		} catch {
 			// Column already exists
 		}
@@ -548,6 +576,11 @@ export class UsageStatsDatabase {
 		const metaAfterV6 = this.readMetaInternal(db)
 		if (metaAfterV6.schemaVersion < 7) {
 			this.migrateToV7(db)
+		}
+
+		const metaAfterV7 = this.readMetaInternal(db)
+		if (metaAfterV7.schemaVersion < 8) {
+			this.migrateToV8(db)
 		}
 	}
 
@@ -726,6 +759,50 @@ export class UsageStatsDatabase {
 	}
 
 	/**
+	 * Migration v7 → v8: backfill cache_discount_base on events, rollups, and
+	 * task usage metadata.
+	 *
+	 * The new column stores, per event, the cacheRatio cost-discount base
+	 * (inputTokens / 1M × max(0, inputPrice − cacheReadsPrice), 0 when the
+	 * provider reports cacheReadTokens or pricing is unavailable). The
+	 * dashboard cacheRatio simulation subtracts ratio × base from stored
+	 * costs so estimated cache reads are priced at the cache-read rate.
+	 *
+	 * Rebuild-then-commit (same pattern as v7): the rebuild recomputes every
+	 * derived row AND backfills usage_events.cache_discount_base from the raw
+	 * events. If it fails, the meta stays at v7 and the migration is retried
+	 * on the next activation.
+	 */
+	private migrateToV8(db: DatabaseSync): void {
+		try {
+			this.rebuildRollupsFromEvents()
+		} catch (err) {
+			throw new StatsDbError(
+				"STATS_DB/migrate/006",
+				"Failed to rebuild rollups for schema v8 (cache discount base backfill)",
+				err,
+			)
+		}
+
+		try {
+			db.exec("BEGIN")
+			this.updateMeta(db, { schemaVersion: 8 })
+			db.exec("COMMIT")
+		} catch (err) {
+			try {
+				db.exec("ROLLBACK")
+			} catch {
+				// Ignore rollback errors
+			}
+			throw new StatsDbError(
+				"STATS_DB/migrate/006",
+				"Failed to migrate to schema v8 (cache discount base backfill)",
+				err,
+			)
+		}
+	}
+
+	/**
 	 * Migration v1 → v2: Recompute day/month buckets using local timezone.
 	 *
 	 * In v1, dayBucket was derived from `occurredAt.slice(0, 10)` which is a UTC
@@ -773,7 +850,8 @@ export class UsageStatsDatabase {
 			while (true) {
 				const rows = db
 					.prepare(
-						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id, usage_json, semantics_json
+						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id,
+						 provider, model, usage_json, semantics_json
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -789,6 +867,8 @@ export class UsageStatsDatabase {
 					const monthBucket = dayBucket.slice(0, 7)
 					const rootTaskId = (row.root_task_id as string) ?? ""
 					const status = row.status as string
+					const provider = row.provider as string
+					const model = row.model as string
 					const usage = JSON.parse(row.usage_json as string)
 					const semantics = JSON.parse(row.semantics_json as string)
 
@@ -801,6 +881,12 @@ export class UsageStatsDatabase {
 					const costUsd = usage.costUsd?.value ?? 0
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+					const eventForCost = {
+						provider,
+						model,
+						usage: { ...usage },
+					} as UsageEventV1
+					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -826,6 +912,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Rebuild monthly rollup
@@ -848,6 +935,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Rebuild session_activity (without touching session_metadata)
@@ -946,6 +1034,7 @@ export class UsageStatsDatabase {
 						usage: { ...usage },
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
+					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
@@ -981,6 +1070,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Monthly breakdown
@@ -1003,6 +1093,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Lifetime breakdown
@@ -1025,6 +1116,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 					}
 
@@ -1050,6 +1142,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Monthly non-cancelled
@@ -1072,6 +1165,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Lifetime non-cancelled
@@ -1094,6 +1188,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Non-cancelled breakdown rows for each axis
@@ -1122,6 +1217,7 @@ export class UsageStatsDatabase {
 								costUsd,
 								uncachedInputTokens,
 								unreportedCacheInputTokens,
+								cacheDiscountBase,
 							})
 
 							// Monthly non-cancelled breakdown
@@ -1144,6 +1240,7 @@ export class UsageStatsDatabase {
 								costUsd,
 								uncachedInputTokens,
 								unreportedCacheInputTokens,
+								cacheDiscountBase,
 							})
 
 							// Lifetime non-cancelled breakdown
@@ -1166,6 +1263,7 @@ export class UsageStatsDatabase {
 								costUsd,
 								uncachedInputTokens,
 								unreportedCacheInputTokens,
+								cacheDiscountBase,
 							})
 						}
 					}
@@ -1259,9 +1357,11 @@ export class UsageStatsDatabase {
 
 			const taskUsageMetadataStmt = db.prepare(`
 				INSERT INTO task_usage_metadata (
-					task_id, model, provider, total_cost, total_tokens, event_count, last_activity_ms
+					task_id, model, provider, total_cost, total_tokens, event_count, last_activity_ms,
+					cache_discount_base
 				) VALUES (
-					@taskId, @model, @provider, @costUsd, @totalTokens, 1, @lastActivityMs
+					@taskId, @model, @provider, @costUsd, @totalTokens, 1, @lastActivityMs,
+					@cacheDiscountBase
 				)
 				ON CONFLICT(task_id) DO UPDATE SET
 					total_cost = total_cost + @costUsd,
@@ -1275,7 +1375,14 @@ export class UsageStatsDatabase {
 						WHEN @lastActivityMs >= last_activity_ms THEN @provider
 						ELSE provider
 					END,
-					last_activity_ms = @lastActivityMs
+					last_activity_ms = @lastActivityMs,
+					cache_discount_base = cache_discount_base + @cacheDiscountBase
+			`)
+
+			// Backfill the per-event discount base onto usage_events itself so the
+			// bounded task-usage SQL path can SUM it straight off the event rows.
+			const eventDiscountBaseStmt = db.prepare(`
+				UPDATE usage_events SET cache_discount_base = @cacheDiscountBase WHERE seq = @seq
 			`)
 
 			while (true) {
@@ -1318,6 +1425,7 @@ export class UsageStatsDatabase {
 						usage: { ...usage },
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
+					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 					const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
 
@@ -1347,6 +1455,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Monthly aggregate
@@ -1369,6 +1478,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Lifetime aggregate
@@ -1391,6 +1501,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// ── Breakdown rollups (per axis) ──
@@ -1422,6 +1533,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Monthly breakdown
@@ -1444,6 +1556,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Lifetime breakdown
@@ -1466,6 +1579,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 					}
 
@@ -1492,6 +1606,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Monthly non-cancelled aggregate
@@ -1514,6 +1629,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Lifetime non-cancelled aggregate
@@ -1536,6 +1652,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 
 						// Non-cancelled breakdown rows for each axis
@@ -1560,6 +1677,7 @@ export class UsageStatsDatabase {
 								costUsd,
 								uncachedInputTokens,
 								unreportedCacheInputTokens,
+								cacheDiscountBase,
 							})
 
 							// Monthly non-cancelled breakdown
@@ -1582,6 +1700,7 @@ export class UsageStatsDatabase {
 								costUsd,
 								uncachedInputTokens,
 								unreportedCacheInputTokens,
+								cacheDiscountBase,
 							})
 
 							// Lifetime non-cancelled breakdown
@@ -1604,6 +1723,7 @@ export class UsageStatsDatabase {
 								costUsd,
 								uncachedInputTokens,
 								unreportedCacheInputTokens,
+								cacheDiscountBase,
 							})
 						}
 					}
@@ -1629,6 +1749,13 @@ export class UsageStatsDatabase {
 						costUsd,
 						totalTokens,
 						lastActivityMs: epochMs,
+						cacheDiscountBase,
+					})
+
+					// Persist the recomputed discount base on the event row itself.
+					eventDiscountBaseStmt.run({
+						seq: row.seq as number,
+						cacheDiscountBase,
 					})
 
 					// Rebuild session_activity (per-day per-root_task_id)
@@ -1718,6 +1845,7 @@ export class UsageStatsDatabase {
 		const costUsd = getEffectiveCost(event)
 		const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
 		const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+		const cacheDiscountBase = computeCacheDiscountBase(event)
 
 		const status = event.status
 		const completedCalls = status === "completed" ? 1 : 0
@@ -1734,13 +1862,15 @@ export class UsageStatsDatabase {
 					timezone_offset_minutes, status, attempt,
 					task_id, parent_task_id, root_task_id,
 					provider, model, mode, endpoint,
-					usage_json, semantics_json, provenance, schema_version
+					usage_json, semantics_json, provenance, schema_version,
+					cache_discount_base
 				) VALUES (
 					@eventId, @idempotencyKey, @occurredAt, @occurredEpochMs,
 					@timezoneOffsetMinutes, @status, @attempt,
 					@taskId, @parentTaskId, @rootTaskId,
 					@provider, @model, @mode, @endpoint,
-					@usageJson, @semanticsJson, @provenance, @schemaVersion
+					@usageJson, @semanticsJson, @provenance, @schemaVersion,
+					@cacheDiscountBase
 				)
 			`)
 
@@ -1763,6 +1893,7 @@ export class UsageStatsDatabase {
 				semanticsJson,
 				provenance: event.provenance,
 				schemaVersion: event.schemaVersion,
+				cacheDiscountBase,
 			})
 
 			const inserted = insertResult.changes > 0
@@ -1796,6 +1927,7 @@ export class UsageStatsDatabase {
 					costUsd,
 					uncachedInputTokens,
 					unreportedCacheInputTokens,
+					cacheDiscountBase,
 				})
 
 				// Update rollups: monthly
@@ -1818,6 +1950,7 @@ export class UsageStatsDatabase {
 					costUsd,
 					uncachedInputTokens,
 					unreportedCacheInputTokens,
+					cacheDiscountBase,
 				})
 
 				// Update rollups: lifetime
@@ -1840,6 +1973,7 @@ export class UsageStatsDatabase {
 					costUsd,
 					uncachedInputTokens,
 					unreportedCacheInputTokens,
+					cacheDiscountBase,
 				})
 
 				// Update breakdown rollups for each supported axis
@@ -1856,6 +1990,7 @@ export class UsageStatsDatabase {
 					costUsd,
 					uncachedInputTokens,
 					unreportedCacheInputTokens,
+					cacheDiscountBase,
 				})
 
 				// Update non-cancelled-only rollups (root_task_id = '__nc__')
@@ -1873,6 +2008,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 				}
 
@@ -1893,6 +2029,7 @@ export class UsageStatsDatabase {
 					costUsd,
 					totalTokens,
 					lastActivityMs: occurredEpochMs,
+					cacheDiscountBase,
 				})
 
 				// Update last sequence in meta
@@ -1954,6 +2091,7 @@ export class UsageStatsDatabase {
 				const costUsd = getEffectiveCost(event)
 				const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
 				const unreportedCacheInputTokens = cacheReadTokens === 0 ? inputTokens : 0
+				const cacheDiscountBase = computeCacheDiscountBase(event)
 
 				const status = event.status
 				const completedCalls = status === "completed" ? 1 : 0
@@ -1966,13 +2104,15 @@ export class UsageStatsDatabase {
 						timezone_offset_minutes, status, attempt,
 						task_id, parent_task_id, root_task_id,
 						provider, model, mode, endpoint,
-						usage_json, semantics_json, provenance, schema_version
+						usage_json, semantics_json, provenance, schema_version,
+						cache_discount_base
 					) VALUES (
 						@eventId, @idempotencyKey, @occurredAt, @occurredEpochMs,
 						@timezoneOffsetMinutes, @status, @attempt,
 						@taskId, @parentTaskId, @rootTaskId,
 						@provider, @model, @mode, @endpoint,
-						@usageJson, @semanticsJson, @provenance, @schemaVersion
+						@usageJson, @semanticsJson, @provenance, @schemaVersion,
+						@cacheDiscountBase
 					)
 				`)
 
@@ -1995,6 +2135,7 @@ export class UsageStatsDatabase {
 					semanticsJson,
 					provenance: event.provenance,
 					schemaVersion: event.schemaVersion,
+					cacheDiscountBase,
 				})
 
 				if (insertResult.changes > 0) {
@@ -2025,6 +2166,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Update rollups: monthly
@@ -2047,6 +2189,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Update rollups: lifetime
@@ -2069,6 +2212,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Update breakdown rollups for each supported axis
@@ -2085,6 +2229,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						uncachedInputTokens,
 						unreportedCacheInputTokens,
+						cacheDiscountBase,
 					})
 
 					// Update non-cancelled-only rollups
@@ -2102,6 +2247,7 @@ export class UsageStatsDatabase {
 							costUsd,
 							uncachedInputTokens,
 							unreportedCacheInputTokens,
+							cacheDiscountBase,
 						})
 					}
 
@@ -2122,6 +2268,7 @@ export class UsageStatsDatabase {
 						costUsd,
 						totalTokens,
 						lastActivityMs: occurredEpochMs,
+						cacheDiscountBase,
 					})
 
 					this.updateMeta(db, { lastSequence: sequence })
@@ -2291,6 +2438,7 @@ export class UsageStatsDatabase {
 									COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0) +
 									COALESCE(json_extract(usage_json, '$.outputTokens.value'), 0))) as total_tokens,
 								SUM(COALESCE(json_extract(usage_json, '$.costUsd.value'), 0)) as stored_cost,
+								SUM(cache_discount_base) as cache_discount_base,
 								SUM(CASE WHEN json_extract(usage_json, '$.costUsd.value') IS NULL THEN 1 ELSE 0 END) as missing_cost_count
 							 FROM usage_events
 							 WHERE task_id IN (${placeholders})${rangeSql}
@@ -2303,6 +2451,7 @@ export class UsageStatsDatabase {
 						taskRow.eventCount = row.event_count as number
 						taskRow.totalTokens = row.total_tokens as number
 						taskRow.totalCost = row.stored_cost as number
+						taskRow.cacheDiscountBase = (row.cache_discount_base as number) ?? 0
 					}
 
 					// Latest-activity metadata mirrors the append-time upsert
@@ -2372,7 +2521,8 @@ export class UsageStatsDatabase {
 				const placeholders = chunk.map(() => "?").join(", ")
 				const rows = db
 					.prepare(
-						`SELECT task_id, total_cost, total_tokens, event_count, last_activity_ms, model, provider
+						`SELECT task_id, total_cost, total_tokens, event_count, last_activity_ms, model, provider,
+							cache_discount_base
 						 FROM task_usage_metadata
 						 WHERE task_id IN (${placeholders})`,
 					)
@@ -2388,6 +2538,7 @@ export class UsageStatsDatabase {
 						lastActivity: row.last_activity_ms as number,
 						model: row.model as string,
 						provider: row.provider as string,
+						cacheDiscountBase: (row.cache_discount_base as number) ?? 0,
 					})
 				}
 			}
@@ -2711,7 +2862,7 @@ export class UsageStatsDatabase {
 						`SELECT axis_value, event_count, completed_calls, failed_calls, cancelled_calls,
 							input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
 							reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens,
-							unreported_cache_input_tokens
+							unreported_cache_input_tokens, cache_discount_base
 						 FROM stats_rollup
 						 WHERE period_type = 'lifetime' AND period_key = 'all'
 						 AND root_task_id = ? AND axis = ?
@@ -2734,7 +2885,8 @@ export class UsageStatsDatabase {
 							SUM(total_tokens) as total_tokens,
 							SUM(cost_usd) as cost_usd,
 							SUM(uncached_input_tokens) as uncached_input_tokens,
-							SUM(unreported_cache_input_tokens) as unreported_cache_input_tokens
+							SUM(unreported_cache_input_tokens) as unreported_cache_input_tokens,
+							SUM(cache_discount_base) as cache_discount_base
 						 FROM stats_rollup
 						 WHERE period_type = ? AND root_task_id = ? AND axis = ?
 						 AND period_key >= ? AND period_key <= ?
@@ -2759,6 +2911,7 @@ export class UsageStatsDatabase {
 				costUsd: row.cost_usd as number,
 				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
 				unreportedCacheInputTokens: (row.unreported_cache_input_tokens as number) ?? 0,
+				cacheDiscountBase: (row.cache_discount_base as number) ?? 0,
 			}))
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", `Failed to query breakdown rollups for axis ${axis}`, err)
@@ -2787,7 +2940,7 @@ export class UsageStatsDatabase {
 					`SELECT period_key as day, event_count, completed_calls, failed_calls, cancelled_calls,
 						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
 						reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens,
-						unreported_cache_input_tokens
+						unreported_cache_input_tokens, cache_discount_base
 					 FROM stats_rollup
 					 WHERE period_type = 'daily' AND root_task_id = ? AND axis = ''
 					 AND period_key >= ? AND period_key <= ?
@@ -2810,6 +2963,7 @@ export class UsageStatsDatabase {
 				costUsd: row.cost_usd as number,
 				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
 				unreportedCacheInputTokens: (row.unreported_cache_input_tokens as number) ?? 0,
+				cacheDiscountBase: (row.cache_discount_base as number) ?? 0,
 			}))
 		} catch (err) {
 			throw new StatsDbError(
@@ -2837,6 +2991,7 @@ export class UsageStatsDatabase {
 		cancelledCalls: number
 		uncachedInputTokens: number
 		unreportedCacheInputTokens: number
+		cacheDiscountBase: number
 	} {
 		const db = this.getDb()
 		const rootTaskId = includeCancelled ? "" : NON_CANCELLED_KEY
@@ -2847,7 +3002,7 @@ export class UsageStatsDatabase {
 					`SELECT event_count, cost_usd as total_cost, total_tokens,
 						input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
 						reasoning_tokens, completed_calls, failed_calls, cancelled_calls,
-						uncached_input_tokens, unreported_cache_input_tokens
+						uncached_input_tokens, unreported_cache_input_tokens, cache_discount_base
 					 FROM stats_rollup
 					 WHERE period_type = 'lifetime' AND root_task_id = ? AND axis = ''
 					 AND period_key = 'all'`,
@@ -2869,6 +3024,7 @@ export class UsageStatsDatabase {
 					cancelledCalls: 0,
 					uncachedInputTokens: 0,
 					unreportedCacheInputTokens: 0,
+					cacheDiscountBase: 0,
 				}
 			}
 
@@ -2886,6 +3042,7 @@ export class UsageStatsDatabase {
 				cancelledCalls: row.cancelled_calls as number,
 				uncachedInputTokens: (row.uncached_input_tokens as number) ?? 0,
 				unreportedCacheInputTokens: (row.unreported_cache_input_tokens as number) ?? 0,
+				cacheDiscountBase: (row.cache_discount_base as number) ?? 0,
 			}
 		} catch (err) {
 			throw new StatsDbError("STATS_DB/read/001", "Failed to query lifetime totals (filtered)", err)
@@ -3103,10 +3260,12 @@ export class UsageStatsDatabase {
 			costUsd: number
 			uncachedInputTokens?: number
 			unreportedCacheInputTokens?: number
+			cacheDiscountBase?: number
 		},
 	): void {
 		const uncachedInputTokens = params.uncachedInputTokens ?? params.inputTokens
 		const unreportedCacheInputTokens = params.unreportedCacheInputTokens ?? 0
+		const cacheDiscountBase = params.cacheDiscountBase ?? 0
 
 		db.prepare(
 			`INSERT INTO stats_rollup (
@@ -3114,13 +3273,13 @@ export class UsageStatsDatabase {
 				event_count, completed_calls, failed_calls, cancelled_calls,
 				input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
 				reasoning_tokens, total_tokens, cost_usd, uncached_input_tokens,
-				unreported_cache_input_tokens
+				unreported_cache_input_tokens, cache_discount_base
 			) VALUES (
 				@periodType, @periodKey, @rootTaskId, @axis, @axisValue,
 				@eventCount, @completedCalls, @failedCalls, @cancelledCalls,
 				@inputTokens, @outputTokens, @cacheReadTokens, @cacheWriteTokens,
 				@reasoningTokens, @totalTokens, @costUsd, @uncachedInputTokens,
-				@unreportedCacheInputTokens
+				@unreportedCacheInputTokens, @cacheDiscountBase
 			)
 			ON CONFLICT(period_type, period_key, root_task_id, axis, axis_value)
 			DO UPDATE SET
@@ -3136,7 +3295,8 @@ export class UsageStatsDatabase {
 				total_tokens = total_tokens + @totalTokens,
 				cost_usd = cost_usd + @costUsd,
 				uncached_input_tokens = uncached_input_tokens + @uncachedInputTokens,
-				unreported_cache_input_tokens = unreported_cache_input_tokens + @unreportedCacheInputTokens`,
+				unreported_cache_input_tokens = unreported_cache_input_tokens + @unreportedCacheInputTokens,
+				cache_discount_base = cache_discount_base + @cacheDiscountBase`,
 		).run({
 			periodType: params.periodType,
 			periodKey: params.periodKey,
@@ -3156,6 +3316,7 @@ export class UsageStatsDatabase {
 			costUsd: params.costUsd,
 			uncachedInputTokens,
 			unreportedCacheInputTokens,
+			cacheDiscountBase,
 		})
 	}
 
@@ -3183,6 +3344,7 @@ export class UsageStatsDatabase {
 			costUsd: number
 			uncachedInputTokens?: number
 			unreportedCacheInputTokens?: number
+			cacheDiscountBase?: number
 		},
 	): void {
 		const axisValueMap: Record<string, string> = {
@@ -3289,6 +3451,7 @@ export class UsageStatsDatabase {
 			costUsd: number
 			uncachedInputTokens?: number
 			unreportedCacheInputTokens?: number
+			cacheDiscountBase?: number
 		},
 	): void {
 		// Daily non-cancelled
@@ -3400,13 +3563,16 @@ export class UsageStatsDatabase {
 			costUsd: number
 			totalTokens: number
 			lastActivityMs: number
+			cacheDiscountBase?: number
 		},
 	): void {
 		db.prepare(
 			`INSERT INTO task_usage_metadata (
-				task_id, model, provider, total_cost, total_tokens, event_count, last_activity_ms
+				task_id, model, provider, total_cost, total_tokens, event_count, last_activity_ms,
+				cache_discount_base
 			) VALUES (
-				@taskId, @model, @provider, @costUsd, @totalTokens, 1, @lastActivityMs
+				@taskId, @model, @provider, @costUsd, @totalTokens, 1, @lastActivityMs,
+				@cacheDiscountBase
 			)
 			ON CONFLICT(task_id) DO UPDATE SET
 				total_cost = total_cost + @costUsd,
@@ -3420,8 +3586,9 @@ export class UsageStatsDatabase {
 					WHEN @lastActivityMs >= last_activity_ms THEN @provider
 					ELSE provider
 				END,
-				last_activity_ms = @lastActivityMs`,
-		).run(params)
+				last_activity_ms = @lastActivityMs,
+				cache_discount_base = cache_discount_base + @cacheDiscountBase`,
+		).run({ ...params, cacheDiscountBase: params.cacheDiscountBase ?? 0 })
 	}
 
 	// ── Internal: Meta Management ──────────────────────────────────────────

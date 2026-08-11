@@ -43,6 +43,7 @@ import {
 	serializeBucketKey,
 	type BucketDeltaValues,
 } from "./UsageAggregator"
+import { applyCacheDiscount } from "./costRecalculation"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -271,7 +272,7 @@ function breakdownRowToBucket(row: BreakdownRollupRow, axis: string, cacheRatio?
 		cacheWriteTokens: row.cacheWriteTokens,
 		reasoningTokens: row.reasoningTokens,
 		totalTokens: row.totalTokens,
-		costUsd: row.costUsd,
+		costUsd: applyCacheDiscount(row.costUsd, row.cacheDiscountBase ?? 0, cacheRatio),
 		unknownEventCount: 0,
 	}
 }
@@ -301,7 +302,7 @@ function dailyRowToBucket(row: DailyRollupDetailedRow, cacheRatio?: number): Sta
 		cacheWriteTokens: row.cacheWriteTokens,
 		reasoningTokens: row.reasoningTokens,
 		totalTokens: row.totalTokens,
-		costUsd: row.costUsd,
+		costUsd: applyCacheDiscount(row.costUsd, row.cacheDiscountBase ?? 0, cacheRatio),
 		unknownEventCount: 0,
 	}
 }
@@ -331,7 +332,7 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[], cacheRatio?: numbe
 		totals.cacheWriteTokens += row.cacheWriteTokens
 		totals.reasoningTokens += row.reasoningTokens
 		totals.totalTokens += row.totalTokens
-		totals.costUsd += row.costUsd
+		totals.costUsd += applyCacheDiscount(row.costUsd, row.cacheDiscountBase ?? 0, cacheRatio)
 	}
 	return totals
 }
@@ -354,6 +355,7 @@ function lifetimeTotalsToBucket(
 		cancelledCalls: number
 		uncachedInputTokens?: number
 		unreportedCacheInputTokens?: number
+		cacheDiscountBase?: number
 	},
 	cacheRatio?: number,
 ): StatsBucket {
@@ -378,7 +380,7 @@ function lifetimeTotalsToBucket(
 		cacheWriteTokens: totals.cacheWriteTokens,
 		reasoningTokens: totals.reasoningTokens,
 		totalTokens: totals.totalTokens,
-		costUsd: totals.totalCost,
+		costUsd: applyCacheDiscount(totals.totalCost, totals.cacheDiscountBase ?? 0, cacheRatio),
 		unknownEventCount: 0,
 	}
 }

@@ -6,7 +6,13 @@ import { describe, it, expect } from "vitest"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
-import { getEffectiveCost, computeEventCost, lookupModelInfo } from "../costRecalculation"
+import {
+	getEffectiveCost,
+	computeEventCost,
+	lookupModelInfo,
+	computeCacheDiscountBase,
+	applyCacheDiscount,
+} from "../costRecalculation"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -330,6 +336,88 @@ describe("costRecalculation", () => {
 			const cost = getEffectiveCost(event)
 			expect(cost).toBeGreaterThan(0)
 			expect(cost).toBeCloseTo(0.5, 5)
+		})
+	})
+
+	describe("computeCacheDiscountBase", () => {
+		it("should return 0 when cacheReadTokens are server-reported", () => {
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					cacheReadTokens: { value: 300, source: "provider" },
+				},
+			})
+			// Reported cache reads keep the verbatim cost path — no discount.
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+
+		it("should return 0 when model pricing is unavailable", () => {
+			const event = makeEvent({
+				provider: "unknown-provider",
+				model: "unknown-model",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+				},
+			})
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+
+		it("should return 0 when the model has no cache-read pricing", () => {
+			// mistralModels["magistral-medium-latest"] has inputPrice but no cacheReadsPrice.
+			const event = makeEvent({
+				provider: "mistral",
+				model: "magistral-medium-latest",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+				},
+			})
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+
+		it("should compute (inputTokens / 1M) × (inputPrice − cacheReadsPrice) for unreported events", () => {
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					// cacheReadTokens missing → unreported
+				},
+			})
+			// claude-sonnet-4-5: inputPrice=$3.0/1M, cacheReadsPrice=$0.30/1M
+			// 1000/1M × (3.0 − 0.3) = 0.0027
+			expect(computeCacheDiscountBase(event)).toBeCloseTo(0.0027, 10)
+		})
+
+		it("should return 0 when inputPrice is not cheaper than cacheReadsPrice", () => {
+			// A synthetic event with zero input tokens always has a zero base.
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				usage: {
+					inputTokens: { value: 0, source: "provider" },
+				},
+			})
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+	})
+
+	describe("applyCacheDiscount", () => {
+		it("should leave the cost unchanged when cacheRatio is undefined or 0", () => {
+			expect(applyCacheDiscount(0.01, 0.0027)).toBe(0.01)
+			expect(applyCacheDiscount(0.01, 0.0027, 0)).toBe(0.01)
+		})
+
+		it("should subtract cacheRatio × discountBase", () => {
+			// 0.01 − 0.5 × 0.0027 = 0.00865
+			expect(applyCacheDiscount(0.01, 0.0027, 0.5)).toBeCloseTo(0.00865, 10)
+			// 0.01 − 1 × 0.0027 = 0.0073
+			expect(applyCacheDiscount(0.01, 0.0027, 1)).toBeCloseTo(0.0073, 10)
+		})
+
+		it("should floor the discounted cost at 0", () => {
+			expect(applyCacheDiscount(0.001, 0.01, 1)).toBe(0)
 		})
 	})
 })

@@ -252,6 +252,89 @@ describe("DashboardTaskProjection", () => {
 		catalog.dispose()
 	})
 
+	it("discounts subtree totalCost by cacheRatio × Σ cacheDiscountBase", () => {
+		const catalog = createCatalog([
+			makeHistoryItem({ id: "root", ts: 300, task: "Root" }),
+			makeHistoryItem({ id: "child", ts: 200, task: "Child", parentTaskId: "root" }),
+		])
+		const reader = createUsageReader(
+			new Map([
+				["root", makeUsageRow({ taskId: "root", totalCost: 0.1, cacheDiscountBase: 0.01, eventCount: 1 })],
+				["child", makeUsageRow({ taskId: "child", totalCost: 0.2, cacheDiscountBase: 0.02, eventCount: 2 })],
+			]),
+		)
+
+		// Subtree: total 0.3, base 0.03 → 0.3 − 0.5 × 0.03 = 0.285.
+		const discounted = computeTaskPage(catalog, reader, "request-cdb", undefined, 50, undefined, 0.5)
+		expect(discounted.tasks[0]!.totalCost).toBeCloseTo(0.285, 10)
+		expect(discounted.childTasks![0]!.totalCost).toBeCloseTo(0.19, 10)
+
+		// Ratio 1 → 0.3 − 0.03 = 0.27; no ratio → verbatim 0.3.
+		const full = computeTaskPage(catalog, reader, "request-cdb", undefined, 50, undefined, 1)
+		expect(full.tasks[0]!.totalCost).toBeCloseTo(0.27, 10)
+		const verbatim = computeTaskPage(catalog, reader, "request-cdb")
+		expect(verbatim.tasks[0]!.totalCost).toBeCloseTo(0.3, 10)
+		catalog.dispose()
+	})
+
+	it("floors the discounted subtree totalCost at 0", () => {
+		const catalog = createCatalog([makeHistoryItem({ id: "root", ts: 300, task: "Root" })])
+		const reader = createUsageReader(
+			new Map([
+				["root", makeUsageRow({ taskId: "root", totalCost: 0.001, cacheDiscountBase: 0.01, eventCount: 1 })],
+			]),
+		)
+
+		const page = computeTaskPage(catalog, reader, "request-cdb-floor", undefined, 50, undefined, 1)
+		expect(page.tasks[0]!.totalCost).toBe(0)
+		catalog.dispose()
+	})
+
+	it("discounts computeTaskDetail per-call cost only for unreported-cacheRead events", () => {
+		const catalog = createCatalog([makeHistoryItem({ id: "root", ts: 300, task: "Root" })])
+		const reader = createUsageReader(new Map(), [
+			{
+				...makeEvent({
+					eventId: "evt-reported",
+					taskId: "root",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						cacheReadTokens: { value: 300, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				sequence: 1,
+			},
+			{
+				...makeEvent({
+					eventId: "evt-unreported",
+					taskId: "root",
+					model: "claude-sonnet-4-20250514",
+					usage: {
+						inputTokens: { value: 1000, source: "provider" },
+						outputTokens: { value: 500, source: "provider" },
+						costUsd: { value: 0.01, source: "provider" },
+					},
+				}),
+				sequence: 2,
+			},
+		])
+
+		const detail = computeTaskDetail(catalog, reader, "root", "request-cdb-detail", undefined, 0.5)
+
+		// Reported call: verbatim 0.01. Unreported call: 0.01 − 0.5 × 0.0027 = 0.00865.
+		expect(detail.apiCalls[0]!.costUsd).toBe(0.01)
+		expect(detail.apiCalls[1]!.costUsd).toBeCloseTo(0.00865, 10)
+		expect(detail.totalCost).toBeCloseTo(0.01865, 10)
+
+		// Without a ratio both calls stay verbatim.
+		const verbatim = computeTaskDetail(catalog, reader, "root", "request-cdb-detail")
+		expect(verbatim.totalCost).toBeCloseTo(0.02)
+		catalog.dispose()
+	})
+
 	it("sums input/output tokens and unions subtree models/modes in first-seen order", () => {
 		const catalog = createCatalog([
 			makeHistoryItem({ id: "root", ts: 300, task: "Root" }),

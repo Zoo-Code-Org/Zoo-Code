@@ -483,6 +483,7 @@ export class UsageStatsStreamCoordinator {
 									this.database,
 									affectedTaskIds,
 									taskRangeMs,
+									sub.subscription.range.cacheRatio,
 								),
 							})
 						} else {
@@ -558,6 +559,7 @@ export class UsageStatsStreamCoordinator {
 							undefined,
 							state.subscription.sessionPageSize,
 							resolveStatsQueryRangeMs(state.subscription.range),
+							state.subscription.range.cacheRatio,
 						)
 						state.visibleTaskIds = new Set(
 							[...tasks.tasks, ...(tasks.childTasks ?? [])].map((task) => task.taskId),
@@ -679,6 +681,7 @@ export class UsageStatsStreamCoordinator {
 										undefined,
 										state.subscription.sessionPageSize,
 										resolveStatsQueryRangeMs(state.subscription.range),
+										state.subscription.range.cacheRatio,
 									)
 									state.visibleTaskIds = new Set(
 										[...tasks.tasks, ...(tasks.childTasks ?? [])].map((task) => task.taskId),

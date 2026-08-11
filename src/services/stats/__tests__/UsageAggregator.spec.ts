@@ -1251,6 +1251,48 @@ describe("UsageAggregator", () => {
 			expect(delta!.cacheReadTokens).toBe(200)
 		})
 
+		it("should discount cost for unreported cacheRead events when cacheRatio is set", () => {
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-20250514",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+					// cacheReadTokens missing → unreported
+				},
+			})
+
+			// claude-sonnet-4: inputPrice=$3.0/1M, cacheReadsPrice=$0.30/1M
+			// discountBase = 1000/1M × 2.7 = 0.0027
+			// ratio 0.5 → 0.01 − 0.5 × 0.0027 = 0.00865
+			const discounted = computeEventContribution(event, makeQuery({ groupBy: [], cacheRatio: 0.5 }))
+			expect(discounted!.costUsd).toBeCloseTo(0.00865, 10)
+
+			// ratio 1 → 0.01 − 0.0027 = 0.0073
+			const full = computeEventContribution(event, makeQuery({ groupBy: [], cacheRatio: 1 }))
+			expect(full!.costUsd).toBeCloseTo(0.0073, 10)
+
+			// No ratio → verbatim cost.
+			const verbatim = computeEventContribution(event, makeQuery({ groupBy: [] }))
+			expect(verbatim!.costUsd).toBe(0.01)
+		})
+
+		it("should keep cost verbatim for server-reported cacheRead events even with cacheRatio", () => {
+			const event = makeEvent({
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					cacheReadTokens: { value: 200, source: "provider" },
+					costUsd: { value: 0.01, source: "provider" },
+				},
+			})
+			const query = makeQuery({ groupBy: [], cacheRatio: 0.5 })
+
+			const delta = computeEventContribution(event, query)
+			expect(delta).not.toBeNull()
+			expect(delta!.costUsd).toBe(0.01)
+		})
+
 		it("should recompute totalTokens as input + output (not from stored field)", () => {
 			const event = makeEvent({
 				usage: {
