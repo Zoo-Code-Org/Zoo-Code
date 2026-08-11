@@ -10,6 +10,7 @@ import {
 	getEffectiveCost,
 	computeEventCost,
 	lookupModelInfo,
+	providerReportsCache,
 	computeCacheDiscountBase,
 	applyCacheDiscount,
 } from "../costRecalculation"
@@ -484,6 +485,137 @@ describe("costRecalculation", () => {
 
 		it("should floor the discounted cost at 0", () => {
 			expect(applyCacheDiscount(0.001, 0.01, 1)).toBe(0)
+		})
+	})
+
+	// ── Custom Model Pricing (modelPricing) Tests ──────────────────────────────
+
+	describe("custom model pricing via modelPricing", () => {
+		it("lookupModelInfo should fall back to modelPricing for unknown provider", () => {
+			const pricing = { inputPrice: 2.0, outputPrice: 6.0, cacheReadsPrice: 0.5 }
+			const info = lookupModelInfo("openai", "my-custom-model", pricing)
+			expect(info).toBeDefined()
+			expect(info?.inputPrice).toBe(2.0)
+			expect(info?.outputPrice).toBe(6.0)
+			expect(info?.cacheReadsPrice).toBe(0.5)
+		})
+
+		it("lookupModelInfo should prefer static registry over modelPricing", () => {
+			// anthropic/claude-sonnet-4-5 is in the static registry with
+			// inputPrice=3.0. Even if modelPricing says 99.0, the static
+			// registry value must win.
+			const pricing = { inputPrice: 99.0, outputPrice: 99.0 }
+			const info = lookupModelInfo("anthropic", "claude-sonnet-4-5", pricing)
+			expect(info).toBeDefined()
+			expect(info?.inputPrice).toBe(3.0)
+			expect(info?.outputPrice).toBe(15.0)
+		})
+
+		it("lookupModelInfo should return undefined when neither registry nor modelPricing", () => {
+			const info = lookupModelInfo("unknown-provider", "unknown-model")
+			expect(info).toBeUndefined()
+		})
+
+		it("lookupModelInfo should return undefined when modelPricing is undefined", () => {
+			const info = lookupModelInfo("unknown-provider", "unknown-model", undefined)
+			expect(info).toBeUndefined()
+		})
+
+		it("providerReportsCache should return true for custom model with cacheReadsPrice", () => {
+			const pricing = { inputPrice: 2.0, cacheReadsPrice: 0.5 }
+			expect(providerReportsCache("openai", "my-custom-model", pricing)).toBe(true)
+		})
+
+		it("providerReportsCache should return false for custom model without cacheReadsPrice", () => {
+			const pricing = { inputPrice: 2.0, outputPrice: 6.0 }
+			expect(providerReportsCache("openai", "my-custom-model", pricing)).toBe(false)
+		})
+
+		it("providerReportsCache should return false for custom model with undefined modelPricing", () => {
+			expect(providerReportsCache("openai", "my-custom-model", undefined)).toBe(false)
+		})
+
+		it("computeCacheDiscountBase should return 0 for custom model with cacheReadsPrice (reporting)", () => {
+			// Custom model WITH cacheReadsPrice → providerReportsCache returns true
+			// → discountBase = 0 (slider should NOT affect cost)
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				modelPricing: { inputPrice: 2.0, outputPrice: 6.0, cacheReadsPrice: 0.5 },
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+
+		it("computeCacheDiscountBase should return 0 for custom model without cacheReadsPrice", () => {
+			// Custom model without cacheReadsPrice → providerReportsCache returns false
+			// but computeCacheDiscountBase guard checks `typeof cacheReadsPrice !== "number"`
+			// which fails → returns 0
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				modelPricing: { inputPrice: 2.0, outputPrice: 6.0 },
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+				},
+			})
+			expect(computeCacheDiscountBase(event)).toBe(0)
+		})
+
+		it("computeEventCost should compute cost from modelPricing for custom model", () => {
+			// Custom model: inputPrice=2.0, outputPrice=6.0
+			// OpenAI semantic: inputTokens includes cached tokens
+			// cost = (1000 / 1M) * 2.0 + (500 / 1M) * 6.0 = 0.002 + 0.003 = 0.005
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				modelPricing: { inputPrice: 2.0, outputPrice: 6.0, cacheReadsPrice: 0.5 },
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// costUsd missing — should compute from modelPricing
+				},
+			})
+			expect(computeEventCost(event)).toBeCloseTo(0.005, 10)
+		})
+
+		it("getEffectiveCost should use modelPricing when costUsd is missing", () => {
+			const event = makeEvent({
+				provider: "openai",
+				model: "my-custom-model",
+				modelPricing: { inputPrice: 2.0, outputPrice: 6.0 },
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// costUsd missing
+				},
+			})
+			// (1000 / 1M) * 2.0 + (500 / 1M) * 6.0 = 0.002 + 0.003 = 0.005
+			expect(getEffectiveCost(event)).toBeCloseTo(0.005, 10)
+		})
+
+		it("static registry model should ignore modelPricing on event", () => {
+			// anthropic/claude-sonnet-4-5 is in the static registry.
+			// Even if the event carries modelPricing, the static registry
+			// value must be used.
+			const event = makeEvent({
+				provider: "anthropic",
+				model: "claude-sonnet-4-5",
+				modelPricing: { inputPrice: 99.0, outputPrice: 99.0, cacheReadsPrice: 99.0 },
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					// costUsd missing
+				},
+			})
+			// Static registry: inputPrice=3.0, outputPrice=15.0
+			// Anthropic semantic: inputTokens does NOT include cached tokens
+			// cost = (1000 / 1M) * 3.0 + (500 / 1M) * 15.0 = 0.003 + 0.0075 = 0.0105
+			expect(getEffectiveCost(event)).toBeCloseTo(0.0105, 10)
 		})
 	})
 })

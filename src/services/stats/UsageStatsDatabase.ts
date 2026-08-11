@@ -398,6 +398,7 @@ export class UsageStatsDatabase {
 				model TEXT NOT NULL,
 				mode TEXT NOT NULL,
 				endpoint TEXT,
+				model_pricing_json TEXT,
 				usage_json TEXT NOT NULL,
 				semantics_json TEXT NOT NULL,
 				provenance TEXT NOT NULL,
@@ -515,6 +516,15 @@ export class UsageStatsDatabase {
 		}
 		try {
 			db.exec("ALTER TABLE task_usage_metadata ADD COLUMN cache_discount_base REAL NOT NULL DEFAULT 0")
+		} catch {
+			// Column already exists
+		}
+
+		// Migration: add model_pricing_json column to usage_events if it doesn't
+		// exist. Stores a snapshot of the model's pricing info at capture time for
+		// custom/user-configured models not in the static provider registry.
+		try {
+			db.exec("ALTER TABLE usage_events ADD COLUMN model_pricing_json TEXT")
 		} catch {
 			// Column already exists
 		}
@@ -851,7 +861,7 @@ export class UsageStatsDatabase {
 				const rows = db
 					.prepare(
 						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id,
-						 provider, model, usage_json, semantics_json
+						 provider, model, model_pricing_json, usage_json, semantics_json
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -883,10 +893,15 @@ export class UsageStatsDatabase {
 					const eventForCost = {
 						provider,
 						model,
+						modelPricing: row.model_pricing_json
+							? (JSON.parse(row.model_pricing_json as string) as UsageEventV1["modelPricing"])
+							: undefined,
 						usage: { ...usage },
 					} as UsageEventV1
 					const unreportedCacheInputTokens =
-						providerReportsCache(provider, model) || cacheReadTokens > 0 ? 0 : inputTokens
+						providerReportsCache(provider, model, eventForCost.modelPricing) || cacheReadTokens > 0
+							? 0
+							: inputTokens
 					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 
 					const completedCalls = status === "completed" ? 1 : 0
@@ -1000,7 +1015,7 @@ export class UsageStatsDatabase {
 				const rows = db
 					.prepare(
 						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, root_task_id,
-						 provider, model, mode, usage_json, semantics_json, provenance
+						 provider, model, mode, model_pricing_json, usage_json, semantics_json, provenance
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -1032,13 +1047,18 @@ export class UsageStatsDatabase {
 					const eventForCost = {
 						provider,
 						model,
+						modelPricing: row.model_pricing_json
+							? (JSON.parse(row.model_pricing_json as string) as UsageEventV1["modelPricing"])
+							: undefined,
 						usage: { ...usage },
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
 					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 					const unreportedCacheInputTokens =
-						providerReportsCache(provider, model) || cacheReadTokens > 0 ? 0 : inputTokens
+						providerReportsCache(provider, model, eventForCost.modelPricing) || cacheReadTokens > 0
+							? 0
+							: inputTokens
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -1391,7 +1411,7 @@ export class UsageStatsDatabase {
 				const rows = db
 					.prepare(
 						`SELECT seq, occurred_epoch_ms, timezone_offset_minutes, status, task_id, root_task_id,
-						 provider, model, mode, usage_json, semantics_json, provenance
+						 provider, model, mode, model_pricing_json, usage_json, semantics_json, provenance
 						 FROM usage_events WHERE seq > ? ORDER BY seq ASC LIMIT ?`,
 					)
 					.all(afterSeq, batchSize) as Array<Record<string, unknown>>
@@ -1424,13 +1444,18 @@ export class UsageStatsDatabase {
 					const eventForCost = {
 						provider,
 						model,
+						modelPricing: row.model_pricing_json
+							? (JSON.parse(row.model_pricing_json as string) as UsageEventV1["modelPricing"])
+							: undefined,
 						usage: { ...usage },
 					} as UsageEventV1
 					const costUsd = getEffectiveCost(eventForCost)
 					const cacheDiscountBase = computeCacheDiscountBase(eventForCost)
 					const uncachedInputTokens = this.computeUncachedInputTokens(usage, semantics)
 					const unreportedCacheInputTokens =
-						providerReportsCache(provider, model) || cacheReadTokens > 0 ? 0 : inputTokens
+						providerReportsCache(provider, model, eventForCost.modelPricing) || cacheReadTokens > 0
+							? 0
+							: inputTokens
 
 					const completedCalls = status === "completed" ? 1 : 0
 					const failedCalls = status === "failed" ? 1 : 0
@@ -1848,7 +1873,9 @@ export class UsageStatsDatabase {
 		const costUsd = getEffectiveCost(event)
 		const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
 		const unreportedCacheInputTokens =
-			providerReportsCache(event.provider, event.model) || cacheReadTokens > 0 ? 0 : inputTokens
+			providerReportsCache(event.provider, event.model, event.modelPricing) || cacheReadTokens > 0
+				? 0
+				: inputTokens
 		const cacheDiscountBase = computeCacheDiscountBase(event)
 
 		const status = event.status
@@ -1862,20 +1889,20 @@ export class UsageStatsDatabase {
 			// Idempotent insert: INSERT OR IGNORE on unique idempotency_key
 			const insertStmt = db.prepare(`
 				INSERT OR IGNORE INTO usage_events (
-					event_id, idempotency_key, occurred_at, occurred_epoch_ms,
-					timezone_offset_minutes, status, attempt,
-					task_id, parent_task_id, root_task_id,
-					provider, model, mode, endpoint,
-					usage_json, semantics_json, provenance, schema_version,
-					cache_discount_base
-				) VALUES (
-					@eventId, @idempotencyKey, @occurredAt, @occurredEpochMs,
-					@timezoneOffsetMinutes, @status, @attempt,
-					@taskId, @parentTaskId, @rootTaskId,
-					@provider, @model, @mode, @endpoint,
-					@usageJson, @semanticsJson, @provenance, @schemaVersion,
-					@cacheDiscountBase
-				)
+						event_id, idempotency_key, occurred_at, occurred_epoch_ms,
+						timezone_offset_minutes, status, attempt,
+						task_id, parent_task_id, root_task_id,
+						provider, model, mode, endpoint, model_pricing_json,
+						usage_json, semantics_json, provenance, schema_version,
+						cache_discount_base
+					) VALUES (
+						@eventId, @idempotencyKey, @occurredAt, @occurredEpochMs,
+						@timezoneOffsetMinutes, @status, @attempt,
+						@taskId, @parentTaskId, @rootTaskId,
+						@provider, @model, @mode, @endpoint, @modelPricingJson,
+						@usageJson, @semanticsJson, @provenance, @schemaVersion,
+						@cacheDiscountBase
+					)
 			`)
 
 			const insertResult = insertStmt.run({
@@ -1898,6 +1925,7 @@ export class UsageStatsDatabase {
 				provenance: event.provenance,
 				schemaVersion: event.schemaVersion,
 				cacheDiscountBase,
+				modelPricingJson: event.modelPricing ? JSON.stringify(event.modelPricing) : null,
 			})
 
 			const inserted = insertResult.changes > 0
@@ -2095,7 +2123,9 @@ export class UsageStatsDatabase {
 				const costUsd = getEffectiveCost(event)
 				const uncachedInputTokens = this.computeUncachedInputTokens(event.usage, event.semantics)
 				const unreportedCacheInputTokens =
-					providerReportsCache(event.provider, event.model) || cacheReadTokens > 0 ? 0 : inputTokens
+					providerReportsCache(event.provider, event.model, event.modelPricing) || cacheReadTokens > 0
+						? 0
+						: inputTokens
 				const cacheDiscountBase = computeCacheDiscountBase(event)
 
 				const status = event.status
@@ -2105,20 +2135,20 @@ export class UsageStatsDatabase {
 
 				const insertStmt = db.prepare(`
 					INSERT OR IGNORE INTO usage_events (
-						event_id, idempotency_key, occurred_at, occurred_epoch_ms,
-						timezone_offset_minutes, status, attempt,
-						task_id, parent_task_id, root_task_id,
-						provider, model, mode, endpoint,
-						usage_json, semantics_json, provenance, schema_version,
-						cache_discount_base
-					) VALUES (
-						@eventId, @idempotencyKey, @occurredAt, @occurredEpochMs,
-						@timezoneOffsetMinutes, @status, @attempt,
-						@taskId, @parentTaskId, @rootTaskId,
-						@provider, @model, @mode, @endpoint,
-						@usageJson, @semanticsJson, @provenance, @schemaVersion,
-						@cacheDiscountBase
-					)
+							event_id, idempotency_key, occurred_at, occurred_epoch_ms,
+							timezone_offset_minutes, status, attempt,
+							task_id, parent_task_id, root_task_id,
+							provider, model, mode, endpoint, model_pricing_json,
+							usage_json, semantics_json, provenance, schema_version,
+							cache_discount_base
+						) VALUES (
+							@eventId, @idempotencyKey, @occurredAt, @occurredEpochMs,
+							@timezoneOffsetMinutes, @status, @attempt,
+							@taskId, @parentTaskId, @rootTaskId,
+							@provider, @model, @mode, @endpoint, @modelPricingJson,
+							@usageJson, @semanticsJson, @provenance, @schemaVersion,
+							@cacheDiscountBase
+						)
 				`)
 
 				const insertResult = insertStmt.run({
@@ -2141,6 +2171,7 @@ export class UsageStatsDatabase {
 					provenance: event.provenance,
 					schemaVersion: event.schemaVersion,
 					cacheDiscountBase,
+					modelPricingJson: event.modelPricing ? JSON.stringify(event.modelPricing) : null,
 				})
 
 				if (insertResult.changes > 0) {
@@ -3671,6 +3702,9 @@ export class UsageStatsDatabase {
 			model: row.model as string,
 			mode: row.mode as string,
 			endpoint: (row.endpoint as string | null) ?? undefined,
+			modelPricing: row.model_pricing_json
+				? (JSON.parse(row.model_pricing_json as string) as UsageEventV1["modelPricing"])
+				: undefined,
 			usage: JSON.parse(row.usage_json as string),
 			semantics: JSON.parse(row.semantics_json as string),
 			provenance: row.provenance as UsageEventV1["provenance"],

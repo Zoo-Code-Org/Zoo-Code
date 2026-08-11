@@ -100,21 +100,39 @@ const ANTHROPIC_SEMANTIC_PROVIDERS = new Set(["anthropic", "bedrock", "vertex"])
  * @param model The model ID from the usage event.
  * @returns The matching ModelInfo, or undefined if not found.
  */
-export function lookupModelInfo(provider: string, model: string): ModelInfo | undefined {
+export function lookupModelInfo(
+	provider: string,
+	model: string,
+	modelPricing?: UsageEventV1["modelPricing"],
+): ModelInfo | undefined {
 	const registry = PROVIDER_MODEL_REGISTRIES[provider]
-	if (!registry) return undefined
 
-	// 1. Exact match
-	if (model in registry) return registry[model]
+	// 1. Static registry lookup (exact + substring match)
+	if (registry) {
+		// 1a. Exact match
+		if (model in registry) return registry[model]
 
-	// 2. Case-insensitive substring match (longest known ID first for specificity)
-	const knownIds = Object.keys(registry)
-	const lowerModel = model.toLowerCase()
-	const sortedIds = [...knownIds].sort((a, b) => b.length - a.length)
-	for (const knownId of sortedIds) {
-		if (lowerModel.includes(knownId.toLowerCase())) {
-			return registry[knownId]
+		// 1b. Case-insensitive substring match (longest known ID first for specificity)
+		const knownIds = Object.keys(registry)
+		const lowerModel = model.toLowerCase()
+		const sortedIds = [...knownIds].sort((a, b) => b.length - a.length)
+		for (const knownId of sortedIds) {
+			if (lowerModel.includes(knownId.toLowerCase())) {
+				return registry[knownId]
+			}
 		}
+	}
+
+	// 2. Fallback to event-level modelPricing (custom/user-configured models)
+	//    Only used when the model is NOT in the static registry, so static
+	//    registry prices always take precedence.
+	if (modelPricing) {
+		return {
+			inputPrice: modelPricing.inputPrice,
+			outputPrice: modelPricing.outputPrice,
+			cacheWritesPrice: modelPricing.cacheWritesPrice,
+			cacheReadsPrice: modelPricing.cacheReadsPrice,
+		} as ModelInfo
 	}
 
 	// 3. Not found
@@ -146,7 +164,7 @@ export function computeEventCost(event: UsageEventV1): number {
 		return event.usage.costUsd.value
 	}
 
-	const modelInfo = lookupModelInfo(event.provider, event.model)
+	const modelInfo = lookupModelInfo(event.provider, event.model, event.modelPricing)
 	if (!modelInfo) return 0
 
 	const inputTokens = event.usage.inputTokens?.value ?? 0
@@ -208,8 +226,12 @@ export function getEffectiveCost(event: UsageEventV1): number {
  * @param model The model ID from the usage event.
  * @returns True if the provider+model is known to report cache info.
  */
-export function providerReportsCache(provider: string, model: string): boolean {
-	const modelInfo = lookupModelInfo(provider, model)
+export function providerReportsCache(
+	provider: string,
+	model: string,
+	modelPricing?: UsageEventV1["modelPricing"],
+): boolean {
+	const modelInfo = lookupModelInfo(provider, model, modelPricing)
 	if (!modelInfo) return false
 	return typeof modelInfo.cacheReadsPrice === "number" && Number.isFinite(modelInfo.cacheReadsPrice)
 }
@@ -242,11 +264,11 @@ export function providerReportsCache(provider: string, model: string): boolean {
 export function computeCacheDiscountBase(event: UsageEventV1): number {
 	// Capability check: if the provider+model is known to report cache info,
 	// cacheReadTokens == 0 is a true cache miss — no discount, no estimation.
-	if (providerReportsCache(event.provider, event.model)) {
+	if (providerReportsCache(event.provider, event.model, event.modelPricing)) {
 		return 0
 	}
 
-	const modelInfo = lookupModelInfo(event.provider, event.model)
+	const modelInfo = lookupModelInfo(event.provider, event.model, event.modelPricing)
 	if (!modelInfo) return 0
 
 	const { inputPrice, cacheReadsPrice } = modelInfo

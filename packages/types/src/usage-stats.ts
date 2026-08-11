@@ -60,6 +60,22 @@ export const UsageEventV1 = z.object({
 	 * events recorded before this field was introduced remain valid.
 	 */
 	endpoint: z.string().optional(),
+	/**
+	 * Snapshot of the model's pricing info at capture time. Only populated
+	 * for models NOT in the static provider registry (i.e. custom/user-
+	 * configured models). The dashboard query path uses this to compute
+	 * cost and cacheRatio discounts when the static registry lookup fails.
+	 * Backward compatible: events recorded before this field was introduced
+	 * remain valid (query path falls back to static registry, then to 0).
+	 */
+	modelPricing: z
+		.object({
+			inputPrice: z.number().optional(),
+			outputPrice: z.number().optional(),
+			cacheWritesPrice: z.number().optional(),
+			cacheReadsPrice: z.number().optional(),
+		})
+		.optional(),
 	usage: z.object({
 		inputTokens: SourcedNumber.optional(),
 		outputTokens: SourcedNumber.optional(),

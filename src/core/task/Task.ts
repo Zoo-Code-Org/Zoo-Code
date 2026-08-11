@@ -80,7 +80,7 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
-import { UsageRecorder, resolveEndpoint } from "../../services/stats"
+import { UsageRecorder, resolveEndpoint, lookupModelInfo } from "../../services/stats"
 import type { UsageRecordingContext, UsageEventStore } from "../../services/stats"
 
 // integrations
@@ -3462,6 +3462,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										costSource: "provider",
 										tokenSource: "provider",
 										endpoint: resolveEndpoint(this.apiConfiguration),
+										// Persist pricing for custom models not in the static registry.
+										// lookupModelInfo returns undefined for custom/user-configured
+										// models, so we snapshot the handler's ModelInfo pricing here.
+										modelPricing: lookupModelInfo(
+											String(
+												this.apiConfiguration.apiProvider &&
+													!isRetiredProvider(this.apiConfiguration.apiProvider)
+													? this.apiConfiguration.apiProvider
+													: "unknown",
+											),
+											getModelId(this.apiConfiguration) || "unknown",
+										)
+											? undefined
+											: {
+													inputPrice: streamModelInfo.inputPrice,
+													outputPrice: streamModelInfo.outputPrice,
+													cacheWritesPrice: streamModelInfo.cacheWritesPrice,
+													cacheReadsPrice: streamModelInfo.cacheReadsPrice,
+												},
 									}
 									// Fire-and-forget: store error must not block task
 									this.usageRecorder.finalizeUsageEvent(requestKey, status, ctx).catch(() => {})
@@ -3608,6 +3627,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								costSource: "provider",
 								tokenSource: "provider",
 								endpoint: resolveEndpoint(this.apiConfiguration),
+								// Persist pricing for custom models not in the static registry.
+								modelPricing: lookupModelInfo(
+									String(
+										this.apiConfiguration.apiProvider &&
+											!isRetiredProvider(this.apiConfiguration.apiProvider)
+											? this.apiConfiguration.apiProvider
+											: "unknown",
+									),
+									getModelId(this.apiConfiguration) || "unknown",
+								)
+									? undefined
+									: {
+											inputPrice: streamModelInfo.inputPrice,
+											outputPrice: streamModelInfo.outputPrice,
+											cacheWritesPrice: streamModelInfo.cacheWritesPrice,
+											cacheReadsPrice: streamModelInfo.cacheReadsPrice,
+										},
 							}
 							// Fire-and-forget: store error must not block task
 							this.usageRecorder.finalizeUsageEvent(requestKey, failedStatus, ctx).catch(() => {})

@@ -427,7 +427,7 @@ export function computeEventDelta(event: UsageEventV1, cacheRatio?: number): Buc
 	// portion of the input is priced at the (cheaper) cache-read rate, so
 	// the cost is reduced by cacheRatio × discountBase. Providers that DO
 	// report cache keep their verbatim cost — cacheRead=0 is a true miss.
-	const isCacheReadUnreported = !providerReportsCache(event.provider, event.model)
+	const isCacheReadUnreported = !providerReportsCache(event.provider, event.model, event.modelPricing)
 	if (isCacheReadUnreported && cacheRatio !== undefined && cacheRatio > 0) {
 		costUsd = applyCacheDiscount(costUsd, computeCacheDiscountBase(event), cacheRatio)
 	}

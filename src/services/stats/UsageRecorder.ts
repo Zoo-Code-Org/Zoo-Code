@@ -55,6 +55,18 @@ export interface UsageRecordingContext {
 	 * Absent for default endpoints. See resolveEndpoint() in Task.ts.
 	 */
 	endpoint?: string
+	/**
+	 * Snapshot of the model's pricing info at capture time. Only populated
+	 * for models NOT in the static provider registry (i.e. custom/user-
+	 * configured models). The dashboard query path uses this to compute
+	 * cost and cacheRatio discounts when the static registry lookup fails.
+	 */
+	modelPricing?: {
+		inputPrice?: number
+		outputPrice?: number
+		cacheWritesPrice?: number
+		cacheReadsPrice?: number
+	}
 }
 
 // ── UsageRecorder ────────────────────────────────────────────────────────────
@@ -127,6 +139,7 @@ export class UsageRecorder {
 			model: ctx.model,
 			mode: ctx.mode,
 			endpoint: ctx.endpoint,
+			modelPricing: ctx.modelPricing,
 			usage: {
 				inputTokens: ctx.inputTokens > 0 ? { value: ctx.inputTokens, source: ctx.tokenSource } : undefined,
 				outputTokens: ctx.outputTokens > 0 ? { value: ctx.outputTokens, source: ctx.tokenSource } : undefined,
