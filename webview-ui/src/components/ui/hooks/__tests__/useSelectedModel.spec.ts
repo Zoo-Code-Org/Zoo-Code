@@ -10,6 +10,7 @@ import {
 	ModelInfo,
 	type RouterModels,
 	type ProviderName,
+	type ModelRecord,
 	anthropicModels,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	litellmDefaultModelInfo,
@@ -53,28 +54,124 @@ const mockUseOllamaModels = useOllamaModels as Mock<typeof useOllamaModels>
 type TestRouterModels = Partial<Record<keyof RouterModels, ModelRecord | null>>
 type QueryResultOptions = { isLoading?: boolean; isError?: boolean }
 
-const createQueryResult = <TData>(data: TData, options: QueryResultOptions = {}) => ({
-	data,
-	isLoading: options.isLoading ?? false,
-	isError: options.isError ?? false,
-})
+const createQueryResult = <TData>(
+	data: TData | undefined,
+	fallbackData: TData,
+	options: QueryResultOptions | boolean = {},
+): UseQueryResult<TData, Error> => {
+	const isLoading = typeof options === "boolean" ? options : (options.isLoading ?? false)
+	const isError = typeof options === "boolean" ? false : (options.isError ?? false)
+
+	if (isLoading) {
+		return {
+			data: undefined,
+			dataUpdatedAt: 0,
+			error: null,
+			errorUpdatedAt: 0,
+			failureCount: 0,
+			failureReason: null,
+			errorUpdateCount: 0,
+			isError: false,
+			isFetched: false,
+			isFetchedAfterMount: false,
+			isFetching: true,
+			isLoading: true,
+			isPending: true,
+			isLoadingError: false,
+			isInitialLoading: true,
+			isPaused: false,
+			isPlaceholderData: false,
+			isRefetchError: false,
+			isRefetching: false,
+			isStale: false,
+			isSuccess: false,
+			isEnabled: true,
+			refetch: vi.fn(),
+			status: "pending",
+			fetchStatus: "fetching",
+			promise: Promise.resolve(fallbackData),
+		}
+	}
+
+	if (isError) {
+		const error = new Error("Test query error")
+
+		return {
+			data: data ?? fallbackData,
+			dataUpdatedAt: 0,
+			error,
+			errorUpdatedAt: 0,
+			failureCount: 1,
+			failureReason: error,
+			errorUpdateCount: 1,
+			isError: true,
+			isFetched: true,
+			isFetchedAfterMount: true,
+			isFetching: false,
+			isLoading: false,
+			isPending: false,
+			isLoadingError: false,
+			isInitialLoading: false,
+			isPaused: false,
+			isPlaceholderData: false,
+			isRefetchError: true,
+			isRefetching: false,
+			isStale: true,
+			isSuccess: false,
+			isEnabled: true,
+			refetch: vi.fn(),
+			status: "error",
+			fetchStatus: "idle",
+			promise: Promise.resolve(data ?? fallbackData),
+		}
+	}
+
+	return {
+		data: data ?? fallbackData,
+		dataUpdatedAt: 0,
+		error: null,
+		errorUpdatedAt: 0,
+		failureCount: 0,
+		failureReason: null,
+		errorUpdateCount: 0,
+		isError: false,
+		isFetched: true,
+		isFetchedAfterMount: true,
+		isFetching: false,
+		isLoading: false,
+		isPending: false,
+		isLoadingError: false,
+		isInitialLoading: false,
+		isPaused: false,
+		isPlaceholderData: false,
+		isRefetchError: false,
+		isRefetching: false,
+		isStale: false,
+		isSuccess: true,
+		isEnabled: true,
+		refetch: vi.fn(),
+		status: "success",
+		fetchStatus: "idle",
+		promise: Promise.resolve(data ?? fallbackData),
+	}
+}
 
 // React Query exposes a discriminated union with additional runtime fields; these tests only need the stable query state fields.
 const createRouterModelsResult = (
 	data: TestRouterModels | undefined,
 	options?: QueryResultOptions,
-): ReturnType<typeof useRouterModels> => createQueryResult(data, options) as ReturnType<typeof useRouterModels>
+): ReturnType<typeof useRouterModels> => createQueryResult(data, {}, options) as ReturnType<typeof useRouterModels>
 
 const createOpenRouterModelProvidersResult = (
 	data: Record<string, ModelInfo> | undefined,
 	options?: QueryResultOptions,
 ): ReturnType<typeof useOpenRouterModelProviders> =>
-	createQueryResult(data, options) as ReturnType<typeof useOpenRouterModelProviders>
+	createQueryResult(data, {}, options) as ReturnType<typeof useOpenRouterModelProviders>
 
 const createLocalModelsResult = (
 	data: ModelRecord | undefined,
 	options?: QueryResultOptions,
-): ReturnType<typeof useLmStudioModels> => createQueryResult(data, options) as ReturnType<typeof useLmStudioModels>
+): ReturnType<typeof useLmStudioModels> => createQueryResult(data, {}, options) as ReturnType<typeof useLmStudioModels>
 
 type OpenRouterModelProviders = NonNullable<ReturnType<typeof useOpenRouterModelProviders>["data"]>
 
@@ -153,69 +250,6 @@ const createRouterModels = (modelKey: keyof RouterModels, modelId: string, info?
 	models[modelKey] = info ? { [modelId]: info } : {}
 	return models
 }
-
-const createQueryResult = <TData>(
-	data: TData | undefined,
-	fallbackData: TData,
-	isLoading: boolean,
-): UseQueryResult<TData, Error> =>
-	isLoading
-		? {
-				data: undefined,
-				dataUpdatedAt: 0,
-				error: null,
-				errorUpdatedAt: 0,
-				failureCount: 0,
-				failureReason: null,
-				errorUpdateCount: 0,
-				isError: false,
-				isFetched: false,
-				isFetchedAfterMount: false,
-				isFetching: true,
-				isLoading: true,
-				isPending: true,
-				isLoadingError: false,
-				isInitialLoading: true,
-				isPaused: false,
-				isPlaceholderData: false,
-				isRefetchError: false,
-				isRefetching: false,
-				isStale: false,
-				isSuccess: false,
-				isEnabled: true,
-				refetch: vi.fn(),
-				status: "pending",
-				fetchStatus: "fetching",
-				promise: Promise.resolve(fallbackData),
-			}
-		: {
-				data: data ?? fallbackData,
-				dataUpdatedAt: 0,
-				error: null,
-				errorUpdatedAt: 0,
-				failureCount: 0,
-				failureReason: null,
-				errorUpdateCount: 0,
-				isError: false,
-				isFetched: true,
-				isFetchedAfterMount: true,
-				isFetching: false,
-				isLoading: false,
-				isPending: false,
-				isLoadingError: false,
-				isInitialLoading: false,
-				isPaused: false,
-				isPlaceholderData: false,
-				isRefetchError: false,
-				isRefetching: false,
-				isStale: false,
-				isSuccess: true,
-				isEnabled: true,
-				refetch: vi.fn(),
-				status: "success",
-				fetchStatus: "idle",
-				promise: Promise.resolve(data ?? fallbackData),
-			}
 
 const createWrapper = () => {
 	const queryClient = new QueryClient({
