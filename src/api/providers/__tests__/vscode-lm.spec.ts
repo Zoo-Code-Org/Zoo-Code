@@ -1427,13 +1427,32 @@ describe("leaked tool-call recovery", () => {
 			expect(leftoverText).toBe(text)
 		})
 
-		it("does not recover an invoke block inside a four-backtick fence", () => {
-			const text = "````\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n````"
+		it("does not recover an invoke inside a four-backtick fence containing a three-backtick fence", () => {
+			// A narrower inner fence must not close the wider outer one, so the invoke stays quoted.
+			const text =
+				"````\n```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```\n````"
 
 			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
 			expect(calls).toHaveLength(0)
 			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke inside a tilde fence containing a backtick fence line", () => {
+			const text = "~~~\n```\n" + invoke("update_todo_list", param("todos", "[x] one")) + "\n```\n~~~"
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("recovers an invoke block that follows a closed code fence", () => {
+			const text = "```\nexample output\n```\n" + invoke("update_todo_list", param("todos", "[x] one"))
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] one" } }])
 		})
 
 		it("does not treat doubled angle brackets as trailing prose after stripping", () => {
