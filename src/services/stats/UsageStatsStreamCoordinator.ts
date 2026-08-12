@@ -468,6 +468,7 @@ export class UsageStatsStreamCoordinator {
 				// membership (task creation ts) and figures (event occurredAt) to it.
 				const taskRangeMs = this.taskCatalog ? resolveStatsQueryRangeMs(sub.subscription.range) : undefined
 				const customPricing = this.customPricingProvider?.()
+				let snapshotFallback = false
 				for (const event of unseenEvents) {
 					try {
 						const legacyDelta = applyEventToProjection(
@@ -509,8 +510,13 @@ export class UsageStatsStreamCoordinator {
 						// On delta computation failure, fall back to snapshot
 						sub.lastSequence = this.database.getLastSequence()
 						this.sendSnapshot(sub)
-						continue
+						snapshotFallback = true
+						break
 					}
+				}
+
+				if (snapshotFallback) {
+					continue
 				}
 
 				// Send deltas to the subscriber

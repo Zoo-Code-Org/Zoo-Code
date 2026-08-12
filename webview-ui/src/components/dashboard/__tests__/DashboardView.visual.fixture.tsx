@@ -4,6 +4,7 @@ import React from "react"
 import { TranslationContext as AppTranslationContext } from "@/i18n/TranslationContext"
 import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import enDashboard from "@/i18n/locales/en/dashboard.json" with { type: "json" }
 import enStats from "@/i18n/locales/en/stats.json" with { type: "json" }
 
@@ -67,9 +68,11 @@ export function DashboardViewFixture() {
 		<ExtensionStateContextProvider>
 			<PlaywrightTranslationContext.Provider value={translationContextValue}>
 				<AppTranslationContext.Provider value={translationContextValue}>
-					<div className="w-[520px] h-[360px] bg-vscode-editor-background text-vscode-foreground overflow-hidden">
-						<DashboardView onDone={() => {}} />
-					</div>
+					<TooltipProvider>
+						<div className="w-[520px] h-[360px] bg-vscode-editor-background text-vscode-foreground overflow-hidden">
+							<DashboardView onDone={() => {}} />
+						</div>
+					</TooltipProvider>
 				</AppTranslationContext.Provider>
 			</PlaywrightTranslationContext.Provider>
 		</ExtensionStateContextProvider>
