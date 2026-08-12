@@ -13,20 +13,14 @@ import {
 	getWorkspaceGitInfo,
 	convertGitUrlToHttps,
 	getGitStatus,
+	getCommitContext,
 } from "../git"
 import { truncateOutput } from "../../integrations/misc/extract-text"
-
-type ExecFunction = (
-	command: string,
-	options: { cwd?: string },
-	callback: (error: ExecException | null, result?: { stdout: string; stderr: string }) => void,
-) => void
-
-type PromisifiedExec = (command: string, options?: { cwd?: string }) => Promise<{ stdout: string; stderr: string }>
 
 // Mock child_process.exec
 vitest.mock("child_process", () => ({
 	exec: vitest.fn(),
+	execFile: vitest.fn(),
 }))
 
 // Mock fs.promises
@@ -34,6 +28,7 @@ vitest.mock("fs", () => ({
 	promises: {
 		access: vitest.fn(),
 		readFile: vitest.fn(),
+		open: vitest.fn(),
 	},
 }))
 
@@ -49,21 +44,27 @@ vitest.mock("vscode", () => ({
 
 // Mock util.promisify to return our own mock function
 vitest.mock("util", () => ({
-	promisify: vitest.fn((fn: ExecFunction): PromisifiedExec => {
-		return async (command: string, options?: { cwd?: string }) => {
+	promisify: vitest.fn((fn: (...args: unknown[]) => void) => {
+		return async (...args: unknown[]) => {
 			// Call the original mock to maintain the mock implementation
 			return new Promise((resolve, reject) => {
-				fn(
-					command,
-					options || {},
-					(error: ExecException | null, result?: { stdout: string; stderr: string }) => {
-						if (error) {
-							reject(error)
-						} else {
-							resolve(result!)
-						}
-					},
-				)
+				const callback = (error: ExecException | null, result?: { stdout: string; stderr: string }) => {
+					if (error) {
+						reject(error)
+					} else {
+						resolve(result!)
+					}
+				}
+
+				// `exec(command, options, cb)` and `execFile(file, args, options, cb)` differ in
+				// arity, so both shapes are normalized here rather than mocking promisify twice.
+				const [first, second, third] = args
+
+				if (Array.isArray(second)) {
+					fn(first, second, third || {}, callback)
+				} else {
+					fn(first, second || {}, callback)
+				}
 			})
 		}
 	}),
@@ -76,7 +77,7 @@ vitest.mock("../../integrations/misc/extract-text", () => ({
 	}),
 }))
 
-import { exec } from "child_process"
+import { exec, execFile } from "child_process"
 
 describe("git utils", () => {
 	const cwd = "/test/path"
@@ -348,6 +349,252 @@ describe("git utils", () => {
 
 			const result = await getCommitInfo("abc123", cwd)
 			expect(result).toBe("Not a git repository")
+		})
+	})
+
+	describe("getCommitContext", () => {
+		const NUL = "\0"
+		const mockDiff = "@@ -1,1 +1,2 @@\n-old line\n+new line"
+
+		type ExecResult = { stdout: string; stderr: string }
+		type ExecCallback = (error: Error | null, result?: ExecResult) => void
+
+		// `checkGitInstalled` and `checkGitRepo` are fixed strings, so they still run through `exec`.
+		const mockProbes = ({ installed = true, repo = true } = {}) => {
+			vitest.mocked(exec).mockImplementation(((command: string, _options: unknown, callback: ExecCallback) => {
+				const available = command === "git --version" ? installed : repo
+
+				if (available) {
+					callback(null, { stdout: "ok", stderr: "" })
+				} else {
+					callback(new Error(`unavailable: ${command}`))
+				}
+
+				return {} as ReturnType<typeof exec>
+			}) as unknown as typeof exec)
+		}
+
+		// Keyed by the joined argument array, since that is what the collector passes now. Anything
+		// not listed rejects, which is how the failure paths are exercised.
+		const mockGit = (responses: Record<string, string>) => {
+			const calls: Array<{ file: string; args: string[] }> = []
+
+			vitest.mocked(execFile).mockImplementation(((
+				file: string,
+				args: string[],
+				_options: unknown,
+				callback: ExecCallback,
+			) => {
+				calls.push({ file, args })
+				const stdout = responses[args.join(" ")]
+
+				if (stdout === undefined) {
+					callback(new Error(`unexpected command: git ${args.join(" ")}`))
+				} else {
+					callback(null, { stdout, stderr: "" })
+				}
+
+				return {} as ReturnType<typeof execFile>
+			}) as unknown as typeof execFile)
+
+			return calls
+		}
+
+		const staged = (nameStatus: string, diff = mockDiff): Record<string, string> => ({
+			"diff --cached --name-status -z": nameStatus,
+			"diff --cached --unified=1": diff,
+			"branch --show-current": "feature/x\n",
+			"log -n5 --format=%s": "earlier subject\n",
+		})
+
+		const workingTree = (status: string, diff = mockDiff): Record<string, string> => ({
+			"diff --cached --name-status -z": "",
+			"status --porcelain=v1 -z --untracked-files=all": status,
+			"diff --unified=1": diff,
+			"rev-parse --show-toplevel": `${cwd}\n`,
+			"branch --show-current": "main\n",
+			"log -n5 --format=%s": "earlier subject\n",
+		})
+
+		// Narrows the result so a failure reports its reason instead of a property-of-undefined.
+		const expectContext = async () => {
+			const result = await getCommitContext(cwd)
+
+			if (!result.ok) {
+				throw new Error(`expected a context, got "${result.reason}"`)
+			}
+
+			return result.context
+		}
+
+		const mockUntrackedFile = (contents: Buffer | null) => {
+			vitest.mocked(fs.promises.open).mockImplementation((async () => {
+				if (!contents) {
+					throw new Error("ENOENT")
+				}
+
+				return {
+					read: async (buffer: Buffer) => ({ bytesRead: contents.copy(buffer) }),
+					close: async () => {},
+				}
+			}) as unknown as typeof fs.promises.open)
+		}
+
+		it("should collect staged changes as structured entries", async () => {
+			mockProbes()
+			mockGit(staged(`M${NUL}src/file1.ts${NUL}A${NUL}src/new.ts${NUL}D${NUL}src/gone.ts${NUL}`))
+
+			const context = await expectContext()
+			expect(context.staged).toBe(true)
+			expect(context.files).toEqual([
+				{ status: "modified", path: "src/file1.ts" },
+				{ status: "added", path: "src/new.ts" },
+				{ status: "deleted", path: "src/gone.ts" },
+			])
+			expect(context.branch).toBe("feature/x")
+			expect(context.recentCommits).toEqual(["earlier subject"])
+			expect(context.diff).toContain("+new line")
+		})
+
+		// A rename or copy record carries two paths. Reading one where there are two would shift
+		// every later record onto the wrong file, so the trailing entry is the real assertion.
+		it("should parse renames and copies without desyncing later entries", async () => {
+			mockProbes()
+			mockGit(
+				staged(
+					`R100${NUL}old name.ts${NUL}new name.ts${NUL}` +
+						`C075${NUL}src/base.ts${NUL}src/copy.ts${NUL}` +
+						`M${NUL}src/after.ts${NUL}`,
+				),
+			)
+
+			expect((await expectContext()).files).toEqual([
+				{ status: "renamed", path: "new name.ts", oldPath: "old name.ts" },
+				{ status: "copied", path: "src/copy.ts", oldPath: "src/base.ts" },
+				{ status: "modified", path: "src/after.ts" },
+			])
+		})
+
+		it("should keep paths with spaces and unusual characters verbatim", async () => {
+			mockProbes()
+			mockGit(staged(`A${NUL}src/a "quoted" & odd (file).ts${NUL}`))
+
+			expect((await expectContext()).files).toEqual([{ status: "added", path: 'src/a "quoted" & odd (file).ts' }])
+		})
+
+		// Replaces an older test that checked the command string for shell metacharacters. With
+		// `execFile` there is no shell at all, so the guard is that arguments stay separate values.
+		it("should pass every argument as an array element rather than a shell string", async () => {
+			mockProbes()
+			const calls = mockGit(staged(`M${NUL}src/file1.ts${NUL}`))
+
+			await getCommitContext(cwd)
+
+			expect(calls.length).toBeGreaterThan(0)
+			expect(calls.every((call) => call.file === "git")).toBe(true)
+			expect(calls.map((call) => call.args)).toContainEqual(["diff", "--cached", "--name-status", "-z"])
+			expect(calls.map((call) => call.args)).toContainEqual(["diff", "--cached", "--unified=1"])
+		})
+
+		it("should fall back to the working tree when nothing is staged", async () => {
+			mockProbes()
+			mockGit(workingTree(` M src/file1.ts${NUL}?? src/untracked.ts${NUL}`))
+			mockUntrackedFile(Buffer.from("export const value = 1\n"))
+
+			const context = await expectContext()
+			expect(context.staged).toBe(false)
+			expect(context.files).toEqual([
+				{ status: "modified", path: "src/file1.ts" },
+				{ status: "untracked", path: "src/untracked.ts" },
+			])
+		})
+
+		// Porcelain reverses the field order of `diff --name-status`: here the new path comes first.
+		it("should parse porcelain renames, where the new path comes first", async () => {
+			mockProbes()
+			mockGit(workingTree(`R  new name.ts${NUL}old name.ts${NUL}M  after.ts${NUL}`))
+
+			expect((await expectContext()).files).toEqual([
+				{ status: "renamed", path: "new name.ts", oldPath: "old name.ts" },
+				{ status: "modified", path: "after.ts" },
+			])
+		})
+
+		it("should include bounded contents for untracked files", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? src/untracked.ts${NUL}`))
+			mockUntrackedFile(Buffer.from("export const answer = 42\n"))
+
+			const context = await expectContext()
+			expect(context.diff).toContain("New file: src/untracked.ts")
+			expect(context.diff).toContain("export const answer = 42")
+		})
+
+		it("should skip untracked files that look binary", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? assets/logo.png${NUL}`))
+			mockUntrackedFile(Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47]))
+
+			const context = await expectContext()
+			expect(context.files).toEqual([{ status: "untracked", path: "assets/logo.png" }])
+			expect(context.diff).not.toContain("New file: assets/logo.png")
+		})
+
+		it("should work in a repository without an initial commit", async () => {
+			mockProbes()
+			// `git log` fails before the first commit, and must not take the collection down with it.
+			const responses = workingTree(`?? file.txt${NUL}`)
+			delete responses["log -n5 --format=%s"]
+			mockGit(responses)
+			mockUntrackedFile(Buffer.from("hello\n"))
+
+			const context = await expectContext()
+			expect(context.recentCommits).toEqual([])
+			expect(context.files).toEqual([{ status: "untracked", path: "file.txt" }])
+		})
+
+		// A line limit alone is not a bound: one generated file can be a single enormous line.
+		it("should cap output by characters as well as by lines", async () => {
+			mockProbes()
+			mockGit(staged(`M${NUL}dist/bundle.js${NUL}`, `+${"a".repeat(200_000)}`))
+
+			await getCommitContext(cwd)
+
+			expect(vitest.mocked(truncateOutput)).toHaveBeenCalledWith(expect.any(String), 500, 102_400)
+		})
+
+		it("should report no-changes on a clean tree", async () => {
+			mockProbes()
+			mockGit(workingTree(""))
+
+			expect(await getCommitContext(cwd)).toEqual({ ok: false, reason: "no-changes" })
+		})
+
+		it("should report git-missing when git is not installed", async () => {
+			mockProbes({ installed: false })
+			mockGit({})
+
+			expect(await getCommitContext(cwd)).toEqual({ ok: false, reason: "git-missing" })
+		})
+
+		it("should report not-a-repo outside a repository", async () => {
+			mockProbes({ repo: false })
+			mockGit({})
+
+			expect(await getCommitContext(cwd)).toEqual({ ok: false, reason: "not-a-repo" })
+		})
+
+		// An oversized diff exceeding `maxBuffer` is expected, not exceptional: the documented
+		// contract is a reason, never a rejection.
+		it("should report failed instead of rejecting when a git command fails", async () => {
+			mockProbes()
+			const responses = staged(`M${NUL}src/file1.ts${NUL}`)
+			delete responses["diff --cached --unified=1"]
+			mockGit(responses)
+
+			const result = await getCommitContext(cwd)
+			expect(result.ok).toBe(false)
+			expect(result).toMatchObject({ reason: "failed" })
 		})
 	})
 

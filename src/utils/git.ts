@@ -1,7 +1,7 @@
 import * as vscode from "vscode"
 import * as path from "path"
 import { promises as fs } from "fs"
-import { exec } from "child_process"
+import { exec, execFile } from "child_process"
 import { promisify } from "util"
 
 import type { GitRepositoryInfo, GitCommit } from "@roo-code/types"
@@ -10,7 +10,30 @@ import { truncateOutput } from "../integrations/misc/extract-text"
 
 const execAsync = promisify(exec)
 
+// Used for the commit-context commands: arguments are passed as an array, so no shell is
+// involved and paths never need quoting.
+const execFileAsync = promisify(execFile)
+
 const GIT_OUTPUT_LINE_LIMIT = 500
+
+// A line limit alone is not a bound: one minified or generated file can be a single line of
+// several megabytes. This caps the payload regardless of how it is distributed across lines.
+const GIT_OUTPUT_CHARACTER_LIMIT = 100 * 1024
+
+// Node's default `exec` buffer is 1MB, which real-world diffs routinely exceed.
+const GIT_DIFF_MAX_BUFFER = 10 * 1024 * 1024
+
+// A commit message needs to know what changed, not every line of how. One line of surrounding
+// context per hunk is enough to tell the model where an edit landed, and shrinking the prompt is
+// the one latency factor we control without affecting the model's output.
+const COMMIT_DIFF_ARGS = ["--unified=1"]
+
+// Untracked files have no diff, so their contents are read directly. Enough to tell the model
+// what a new file is for, not enough for a large one to crowd out the rest of the context.
+const UNTRACKED_FILE_BYTE_LIMIT = 2 * 1024
+const UNTRACKED_TOTAL_CHARACTER_LIMIT = 20 * 1024
+
+const RECENT_COMMIT_COUNT = 5
 
 /**
  * Extracts git repository information from the workspace's .git directory
@@ -343,6 +366,278 @@ export async function getWorkingState(cwd: string): Promise<string> {
 	} catch (error) {
 		console.error("Error getting working state:", error)
 		return `Failed to get working state: ${error instanceof Error ? error.message : String(error)}`
+	}
+}
+
+export type GitFileStatus = "added" | "modified" | "deleted" | "renamed" | "copied" | "untracked" | "unknown"
+
+export interface GitFileChange {
+	status: GitFileStatus
+	/** Path relative to the repository root, exactly as git reported it. */
+	path: string
+	/** Where the file came from. Only set for renames and copies. */
+	oldPath?: string
+}
+
+export interface CommitContext {
+	/** True when describing the index, false when describing the whole working tree. */
+	staged: boolean
+	/** Undefined when HEAD is detached. */
+	branch?: string
+	recentCommits: string[]
+	files: GitFileChange[]
+	/** The diff, followed by the contents of any untracked files. Truncated to fit a prompt. */
+	diff: string
+}
+
+export type CommitContextResult =
+	| { ok: true; context: CommitContext }
+	| { ok: false; reason: "git-missing" | "not-a-repo" | "no-changes" | "failed"; error?: string }
+
+async function runGit(args: string[], cwd: string): Promise<string> {
+	const { stdout } = await execFileAsync("git", args, { cwd, maxBuffer: GIT_DIFF_MAX_BUFFER })
+	return stdout
+}
+
+function toFileStatus(code: string): GitFileStatus {
+	switch (code) {
+		case "A":
+			return "added"
+		case "M":
+			return "modified"
+		case "D":
+			return "deleted"
+		case "R":
+			return "renamed"
+		case "C":
+			return "copied"
+		case "?":
+			return "untracked"
+		default:
+			return "unknown"
+	}
+}
+
+/**
+ * Parses `git diff --name-status -z`: a NUL-terminated status field followed by one path, or -
+ * for renames and copies - by two paths, the original first.
+ *
+ * Copy records appear whenever the user has `diff.renames = copies` configured, so they have to
+ * be consumed correctly even though we never ask for copy detection: reading one path where
+ * there are two would shift every later record onto the wrong file.
+ */
+function parseNameStatus(stdout: string): GitFileChange[] {
+	const fields = stdout.split("\0")
+	const files: GitFileChange[] = []
+
+	for (let index = 0; index < fields.length; index++) {
+		const code = fields[index]
+
+		// The final NUL leaves an empty trailing field.
+		if (!code) {
+			continue
+		}
+
+		const status = toFileStatus(code[0])
+		const first = fields[++index]
+
+		if (status === "renamed" || status === "copied") {
+			const second = fields[++index]
+
+			if (!first || !second) {
+				break
+			}
+
+			files.push({ status, path: second, oldPath: first })
+			continue
+		}
+
+		if (!first) {
+			break
+		}
+
+		files.push({ status, path: first })
+	}
+
+	return files
+}
+
+/**
+ * Parses `git status --porcelain=v1 -z`: `XY<space><path>`, with renames and copies adding the
+ * original path as a second NUL-terminated field.
+ *
+ * Note the field order is the reverse of `git diff --name-status -z` - here the new path comes
+ * first. Both formats are NUL-delimited, so paths are emitted verbatim and never quoted.
+ */
+function parsePorcelainStatus(stdout: string): GitFileChange[] {
+	const records = stdout.split("\0")
+	const files: GitFileChange[] = []
+
+	for (let index = 0; index < records.length; index++) {
+		const record = records[index]
+
+		// The shortest valid record is two status characters, a space and a single-character path.
+		if (record.length < 4) {
+			continue
+		}
+
+		const indexCode = record[0]
+		const worktreeCode = record[1]
+		const filePath = record.slice(3)
+
+		// The index takes precedence, since that is what a commit would contain.
+		const status = toFileStatus(indexCode === " " ? worktreeCode : indexCode)
+
+		if (status === "renamed" || status === "copied") {
+			files.push({ status, path: filePath, oldPath: records[++index] })
+			continue
+		}
+
+		files.push({ status, path: filePath })
+	}
+
+	return files
+}
+
+/**
+ * Reads up to `UNTRACKED_FILE_BYTE_LIMIT` bytes of a file, or null if it cannot be read or looks
+ * binary. Only the head of the file is read, so an enormous untracked file costs nothing.
+ */
+async function readBoundedText(filePath: string): Promise<string | null> {
+	const handle = await fs.open(filePath, "r").catch(() => null)
+
+	if (!handle) {
+		return null
+	}
+
+	try {
+		const buffer = Buffer.alloc(UNTRACKED_FILE_BYTE_LIMIT)
+		const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)
+		const contents = buffer.subarray(0, bytesRead)
+
+		// An embedded NUL is the same heuristic git itself uses to call a file binary.
+		return contents.includes(0) ? null : contents.toString("utf8")
+	} catch {
+		return null
+	} finally {
+		await handle.close().catch(() => {})
+	}
+}
+
+/**
+ * Collects the contents of untracked files, which no diff would show. Without this an
+ * untracked-only change reaches the model as a bare list of filenames.
+ */
+async function getUntrackedContents(cwd: string, files: GitFileChange[]): Promise<string> {
+	const untracked = files.filter((file) => file.status === "untracked")
+
+	if (untracked.length === 0) {
+		return ""
+	}
+
+	// Porcelain paths are relative to the repository root, which is not necessarily `cwd`.
+	const root = (await runGit(["rev-parse", "--show-toplevel"], cwd).catch(() => "")).trim() || cwd
+	const sections: string[] = []
+	let total = 0
+
+	for (const file of untracked) {
+		if (total >= UNTRACKED_TOTAL_CHARACTER_LIMIT) {
+			break
+		}
+
+		const contents = await readBoundedText(path.join(root, file.path))
+
+		if (contents === null) {
+			continue
+		}
+
+		sections.push(`--- New file: ${file.path} ---\n${contents}`)
+		total += contents.length
+	}
+
+	return sections.join("\n\n")
+}
+
+/** Both of these are context, not the payload, so a repository without commits still works. */
+async function getCurrentBranch(cwd: string): Promise<string | undefined> {
+	const branch = await runGit(["branch", "--show-current"], cwd).catch(() => "")
+	return branch.trim() || undefined
+}
+
+async function getRecentCommits(cwd: string): Promise<string[]> {
+	const log = await runGit(["log", `-n${RECENT_COMMIT_COUNT}`, "--format=%s"], cwd).catch(() => "")
+	return log
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean)
+}
+
+/**
+ * Collects the changes to describe in a commit message.
+ *
+ * Prefers staged changes, since that is what a commit will actually contain. When nothing is
+ * staged, falls back to the whole working tree so the caller still has something to summarize.
+ *
+ * Every command runs through `execFile` with an argument array, so no path is ever interpolated
+ * into a shell string, and every listing is read in NUL-delimited form.
+ *
+ * @param cwd The repository root to inspect
+ * @returns The collected context, or the reason there is none. Never rejects.
+ */
+export async function getCommitContext(cwd: string): Promise<CommitContextResult> {
+	if (!(await checkGitInstalled())) {
+		return { ok: false, reason: "git-missing" }
+	}
+
+	if (!(await checkGitRepo(cwd))) {
+		return { ok: false, reason: "not-a-repo" }
+	}
+
+	try {
+		const staged = parseNameStatus(await runGit(["diff", "--cached", "--name-status", "-z"], cwd))
+
+		if (staged.length > 0) {
+			const diff = await runGit(["diff", "--cached", ...COMMIT_DIFF_ARGS], cwd)
+			return { ok: true, context: await buildContext(cwd, true, staged, diff) }
+		}
+
+		// Nothing staged - describe the working tree instead. `--untracked-files=all` lists files
+		// inside new directories individually, which the default summarized form would collapse.
+		const files = parsePorcelainStatus(
+			await runGit(["status", "--porcelain=v1", "-z", "--untracked-files=all"], cwd),
+		)
+
+		if (files.length === 0) {
+			return { ok: false, reason: "no-changes" }
+		}
+
+		// Deliberately `git diff` rather than `git diff HEAD`: we only reach this branch when the
+		// index is empty, so the two produce identical output - but `HEAD` does not resolve in a
+		// repository without an initial commit, where it would fail outright.
+		const diff = await runGit(["diff", ...COMMIT_DIFF_ARGS], cwd)
+		const untracked = await getUntrackedContents(cwd, files)
+
+		return { ok: true, context: await buildContext(cwd, false, files, `${diff}\n\n${untracked}`) }
+	} catch (error) {
+		// Failures here are expected rather than exceptional - an oversized diff exceeding
+		// `maxBuffer`, a repository in a state git refuses to describe - so the caller gets a
+		// reason rather than a rejection.
+		return { ok: false, reason: "failed", error: error instanceof Error ? error.message : String(error) }
+	}
+}
+
+async function buildContext(
+	cwd: string,
+	staged: boolean,
+	files: GitFileChange[],
+	diff: string,
+): Promise<CommitContext> {
+	return {
+		staged,
+		branch: await getCurrentBranch(cwd),
+		recentCommits: await getRecentCommits(cwd),
+		files,
+		diff: truncateOutput(diff.trim(), GIT_OUTPUT_LINE_LIMIT, GIT_OUTPUT_CHARACTER_LIMIT),
 	}
 }
 
