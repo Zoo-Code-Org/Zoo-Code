@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "执行",
 			"description": "自动执行白名单中的命令而无需批准",
+			"destructiveCommandGuard": {
+				"label": "启用破坏性命令防护",
+				"description": "下载并使用适用于此平台的 Destructive Command Guard（DCG）。DCG 允许的命令会自动执行。被 DCG 拦截的命令需要你批准后才能执行。启用后，Zoo 的命令列表将被禁用。关闭此选项时，已下载的可执行文件会保留。"
+			},
 			"allowedCommands": "命令白名单",
 			"allowedCommandsDescription": "当\"自动批准命令行操作\"启用时可以自动执行的命令前缀。添加 * 以允许所有命令（谨慎使用）。",
 			"deniedCommands": "拒绝的命令",
@@ -491,6 +495,9 @@
 		"openAiApiKey": "OpenAI API 密钥",
 		"apiKey": "API 密钥",
 		"openAiBaseUrl": "OpenAI 基础 URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure 部署名称",
+		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",
 		"getOpenAiApiKey": "获取 OpenAI API 密钥",
 		"mistralApiKey": "Mistral API 密钥",
 		"getMistralApiKey": "获取 Mistral / Codestral API 密钥",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "限制响应中的最大 Token 数量",
 	"maxOutputTokensLabel": "最大输出 Token 数",
 	"maxTokensGenerateDescription": "响应中生成的最大 Token 数",
+	"openAiCodexSpeed": {
+		"label": "速度",
+		"tooltip": "快速模式使用 Codex 优先处理，速度约为 1.5 倍，但会消耗更多订阅配额。",
+		"standard": "标准",
+		"fast": "快速（1.5 倍速度，用量增加）"
+	},
 	"serviceTier": {
 		"label": "服务等级",
 		"tooltip": "为加快API请求处理速度，请尝试优先处理服务等级。为获得更低价格但延迟较高，请尝试灵活处理等级。",

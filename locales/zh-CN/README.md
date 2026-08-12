@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -32,15 +31,25 @@
 
 你可以在 [Roo→Zoo 迁移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到从 Roo Code 迁移到 Zoo Code 的快速说明。我们希望在大家迁移过程中尽可能提供帮助，这也是我们设立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社区的原因。如果你遇到问题或有任何疑问，欢迎加入后直接提问。
 
-## v3.72.0 新增内容
+## Zoo Code 在 Roo Code 之后新增的功能
 
-- **Moonshot 和 Kimi Code 提供商** — 动态发现 Moonshot 模型，或使用 OAuth 设备流程登录 Kimi Code。
-- **最新模型支持** — 跨提供商使用 Claude Opus 5，以及 Kimi K3、Gemini 3.6 Flash 和 MiniMax-M3。
-- **改进的子任务工作流** — 干净地放弃中断的子任务，并通过更安全的任务历史失效机制和更完善的恢复测试提升可靠性。
-- **扩展代码库索引** — 为 Dart 和纯文本文件建立索引。
-- **提供商可靠性** — 修复 ChatGPT OAuth 下的 GPT-5.6 Luna、LiteLLM reasoning content 和 DeepSeek V4 图片输入问题。
-- **更顺畅的设置体验** — 改进 Zoo Gateway 登录和模式切换行为。
-- API、提供商类型、依赖、本地化和 CI 改进。
+Zoo Code 基于 Roo Code 打下的基础持续扩展，新增了：
+
+- **Semble 代码库智能** — 快速、按需的语义代码搜索，可自动设置，无需单独的索引流程。
+- **更强大的 Orchestrator 工作流** — 更安全的任务委派、并行任务协调、可靠的父子任务恢复，以及更完善的子任务与提供商配置隔离。
+- **通过 Destructive Command Guard (DCG) 实现更长时间的自主运行** — 自动阻止危险命令，同时让可信工作继续执行，无需反复批准。
+- **最新模型** — 持续支持新的 Claude、GPT、Gemini、Kimi、GLM、Grok、MiniMax 及其他模型系列。
+- **更多连接方式** — 新增和扩展了 Zoo Gateway、Moonshot、Kimi Code、Kenari、Friendli、OpenCode Go 等众多提供商。
+- **更可靠的终端和编辑工作流** — 修复终端过早完成、任务状态竞争、上下文管理、差异更新编辑和提供商专用工具调用等问题。
+- **更全面的工作区控制** — 支持规则管理、按模式限制 MCP、多根工作区路径控制、模型推理选项和完成后的变更审查操作。
+
+## v3.76.0 新增内容
+
+- **通过 Destructive Command Guard (DCG) 长时间、不间断地运行任务** — DCG 会阻止危险命令，同时让 Zoo 继续工作，无需你反复点击批准按钮；托管二进制文件的下载和安装也经过了安全加固。
+- **更完善的提供商控制和可靠性** — 可选择 OpenAI Codex 响应速度、使用更新后的 DeepSeek 配置，并在提供商配置变更与运行中任务之间获得更强的隔离。
+- **重要的终端运行修复** — Zoo 现在会等待终端命令完成后再开始下一步，避免工作重叠和模型过早继续。
+- 更智能的批处理会合并相关工具的批准请求，同时将不相关的请求分开处理。
+- 遇到故障和并发请求时，遥测数据传输与模型缓存获取更加稳定可靠。
 
 ## Zoo Code 能为您做什么？
 
@@ -64,24 +73,9 @@ Zoo Code 适应您的工作方式，而不是相反：
 
 了解更多：[使用模式](https://docs.zoocode.dev/basic-usage/using-modes) • [自定义模式](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## 教程和功能视频
-
-<div align="center">
-
-|                                                                                                                                                                     |                                                                                                                                                                    |                                                                                                                                                                  |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>安装 Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>配置个人资料</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>代码库索引</b> |
-|  <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>自定义模式</b>   |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>检查点</b>    | <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>上下文管理</b> |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">更多快速教程和功能视频...</a>
-</p>
-
 ## 资源
 
 - **[文档](https://docs.zoocode.dev):** 安装、配置和掌握 Zoo Code 的官方指南。
-- **[YouTube 频道](https://youtube.com/@roocodeyt?feature=shared):** 观看教程和功能演示。
 - **[Discord 服务器](https://discord.gg/VxfP4Vx3gX):** 加入社区以获得实时帮助和讨论。
 - **[Reddit 社区](https://www.reddit.com/r/ZooCode):** 分享您的经验，看看别人在构建什么。
 - **[GitHub 问题](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** 报告错误并跟踪开发。

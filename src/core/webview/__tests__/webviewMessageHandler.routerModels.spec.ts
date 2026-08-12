@@ -128,7 +128,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		getModelsMock.mockImplementation(async (options: any) => {
 			if (options?.provider === "deepseek") {
-				return { "deepseek-chat": { contextWindow: 128000, supportsPromptCache: true } }
+				return { "deepseek-v4-flash": { contextWindow: 1_000_000, supportsPromptCache: true } }
 			}
 
 			switch (options?.provider) {
@@ -163,7 +163,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		)
 		expect(call).toBeTruthy()
 		expect(call[0].routerModels.deepseek).toEqual({
-			"deepseek-chat": { contextWindow: 128000, supportsPromptCache: true },
+			"deepseek-v4-flash": { contextWindow: 1_000_000, supportsPromptCache: true },
 		})
 	})
 

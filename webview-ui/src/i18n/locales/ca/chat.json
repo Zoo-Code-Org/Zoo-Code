@@ -233,6 +233,7 @@
 		"exitStatus": "S'ha sortit amb l'estat {{exitCode}}",
 		"malformedCommand": "Ordre mal formada: error de sintaxi del shell",
 		"manageCommands": "Comandes aprovades automàticament",
+		"denied": "Ordre denegada",
 		"addToAllowed": "Afegeix a la llista permesa",
 		"removeFromAllowed": "Elimina de la llista permesa",
 		"addToDenied": "Afegeix a la llista denegada",
@@ -343,9 +344,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Proveïdors Moonshot i Kimi Code — connecta't als models de Moonshot amb detecció de models en temps real o inicia la sessió a Kimi Code mitjançant el flux de dispositiu OAuth.",
-			"highlight2": "Compatibilitat amb els models més recents — utilitza Claude Opus 5 amb tots els proveïdors, a més de Kimi K3, Gemini 3.6 Flash i MiniMax-M3.",
-			"highlight3": "Fluxos de treball més fiables — abandona subtasques interrompudes de manera neta i indexa fitxers Dart i de text pla a la teva base de codi."
+			"highlight1": "Executa tasques més llargues i sense interrupcions amb Destructive Command Guard (DCG) — DCG bloqueja les ordres perilloses mentre permet que Zoo continuï treballant sense que hagis de prémer contínuament els botons d'aprovació.",
+			"highlight2": "Millors controls i fiabilitat dels proveïdors — tria la velocitat de resposta d'OpenAI Codex, utilitza configuracions de DeepSeek actualitzades i mantén les tasques en execució aïllades dels canvis de perfil.",
+			"highlight3": "Correcció crítica de l'execució al terminal — Zoo ara espera que les ordres del terminal acabin abans d'iniciar el pas següent."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

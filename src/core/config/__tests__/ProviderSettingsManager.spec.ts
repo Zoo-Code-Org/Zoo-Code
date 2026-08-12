@@ -1,8 +1,14 @@
 // npx vitest src/core/config/__tests__/ProviderSettingsManager.spec.ts
 
-import { ExtensionContext } from "vscode"
+import {
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	OpenAiCodexServiceTier,
+	providerIdentifiers,
+	type ProviderSettings,
+} from "@roo-code/types"
 
-import type { ProviderSettings } from "@roo-code/types"
+import { clearAllMocks } from "../../../test-utils/reset"
+import { makeExtensionContext } from "../../../test-utils/vscode"
 
 import { ProviderSettingsManager, ProviderProfiles, SyncCloudProfilesResult } from "../ProviderSettingsManager"
 
@@ -33,7 +39,6 @@ vi.mock("../../../api", async () => {
 	}
 })
 
-// Mock VSCode ExtensionContext
 const mockSecrets = {
 	get: vi.fn(),
 	store: vi.fn(),
@@ -45,16 +50,17 @@ const mockGlobalState = {
 	update: vi.fn(),
 }
 
-const mockContext = {
-	secrets: mockSecrets,
-	globalState: mockGlobalState,
-} as unknown as ExtensionContext
+const baseContext = makeExtensionContext()
+const mockContext = makeExtensionContext({
+	secrets: { ...baseContext.secrets, ...mockSecrets },
+	globalState: { ...baseContext.globalState, ...mockGlobalState },
+})
 
 describe("ProviderSettingsManager", () => {
 	let providerSettingsManager: ProviderSettingsManager
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Reset all mock implementations to default successful behavior
 		mockSecrets.get.mockResolvedValue(null)
 		mockSecrets.store.mockResolvedValue(undefined)
@@ -450,6 +456,32 @@ describe("ProviderSettingsManager", () => {
 			expect(mockSecrets.store.mock.calls[0][0]).toEqual("roo_cline_config_api_config")
 			expect(storedConfig).toEqual(expectedConfig)
 		})
+
+		it.each([OpenAiCodexServiceTier.Default, OpenAiCodexServiceTier.Priority] as const)(
+			"should persist the OpenAI Codex %s speed preference",
+			async (openAiCodexServiceTier) => {
+				mockSecrets.get.mockResolvedValue(
+					JSON.stringify({
+						currentApiConfigName: "default",
+						apiConfigs: { default: {} },
+						modeApiConfigs: {},
+					}),
+				)
+
+				await providerSettingsManager.saveConfig("codex", {
+					apiProvider: providerIdentifiers.openaiCodex,
+					apiModelId: "gpt-5.6-sol",
+					[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTier,
+				})
+
+				const storedProfiles = JSON.parse(mockSecrets.store.mock.calls.at(-1)?.[1])
+				expect(storedProfiles.apiConfigs.codex).toMatchObject({
+					apiProvider: providerIdentifiers.openaiCodex,
+					apiModelId: "gpt-5.6-sol",
+					[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTier,
+				})
+			},
+		)
 
 		it("should only save provider relevant settings", async () => {
 			mockSecrets.get.mockResolvedValue(

@@ -1,5 +1,6 @@
 import type { ProviderName, ModelInfo, ProviderSettings } from "@roo-code/types"
 import {
+	providerIdentifiers,
 	anthropicDefaultModelId,
 	bedrockDefaultModelId,
 	deepSeekDefaultModelId,
@@ -39,51 +40,54 @@ export interface ProviderServiceConfig {
 }
 
 export const PROVIDER_SERVICE_CONFIG: Partial<Record<ProviderName, ProviderServiceConfig>> = {
-	anthropic: { serviceName: "Anthropic", serviceUrl: "https://console.anthropic.com" },
-	bedrock: { serviceName: "Amazon Bedrock", serviceUrl: "https://aws.amazon.com/bedrock" },
-	deepseek: { serviceName: "DeepSeek", serviceUrl: "https://platform.deepseek.com" },
-	moonshot: { serviceName: "Moonshot", serviceUrl: "https://platform.moonshot.cn" },
-	"kimi-code": { serviceName: "Kimi Code", serviceUrl: "https://www.kimi.com/code" },
-	gemini: { serviceName: "Google Gemini", serviceUrl: "https://ai.google.dev" },
-	mistral: { serviceName: "Mistral", serviceUrl: "https://console.mistral.ai" },
-	"openai-native": { serviceName: "OpenAI", serviceUrl: "https://platform.openai.com" },
-	"qwen-code": { serviceName: "Qwen Code", serviceUrl: "https://dashscope.console.aliyun.com" },
-	vertex: { serviceName: "GCP Vertex AI", serviceUrl: "https://console.cloud.google.com/vertex-ai" },
-	xai: { serviceName: "xAI", serviceUrl: "https://x.ai" },
-	sambanova: { serviceName: "SambaNova", serviceUrl: "https://sambanova.ai" },
-	zai: { serviceName: "Z.ai", serviceUrl: "https://z.ai" },
-	fireworks: { serviceName: "Fireworks AI", serviceUrl: "https://fireworks.ai" },
-	friendli: { serviceName: "Friendli", serviceUrl: "https://friendli.ai" },
-	minimax: { serviceName: "MiniMax", serviceUrl: "https://minimax.chat" },
-	mimo: { serviceName: "Xiaomi MiMo", serviceUrl: "https://platform.xiaomimimo.com" },
-	baseten: { serviceName: "Baseten", serviceUrl: "https://baseten.co" },
-	ollama: { serviceName: "Ollama", serviceUrl: "https://ollama.ai" },
-	lmstudio: { serviceName: "LM Studio", serviceUrl: "https://lmstudio.ai/docs" },
-	"vscode-lm": {
+	[providerIdentifiers.anthropic]: { serviceName: "Anthropic", serviceUrl: "https://console.anthropic.com" },
+	[providerIdentifiers.bedrock]: { serviceName: "Amazon Bedrock", serviceUrl: "https://aws.amazon.com/bedrock" },
+	[providerIdentifiers.deepseek]: { serviceName: "DeepSeek", serviceUrl: "https://platform.deepseek.com" },
+	[providerIdentifiers.moonshot]: { serviceName: "Moonshot", serviceUrl: "https://platform.moonshot.cn" },
+	[providerIdentifiers.kimiCode]: { serviceName: "Kimi Code", serviceUrl: "https://www.kimi.com/code" },
+	[providerIdentifiers.gemini]: { serviceName: "Google Gemini", serviceUrl: "https://ai.google.dev" },
+	[providerIdentifiers.mistral]: { serviceName: "Mistral", serviceUrl: "https://console.mistral.ai" },
+	[providerIdentifiers.openaiNative]: { serviceName: "OpenAI", serviceUrl: "https://platform.openai.com" },
+	[providerIdentifiers.qwenCode]: { serviceName: "Qwen Code", serviceUrl: "https://dashscope.console.aliyun.com" },
+	[providerIdentifiers.vertex]: {
+		serviceName: "GCP Vertex AI",
+		serviceUrl: "https://console.cloud.google.com/vertex-ai",
+	},
+	[providerIdentifiers.xai]: { serviceName: "xAI", serviceUrl: "https://x.ai" },
+	[providerIdentifiers.sambanova]: { serviceName: "SambaNova", serviceUrl: "https://sambanova.ai" },
+	[providerIdentifiers.zai]: { serviceName: "Z.ai", serviceUrl: "https://z.ai" },
+	[providerIdentifiers.fireworks]: { serviceName: "Fireworks AI", serviceUrl: "https://fireworks.ai" },
+	[providerIdentifiers.friendli]: { serviceName: "Friendli", serviceUrl: "https://friendli.ai" },
+	[providerIdentifiers.minimax]: { serviceName: "MiniMax", serviceUrl: "https://minimax.chat" },
+	[providerIdentifiers.mimo]: { serviceName: "Xiaomi MiMo", serviceUrl: "https://platform.xiaomimimo.com" },
+	[providerIdentifiers.baseten]: { serviceName: "Baseten", serviceUrl: "https://baseten.co" },
+	[providerIdentifiers.ollama]: { serviceName: "Ollama", serviceUrl: "https://ollama.ai" },
+	[providerIdentifiers.lmstudio]: { serviceName: "LM Studio", serviceUrl: "https://lmstudio.ai/docs" },
+	[providerIdentifiers.vscodeLm]: {
 		serviceName: "VS Code LM",
 		serviceUrl: "https://code.visualstudio.com/api/extension-guides/language-model",
 	},
 }
 
 export const PROVIDER_DEFAULT_MODEL_IDS: Partial<Record<ProviderName, string>> = {
-	anthropic: anthropicDefaultModelId,
-	bedrock: bedrockDefaultModelId,
-	deepseek: deepSeekDefaultModelId,
-	moonshot: moonshotDefaultModelId,
-	"kimi-code": kimiCodeDefaultModelId,
-	gemini: geminiDefaultModelId,
-	mistral: mistralDefaultModelId,
-	"openai-native": openAiNativeDefaultModelId,
-	"qwen-code": qwenCodeDefaultModelId,
-	vertex: vertexDefaultModelId,
-	xai: xaiDefaultModelId,
-	sambanova: sambaNovaDefaultModelId,
-	zai: internationalZAiDefaultModelId,
-	fireworks: fireworksDefaultModelId,
-	friendli: friendliDefaultModelId,
-	minimax: minimaxDefaultModelId,
-	mimo: mimoDefaultModelId,
-	baseten: basetenDefaultModelId,
+	[providerIdentifiers.anthropic]: anthropicDefaultModelId,
+	[providerIdentifiers.bedrock]: bedrockDefaultModelId,
+	[providerIdentifiers.deepseek]: deepSeekDefaultModelId,
+	[providerIdentifiers.moonshot]: moonshotDefaultModelId,
+	[providerIdentifiers.kimiCode]: kimiCodeDefaultModelId,
+	[providerIdentifiers.gemini]: geminiDefaultModelId,
+	[providerIdentifiers.mistral]: mistralDefaultModelId,
+	[providerIdentifiers.openaiNative]: openAiNativeDefaultModelId,
+	[providerIdentifiers.qwenCode]: qwenCodeDefaultModelId,
+	[providerIdentifiers.vertex]: vertexDefaultModelId,
+	[providerIdentifiers.xai]: xaiDefaultModelId,
+	[providerIdentifiers.sambanova]: sambaNovaDefaultModelId,
+	[providerIdentifiers.zai]: internationalZAiDefaultModelId,
+	[providerIdentifiers.fireworks]: fireworksDefaultModelId,
+	[providerIdentifiers.friendli]: friendliDefaultModelId,
+	[providerIdentifiers.minimax]: minimaxDefaultModelId,
+	[providerIdentifiers.mimo]: mimoDefaultModelId,
+	[providerIdentifiers.baseten]: basetenDefaultModelId,
 }
 
 export const getProviderServiceConfig = (provider: ProviderName): ProviderServiceConfig => {
@@ -92,7 +96,7 @@ export const getProviderServiceConfig = (provider: ProviderName): ProviderServic
 
 export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {
 	// Handle Z.ai's China/International entrypoint distinction
-	if (provider === "zai" && apiConfiguration) {
+	if (provider === providerIdentifiers.zai && apiConfiguration) {
 		return apiConfiguration.zaiApiLine === "china_coding"
 			? mainlandZAiDefaultModelId
 			: internationalZAiDefaultModelId
@@ -109,44 +113,47 @@ export type ProviderModelConfig = {
 // Minimal per-provider config used by ApiOptions for model-id field wiring.
 // Kept in this file to keep ApiOptions.tsx from growing a second registry.
 const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> = {
-	openrouter: { field: "openRouterModelId", default: openRouterDefaultModelId },
-	requesty: { field: "requestyModelId", default: requestyDefaultModelId },
-	unbound: { field: "unboundModelId", default: unboundDefaultModelId },
-	litellm: { field: "litellmModelId", default: litellmDefaultModelId },
-	anthropic: { field: "apiModelId", default: anthropicDefaultModelId },
-	"openai-codex": { field: "apiModelId", default: openAiCodexDefaultModelId },
-	"qwen-code": { field: "apiModelId", default: qwenCodeDefaultModelId },
-	"openai-native": { field: "apiModelId", default: openAiNativeDefaultModelId },
-	gemini: { field: "apiModelId", default: geminiDefaultModelId },
-	deepseek: { field: "apiModelId", default: deepSeekDefaultModelId },
-	moonshot: { field: "apiModelId", default: moonshotDefaultModelId },
-	"kimi-code": { field: "apiModelId", default: kimiCodeDefaultModelId },
-	minimax: { field: "apiModelId", default: minimaxDefaultModelId },
-	mimo: { field: "apiModelId", default: mimoDefaultModelId },
-	mistral: { field: "apiModelId", default: mistralDefaultModelId },
-	xai: { field: "apiModelId", default: xaiDefaultModelId },
-	baseten: { field: "apiModelId", default: basetenDefaultModelId },
-	bedrock: { field: "apiModelId", default: bedrockDefaultModelId },
-	vertex: { field: "apiModelId", default: vertexDefaultModelId },
-	sambanova: { field: "apiModelId", default: sambaNovaDefaultModelId },
-	zai: { field: "apiModelId" },
-	fireworks: { field: "apiModelId", default: fireworksDefaultModelId },
-	friendli: { field: "apiModelId", default: friendliDefaultModelId },
-	poe: { field: "apiModelId", default: poeDefaultModelId },
-	"vercel-ai-gateway": { field: "vercelAiGatewayModelId", default: vercelAiGatewayDefaultModelId },
-	"opencode-go": { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
-	kenari: { field: "kenariModelId", default: kenariDefaultModelId },
-	"zoo-gateway": { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
-	openai: { field: "openAiModelId" },
-	ollama: { field: "ollamaModelId" },
-	lmstudio: { field: "lmStudioModelId" },
+	[providerIdentifiers.openrouter]: { field: "openRouterModelId", default: openRouterDefaultModelId },
+	[providerIdentifiers.requesty]: { field: "requestyModelId", default: requestyDefaultModelId },
+	[providerIdentifiers.unbound]: { field: "unboundModelId", default: unboundDefaultModelId },
+	[providerIdentifiers.litellm]: { field: "litellmModelId", default: litellmDefaultModelId },
+	[providerIdentifiers.anthropic]: { field: "apiModelId", default: anthropicDefaultModelId },
+	[providerIdentifiers.openaiCodex]: { field: "apiModelId", default: openAiCodexDefaultModelId },
+	[providerIdentifiers.qwenCode]: { field: "apiModelId", default: qwenCodeDefaultModelId },
+	[providerIdentifiers.openaiNative]: { field: "apiModelId", default: openAiNativeDefaultModelId },
+	[providerIdentifiers.gemini]: { field: "apiModelId", default: geminiDefaultModelId },
+	[providerIdentifiers.deepseek]: { field: "apiModelId", default: deepSeekDefaultModelId },
+	[providerIdentifiers.moonshot]: { field: "apiModelId", default: moonshotDefaultModelId },
+	[providerIdentifiers.kimiCode]: { field: "apiModelId", default: kimiCodeDefaultModelId },
+	[providerIdentifiers.minimax]: { field: "apiModelId", default: minimaxDefaultModelId },
+	[providerIdentifiers.mimo]: { field: "apiModelId", default: mimoDefaultModelId },
+	[providerIdentifiers.mistral]: { field: "apiModelId", default: mistralDefaultModelId },
+	[providerIdentifiers.xai]: { field: "apiModelId", default: xaiDefaultModelId },
+	[providerIdentifiers.baseten]: { field: "apiModelId", default: basetenDefaultModelId },
+	[providerIdentifiers.bedrock]: { field: "apiModelId", default: bedrockDefaultModelId },
+	[providerIdentifiers.vertex]: { field: "apiModelId", default: vertexDefaultModelId },
+	[providerIdentifiers.sambanova]: { field: "apiModelId", default: sambaNovaDefaultModelId },
+	[providerIdentifiers.zai]: { field: "apiModelId" },
+	[providerIdentifiers.fireworks]: { field: "apiModelId", default: fireworksDefaultModelId },
+	[providerIdentifiers.friendli]: { field: "apiModelId", default: friendliDefaultModelId },
+	[providerIdentifiers.poe]: { field: "apiModelId", default: poeDefaultModelId },
+	[providerIdentifiers.vercelAiGateway]: {
+		field: "vercelAiGatewayModelId",
+		default: vercelAiGatewayDefaultModelId,
+	},
+	[providerIdentifiers.opencodeGo]: { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
+	[providerIdentifiers.kenari]: { field: "kenariModelId", default: kenariDefaultModelId },
+	[providerIdentifiers.zooGateway]: { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
+	[providerIdentifiers.openai]: { field: "openAiModelId" },
+	[providerIdentifiers.ollama]: { field: "ollamaModelId" },
+	[providerIdentifiers.lmstudio]: { field: "lmStudioModelId" },
 }
 
 export function getProviderModelConfig(provider: string, apiConfiguration?: ProviderSettings) {
 	const config = PROVIDER_MODEL_CONFIG[provider as ProviderName]
 	if (!config) return undefined
 
-	if (provider === "zai") {
+	if (provider === providerIdentifiers.zai) {
 		return {
 			...config,
 			default: getDefaultModelIdForProvider(provider as ProviderName, apiConfiguration),
@@ -158,8 +165,8 @@ export function getProviderModelConfig(provider: string, apiConfiguration?: Prov
 
 // Custom mapping for doc URL slugs. Default is provider key.
 const PROVIDER_DOCS_SLUGS: Partial<Record<ProviderName, string>> = {
-	"openai-native": "openai",
-	openai: "openai-compatible",
+	[providerIdentifiers.openaiNative]: "openai",
+	[providerIdentifiers.openai]: "openai-compatible",
 }
 
 export function getProviderDocsSlug(provider: string) {
@@ -173,7 +180,7 @@ export const getStaticModelsForProvider = (
 	const models = MODELS_BY_PROVIDER[provider] ?? {}
 
 	// Add custom-arn option for Bedrock
-	if (provider === "bedrock") {
+	if (provider === providerIdentifiers.bedrock) {
 		return {
 			...models,
 			"custom-arn": {
@@ -200,18 +207,18 @@ export const isStaticModelProvider = (provider: ProviderName): boolean => {
  * and should not use the generic ModelPicker in ApiOptions
  */
 export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
-	"openrouter",
-	"requesty",
-	"unbound",
-	"openai", // OpenAI Compatible
-	"openai-codex", // OpenAI Codex has custom UI with auth and rate limits
-	"kimi-code",
-	"litellm",
-	"vercel-ai-gateway",
-	"ollama",
-	"lmstudio",
-	"vscode-lm",
-	"moonshot", // Moonshot has custom ModelPicker inside Moonshot.tsx
+	providerIdentifiers.openrouter,
+	providerIdentifiers.requesty,
+	providerIdentifiers.unbound,
+	providerIdentifiers.openai, // OpenAI Compatible
+	providerIdentifiers.openaiCodex, // OpenAI Codex has custom UI with auth and rate limits
+	providerIdentifiers.kimiCode,
+	providerIdentifiers.litellm,
+	providerIdentifiers.vercelAiGateway,
+	providerIdentifiers.ollama,
+	providerIdentifiers.lmstudio,
+	providerIdentifiers.vscodeLm,
+	providerIdentifiers.moonshot, // Moonshot has custom ModelPicker inside Moonshot.tsx
 ]
 
 /**
@@ -231,7 +238,7 @@ export const handleModelChangeSideEffects = <K extends keyof ProviderSettings>(
 	setApiConfigurationField: (field: K, value: ProviderSettings[K]) => void,
 ): void => {
 	// Bedrock: Clear custom ARN if not using custom ARN option
-	if (provider === "bedrock" && modelId !== "custom-arn") {
+	if (provider === providerIdentifiers.bedrock && modelId !== "custom-arn") {
 		setApiConfigurationField("awsCustomArn" as K, "" as ProviderSettings[K])
 	}
 

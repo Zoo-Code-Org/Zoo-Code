@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -36,15 +35,25 @@
 
 Roo Code'dan Zoo Code'a geçmek için hızlı bir rehberi [Roo→Zoo geçiş rehberinde](https://docs.zoocode.dev/roo-to-zoo-migration) bulabilirsin. Geçiş sürecinde kullanıcılara elimizden geldiğince yardımcı olmak istiyoruz ve bunun için [Reddit](https://www.reddit.com/r/ZooCode) ile [Discord](https://discord.gg/VxfP4Vx3gX) topluluklarımız var. Bir sorun yaşarsan ya da soruların olursa gel ve sor.
 
-## v3.72.0'daki Yenilikler
+## Zoo Code'un Roo Code'dan Sonra Ekledikleri
 
-- **Moonshot ve Kimi Code provider'ları** — Moonshot modellerini dinamik olarak keşfet veya OAuth cihaz akışıyla Kimi Code'da oturum aç.
-- **En yeni model desteği** — provider'lar genelinde Claude Opus 5'in yanı sıra Kimi K3, Gemini 3.6 Flash ve MiniMax-M3'ü kullan.
-- **Geliştirilmiş alt görev iş akışları** — daha güvenli görev geçmişi geçersiz kılma ve daha iyi devam ettirme kapsamıyla kesintiye uğramış alt görevleri temiz biçimde bırak.
-- **Genişletilmiş kod tabanı indeksleme** — Dart ve düz metin dosyalarını indeksle.
-- **Provider güvenilirliği** — ChatGPT OAuth ile GPT-5.6 Luna, LiteLLM reasoning content ve DeepSeek V4 görsel girdisi için düzeltmeler.
-- **Daha akıcı kurulum ve ayarlar** — Zoo Gateway oturum açma ve mod değiştirme davranışı iyileştirildi.
-- API, provider türleri, bağımlılıklar, yerelleştirme ve CI iyileştirmeleri.
+Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli şunlarla genişletmeye devam ediyor:
+
+- **Semble kod tabanı zekâsı** — otomatik kurulumla çalışan, ayrı bir indeksleme iş akışı gerektirmeyen hızlı ve isteğe bağlı semantik kod araması.
+- **Daha güçlü Orchestrator iş akışları** — daha güvenli görev devri, paralel görev koordinasyonu, güvenilir üst/alt görev kurtarma ve alt görevlerle sağlayıcı profilleri arasında daha iyi yalıtım.
+- **Destructive Command Guard (DCG) ile daha uzun otonom çalıştırmalar** — güvenilir işler tekrarlanan onay istekleri olmadan sürerken tehlikeli komutları otomatik olarak engeller.
+- **En yeni modeller** — yeni Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax ve diğer model aileleri için sürekli destek.
+- **Daha fazla bağlantı seçeneği** — Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go ve çok daha fazlası dahil yeni ve genişletilmiş sağlayıcılar.
+- **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
+- **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
+
+## v3.76.0'daki Yenilikler
+
+- **Destructive Command Guard (DCG) ile daha uzun ve kesintisiz görevler çalıştır** — DCG tehlikeli komutları engellerken Zoo'nun sürekli onay düğmelerine basmana gerek kalmadan çalışmayı sürdürmesini sağlar; yönetilen ikili dosyanın indirilmesi ve kurulumu da güçlendirildi.
+- **Daha iyi sağlayıcı denetimleri ve güvenilirlik** — OpenAI Codex yanıt hızını seç, güncellenmiş DeepSeek yapılandırmalarını kullan ve sağlayıcı profili değişiklikleriyle çalışan görevler arasındaki daha güçlü yalıtımdan yararlan.
+- **Kritik terminal yürütme düzeltmesi** — Zoo artık sonraki adıma başlamadan önce terminal komutlarının bitmesini bekliyor; böylece işler çakışmıyor ve model erken devam etmiyor.
+- Daha akıllı gruplama, ilişkili araç onaylarını bir araya getirirken ilgisiz istekleri ayrı tutuyor.
+- Telemetri teslimi ve model önbelleğini getirme işlemleri, hatalar ve eş zamanlı istekler karşısında daha dayanıklı.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 
@@ -68,24 +77,9 @@ Zoo Code, sizin çalışma şeklinize uyum sağlar, tam tersi değil:
 
 Daha fazla: [Modları kullanma](https://docs.zoocode.dev/basic-usage/using-modes) • [Özel modlar](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Eğitim ve Özellik Videoları
-
-<div align="center">
-
-|                                                                                                                                                                         |                                                                                                                                                                               |                                                                                                                                                                             |
-| :---------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Zoo Code Kurulumu</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Profilleri Yapılandırma</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Kod Tabanı İndeksleme</b> |
-|    <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Özel Modlar</b>    |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Kontrol Noktaları</b>    |    <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Bağlam Yönetimi</b>    |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Daha fazla hızlı eğitim ve özellik videosu...</a>
-</p>
-
 ## Kaynaklar
 
 - **[Dokümantasyon](https://docs.zoocode.dev):** Zoo Code'u yükleme, yapılandırma ve ustalaşma konusundaki resmi kılavuz.
-- **[YouTube Kanalı](https://youtube.com/@roocodeyt?feature=shared):** Eğitimleri izleyin ve özellikleri çalışırken görün.
 - **[Discord Sunucusu](https://discord.gg/VxfP4Vx3gX):** Gerçek zamanlı yardım ve tartışma için topluluğa katılın.
 - **[Reddit Topluluğu](https://www.reddit.com/r/ZooCode):** Deneyimlerinizi paylaşın ve başkalarının ne inşa ettiğini görün.
 - **[GitHub Sorunları](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Hataları bildirin ve gelişimi takip edin.

@@ -6,6 +6,8 @@ import OpenAI from "openai"
 import { type FireworksModelId, fireworksDefaultModelId, fireworksModels } from "@roo-code/types"
 
 import { FireworksHandler } from "../fireworks"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -27,11 +29,11 @@ describe("FireworksHandler", () => {
 	let handler: FireworksHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
-		mockCreate.mockImplementation(async () => ({
-			[Symbol.asyncIterator]: async function* () {
-				yield {
+		mockCreate.mockImplementation(async () =>
+			asyncStreamFrom([
+				{
 					choices: [
 						{
 							delta: { content: "Test response" },
@@ -39,8 +41,8 @@ describe("FireworksHandler", () => {
 						},
 					],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [
 						{
 							delta: {},
@@ -52,9 +54,9 @@ describe("FireworksHandler", () => {
 						completion_tokens: 5,
 						total_tokens: 15,
 					},
-				}
-			},
-		}))
+				},
+			]),
+		)
 		handler = new FireworksHandler({ fireworksApiKey: "test-key" })
 	})
 
@@ -436,19 +438,7 @@ describe("FireworksHandler", () => {
 	it("createMessage should yield text content from stream", async () => {
 		const testContent = "This is test content from Fireworks stream"
 
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					next: vi
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: { choices: [{ delta: { content: testContent } }] },
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([{ choices: [{ delta: { content: testContent } }] }]))
 
 		const stream = handler.createMessage("system prompt", [])
 		const firstChunk = await stream.next()
@@ -458,19 +448,9 @@ describe("FireworksHandler", () => {
 	})
 
 	it("createMessage should yield usage data from stream", async () => {
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					next: vi
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: { choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } },
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() =>
+			asyncStreamFrom([{ choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } }]),
+		)
 
 		const stream = handler.createMessage("system prompt", [])
 		const firstChunk = await stream.next()
@@ -487,15 +467,7 @@ describe("FireworksHandler", () => {
 			fireworksApiKey: "test-fireworks-api-key",
 		})
 
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					async next() {
-						return { done: true }
-					},
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const systemPrompt = "Test system prompt for Fireworks"
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for Fireworks" }]
@@ -523,13 +495,7 @@ describe("FireworksHandler", () => {
 			fireworksApiKey: "test-fireworks-api-key",
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const messageGenerator = handlerWithModel.createMessage("system", [])
 		await messageGenerator.next()
@@ -549,13 +515,7 @@ describe("FireworksHandler", () => {
 			fireworksApiKey: "test-fireworks-api-key",
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const messageGenerator = handlerWithModel.createMessage("system", [])
 		await messageGenerator.next()
@@ -577,13 +537,7 @@ describe("FireworksHandler", () => {
 			modelTemperature: 0.7,
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const messageGenerator = handlerWithModel.createMessage("system", [])
 		await messageGenerator.next()
@@ -610,9 +564,9 @@ describe("FireworksHandler", () => {
 	})
 
 	it("createMessage should handle stream with multiple chunks", async () => {
-		mockCreate.mockImplementationOnce(async () => ({
-			[Symbol.asyncIterator]: async function* () {
-				yield {
+		mockCreate.mockImplementationOnce(async () =>
+			asyncStreamFrom([
+				{
 					choices: [
 						{
 							delta: { content: "Hello" },
@@ -620,8 +574,8 @@ describe("FireworksHandler", () => {
 						},
 					],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [
 						{
 							delta: { content: " world" },
@@ -629,8 +583,8 @@ describe("FireworksHandler", () => {
 						},
 					],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [
 						{
 							delta: {},
@@ -642,18 +596,15 @@ describe("FireworksHandler", () => {
 						completion_tokens: 10,
 						total_tokens: 15,
 					},
-				}
-			},
-		}))
+				},
+			]),
+		)
 
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
 		const stream = handler.createMessage(systemPrompt, messages)
-		const chunks = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		expect(chunks[0]).toEqual({ type: "text", text: "Hello" })
 		expect(chunks[1]).toEqual({ type: "text", text: " world" })

@@ -56,9 +56,33 @@ export abstract class RouterProvider extends BaseProvider {
 		})
 	}
 
+	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
+
 	public async fetchModel() {
-		this.models = await getModels({ provider: this.name, apiKey: this.client.apiKey, baseUrl: this.client.baseURL })
-		return this.getModel()
+		if (Object.keys(this.models).length > 0) {
+			return this.getModel()
+		}
+
+		if (!this.modelFetchPromise) {
+			this.modelFetchPromise = getModels({
+				provider: this.name,
+				apiKey: this.client.apiKey,
+				baseUrl: this.client.baseURL,
+			})
+				.then((models) => {
+					this.models = models
+					return this.getModel()
+				})
+				.finally(() => {
+					this.modelFetchPromise = undefined
+				})
+		}
+
+		return this.modelFetchPromise
+	}
+
+	async ensureModelFetched(): Promise<void> {
+		await this.fetchModel()
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {

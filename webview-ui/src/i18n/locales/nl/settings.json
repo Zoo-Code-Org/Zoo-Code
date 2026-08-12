@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Uitvoeren",
 			"description": "Automatisch toegestane terminalcommando's uitvoeren zonder goedkeuring",
+			"destructiveCommandGuard": {
+				"label": "Beveiliging tegen destructieve opdrachten inschakelen",
+				"description": "Download en gebruik Destructive Command Guard (DCG) voor dit platform. Opdrachten die DCG toestaat, worden automatisch uitgevoerd. Voor opdrachten die DCG blokkeert, is jouw goedkeuring nodig. De opdrachtenlijsten van Zoo zijn uitgeschakeld zolang deze optie actief is. Het gedownloade uitvoerbare bestand blijft bewaard als je de optie uitschakelt."
+			},
 			"allowedCommands": "Toegestane automatisch uit te voeren commando's",
 			"allowedCommandsDescription": "Commando-prefixen die automatisch kunnen worden uitgevoerd als 'Altijd goedkeuren voor uitvoeren' is ingeschakeld. Voeg * toe om alle commando's toe te staan (gebruik met voorzichtigheid).",
 			"deniedCommands": "Geweigerde commando's",
@@ -491,6 +495,9 @@
 		"apiKey": "API-sleutel",
 		"openAiApiKey": "OpenAI API-sleutel",
 		"openAiBaseUrl": "Basis-URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
+		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",
 		"getOpenAiApiKey": "OpenAI API-sleutel ophalen",
 		"mistralApiKey": "Mistral API-sleutel",
 		"getMistralApiKey": "Mistral / Codestral API-sleutel ophalen",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
 	"maxOutputTokensLabel": "Maximale output tokens",
 	"maxTokensGenerateDescription": "Maximale tokens om te genereren in het antwoord",
+	"openAiCodexSpeed": {
+		"label": "Snelheid",
+		"tooltip": "De snelle modus gebruikt prioriteitsverwerking van Codex voor ongeveer 1,5 keer hogere snelheid en verbruikt meer abonnementquotum.",
+		"standard": "Standaard",
+		"fast": "Snel (1,5 keer hogere snelheid, meer verbruik)"
+	},
 	"serviceTier": {
 		"label": "Serviceniveau",
 		"tooltip": "Voor snellere verwerking van API-verzoeken, probeer het prioriteitsverwerkingsniveau. Voor lagere prijzen met hogere latentie, probeer het flexverwerkingsniveau.",

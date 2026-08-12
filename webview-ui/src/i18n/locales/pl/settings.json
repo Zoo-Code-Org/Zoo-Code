@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Wykonaj",
 			"description": "Automatycznie wykonuj dozwolone polecenia terminala bez konieczności zatwierdzania",
+			"destructiveCommandGuard": {
+				"label": "Włącz ochronę przed destrukcyjnymi poleceniami",
+				"description": "Pobiera i używa Destructive Command Guard (DCG) dla tej platformy. Polecenia dozwolone przez DCG są wykonywane automatycznie. Polecenia zablokowane przez DCG wymagają twojej zgody. Listy poleceń Zoo są wyłączone, gdy ta opcja jest aktywna. Pobrany plik wykonywalny pozostaje na dysku po wyłączeniu opcji."
+			},
 			"allowedCommands": "Dozwolone polecenia auto-wykonania",
 			"allowedCommandsDescription": "Prefiksy poleceń, które mogą być automatycznie wykonywane, gdy \"Zawsze zatwierdzaj operacje wykonania\" jest włączone. Dodaj * aby zezwolić na wszystkie polecenia (używaj z ostrożnością).",
 			"deniedCommands": "Odrzucone polecenia",
@@ -491,6 +495,9 @@
 		"apiKey": "Klucz API",
 		"openAiApiKey": "Klucz API OpenAI",
 		"openAiBaseUrl": "URL bazowy",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
+		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",
 		"getOpenAiApiKey": "Uzyskaj klucz API OpenAI",
 		"mistralApiKey": "Klucz API Mistral",
 		"getMistralApiKey": "Uzyskaj klucz API Mistral / Codestral",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "Ogranicz maksymalną liczbę tokenów w odpowiedzi",
 	"maxOutputTokensLabel": "Maksymalne tokeny wyjściowe",
 	"maxTokensGenerateDescription": "Maksymalne tokeny do wygenerowania w odpowiedzi",
+	"openAiCodexSpeed": {
+		"label": "Szybkość",
+		"tooltip": "Tryb szybki korzysta z priorytetowego przetwarzania Codex, zapewniając około 1,5 raza większą szybkość i zużywając więcej limitu subskrypcji.",
+		"standard": "Standardowy",
+		"fast": "Szybki (1,5 raza szybciej, większe użycie)"
+	},
 	"serviceTier": {
 		"label": "Poziom usług",
 		"tooltip": "Aby szybciej przetwarzać żądania API, wypróbuj priorytetowy poziom usług. Aby uzyskać niższe ceny przy wyższej latencji, wypróbuj elastyczny poziom usług.",

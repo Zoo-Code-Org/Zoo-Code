@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Executar",
 			"description": "Executar automàticament comandes de terminal permeses sense requerir aprovació",
+			"destructiveCommandGuard": {
+				"label": "Activa la protecció contra ordres destructives",
+				"description": "Baixa i utilitza Destructive Command Guard (DCG) per a aquesta plataforma. Les ordres permeses per DCG s'executen automàticament. Les ordres bloquejades per DCG requereixen la teva aprovació. Les llistes d'ordres de Zoo es desactiven mentre aquesta opció està activa. L'executable baixat es conserva si la desactives."
+			},
 			"allowedCommands": "Comandes d'auto-execució permeses",
 			"allowedCommandsDescription": "Prefixos de comandes que poden ser executats automàticament quan \"Aprovar sempre operacions d'execució\" està habilitat. Afegeix * per permetre totes les comandes (usar amb precaució).",
 			"deniedCommands": "Comandes denegades",
@@ -491,6 +495,9 @@
 		"openAiApiKey": "Clau API d'OpenAI",
 		"apiKey": "Clau API",
 		"openAiBaseUrl": "URL base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nom de desplegament d'Azure",
+		"azureOpenAiDeploymentNameDescription": "Introduïu el nom del desplegament d'Azure AI Studio, no el nom del model subjacent.",
 		"getOpenAiApiKey": "Obtenir clau API d'OpenAI",
 		"mistralApiKey": "Clau API de Mistral",
 		"getMistralApiKey": "Obtenir clau API de Mistral / Codestral",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "Limitar el nombre màxim de tokens en la resposta",
 	"maxOutputTokensLabel": "Tokens màxims de sortida",
 	"maxTokensGenerateDescription": "Tokens màxims a generar en la resposta",
+	"openAiCodexSpeed": {
+		"label": "Velocitat",
+		"tooltip": "El mode ràpid utilitza el processament prioritari de Codex per oferir aproximadament 1,5 vegades més velocitat i consumeix més quota de subscripció.",
+		"standard": "Estàndard",
+		"fast": "Ràpid (1,5 vegades més velocitat, més consum)"
+	},
 	"serviceTier": {
 		"label": "Nivell de servei",
 		"tooltip": "Per a un processament més ràpid de les sol·licituds de l'API, proveu el nivell de servei de processament prioritari. Per a preus més baixos amb una latència més alta, proveu el nivell de processament flexible.",

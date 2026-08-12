@@ -1,6 +1,8 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { screen, fireEvent, waitFor } from "@testing-library/react"
+
+import { renderWithExtensionState } from "@/utils/test-utils"
 import { vi, describe, it, expect, beforeEach } from "vitest"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
 import React from "react"
 
 import SettingsView from "../SettingsView"
@@ -10,6 +12,7 @@ const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: vi.fn(),
 }))
 
@@ -331,11 +334,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	it("should not show unsaved changes when settings are automatically initialized", async () => {
 		const onDone = vi.fn()
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render
 		await waitFor(() => {
@@ -380,11 +379,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			return <div data-testid="api-options">ApiOptions with Init</div>
 		})
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render and effects to run
 		await waitFor(() => {
@@ -431,11 +426,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		// Override the mock for this specific test
 		vi.mocked(ApiOptions).mockImplementation(ApiOptionsWithButton)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render
 		await waitFor(() => {
@@ -472,11 +463,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		}
 		;(useExtensionState as any).mockReturnValue(stateWithUndefined)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for initialization
 		await waitFor(() => {
@@ -515,11 +502,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		}
 		;(useExtensionState as any).mockReturnValue(stateWithNull)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for initialization
 		await waitFor(() => {
@@ -569,11 +552,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			return <div data-testid="api-options">ApiOptions</div>
 		})
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for component to fully mount and ApiOptions effect to run
 		await waitFor(() => {
@@ -601,11 +580,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("buffers MCP enablement until Save", async () => {
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={vi.fn()} targetSection="mcp" />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="mcp" />, { queryClient })
 
 		const toggle = await screen.findByTestId("mcp-enabled-toggle")
 		fireEvent.click(toggle)

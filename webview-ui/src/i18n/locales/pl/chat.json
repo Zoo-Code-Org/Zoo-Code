@@ -233,6 +233,7 @@
 		"exitStatus": "Zakończono ze statusem {{exitCode}}",
 		"malformedCommand": "Nieprawidlowe polecenie: blad skladni shell",
 		"manageCommands": "Polecenia zatwierdzone automatycznie",
+		"denied": "Polecenie odrzucone",
 		"addToAllowed": "Dodaj do listy dozwolonych",
 		"removeFromAllowed": "Usuń z listy dozwolonych",
 		"addToDenied": "Dodaj do listy odrzuconych",
@@ -343,9 +344,9 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "Providerzy Moonshot i Kimi Code — łącz się z modelami Moonshot dzięki wykrywaniu modeli na żywo lub zaloguj się do Kimi Code przez przepływ urządzenia OAuth.",
-			"highlight2": "Obsługa najnowszych modeli — korzystaj z Claude Opus 5 u różnych providerów, a także z Kimi K3, Gemini 3.6 Flash i MiniMax-M3.",
-			"highlight3": "Bardziej niezawodne workflow — bezpiecznie porzucaj przerwane podzadania i indeksuj pliki Dart oraz pliki tekstowe w swojej bazie kodu."
+			"highlight1": "Uruchamiaj dłuższe zadania bez przerw dzięki Destructive Command Guard (DCG) — DCG blokuje niebezpieczne polecenia, a Zoo może dalej pracować bez ciągłego naciskania przycisków zatwierdzania.",
+			"highlight2": "Lepsze sterowanie providerami i niezawodność — wybieraj szybkość odpowiedzi OpenAI Codex, korzystaj ze zaktualizowanych konfiguracji DeepSeek i izoluj uruchomione zadania od zmian profilu.",
+			"highlight3": "Krytyczna poprawka wykonywania poleceń w terminalu — Zoo czeka teraz na zakończenie poleceń terminala przed rozpoczęciem następnego kroku."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Yürüt",
 			"description": "Onay gerektirmeden otomatik olarak izin verilen terminal komutlarını yürüt",
+			"destructiveCommandGuard": {
+				"label": "Yıkıcı komut korumasını etkinleştir",
+				"description": "Bu platform için Destructive Command Guard'ı (DCG) indirir ve kullanır. DCG'nin izin verdiği komutlar otomatik olarak çalıştırılır. DCG tarafından engellenen komutlar onayını gerektirir. Bu seçenek etkinken Zoo'nun komut listeleri devre dışı bırakılır. Seçeneği kapatsan da indirilen çalıştırılabilir dosya korunur."
+			},
 			"allowedCommands": "İzin Verilen Otomatik Yürütme Komutları",
 			"allowedCommandsDescription": "\"Yürütme işlemlerini her zaman onayla\" etkinleştirildiğinde otomatik olarak yürütülebilen komut önekleri. Tüm komutlara izin vermek için * ekleyin (dikkatli kullanın).",
 			"deniedCommands": "Reddedilen komutlar",
@@ -491,6 +495,9 @@
 		"openAiApiKey": "OpenAI API Anahtarı",
 		"apiKey": "API Anahtarı",
 		"openAiBaseUrl": "Temel URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure dağıtım adı",
+		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
 		"getOpenAiApiKey": "OpenAI API Anahtarı Al",
 		"mistralApiKey": "Mistral API Anahtarı",
 		"getMistralApiKey": "Mistral / Codestral API Anahtarı Al",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "Yanıttaki maksimum token sayısını sınırla",
 	"maxOutputTokensLabel": "Maksimum çıktı tokenları",
 	"maxTokensGenerateDescription": "Yanıtta oluşturulacak maksimum token sayısı",
+	"openAiCodexSpeed": {
+		"label": "Hız",
+		"tooltip": "Hızlı mod, yaklaşık 1,5 kat hız için Codex öncelikli işlemeyi kullanır ve daha fazla abonelik kotası tüketir.",
+		"standard": "Standart",
+		"fast": "Hızlı (1,5 kat hız, daha fazla kullanım)"
+	},
 	"serviceTier": {
 		"label": "Hizmet seviyesi",
 		"tooltip": "Daha hızlı API isteği işleme için öncelikli işleme hizmeti seviyesini deneyin. Daha düşük gecikme süresiyle daha düşük fiyatlar için esnek işleme seviyesini deneyin.",

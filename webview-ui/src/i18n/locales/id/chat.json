@@ -284,6 +284,7 @@
 		"exitStatus": "Keluar dengan status {{exitCode}}",
 		"malformedCommand": "Perintah tidak valid: kesalahan sintaks shell",
 		"manageCommands": "Perintah yang disetujui secara otomatis",
+		"denied": "Perintah ditolak",
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
@@ -372,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Provider Moonshot dan Kimi Code — hubungkan ke model Moonshot dengan penemuan model secara langsung, atau masuk ke Kimi Code melalui alur perangkat OAuth.",
-			"highlight2": "Dukungan model terbaru — gunakan Claude Opus 5 di berbagai provider, ditambah Kimi K3, Gemini 3.6 Flash, dan MiniMax-M3.",
-			"highlight3": "Workflow lebih andal — tinggalkan subtask yang terinterupsi dengan bersih, serta indeks file Dart dan teks biasa di codebase-mu."
+			"highlight1": "Jalankan task yang lebih lama tanpa gangguan dengan Destructive Command Guard (DCG) — DCG memblokir perintah berbahaya sambil membiarkan Zoo terus bekerja tanpa kamu terus-menerus menekan tombol persetujuan.",
+			"highlight2": "Kontrol dan keandalan provider yang lebih baik — pilih kecepatan respons OpenAI Codex, gunakan konfigurasi DeepSeek terbaru, dan pisahkan task yang sedang berjalan dari perubahan profil.",
+			"highlight3": "Perbaikan penting eksekusi terminal — Zoo kini menunggu perintah terminal selesai sebelum memulai langkah berikutnya."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

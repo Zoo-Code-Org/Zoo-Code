@@ -13,7 +13,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.72.0",
+		version: "3.74.0",
 	},
 }))
 
@@ -41,11 +41,11 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What's New:",
 				"chat:announcement.release.highlight1":
-					"Moonshot and Kimi Code providers — connect to Moonshot models with live model discovery, or sign in to Kimi Code through its OAuth device flow.",
+					"More OpenAI controls — use Fast priority mode with OpenAI Codex and choose higher reasoning effort for OpenAI-compatible models.",
 				"chat:announcement.release.highlight2":
-					"Latest model support — use Claude Opus 5 across providers, plus Kimi K3, Gemini 3.6 Flash, and MiniMax-M3.",
+					"More reliable providers and models — improved router metadata handling, Ollama model refresh, Bedrock proxy support, and Friendli reasoning controls.",
 				"chat:announcement.release.highlight3":
-					"More reliable workflows — abandon interrupted subtasks cleanly, and index Dart and plain-text files in your codebase.",
+					"Smoother settings and developer workflows — settings now preserve unsaved edits, short terminal commands complete cleanly, architect plans use workspace-relative paths, and remaining user-facing Roo branding is updated to Zoo.",
 				"chat:announcement.handoff.heading": "The Roo Code plugin is not going away.",
 			}
 
@@ -62,20 +62,20 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.72.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.74.0 Released")).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Moonshot and Kimi Code providers — connect to Moonshot models with live model discovery, or sign in to Kimi Code through its OAuth device flow.",
+				"More OpenAI controls — use Fast priority mode with OpenAI Codex and choose higher reasoning effort for OpenAI-compatible models.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Latest model support — use Claude Opus 5 across providers, plus Kimi K3, Gemini 3.6 Flash, and MiniMax-M3.",
+				"More reliable providers and models — improved router metadata handling, Ollama model refresh, Bedrock proxy support, and Friendli reasoning controls.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"More reliable workflows — abandon interrupted subtasks cleanly, and index Dart and plain-text files in your codebase.",
+				"Smoother settings and developer workflows — settings now preserve unsaved edits, short terminal commands complete cleanly, architect plans use workspace-relative paths, and remaining user-facing Roo branding is updated to Zoo.",
 			),
 		).toBeInTheDocument()
 	})

@@ -233,6 +233,7 @@
 		"exitStatus": "Salió con el estado {{exitCode}}",
 		"malformedCommand": "Comando mal formado: error de sintaxis del shell",
 		"manageCommands": "Comandos aprobados automáticamente",
+		"denied": "Comando denegado",
 		"addToAllowed": "Agregar a la lista de permitidos",
 		"removeFromAllowed": "Eliminar de la lista de permitidos",
 		"addToDenied": "Agregar a la lista de denegados",
@@ -343,9 +344,9 @@
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novedades:",
-			"highlight1": "Proveedores Moonshot y Kimi Code — conéctate a modelos de Moonshot con detección de modelos en tiempo real o inicia sesión en Kimi Code mediante su flujo de dispositivo OAuth.",
-			"highlight2": "Compatibilidad con los modelos más recientes — usa Claude Opus 5 con todos los proveedores, además de Kimi K3, Gemini 3.6 Flash y MiniMax-M3.",
-			"highlight3": "Flujos de trabajo más fiables — abandona subtareas interrumpidas de forma limpia e indexa archivos Dart y de texto sin formato en tu base de código."
+			"highlight1": "Ejecuta tareas más largas y sin interrupciones con Destructive Command Guard (DCG) — DCG bloquea comandos peligrosos mientras permite que Zoo siga trabajando sin que tengas que pulsar continuamente los botones de aprobación.",
+			"highlight2": "Mejores controles y fiabilidad de proveedores — elige la velocidad de respuesta de OpenAI Codex, usa configuraciones actualizadas de DeepSeek y mantén las tareas en ejecución aisladas de los cambios de perfil.",
+			"highlight3": "Corrección crítica de ejecución en terminal — Zoo ahora espera a que terminen los comandos del terminal antes de iniciar el siguiente paso."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",

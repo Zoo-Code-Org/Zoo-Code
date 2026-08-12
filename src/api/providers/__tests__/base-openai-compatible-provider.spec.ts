@@ -6,6 +6,8 @@ import OpenAI from "openai"
 import type { ModelInfo } from "@roo-code/types"
 
 import { BaseOpenAiCompatibleProvider } from "../base-openai-compatible-provider"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -51,7 +53,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 	let handler: TestOpenAiCompatibleProvider
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		handler = new TestOpenAiCompatibleProvider("test-api-key")
 	})
 
@@ -61,33 +63,16 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 	describe("TagMatcher reasoning tags", () => {
 		it("should handle reasoning tags (<think>) from stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>Let me think" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " about this</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "The answer is 42" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "<think>Let me think" } }] },
+					{ choices: [{ delta: { content: " about this</think>" } }] },
+					{ choices: [{ delta: { content: "The answer is 42" } }] },
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// TagMatcher yields chunks as they're processed
 			expect(chunks).toEqual([
@@ -98,32 +83,15 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should handle reasoning tags (<thought>) from stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<thought>Deep thought" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " here</thought>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "Result: 42" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "<thought>Deep thought" } }] },
+					{ choices: [{ delta: { content: " here</thought>" } }] },
+					{ choices: [{ delta: { content: "Result: 42" } }] },
+				]),
+			)
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 			expect(chunks).toEqual([
 				{ type: "reasoning", text: "Deep thought" },
 				{ type: "reasoning", text: " here" },
@@ -132,32 +100,15 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should not close <think> tag with </thought> tag", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>Thinking" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " but closing with wrong tag</thought>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " still thinking" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "<think>Thinking" } }] },
+					{ choices: [{ delta: { content: " but closing with wrong tag</thought>" } }] },
+					{ choices: [{ delta: { content: " still thinking" } }] },
+				]),
+			)
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 			// The </thought> tag should be treated as text since it doesn't match the active <think> tag
 			expect(chunks).toEqual([
 				{ type: "reasoning", text: "Thinking" },
@@ -167,33 +118,16 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should handle complete <think> tag in a single chunk", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "Regular text before " } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>Complete thought</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " regular text after" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Regular text before " } }] },
+					{ choices: [{ delta: { content: "<think>Complete thought</think>" } }] },
+					{ choices: [{ delta: { content: " regular text after" } }] },
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// When a complete tag arrives in one chunk, TagMatcher may not parse it
 			// This test documents the actual behavior
@@ -202,54 +136,27 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should handle incomplete <think> tag at end of stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>Incomplete thought" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: "<think>Incomplete thought" } }] }]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// TagMatcher should flush incomplete reasoning content on stream end
 			expect(chunks).toContainEqual({ type: "reasoning", text: "Incomplete thought" })
 		})
 
 		it("should handle text without any <think> tags", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "Just regular text" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " without reasoning" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Just regular text" } }] },
+					{ choices: [{ delta: { content: " without reasoning" } }] },
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toEqual([
 				{ type: "text", text: "Just regular text" },
@@ -258,33 +165,16 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should handle <think> tags that start at beginning of stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>reasoning" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " content</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " normal text" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "<think>reasoning" } }] },
+					{ choices: [{ delta: { content: " content</think>" } }] },
+					{ choices: [{ delta: { content: " normal text" } }] },
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toEqual([
 				{ type: "reasoning", text: "reasoning" },
@@ -296,37 +186,17 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 	describe("reasoning_content field", () => {
 		it("should preserve whitespace-only reasoning_content so streamed boundaries survive concatenation", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "\n" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "   " } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "\t\n  " } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "Regular content" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "\n" } }] },
+					{ choices: [{ delta: { reasoning_content: "   " } }] },
+					{ choices: [{ delta: { reasoning_content: "\t\n  " } }] },
+					{ choices: [{ delta: { content: "Regular content" } }] },
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toEqual([
 				{ type: "reasoning", text: "\n" },
@@ -337,33 +207,16 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should yield non-empty reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "Thinking step 1" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "\n" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "Thinking step 2" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "Thinking step 1" } }] },
+					{ choices: [{ delta: { reasoning_content: "\n" } }] },
+					{ choices: [{ delta: { reasoning_content: "Thinking step 2" } }] },
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks).toEqual([
 				{ type: "reasoning", text: "Thinking step 1" },
@@ -373,25 +226,12 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should handle reasoning_content with leading/trailing whitespace", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "  content with spaces  " } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { reasoning_content: "  content with spaces  " } }] }]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Should yield reasoning with spaces (only pure whitespace is filtered)
 			expect(chunks).toEqual([{ type: "reasoning", text: "  content with spaces  " }])
@@ -400,15 +240,7 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 	describe("Basic functionality", () => {
 		it("should create stream with correct parameters", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const systemPrompt = "Test system prompt"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message" }]
@@ -429,22 +261,14 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should yield usage data from stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [{ delta: {} }],
-									usage: { prompt_tokens: 100, completion_tokens: 50 },
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 100, completion_tokens: 50 },
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -456,67 +280,50 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 	describe("Tool call handling", () => {
 		it("should yield tool_call_end events when finish_reason is tool_calls", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
 										{
-											delta: {
-												tool_calls: [
-													{
-														index: 0,
-														id: "call_123",
-														function: { name: "test_tool", arguments: '{"arg":' },
-													},
-												],
-											},
+											index: 0,
+											id: "call_123",
+											function: { name: "test_tool", arguments: '{"arg":' },
 										},
 									],
 								},
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [
+							},
+						],
+					},
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
 										{
-											delta: {
-												tool_calls: [
-													{
-														index: 0,
-														function: { arguments: '"value"}' },
-													},
-												],
-											},
+											index: 0,
+											function: { arguments: '"value"}' },
 										},
 									],
 								},
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [
-										{
-											delta: {},
-											finish_reason: "tool_calls",
-										},
-									],
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+							},
+						],
+					},
+					{
+						choices: [
+							{
+								delta: {},
+								finish_reason: "tool_calls",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Should have tool_call_partial and tool_call_end
 			const partialChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
@@ -528,55 +335,41 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should yield multiple tool_call_end events for parallel tool calls", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
 										{
-											delta: {
-												tool_calls: [
-													{
-														index: 0,
-														id: "call_001",
-														function: { name: "tool_a", arguments: "{}" },
-													},
-													{
-														index: 1,
-														id: "call_002",
-														function: { name: "tool_b", arguments: "{}" },
-													},
-												],
-											},
+											index: 0,
+											id: "call_001",
+											function: { name: "tool_a", arguments: "{}" },
+										},
+										{
+											index: 1,
+											id: "call_002",
+											function: { name: "tool_b", arguments: "{}" },
 										},
 									],
 								},
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [
-										{
-											delta: {},
-											finish_reason: "tool_calls",
-										},
-									],
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+							},
+						],
+					},
+					{
+						choices: [
+							{
+								delta: {},
+								finish_reason: "tool_calls",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
 			expect(endChunks).toHaveLength(2)
@@ -584,32 +377,21 @@ describe("BaseOpenAiCompatibleProvider", () => {
 		})
 
 		it("should not yield tool_call_end when finish_reason is not tool_calls", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [
-										{
-											delta: { content: "Some text response" },
-											finish_reason: "stop",
-										},
-									],
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: { content: "Some text response" },
+								finish_reason: "stop",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
-			const chunks = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
 			expect(endChunks).toHaveLength(0)

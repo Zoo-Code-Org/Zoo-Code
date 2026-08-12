@@ -68,16 +68,26 @@ vi.mock("@src/components/ui", () => ({
 }))
 
 // Mock other components
+const { mockModelPicker } = vi.hoisted(() => ({ mockModelPicker: vi.fn() }))
+
 vi.mock("../../ModelPicker", () => ({
-	ModelPicker: () => <div data-testid="model-picker">Model Picker</div>,
+	ModelPicker: (props: any) => {
+		mockModelPicker(props)
+		return <div data-testid="model-picker">Model Picker</div>
+	},
 }))
 
 vi.mock("../../R1FormatSetting", () => ({
 	R1FormatSetting: () => <div data-testid="r1-format-setting">R1 Format Setting</div>,
 }))
 
+const { mockThinkingBudget } = vi.hoisted(() => ({ mockThinkingBudget: vi.fn() }))
+
 vi.mock("../../ThinkingBudget", () => ({
-	ThinkingBudget: () => <div data-testid="thinking-budget">Thinking Budget</div>,
+	ThinkingBudget: (props: any) => {
+		mockThinkingBudget(props)
+		return <div data-testid="thinking-budget">Thinking Budget</div>
+	},
 }))
 
 // Mock react-use
@@ -136,6 +146,78 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 
 			// Check that the correct translation key is used for the description
 			expect(screen.getByText("settings:includeMaxOutputTokensDescription")).toBeInTheDocument()
+		})
+	})
+
+	describe("Azure OpenAI guidance", () => {
+		it.each([
+			{ openAiBaseUrl: "https://resource.openai.azure.com/" },
+			{ openAiBaseUrl: "https://models.example.com", openAiUseAzure: true },
+		])("shows Azure-specific endpoint and deployment guidance", (apiConfiguration) => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:providers.azureOpenAiBaseUrlPlaceholder")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(
+				expect.objectContaining({ label: "settings:providers.azureOpenAiDeploymentName" }),
+			)
+			expect(screen.getByText("settings:providers.azureOpenAiDeploymentNameDescription")).toBeInTheDocument()
+		})
+
+		it("keeps generic OpenAI-compatible guidance for non-Azure endpoints", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiBaseUrl: "https://models.example.com/v1" } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+			expect(
+				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
+			).not.toBeInTheDocument()
+		})
+
+		it("keeps generic OpenAI-compatible guidance for Azure AI Inference endpoints", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{ openAiBaseUrl: "https://my-resource.services.ai.azure.com/models" } as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
+			expect(
+				screen.queryByText("settings:providers.azureOpenAiDeploymentNameDescription"),
+			).not.toBeInTheDocument()
+		})
+
+		it("keeps generic guidance when Azure AI Inference uses the Azure compatibility flag", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={
+						{
+							openAiBaseUrl: "https://my-resource.services.ai.azure.com/models",
+							openAiUseAzure: true,
+						} as ProviderSettings
+					}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			expect(screen.getByPlaceholderText("settings:placeholders.baseUrl")).toBeInTheDocument()
+			expect(mockModelPicker).toHaveBeenLastCalledWith(expect.objectContaining({ label: undefined }))
 		})
 	})
 
@@ -310,6 +392,41 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			// Check that the description has the correct styling classes
 			const description = screen.getByText("settings:includeMaxOutputTokensDescription")
 			expect(description).toHaveClass("text-sm", "text-vscode-descriptionForeground", "ml-6")
+		})
+	})
+	describe("reasoning effort", () => {
+		it("should expose and persist the max reasoning-effort value", () => {
+			const apiConfiguration: Partial<ProviderSettings> = {
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+				},
+			}
+
+			render(
+				<OpenAICompatible
+					apiConfiguration={apiConfiguration as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toEqual([
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+				"max",
+			])
+
+			thinkingBudgetProps.setApiConfigurationField("reasoningEffort", "max")
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiCustomModelInfo", {
+				...apiConfiguration.openAiCustomModelInfo,
+				reasoningEffort: "max",
+			})
 		})
 	})
 })

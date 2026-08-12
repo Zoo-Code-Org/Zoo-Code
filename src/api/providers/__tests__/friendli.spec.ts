@@ -8,6 +8,8 @@ import { friendliDefaultModelId, friendliModels } from "@roo-code/types"
 import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
 import { FriendliHandler } from "../friendli"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -29,11 +31,11 @@ describe("FriendliHandler", () => {
 	let handler: FriendliHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
-		mockCreate.mockImplementation(async () => ({
-			[Symbol.asyncIterator]: async function* () {
-				yield {
+		mockCreate.mockImplementation(async () =>
+			asyncStreamFrom([
+				{
 					choices: [
 						{
 							delta: { content: "Test response" },
@@ -41,8 +43,8 @@ describe("FriendliHandler", () => {
 						},
 					],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [
 						{
 							delta: {},
@@ -54,9 +56,9 @@ describe("FriendliHandler", () => {
 						completion_tokens: 5,
 						total_tokens: 15,
 					},
-				}
-			},
-		}))
+				},
+			]),
+		)
 		handler = new FriendliHandler({ friendliApiKey: "test-key" })
 	})
 
@@ -189,19 +191,7 @@ describe("FriendliHandler", () => {
 	it("createMessage should yield text content from stream", async () => {
 		const testContent = "This is test content from Friendli stream"
 
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					next: vi
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: { choices: [{ delta: { content: testContent } }] },
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([{ choices: [{ delta: { content: testContent } }] }]))
 
 		const stream = handler.createMessage("system prompt", [])
 		const firstChunk = await stream.next()
@@ -211,19 +201,9 @@ describe("FriendliHandler", () => {
 	})
 
 	it("createMessage should yield usage data from stream", async () => {
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					next: vi
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: { choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } },
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() =>
+			asyncStreamFrom([{ choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } }]),
+		)
 
 		const stream = handler.createMessage("system prompt", [])
 		const firstChunk = await stream.next()
@@ -240,15 +220,7 @@ describe("FriendliHandler", () => {
 			friendliApiKey: "test-friendli-api-key",
 		})
 
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					async next() {
-						return { done: true }
-					},
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const systemPrompt = "Test system prompt for Friendli"
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for Friendli" }]
@@ -276,13 +248,7 @@ describe("FriendliHandler", () => {
 			modelTemperature: 0.3,
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const messageGenerator = handlerWithModel.createMessage("system", [])
 		await messageGenerator.next()
@@ -308,9 +274,9 @@ describe("FriendliHandler", () => {
 	})
 
 	it("createMessage should handle stream with multiple chunks", async () => {
-		mockCreate.mockImplementationOnce(async () => ({
-			[Symbol.asyncIterator]: async function* () {
-				yield {
+		mockCreate.mockImplementationOnce(async () =>
+			asyncStreamFrom([
+				{
 					choices: [
 						{
 							delta: { content: "Hello" },
@@ -318,8 +284,8 @@ describe("FriendliHandler", () => {
 						},
 					],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [
 						{
 							delta: { content: " world" },
@@ -327,8 +293,8 @@ describe("FriendliHandler", () => {
 						},
 					],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [
 						{
 							delta: {},
@@ -340,18 +306,15 @@ describe("FriendliHandler", () => {
 						completion_tokens: 10,
 						total_tokens: 15,
 					},
-				}
-			},
-		}))
+				},
+			]),
+		)
 
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
 		const stream = handler.createMessage(systemPrompt, messages)
-		const chunks = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		expect(chunks[0]).toEqual({ type: "text", text: "Hello" })
 		expect(chunks[1]).toEqual({ type: "text", text: " world" })
@@ -406,7 +369,7 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 
 describe("FriendliHandler — Friendli-specific reasoning params", () => {
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("should include reasoning_effort, chat_template_kwargs, parse_reasoning for GLM-5.2 with reasoning enabled", async () => {
@@ -417,13 +380,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			reasoningEffort: "high",
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		await handler.createMessage("system", []).next()
 
@@ -446,13 +403,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			enableReasoningEffort: false,
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		await handler.createMessage("system", []).next()
 
@@ -471,13 +422,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			reasoningEffort: "none",
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		await handler.createMessage("system", []).next()
 
@@ -496,13 +441,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			reasoningEffort: "disable",
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		await handler.createMessage("system", []).next()
 
@@ -520,13 +459,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			// No enableReasoningEffort or reasoningEffort — model default "high" kicks in
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		await handler.createMessage("system", []).next()
 
@@ -545,13 +478,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			reasoningEffort: "high",
 		})
 
-		mockCreate.mockImplementationOnce(() => ({
-			[Symbol.asyncIterator]: () => ({
-				async next() {
-					return { done: true }
-				},
-			}),
-		}))
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		await handler.createMessage("system", []).next()
 
@@ -569,28 +496,25 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			reasoningEffort: "high",
 		})
 
-		mockCreate.mockImplementationOnce(async () => ({
-			[Symbol.asyncIterator]: async function* () {
-				yield {
+		mockCreate.mockImplementationOnce(async () =>
+			asyncStreamFrom([
+				{
 					choices: [{ delta: { reasoning_content: "Let me think..." } }],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [{ delta: { content: "The answer is 42" } }],
 					usage: null,
-				}
-				yield {
+				},
+				{
 					choices: [{ delta: {} }],
 					usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 },
-				}
-			},
-		}))
+				},
+			]),
+		)
 
 		const stream = handler.createMessage("system", [])
-		const chunks = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		expect(chunks).toContainEqual({ type: "reasoning", text: "Let me think..." })
 		expect(chunks).toContainEqual({ type: "text", text: "The answer is 42" })

@@ -1,7 +1,6 @@
 <p align="center">
   <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
   <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-  <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
   <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
   <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
   <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -35,15 +34,25 @@
 You can find a quick guide for migrating from Roo Code to Zoo Code in the [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration). We plan to try and help users as they transition over, we have our [Reddit](https://www.reddit.com/r/ZooCode) and [Discord](https://discord.gg/VxfP4Vx3gX)
 for this exact support, so if you are having problems or if you have question, jump on and ask.
 
-## What's New in v3.72.0
+## What Zoo Code Has Added Since Roo Code
 
-- **Moonshot and Kimi Code providers** — discover Moonshot models dynamically or sign in to Kimi Code through its OAuth device flow.
-- **Latest model support** — use Claude Opus 5 across providers, plus Kimi K3, Gemini 3.6 Flash, and MiniMax-M3.
-- **Improved subtask workflows** — abandon interrupted subtasks cleanly, with safer task-history invalidation and better resume coverage.
-- **Expanded codebase indexing** — index Dart and plain-text files.
-- **Provider reliability** — fixes for GPT-5.6 Luna with ChatGPT OAuth, LiteLLM reasoning content, and DeepSeek V4 image input.
-- **Smoother setup and settings** — improved Zoo Gateway sign-in and mode-switch behavior.
-- API, provider-type, dependency, localization, and CI improvements.
+Zoo Code builds on the foundation created by Roo Code and continues to expand it with:
+
+- **Semble codebase intelligence** — fast, on-demand semantic code search with automatic setup and no separate indexing workflow.
+- **Stronger Orchestrator workflows** — safer delegation, parallel task coordination, reliable parent/child task recovery, and better isolation between subtasks and provider profiles.
+- **Longer autonomous runs with Destructive Command Guard (DCG)** — automatically block dangerous commands while trusted work continues without repeated approval prompts.
+- **The latest models** — ongoing support for new Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax, and other model families.
+- **More ways to connect** — new and expanded providers including Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go, and many more.
+- **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
+- **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
+
+## What's New in v3.76.0
+
+- **Run longer, uninterrupted tasks with Destructive Command Guard (DCG)** — DCG blocks dangerous commands while letting Zoo keep working without you continuously pressing approval buttons, backed by hardened managed-binary downloads and installation.
+- **Better provider controls and reliability** — choose OpenAI Codex response speed, use updated DeepSeek configurations, and benefit from stronger isolation between provider-profile changes and running tasks.
+- **Critical terminal execution fix** — Zoo now waits for terminal commands to finish before starting the next step, preventing overlapping work and premature model continuation.
+- Smarter batching groups related tool approvals while keeping unrelated requests separate.
+- Telemetry delivery and model-cache fetching are more resilient under failures and concurrent requests.
 
 <details>
   <summary>🌐 Available languages</summary>
@@ -66,6 +75,7 @@ for this exact support, so if you are having problems or if you have question, j
 - [Tiếng Việt](locales/vi/README.md)
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
+
 </details>
 
 ---
@@ -93,26 +103,10 @@ Zoo Code adapts to how you work:
 Learn more: [Using Modes](https://docs.zoocode.dev/basic-usage/using-modes) •
 [Custom Modes](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Tutorial & Feature Videos
-
-<div align="center">
-
-|                                                                                                                                                                                                               |                                                                                                                                                                                                       |                                                                                                                                                                                                   |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%" alt="Installing the Extension"></a><br><b>Installing the Extension</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%" alt="Configuring Profiles"></a><br><b>Configuring Profiles</b> |  <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%" alt="Codebase Indexing"></a><br><b>Codebase Indexing</b>  |
-|             <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%" alt="Custom Modes"></a><br><b>Custom Modes</b>             |          <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%" alt="Checkpoints"></a><br><b>Checkpoints</b>          | <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%" alt="Context Management"></a><br><b>Context Management</b> |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">More quick tutorial and feature videos...</a>
-</p>
-
 ## Resources
 
 - **[Documentation](https://docs.zoocode.dev):** The official guide to
   installing, configuring, and mastering Zoo Code.
-- **[YouTube Channel](https://youtube.com/@roocodeyt?feature=shared):** Watch
-  tutorials and see features in action.
 - **[Discord Server](https://discord.gg/VxfP4Vx3gX):** Join the community for
   real-time help and discussion.
 - **[Reddit Community](https://www.reddit.com/r/ZooCode/):** Share your

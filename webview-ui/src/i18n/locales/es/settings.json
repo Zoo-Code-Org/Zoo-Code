@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Ejecutar",
 			"description": "Ejecutar automáticamente comandos de terminal permitidos sin requerir aprobación",
+			"destructiveCommandGuard": {
+				"label": "Activar la protección contra comandos destructivos",
+				"description": "Descarga y usa Destructive Command Guard (DCG) para esta plataforma. Los comandos permitidos por DCG se ejecutan automáticamente. Los comandos bloqueados por DCG requieren tu aprobación. Las listas de comandos de Zoo se desactivan mientras esta opción está habilitada. El ejecutable descargado se conserva si la desactivas."
+			},
 			"allowedCommands": "Comandos de auto-ejecución permitidos",
 			"allowedCommandsDescription": "Prefijos de comandos que pueden ser ejecutados automáticamente cuando \"Aprobar siempre operaciones de ejecución\" está habilitado. Añade * para permitir todos los comandos (usar con precaución).",
 			"deniedCommands": "Comandos denegados",
@@ -491,6 +495,9 @@
 		"openAiApiKey": "Clave API de OpenAI",
 		"apiKey": "Clave API",
 		"openAiBaseUrl": "URL base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nombre de implementación de Azure",
+		"azureOpenAiDeploymentNameDescription": "Introduce el nombre de la implementación de Azure AI Studio, no el nombre del modelo subyacente.",
 		"getOpenAiApiKey": "Obtener clave API de OpenAI",
 		"mistralApiKey": "Clave API de Mistral",
 		"getMistralApiKey": "Obtener clave API de Mistral / Codestral",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "Limitar el número máximo de tokens en la respuesta",
 	"maxOutputTokensLabel": "Tokens máximos de salida",
 	"maxTokensGenerateDescription": "Tokens máximos a generar en la respuesta",
+	"openAiCodexSpeed": {
+		"label": "Velocidad",
+		"tooltip": "El modo rápido usa el procesamiento prioritario de Codex para ofrecer aproximadamente 1,5 veces más velocidad y consume más cuota de suscripción.",
+		"standard": "Estándar",
+		"fast": "Rápido (1,5 veces más velocidad, mayor uso)"
+	},
 	"serviceTier": {
 		"label": "Nivel de servicio",
 		"tooltip": "Para un procesamiento más rápido de las solicitudes de API, prueba el nivel de servicio de procesamiento prioritario. Para precios más bajos con mayor latencia, prueba el nivel de procesamiento flexible.",

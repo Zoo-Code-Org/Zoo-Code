@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "실행",
 			"description": "승인 없이 자동으로 허용된 터미널 명령 실행",
+			"destructiveCommandGuard": {
+				"label": "파괴적 명령어 보호 활성화",
+				"description": "이 플랫폼용 Destructive Command Guard(DCG)를 다운로드하여 사용합니다. DCG가 허용한 명령어는 자동으로 실행됩니다. DCG가 차단한 명령어는 실행 전 승인이 필요합니다. 이 옵션을 사용하는 동안 Zoo의 명령어 목록은 비활성화됩니다. 옵션을 꺼도 다운로드한 실행 파일은 유지됩니다."
+			},
 			"allowedCommands": "허용된 자동 실행 명령",
 			"allowedCommandsDescription": "\"실행 작업 항상 승인\"이 활성화되었을 때 자동 실행될 수 있는 명령 접두사. 모든 명령을 허용하려면 * 추가(주의해서 사용)",
 			"deniedCommands": "거부된 명령",
@@ -491,6 +495,9 @@
 		"apiKey": "API 키",
 		"openAiApiKey": "OpenAI API 키",
 		"openAiBaseUrl": "기본 URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure 배포 이름",
+		"azureOpenAiDeploymentNameDescription": "기반 모델 이름이 아닌 Azure AI Studio의 배포 이름을 입력하세요.",
 		"getOpenAiApiKey": "OpenAI API 키 받기",
 		"mistralApiKey": "Mistral API 키",
 		"getMistralApiKey": "Mistral / Codestral API 키 받기",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "응답에서 최대 토큰 수 제한",
 	"maxOutputTokensLabel": "최대 출력 토큰",
 	"maxTokensGenerateDescription": "응답에서 생성할 최대 토큰 수",
+	"openAiCodexSpeed": {
+		"label": "속도",
+		"tooltip": "빠른 모드는 Codex 우선 처리를 사용하여 약 1.5배 빠른 속도를 제공하며 구독 할당량을 더 많이 사용합니다.",
+		"standard": "표준",
+		"fast": "빠름(1.5배 속도, 사용량 증가)"
+	},
 	"serviceTier": {
 		"label": "서비스 등급",
 		"tooltip": "API 요청을 더 빠르게 처리하려면 우선 처리 서비스 등급을 사용해 보세요. 더 낮은 가격에 더 높은 지연 시간을 원하시면 플렉스 처리 등급을 사용해 보세요.",

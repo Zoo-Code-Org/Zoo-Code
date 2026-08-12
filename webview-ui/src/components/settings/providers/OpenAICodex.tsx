@@ -1,6 +1,11 @@
 import React from "react"
 
-import { type ProviderSettings, openAiCodexDefaultModelId, openAiCodexModels } from "@roo-code/types"
+import {
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	type ProviderSettings,
+	openAiCodexDefaultModelId,
+	openAiCodexModels,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Button } from "@src/components/ui"
@@ -8,6 +13,7 @@ import { vscode } from "@src/utils/vscode"
 
 import { ModelPicker } from "../ModelPicker"
 import { OpenAICodexRateLimitDashboard } from "./OpenAICodexRateLimitDashboard"
+import { OpenAICodexSpeedSelector } from "./OpenAICodexSpeedSelector"
 
 interface OpenAICodexProps {
 	apiConfiguration: ProviderSettings
@@ -65,6 +71,11 @@ export const OpenAICodex: React.FC<OpenAICodexProps> = ({
 				serviceUrl="https://chatgpt.com"
 				simplifySettings={simplifySettings}
 				hidePricing
+			/>
+
+			<OpenAICodexSpeedSelector
+				value={apiConfiguration[OPEN_AI_CODEX_SERVICE_TIER_KEY]}
+				onValueChange={(value) => setApiConfigurationField(OPEN_AI_CODEX_SERVICE_TIER_KEY, value)}
 			/>
 		</div>
 	)

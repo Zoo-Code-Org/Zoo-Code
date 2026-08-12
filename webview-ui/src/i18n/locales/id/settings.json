@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Eksekusi",
 			"description": "Secara otomatis mengeksekusi perintah terminal yang diizinkan tanpa memerlukan persetujuan",
+			"destructiveCommandGuard": {
+				"label": "Aktifkan perlindungan perintah destruktif",
+				"description": "Unduh dan gunakan Destructive Command Guard (DCG) untuk platform ini. Perintah yang diizinkan DCG dijalankan secara otomatis. Perintah yang diblokir DCG memerlukan persetujuanmu. Daftar perintah Zoo dinonaktifkan selama opsi ini aktif. File executable yang diunduh tetap disimpan jika kamu menonaktifkannya."
+			},
 			"allowedCommands": "Perintah Auto-Execute yang Diizinkan",
 			"allowedCommandsDescription": "Prefix perintah yang dapat di-auto-execute ketika \"Selalu setujui operasi eksekusi\" diaktifkan. Tambahkan * untuk mengizinkan semua perintah (gunakan dengan hati-hati).",
 			"deniedCommands": "Perintah yang ditolak",
@@ -491,6 +495,9 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nama deployment Azure",
+		"azureOpenAiDeploymentNameDescription": "Masukkan nama deployment dari Azure AI Studio, bukan nama model dasarnya.",
 		"getOpenAiApiKey": "Dapatkan OpenAI API Key",
 		"mistralApiKey": "Mistral API Key",
 		"getMistralApiKey": "Dapatkan Mistral / Codestral API Key",
@@ -1046,6 +1053,12 @@
 	"limitMaxTokensDescription": "Batasi jumlah maksimum token dalam respons",
 	"maxOutputTokensLabel": "Token output maksimum",
 	"maxTokensGenerateDescription": "Token maksimum untuk dihasilkan dalam respons",
+	"openAiCodexSpeed": {
+		"label": "Kecepatan",
+		"tooltip": "Mode Cepat menggunakan pemrosesan prioritas Codex untuk kecepatan sekitar 1,5x dan memakai lebih banyak kuota langganan.",
+		"standard": "Standar",
+		"fast": "Cepat (kecepatan 1,5x, penggunaan meningkat)"
+	},
 	"serviceTier": {
 		"label": "Tingkat layanan",
 		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih rendah dengan latensi lebih tinggi, coba tingkat pemrosesan fleksibel.",

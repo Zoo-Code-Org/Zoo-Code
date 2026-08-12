@@ -16,6 +16,7 @@ import {
 	SUBTASK_API_HANG_PARENT_MARKER,
 	SUBTASK_API_HANG_PARENT_PROMPT,
 	SUBTASK_API_HANG_PARENT_RESULT,
+	SUBTASK_API_HANG_RESPONSE_LATENCY_MS,
 	SUBTASK_API_HANG_RESUME_MESSAGE,
 	SUBTASK_CHILD_FOLLOWUP_ANSWER,
 	SUBTASK_FAST_CHILD_RESULT,
@@ -33,6 +34,7 @@ import {
 type AimockMessageContent = string | Array<{ type?: string; text?: string }>
 
 type AimockJournalEntry = {
+	timestamp?: number
 	body?: {
 		messages?: Array<{
 			role?: string
@@ -49,24 +51,67 @@ const messageContentText = (content?: AimockMessageContent) => {
 	return content?.map((part) => part.text ?? "").join("") ?? ""
 }
 
-const waitForAimockRequestContaining = async (expectedText: string, excludeText?: string) => {
+const fetchAimockJournal = async () => {
 	const aimockUrl = process.env.AIMOCK_URL
 	assert.ok(aimockUrl, "AIMOCK_URL must be set for aimock journal assertions")
 
-	await waitFor(async () => {
-		const response = await fetch(`${aimockUrl}/__aimock/journal`)
-		const entries = (await response.json()) as AimockJournalEntry[]
+	const response = await fetch(`${aimockUrl}/__aimock/journal`)
+	return (await response.json()) as AimockJournalEntry[]
+}
 
-		return entries.some((entry) => {
-			const messages = entry.body?.messages
-			if (!messages) return false
-			const entryText = messages.map((m) => messageContentText(m.content)).join("")
-			if (excludeText && entryText.includes(excludeText)) return false
-			return messages.some(
-				(message) => message.role === "user" && messageContentText(message.content).includes(expectedText),
-			)
-		})
+const findAimockRequest = (entries: AimockJournalEntry[], expectedText: string, excludeText?: string) =>
+	entries.find((entry) => {
+		const messages = entry.body?.messages
+		if (!messages) return false
+		const entryText = messages.map((m) => messageContentText(m.content)).join("")
+		if (excludeText && entryText.includes(excludeText)) return false
+		return messages.some(
+			(message) => message.role === "user" && messageContentText(message.content).includes(expectedText),
+		)
 	})
+
+// Waits for a matching request to appear in the aimock journal and returns its journal
+// timestamp, so callers can anchor post-test drains to the exact request this test created.
+const waitForAimockRequestContaining = async (
+	expectedText: string,
+	excludeText?: string,
+): Promise<number | undefined> => {
+	let matchedAt: number | undefined
+
+	await waitFor(async () => {
+		matchedAt = findAimockRequest(await fetchAimockJournal(), expectedText, excludeText)?.timestamp
+		return matchedAt !== undefined
+	})
+
+	return matchedAt
+}
+
+// Grace period after the delayed window for aimock to flush the stream's remaining chunks to
+// the dead socket. 500ms is an empirical margin for that flush plus socket teardown; if this
+// suite becomes flaky again on slow CI runners, widen this value first.
+const SUBTASK_API_HANG_DRAIN_GRACE_MS = 500
+
+// aimock does not observe client disconnects: after the API-hang child request is cancelled,
+// the mock keeps the delayed stream pending server-side until the fixture's ttft has fully
+// elapsed, then flushes the remaining chunks to the dead socket. A streamed request opened by
+// the next test can interleave with that late flush, so wait out the remainder of the delayed
+// window before the next test runs. The deadline is anchored to the journal timestamp of the
+// request this test created (never earlier traffic), and bounded by one latency window plus
+// grace, so it cannot hide a genuine hang.
+const waitForDelayedSubtaskStreamDrain = async (delayedRequestStartedAt: number | undefined) => {
+	if (delayedRequestStartedAt === undefined) {
+		// The delayed request never reached the mock (the test failed before cancelling
+		// an in-flight request), so there is no delayed stream to drain.
+		return
+	}
+
+	const drainDeadlineMs =
+		delayedRequestStartedAt + SUBTASK_API_HANG_RESPONSE_LATENCY_MS + SUBTASK_API_HANG_DRAIN_GRACE_MS
+	const remainingMs = drainDeadlineMs - Date.now()
+
+	if (remainingMs > 0) {
+		await sleep(remainingMs)
+	}
 }
 
 suite("Roo Code Subtasks", function () {
@@ -482,6 +527,7 @@ suite("Roo Code Subtasks", function () {
 		const api = globalThis.api
 		const asks: Record<string, ClineMessage[]> = {}
 		const says: Record<string, ClineMessage[]> = {}
+		let delayedChildRequestStartedAt: number | undefined
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
 			if (message.type === "ask") {
@@ -519,7 +565,10 @@ suite("Roo Code Subtasks", function () {
 				return false
 			})
 
-			await waitForAimockRequestContaining(SUBTASK_API_HANG_CHILD_MARKER, SUBTASK_API_HANG_PARENT_MARKER)
+			delayedChildRequestStartedAt = await waitForAimockRequestContaining(
+				SUBTASK_API_HANG_CHILD_MARKER,
+				SUBTASK_API_HANG_PARENT_MARKER,
+			)
 
 			await api.cancelCurrentTask()
 
@@ -580,6 +629,9 @@ suite("Roo Code Subtasks", function () {
 				await api.clearCurrentTask()
 			}
 			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
+			// Drain the cancelled delayed stream before the next test can open another
+			// streamed request against the mock.
+			await waitForDelayedSubtaskStreamDrain(delayedChildRequestStartedAt)
 		}
 	})
 
@@ -608,7 +660,8 @@ suite("Roo Code Subtasks", function () {
 			...parentProfile,
 			openRouterModelId: "openai/gpt-4.1-mini",
 		}
-		const priorModeApiConfigs = api.getConfiguration().modeApiConfigs ?? {}
+		const priorConfiguration = api.getConfiguration()
+		const priorActiveProfile = api.getActiveProfile()
 		const parentProfileId = await api.upsertProfile("subtask-parent-profile", parentProfile, true)
 		const childProfileId = await api.upsertProfile("subtask-child-profile", childProfile, false)
 		await api.setConfiguration({
@@ -683,7 +736,10 @@ suite("Roo Code Subtasks", function () {
 			)
 		} finally {
 			api.off(RooCodeEventName.Message, messageHandler)
-			await api.setConfiguration({ modeApiConfigs: priorModeApiConfigs })
+			await api.setConfiguration(priorConfiguration)
+			if (priorActiveProfile) {
+				await api.setActiveProfile(priorActiveProfile)
+			}
 			await api.deleteProfile("subtask-child-profile").catch(() => {})
 			await api.deleteProfile("subtask-parent-profile").catch(() => {})
 			while (api.getCurrentTaskStack().length > 0) {

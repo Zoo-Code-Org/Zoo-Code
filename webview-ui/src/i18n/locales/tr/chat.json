@@ -233,6 +233,7 @@
 		"exitStatus": "{{exitCode}} durumuyla çıkıldı",
 		"malformedCommand": "Hatalı komut: shell sozdizimi hatasi",
 		"manageCommands": "Komut İzinlerini Yönet",
+		"denied": "Komut reddedildi",
 		"commandManagementDescription": "Komut izinlerini yönetin: Otomatik yürütmeye izin vermek için ✓'e, yürütmeyi reddetmek için ✗'e tıklayın. Desenler açılıp kapatılabilir veya listelerden kaldırılabilir. <settingsLink>Tüm ayarları görüntüle</settingsLink>",
 		"addToAllowed": "İzin verilenler listesine ekle",
 		"removeFromAllowed": "İzin verilenler listesinden kaldır",
@@ -344,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Moonshot ve Kimi Code provider'ları — canlı model keşfiyle Moonshot modellerine bağlan veya OAuth cihaz akışıyla Kimi Code'da oturum aç.",
-			"highlight2": "En yeni model desteği — provider'lar genelinde Claude Opus 5'in yanı sıra Kimi K3, Gemini 3.6 Flash ve MiniMax-M3'ü kullan.",
-			"highlight3": "Daha güvenilir iş akışları — kesintiye uğramış alt görevleri temiz biçimde bırak ve kod tabanındaki Dart ile düz metin dosyalarını indeksle."
+			"highlight1": "Destructive Command Guard (DCG) ile daha uzun görevleri kesintisiz çalıştır — DCG tehlikeli komutları engellerken Zoo'nun sürekli onay düğmelerine basmana gerek kalmadan çalışmasını sağlar.",
+			"highlight2": "Daha iyi provider denetimleri ve güvenilirlik — OpenAI Codex yanıt hızını seç, güncellenmiş DeepSeek yapılandırmalarını kullan ve çalışan görevleri profil değişikliklerinden yalıt.",
+			"highlight3": "Kritik terminal yürütme düzeltmesi — Zoo artık bir sonraki adıma başlamadan önce terminal komutlarının bitmesini bekliyor."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

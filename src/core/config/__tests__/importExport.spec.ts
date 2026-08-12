@@ -8,6 +8,9 @@ import * as vscode from "vscode"
 import type { ProviderName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+import { makeExtensionContext } from "../../../test-utils/vscode"
+
 import { importSettings, importSettingsFromFile, importSettingsWithFeedback, exportSettings } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
@@ -97,11 +100,11 @@ vi.mock("../../../api", () => ({
 describe("importExport", () => {
 	let mockProviderSettingsManager: ReturnType<typeof vi.mocked<ProviderSettingsManager>>
 	let mockContextProxy: ReturnType<typeof vi.mocked<ContextProxy>>
-	let mockExtensionContext: ReturnType<typeof vi.mocked<vscode.ExtensionContext>>
+	let mockExtensionContext: vscode.ExtensionContext
 	let mockCustomModesManager: ReturnType<typeof vi.mocked<CustomModesManager>>
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -129,8 +132,12 @@ describe("importExport", () => {
 
 		const map = new Map<string, string>()
 
-		mockExtensionContext = {
+		// Secrets are Map-backed so real ProviderSettingsManager instances can
+		// round-trip configs; the rest of the context comes from the shared builder.
+		const baseContext = makeExtensionContext()
+		mockExtensionContext = makeExtensionContext({
 			secrets: {
+				...baseContext.secrets,
 				get: vi.fn().mockImplementation((key: string) => {
 					return map.get(key)
 				}),
@@ -138,7 +145,7 @@ describe("importExport", () => {
 					return map.set(key, value)
 				}),
 			},
-		} as unknown as ReturnType<typeof vi.mocked<vscode.ExtensionContext>>
+		})
 	})
 
 	describe("importSettings", () => {
@@ -2030,7 +2037,7 @@ describe("importExport", () => {
 			;(fs.readFile as Mock).mockResolvedValue(exportedFileContent)
 
 			// Reset mocks for import
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockProviderSettingsManager.export.mockResolvedValue({
 				currentApiConfigName: "default",
 				apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
@@ -2118,7 +2125,7 @@ describe("importExport", () => {
 			;(fs.readFile as Mock).mockResolvedValue(exportedFileContent)
 
 			// Reset mocks for import
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockProviderSettingsManager.export.mockResolvedValue({
 				currentApiConfigName: "default",
 				apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
@@ -2510,20 +2517,14 @@ describe("importExport", () => {
 			{
 				testCase: "supportsReasoningBudget is false",
 				providerName: "deepseek-provider",
-				modelId: "deepseek-chat",
+				modelId: "deepseek-v4-flash",
 				providerId: "deepseek-id",
 			},
 			{
 				testCase: "requiredReasoningBudget is false",
 				providerName: "deepseek-provider-2",
-				modelId: "deepseek-coder",
+				modelId: "deepseek-v4-pro",
 				providerId: "deepseek-id-2",
-			},
-			{
-				testCase: "both supportsReasoningBudget and requiredReasoningBudget are false",
-				providerName: "deepseek-provider-3",
-				modelId: "deepseek-reasoner",
-				providerId: "deepseek-id-3",
 			},
 		])(
 			"should exclude modelMaxTokens and modelMaxThinkingTokens when $testCase",

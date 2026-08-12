@@ -17,6 +17,8 @@ import { opencodeGoDefaultModelId, opencodeGoModels, isOpencodeGoAnthropicFormat
 import { OpencodeGoHandler } from "../opencode-go"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -63,7 +65,7 @@ describe("OpencodeGoHandler", () => {
 	}
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate.mockClear()
 		mockAnthropicCreate.mockClear()
 	})
@@ -114,9 +116,9 @@ describe("OpencodeGoHandler", () => {
 
 	describe("createMessage", () => {
 		beforeEach(() => {
-			mockCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -134,8 +136,8 @@ describe("OpencodeGoHandler", () => {
 							},
 						],
 						usage: null,
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: {
 							prompt_tokens: 12,
@@ -143,19 +145,16 @@ describe("OpencodeGoHandler", () => {
 							total_tokens: 19,
 							prompt_tokens_details: { cached_tokens: 4 },
 						},
-					}
-				},
-			}))
+					},
+				]),
+			)
 		})
 
 		it("streams text, reasoning, tool-call and usage chunks", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks = []
-			for await (const chunk of handler.createMessage("You are helpful.", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("You are helpful.", messages))
 
 			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking…" })
@@ -177,9 +176,7 @@ describe("OpencodeGoHandler", () => {
 		it("requests a streaming completion with usage included and native max tokens", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -197,9 +194,7 @@ describe("OpencodeGoHandler", () => {
 		it("forwards the model's default reasoning_effort for reasoning-capable models", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			// glm-5.1 advertises supportsReasoningEffort with a default of "medium".
 			expect(mockCreate).toHaveBeenCalledWith(
@@ -213,9 +208,7 @@ describe("OpencodeGoHandler", () => {
 		it("omits reasoning_effort when the user disables reasoning", async () => {
 			const handler = new OpencodeGoHandler({ ...mockOptions, reasoningEffort: "disable" })
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
 			expect(callArgs.reasoning_effort).toBeUndefined()
@@ -229,9 +222,7 @@ describe("OpencodeGoHandler", () => {
 					content: [{ type: "text", text: "Hi" }],
 				},
 			]
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockCreate.mock.calls[0][0] as { messages: Array<{ role: string }> }
 			// The system prompt is prepended, then the R1-converted user message.
@@ -241,54 +232,48 @@ describe("OpencodeGoHandler", () => {
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
-					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -298,21 +283,18 @@ describe("OpencodeGoHandler", () => {
 								index: 0,
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
@@ -324,22 +306,20 @@ describe("OpencodeGoHandler", () => {
 			vitest.mocked(getModels).mockImplementationOnce(async () => ({
 				"kimi-k2.6": { ...opencodeGoModels["kimi-k2.6"] },
 			}))
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { content: "Hi" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Hi" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "kimi-k2.6" })
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockCreate.mock.calls[0][0] as { messages: Array<{ role: string }> }
 			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
@@ -348,23 +328,20 @@ describe("OpencodeGoHandler", () => {
 		})
 
 		it("emits a usage chunk with zeroed tokens when the stream reports no usage", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { content: "Hi" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Hi" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 0 })
 		})
@@ -373,9 +350,7 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 999 })
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
 		})
@@ -433,9 +408,9 @@ describe("OpencodeGoHandler", () => {
 		}
 
 		beforeEach(() => {
-			mockAnthropicCreate.mockImplementation(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockAnthropicCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
 						type: "message_start",
 						message: {
 							usage: {
@@ -445,37 +420,35 @@ describe("OpencodeGoHandler", () => {
 								cache_read_input_tokens: 3,
 							},
 						},
-					}
-					yield {
+					},
+					{
 						type: "content_block_start",
 						index: 0,
 						content_block: { type: "text", text: "" },
-					}
-					yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } }
-					yield {
+					},
+					{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+					{
 						type: "content_block_start",
 						index: 1,
 						content_block: { type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
-					}
-					yield {
+					},
+					{
 						type: "content_block_delta",
 						index: 1,
 						delta: { type: "input_json_delta", partial_json: '{"path":' },
-					}
-					yield { type: "content_block_stop", index: 1 }
-					yield { type: "message_delta", usage: { output_tokens: 5 } }
-					yield { type: "message_stop" }
-				},
-			}))
+					},
+					{ type: "content_block_stop", index: 1 },
+					{ type: "message_delta", usage: { output_tokens: 5 } },
+					{ type: "message_stop" },
+				]),
+			)
 		})
 
 		it("routes the request through the Anthropic /v1/messages client, not chat completions", async () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -492,10 +465,7 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
 			expect(chunks).toContainEqual({
@@ -539,9 +509,7 @@ describe("OpencodeGoHandler", () => {
 				{ role: "user", content: "second" },
 			]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk // drain
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockAnthropicCreate.mock.calls[0][0] as {
 				system: Array<{ cache_control?: unknown }>
@@ -603,9 +571,7 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
 			// Disable-tools path: with no tools, neither field is sent so the
@@ -628,9 +594,7 @@ describe("OpencodeGoHandler", () => {
 				},
 			]
 
-			for await (const _chunk of handler.createMessage("sys", messages, { taskId: "test-task", tools })) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages, { taskId: "test-task", tools }))
 
 			const callArgs = mockAnthropicCreate.mock.calls[0][0] as Record<string, unknown>
 			expect(Array.isArray(callArgs.tools)).toBe(true)
@@ -650,9 +614,7 @@ describe("OpencodeGoHandler", () => {
 				{ role: "user", content: "second" },
 			]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockAnthropicCreate.mock.calls[0][0] as {
 				system: Array<{ cache_control?: unknown }>
@@ -676,9 +638,7 @@ describe("OpencodeGoHandler", () => {
 				},
 			]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockAnthropicCreate.mock.calls[0][0] as { messages: Array<{ content: any }> }
 			const lastUserMsg = callArgs.messages[callArgs.messages.length - 1]
@@ -692,9 +652,7 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "assistant", content: "only assistant" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			const callArgs = mockAnthropicCreate.mock.calls[0][0] as {
 				messages: Array<{ cache_control?: unknown }>
@@ -703,41 +661,35 @@ describe("OpencodeGoHandler", () => {
 		})
 
 		it("streams thinking content blocks and thinking deltas", async () => {
-			mockAnthropicCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { type: "message_start", message: { usage: { input_tokens: 5, output_tokens: 0 } } }
-					// index 0: thinking block (no leading newline at index 0).
-					yield {
+			mockAnthropicCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 5, output_tokens: 0 } } },
+					{
 						type: "content_block_start",
 						index: 0,
 						content_block: { type: "thinking", thinking: "initial thought" },
-					}
-					yield {
+					},
+					{
 						type: "content_block_delta",
 						index: 0,
 						delta: { type: "thinking_delta", thinking: " more" },
-					}
-					// index 1: text block gets a leading newline separator.
-					yield { type: "content_block_start", index: 1, content_block: { type: "text", text: "" } }
-					yield { type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "answer" } }
-					// index 2: a second thinking block also gets a newline separator.
-					yield {
+					},
+					{ type: "content_block_start", index: 1, content_block: { type: "text", text: "" } },
+					{ type: "content_block_delta", index: 1, delta: { type: "text_delta", text: "answer" } },
+					{
 						type: "content_block_start",
 						index: 2,
 						content_block: { type: "thinking", thinking: "second thought" },
-					}
-					yield { type: "message_delta", usage: { output_tokens: 3 } }
-					yield { type: "message_stop" }
-				},
-			}))
+					},
+					{ type: "message_delta", usage: { output_tokens: 3 } },
+					{ type: "message_stop" },
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			// index 0 thinking block (no leading newline separator at index 0).
 			expect(chunks).toContainEqual({ type: "reasoning", text: "initial thought" })
@@ -758,9 +710,7 @@ describe("OpencodeGoHandler", () => {
 			})
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192 }))
 		})
@@ -769,36 +719,33 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler({ ...anthropicOptions, includeMaxTokens: true })
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			for await (const _chunk of handler.createMessage("sys", messages)) {
-				void _chunk
-			}
+			await collectStream(handler.createMessage("sys", messages))
 
 			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
 			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 65_536 }))
 		})
 
 		it("accumulates output tokens across message_delta events into the final cost", async () => {
-			mockAnthropicCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 0 } } }
-					yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
-					yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }
-					yield { type: "message_delta", usage: { output_tokens: 4 } }
-					yield { type: "message_delta", usage: { output_tokens: 6 } }
-					yield { type: "message_stop" }
-				},
-			}))
+			mockAnthropicCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 0 } } },
+					{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+					{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
+					{ type: "message_delta", usage: { output_tokens: 4 } },
+					{ type: "message_delta", usage: { output_tokens: 6 } },
+					{ type: "message_stop" },
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
-			const costChunk = chunks.find((c) => c.type === "usage" && c.totalCost !== undefined)
-			expect(costChunk).toBeDefined()
+			const costChunk = chunks.find((c) => c.type === "usage" && "totalCost" in c && c.totalCost !== undefined)
+			if (!costChunk || costChunk.type !== "usage") {
+				throw new Error("Expected usage chunk with cost")
+			}
 			// qwen3.7-max: input $2.5/M, output $7.5/M. Accumulated output
 			// tokens (4 + 6 = 10) must feed the cost calc — without the
 			// accumulation fix this would only reflect the 10 input tokens
@@ -807,23 +754,20 @@ describe("OpencodeGoHandler", () => {
 		})
 
 		it("does not yield a cost chunk when the stream reports no token usage", async () => {
-			mockAnthropicCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { type: "message_start", message: { usage: { input_tokens: 0, output_tokens: 0 } } }
-					yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }
-					yield { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } }
-					yield { type: "message_delta", usage: { output_tokens: 0 } }
-					yield { type: "message_stop" }
-				},
-			}))
+			mockAnthropicCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 0, output_tokens: 0 } } },
+					{ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+					{ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } },
+					{ type: "message_delta", usage: { output_tokens: 0 } },
+					{ type: "message_stop" },
+				]),
+			)
 
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage("sys", messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage("sys", messages))
 
 			expect(chunks.some((c) => c.type === "usage" && c.totalCost !== undefined)).toBe(false)
 		})
@@ -842,9 +786,7 @@ describe("OpencodeGoHandler", () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
 			await expect(async () => {
-				for await (const _chunk of handler.createMessage("sys", messages)) {
-					void _chunk
-				}
+				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: rate limited")
 		})
 	})

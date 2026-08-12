@@ -233,6 +233,7 @@
 		"exitStatus": "Đã thoát với trạng thái {{exitCode}}",
 		"malformedCommand": "Lệnh không hợp lệ: lỗi cú pháp shell",
 		"manageCommands": "Quản lý quyền lệnh",
+		"denied": "Lệnh bị từ chối",
 		"commandManagementDescription": "Quản lý quyền lệnh: Nhấp vào ✓ để cho phép tự động thực thi, ✗ để từ chối thực thi. Các mẫu có thể được bật/tắt hoặc xóa khỏi danh sách. <settingsLink>Xem tất cả cài đặt</settingsLink>",
 		"addToAllowed": "Thêm vào danh sách cho phép",
 		"removeFromAllowed": "Xóa khỏi danh sách cho phép",
@@ -344,9 +345,9 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới:",
-			"highlight1": "Provider Moonshot và Kimi Code — kết nối với các model Moonshot bằng tính năng khám phá model trực tiếp hoặc đăng nhập Kimi Code qua luồng thiết bị OAuth.",
-			"highlight2": "Hỗ trợ model mới nhất — dùng Claude Opus 5 trên nhiều provider, cùng với Kimi K3, Gemini 3.6 Flash và MiniMax-M3.",
-			"highlight3": "Workflow đáng tin cậy hơn — từ bỏ gọn gàng các tác vụ con bị gián đoạn và lập chỉ mục file Dart cùng file văn bản thuần trong codebase."
+			"highlight1": "Chạy các task dài hơn mà không bị gián đoạn với Destructive Command Guard (DCG) — DCG chặn các lệnh nguy hiểm trong khi để Zoo tiếp tục làm việc mà bạn không cần liên tục nhấn nút phê duyệt.",
+			"highlight2": "Khả năng điều khiển và độ tin cậy của provider tốt hơn — chọn tốc độ phản hồi OpenAI Codex, dùng cấu hình DeepSeek mới nhất và tách biệt các task đang chạy khỏi thay đổi profile.",
+			"highlight3": "Sửa lỗi nghiêm trọng khi thực thi terminal — Zoo giờ sẽ chờ lệnh terminal hoàn tất trước khi bắt đầu bước tiếp theo."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

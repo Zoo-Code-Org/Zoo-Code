@@ -13,6 +13,14 @@
 	"codebaseSearch": {
 		"approval": "Suche nach '{{query}}' im Codebase..."
 	},
+	"executeCommand": {
+		"destructiveCommandGuard": {
+			"blocked": "Destructive Command Guard hat diesen Befehl blockiert.",
+			"blockedWithReason": "Destructive Command Guard hat diesen Befehl blockiert. Nachricht von DCG: {{reason}}",
+			"blockedWithRule": "Destructive Command Guard hat diesen Befehl blockiert. (Regel: {{ruleId}})",
+			"blockedWithReasonAndRule": "Destructive Command Guard hat diesen Befehl blockiert. Nachricht von DCG: {{reason}} (Regel: {{ruleId}})"
+		}
+	},
 	"newTask": {
 		"errors": {
 			"policy_restriction": "Neue Aufgabe konnte aufgrund von Richtlinienbeschränkungen nicht erstellt werden."

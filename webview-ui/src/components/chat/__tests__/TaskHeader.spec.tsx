@@ -1,8 +1,7 @@
 // npx vitest src/components/chat/__tests__/TaskHeader.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent } from "@/utils/test-utils"
 
 import type { ProviderSettings } from "@roo-code/types"
 
@@ -54,6 +53,7 @@ const mockExtensionState: {
 
 // Mock the ExtensionStateContext
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: () => mockExtensionState,
 }))
 
@@ -100,14 +100,8 @@ describe("TaskHeader", () => {
 		handleCondenseContext: vi.fn(),
 	}
 
-	const queryClient = new QueryClient()
-
 	const renderTaskHeader = (props: Partial<TaskHeaderProps> = {}) => {
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<TaskHeader {...defaultProps} {...props} />
-			</QueryClientProvider>,
-		)
+		return renderWithExtensionState(<TaskHeader {...defaultProps} {...props} />)
 	}
 
 	it("should display cost when totalCost is greater than 0", () => {
