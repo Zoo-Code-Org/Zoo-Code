@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}}-Dokumentation",
+		"commitMessageModel": {
+			"label": "Modell für Commit-Nachrichten",
+			"description": "Profil zum Generieren von Commit-Nachrichten aus der Quellcodeverwaltung. Ein kleines, schnelles Modell reicht in der Regel aus. Nicht ausgewählt lassen, um das aktuell aktive Profil zu verwenden.",
+			"useCurrentConfig": "Aktuell ausgewählte API-Konfiguration verwenden"
+		},
+		"commitMessageTimeout": {
+			"label": "Zeitlimit für Commit-Nachricht",
+			"description": "Sekunden, die auf eine Commit-Nachricht gewartet wird. Erhöhe den Wert, wenn ein langsames oder entferntes Modell länger braucht."
+		},
 		"configProfile": "Konfigurationsprofil",
 		"description": "Speichern Sie verschiedene API-Konfigurationen, um schnell zwischen Anbietern und Einstellungen zu wechseln.",
 		"apiProvider": "API-Anbieter",

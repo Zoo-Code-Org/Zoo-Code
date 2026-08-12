@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "Tài liệu {{provider}}",
+		"commitMessageModel": {
+			"label": "Mô hình tạo thông điệp commit",
+			"description": "Hồ sơ dùng để tạo thông điệp commit từ bảng Source Control. Một mô hình nhỏ và nhanh thường là đủ. Để trống để dùng hồ sơ đang hoạt động.",
+			"useCurrentConfig": "Dùng cấu hình API đang được chọn"
+		},
+		"commitMessageTimeout": {
+			"label": "Thời gian chờ thông điệp commit",
+			"description": "Số giây chờ thông điệp commit trước khi bỏ cuộc. Tăng lên nếu mô hình chậm hoặc từ xa cần nhiều thời gian hơn."
+		},
 		"configProfile": "Hồ sơ cấu hình",
 		"description": "Lưu các cấu hình API khác nhau để nhanh chóng chuyển đổi giữa các nhà cung cấp và cài đặt.",
 		"apiProvider": "Nhà cung cấp API",

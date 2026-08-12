@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}} 文档",
+		"commitMessageModel": {
+			"label": "提交信息模型",
+			"description": "用于从源代码管理面板生成提交信息的配置文件。通常小而快的模型就足够了。留空则使用当前激活的配置文件。",
+			"useCurrentConfig": "使用当前选择的 API 配置"
+		},
+		"commitMessageTimeout": {
+			"label": "提交信息超时",
+			"description": "等待提交信息的秒数。如果模型较慢或为远程模型，请调高此值。"
+		},
 		"configProfile": "配置文件",
 		"description": "保存多组API配置便于快速切换",
 		"apiProvider": "API提供商",

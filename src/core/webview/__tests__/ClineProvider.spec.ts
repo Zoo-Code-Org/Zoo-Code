@@ -1266,8 +1266,9 @@ describe("ClineProvider", () => {
 			expect(state.commitMessageApiConfigId).toBeUndefined()
 		})
 
-		// The timeout is read from getState() to bound the request. Omitted from the returned state
-		// it reads as unset, so a configured value silently became the default instead.
+		// The timeout is read from getState() to bound the request, and from the posted state by
+		// the settings input. Omitted from either it reads as unset, so a configured value silently
+		// became the default and the input snapped back after every save.
 		it("getState returns the saved commitMessageTimeout", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			await provider.contextProxy.setValue("commitMessageTimeout", 120)

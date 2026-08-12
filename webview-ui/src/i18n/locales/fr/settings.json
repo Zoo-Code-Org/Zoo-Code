@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "Documentation {{provider}}",
+		"commitMessageModel": {
+			"label": "Modèle pour les messages de commit",
+			"description": "Profil utilisé pour générer les messages de commit depuis le panneau de contrôle de code source. Un petit modèle rapide suffit généralement. Laissez vide pour utiliser le profil actif.",
+			"useCurrentConfig": "Utiliser la configuration d'API actuellement sélectionnée"
+		},
+		"commitMessageTimeout": {
+			"label": "Délai du message de commit",
+			"description": "Secondes d'attente du message de commit avant d'abandonner. Augmentez-le si un modèle lent ou distant a besoin de plus de temps."
+		},
 		"configProfile": "Profil de configuration",
 		"description": "Enregistrez différentes configurations d'API pour basculer rapidement entre les fournisseurs et les paramètres.",
 		"apiProvider": "Fournisseur d'API",

@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "Dokumentasi {{provider}}",
+		"commitMessageModel": {
+			"label": "Model Pesan Commit",
+			"description": "Profil yang digunakan untuk menghasilkan pesan commit dari panel Source Control. Model kecil dan cepat biasanya sudah cukup. Biarkan tidak dipilih untuk menggunakan profil yang sedang aktif.",
+			"useCurrentConfig": "Gunakan konfigurasi API yang dipilih saat ini"
+		},
+		"commitMessageTimeout": {
+			"label": "Batas Waktu Pesan Commit",
+			"description": "Detik menunggu pesan commit sebelum menyerah. Naikkan jika model lambat atau jarak jauh perlu waktu lebih lama."
+		},
 		"configProfile": "Profil Konfigurasi",
 		"description": "Simpan konfigurasi API yang berbeda untuk beralih dengan cepat antara provider dan pengaturan.",
 		"apiProvider": "Provider API",

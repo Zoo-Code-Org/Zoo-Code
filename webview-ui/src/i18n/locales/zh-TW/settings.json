@@ -383,6 +383,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}} 說明文件",
+		"commitMessageModel": {
+			"label": "提交訊息模型",
+			"description": "用於從原始檔控制面板產生提交訊息的設定檔。通常小而快的模型就足夠了。留空則使用目前啟用的設定檔。",
+			"useCurrentConfig": "使用目前選取的 API 設定"
+		},
+		"commitMessageTimeout": {
+			"label": "提交訊息逾時",
+			"description": "等待提交訊息的秒數。若模型較慢或為遠端模型，請調高此值。"
+		},
 		"configProfile": "設定檔",
 		"description": "儲存不同的 API 設定以快速切換供應商和設定。",
 		"apiProvider": "API 供應商",

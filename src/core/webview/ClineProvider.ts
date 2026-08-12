@@ -2622,6 +2622,8 @@ export class ClineProvider
 			customSupportPrompts: customSupportPrompts ?? {},
 			enhancementApiConfigId,
 			commitMessageApiConfigId,
+			// Left undefined when unset so the webview shows its own default rather than a value
+			// the user never chose.
 			commitMessageTimeout,
 			autoApprovalEnabled: autoApprovalEnabled ?? false,
 			customModes,

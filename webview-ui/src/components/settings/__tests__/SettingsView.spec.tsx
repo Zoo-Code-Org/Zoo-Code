@@ -175,7 +175,14 @@ vi.mock("@/components/ui", () => ({
 	),
 	Select: ({ children, value, onValueChange }: any) => (
 		<div data-testid="select" data-value={value}>
-			<button onClick={() => onValueChange && onValueChange("test-change")}>{value}</button>
+			{/* Setting `data-next-value` on the button lets a test choose which option is picked.
+			    Without it the click keeps its historical fixed value. */}
+			<button
+				onClick={(e: any) =>
+					onValueChange && onValueChange(e.currentTarget.getAttribute("data-next-value") ?? "test-change")
+				}>
+				{value}
+			</button>
 			{children}
 		</div>
 	),
@@ -370,6 +377,40 @@ describe("SettingsView - Sound Settings", () => {
 					ttsEnabled: true,
 				}),
 			}),
+		)
+	})
+
+	it("saves a newly selected commit message model", async () => {
+		const { activateTab, getSettingsContent } = renderSettingsView({
+			listApiConfigMeta: [
+				{ id: "config1", name: "Config 1" },
+				{ id: "config2", name: "Config 2" },
+			],
+			commitMessageApiConfigId: "config2",
+			settingsImportedAt: new Date().toISOString(),
+		})
+
+		activateTab("providers")
+
+		// Selecting a different profile covers the whole selection -> cachedState -> updateSettings
+		// path, which re-saving the initial value would not.
+		const content = getSettingsContent()
+		const picker = (await within(content).findByTestId("select-item-config1")).closest("[data-testid='select']")
+		const trigger = within(picker as HTMLElement).getByRole("button")
+
+		trigger.setAttribute("data-next-value", "config1")
+		fireEvent.click(trigger)
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({
+						commitMessageApiConfigId: "config1",
+					}),
+				}),
+			),
 		)
 	})
 

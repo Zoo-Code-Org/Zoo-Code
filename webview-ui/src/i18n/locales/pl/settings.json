@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "Dokumentacja {{provider}}",
+		"commitMessageModel": {
+			"label": "Model komunikatów zatwierdzenia",
+			"description": "Profil używany do generowania komunikatów zatwierdzenia z panelu kontroli źródła. Zwykle wystarczy mały, szybki model. Pozostaw niewybrane, aby użyć aktywnego profilu.",
+			"useCurrentConfig": "Użyj aktualnie wybranej konfiguracji API"
+		},
+		"commitMessageTimeout": {
+			"label": "Limit czasu komunikatu commita",
+			"description": "Sekundy oczekiwania na komunikat commita. Zwiększ, jeśli wolny lub zdalny model potrzebuje więcej czasu."
+		},
 		"configProfile": "Profil konfiguracji",
 		"description": "Zapisz różne konfiguracje API, aby szybko przełączać się między dostawcami i ustawieniami.",
 		"apiProvider": "Dostawca API",

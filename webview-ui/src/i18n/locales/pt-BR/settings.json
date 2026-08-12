@@ -356,6 +356,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "Documentação do {{provider}}",
+		"commitMessageModel": {
+			"label": "Modelo para mensagens de commit",
+			"description": "Perfil usado para gerar mensagens de commit a partir do painel de Controle do Código-Fonte. Um modelo pequeno e rápido costuma ser suficiente. Deixe sem seleção para usar o perfil ativo.",
+			"useCurrentConfig": "Usar a configuração de API selecionada no momento"
+		},
+		"commitMessageTimeout": {
+			"label": "Tempo limite da mensagem de commit",
+			"description": "Segundos de espera pela mensagem de commit antes de desistir. Aumente se um modelo lento ou remoto precisar de mais tempo."
+		},
 		"configProfile": "Perfil de configuração",
 		"description": "Salve diferentes configurações de API para alternar rapidamente entre provedores e configurações.",
 		"apiProvider": "Provedor de API",
