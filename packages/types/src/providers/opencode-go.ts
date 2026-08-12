@@ -295,6 +295,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 
 	// --- DeepSeek ---
 	"deepseek-v4-pro": {
+		displayName: "DeepSeek V4 Pro 0813",
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
 		supportsImages: false,
@@ -312,7 +313,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		outputPrice: 3.48,
 		cacheReadsPrice: 0.0145,
 		description:
-			"DeepSeek-V4-Pro is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
+			"DeepSeek-V4-Pro-0813 is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
 	},
 	"deepseek-v4-flash": {
 		maxTokens: 384_000,

@@ -256,6 +256,7 @@ export const fireworksModels = {
 			"Kimi K2.6 is Moonshot AI's latest flagship agentic model, building on K2.5 with stronger long-horizon reasoning, multi-step tool use, and unified vision/text understanding.",
 	},
 	"accounts/fireworks/models/deepseek-v4-pro": {
+		displayName: "DeepSeek V4 Pro 0813",
 		maxTokens: 16384,
 		contextWindow: 1048576,
 		supportsImages: false,
@@ -264,7 +265,7 @@ export const fireworksModels = {
 		outputPrice: 3.48,
 		cacheReadsPrice: 0.14,
 		description:
-			"DeepSeek V4 Pro is the latest iteration of the DeepSeek model family, with improved reasoning, code generation, and instruction following over the V3 series.",
+			"DeepSeek V4 Pro 0813 is the latest iteration of the DeepSeek model family, with improved reasoning, code generation, and instruction following over the V3 series.",
 	},
 	"accounts/fireworks/models/kimi-k2p7-code": {
 		maxTokens: 16384,
