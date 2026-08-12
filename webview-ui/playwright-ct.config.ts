@@ -116,6 +116,9 @@ export default defineConfig({
 	expect: {
 		toHaveScreenshot: {
 			animations: "disabled",
+			// Allow 1% pixel diff to tolerate cross-platform rendering
+			// differences (Windows ↔ Linux font anti-aliasing).
+			maxDiffPixelRatio: 0.01,
 		},
 	},
 	projects: [
