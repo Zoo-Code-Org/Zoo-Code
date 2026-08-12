@@ -43,23 +43,25 @@ const isDeepSeekThinkingEnabled = (modelId: string, options: ApiHandlerOptions) 
 
 // https://api-docs.deepseek.com/guides/thinking_mode/
 export const normalizeDeepSeekReasoningEffort = (
-	// the mapping became model-agnostic now,
-	// but let's keep the modelId parameter for future flexibility
-	// updated 2026-08-13
-	_modelId: DeepSeekModelId,
+	modelId: DeepSeekModelId,
 	reasoningEffort?: string,
 ): "low" | "high" | "max" | undefined => {
-	switch (reasoningEffort) {
-		case "low":
-			return "low"
+	// still check the modelId so non-supported models won't produce reasoning efforts
+	switch (modelId) {
+		case "deepseek-v4-flash":
+		case "deepseek-v4-pro":
+			switch (reasoningEffort) {
+				case "low":
+					return "low"
 
-		case "medium":
-		case "high":
-		case "xhigh":
-			return "high"
+				case "medium":
+				case "high":
+				case "xhigh":
+					return "high"
 
-		case "max":
-			return "max"
+				case "max":
+					return "max"
+			}
 	}
 
 	return undefined

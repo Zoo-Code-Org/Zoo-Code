@@ -617,6 +617,7 @@ describe("DeepSeekHandler", () => {
 
 	describe("normalizeDeepSeekReasoningEffort", () => {
 		// https://api-docs.deepseek.com/guides/thinking_mode/
+		// updated on 2026-08-13
 		it("should map acceptable reasoning efforts the same way as stated by the official documentation", async () => {
 			const mappings: {
 				modelId: DeepSeekModelId
@@ -632,6 +633,11 @@ describe("DeepSeekHandler", () => {
 					modelId: "deepseek-v4-flash",
 					rawReasoningEffort: "low",
 					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "medium",
+					mappedReasoningEffort: "high",
 				},
 				{
 					modelId: "deepseek-v4-flash",
@@ -656,6 +662,11 @@ describe("DeepSeekHandler", () => {
 				{
 					modelId: "deepseek-v4-pro",
 					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "medium",
 					mappedReasoningEffort: "high",
 				},
 				{
@@ -666,7 +677,7 @@ describe("DeepSeekHandler", () => {
 				{
 					modelId: "deepseek-v4-pro",
 					rawReasoningEffort: "xhigh",
-					mappedReasoningEffort: "max",
+					mappedReasoningEffort: "high",
 				},
 				{
 					modelId: "deepseek-v4-pro",
