@@ -1226,6 +1226,47 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("commit message model selection is included in state", () => {
+		// Both paths matter: the webview reads the posted state to show the current selection, and
+		// the generator reads getState() to pick a profile. Dropping either one makes a saved
+		// selection look like it reverted.
+		it("getStateToPostToWebview returns the saved commitMessageApiConfigId", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", "config-2")
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageApiConfigId).toBe("config-2")
+		})
+
+		it("getStateToPostToWebview leaves commitMessageApiConfigId unset when no profile is chosen", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageApiConfigId).toBeUndefined()
+		})
+
+		it("getState returns the saved commitMessageApiConfigId", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", "config-2")
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageApiConfigId).toBe("config-2")
+		})
+
+		it("getState leaves commitMessageApiConfigId unset when no profile is chosen", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", undefined)
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageApiConfigId).toBeUndefined()
+		})
+	})
+
 	it("getStateToPostToWebview passes through defined diffFuzzyThreshold value", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("diffFuzzyThreshold", 0.5)
