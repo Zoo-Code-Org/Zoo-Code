@@ -1,6 +1,6 @@
 import type { ProviderSettings } from "@roo-code/types"
 
-import { getCommitMessageSettings } from "../config"
+import { DEFAULT_COMMIT_MESSAGE_TIMEOUT_SECONDS, getCommitMessageSettings } from "../config"
 import type { ClineProvider } from "../../../core/webview/ClineProvider"
 
 describe("getCommitMessageSettings", () => {
@@ -24,13 +24,14 @@ describe("getCommitMessageSettings", () => {
 	// host. This reads the two members the function actually touches, so the double assertion is
 	// the narrowest way to stand in for it - widening to `unknown` first because the stub is not
 	// structurally assignable to the full class.
-	const makeProvider = (commitMessageApiConfigId?: string) =>
+	const makeProvider = (commitMessageApiConfigId?: string, commitMessageTimeout?: number) =>
 		({
 			getState: vi.fn().mockResolvedValue({
 				apiConfiguration,
 				listApiConfigMeta,
 				customSupportPrompts: { COMMIT_MESSAGE: "custom" },
 				commitMessageApiConfigId,
+				commitMessageTimeout,
 			}),
 			providerSettingsManager: { getProfile },
 		}) as unknown as ClineProvider
@@ -62,6 +63,30 @@ describe("getCommitMessageSettings", () => {
 		const settings = await getCommitMessageSettings(makeProvider())
 
 		expect(settings.customSupportPrompts).toEqual({ COMMIT_MESSAGE: "custom" })
+	})
+
+	describe("timeout", () => {
+		it("defaults when the setting is unset", async () => {
+			const settings = await getCommitMessageSettings(makeProvider())
+
+			expect(settings.timeoutMs).toBe(DEFAULT_COMMIT_MESSAGE_TIMEOUT_SECONDS * 1000)
+		})
+
+		it("uses the configured value, in milliseconds", async () => {
+			const settings = await getCommitMessageSettings(makeProvider(undefined, 120))
+
+			expect(settings.timeoutMs).toBe(120_000)
+		})
+
+		// The timeout is what bounds a stalled provider, so it has to survive the paths that fall
+		// back to the active configuration rather than being lost with the profile lookup.
+		it("survives a profile that no longer exists", async () => {
+			getProfile = vi.fn().mockRejectedValue(new Error("Profile not found"))
+
+			const settings = await getCommitMessageSettings(makeProvider("config2", 90))
+
+			expect(settings.timeoutMs).toBe(90_000)
+		})
 	})
 
 	it("falls back when the saved id is not in the known profiles", async () => {

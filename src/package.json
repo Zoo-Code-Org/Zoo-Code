@@ -169,6 +169,15 @@
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.generateCommitMessage",
+				"title": "%command.generateCommitMessage.title%",
+				"category": "%configuration.title%",
+				"icon": {
+					"light": "assets/icons/panel_light.png",
+					"dark": "assets/icons/panel_dark.png"
+				}
 			}
 		],
 		"menus": {
@@ -264,6 +273,13 @@
 					"command": "zoo-code.popoutButtonClicked",
 					"group": "overflow@2",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				}
+			],
+			"scm/title": [
+				{
+					"command": "zoo-code.generateCommitMessage",
+					"group": "navigation",
+					"when": "scmProvider == git"
 				}
 			]
 		},

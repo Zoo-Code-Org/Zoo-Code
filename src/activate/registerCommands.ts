@@ -14,6 +14,7 @@ import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
+import { generateCommitMessage } from "../services/commit-message"
 import { t } from "../i18n"
 
 /**
@@ -219,6 +220,9 @@ const getCommandsMap = ({
 			outputChannel.appendLine(`[toggleAutoApprove] postMessageToWebview failed: ${error}`)
 		}
 	},
+	// Uses `provider` rather than the visible instance so the Source Control button still works
+	// while the Zoo Code sidebar is closed.
+	generateCommitMessage: (sourceControl?: vscode.SourceControl) => generateCommitMessage(provider, sourceControl),
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
