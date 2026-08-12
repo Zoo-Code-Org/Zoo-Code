@@ -305,6 +305,7 @@ export type ExtensionState = Pick<
 	| "customSupportPrompts"
 	| "enhancementApiConfigId"
 	| "commitMessageApiConfigId"
+	| "commitMessageTimeout"
 	| "customCondensingPrompt"
 	| "codebaseIndexConfig"
 	| "codebaseIndexModels"
