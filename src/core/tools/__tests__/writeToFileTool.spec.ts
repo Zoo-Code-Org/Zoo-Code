@@ -231,8 +231,10 @@ describe("writeToFileTool", () => {
 				...params,
 			},
 			nativeArgs: {
-				path: (params.path ?? testFilePath) as any,
-				content: (params.content ?? testContent) as any,
+				path: (Object.prototype.hasOwnProperty.call(params, "path") ? params.path : testFilePath) as any,
+				content: (Object.prototype.hasOwnProperty.call(params, "content")
+					? params.content
+					: testContent) as any,
 			},
 			partial: isPartial,
 		}
@@ -476,6 +478,7 @@ describe("writeToFileTool", () => {
 			expect(mockCline.once).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
 
 			abortCleanup?.()
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
 
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(1)
@@ -524,6 +527,62 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 		})
 
+		it("uses safe reset and clears partial state when path is missing", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({ path: "" })
+
+				expect(mockCline.recordToolError).toHaveBeenCalledWith("write_to_file")
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("uses safe reset and clears partial state when content is missing", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({ content: undefined })
+
+				expect(mockCline.recordToolError).toHaveBeenCalledWith("write_to_file")
+				expect(mockPushToolResult).toHaveBeenCalledWith("Missing param error")
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
 		it("swallows partial streaming errors instead of surfacing a duplicate error bubble", async () => {
 			// The same filesystem operation is retried in execute() once the block completes,
 			// and that authoritative non-partial path reports the error to the user. Surfacing
@@ -556,7 +615,7 @@ describe("writeToFileTool", () => {
 			// Second call - path stabilized, open() rejects
 			await executeWriteFileTool({}, { isPartial: true })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expect.any(String))
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
@@ -573,7 +632,7 @@ describe("writeToFileTool", () => {
 			// Second call - path stabilized, update() rejects
 			await executeWriteFileTool({}, { isPartial: true })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expect.any(String))
 			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
@@ -684,20 +743,25 @@ describe("writeToFileTool", () => {
 
 		it("swallows diff view reset errors during partial failure cleanup", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-			mockCline.diffViewProvider.open.mockRejectedValue(
-				Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
-			)
-			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+			try {
+				mockCline.diffViewProvider.open.mockRejectedValue(
+					Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+				)
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
 
-			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
-			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-			expect(mockHandleError).not.toHaveBeenCalled()
-			expect(consoleErrorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
-
-			consoleErrorSpy.mockRestore()
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expect.any(String))
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 
 		it("continues partial failure cleanup when finalizing partial ask fails", async () => {

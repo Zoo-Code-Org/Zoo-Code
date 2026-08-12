@@ -3351,9 +3351,12 @@ describe("Cline", () => {
 		})
 
 		it("finalizePartialToolAsk persists and updates a non-last partial tool ask", async () => {
+			let updateSnapshot: Record<string, unknown> | undefined
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
-				.mockResolvedValue(undefined)
+				.mockImplementation(async (message) => {
+					updateSnapshot = { ...message }
+				})
 			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
 
 			const task = new Task({
@@ -3385,6 +3388,7 @@ describe("Cline", () => {
 			expect(partialToolAsk.partial).toBe(false)
 			expect(saveSpy).toHaveBeenCalled()
 			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			expect(updateSnapshot?.partial).toBe(false)
 
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()
@@ -3417,6 +3421,49 @@ describe("Cline", () => {
 			expect(task.clineMessages[0].partial).toBe(true)
 			expect(saveSpy).not.toHaveBeenCalled()
 			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk updates the latest partial tool ask when no text is provided", async () => {
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const olderPartialToolAsk = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "older partial tool message",
+				partial: true,
+			}
+			const latestPartialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "latest partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(olderPartialToolAsk)
+			task.clineMessages.push(latestPartialToolAsk)
+
+			await task.finalizePartialToolAsk()
+			await flushMicrotasks()
+
+			expect(olderPartialToolAsk.partial).toBe(true)
+			expect(latestPartialToolAsk.partial).toBe(false)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(latestPartialToolAsk)
 
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()

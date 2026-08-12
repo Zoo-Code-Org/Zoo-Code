@@ -65,7 +65,7 @@ import { ApiStream, GroundingSource } from "../../api/transform/stream"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 
 // shared
-import { findLastIndex } from "../../shared/array"
+import { findLast, findLastIndex } from "../../shared/array"
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { t } from "../../i18n"
@@ -1840,16 +1840,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * instead of relying on clineMessages.at(-1).
 	 */
 	async finalizePartialToolAsk(text?: string): Promise<void> {
-		const partialToolAsk = this.clineMessages
-			.slice()
-			.reverse()
-			.find(
-				(message) =>
-					message.partial === true &&
-					message.type === "ask" &&
-					message.ask === "tool" &&
-					(text === undefined || message.text === text),
-			)
+		const partialToolAsk = findLast(
+			this.clineMessages,
+			(message) =>
+				message.partial === true &&
+				message.type === "ask" &&
+				message.ask === "tool" &&
+				(text === undefined || message.text === text),
+		)
 
 		if (!partialToolAsk) {
 			return

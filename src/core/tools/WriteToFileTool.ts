@@ -61,7 +61,6 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	private hasPathStabilizedForTask(task: Task, partialPath: string | undefined): boolean {
-		this.registerTaskPartialStateCleanup(task)
 		const key = this.getPartialStreamFailureKey(task)
 		const lastSeenPath = this.lastSeenPartialPathByTaskId.get(key)
 		const pathHasStabilized = lastSeenPath !== undefined && lastSeenPath === partialPath
@@ -106,13 +105,13 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		const { pushToolResult, handleError, askApproval } = callbacks
 		const relPath = params.path
 		let newContent = params.content
-		const partialStreamFailureKey = this.getPartialStreamFailureKey(task)
 
 		if (!relPath) {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
-			await task.diffViewProvider.reset()
+			await this.resetDiffViewAfterWrite(task)
+			this.resetTaskPartialState(task)
 			return
 		}
 
@@ -120,7 +119,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
-			await task.diffViewProvider.reset()
+			await this.resetDiffViewAfterWrite(task)
+			this.resetTaskPartialState(task)
 			return
 		}
 
@@ -288,6 +288,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (this.partialStreamFailuresByTaskId.has(partialStreamFailureKey)) {
 			return
 		}
+
+		this.registerTaskPartialStateCleanup(task)
 
 		// Wait for path to stabilize before showing UI (prevents truncated paths)
 		if (!this.hasPathStabilizedForTask(task, relPath) || newContent === undefined) {
