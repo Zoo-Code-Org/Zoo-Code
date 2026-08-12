@@ -1,12 +1,6 @@
 /* v8 ignore file -- Playwright component fixture is covered by the visual test. */
 import React from "react"
 
-import type {
-	DashboardTaskStatsSnapshot,
-	StatsBucket,
-	StatsQuery,
-} from "@roo-code/types"
-
 import { TranslationContext as AppTranslationContext } from "@/i18n/TranslationContext"
 import { TranslationContext as PlaywrightTranslationContext } from "@src/i18n/TranslationContext"
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
@@ -14,6 +8,14 @@ import enDashboard from "@/i18n/locales/en/dashboard.json" with { type: "json" }
 import enStats from "@/i18n/locales/en/stats.json" with { type: "json" }
 
 import DashboardView from "../DashboardView"
+
+// NOTE: this module intentionally exports ONLY the mounted component
+// (`DashboardViewFixture`). The `makeFixtureSnapshot` data builder used to live
+// here too, but exporting a non-component helper alongside the component made
+// the Playwright CT Vite pipeline instantiate this module twice at collection
+// time, surfacing as `SyntaxError: Identifier 'DashboardViewFixture' has
+// already been declared`. The data builder now lives in the test file, matching
+// the TaskList fixture pattern (component-only export).
 
 // ── Translations ─────────────────────────────────────────────────────────────
 // The dashboard components read `useAppTranslation()` from BOTH the real
@@ -44,159 +46,6 @@ const t = (key: string) => translations[key] ?? key
 const translationContextValue = {
 	t,
 	i18n: null as unknown as typeof import("../../../i18n/setup").default,
-}
-
-// ── Mock data ────────────────────────────────────────────────────────────────
-
-function makeBucket(overrides: Partial<StatsBucket> = {}): StatsBucket {
-	return {
-		key: {},
-		events: 10,
-		completedCalls: 8,
-		failedCalls: 1,
-		cancelledCalls: 1,
-		inputTokens: 5000,
-		outputTokens: 2500,
-		cacheReadTokens: 1000,
-		cacheWriteTokens: 500,
-		reasoningTokens: 200,
-		totalTokens: 7500,
-		costUsd: 0.15,
-		unknownEventCount: 0,
-		...overrides,
-	}
-}
-
-const now = Date.now()
-
-// 30 days of heatmap activity, oldest first, with a rising wave and lighter
-// weekends so the heatmap shows multiple intensity levels instead of a flat row.
-const heatmapValues: number[] = Array.from({ length: 30 }, (_, i) => {
-	const wave = Math.sin(i / 3.5) * 0.5 + 0.5
-	const weekend = i % 7 === 0 || i % 7 === 6 ? 0.25 : 1
-	return Math.round(800 + 9000 * wave * weekend)
-})
-
-// Build a full `DashboardTaskStatsSnapshot` matching the shape the stream hook
-// expects. `requestId` must equal the subscription requestId the hook posts in
-// `subscribeDashboardStats` so the stale-epoch check passes.
-export function makeFixtureSnapshot(requestId: string): DashboardTaskStatsSnapshot {
-	return {
-		requestId,
-		generation: 1,
-		sequence: 10,
-		stats: {
-			query: {
-				preset: "today",
-				timezone: "UTC",
-				groupBy: ["model"],
-				includeCancelled: false,
-				cacheRatio: 0.94,
-			} satisfies StatsQuery,
-			generatedAt: new Date(now).toISOString(),
-			buckets: [
-				makeBucket({
-					key: { model: "claude-sonnet-4-20250514" },
-					events: 6,
-					totalTokens: 5000,
-					inputTokens: 3500,
-					outputTokens: 1500,
-					cacheReadTokens: 800,
-					cacheWriteTokens: 400,
-					reasoningTokens: 150,
-					costUsd: 0.1,
-				}),
-				makeBucket({
-					key: { model: "gpt-4o" },
-					events: 4,
-					totalTokens: 2500,
-					inputTokens: 1500,
-					outputTokens: 1000,
-					cacheReadTokens: 200,
-					cacheWriteTokens: 100,
-					reasoningTokens: 50,
-					costUsd: 0.05,
-				}),
-			],
-			totals: makeBucket({
-				events: 10,
-				totalTokens: 7500,
-				inputTokens: 5000,
-				outputTokens: 2500,
-				costUsd: 0.15,
-			}),
-			coverage: {
-				firstEventAt: new Date(now - 3 * 86_400_000).toISOString(),
-				lastEventAt: new Date(now).toISOString(),
-				recordingPaused: false,
-				backfilledEventCount: 2,
-			},
-		},
-		tasks: {
-			requestId,
-			catalogRevision: 1,
-			tasks: [
-				{
-					taskId: "task-1",
-					rootTaskId: "task-1",
-					title: "Implement OAuth refresh flow",
-					taskTimestamp: now - 30 * 60_000,
-					lastUsageAt: now - 5 * 60_000,
-					totalCost: 0.08,
-					totalTokens: 4000,
-					inputTokens: 2800,
-					outputTokens: 1200,
-					model: "claude-sonnet-4-20250514",
-					provider: "anthropic",
-					models: ["claude-sonnet-4-20250514"],
-					modes: ["code"],
-					eventCount: 4,
-					childTaskIds: [],
-				},
-				{
-					taskId: "task-2",
-					rootTaskId: "task-2",
-					title: "Fix cache ratio bug",
-					taskTimestamp: now - 2 * 3_600_000,
-					lastUsageAt: now - 30 * 60_000,
-					totalCost: 0.04,
-					totalTokens: 2000,
-					inputTokens: 1400,
-					outputTokens: 600,
-					model: "gpt-4o",
-					provider: "openai",
-					models: ["gpt-4o"],
-					modes: ["debug"],
-					eventCount: 3,
-					childTaskIds: [],
-				},
-				{
-					taskId: "task-3",
-					rootTaskId: "task-3",
-					title: "Translate dashboard strings",
-					taskTimestamp: now - 3 * 3_600_000,
-					lastUsageAt: now - 2 * 3_600_000,
-					totalCost: 0.03,
-					totalTokens: 1500,
-					inputTokens: 800,
-					outputTokens: 700,
-					model: "claude-sonnet-4-20250514",
-					provider: "anthropic",
-					models: ["claude-sonnet-4-20250514"],
-					modes: ["translate"],
-					eventCount: 3,
-					childTaskIds: [],
-				},
-			],
-			childTasks: [],
-			cursor: undefined,
-			totalEstimate: 3,
-		},
-		heatmap: {
-			rangeDays: 30,
-			values: heatmapValues,
-		},
-	}
 }
 
 // ── Fixture ──────────────────────────────────────────────────────────────────

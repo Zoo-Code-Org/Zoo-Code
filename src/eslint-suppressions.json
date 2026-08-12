@@ -24,6 +24,11 @@
 			"count": 6
 		}
 	},
+	"__tests__/extension.spec.ts": {
+		"@typescript-eslint/no-explicit-any": {
+			"count": 1
+		}
+	},
 	"__tests__/history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 72
