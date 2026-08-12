@@ -1,4 +1,4 @@
-import { formatLargeNumber, formatDate, formatTimeAgo } from "../format"
+import { formatLargeNumber, formatDate, formatTime, formatTimeAgo } from "../format"
 
 // Mock i18next
 vi.mock("i18next", () => ({
@@ -64,6 +64,15 @@ describe("formatDate", () => {
 		// The exact format depends on the locale, but it should contain the date components
 		expect(result).toMatch(/january|jan/i)
 		expect(result).toMatch(/15/)
+	})
+})
+
+describe("formatTime", () => {
+	it("should format time in English", () => {
+		const timestamp = new Date("2024-01-15T14:30:45").getTime()
+		const result = formatTime(timestamp)
+		// The exact format depends on the locale, but it should contain the time components
+		expect(result).toMatch(/2:30:45|14:30:45/i)
 	})
 })
 
