@@ -1,4 +1,9 @@
-import { type ProviderSettings, type OrganizationAllowList, type RouterModels } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	type ProviderSettings,
+	type OrganizationAllowList,
+	type RouterModels,
+} from "@roo-code/types"
 
 // Mock i18next to return translation keys with interpolated values
 vi.mock("i18next", () => ({
@@ -112,6 +117,42 @@ describe("Model Validation Functions", () => {
 
 			const result = getModelValidationError(config, undefined, allowAllOrganization)
 			expect(result).toBeUndefined()
+		})
+
+		it.each([
+			{
+				name: "OpenAI Native",
+				config: {
+					apiProvider: providerIdentifiers.openaiNative,
+					apiModelId: "blocked-model",
+				} satisfies ProviderSettings,
+			},
+			{
+				name: "OpenAI Compatible",
+				config: {
+					apiProvider: providerIdentifiers.openai,
+					openAiModelId: "blocked-model",
+				} satisfies ProviderSettings,
+			},
+			{
+				name: "VS Code LM",
+				config: {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { id: "blocked-model" },
+				} satisfies ProviderSettings,
+			},
+		])("uses the provider-specific model field for $name organization validation", ({ config }) => {
+			const organizationAllowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[config.apiProvider!]: { allowAll: false, models: ["allowed-model"] },
+				},
+			}
+
+			const result = getModelValidationError(config, undefined, organizationAllowList)
+
+			expect(result).toContain("settings:validation.modelNotAllowed")
+			expect(result).toContain("model=blocked-model")
 		})
 
 		it("handles empty model IDs gracefully", () => {
