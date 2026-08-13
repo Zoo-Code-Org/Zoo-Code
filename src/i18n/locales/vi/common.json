@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "Không tìm thấy thay đổi nào.",
-		"commit_message_generating": "Đang tạo thông điệp commit...",
 		"commit_message_no_changes": "Không có thay đổi nào để commit.",
 		"commit_message_nothing_staged": "Hãy stage các thay đổi bạn muốn commit, sau đó tạo thông điệp.",
 		"commit_message_box_not_empty": "Đã giữ lại thông điệp commit của bạn. Hãy xóa trống ô để tạo thông điệp mới.",

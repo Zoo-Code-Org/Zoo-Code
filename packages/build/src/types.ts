@@ -39,7 +39,8 @@ const commandsSchema = z.array(
 export type Commands = z.infer<typeof commandsSchema>
 
 const menuItemSchema = z.object({
-	group: z.string(),
+	// Absent on menus that do not group their items, such as `commandPalette`.
+	group: z.string().optional(),
 	command: z.string().optional(),
 	submenu: z.string().optional(),
 	when: z.string().optional(),

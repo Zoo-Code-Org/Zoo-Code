@@ -169,7 +169,6 @@
 	},
 	"info": {
 		"no_changes": "No s'han trobat canvis.",
-		"commit_message_generating": "Generant el missatge de commit...",
 		"commit_message_no_changes": "No hi ha canvis per confirmar.",
 		"commit_message_nothing_staged": "Prepara (stage) els canvis que vols confirmar i després genera el missatge.",
 		"commit_message_box_not_empty": "S'ha conservat el teu missatge de commit. Buida el camp per generar-ne un de nou.",

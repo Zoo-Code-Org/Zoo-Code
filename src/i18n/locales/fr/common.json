@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "Aucun changement trouvé.",
-		"commit_message_generating": "Génération du message de commit...",
 		"commit_message_no_changes": "Aucune modification à valider.",
 		"commit_message_nothing_staged": "Indexez (stage) les modifications à valider, puis générez le message.",
 		"commit_message_box_not_empty": "Votre message de commit a été conservé. Videz le champ pour en générer un nouveau.",

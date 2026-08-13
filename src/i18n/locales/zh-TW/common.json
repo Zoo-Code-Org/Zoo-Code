@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "沒有找到更改。",
-		"commit_message_generating": "正在產生提交訊息...",
 		"commit_message_no_changes": "沒有可提交的變更。",
 		"commit_message_nothing_staged": "請先暗存（stage）要提交的變更，然後產生訊息。",
 		"commit_message_box_not_empty": "已保留你的提交訊息。清空輸入框即可重新產生。",

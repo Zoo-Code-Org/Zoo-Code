@@ -169,7 +169,6 @@
 	},
 	"info": {
 		"no_changes": "Nenhuma alteração encontrada.",
-		"commit_message_generating": "Gerando mensagem de commit...",
 		"commit_message_no_changes": "Nenhuma alteração para confirmar.",
 		"commit_message_nothing_staged": "Prepare (stage) as alterações que deseja commitar e depois gere a mensagem.",
 		"commit_message_box_not_empty": "Sua mensagem de commit foi mantida. Limpe o campo para gerar uma nova.",

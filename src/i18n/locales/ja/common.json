@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "変更は見つかりませんでした。",
-		"commit_message_generating": "コミットメッセージを生成しています...",
 		"commit_message_no_changes": "コミットする変更がありません。",
 		"commit_message_nothing_staged": "コミットする変更をステージしてからメッセージを生成してください。",
 		"commit_message_box_not_empty": "コミットメッセージを保持しました。新しく生成するには入力欄を空にしてください。",

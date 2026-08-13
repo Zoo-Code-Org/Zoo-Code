@@ -14,7 +14,7 @@ import { CodeIndexManager } from "../services/code-index/manager"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
-import { generateCommitMessage } from "../services/commit-message"
+import { generateCommitMessage, stopGeneratingCommitMessage } from "../services/commit-message"
 import { t } from "../i18n"
 
 /**
@@ -223,6 +223,9 @@ const getCommandsMap = ({
 	// Uses `provider` rather than the visible instance so the Source Control button still works
 	// while the Zoo Code sidebar is closed.
 	generateCommitMessage: (sourceControl?: vscode.SourceControl) => generateCommitMessage(provider, sourceControl),
+	// Replaces the button above while a message is generating, so it needs no provider - it only
+	// aborts the request that button started.
+	stopGeneratingCommitMessage: (sourceControl?: vscode.SourceControl) => stopGeneratingCommitMessage(sourceControl),
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {

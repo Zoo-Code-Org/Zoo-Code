@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "No changes found.",
-		"commit_message_generating": "Generating commit message...",
 		"commit_message_no_changes": "No changes to commit.",
 		"commit_message_nothing_staged": "Stage the changes you want to commit, then generate the message.",
 		"commit_message_box_not_empty": "Kept your commit message. Clear the box to generate a new one.",
