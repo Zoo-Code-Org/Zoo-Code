@@ -123,10 +123,6 @@ function isInsideCodeFence(before: string): boolean {
 	return openFence !== null
 }
 
-/**
- * Strips well-formed tags repeatedly until the result stops changing. A single pass is unsafe:
- * `<<invoke>>` reassembles into a live-looking tag after one replacement.
- */
 /** True when `text` already contains a closed `<invoke>` block, so buffering is still productive. */
 function hasCompleteInvokeBlock(text: string): boolean {
 	LEAKED_INVOKE_BLOCK.lastIndex = 0
@@ -135,6 +131,10 @@ function hasCompleteInvokeBlock(text: string): boolean {
 	return found
 }
 
+/**
+ * Strips well-formed tags repeatedly until the result stops changing. A single pass is unsafe:
+ * `<<invoke>>` reassembles into a live-looking tag after one replacement.
+ */
 function stripTagsCompletely(text: string): string {
 	let current = text
 	for (;;) {
@@ -768,10 +768,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		const contextWindowTokens = this.getCondenseContextWindow()
 		if (Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
 			const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
-			const messagesBudgetChars =
+			const rawBudgetChars =
 				contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
 				systemPrompt.length -
 				toolSchemaChars
+			// A system prompt or tool schema large enough to consume the whole budget would leave a
+			// non-positive budget, which disables trimming exactly when the request is most oversized.
+			const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
 			truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
 		}
 

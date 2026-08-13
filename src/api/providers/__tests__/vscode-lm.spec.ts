@@ -16,6 +16,14 @@ vi.mock("vscode", () => {
 		) {}
 	}
 
+	class MockLanguageModelToolResultPart {
+		type = "tool_result"
+		constructor(
+			public callId: string,
+			public content: unknown[],
+		) {}
+	}
+
 	return {
 		workspace: {
 			getConfiguration: vi.fn(() => ({
@@ -53,6 +61,7 @@ vi.mock("vscode", () => {
 		},
 		LanguageModelTextPart: MockLanguageModelTextPart,
 		LanguageModelToolCallPart: MockLanguageModelToolCallPart,
+		LanguageModelToolResultPart: MockLanguageModelToolResultPart,
 		lm: {
 			selectChatModels: vi.fn(),
 		},
@@ -276,6 +285,42 @@ describe("VsCodeLmHandler", () => {
 			})
 		})
 
+		it("still trims oversized tool_results when the system prompt consumes the whole budget", async () => {
+			// A system prompt larger than the derived char budget drives the raw budget negative; the
+			// clamp keeps trimming active for the case where the request is most oversized.
+			const systemPrompt = "S".repeat(handler.getCondenseContextWindow() * 3)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "t1", name: "some_tool", input: { a: 1 } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "X".repeat(50_000) }],
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("ok")
+					return
+				})(),
+				text: (async function* () {
+					yield "ok"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, { taskId: "test-task" })
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			const sent = JSON.stringify(mockLanguageModelChat.sendRequest.mock.calls[0][0])
+			expect(sent).toContain("characters truncated")
+			expect(sent).not.toContain("X".repeat(10_000))
+		})
+
 		describe("leaked tool-call recovery during streaming", () => {
 			const salvageTools = [
 				{
@@ -334,15 +379,7 @@ describe("VsCodeLmHandler", () => {
 
 			const collect = async (parts: string[]) => {
 				streamTextParts(parts)
-				const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], {
-					taskId: "test-task",
-					tools: salvageTools,
-				})
-				const chunks = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
-				return chunks
+				return drain()
 			}
 
 			it("recovers a tool call the model streamed as raw invoke XML", async () => {
