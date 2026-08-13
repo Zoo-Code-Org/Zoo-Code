@@ -59,4 +59,9 @@ describe("applyNanoGptRoutingPreference", () => {
 		expect(applyNanoGptRoutingPreference("model:thinking", "fast")).toBe("model:thinking:fast")
 		expect(applyNanoGptRoutingPreference("model:thinking", "auto")).toBe("model:thinking")
 	})
+
+	it("normalizes multiple trailing routing suffixes to exactly one active preference", () => {
+		expect(applyNanoGptRoutingPreference("model:thinking:fast:cheap", "latency")).toBe("model:thinking:latency")
+		expect(applyNanoGptRoutingPreference("model:thinking:FAST:CACHED", "auto")).toBe("model:thinking")
+	})
 })

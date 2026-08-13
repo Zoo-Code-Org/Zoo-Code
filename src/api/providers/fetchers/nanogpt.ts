@@ -4,10 +4,10 @@ import { z } from "zod"
 import { NANOGPT_BASE_URL, nanoGptDefaultModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
 const nanoGptPricingSchema = z.object({
-	prompt: z.number().optional(),
-	completion: z.number().optional(),
-	cacheReadInputPer1kTokens: z.number().optional(),
-	cacheWriteInputPer1kTokens: z.number().optional(),
+	prompt: z.number().nonnegative().optional(),
+	completion: z.number().nonnegative().optional(),
+	cacheReadInputPer1kTokens: z.number().nonnegative().optional(),
+	cacheWriteInputPer1kTokens: z.number().nonnegative().optional(),
 })
 
 const nanoGptModelSchema = z.object({
@@ -26,6 +26,11 @@ const nanoGptModelSchema = z.object({
 })
 
 export type NanoGptModel = z.infer<typeof nanoGptModelSchema>
+
+function getSafeErrorMessage(error: unknown, apiKey?: string): string {
+	const message = error instanceof Error ? error.message : String(error)
+	return apiKey ? message.replaceAll(apiKey, "[REDACTED]") : message
+}
 
 const nanoGptModelsResponseSchema = z.object({
 	data: z.array(z.unknown()),
@@ -80,7 +85,7 @@ export async function getNanoGptModels(apiKey?: string): Promise<ModelRecord> {
 
 		return models
 	} catch (error) {
-		console.error(`Error fetching NanoGPT models: ${error instanceof Error ? error.message : String(error)}`)
+		console.error(`Error fetching NanoGPT models: ${getSafeErrorMessage(error, apiKey)}`)
 		return {}
 	}
 }

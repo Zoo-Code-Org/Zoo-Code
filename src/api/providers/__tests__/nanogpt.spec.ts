@@ -156,6 +156,19 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
+	it("keeps unauthenticated catalog fetches public and redacts streaming errors", async () => {
+		mockCreate.mockRejectedValue(new Error("upstream rejected secret-key"))
+		const handler = new NanoGptHandler({ nanoGptApiKey: "secret-key", nanoGptModelId: "model:thinking" })
+		await expect(collectStream(handler.createMessage("sys", messages))).rejects.toThrow(
+			"NanoGPT streaming error: upstream rejected [REDACTED]",
+		)
+
+		vi.mocked(getModels).mockResolvedValue({})
+		mockCreate.mockResolvedValue(asyncStreamFrom([]))
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+		expect(getModels).toHaveBeenLastCalledWith(expect.objectContaining({ provider: "nanogpt", apiKey: undefined }))
+	})
+
 	it("maps usage with root-field precedence and no reasoning double count", async () => {
 		mockCreate.mockResolvedValue(
 			asyncStreamFrom([

@@ -109,6 +109,30 @@ describe("NanoGPT model fetcher", () => {
 		},
 	)
 
+	it("rejects negative numeric metadata without leaking the API key in errors", async () => {
+		vi.mocked(axios.get)
+			.mockResolvedValueOnce({
+				data: {
+					data: [
+						{ id: "valid-free", pricing: { prompt: 0, completion: 0 } },
+						{ id: "invalid-price", pricing: { prompt: -1 } },
+					],
+				},
+			})
+			.mockRejectedValueOnce(new Error("upstream rejected secret-key"))
+		const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
+		const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+		expect(await getNanoGptModels("secret-key")).toEqual({
+			"valid-free": expect.objectContaining({ inputPrice: 0, outputPrice: 0 }),
+		})
+		expect(await getNanoGptModels("secret-key")).toEqual({})
+		expect(consoleError).toHaveBeenLastCalledWith("Error fetching NanoGPT models: upstream rejected [REDACTED]")
+
+		warning.mockRestore()
+		consoleError.mockRestore()
+	})
+
 	it("does not invent absent optional metadata", () => {
 		const info = parseNanoGptModel({ id: "minimal" })
 		expect(info).toEqual({

@@ -71,6 +71,14 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		)
 	}
 
+	private createSafeError(operation: string, error: unknown): Error {
+		const message = error instanceof Error ? error.message : String(error)
+		const safeMessage = this.options.nanoGptApiKey
+			? message.replaceAll(this.options.nanoGptApiKey, "[REDACTED]")
+			: message
+		return new Error(`NanoGPT ${operation} error: ${safeMessage}`)
+	}
+
 	override async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
@@ -97,31 +105,35 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			body.reasoning_effort = reasoningEffort
 		}
 
-		const completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+		try {
+			const completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
 
-			const reasoning = extractReasoningFromDelta(delta)
-			if (reasoning) {
-				yield { type: "reasoning", text: reasoning }
-			}
+				const reasoning = extractReasoningFromDelta(delta)
+				if (reasoning) {
+					yield { type: "reasoning", text: reasoning }
+				}
 
-			for (const toolCall of delta?.tool_calls ?? []) {
-				yield {
-					type: "tool_call_partial",
-					index: toolCall.index,
-					id: toolCall.id,
-					name: toolCall.function?.name,
-					arguments: toolCall.function?.arguments,
+				for (const toolCall of delta?.tool_calls ?? []) {
+					yield {
+						type: "tool_call_partial",
+						index: toolCall.index,
+						id: toolCall.id,
+						name: toolCall.function?.name,
+						arguments: toolCall.function?.arguments,
+					}
+				}
+
+				if (chunk.usage) {
+					yield mapNanoGptUsage(chunk.usage as NanoGptUsage)
 				}
 			}
-
-			if (chunk.usage) {
-				yield mapNanoGptUsage(chunk.usage as NanoGptUsage)
-			}
+		} catch (error) {
+			throw this.createSafeError("streaming", error)
 		}
 	}
 
@@ -150,14 +162,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			})
 			return response.choices[0]?.message.content ?? ""
 		} catch (error) {
-			if (!(error instanceof Error)) {
-				throw error
-			}
-
-			const safeMessage = this.options.nanoGptApiKey
-				? error.message.replaceAll(this.options.nanoGptApiKey, "[REDACTED]")
-				: error.message
-			throw new Error(`NanoGPT completion error: ${safeMessage}`)
+			throw this.createSafeError("completion", error)
 		}
 	}
 }
