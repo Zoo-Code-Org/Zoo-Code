@@ -27,3 +27,33 @@ describe("contributes commands schema", () => {
 		expect(commandsSchema.safeParse(command({ light: "assets/icons/panel_light.png" })).success).toBe(false)
 	})
 })
+
+describe("contributes menus schema", () => {
+	const menusSchema = contributesSchema.shape.menus
+
+	it("accepts a grouped menu item", () => {
+		const menus = {
+			"scm/title": [
+				{
+					command: "zoo-code.generateCommitMessage",
+					group: "navigation",
+					when: "scmProvider == git && !zoo-code.generatingCommitMessage",
+				},
+			],
+		}
+
+		expect(menusSchema.safeParse(menus).success).toBe(true)
+	})
+
+	// `commandPalette` items have no group. This field used to be required, which rejected the
+	// manifest outright when generating the nightly build.
+	it("accepts a menu item with no group", () => {
+		const menus = {
+			commandPalette: [
+				{ command: "zoo-code.stopGeneratingCommitMessage", when: "zoo-code.generatingCommitMessage" },
+			],
+		}
+
+		expect(menusSchema.safeParse(menus).success).toBe(true)
+	})
+})

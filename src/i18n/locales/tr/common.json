@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "Değişiklik bulunamadı.",
-		"commit_message_generating": "Commit mesajı oluşturuluyor...",
 		"commit_message_no_changes": "Commit edilecek değişiklik yok.",
 		"commit_message_nothing_staged": "Commit etmek istediğiniz değişiklikleri stage'e alın, sonra mesajı oluşturun.",
 		"commit_message_box_not_empty": "Commit mesajınız korundu. Yenisini oluşturmak için kutuyu temizleyin.",

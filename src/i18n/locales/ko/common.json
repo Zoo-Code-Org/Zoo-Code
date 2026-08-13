@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "변경 사항이 없습니다.",
-		"commit_message_generating": "커밋 메시지를 생성하는 중...",
 		"commit_message_no_changes": "커밋할 변경 사항이 없습니다.",
 		"commit_message_nothing_staged": "커밋할 변경 사항을 스테이징한 뒤 메시지를 생성하세요.",
 		"commit_message_box_not_empty": "커밋 메시지를 유지했습니다. 새로 생성하려면 입력란을 비우세요.",

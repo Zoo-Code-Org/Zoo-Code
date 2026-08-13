@@ -91,6 +91,7 @@ vi.mock("../../i18n", () => ({
 
 vi.mock("../../services/commit-message", () => ({
 	generateCommitMessage: vi.fn().mockResolvedValue(undefined),
+	stopGeneratingCommitMessage: vi.fn().mockResolvedValue(undefined),
 }))
 
 vi.mock("../../services/ripgrep/diagnostic", () => ({
@@ -205,6 +206,16 @@ describe("registerCommands handlers", () => {
 		// Uses the registered provider rather than the visible one, so the Source Control button
 		// still works while the Zoo Code sidebar is closed.
 		expect(vi.mocked(generateCommitMessage)).toHaveBeenCalledWith(mockProvider, sourceControl)
+	})
+
+	it("stopGeneratingCommitMessage forwards the clicked source control", async () => {
+		const { stopGeneratingCommitMessage } = await import("../../services/commit-message")
+		const sourceControl = { rootUri: { fsPath: "/repo" } }
+
+		await handlers["zoo-code.stopGeneratingCommitMessage"](sourceControl)
+
+		// No provider: it only aborts the request the button above it started.
+		expect(vi.mocked(stopGeneratingCommitMessage)).toHaveBeenCalledWith(sourceControl)
 	})
 
 	it("settingsButtonClicked posts both settingsButtonClicked and didBecomeVisible actions", () => {

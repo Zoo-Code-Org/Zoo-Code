@@ -170,7 +170,6 @@
 	},
 	"info": {
 		"no_changes": "未找到更改。",
-		"commit_message_generating": "正在生成提交信息...",
 		"commit_message_no_changes": "没有可提交的更改。",
 		"commit_message_nothing_staged": "请先暂存（stage）要提交的更改，然后生成信息。",
 		"commit_message_box_not_empty": "已保留你的提交信息。清空输入框即可重新生成。",

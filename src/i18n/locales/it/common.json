@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "Nessuna modifica trovata.",
-		"commit_message_generating": "Generazione del messaggio di commit...",
 		"commit_message_no_changes": "Nessuna modifica da confermare.",
 		"commit_message_nothing_staged": "Aggiungi all'area di stage le modifiche da committare, poi genera il messaggio.",
 		"commit_message_box_not_empty": "Il tuo messaggio di commit è stato mantenuto. Svuota il campo per generarne uno nuovo.",

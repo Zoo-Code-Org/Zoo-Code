@@ -48,6 +48,7 @@ export const commandIds = [
 	"toggleAutoApprove",
 
 	"generateCommitMessage",
+	"stopGeneratingCommitMessage",
 
 	"showRipgrepDiagnostic",
 ] as const

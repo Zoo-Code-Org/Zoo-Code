@@ -178,6 +178,12 @@
 					"light": "assets/icons/panel_light.png",
 					"dark": "assets/icons/panel_dark.png"
 				}
+			},
+			{
+				"command": "zoo-code.stopGeneratingCommitMessage",
+				"title": "%command.stopGeneratingCommitMessage.title%",
+				"category": "%configuration.title%",
+				"icon": "$(debug-stop)"
 			}
 		],
 		"menus": {
@@ -279,7 +285,18 @@
 				{
 					"command": "zoo-code.generateCommitMessage",
 					"group": "navigation",
-					"when": "scmProvider == git"
+					"when": "scmProvider == git && !zoo-code.generatingCommitMessage"
+				},
+				{
+					"command": "zoo-code.stopGeneratingCommitMessage",
+					"group": "navigation",
+					"when": "scmProvider == git && zoo-code.generatingCommitMessage"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "zoo-code.stopGeneratingCommitMessage",
+					"when": "zoo-code.generatingCommitMessage"
 				}
 			]
 		},

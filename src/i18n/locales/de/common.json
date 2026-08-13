@@ -165,7 +165,6 @@
 	},
 	"info": {
 		"no_changes": "Keine Änderungen gefunden.",
-		"commit_message_generating": "Commit-Nachricht wird generiert...",
 		"commit_message_no_changes": "Keine Änderungen zum Committen.",
 		"commit_message_nothing_staged": "Stelle die zu committenden Änderungen bereit (stage) und generiere dann die Nachricht.",
 		"commit_message_box_not_empty": "Deine Commit-Nachricht wurde beibehalten. Leere das Feld, um eine neue zu erzeugen.",

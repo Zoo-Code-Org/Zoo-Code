@@ -17,6 +17,7 @@
 	"command.showRipgrepDiagnostic.title": "顯示 Ripgrep 診斷",
 	"command.toggleAutoApprove.title": "切換自動批准",
 	"command.generateCommitMessage.title": "產生提交訊息",
+	"command.stopGeneratingCommitMessage.title": "停止產生提交訊息",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",

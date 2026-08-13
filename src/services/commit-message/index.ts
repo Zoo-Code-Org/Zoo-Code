@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 
 import { t } from "../../i18n"
+import { Package } from "../../shared/package"
 import { getCommitContext } from "../../utils/git"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 
@@ -27,13 +28,30 @@ interface GitExtensionExports {
 type RepositoryLookup = { repository: GitRepository } | { error: "no-repository" | "ambiguous" }
 
 /**
- * Repositories with a request in flight. The command is reachable from a toolbar button, so it can
- * be clicked repeatedly while a slow model is still answering; without this each click would stack
- * another progress indicator in the status bar and issue another request.
+ * Repositories with a request in flight, and the controller that stops each one.
  *
- * Keyed by repository so that one repository generating does not block another.
+ * Keyed by repository so that one repository generating does not block another, and holding the
+ * controller rather than just the key so `stopGeneratingCommitMessage` - a separate command, and so
+ * outside the request entirely - can abort it.
  */
-const generating = new Set<string>()
+const generating = new Map<string, AbortController>()
+
+/**
+ * Swaps the Source Control button between generate and stop.
+ *
+ * Namespaced like a command id so the nightly build's `zoo-code` -> `zoo-code-nightly` substitution
+ * rewrites this key and the `when` clause in package.json that reads it in step: the substitution
+ * covers `when`, and `Package.name` is redefined at bundle time.
+ */
+const GENERATING_CONTEXT_KEY = `${Package.name}.generatingCommitMessage`
+
+/**
+ * Context keys are workspace-wide, so this is true while *any* repository is generating. In a
+ * multi-repository workspace that means the stop button also appears on repositories with nothing
+ * in flight; stopping one of those does nothing.
+ */
+const publishGeneratingContext = () =>
+	vscode.commands.executeCommand("setContext", GENERATING_CONTEXT_KEY, generating.size > 0)
 
 // Symbols rather than sentinel strings, so no model output can ever be mistaken for one of them.
 const CANCELLED = Symbol("cancelled")
@@ -107,7 +125,11 @@ export async function generateCommitMessage(
 			return
 		}
 
-		generating.add(repositoryKey)
+		// Registered before anything slow runs, so the button is a stop button for the whole of the
+		// request rather than only once the model has been reached.
+		const controller = new AbortController()
+		generating.set(repositoryKey, controller)
+		await publishGeneratingContext()
 
 		try {
 			// Captured before anything slow runs, so an edit made during generation is detectable.
@@ -139,37 +161,40 @@ export async function generateCommitMessage(
 				return
 			}
 
+			// Collecting the diff is the one phase that cannot be interrupted - `getCommitContext`
+			// shells out to git and takes no signal - so a stop pressed during it lands here.
+			if (controller.signal.aborted) {
+				return
+			}
+
 			const { apiConfiguration, customSupportPrompts, timeoutMs } = await getCommitMessageSettings(provider)
 
-			// `ProgressLocation.Notification` is the only location that renders a cancel button, and a
-			// request with no way out is worse than an extra toast: a provider that never answers would
-			// otherwise leave the indicator up until the window is reloaded.
+			// `ProgressLocation.SourceControl` draws an indeterminate bar in the Source Control view
+			// header and drops the title, which is what this wants: the button directly beneath it
+			// has already become a stop button, so nothing has to say so in words.
 			const outcome: string | typeof CANCELLED | typeof TIMED_OUT = await vscode.window.withProgress(
-				{
-					location: vscode.ProgressLocation.Notification,
-					title: t("common:info.commit_message_generating"),
-					cancellable: true,
-				},
-				async (_progress, token) => {
-					const controller = new AbortController()
-
-					const cancelled = new Promise<typeof CANCELLED>((resolve) =>
-						token.onCancellationRequested(() => {
-							controller.abort()
-							resolve(CANCELLED)
-						}),
-					)
-
+				{ location: vscode.ProgressLocation.SourceControl },
+				async () => {
 					// The bound that makes this safe on every provider. Only a handful forward the
 					// abort signal to the underlying request, so a stalled provider cannot be
 					// stopped - but it can be stopped being waited on, which is what frees the user.
-					let timer: NodeJS.Timeout | undefined
+					// Both routes abort the same controller, so a flag is what tells them apart.
+					let timedOut = false
 
-					const timedOut = new Promise<typeof TIMED_OUT>((resolve) => {
-						timer = setTimeout(() => {
-							controller.abort()
-							resolve(TIMED_OUT)
-						}, timeoutMs)
+					const timer = setTimeout(() => {
+						timedOut = true
+						controller.abort()
+					}, timeoutMs)
+
+					const aborted = new Promise<typeof CANCELLED | typeof TIMED_OUT>((resolve) => {
+						const settle = () => resolve(timedOut ? TIMED_OUT : CANCELLED)
+
+						// A signal aborted before the listener is attached never fires `abort`.
+						if (controller.signal.aborted) {
+							settle()
+						} else {
+							controller.signal.addEventListener("abort", settle, { once: true })
+						}
 					})
 
 					// Providers that honour the signal reject once it is aborted. That rejection
@@ -182,7 +207,7 @@ export async function generateCommitMessage(
 						abortSignal: controller.signal,
 					}).catch((error) => {
 						if (controller.signal.aborted) {
-							return token.isCancellationRequested ? CANCELLED : TIMED_OUT
+							return timedOut ? TIMED_OUT : CANCELLED
 						}
 
 						throw error
@@ -192,7 +217,7 @@ export async function generateCommitMessage(
 						// Whichever settles first wins: the indicator closes and the repository is
 						// released even when the request itself keeps running, and whatever it
 						// eventually returns is dropped.
-						return await Promise.race([request, cancelled, timedOut])
+						return await Promise.race([request, aborted])
 					} finally {
 						clearTimeout(timer)
 					}
@@ -222,6 +247,7 @@ export async function generateCommitMessage(
 			repository.inputBox.value = message
 		} finally {
 			generating.delete(repositoryKey)
+			await publishGeneratingContext()
 		}
 	} catch (error) {
 		vscode.window.showErrorMessage(
@@ -229,5 +255,21 @@ export async function generateCommitMessage(
 				error: error instanceof Error ? error.message : String(error),
 			}),
 		)
+	}
+}
+
+/**
+ * Stops the generation running in the clicked repository, leaving the input box as it was.
+ *
+ * Nothing is reported either way. Stopping is the user's own doing, which is already why a stopped
+ * request writes no message and shows no error.
+ */
+export async function stopGeneratingCommitMessage(sourceControl?: vscode.SourceControl): Promise<void> {
+	const lookup = await findRepository(sourceControl)
+
+	// The button is shown by a workspace-wide context key, so it is also on repositories with
+	// nothing in flight. There it does nothing, rather than guessing at which repository was meant.
+	if ("repository" in lookup) {
+		generating.get(lookup.repository.rootUri.fsPath)?.abort()
 	}
 }

@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 
-import { generateCommitMessage } from "../index"
+import { generateCommitMessage, stopGeneratingCommitMessage } from "../index"
 import * as gitModule from "../../../utils/git"
 import * as generatorModule from "../generator"
 import * as configModule from "../config"
@@ -9,15 +9,12 @@ import type { ClineProvider } from "../../../core/webview/ClineProvider"
 
 vi.mock("vscode", () => ({
 	extensions: { getExtension: vi.fn() },
+	commands: { executeCommand: vi.fn() },
 	window: {
 		showErrorMessage: vi.fn(),
 		showInformationMessage: vi.fn(),
-		// Run the task immediately so assertions don't have to await a real progress UI. The token
-		// never fires, standing in for a request the user lets run to completion.
-		withProgress: vi.fn(
-			(_options: unknown, task: (progress: unknown, token: unknown) => Promise<string | undefined>) =>
-				task({ report: vi.fn() }, { isCancellationRequested: false, onCancellationRequested: () => {} }),
-		),
+		// Run the task immediately so assertions don't have to await a real progress UI.
+		withProgress: vi.fn((_options: unknown, task: () => Promise<string | undefined>) => task()),
 	},
 	ProgressLocation: { SourceControl: 1, Window: 10, Notification: 15 },
 	Uri: { file: (fsPath: string) => ({ fsPath }) },
@@ -47,23 +44,39 @@ describe("generateCommitMessage (Source Control integration)", () => {
 		} as never)
 	}
 
-	/** Runs the progress task immediately against the given cancellation token. */
-	const runProgressTask = (
-		token: Pick<vscode.CancellationToken, "isCancellationRequested"> & {
-			onCancellationRequested: (listener: () => void) => void
-		},
-	) => {
-		vi.mocked(vscode.window.withProgress).mockImplementation((_options, task) =>
-			task({ report: vi.fn() }, token as vscode.CancellationToken),
-		)
+	/** The source control the SCM menus hand to both commands, identifying the repository clicked. */
+	const sourceControl = { rootUri: { fsPath: "/repo" } } as vscode.SourceControl
+
+	/** The value the given `setContext` call published for the button-swapping key. */
+	const contextKeyUpdates = () =>
+		vi
+			.mocked(vscode.commands.executeCommand)
+			.mock.calls.filter(
+				([command, key]) => command === "setContext" && key === "zoo-code.generatingCommitMessage",
+			)
+			.map(([, , value]) => value)
+
+	/**
+	 * Starts a generation the model never answers, stops it from the Source Control button, and
+	 * waits for the command to settle - which is what the user sees as the square reverting.
+	 */
+	const startThenStop = async (repository = sourceControl) => {
+		vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(new Promise<string>(() => {}))
+
+		const pending = generateCommitMessage(provider, repository)
+
+		// Let the awaits before the request settle, so there is something in flight to stop.
+		await Promise.resolve()
+		await Promise.resolve()
+		await Promise.resolve()
+
+		await stopGeneratingCommitMessage(repository)
+
+		return pending
 	}
 
 	beforeEach(() => {
 		vi.clearAllMocks()
-
-		// `clearAllMocks` clears calls but keeps implementations, so the cancelling token installed
-		// by the cancellation tests would otherwise leak into every test that runs after them.
-		runProgressTask({ isCancellationRequested: false, onCancellationRequested: () => {} })
 
 		inputBox = { value: "" }
 		mockRepositories([{ rootUri: { fsPath: "/repo" }, inputBox }])
@@ -210,16 +223,80 @@ describe("generateCommitMessage (Source Control integration)", () => {
 		})
 	})
 
-	it("reports progress somewhere the title is actually rendered, with a way out", async () => {
+	it("reports progress in the Source Control view rather than a notification", async () => {
 		await generateCommitMessage(provider)
 
-		// `ProgressLocation.SourceControl` silently drops the title, and only `Notification`
-		// renders the cancel button, so a regression to either of the others would leave the user
-		// stuck behind a request they cannot stop.
+		// The way out is the stop button, not a cancel button on a toast, so this deliberately does
+		// not use `Notification`. `SourceControl` drops the title, hence there being none to pass.
 		const [options] = vi.mocked(vscode.window.withProgress).mock.calls[0]
-		expect(options.location).toBe(vscode.ProgressLocation.Notification)
-		expect(options.title).toBeTruthy()
-		expect(options.cancellable).toBe(true)
+		expect(options.location).toBe(vscode.ProgressLocation.SourceControl)
+		expect(options.title).toBeUndefined()
+		expect(options.cancellable).toBeUndefined()
+	})
+
+	// The context key is what swaps the Source Control button between the two commands, so it has
+	// to be true for exactly as long as there is something to stop.
+	describe("the button-swapping context key", () => {
+		it("goes up before the request and back down after it", async () => {
+			await generateCommitMessage(provider)
+
+			expect(contextKeyUpdates()).toEqual([true, false])
+		})
+
+		it("is raised before the diff is collected, which is the slow part on a large repo", async () => {
+			vi.mocked(gitModule.getCommitContext).mockImplementation(async () => {
+				expect(contextKeyUpdates()).toEqual([true])
+				return { ok: true, context }
+			})
+
+			await generateCommitMessage(provider)
+
+			expect(gitModule.getCommitContext).toHaveBeenCalled()
+		})
+
+		it("comes back down when generation fails", async () => {
+			vi.mocked(generatorModule.generateCommitMessage).mockRejectedValue(new Error("provider exploded"))
+
+			await generateCommitMessage(provider)
+
+			expect(contextKeyUpdates()).toEqual([true, false])
+		})
+
+		it("comes back down when there was nothing to describe", async () => {
+			vi.mocked(gitModule.getCommitContext).mockResolvedValue({ ok: false, reason: "nothing-staged" })
+
+			await generateCommitMessage(provider)
+
+			expect(contextKeyUpdates()).toEqual([true, false])
+		})
+
+		// One repository finishing must not put the other's button back to the zebra while it is
+		// still generating, so the key tracks how many are in flight rather than the last event.
+		it("stays up while another repository is still generating", async () => {
+			const otherInputBox = { value: "" }
+
+			mockRepositories([
+				{ rootUri: { fsPath: "/other" }, inputBox: otherInputBox },
+				{ rootUri: { fsPath: "/repo" }, inputBox },
+			])
+
+			const slow = new Promise<string>(() => {})
+			vi.mocked(generatorModule.generateCommitMessage).mockReturnValueOnce(slow)
+
+			const pending = generateCommitMessage(provider, { rootUri: { fsPath: "/other" } } as vscode.SourceControl)
+			await Promise.resolve()
+
+			vi.mocked(generatorModule.generateCommitMessage).mockResolvedValue("feat: add a thing")
+			await generateCommitMessage(provider, sourceControl)
+
+			expect(inputBox.value).toBe("feat: add a thing")
+			expect(contextKeyUpdates()).not.toContain(false)
+
+			await stopGeneratingCommitMessage({ rootUri: { fsPath: "/other" } } as vscode.SourceControl)
+			await pending
+
+			expect(contextKeyUpdates().at(-1)).toBe(false)
+		})
 	})
 
 	// Most providers ignore the abort signal, so a request that never answers cannot be stopped -
@@ -274,57 +351,116 @@ describe("generateCommitMessage (Source Control integration)", () => {
 		})
 	})
 
-	describe("cancellation", () => {
-		/** Runs the progress task with a token that is cancelled as soon as it is listened to. */
-		const cancelImmediately = () =>
-			runProgressTask({
-				isCancellationRequested: false,
-				onCancellationRequested: (listener: () => void) => listener(),
-			})
-
-		it("leaves the box alone when the user cancels", async () => {
-			cancelImmediately()
-			vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(new Promise<string>(() => {}))
-
-			await generateCommitMessage(provider)
+	describe("stopping from the Source Control button", () => {
+		it("leaves the box alone and says nothing", async () => {
+			await startThenStop()
 
 			expect(inputBox.value).toBe("")
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			expect(vscode.window.showInformationMessage).not.toHaveBeenCalled()
 		})
 
 		it("aborts the request so providers that honour the signal can drop it", async () => {
-			cancelImmediately()
-			vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(new Promise<string>(() => {}))
-
-			await generateCommitMessage(provider)
+			await startThenStop()
 
 			const [options] = vi.mocked(generatorModule.generateCommitMessage).mock.calls[0]
 			expect(options.abortSignal?.aborted).toBe(true)
 		})
 
-		// The request outlives the cancellation for providers that ignore the signal, so a late
-		// rejection must not resurface as an unhandled rejection or an error toast.
-		it("swallows a rejection that arrives after cancelling", async () => {
-			cancelImmediately()
+		// The request outlives the stop for providers that ignore the signal, so a late rejection
+		// must not resurface as an unhandled rejection or an error toast.
+		it("swallows a rejection that arrives after stopping", async () => {
+			let reject: (error: Error) => void = () => {}
 			vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(
-				Promise.reject(new Error("aborted by provider")),
+				new Promise<string>((_resolve, r) => (reject = r)),
 			)
 
-			await expect(generateCommitMessage(provider)).resolves.toBeUndefined()
+			const pending = generateCommitMessage(provider, sourceControl)
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			await stopGeneratingCommitMessage(sourceControl)
+			reject(new Error("aborted by provider"))
+
+			await expect(pending).resolves.toBeUndefined()
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 		})
 
 		it("releases the repository so the next attempt is not blocked", async () => {
-			cancelImmediately()
-			vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(new Promise<string>(() => {}))
+			await startThenStop()
 
-			await generateCommitMessage(provider)
-			await generateCommitMessage(provider)
+			vi.mocked(generatorModule.generateCommitMessage).mockResolvedValue("feat: add a thing")
+			await generateCommitMessage(provider, sourceControl)
 
-			expect(generatorModule.generateCommitMessage).toHaveBeenCalledTimes(2)
+			expect(inputBox.value).toBe("feat: add a thing")
 			expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
 				"common:info.commit_message_already_generating",
 			)
+		})
+
+		it("puts the button back", async () => {
+			await startThenStop()
+
+			expect(contextKeyUpdates()).toEqual([true, false])
+		})
+
+		// Collecting the diff shells out to git and cannot be interrupted, so the only thing a stop
+		// can do there is make sure no request is ever issued.
+		it("never reaches the model when stopped while the diff is being collected", async () => {
+			vi.mocked(gitModule.getCommitContext).mockImplementation(async () => {
+				await stopGeneratingCommitMessage(sourceControl)
+				return { ok: true, context }
+			})
+
+			await generateCommitMessage(provider, sourceControl)
+
+			expect(generatorModule.generateCommitMessage).not.toHaveBeenCalled()
+			expect(inputBox.value).toBe("")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		// The context key is workspace-wide, so the button is also on repositories with nothing in
+		// flight. Pressing it there must not stop a different repository's request.
+		it("does nothing on a repository that is not generating", async () => {
+			const otherInputBox = { value: "" }
+
+			mockRepositories([
+				{ rootUri: { fsPath: "/other" }, inputBox: otherInputBox },
+				{ rootUri: { fsPath: "/repo" }, inputBox },
+			])
+
+			vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(new Promise<string>(() => {}))
+
+			const pending = generateCommitMessage(provider, sourceControl)
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			await stopGeneratingCommitMessage({ rootUri: { fsPath: "/other" } } as vscode.SourceControl)
+
+			const [options] = vi.mocked(generatorModule.generateCommitMessage).mock.calls[0]
+			expect(options.abortSignal?.aborted).toBe(false)
+
+			await stopGeneratingCommitMessage(sourceControl)
+			await pending
+		})
+
+		it("does nothing when the clicked repository is unknown", async () => {
+			vi.mocked(generatorModule.generateCommitMessage).mockReturnValue(new Promise<string>(() => {}))
+
+			const pending = generateCommitMessage(provider, sourceControl)
+			await Promise.resolve()
+			await Promise.resolve()
+			await Promise.resolve()
+
+			await stopGeneratingCommitMessage({ rootUri: { fsPath: "/elsewhere" } } as vscode.SourceControl)
+
+			const [options] = vi.mocked(generatorModule.generateCommitMessage).mock.calls[0]
+			expect(options.abortSignal?.aborted).toBe(false)
+
+			await stopGeneratingCommitMessage(sourceControl)
+			await pending
 		})
 	})
 
