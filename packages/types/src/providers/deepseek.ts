@@ -28,7 +28,7 @@ export const deepSeekModels = {
 		displayName: "DeepSeek V4 Pro 0813",
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
-		supportsImages: true,
+		supportsImages: false,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["disable", "high", "max"], // Updated 2026-08-01
 		preserveReasoning: true,

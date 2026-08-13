@@ -309,9 +309,9 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
 		preserveReasoning: true,
 		reasoningEffort: "high",
-		inputPrice: 1.74,
-		outputPrice: 3.48,
-		cacheReadsPrice: 0.0145,
+		inputPrice: 0.435,
+		outputPrice: 0.87,
+		cacheReadsPrice: 0.003625,
 		description:
 			"DeepSeek-V4-Pro-0813 is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
 	},
