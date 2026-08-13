@@ -284,12 +284,12 @@
 			"scm/title": [
 				{
 					"command": "zoo-code.generateCommitMessage",
-					"group": "navigation",
+					"group": "navigation@1",
 					"when": "scmProvider == git && !zoo-code.generatingCommitMessage"
 				},
 				{
 					"command": "zoo-code.stopGeneratingCommitMessage",
-					"group": "navigation",
+					"group": "navigation@1",
 					"when": "scmProvider == git && zoo-code.generatingCommitMessage"
 				}
 			],
