@@ -3,6 +3,8 @@ import { z } from "zod"
 
 import { NANOGPT_BASE_URL, nanoGptDefaultModelInfo, type ModelInfo, type ModelRecord } from "@roo-code/types"
 
+const nanoGptReasoningEfforts: NonNullable<ModelInfo["supportsReasoningEffort"]> = ["low", "medium", "high"]
+
 const nanoGptPricingSchema = z.object({
 	prompt: z.number().nonnegative().optional(),
 	completion: z.number().nonnegative().optional(),
@@ -14,12 +16,13 @@ const nanoGptModelSchema = z.object({
 	id: z.string().min(1),
 	name: z.string().optional(),
 	description: z.string().optional(),
-	context_length: z.number().positive().optional(),
-	max_output_tokens: z.number().positive().optional(),
+	context_length: z.number().positive().nullish(),
+	max_output_tokens: z.number().positive().nullish(),
 	capabilities: z
 		.object({
 			vision: z.boolean().optional(),
 			tool_calling: z.boolean().optional(),
+			reasoning: z.boolean().optional(),
 		})
 		.optional(),
 	pricing: nanoGptPricingSchema.optional(),
@@ -41,6 +44,9 @@ export const parseNanoGptModel = (model: NanoGptModel): ModelInfo => ({
 	maxTokens: model.max_output_tokens ?? nanoGptDefaultModelInfo.maxTokens,
 	supportsPromptCache: false,
 	...(model.capabilities?.vision !== undefined ? { supportsImages: model.capabilities.vision } : {}),
+	...(model.capabilities?.reasoning !== undefined
+		? { supportsReasoningEffort: model.capabilities.reasoning ? [...nanoGptReasoningEfforts] : false }
+		: {}),
 	...(model.name !== undefined ? { displayName: model.name } : {}),
 	...(model.description !== undefined ? { description: model.description } : {}),
 	...(model.pricing?.prompt !== undefined ? { inputPrice: model.pricing.prompt } : {}),

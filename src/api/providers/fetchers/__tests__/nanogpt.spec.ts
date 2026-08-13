@@ -92,6 +92,31 @@ describe("NanoGPT model fetcher", () => {
 		warning.mockRestore()
 	})
 
+	it("keeps models with null token metadata and preserves reasoning capability", async () => {
+		vi.mocked(axios.get).mockResolvedValue({
+			data: {
+				data: [
+					{
+						id: "reasoning-model",
+						context_length: null,
+						max_output_tokens: null,
+						capabilities: { reasoning: true },
+					},
+					{ id: "non-reasoning-model", capabilities: { reasoning: false } },
+				],
+			},
+		})
+
+		const models = await getNanoGptModels()
+		expect(models["reasoning-model"]).toEqual({
+			contextWindow: nanoGptDefaultModelInfo.contextWindow,
+			maxTokens: nanoGptDefaultModelInfo.maxTokens,
+			supportsPromptCache: false,
+			supportsReasoningEffort: ["low", "medium", "high"],
+		})
+		expect(models["non-reasoning-model"].supportsReasoningEffort).toBe(false)
+	})
+
 	it.each([{ data: null }, [], null])("returns no models for invalid top-level data %#", async (data) => {
 		vi.mocked(axios.get).mockResolvedValue({ data })
 		const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
