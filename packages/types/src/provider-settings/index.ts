@@ -30,6 +30,7 @@ import { qwenCodeProviderDefinition } from "./qwen-code.js"
 import { vercelAiGatewayProviderDefinition } from "./vercel-ai-gateway.js"
 import { opencodeGoProviderDefinition } from "./opencode-go.js"
 import { kenariProviderDefinition } from "./kenari.js"
+import { nanoGptProviderDefinition } from "./nanogpt.js"
 import { zooGatewayProviderDefinition } from "./zoo-gateway.js"
 import { basetenProviderDefinition } from "./baseten.js"
 
@@ -38,6 +39,12 @@ import type { ProviderDefinition } from "./common.js"
 export { OPEN_AI_CODEX_SERVICE_TIER_KEY } from "./openai-codex.js"
 export { kimiCodeAuthMethodSchema, type KimiCodeAuthMethod } from "./kimi-code.js"
 export { zaiApiLineSchema, type ZaiApiLine } from "./zai.js"
+export {
+	nanoGptDefaultRoutingPreference,
+	nanoGptRoutingPreferences,
+	nanoGptRoutingPreferenceSchema,
+	type NanoGptRoutingPreference,
+} from "./nanogpt.js"
 export type { ProviderDefinition } from "./common.js"
 
 export const providerDefinitionList = [
@@ -73,6 +80,7 @@ export const providerDefinitionList = [
 	vercelAiGatewayProviderDefinition,
 	opencodeGoProviderDefinition,
 	kenariProviderDefinition,
+	nanoGptProviderDefinition,
 	zooGatewayProviderDefinition,
 	basetenProviderDefinition,
 ] as const satisfies readonly ProviderDefinition[]

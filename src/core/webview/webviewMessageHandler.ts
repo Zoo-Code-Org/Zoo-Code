@@ -1076,6 +1076,7 @@ export const webviewMessageHandler = async (
 						moonshot: {},
 						"opencode-go": {},
 						kenari: {},
+						nanogpt: {},
 						"kimi-code": {},
 					}
 
@@ -1217,6 +1218,19 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: "kenari",
 				options: { provider: "kenari", apiKey: kenariApiKey },
+			})
+
+			// NanoGPT's detailed catalog is public, while an optional key can expose a
+			// different allowlist. Prefer an explicitly supplied unsaved key and use the
+			// same key-scoped options for refresh and retrieval.
+			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
+			if (message?.values?.nanoGptApiKey !== undefined) {
+				await flushModels({ provider: "nanogpt", apiKey: nanoGptApiKey }, true)
+			}
+
+			candidates.push({
+				key: "nanogpt",
+				options: { provider: "nanogpt", apiKey: nanoGptApiKey },
 			})
 
 			if (!providerFilter || providerFilter === "kimi-code") {

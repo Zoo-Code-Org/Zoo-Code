@@ -13,6 +13,7 @@ const expectedModelIdKeys = [
 	"vercelAiGatewayModelId",
 	"opencodeGoModelId",
 	"kenariModelId",
+	"nanoGptModelId",
 	"zooGatewayModelId",
 ] as const
 

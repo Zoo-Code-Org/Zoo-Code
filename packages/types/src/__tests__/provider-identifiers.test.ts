@@ -32,6 +32,7 @@ const expectedProviderIdentifiers = [
 	"deepseek",
 	"opencode-go",
 	"kenari",
+	"nanogpt",
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
@@ -106,6 +107,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.moonshot,
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
+			providerIdentifiers.nanogpt,
 			providerIdentifiers.kimiCode,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])

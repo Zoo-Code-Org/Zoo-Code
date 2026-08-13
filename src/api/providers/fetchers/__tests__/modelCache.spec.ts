@@ -45,6 +45,7 @@ vi.mock("../litellm")
 vi.mock("../openrouter")
 vi.mock("../requesty")
 vi.mock("../kenari")
+vi.mock("../nanogpt")
 vi.mock("../moonshot")
 vi.mock("../zoo-gateway")
 
@@ -70,6 +71,7 @@ import { getLiteLLMModels } from "../litellm"
 import { getOpenRouterModels } from "../openrouter"
 import { getRequestyModels } from "../requesty"
 import { getKenariModels } from "../kenari"
+import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
 import { getZooGatewayModels } from "../zoo-gateway"
 
@@ -77,6 +79,7 @@ const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
 const mockGetRequestyModels = getRequestyModels as Mock<typeof getRequestyModels>
 const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
+const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 
@@ -194,6 +197,22 @@ describe("getModels with new GetModelsOptions", () => {
 		const result = await getModels({ provider: providerIdentifiers.kenari, apiKey: "kenari-key-for-testing" })
 
 		expect(mockGetKenariModels).toHaveBeenCalledWith("kenari-key-for-testing")
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches NanoGPT with an optional API key", async () => {
+		const mockModels = {
+			"openai/gpt-5.6-sol": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+			},
+		}
+		mockGetNanoGptModels.mockResolvedValue(mockModels)
+
+		const result = await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" })
+
+		expect(mockGetNanoGptModels).toHaveBeenCalledWith("nanogpt-key")
 		expect(result).toEqual(mockModels)
 	})
 
@@ -1076,6 +1095,31 @@ describe("key-scoped cache key derivation", () => {
 		// The discriminator is the trailing key-component: an 8-char (32-bit) hex string.
 		const discriminator = cacheKey.split(":").pop() as string
 		expect(discriminator).toMatch(/^[0-9a-f]{8}$/)
+	})
+})
+
+describe("NanoGPT key-scoped cache isolation", () => {
+	const nanoGptModels = {
+		"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockGetNanoGptModels.mockResolvedValue(nanoGptModels)
+	})
+
+	it("separates public, key A, and key B cache identities without exposing raw keys", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.nanogpt })
+		await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nano-key-a" })
+		await getModels({ provider: providerIdentifiers.nanogpt, apiKey: "nano-key-b" })
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys).size).toBe(3)
+		expect(cacheKeys).toContain("nanogpt")
+		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
 	})
 })
 
