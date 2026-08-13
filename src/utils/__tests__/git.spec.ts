@@ -427,25 +427,11 @@ describe("git utils", () => {
 			return result.context
 		}
 
-		const mockUntrackedFile = (contents: Buffer | null) => {
-			vitest.mocked(fs.promises.open).mockImplementation((async () => {
-				if (!contents) {
-					throw new Error("ENOENT")
-				}
-
-				return {
-					read: async (buffer: Buffer) => ({ bytesRead: contents.copy(buffer) }),
-					close: async () => {},
-				}
-			}) as unknown as typeof fs.promises.open)
-		}
-
 		it("should collect staged changes as structured entries", async () => {
 			mockProbes()
 			mockGit(staged(`M${NUL}src/file1.ts${NUL}A${NUL}src/new.ts${NUL}D${NUL}src/gone.ts${NUL}`))
 
 			const context = await expectContext()
-			expect(context.staged).toBe(true)
 			expect(context.files).toEqual([
 				{ status: "modified", path: "src/file1.ts" },
 				{ status: "added", path: "src/new.ts" },
@@ -496,61 +482,36 @@ describe("git utils", () => {
 			expect(calls.map((call) => call.args)).toContainEqual(["diff", "--cached", "--unified=1"])
 		})
 
-		it("should fall back to the working tree when nothing is staged", async () => {
+		// Only the index is described, so a dirty working tree with an empty index is a distinct
+		// outcome: the user can fix it by staging, and the caller says so.
+		it("should report nothing-staged when the working tree is dirty but the index is empty", async () => {
 			mockProbes()
 			mockGit(workingTree(` M src/file1.ts${NUL}?? src/untracked.ts${NUL}`))
-			mockUntrackedFile(Buffer.from("export const value = 1\n"))
 
-			const context = await expectContext()
-			expect(context.staged).toBe(false)
-			expect(context.files).toEqual([
-				{ status: "modified", path: "src/file1.ts" },
-				{ status: "untracked", path: "src/untracked.ts" },
-			])
+			expect(await getCommitContext(cwd)).toEqual({ ok: false, reason: "nothing-staged" })
 		})
 
-		// Porcelain reverses the field order of `diff --name-status`: here the new path comes first.
-		it("should parse porcelain renames, where the new path comes first", async () => {
+		it("should describe only the index when both it and the working tree have changes", async () => {
 			mockProbes()
-			mockGit(workingTree(`R  new name.ts${NUL}old name.ts${NUL}M  after.ts${NUL}`))
+			// `workingTree` blanks the staged listing, so the staged responses have to win.
+			mockGit({
+				...workingTree(` M src/unstaged.ts${NUL}`),
+				...staged(`M${NUL}src/staged.ts${NUL}`),
+			})
 
-			expect((await expectContext()).files).toEqual([
-				{ status: "renamed", path: "new name.ts", oldPath: "old name.ts" },
-				{ status: "modified", path: "after.ts" },
-			])
-		})
-
-		it("should include bounded contents for untracked files", async () => {
-			mockProbes()
-			mockGit(workingTree(`?? src/untracked.ts${NUL}`))
-			mockUntrackedFile(Buffer.from("export const answer = 42\n"))
-
-			const context = await expectContext()
-			expect(context.diff).toContain("New file: src/untracked.ts")
-			expect(context.diff).toContain("export const answer = 42")
-		})
-
-		it("should skip untracked files that look binary", async () => {
-			mockProbes()
-			mockGit(workingTree(`?? assets/logo.png${NUL}`))
-			mockUntrackedFile(Buffer.from([0x89, 0x50, 0x00, 0x4e, 0x47]))
-
-			const context = await expectContext()
-			expect(context.files).toEqual([{ status: "untracked", path: "assets/logo.png" }])
-			expect(context.diff).not.toContain("New file: assets/logo.png")
+			expect((await expectContext()).files).toEqual([{ status: "modified", path: "src/staged.ts" }])
 		})
 
 		it("should work in a repository without an initial commit", async () => {
 			mockProbes()
 			// `git log` fails before the first commit, and must not take the collection down with it.
-			const responses = workingTree(`?? file.txt${NUL}`)
+			const responses = staged(`A${NUL}file.txt${NUL}`)
 			delete responses["log -n5 --format=%s"]
 			mockGit(responses)
-			mockUntrackedFile(Buffer.from("hello\n"))
 
 			const context = await expectContext()
 			expect(context.recentCommits).toEqual([])
-			expect(context.files).toEqual([{ status: "untracked", path: "file.txt" }])
+			expect(context.files).toEqual([{ status: "added", path: "file.txt" }])
 		})
 
 		// A line limit alone is not a bound: one generated file can be a single enormous line.
