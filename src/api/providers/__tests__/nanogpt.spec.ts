@@ -69,11 +69,22 @@ describe("NanoGptHandler", () => {
 		["latency", "model:thinking:latency"],
 		["throughput", "model:thinking:throughput"],
 		["tools", "model:thinking:tools"],
-		["caching", "model:thinking:caching"],
 	] as const)("sends %s routing", async (preference, expected) => {
 		const handler = new NanoGptHandler({ nanoGptModelId: "model:thinking", nanoGptRoutingPreference: preference })
 		await collectStream(handler.createMessage("system", messages))
 		expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expected }), expect.anything())
+	})
+
+	it("requests cache-capable routing without changing the streaming model ID", async () => {
+		const handler = new NanoGptHandler({
+			nanoGptModelId: "model:thinking",
+			nanoGptRoutingPreference: "caching",
+		})
+		await collectStream(handler.createMessage("system", messages))
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: "model:thinking", caching: true, stream: true }),
+			expect.anything(),
+		)
 	})
 
 	it("streams interleaved text, both reasoning variants, and parallel tool calls", async () => {
@@ -233,6 +244,20 @@ describe("NanoGptHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("requests cache-capable routing without changing the completion model ID", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const handler = new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				nanoGptRoutingPreference: "caching",
+			})
+			await handler.completePrompt("prompt")
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({
+				model: "model:thinking",
+				caching: true,
+				stream: false,
+			})
+		})
+
 		it("returns normal and empty content", async () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 			const handler = new NanoGptHandler({ nanoGptModelId: "model:thinking" })

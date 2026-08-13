@@ -23,6 +23,8 @@ type NanoGptUsage = OpenAI.CompletionUsage & {
 	reasoning_tokens?: number
 }
 
+type NanoGptCachingRequest = { caching?: true }
+
 const OPENAI_REASONING_EFFORTS = ["low", "medium", "high"] as const
 type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number]
 
@@ -85,7 +87,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const { id: canonicalModelId, info } = await this.fetchModel()
-		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & NanoGptCachingRequest = {
 			model: this.getRequestModelId(canonicalModelId),
 			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
 			stream: true,
@@ -94,6 +96,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
 		if (this.options.modelTemperature !== undefined && this.supportsTemperature(canonicalModelId)) {
@@ -139,11 +142,12 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id: canonicalModelId, info } = await this.fetchModel()
-		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
+		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & NanoGptCachingRequest = {
 			model: this.getRequestModelId(canonicalModelId),
 			messages: [{ role: "user", content: prompt }],
 			stream: false,
 			max_tokens: info.maxTokens ?? undefined,
+			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
 		if (this.options.modelTemperature !== undefined && this.supportsTemperature(canonicalModelId)) {

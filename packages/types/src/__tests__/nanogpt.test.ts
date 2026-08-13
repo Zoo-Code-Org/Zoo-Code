@@ -33,7 +33,7 @@ describe("applyNanoGptRoutingPreference", () => {
 		["latency", "model:latency"],
 		["throughput", "model:throughput"],
 		["tools", "model:tools"],
-		["caching", "model:caching"],
+		["caching", "model"],
 	] as const)("maps %s routing", (preference, expected) => {
 		expect(applyNanoGptRoutingPreference("model", preference)).toBe(expected)
 	})

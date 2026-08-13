@@ -29,13 +29,12 @@ const ROUTING_SUFFIXES = new Set([
 	"cached",
 ])
 
-const ROUTING_SUFFIX_BY_PREFERENCE: Record<Exclude<NanoGptRoutingPreference, "auto">, string> = {
+const ROUTING_SUFFIX_BY_PREFERENCE: Record<Exclude<NanoGptRoutingPreference, "auto" | "caching">, string> = {
 	fast: "fast",
 	cheap: "cheap",
 	latency: "latency",
 	throughput: "throughput",
 	tools: "tools",
-	caching: "caching",
 }
 
 /** Applies one request-only NanoGPT routing suffix while preserving identity suffixes such as `:thinking`. */
@@ -52,5 +51,7 @@ export function applyNanoGptRoutingPreference(modelId: string, preference: NanoG
 		finalSuffix = separatorIndex >= 0 ? canonicalId.slice(separatorIndex + 1).toLowerCase() : ""
 	}
 
-	return preference === "auto" ? canonicalId : `${canonicalId}:${ROUTING_SUFFIX_BY_PREFERENCE[preference]}`
+	return preference === "auto" || preference === "caching"
+		? canonicalId
+		: `${canonicalId}:${ROUTING_SUFFIX_BY_PREFERENCE[preference]}`
 }
