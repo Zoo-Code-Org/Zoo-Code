@@ -1064,6 +1064,10 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		// Ensure provider exposes getMcpHub and returns our mock
 		;(mockClineProvider as any).getMcpHub = vi.fn().mockReturnValue(mockMcpHub)
+
+		// `clearAllMocks` keeps implementations, so an earlier suite's return value would
+		// otherwise decide whether these tests see the flag as changed.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
 	})
 
 	it("delegates enable=true to McpHub and posts updated state", async () => {
@@ -1100,6 +1104,33 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("leaves the servers alone when the flag has not changed", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mcpEnabled: true },
+		})
+
+		expect(mockMcpHub.handleMcpEnabledChange).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("mcpEnabled", true)
+	})
+
+	// Settings are written one after another, so anything listed after `mcpEnabled` used to be
+	// saved only once every server had reconnected - which is why a newly picked commit message
+	// profile could take seconds to take effect.
+	it("writes the settings that follow mcpEnabled without waiting on the servers", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(true)
+		mockMcpHub.handleMcpEnabledChange.mockReturnValue(new Promise(() => {}))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mcpEnabled: true, commitMessageApiConfigId: "config-1" },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("commitMessageApiConfigId", "config-1")
 	})
 })
 
