@@ -1118,6 +1118,25 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("mcpEnabled", true)
 	})
 
+	// `refreshAllConnections` reads the flag back out of state to decide what to reconcile to, so
+	// reconciling before the new value is stored reconnects the servers it was meant to close.
+	it("stores the new flag before asking the hub to reconcile", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mcpEnabled: false },
+		})
+
+		const setValue = vi.mocked(mockClineProvider.contextProxy.setValue)
+		const stored = setValue.mock.calls.findIndex(([key]) => key === "mcpEnabled")
+
+		expect(stored).toBeGreaterThanOrEqual(0)
+		expect(setValue.mock.invocationCallOrder[stored]).toBeLessThan(
+			mockMcpHub.handleMcpEnabledChange.mock.invocationCallOrder[0],
+		)
+	})
+
 	// Settings are written one after another, so anything listed after `mcpEnabled` used to be
 	// saved only once every server had reconnected - which is why a newly picked commit message
 	// profile could take seconds to take effect.
