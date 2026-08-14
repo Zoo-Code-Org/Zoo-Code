@@ -1,6 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import type { ModelInfo } from "@roo-code/types"
+import type { ModelInfo, ModelRecord } from "@roo-code/types"
 
 import type { ApiHandler, ApiHandlerCreateMessageMetadata } from "../index"
 import { ApiStream } from "../transform/stream"
@@ -13,6 +13,7 @@ import { getApiRequestTimeout } from "./utils/timeout-config"
  */
 export abstract class BaseProvider implements ApiHandler {
 	protected readonly timeoutMs: number = getApiRequestTimeout()
+	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
 
 	abstract createMessage(
 		systemPrompt: string,
@@ -21,6 +22,34 @@ export abstract class BaseProvider implements ApiHandler {
 	): ApiStream
 
 	abstract getModel(): { id: string; info: ModelInfo }
+
+	/**
+	 * Single-flights model metadata requests and clears the in-flight promise
+	 * after either success or failure so a later call can retry.
+	 */
+	protected fetchModelWithSingleFlight(
+		models: ModelRecord,
+		fetchModels: () => Promise<ModelRecord>,
+		setModels: (models: ModelRecord) => void,
+		getModel: () => { id: string; info: ModelInfo },
+	): Promise<{ id: string; info: ModelInfo }> {
+		if (Object.keys(models).length > 0) {
+			return Promise.resolve(getModel())
+		}
+
+		if (!this.modelFetchPromise) {
+			this.modelFetchPromise = fetchModels()
+				.then((fetchedModels) => {
+					setModels(fetchedModels)
+					return getModel()
+				})
+				.finally(() => {
+					this.modelFetchPromise = undefined
+				})
+		}
+
+		return this.modelFetchPromise
+	}
 
 	/**
 	 * Converts an array of tools to be compatible with OpenAI's strict mode.

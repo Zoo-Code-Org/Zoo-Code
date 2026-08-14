@@ -538,8 +538,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	}
 
 	async fetchModel() {
-		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey)
-		return this.getModel()
+		return this.fetchModelWithSingleFlight(
+			this.models,
+			() => getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey),
+			(models) => {
+				this.models = models
+			},
+			() => this.getModel(),
+		)
+	}
+
+	async ensureModelFetched(): Promise<void> {
+		await this.fetchModel()
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {

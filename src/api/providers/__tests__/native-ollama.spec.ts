@@ -912,6 +912,50 @@ describe("NativeOllamaHandler", () => {
 		})
 	})
 
+	describe("ensureModelFetched", () => {
+		it("makes the detected context window available before a request", async () => {
+			mockGetOllamaModels.mockResolvedValueOnce({
+				llama2: {
+					contextWindow: 1_000_000,
+					maxTokens: 4096,
+					supportsImages: false,
+					supportsPromptCache: true,
+				},
+			})
+
+			expect(handler.getModel().info.contextWindow).toBe(128_000)
+
+			await handler.ensureModelFetched()
+
+			expect(handler.getModel().info.contextWindow).toBe(1_000_000)
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+		})
+
+		it("skips subsequent fetches after models are populated", async () => {
+			await handler.ensureModelFetched()
+			mockGetOllamaModels.mockClear()
+
+			await handler.fetchModel()
+
+			expect(mockGetOllamaModels).not.toHaveBeenCalled()
+		})
+
+		it("deduplicates concurrent metadata fetches", async () => {
+			await Promise.all([handler.ensureModelFetched(), handler.ensureModelFetched()])
+
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+		})
+
+		it("allows a later fetch after a rejected request", async () => {
+			mockGetOllamaModels.mockRejectedValueOnce(new Error("network down"))
+
+			await expect(handler.ensureModelFetched()).rejects.toThrow("network down")
+			await handler.ensureModelFetched()
+
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(2)
+		})
+	})
+
 	describe("tool calling", () => {
 		it("should include tools when tools are provided", async () => {
 			// Model metadata should not gate tool inclusion; metadata.tools controls it.

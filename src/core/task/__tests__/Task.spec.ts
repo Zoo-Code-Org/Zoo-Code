@@ -26,6 +26,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import { manageContext } from "../../context-management"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -234,6 +235,14 @@ vi.mock("../../condense", async (importOriginal) => {
 			cost: 0,
 			newContextTokens: 1,
 		}),
+	}
+})
+
+vi.mock("../../context-management", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../context-management")>()
+	return {
+		...actual,
+		manageContext: vi.fn(actual.manageContext),
 	}
 })
 
@@ -2997,6 +3006,67 @@ describe("Cline", () => {
 			expect(safeSpy).toHaveBeenCalled()
 			expect(ensureModelFetched).toHaveBeenCalled()
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)
+		})
+	})
+
+	describe("context management model metadata", () => {
+		it("passes the fetched context window to context management", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			let modelInfo: ModelInfo = {
+				supportsImages: false,
+				supportsPromptCache: true,
+				contextWindow: 128_000,
+				maxTokens: 4096,
+			}
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({
+				id: mockApiConfig.apiModelId!,
+				info: modelInfo,
+			}))
+			const ensureModelFetched = vi.fn().mockImplementation(async () => {
+				modelInfo = { ...modelInfo, contextWindow: 1_000_000 }
+			})
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "text", text: "ok" }
+				},
+				async next() {
+					return { done: true, value: undefined }
+				},
+				async return() {
+					return { done: true, value: undefined }
+				},
+				async throw(error: unknown) {
+					throw error
+				},
+				async [Symbol.asyncDispose]() {},
+			} as AsyncGenerator<ApiStreamChunk>)
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			vi.mocked(manageContext).mockClear()
+			await task.attemptApiRequest(0).next()
+
+			expect(ensureModelFetched).toHaveBeenCalledTimes(1)
+			expect(manageContext).toHaveBeenCalledWith(expect.objectContaining({ contextWindow: 1_000_000 }))
 		})
 	})
 
