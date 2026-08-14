@@ -30,6 +30,9 @@ import {
 	kimiCodeDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
+	getZAiModels,
+	internationalZAiDefaultModelId,
+	mainlandZAiDefaultModelId,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
 } from "@roo-code/types"
@@ -1278,6 +1281,50 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+	})
+
+	describe("Z AI provider", () => {
+		it("uses the International Coding catalog when no API line is configured", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(getZAiModels("international_coding")["glm-5.3"])
+		})
+
+		it("uses the China Coding catalog for GLM-5.3", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+				zaiApiLine: "china_coding",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(getZAiModels("china_coding")["glm-5.3"])
+			expect(result.current.info?.inputPrice).toBe(0.68)
+		})
+
+		it.each([
+			["international_api", internationalZAiDefaultModelId],
+			["china_api", mainlandZAiDefaultModelId],
+		] as const)("falls back when GLM-5.3 is unavailable on %s", (zaiApiLine, expectedModelId) => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+				zaiApiLine,
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(expectedModelId)
+			expect(result.current.info).toEqual(getZAiModels(zaiApiLine)[expectedModelId])
 		})
 	})
 
