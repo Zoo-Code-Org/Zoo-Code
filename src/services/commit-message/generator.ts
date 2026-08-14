@@ -40,7 +40,7 @@ const RESERVED_CLOSING_LABELS = /<\/(branch|recent_commits|changed_files|diff)>/
  * while no longer matching the label the prompt uses as a delimiter.
  */
 /** Written as an escape so it survives editors and linters that strip invisible characters. */
-const ZERO_WIDTH_SPACE = "​"
+const ZERO_WIDTH_SPACE = "\u200b"
 
 function neutralizeClosingLabels(value: string): string {
 	// `</diff>` becomes `<[zero-width space]/diff>`: the same words, no longer the delimiter.
