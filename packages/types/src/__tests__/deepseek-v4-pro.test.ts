@@ -10,16 +10,32 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 		expect(model?.contextWindow).toBeGreaterThanOrEqual(1_000_000)
 	})
 
-	it("uses first-party capabilities and OpenCode Go pricing", () => {
+	it("uses peak first-party pricing and unchanged OpenCode Go pricing", () => {
+		expect(deepSeekModels["deepseek-v4-flash"]).toMatchObject({
+			supportsImages: false,
+			outputPrice: 1.32,
+			cacheWritesPrice: 0.44,
+			cacheReadsPrice: 0.014,
+		})
 		expect(deepSeekModels["deepseek-v4-pro"].supportsImages).toBe(false)
+		expect(deepSeekModels["deepseek-v4-pro"]).toMatchObject({
+			outputPrice: 3.96,
+			cacheWritesPrice: 1.32,
+			cacheReadsPrice: 0.044,
+		})
 		expect(opencodeGoModels["deepseek-v4-pro"]).toMatchObject({
 			inputPrice: 0.435,
 			outputPrice: 0.87,
 			cacheReadsPrice: 0.003625,
 		})
+		expect(opencodeGoModels["deepseek-v4-flash"]).toMatchObject({
+			inputPrice: 0.14,
+			outputPrice: 0.28,
+			cacheReadsPrice: 0.0028,
+		})
 	})
 
-	// Self-hosted providers serve the published preview weights, not the checkpoint behind DeepSeek's API alias.
+	// Self-hosted providers retain separate IDs for the preview weights and 0813 checkpoint.
 	it.each([
 		["Fireworks AI", fireworksModels["accounts/fireworks/models/deepseek-v4-pro"]],
 		["Baseten", basetenModels["deepseek-ai/DeepSeek-V4-Pro"]],
@@ -31,7 +47,36 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 		expect(model?.contextWindow).toBeGreaterThanOrEqual(1_000_000)
 	})
 
-	it("does not infer an unverified Baseten cache-write price", () => {
+	it.each([
+		[
+			"Fireworks AI",
+			fireworksModels["accounts/fireworks/models/deepseek-v4-pro-0813"],
+			{ inputPrice: 1.32, outputPrice: 3.96, cacheReadsPrice: 0.044 },
+		],
+		[
+			"Baseten",
+			basetenModels["deepseek-ai/DeepSeek-V4-Pro-0813"],
+			{ inputPrice: 1.32, outputPrice: 3.96, cacheReadsPrice: 0.132 },
+		],
+	])("publishes the dated checkpoint and provider-specific pricing for %s", (_provider, model, pricing) => {
+		expect(model).toMatchObject({
+			displayName: "DeepSeek V4 Pro 0813",
+			...pricing,
+		})
+	})
+
+	it("keeps preview pricing separate and omits unverified cache-write prices", () => {
+		expect(fireworksModels["accounts/fireworks/models/deepseek-v4-pro"]).toMatchObject({
+			inputPrice: 1.74,
+			outputPrice: 3.48,
+			cacheReadsPrice: 0.145,
+		})
+		expect(basetenModels["deepseek-ai/DeepSeek-V4-Pro"]).toMatchObject({
+			inputPrice: 1.74,
+			outputPrice: 3.48,
+			cacheReadsPrice: 0.145,
+		})
 		expect(basetenModels["deepseek-ai/DeepSeek-V4-Pro"]).not.toHaveProperty("cacheWritesPrice")
+		expect(basetenModels["deepseek-ai/DeepSeek-V4-Pro-0813"]).not.toHaveProperty("cacheWritesPrice")
 	})
 })
