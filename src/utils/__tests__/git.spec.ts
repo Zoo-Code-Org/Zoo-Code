@@ -401,17 +401,16 @@ describe("git utils", () => {
 		}
 
 		const staged = (nameStatus: string, diff = mockDiff): Record<string, string> => ({
-			"diff --cached --name-status -z": nameStatus,
-			"diff --cached --unified=1": diff,
+			"diff --cached --name-status -z --find-renames --find-copies": nameStatus,
+			"diff --cached --unified=1 --find-renames --find-copies": diff,
 			"branch --show-current": "feature/x\n",
 			"log -n5 --format=%s": "earlier subject\n",
 		})
 
 		const workingTree = (status: string, diff = mockDiff): Record<string, string> => ({
-			"diff --cached --name-status -z": "",
+			"diff --cached --name-status -z --find-renames --find-copies": "",
 			"status --porcelain=v1 -z --untracked-files=all": status,
-			"diff --unified=1": diff,
-			"rev-parse --show-toplevel": `${cwd}\n`,
+			"diff --unified=1 --find-renames --find-copies": diff,
 			"branch --show-current": "main\n",
 			"log -n5 --format=%s": "earlier subject\n",
 		})
@@ -478,17 +477,119 @@ describe("git utils", () => {
 
 			expect(calls.length).toBeGreaterThan(0)
 			expect(calls.every((call) => call.file === "git")).toBe(true)
-			expect(calls.map((call) => call.args)).toContainEqual(["diff", "--cached", "--name-status", "-z"])
-			expect(calls.map((call) => call.args)).toContainEqual(["diff", "--cached", "--unified=1"])
+			expect(calls.map((call) => call.args)).toContainEqual([
+				"diff",
+				"--cached",
+				"--name-status",
+				"-z",
+				"--find-renames",
+				"--find-copies",
+			])
+			expect(calls.map((call) => call.args)).toContainEqual([
+				"diff",
+				"--cached",
+				"--unified=1",
+				"--find-renames",
+				"--find-copies",
+			])
 		})
 
-		// Only the index is described, so a dirty working tree with an empty index is a distinct
-		// outcome: the user can fix it by staging, and the caller says so.
-		it("should report nothing-staged when the working tree is dirty but the index is empty", async () => {
+		// Left to `diff.renames`, a moved file reaches the model as a delete plus an add for some
+		// users and as a rename for others.
+		it("should ask for rename and copy detection rather than relying on git configuration", async () => {
 			mockProbes()
-			mockGit(workingTree(` M src/file1.ts${NUL}?? src/untracked.ts${NUL}`))
+			const calls = mockGit(staged(`R100${NUL}src/old.ts${NUL}src/new.ts${NUL}`))
 
-			expect(await getCommitContext(cwd)).toEqual({ ok: false, reason: "nothing-staged" })
+			await getCommitContext(cwd)
+
+			expect(
+				calls.every(
+					(call) =>
+						!call.args.includes("diff") ||
+						(call.args.includes("--find-renames") && call.args.includes("--find-copies")),
+				),
+			).toBe(true)
+		})
+
+		it("should describe the working tree when the index is empty", async () => {
+			mockProbes()
+			mockGit(workingTree(` M src/file1.ts${NUL}`))
+
+			const context = await expectContext()
+
+			expect(context.files).toEqual([{ status: "modified", path: "src/file1.ts" }])
+			expect(context.diff).toContain("+new line")
+		})
+
+		// Reads `bytes` into the caller's buffer, the way a real file handle would.
+		const mockUntrackedFile = (bytes: Buffer) => {
+			const close = vitest.fn().mockResolvedValue(undefined)
+
+			vitest.mocked(fs.promises.open).mockResolvedValue({
+				read: vitest.fn().mockImplementation(async (buffer: Buffer, offset: number, length: number) => {
+					const written = bytes.copy(buffer, offset, 0, Math.min(length, bytes.length))
+					return { bytesRead: written }
+				}),
+				close,
+			} as never)
+
+			return { close }
+		}
+
+		// A path alone does not say what an added file is for, which is most of what a commit
+		// message about a new file has to convey.
+		it("should inline the contents of untracked files", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? src/added.ts${NUL}`, ""))
+			mockUntrackedFile(Buffer.from("export const answer = 42\n"))
+
+			const context = await expectContext()
+
+			expect(context.files).toEqual([{ status: "untracked", path: "src/added.ts" }])
+			expect(context.diff).toContain("+++ b/src/added.ts")
+			expect(context.diff).toContain("export const answer = 42")
+		})
+
+		it("should mark binary untracked files instead of inlining them", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? assets/logo.png${NUL}`, ""))
+			mockUntrackedFile(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x01, 0x02]))
+
+			expect((await expectContext()).diff).toContain("(binary file)")
+		})
+
+		it("should read only the beginning of a large untracked file", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? data/big.txt${NUL}`, ""))
+			mockUntrackedFile(Buffer.from("x".repeat(64 * 1024)))
+
+			const context = await expectContext()
+
+			expect(context.diff).toContain("(truncated)")
+			// The cap is what bounds this, not the number of bytes the file happens to hold.
+			expect(context.diff.length).toBeLessThan(32 * 1024)
+		})
+
+		it("should list untracked files past the limit by path only", async () => {
+			mockProbes()
+			const status = Array.from({ length: 12 }, (_, index) => `?? src/file${index}.ts${NUL}`).join("")
+			mockGit(workingTree(status, ""))
+			mockUntrackedFile(Buffer.from("contents\n"))
+
+			const context = await expectContext()
+
+			expect(context.files).toHaveLength(12)
+			expect(context.diff).toContain("(contents omitted)")
+			// Ten are read; the remaining two are named without being opened.
+			expect(fs.promises.open).toHaveBeenCalledTimes(10)
+		})
+
+		it("should still describe an untracked file it cannot read", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? src/vanished.ts${NUL}`, ""))
+			vitest.mocked(fs.promises.open).mockRejectedValue(new Error("ENOENT"))
+
+			expect((await expectContext()).diff).toContain("(unreadable)")
 		})
 
 		it("should describe only the index when both it and the working tree have changes", async () => {
@@ -550,7 +651,7 @@ describe("git utils", () => {
 		it("should report failed instead of rejecting when a git command fails", async () => {
 			mockProbes()
 			const responses = staged(`M${NUL}src/file1.ts${NUL}`)
-			delete responses["diff --cached --unified=1"]
+			delete responses["diff --cached --unified=1 --find-renames --find-copies"]
 			mockGit(responses)
 
 			const result = await getCommitContext(cwd)
