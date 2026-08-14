@@ -15,6 +15,7 @@ import type { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
 import { RouterProvider } from "./router-provider"
+import { handleProviderError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
 type NanoGptUsage = OpenAI.CompletionUsage & {
@@ -74,11 +75,13 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	private createSafeError(operation: string, error: unknown): Error {
-		const message = error instanceof Error ? error.message : String(error)
-		const safeMessage = this.options.nanoGptApiKey
-			? message.replaceAll(this.options.nanoGptApiKey, "[REDACTED]")
-			: message
-		return new Error(`NanoGPT ${operation} error: ${safeMessage}`)
+		return handleProviderError(error, "NanoGPT", {
+			messagePrefix: operation,
+			messageTransformer: (message) =>
+				this.options.nanoGptApiKey
+					? `NanoGPT ${operation} error: ${message.replaceAll(this.options.nanoGptApiKey, "[REDACTED]")}`
+					: `NanoGPT ${operation} error: ${message}`,
+		})
 	}
 
 	override async *createMessage(

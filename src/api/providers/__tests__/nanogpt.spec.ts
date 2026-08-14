@@ -167,12 +167,22 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
-	it("keeps unauthenticated catalog fetches public and redacts streaming errors", async () => {
-		mockCreate.mockRejectedValue(new Error("upstream rejected secret-key"))
-		const handler = new NanoGptHandler({ nanoGptApiKey: "secret-key", nanoGptModelId: "model:thinking" })
-		await expect(collectStream(handler.createMessage("sys", messages))).rejects.toThrow(
-			"NanoGPT streaming error: upstream rejected [REDACTED]",
+	it("keeps unauthenticated catalog fetches public and preserves streaming error metadata while redacting", async () => {
+		const errorDetails = [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "10s" }]
+		mockCreate.mockRejectedValue(
+			Object.assign(new Error("upstream rejected secret-key"), {
+				status: 429,
+				code: "rate_limit_exceeded",
+				errorDetails,
+			}),
 		)
+		const handler = new NanoGptHandler({ nanoGptApiKey: "secret-key", nanoGptModelId: "model:thinking" })
+		await expect(collectStream(handler.createMessage("sys", messages))).rejects.toMatchObject({
+			message: "NanoGPT streaming error: upstream rejected [REDACTED]",
+			status: 429,
+			code: "rate_limit_exceeded",
+			errorDetails,
+		})
 
 		vi.mocked(getModels).mockResolvedValue({})
 		mockCreate.mockResolvedValue(asyncStreamFrom([]))
@@ -272,12 +282,22 @@ describe("NanoGptHandler", () => {
 			expect(await handler.completePrompt("prompt")).toBe("")
 		})
 
-		it("wraps useful upstream errors without leaking the API key", async () => {
-			mockCreate.mockRejectedValue(new Error("upstream rejected secret-key"))
-			const handler = new NanoGptHandler({ nanoGptApiKey: "secret-key", nanoGptModelId: "model:thinking" })
-			await expect(handler.completePrompt("prompt")).rejects.toThrow(
-				"NanoGPT completion error: upstream rejected [REDACTED]",
+		it("preserves completion error metadata without leaking the API key", async () => {
+			const errorDetails = [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "20s" }]
+			mockCreate.mockRejectedValue(
+				Object.assign(new Error("upstream rejected secret-key"), {
+					status: 429,
+					code: "rate_limit_exceeded",
+					errorDetails,
+				}),
 			)
+			const handler = new NanoGptHandler({ nanoGptApiKey: "secret-key", nanoGptModelId: "model:thinking" })
+			await expect(handler.completePrompt("prompt")).rejects.toMatchObject({
+				message: "NanoGPT completion error: upstream rejected [REDACTED]",
+				status: 429,
+				code: "rate_limit_exceeded",
+				errorDetails,
+			})
 		})
 	})
 

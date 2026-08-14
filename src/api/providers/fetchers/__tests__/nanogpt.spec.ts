@@ -117,6 +117,29 @@ describe("NanoGPT model fetcher", () => {
 		expect(models["non-reasoning-model"].supportsReasoningEffort).toBe(false)
 	})
 
+	it("preserves exact reasoning efforts and falls back when the catalog omits them", () => {
+		expect(
+			parseNanoGptModel({
+				id: "high-only",
+				capabilities: { reasoning: true },
+				reasoning_efforts: ["high"],
+			}).supportsReasoningEffort,
+		).toEqual(["high"])
+
+		const extendedEfforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max"] as const
+		expect(
+			parseNanoGptModel({
+				id: "extended-reasoning",
+				capabilities: { reasoning: true },
+				reasoning_efforts: [...extendedEfforts],
+			}).supportsReasoningEffort,
+		).toEqual(extendedEfforts)
+
+		expect(
+			parseNanoGptModel({ id: "fallback-reasoning", capabilities: { reasoning: true } }).supportsReasoningEffort,
+		).toEqual(["low", "medium", "high"])
+	})
+
 	it.each([{ data: null }, [], null])("returns no models for invalid top-level data %#", async (data) => {
 		vi.mocked(axios.get).mockResolvedValue({ data })
 		const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined)
