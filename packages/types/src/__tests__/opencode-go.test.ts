@@ -88,12 +88,12 @@ describe("opencode-go registry", () => {
 				supportsImages: true,
 				supportsPromptCache: true,
 				supportsMaxTokens: true,
-				preserveReasoning: true,
 				inputPrice: 2.0,
 				outputPrice: 6.0,
 				cacheReadsPrice: 0.25,
 				cacheWritesPrice: 2.5,
 			})
+			expect(info?.preserveReasoning).toBeUndefined()
 		})
 	})
 

@@ -297,7 +297,6 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
-		preserveReasoning: true,
 		inputPrice: 2.0,
 		outputPrice: 6.0,
 		cacheReadsPrice: 0.25,

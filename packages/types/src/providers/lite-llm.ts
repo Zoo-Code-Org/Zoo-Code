@@ -24,14 +24,12 @@ export const litellmDefaultModelInfo: ModelInfo = {
  *
  * Rather than matching model-family substrings with a regex (which can
  * over-match unrelated aliases, e.g. a family fragment appearing inside a
- * longer unrelated model id), this is an explicit list of the exact model
- * ids that set `preserveReasoning: true` in their native provider config
- * (see deepseek.ts, mimo.ts, moonshot.ts, bedrock.ts, fireworks.ts, zai.ts,
- * minimax.ts, opencode-go.ts). The same behavior is inferred for a
- * LiteLLM-routed alias of the same underlying model. Keep this list in sync
- * with those registries. This is still best-effort: unrecognized aliases or
- * renamed deployments will not match, and callers should treat it as a
- * heuristic, not a source of truth.
+ * longer unrelated model id), this is an explicit list of models whose
+ * OpenAI-compatible routes use interleaved `reasoning_content`. Native
+ * provider metadata informs this list where applicable, but gateway routes
+ * can have different preservation semantics. This is still best-effort:
+ * unrecognized aliases or renamed deployments will not match, and callers
+ * should treat it as a heuristic, not a source of truth.
  */
 export const LITELLM_PRESERVE_REASONING_MODEL_IDS = [
 	// deepseek.ts
