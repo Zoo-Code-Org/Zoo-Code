@@ -139,7 +139,7 @@ describe("getApiProtocol", () => {
 		})
 
 		it("should return 'openai' for opencode-go OpenAI-format models (GLM/DeepSeek/etc.)", () => {
-			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.2")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.3")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "deepseek-v4-pro")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "kimi-k2.5")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "mimo-v2.5")).toBe(OPENAI_API_PROTOCOL)
