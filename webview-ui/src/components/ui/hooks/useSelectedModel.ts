@@ -20,8 +20,8 @@ import {
 	vscodeLlmDefaultModelId,
 	openAiCodexModels,
 	sambaNovaModels,
-	internationalZAiModels,
-	mainlandZAiModels,
+	getZAiModels,
+	zaiApiLineConfigs,
 	fireworksModels,
 	friendliModels,
 	basetenModels,
@@ -305,11 +305,12 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.zai: {
-			const isChina = apiConfiguration.zaiApiLine === "china_coding"
-			const models = isChina ? mainlandZAiModels : internationalZAiModels
+			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
+			const isChina = zaiApiLineConfigs[apiLine].isChina
+			const models = getZAiModels(apiLine)
 			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = models[id as keyof typeof models]
+			const id = getValidatedModelId(apiConfiguration.apiModelId, models, defaultModelId)
+			const info = models[id]
 			return { id, info }
 		}
 		case providerIdentifiers.openaiNative: {
