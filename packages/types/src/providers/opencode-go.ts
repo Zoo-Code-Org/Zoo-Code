@@ -102,22 +102,6 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"GLM-5.2 is Zhipu's flagship model with a 1M context window, 128k max output, and dual thinking-effort modes (High/Max). It delivers top-tier long-context reasoning, coding, and agentic performance. Available via the Opencode Go plan.",
 	},
-	"glm-5.3": {
-		maxTokens: 131_072,
-		contextWindow: 1_000_000,
-		supportsImages: false,
-		supportsPromptCache: true,
-		supportsMaxTokens: true,
-		supportsReasoningEffort: ["low", "high", "max"],
-		reasoningEffort: "max",
-		preserveReasoning: true,
-		inputPrice: 1.4,
-		outputPrice: 4.4,
-		cacheReadsPrice: 0.26,
-		description:
-			"GLM-5.3 is Zhipu's flagship coding and agentic model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available via the Opencode Go plan.",
-	},
-
 	// --- Moonshot Kimi ---
 	"kimi-k3": {
 		maxTokens: 131_072, // Default max_completion_tokens (configurable up to 1,048,576)

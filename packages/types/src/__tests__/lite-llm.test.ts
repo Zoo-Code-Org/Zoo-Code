@@ -20,7 +20,7 @@ describe("LiteLLM preserveReasoning model detection", () => {
 
 	it("matches case-insensitively", () => {
 		expect(isLiteLLMPreserveReasoningModel("MiniMax-M2.7-Highspeed")).toBe(true)
-		expect(isLiteLLMPreserveReasoningModel("GLM-5.3")).toBe(true)
+		expect(isLiteLLMPreserveReasoningModel("GLM-5.2")).toBe(true)
 		expect(isLiteLLMPreserveReasoningModel("QWEN3.8-MAX")).toBe(true)
 	})
 
