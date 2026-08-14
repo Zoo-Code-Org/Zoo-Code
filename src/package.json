@@ -293,6 +293,12 @@
 					"when": "scmProvider == git && zoo-code.generatingCommitMessage"
 				}
 			],
+			"scm/inputBox": [
+				{
+					"command": "zoo-code.generateCommitMessage",
+					"when": "scmProvider == git"
+				}
+			],
 			"commandPalette": [
 				{
 					"command": "zoo-code.stopGeneratingCommitMessage",

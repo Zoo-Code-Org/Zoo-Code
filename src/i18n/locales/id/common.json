@@ -166,7 +166,6 @@
 	"info": {
 		"no_changes": "Tidak ada perubahan ditemukan.",
 		"commit_message_no_changes": "Tidak ada perubahan untuk di-commit.",
-		"commit_message_nothing_staged": "Stage perubahan yang ingin di-commit, lalu buat pesannya.",
 		"commit_message_box_not_empty": "Pesan commit Anda dipertahankan. Kosongkan kotaknya untuk membuat yang baru.",
 		"commit_message_already_generating": "Sudah membuat pesan commit.",
 		"clipboard_copy": "System prompt berhasil disalin ke clipboard",

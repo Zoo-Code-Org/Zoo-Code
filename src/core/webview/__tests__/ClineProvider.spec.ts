@@ -1265,6 +1265,44 @@ describe("ClineProvider", () => {
 
 			expect(state.commitMessageApiConfigId).toBeUndefined()
 		})
+
+		// The timeout is read from getState() to bound the request. Omitted from the returned state
+		// it reads as unset, so a configured value silently became the default instead.
+		it("getState returns the saved commitMessageTimeout", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", 120)
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageTimeout).toBe(120)
+		})
+
+		it("getState leaves commitMessageTimeout unset when no timeout is configured", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", undefined)
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageTimeout).toBeUndefined()
+		})
+
+		it("getStateToPostToWebview returns the saved commitMessageTimeout", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", 120)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageTimeout).toBe(120)
+		})
+
+		it("getStateToPostToWebview leaves commitMessageTimeout unset when no timeout is configured", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageTimeout).toBeUndefined()
+		})
 	})
 
 	it("getStateToPostToWebview passes through defined diffFuzzyThreshold value", async () => {

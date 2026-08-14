@@ -181,17 +181,16 @@ describe("generateCommitMessage (Source Control integration)", () => {
 			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("common:info.commit_message_no_changes")
 		})
 
-		// Only the index is described, so this is the one failure the user can act on directly.
-		it("asks the user to stage something when the index is empty", async () => {
-			vi.mocked(gitModule.getCommitContext).mockResolvedValue({ ok: false, reason: "nothing-staged" })
+		// An empty index is no longer a dead end: the working tree is described instead, so the
+		// only remaining "nothing to do" case is a genuinely clean repository.
+		it("does not reach the model when there is nothing to describe", async () => {
+			vi.mocked(gitModule.getCommitContext).mockResolvedValue({ ok: false, reason: "no-changes" })
 
 			await generateCommitMessage(provider)
 
 			expect(inputBox.value).toBe("")
 			expect(generatorModule.generateCommitMessage).not.toHaveBeenCalled()
-			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-				"common:info.commit_message_nothing_staged",
-			)
+			expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("common:info.commit_message_no_changes")
 		})
 
 		it("reports a missing repository when git cannot describe the folder", async () => {
@@ -263,7 +262,7 @@ describe("generateCommitMessage (Source Control integration)", () => {
 		})
 
 		it("comes back down when there was nothing to describe", async () => {
-			vi.mocked(gitModule.getCommitContext).mockResolvedValue({ ok: false, reason: "nothing-staged" })
+			vi.mocked(gitModule.getCommitContext).mockResolvedValue({ ok: false, reason: "no-changes" })
 
 			await generateCommitMessage(provider)
 

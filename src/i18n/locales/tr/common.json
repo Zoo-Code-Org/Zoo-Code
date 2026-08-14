@@ -166,7 +166,6 @@
 	"info": {
 		"no_changes": "Değişiklik bulunamadı.",
 		"commit_message_no_changes": "Commit edilecek değişiklik yok.",
-		"commit_message_nothing_staged": "Commit etmek istediğiniz değişiklikleri stage'e alın, sonra mesajı oluşturun.",
 		"commit_message_box_not_empty": "Commit mesajınız korundu. Yenisini oluşturmak için kutuyu temizleyin.",
 		"commit_message_already_generating": "Zaten bir commit mesajı oluşturuluyor.",
 		"clipboard_copy": "Sistem istemi panoya başarıyla kopyalandı",

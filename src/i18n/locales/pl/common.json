@@ -166,7 +166,6 @@
 	"info": {
 		"no_changes": "Nie znaleziono zmian.",
 		"commit_message_no_changes": "Brak zmian do zatwierdzenia.",
-		"commit_message_nothing_staged": "Dodaj do przechowalni (stage) zmiany do zatwierdzenia, a następnie wygeneruj komunikat.",
 		"commit_message_box_not_empty": "Zachowano Twoją wiadomość commita. Wyczyść pole, aby wygenerować nową.",
 		"commit_message_already_generating": "Generowanie komunikatu commita już trwa.",
 		"clipboard_copy": "Komunikat systemowy został pomyślnie skopiowany do schowka",

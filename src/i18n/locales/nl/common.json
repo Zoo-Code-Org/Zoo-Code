@@ -166,7 +166,6 @@
 	"info": {
 		"no_changes": "Geen wijzigingen gevonden.",
 		"commit_message_no_changes": "Geen wijzigingen om vast te leggen.",
-		"commit_message_nothing_staged": "Stage de wijzigingen die je wilt vastleggen en genereer daarna het bericht.",
 		"commit_message_box_not_empty": "Je commitbericht is behouden. Maak het veld leeg om een nieuw bericht te genereren.",
 		"commit_message_already_generating": "Er wordt al een commitbericht gegenereerd.",
 		"clipboard_copy": "Systeemprompt succesvol gekopieerd naar klembord",

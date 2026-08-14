@@ -143,11 +143,9 @@ export async function generateCommitMessage(
 			const result = await getCommitContext(repository.rootUri.fsPath)
 
 			if (!result.ok) {
-				if (result.reason === "nothing-staged") {
-					// Only the index is described, so this is the one failure the user can fix
-					// directly - the message says how rather than just reporting nothing happened.
-					vscode.window.showInformationMessage(t("common:info.commit_message_nothing_staged"))
-				} else if (result.reason === "no-changes") {
+				if (result.reason === "no-changes") {
+					// The working tree is described when the index is empty, so reaching here means
+					// there is genuinely nothing to summarize rather than merely nothing staged.
 					vscode.window.showInformationMessage(t("common:info.commit_message_no_changes"))
 				} else if (result.reason === "failed") {
 					vscode.window.showErrorMessage(
