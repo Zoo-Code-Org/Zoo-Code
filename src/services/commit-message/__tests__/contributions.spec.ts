@@ -43,6 +43,24 @@ describe("Source Control title bar contributions", () => {
 		expect(command!.icon).toBe("$(debug-stop)")
 	})
 
+	// The title bar is not the only place a commit message gets written from, so the action is also
+	// offered on the input box itself, as issue #286 requires.
+	it("also offers generation from the Source Control input box", () => {
+		const inputBox = packageJson.contributes.menus["scm/inputBox"]
+		const item = inputBox?.find(({ command }) => command === "zoo-code.generateCommitMessage")
+
+		expect(item).toBeDefined()
+		expect(item!.when).toBe("scmProvider == git")
+	})
+
+	// Unlike the title bar, this menu holds one action rather than a pair swapped by a context key,
+	// so there is nothing here to keep in a fixed slot.
+	it("does not duplicate the stop command onto the input box", () => {
+		const inputBox = packageJson.contributes.menus["scm/inputBox"]
+
+		expect(inputBox?.some(({ command }) => command === "zoo-code.stopGeneratingCommitMessage")).toBe(false)
+	})
+
 	it("titles the stop button so hovering it says what it does", () => {
 		const nls = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.nls.json"), "utf8"))
 

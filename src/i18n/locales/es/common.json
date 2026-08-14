@@ -166,7 +166,6 @@
 	"info": {
 		"no_changes": "No se encontraron cambios.",
 		"commit_message_no_changes": "No hay cambios para confirmar.",
-		"commit_message_nothing_staged": "Prepara (stage) los cambios que quieres confirmar y luego genera el mensaje.",
 		"commit_message_box_not_empty": "Se ha conservado tu mensaje de commit. Vacía el campo para generar uno nuevo.",
 		"commit_message_already_generating": "Ya se está generando un mensaje de commit.",
 		"clipboard_copy": "Mensaje del sistema copiado correctamente al portapapeles",
