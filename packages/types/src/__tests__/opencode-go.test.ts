@@ -10,6 +10,7 @@ import {
 
 describe("opencode-go registry", () => {
 	const anthropicFormatModels = [
+		"qwen3.8-max",
 		"qwen3.7-max",
 		"qwen3.7-plus",
 		"qwen3.6-plus",
@@ -21,6 +22,7 @@ describe("opencode-go registry", () => {
 		"glm-5",
 		"glm-5.1",
 		"glm-5.2",
+		"glm-5.3",
 		"kimi-k3",
 		"kimi-k2.5",
 		"kimi-k2.6",
@@ -77,6 +79,39 @@ describe("opencode-go registry", () => {
 			expect(info?.inputPrice).toBe(3.0)
 			expect(info?.outputPrice).toBe(15.0)
 			expect(info?.cacheReadsPrice).toBe(0.3)
+		})
+
+		it("exposes current GLM-5.3 capabilities and Go pricing", () => {
+			const info = getOpencodeGoModelInfo("glm-5.3")
+			expect(info).toMatchObject({
+				maxTokens: 131_072,
+				contextWindow: 1_000_000,
+				supportsImages: false,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["low", "high", "max"],
+				reasoningEffort: "max",
+				preserveReasoning: true,
+				inputPrice: 1.4,
+				outputPrice: 4.4,
+				cacheReadsPrice: 0.26,
+			})
+		})
+
+		it("exposes current Qwen3.8 Max capabilities and Go pricing", () => {
+			const info = getOpencodeGoModelInfo("qwen3.8-max")
+			expect(info).toMatchObject({
+				maxTokens: 131_072,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				preserveReasoning: true,
+				inputPrice: 2.0,
+				outputPrice: 6.0,
+				cacheReadsPrice: 0.25,
+				cacheWritesPrice: 2.5,
+			})
 		})
 	})
 

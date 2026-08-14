@@ -102,6 +102,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"GLM-5.2 is Zhipu's flagship model with a 1M context window, 128k max output, and dual thinking-effort modes (High/Max). It delivers top-tier long-context reasoning, coding, and agentic performance. Available via the Opencode Go plan.",
 	},
+	"glm-5.3": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.3 is Zhipu's flagship coding and agentic model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available via the Opencode Go plan.",
+	},
 
 	// --- Moonshot Kimi ---
 	"kimi-k3": {
@@ -292,6 +307,20 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Qwen3.7 Max - Alibaba's flagship text-only reasoning agent model with a 1M context window, designed for long-horizon agent workflows. Available via the Opencode Go plan.",
 	},
+	"qwen3.8-max": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		preserveReasoning: true,
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.25,
+		cacheWritesPrice: 2.5,
+		description:
+			"Qwen3.8 Max - Alibaba's flagship multimodal reasoning model with a 1M context window, 128k max output, and long-horizon coding and agentic capabilities. Available via the Opencode Go plan.",
+	},
 
 	// --- DeepSeek ---
 	"deepseek-v4-pro": {
@@ -349,6 +378,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
  */
 export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 	// --- Alibaba Qwen ---
+	"qwen3.8-max",
 	"qwen3.7-max",
 	"qwen3.7-plus",
 	"qwen3.6-plus",

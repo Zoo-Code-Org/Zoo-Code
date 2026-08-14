@@ -56,6 +56,7 @@ export const LITELLM_PRESERVE_REASONING_MODEL_IDS = [
 	"glm-5",
 	"glm-5.1",
 	"glm-5.2",
+	"glm-5.3",
 	"glm-5-turbo",
 
 	// bedrock.ts, minimax.ts, opencode-go.ts
@@ -74,6 +75,7 @@ export const LITELLM_PRESERVE_REASONING_MODEL_IDS = [
 	"qwen3.6-plus",
 	"qwen3.7-plus",
 	"qwen3.7-max",
+	"qwen3.8-max",
 ] as const
 
 const LITELLM_PRESERVE_REASONING_MODEL_ID_SET = new Set<string>(LITELLM_PRESERVE_REASONING_MODEL_IDS)
