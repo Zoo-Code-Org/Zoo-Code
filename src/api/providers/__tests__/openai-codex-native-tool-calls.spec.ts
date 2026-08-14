@@ -475,15 +475,20 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
+		// Completions stream like everything else, so the SDK path is forced to fail and the
+		// hand-built SSE request is what these assertions inspect.
+		Reflect.set(handler, "client", {
+			responses: { create: vi.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
 		const mockFetch = vi.fn().mockResolvedValue({
 			ok: true,
-			json: vi.fn().mockResolvedValue({
-				output: [
-					{
-						type: "message",
-						content: [{ type: "output_text", text: "done" }],
-					},
-				],
+			body: new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"done"}\n\n'),
+					)
+					controller.close()
+				},
 			}),
 		})
 		global.fetch = mockFetch as any

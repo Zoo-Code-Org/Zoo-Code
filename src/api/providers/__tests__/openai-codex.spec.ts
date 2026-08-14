@@ -247,28 +247,182 @@ describe("OpenAiCodexHandler.completePrompt service tier", () => {
 	it.each<[string, OpenAiCodexServiceTier | undefined, typeof OpenAiCodexServiceTier.Priority | undefined]>([
 		["Fast", OpenAiCodexServiceTier.Priority, OpenAiCodexServiceTier.Priority],
 		["Standard", undefined, undefined],
-	])("uses the %s preference in non-streaming requests", async (_mode, configuredTier, expectedTier) => {
+	])("uses the %s preference in completion requests", async (_mode, configuredTier, expectedTier) => {
 		const handler = new OpenAiCodexHandler({
 			apiModelId: "gpt-5.6-sol",
 			...(configuredTier ? { [OPEN_AI_CODEX_SERVICE_TIER_KEY]: configuredTier } : {}),
 		})
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		const mockFetch = vitest.fn().mockResolvedValue({
-			ok: true,
-			json: vitest.fn().mockResolvedValue({ text: "Complete" }),
-		})
-		vitest.stubGlobal("fetch", mockFetch)
+		const create = vitest.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "Complete" },
+				{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+			]),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
 
 		await expect(handler.completePrompt("Hello")).resolves.toBe("Complete")
 
-		const body = JSON.parse(mockFetch.mock.calls[0][1].body)
-		expect(body.stream).toBe(false)
+		const body = create.mock.calls[0][0]
+		// The Codex subscription endpoint rejects `stream: false` outright.
+		expect(body.stream).toBe(true)
 		if (expectedTier) {
 			expect(body[SERVICE_TIER_KEY]).toBe(expectedTier)
 		} else {
 			expect(body).not.toHaveProperty(SERVICE_TIER_KEY)
 		}
+	})
+})
+
+describe("OpenAiCodexHandler.completePrompt streaming", () => {
+	function createHandler() {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		return handler
+	}
+
+	function injectStream(handler: OpenAiCodexHandler, events: unknown[]) {
+		const create = vitest.fn().mockResolvedValue(asyncStreamFrom(events))
+		Reflect.set(handler, "client", { responses: { create } })
+		return create
+	}
+
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	it("joins consecutive text deltas into one string", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "feat: " },
+			{ type: "response.output_text.delta", delta: "add commit messages" },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("feat: add commit messages")
+	})
+
+	// A commit message is written straight into the Source Control box, so reasoning must never
+	// become part of it.
+	it("omits reasoning from the completion", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.reasoning_summary_text.delta", delta: "Thinking about the diff" },
+			{ type: "response.output_text.delta", delta: "fix: correct the parser" },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		const result = await handler.completePrompt("Hello")
+
+		expect(result).toBe("fix: correct the parser")
+		expect(result).not.toContain("Thinking")
+	})
+
+	it("omits usage and tool calls from the completion", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "chore: tidy" },
+			{
+				type: "response.output_item.done",
+				item: { type: "function_call", call_id: "call_1", name: "read_file", arguments: "{}" },
+			},
+			{
+				type: "response.completed",
+				response: {
+					id: "r1",
+					status: "completed",
+					output: [],
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+			},
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("chore: tidy")
+	})
+
+	// The SDK path swallows its own errors into the SSE fallback, so an auth failure only reaches
+	// the retry loop from the fallback - the same shape the streaming Luna retry test relies on.
+	it("retries once with a refreshed token when the first attempt is unauthorized", async () => {
+		const handler = createHandler()
+		const refresh = vitest
+			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+			.mockResolvedValue("fresh-token")
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
+		const mockFetch = vitest
+			.fn()
+			.mockResolvedValueOnce({
+				ok: false,
+				status: 401,
+				text: vitest.fn().mockResolvedValue('{"error":{"message":"Codex API invalid token"}}'),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_text.delta","delta":"docs: update"}\n\n',
+							),
+						)
+						controller.close()
+					},
+				}),
+			})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("docs: update")
+		expect(refresh).toHaveBeenCalled()
+		expect(mockFetch).toHaveBeenCalledTimes(2)
+	})
+
+	// The caller's signal is linked to the internal controller rather than passed through, so what
+	// matters is that aborting the caller's one aborts the signal the request is actually using.
+	it("passes the caller's abort signal down to the request", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		let signalDuringRequest: AbortSignal | undefined
+
+		const create = vitest.fn().mockImplementation((_body: unknown, options: { signal: AbortSignal }) => {
+			signalDuringRequest = options.signal
+			// Abort mid-flight, while `executeRequest`'s listener is still attached.
+			controller.abort()
+			return Promise.resolve(
+				asyncStreamFrom([
+					{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+				]),
+			)
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+
+		await handler.completePrompt("Hello", { abortSignal: controller.signal })
+
+		expect(signalDuringRequest).toBeInstanceOf(AbortSignal)
+		expect(signalDuringRequest!.aborted).toBe(true)
+	})
+
+	it("aborts immediately when the caller's signal is already aborted", async () => {
+		const handler = createHandler()
+		const create = injectStream(handler, [
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })
+
+		expect(create.mock.calls[0][1].signal.aborted).toBe(true)
+	})
+
+	it("wraps failures from both transports as a completion error", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		vitest.stubGlobal("fetch", vitest.fn().mockRejectedValue(new Error("network down")))
+
+		await expect(handler.completePrompt("Hello")).rejects.toThrow(/completionError|network down/)
 	})
 })
 
@@ -601,15 +755,20 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna", reasoningEffort: "disable" })
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		// Forcing the SDK path to fail exercises the SSE fallback, which is where the request body
+		// and the Codex-specific headers are assembled by hand.
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
 		const mockFetch = vitest.fn().mockResolvedValue({
 			ok: true,
-			json: vitest.fn().mockResolvedValue({
-				output: [
-					{
-						type: "message",
-						content: [{ type: "output_text", text: "Complete" }],
-					},
-				],
+			body: new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Complete"}\n\n'),
+					)
+					controller.close()
+				},
 			}),
 		})
 		vitest.stubGlobal("fetch", mockFetch)
@@ -622,7 +781,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
 		expect(body).toMatchObject({
 			model: "gpt-5.6-luna",
-			stream: false,
+			stream: true,
 			tool_choice: "auto",
 			parallel_tool_calls: false,
 			reasoning: { context: "all_turns" },

@@ -217,7 +217,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const model = this.getModel()
-		yield* this.handleResponsesApiMessage(model, systemPrompt, messages, metadata)
+		yield* this.handleResponsesApiMessage(model, systemPrompt, messages, metadata, metadata?.abortSignal)
 	}
 
 	private async *handleResponsesApiMessage(
@@ -225,6 +225,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
+		abortSignal?: AbortSignal,
 	): ApiStream {
 		// Reset state for this request
 		this.lastResponseOutput = undefined
@@ -274,7 +275,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		// Make the request with retry on auth failure
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				yield* this.executeRequest(requestBody, model, accessToken, effectiveSessionId)
+				yield* this.executeRequest(requestBody, model, accessToken, effectiveSessionId, abortSignal)
 				return
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
@@ -438,9 +439,22 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		effectiveSessionId: string,
+		abortSignal?: AbortSignal,
 	): ApiStream {
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
+
+		// A caller's signal has to be linked rather than used directly, since both transports below
+		// abort through `this.abortController`. Without this the signal never reaches the wire.
+		const abortFromCaller = () => this.abortController?.abort()
+
+		if (abortSignal) {
+			if (abortSignal.aborted) {
+				this.abortController.abort()
+			} else {
+				abortSignal.addEventListener("abort", abortFromCaller, { once: true })
+			}
+		}
 
 		try {
 			// Prefer OpenAI SDK streaming (same approach as openai-native) so event handling
@@ -491,6 +505,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				yield* this.makeCodexRequest(requestBody, model, accessToken, effectiveSessionId)
 			}
 		} finally {
+			abortSignal?.removeEventListener("abort", abortFromCaller)
 			this.abortController = undefined
 		}
 	}
@@ -1256,98 +1271,38 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		return this.lastResponseId
 	}
 
+	/**
+	 * The Codex subscription endpoint only accepts streaming requests - a body with `stream: false`
+	 * is rejected with `Stream must be set to true` - so a one-shot completion is the streaming
+	 * request with its text chunks joined back together.
+	 *
+	 * Going through `handleResponsesApiMessage` rather than issuing its own request is what keeps
+	 * the OAuth refresh-and-retry, the SDK-then-SSE fallback, the Luna body and the service tier
+	 * from having to be duplicated here.
+	 */
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		this.abortController = new AbortController()
-
 		try {
 			const model = this.getModel()
 
-			// Get access token
-			const accessToken = await openAiCodexOAuthManager.getAccessToken()
-			if (!accessToken) {
-				throw new Error(
-					t("common:errors.openAiCodex.notAuthenticated", {
-						defaultValue:
-							"Not authenticated with OpenAI Codex. Please sign in using the OpenAI Codex OAuth flow.",
-					}),
-				)
-			}
+			// Only the answer is wanted. Reasoning is deliberately dropped rather than concatenated:
+			// callers such as commit-message generation write this straight into the editor.
+			let text = ""
 
-			const reasoningEffort = this.getReasoningEffort(model)
-			const serviceTier = getOpenAiCodexServiceTier(this.options)
-
-			const baseRequestBody: any = {
-				model: model.id,
-				input: [
-					{
-						role: "user",
-						content: [{ type: "input_text", text: prompt }],
-					},
-				],
-				stream: false,
-				store: false,
-				...(serviceTier ? { [SERVICE_TIER_KEY]: serviceTier } : {}),
-				...(reasoningEffort ? { include: ["reasoning.encrypted_content"] } : {}),
-			}
-
-			if (reasoningEffort) {
-				baseRequestBody.reasoning = {
-					effort: reasoningEffort,
-					summary: "auto" as const,
+			for await (const chunk of this.handleResponsesApiMessage(
+				model,
+				"",
+				[{ role: "user", content: prompt }],
+				// `taskId` is required, and resolves to the same session id this used to send
+				// directly, so `prompt_cache_key` is unchanged.
+				{ taskId: this.sessionId },
+				options?.abortSignal,
+			)) {
+				if (chunk.type === "text") {
+					text += chunk.text
 				}
 			}
 
-			const requestBody =
-				model.id === LUNA_MODEL_ID
-					? this.buildLunaRequestBody(baseRequestBody, this.sessionId)
-					: baseRequestBody
-
-			const url = `${CODEX_API_BASE_URL}/responses`
-
-			// Get ChatGPT account ID for organization subscriptions
-			const accountId = await openAiCodexOAuthManager.getAccountId()
-
-			// Build headers with required Codex-specific fields
-			const headers: Record<string, string> = {
-				...this.buildCodexHeaders(model, this.sessionId, accountId),
-				"Content-Type": "application/json",
-				Authorization: `Bearer ${accessToken}`,
-			}
-
-			const response = await fetch(url, {
-				method: "POST",
-				headers,
-				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
-			})
-
-			if (!response.ok) {
-				const errorText = await response.text()
-				throw new Error(
-					t("common:errors.openAiCodex.genericError", { status: response.status }) +
-						(errorText ? `: ${errorText}` : ""),
-				)
-			}
-
-			const responseData = await response.json()
-
-			if (responseData?.output && Array.isArray(responseData.output)) {
-				for (const outputItem of responseData.output) {
-					if (outputItem.type === "message" && outputItem.content) {
-						for (const content of outputItem.content) {
-							if (content.type === "output_text" && content.text) {
-								return content.text
-							}
-						}
-					}
-				}
-			}
-
-			if (responseData?.text) {
-				return responseData.text
-			}
-
-			return ""
+			return text
 		} catch (error) {
 			const errorModel = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
@@ -1358,8 +1313,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				throw new Error(t("common:errors.openAiCodex.completionError", { message: error.message }))
 			}
 			throw error
-		} finally {
-			this.abortController = undefined
 		}
 	}
 }
