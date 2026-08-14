@@ -22,6 +22,7 @@ describe("opencode-go registry", () => {
 		"glm-5",
 		"glm-5.1",
 		"glm-5.2",
+		"glm-5.3",
 		"kimi-k3",
 		"kimi-k2.5",
 		"kimi-k2.6",
@@ -94,6 +95,22 @@ describe("opencode-go registry", () => {
 				cacheWritesPrice: 2.5,
 			})
 			expect(info?.preserveReasoning).toBeUndefined()
+		})
+
+		it("glm-5.3 exposes its native context, pricing, and always-on reasoning levels", () => {
+			const info = getOpencodeGoModelInfo("glm-5.3")
+			expect(info).toBeDefined()
+			expect(info?.maxTokens).toBe(131_072)
+			expect(info?.contextWindow).toBe(1_000_000)
+			expect(info?.supportsImages).toBe(false)
+			expect(info?.supportsPromptCache).toBe(true)
+			expect(info?.supportsMaxTokens).toBe(true)
+			expect(info?.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(info?.reasoningEffort).toBe("max")
+			expect(info?.preserveReasoning).toBe(true)
+			expect(info?.inputPrice).toBe(1.4)
+			expect(info?.outputPrice).toBe(4.4)
+			expect(info?.cacheReadsPrice).toBe(0.26)
 		})
 	})
 

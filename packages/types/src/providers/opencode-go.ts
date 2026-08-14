@@ -86,6 +86,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. Available via the Opencode Go plan.",
 	},
+	"glm-5.3": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available via the Opencode Go plan.",
+	},
 	"glm-5.2": {
 		maxTokens: 131_072,
 		contextWindow: 1_000_000,

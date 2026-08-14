@@ -722,6 +722,7 @@ const ApiOptions = ({
 								models={getStaticModelsForProvider(
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
+									apiConfiguration,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}

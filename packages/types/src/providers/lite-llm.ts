@@ -54,6 +54,7 @@ export const LITELLM_PRESERVE_REASONING_MODEL_IDS = [
 	"glm-5",
 	"glm-5.1",
 	"glm-5.2",
+	"glm-5.3",
 	"glm-5-turbo",
 
 	// bedrock.ts, minimax.ts, opencode-go.ts
