@@ -29,17 +29,39 @@ function formatChangedFiles(files: GitFileChange[]): string {
 }
 
 /**
+ * The labels that close the prompt's untrusted-data blocks. Repository text is free to contain any
+ * of them - a branch name, a commit subject, or a line of a diff that happens to be prompt markup.
+ */
+const RESERVED_CLOSING_LABELS = /<\/(branch|recent_commits|changed_files|diff)>/gi
+
+/**
+ * Defuses the closing labels so repository content cannot end its own block early and continue as
+ * instructions. A zero-width space keeps the text readable to the model - it still sees the words -
+ * while no longer matching the label the prompt uses as a delimiter.
+ */
+/** Written as an escape so it survives editors and linters that strip invisible characters. */
+const ZERO_WIDTH_SPACE = "​"
+
+function neutralizeClosingLabels(value: string): string {
+	// `</diff>` becomes `<[zero-width space]/diff>`: the same words, no longer the delimiter.
+	return value.replace(RESERVED_CLOSING_LABELS, (label) => `<${ZERO_WIDTH_SPACE}${label.slice(1)}`)
+}
+
+/**
  * Fills the commit message prompt, which the user can edit in Settings → Prompts. The pieces are
  * separate placeholders so a custom prompt can drop or reorder any of them.
+ *
+ * Every field is git-derived, so all of them are neutralized rather than only the diff: a branch
+ * name and a commit subject are just as attacker-controlled as the changes themselves.
  */
 export function buildCommitMessagePrompt(context: CommitContext, customSupportPrompts?: CustomSupportPrompts): string {
 	return supportPrompt.create(
 		"COMMIT_MESSAGE",
 		{
-			branch: context.branch ?? "(detached HEAD)",
-			recentCommits: context.recentCommits.map((subject) => `- ${subject}`).join("\n"),
-			changedFiles: formatChangedFiles(context.files),
-			diff: context.diff,
+			branch: neutralizeClosingLabels(context.branch ?? "(detached HEAD)"),
+			recentCommits: neutralizeClosingLabels(context.recentCommits.map((subject) => `- ${subject}`).join("\n")),
+			changedFiles: neutralizeClosingLabels(formatChangedFiles(context.files)),
+			diff: neutralizeClosingLabels(context.diff),
 		},
 		customSupportPrompts,
 	)
