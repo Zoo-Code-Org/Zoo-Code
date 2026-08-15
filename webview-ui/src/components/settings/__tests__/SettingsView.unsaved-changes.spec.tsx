@@ -1,6 +1,8 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { screen, fireEvent, waitFor } from "@testing-library/react"
+
+import { renderWithExtensionState } from "@/utils/test-utils"
 import { vi, describe, it, expect, beforeEach } from "vitest"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient } from "@tanstack/react-query"
 import React from "react"
 
 import SettingsView from "../SettingsView"
@@ -10,6 +12,7 @@ const postMessage = vi.spyOn(vscode, "postMessage").mockImplementation(() => {})
 
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: vi.fn(),
 }))
 
@@ -331,11 +334,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	it("should not show unsaved changes when settings are automatically initialized", async () => {
 		const onDone = vi.fn()
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render
 		await waitFor(() => {
@@ -380,11 +379,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			return <div data-testid="api-options">ApiOptions with Init</div>
 		})
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render and effects to run
 		await waitFor(() => {
@@ -431,11 +426,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		// Override the mock for this specific test
 		vi.mocked(ApiOptions).mockImplementation(ApiOptionsWithButton)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for the component to render
 		await waitFor(() => {
@@ -472,11 +463,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		}
 		;(useExtensionState as any).mockReturnValue(stateWithUndefined)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for initialization
 		await waitFor(() => {
@@ -515,11 +502,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		}
 		;(useExtensionState as any).mockReturnValue(stateWithNull)
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for initialization
 		await waitFor(() => {
@@ -569,11 +552,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			return <div data-testid="api-options">ApiOptions</div>
 		})
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={onDone} />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
 
 		// Wait for component to fully mount and ApiOptions effect to run
 		await waitFor(() => {
@@ -601,11 +580,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("buffers MCP enablement until Save", async () => {
-		render(
-			<QueryClientProvider client={queryClient}>
-				<SettingsView onDone={vi.fn()} targetSection="mcp" />
-			</QueryClientProvider>,
-		)
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="mcp" />, { queryClient })
 
 		const toggle = await screen.findByTestId("mcp-enabled-toggle")
 		fireEvent.click(toggle)
@@ -627,5 +602,111 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 				updatedSettings: expect.objectContaining({ mcpEnabled: true }),
 			}),
 		)
+	})
+
+	it("buffers and saves the complete NanoGPT provider configuration from cached state", async () => {
+		const liveApiConfiguration = {
+			apiProvider: "nanogpt" as const,
+			nanoGptApiKey: "original-key",
+			nanoGptModelId: "openai/original",
+			nanoGptRoutingPreference: "auto" as const,
+		}
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: liveApiConfiguration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<div>
+				<input
+					data-testid="cached-nanogpt-key"
+					value={apiConfiguration.nanoGptApiKey ?? ""}
+					onChange={(event) => setApiConfigurationField("nanoGptApiKey", event.target.value)}
+				/>
+				<input
+					data-testid="cached-nanogpt-model"
+					value={apiConfiguration.nanoGptModelId ?? ""}
+					onChange={(event) => setApiConfigurationField("nanoGptModelId", event.target.value)}
+				/>
+				<select
+					data-testid="cached-nanogpt-routing"
+					value={apiConfiguration.nanoGptRoutingPreference ?? "auto"}
+					onChange={(event) =>
+						setApiConfigurationField(
+							"nanoGptRoutingPreference",
+							event.target.value as
+								| "auto"
+								| "fast"
+								| "cheap"
+								| "latency"
+								| "throughput"
+								| "tools"
+								| "caching",
+						)
+					}>
+					<option value="auto">Automatic</option>
+					<option value="tools">Tool-capable</option>
+				</select>
+			</div>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+
+		expect(await screen.findByTestId("cached-nanogpt-key")).toHaveValue("original-key")
+		expect(screen.getByTestId("cached-nanogpt-model")).toHaveValue("openai/original")
+		expect(screen.getByTestId("cached-nanogpt-routing")).toHaveValue("auto")
+
+		fireEvent.change(screen.getByTestId("cached-nanogpt-key"), { target: { value: "unsaved-key" } })
+		fireEvent.change(screen.getByTestId("cached-nanogpt-model"), { target: { value: "openai/next" } })
+		fireEvent.change(screen.getByTestId("cached-nanogpt-routing"), { target: { value: "tools" } })
+
+		expect(liveApiConfiguration).toEqual({
+			apiProvider: "nanogpt",
+			nanoGptApiKey: "original-key",
+			nanoGptModelId: "openai/original",
+			nanoGptRoutingPreference: "auto",
+		})
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				apiProvider: "nanogpt",
+				nanoGptApiKey: "unsaved-key",
+				nanoGptModelId: "openai/next",
+				nanoGptRoutingPreference: "tools",
+			},
+		})
+	})
+
+	it("discards NanoGPT cached edits and restores the extension values", async () => {
+		const onDone = vi.fn()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: {
+				apiProvider: "nanogpt",
+				nanoGptApiKey: "saved-key",
+				nanoGptModelId: "openai/saved",
+				nanoGptRoutingPreference: "cheap",
+			},
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<input
+				data-testid="cached-nanogpt-key"
+				value={apiConfiguration.nanoGptApiKey ?? ""}
+				onChange={(event) => setApiConfigurationField("nanoGptApiKey", event.target.value)}
+			/>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
+		fireEvent.change(await screen.findByTestId("cached-nanogpt-key"), { target: { value: "discard-me" } })
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+
+		await waitFor(() => expect(screen.getByTestId("cached-nanogpt-key")).toHaveValue("saved-key"))
+		expect(onDone).toHaveBeenCalledOnce()
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})
 })

@@ -1,4 +1,4 @@
-import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers } from "../index.js"
+import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
 import {
 	getApiProtocol,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
@@ -7,6 +7,20 @@ import {
 	providerSettingsSchemaDiscriminated,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
+import { providerDefinitionList } from "../provider-settings/index.js"
+
+describe("provider settings discriminated union", () => {
+	it("composes exactly one provider-specific definition for every provider", () => {
+		const registeredProviders = providerDefinitionList.map(({ apiProvider }) => apiProvider)
+
+		expect([...registeredProviders].sort()).toEqual([...providerNames].sort())
+		expect(new Set(registeredProviders).size).toBe(providerNames.length)
+	})
+
+	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
+		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+})
 
 describe("OpenAI Codex provider settings", () => {
 	it("preserves the Fast preference in general and provider-specific schemas", () => {
@@ -116,6 +130,7 @@ describe("getApiProtocol", () => {
 
 	describe("Opencode Go provider", () => {
 		it("should return 'anthropic' for opencode-go Anthropic-format models (Qwen/MiniMax)", () => {
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.8-max")).toBe(ANTHROPIC_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.7-max")).toBe(ANTHROPIC_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.7-plus")).toBe(ANTHROPIC_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "qwen3.6-plus")).toBe(ANTHROPIC_API_PROTOCOL)
@@ -125,7 +140,7 @@ describe("getApiProtocol", () => {
 		})
 
 		it("should return 'openai' for opencode-go OpenAI-format models (GLM/DeepSeek/etc.)", () => {
-			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.2")).toBe(OPENAI_API_PROTOCOL)
+			expect(getApiProtocol(providerIdentifiers.opencodeGo, "glm-5.3")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "deepseek-v4-pro")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "kimi-k2.5")).toBe(OPENAI_API_PROTOCOL)
 			expect(getApiProtocol(providerIdentifiers.opencodeGo, "mimo-v2.5")).toBe(OPENAI_API_PROTOCOL)

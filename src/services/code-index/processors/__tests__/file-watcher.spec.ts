@@ -4,6 +4,8 @@ import * as vscode from "vscode"
 
 import { FileWatcher } from "../file-watcher"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock TelemetryService
 vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 	TelemetryService: {
@@ -111,7 +113,7 @@ describe("FileWatcher", () => {
 
 	beforeEach(() => {
 		// Reset all mocks
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.useFakeTimers()
 
 		// Create mock event handlers

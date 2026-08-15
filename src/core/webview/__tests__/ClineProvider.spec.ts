@@ -1011,6 +1011,28 @@ describe("ClineProvider", () => {
 		expect(state).toHaveProperty("writeDelayMs")
 	})
 
+	test("getState and getStateToPostToWebview return the complete NanoGPT configuration", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: "nanogpt",
+			nanoGptApiKey: "nanogpt-secret",
+			nanoGptModelId: "openai/model",
+			nanoGptRoutingPreference: "latency",
+		})
+
+		const state = await provider.getState()
+		const postedState = await provider.getStateToPostToWebview()
+		const expectedConfiguration = {
+			apiProvider: "nanogpt",
+			nanoGptApiKey: "nanogpt-secret",
+			nanoGptModelId: "openai/model",
+			nanoGptRoutingPreference: "latency",
+		}
+
+		expect(state.apiConfiguration).toMatchObject(expectedConfiguration)
+		expect(postedState.apiConfiguration).toMatchObject(expectedConfiguration)
+	})
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 
@@ -3200,6 +3222,8 @@ describe("ClineProvider - Router Models", () => {
 		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		// NanoGPT's detailed catalog is public and may be scoped by an optional key.
+		expect(getModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -3218,6 +3242,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
 				"kimi-code": {},
 			},
 			values: undefined,
@@ -3252,6 +3277,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm fail
 			.mockResolvedValueOnce(mockModels) // opencode-go (public endpoint)
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
+			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
 
@@ -3272,6 +3298,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
 				"kimi-code": {},
 			},
 			values: undefined,
@@ -3372,6 +3399,7 @@ describe("ClineProvider - Router Models", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
 				"kimi-code": {},
 			},
 			values: undefined,

@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更多 OpenAI 控制选项 — 在 OpenAI Codex 中使用 Fast 优先模式，并为 OpenAI 兼容模型选择更高的 reasoning effort。",
-			"highlight2": "更可靠的提供商和模型 — 改进 router 元数据处理、Ollama 模型刷新、Bedrock 代理支持和 Friendli reasoning 控制。",
-			"highlight3": "更顺畅的设置和开发工作流 — 设置现在会保留未保存的编辑，短终端命令可正确完成，Architect 计划使用相对于工作区的路径，剩余面向用户的 Roo 品牌也已更新为 Zoo。"
+			"highlight1": "三款重磅新模型现已推出 — 使用全新的 Gemini 3.7 Flash、GLM 5.3 和 Qwen3.8 Max 模型，以及更新后的 DeepSeek V4 推理、定价和提供商覆盖。",
+			"highlight2": "连接 NanoGPT — 使用动态模型发现、流式传输和 Prompt 补全，并按速度、价格、延迟、吞吐量、工具支持和缓存设置路由偏好。",
+			"highlight3": "更可靠的提供商和任务 — 修复改进了 Azure OpenAI endpoint 设置、Kimi Code 输出限制、任务历史标题保留以及 Zoo 设置的导入/导出。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

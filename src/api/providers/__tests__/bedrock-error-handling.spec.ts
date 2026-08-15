@@ -33,12 +33,14 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 
 import { AwsBedrockHandler } from "../bedrock"
 import { Anthropic } from "@anthropic-ai/sdk"
+import { collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("AwsBedrockHandler Error Handling", () => {
 	let handler: AwsBedrockHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		mockCaptureException.mockClear()
 		handler = new AwsBedrockHandler({
 			apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -298,11 +300,7 @@ describe("AwsBedrockHandler Error Handling", () => {
 
 			// For throttling errors, it should throw immediately without yielding chunks
 			// This allows the retry mechanism to catch and handle it
-			await expect(async () => {
-				for await (const chunk of generator) {
-					// Should not yield any chunks for throttling errors
-				}
-			}).rejects.toThrow("Bedrock is unable to process your request")
+			await expect(collectStream(generator)).rejects.toThrow("Bedrock is unable to process your request")
 		})
 
 		it("should yield error chunks for non-throttling errors in streaming context", async () => {
@@ -443,9 +441,7 @@ describe("AwsBedrockHandler Error Handling", () => {
 
 			try {
 				const stream = handler.createMessage("system", [{ role: "user", content: "test" }])
-				for await (const chunk of stream) {
-					// Should not reach here as it should throw an error
-				}
+				await collectStream(stream)
 				throw new Error("Expected error to be thrown")
 			} catch (error) {
 				// Should contain error codes (note: this will be caught by the non-throttling error path)

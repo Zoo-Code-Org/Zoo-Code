@@ -179,11 +179,6 @@
 			"count": 3
 		}
 	},
-	"api/providers/__tests__/lmstudio.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18
@@ -226,7 +221,7 @@
 	},
 	"api/providers/__tests__/openai-native.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 78
+			"count": 74
 		}
 	},
 	"api/providers/__tests__/openai-timeout.spec.ts": {
@@ -277,11 +272,6 @@
 	"api/providers/__tests__/vertex.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
-		}
-	},
-	"api/providers/__tests__/xai.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"api/providers/__tests__/zai.spec.ts": {
@@ -601,7 +591,7 @@
 	},
 	"core/assistant-message/presentAssistantMessage.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 7
+			"count": 3
 		}
 	},
 	"core/auto-approval/__tests__/AutoApprovalHandler.spec.ts": {
@@ -667,16 +657,6 @@
 	"core/config/__tests__/CustomModesManager.yamlEdgeCases.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
-		}
-	},
-	"core/config/__tests__/CustomModesSettings.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
-	"core/config/__tests__/ModeConfig.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 6
 		}
 	},
 	"core/config/__tests__/ProviderSettingsManager.spec.ts": {
@@ -1076,7 +1056,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 40
+			"count": 37
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
@@ -1206,7 +1186,7 @@
 	},
 	"integrations/editor/__tests__/DiffViewProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 311
+			"count": 310
 		}
 	},
 	"integrations/editor/__tests__/EditorUtils.spec.ts": {

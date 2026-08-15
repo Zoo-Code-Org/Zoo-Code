@@ -373,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Kontrol OpenAI yang lebih lengkap — gunakan mode prioritas Fast dengan OpenAI Codex dan pilih tingkat reasoning yang lebih tinggi untuk model yang kompatibel dengan OpenAI.",
-			"highlight2": "Provider dan model yang lebih andal — peningkatan penanganan metadata router, refresh model Ollama, dukungan proxy Bedrock, dan kontrol reasoning Friendli.",
-			"highlight3": "Settings dan workflow developer yang lebih mulus — settings kini mempertahankan edit yang belum disimpan, perintah terminal singkat selesai dengan benar, rencana architect memakai path relatif workspace, dan branding Roo yang masih terlihat telah diperbarui menjadi Zoo."
+			"highlight1": "Tiga model baru utama telah hadir — gunakan model terbaru Gemini 3.7 Flash, GLM 5.3, dan Qwen3.8 Max, ditambah pembaruan reasoning, harga, dan cakupan provider DeepSeek V4.",
+			"highlight2": "Hubungkan ke NanoGPT — gunakan penemuan model dinamis, streaming dan penyelesaian prompt, serta preferensi routing untuk kecepatan, harga, latensi, throughput, dukungan tool, dan caching.",
+			"highlight3": "Provider dan task yang lebih andal — perbaikan meningkatkan pengaturan endpoint Azure OpenAI, batas output Kimi Code, penyimpanan judul riwayat task, serta impor/ekspor pengaturan Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

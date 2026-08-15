@@ -8,6 +8,9 @@ import * as vscode from "vscode"
 import type { ProviderName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+import { makeExtensionContext } from "../../../test-utils/vscode"
+
 import { importSettings, importSettingsFromFile, importSettingsWithFeedback, exportSettings } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
@@ -97,11 +100,11 @@ vi.mock("../../../api", () => ({
 describe("importExport", () => {
 	let mockProviderSettingsManager: ReturnType<typeof vi.mocked<ProviderSettingsManager>>
 	let mockContextProxy: ReturnType<typeof vi.mocked<ContextProxy>>
-	let mockExtensionContext: ReturnType<typeof vi.mocked<vscode.ExtensionContext>>
+	let mockExtensionContext: vscode.ExtensionContext
 	let mockCustomModesManager: ReturnType<typeof vi.mocked<CustomModesManager>>
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -129,8 +132,12 @@ describe("importExport", () => {
 
 		const map = new Map<string, string>()
 
-		mockExtensionContext = {
+		// Secrets are Map-backed so real ProviderSettingsManager instances can
+		// round-trip configs; the rest of the context comes from the shared builder.
+		const baseContext = makeExtensionContext()
+		mockExtensionContext = makeExtensionContext({
 			secrets: {
+				...baseContext.secrets,
 				get: vi.fn().mockImplementation((key: string) => {
 					return map.get(key)
 				}),
@@ -138,7 +145,7 @@ describe("importExport", () => {
 					return map.set(key, value)
 				}),
 			},
-		} as unknown as ReturnType<typeof vi.mocked<vscode.ExtensionContext>>
+		})
 	})
 
 	describe("importSettings", () => {
@@ -1356,7 +1363,7 @@ describe("importExport", () => {
 
 		it("should export settings to the selected file location", async () => {
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-				fsPath: "/mock/path/roo-code-settings.json",
+				fsPath: "/mock/path/zoo-code-settings.json",
 			})
 
 			const mockProviderProfiles = {
@@ -1383,7 +1390,7 @@ describe("importExport", () => {
 			expect(mockContextProxy.export).toHaveBeenCalled()
 			expect(fs.mkdir).toHaveBeenCalledWith("/mock/path", { recursive: true })
 
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/roo-code-settings.json", {
+			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 				providerProfiles: mockProviderProfiles,
 				globalSettings: mockGlobalSettings,
 			})
@@ -1391,7 +1398,7 @@ describe("importExport", () => {
 
 		it("should include globalSettings when allowedMaxRequests is null", async () => {
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-				fsPath: "/mock/path/roo-code-settings.json",
+				fsPath: "/mock/path/zoo-code-settings.json",
 			})
 
 			const mockProviderProfiles = {
@@ -1415,7 +1422,7 @@ describe("importExport", () => {
 				contextProxy: mockContextProxy,
 			})
 
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/roo-code-settings.json", {
+			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 				providerProfiles: mockProviderProfiles,
 				globalSettings: mockGlobalSettings,
 			})
@@ -1423,7 +1430,7 @@ describe("importExport", () => {
 
 		it("should handle errors during the export process", async () => {
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-				fsPath: "/mock/path/roo-code-settings.json",
+				fsPath: "/mock/path/zoo-code-settings.json",
 			})
 
 			mockProviderSettingsManager.export.mockResolvedValue({
@@ -1453,7 +1460,7 @@ describe("importExport", () => {
 
 		it("should handle errors during directory creation", async () => {
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-				fsPath: "/mock/path/roo-code-settings.json",
+				fsPath: "/mock/path/zoo-code-settings.json",
 			})
 
 			mockProviderSettingsManager.export.mockResolvedValue({
@@ -1490,13 +1497,13 @@ describe("importExport", () => {
 				defaultUri: expect.anything(),
 			})
 
-			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/mock/home", "Downloads", "roo-code-settings.json"))
+			expect(vscode.Uri.file).toHaveBeenCalledWith(path.join("/mock/home", "Downloads", "zoo-code-settings.json"))
 		})
 
 		describe("codebase indexing export", () => {
 			it("should export correct base URL for OpenAI Compatible provider", async () => {
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				const mockProviderProfiles = {
@@ -1538,7 +1545,7 @@ describe("importExport", () => {
 					contextProxy: mockContextProxy,
 				})
 
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/roo-code-settings.json", {
+				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings,
 				})
@@ -1546,7 +1553,7 @@ describe("importExport", () => {
 
 			it("should export model dimension for OpenAI Compatible provider", async () => {
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				const mockProviderProfiles = {
@@ -1593,7 +1600,7 @@ describe("importExport", () => {
 
 			it("should not mix settings between different providers", async () => {
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				const mockProviderProfiles = {
@@ -1653,7 +1660,7 @@ describe("importExport", () => {
 
 			it("should handle missing provider-specific settings gracefully", async () => {
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				const mockProviderProfiles = {
@@ -1691,7 +1698,7 @@ describe("importExport", () => {
 				})
 
 				// Should not throw an error and should preserve original settings
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/roo-code-settings.json", {
+				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings, // Should remain unchanged
 				})
@@ -1699,7 +1706,7 @@ describe("importExport", () => {
 
 			it("should maintain backward compatibility with existing exports", async () => {
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				const mockProviderProfiles = {
@@ -1734,7 +1741,7 @@ describe("importExport", () => {
 				})
 
 				// Should not modify settings for non-openai-compatible providers
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/roo-code-settings.json", {
+				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings, // Should remain unchanged
 				})
@@ -1742,7 +1749,7 @@ describe("importExport", () => {
 
 			it("should handle missing current provider gracefully", async () => {
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				const mockProviderProfiles = {
@@ -1779,7 +1786,7 @@ describe("importExport", () => {
 				})
 
 				// Should not throw an error and should preserve original settings
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/roo-code-settings.json", {
+				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
 					providerProfiles: mockProviderProfiles,
 					globalSettings: mockGlobalSettings, // Should remain unchanged
 				})
@@ -2030,7 +2037,7 @@ describe("importExport", () => {
 			;(fs.readFile as Mock).mockResolvedValue(exportedFileContent)
 
 			// Reset mocks for import
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockProviderSettingsManager.export.mockResolvedValue({
 				currentApiConfigName: "default",
 				apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
@@ -2118,7 +2125,7 @@ describe("importExport", () => {
 			;(fs.readFile as Mock).mockResolvedValue(exportedFileContent)
 
 			// Reset mocks for import
-			vi.clearAllMocks()
+			clearAllMocks()
 			mockProviderSettingsManager.export.mockResolvedValue({
 				currentApiConfigName: "default",
 				apiConfigs: { default: { apiProvider: "anthropic" as ProviderName, id: "default-id" } },
@@ -2452,7 +2459,7 @@ describe("importExport", () => {
 			// when the OpenAI Compatible settings are stored in global state via contextProxy
 
 			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-				fsPath: "/mock/path/roo-code-settings.json",
+				fsPath: "/mock/path/zoo-code-settings.json",
 			})
 
 			// Set up provider profiles - note that the OpenAI Compatible provider does NOT have
@@ -2526,7 +2533,7 @@ describe("importExport", () => {
 				// Using deepseek provider which uses apiModelId and has supportsReasoningBudget: false
 
 				;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
-					fsPath: "/mock/path/roo-code-settings.json",
+					fsPath: "/mock/path/zoo-code-settings.json",
 				})
 
 				// Use a real ProviderSettingsManager instance to test the actual filtering logic

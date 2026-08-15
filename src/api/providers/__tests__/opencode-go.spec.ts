@@ -18,6 +18,7 @@ import { OpencodeGoHandler } from "../opencode-go"
 import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -64,7 +65,7 @@ describe("OpencodeGoHandler", () => {
 	}
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate.mockClear()
 		mockAnthropicCreate.mockClear()
 	})
@@ -801,7 +802,7 @@ describe("OpencodeGoHandler", () => {
 		})
 
 		it("classifies OpenAI-compatible Go models as non-Anthropic-format", () => {
-			expect(isOpencodeGoAnthropicFormatModel("glm-5.2")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("glm-5.3")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("kimi-k2.6")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("deepseek-v4-pro")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("mimo-v2.5")).toBe(false)

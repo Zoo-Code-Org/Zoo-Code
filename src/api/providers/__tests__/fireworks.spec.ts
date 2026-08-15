@@ -7,6 +7,7 @@ import { type FireworksModelId, fireworksDefaultModelId, fireworksModels } from 
 
 import { FireworksHandler } from "../fireworks"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -28,7 +29,7 @@ describe("FireworksHandler", () => {
 	let handler: FireworksHandler
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([
@@ -117,7 +118,14 @@ describe("FireworksHandler", () => {
 			contextWindow: 1048576,
 			inputPrice: 1.74,
 			outputPrice: 3.48,
-			cacheReadsPrice: 0.14,
+			cacheReadsPrice: 0.145,
+		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-pro-0813" as const,
+			contextWindow: 1_000_000,
+			inputPrice: 1.32,
+			outputPrice: 3.96,
+			cacheReadsPrice: 0.044,
 		},
 	])(
 		"should expose newly added model $modelId",

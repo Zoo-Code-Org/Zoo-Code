@@ -4,6 +4,8 @@ import { AwsBedrockHandler } from "../bedrock"
 import { BedrockRuntimeClient, ConverseStreamCommand } from "@aws-sdk/client-bedrock-runtime"
 import { logger } from "../../../utils/logging"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock the AWS SDK
 vi.mock("@aws-sdk/client-bedrock-runtime")
 vi.mock("../../../utils/logging")
@@ -37,7 +39,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 	})
 
 	afterEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 	})
 
 	describe("Extended Thinking Support", () => {

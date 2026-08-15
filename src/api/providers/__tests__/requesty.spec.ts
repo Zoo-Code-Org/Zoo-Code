@@ -10,10 +10,11 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { RequestyHandler } from "../requesty"
-import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 const mockCreate = vitest.fn()
 
@@ -98,12 +99,12 @@ vitest.mock("../fetchers/modelCache", () => ({
 }))
 
 describe("RequestyHandler", () => {
-	const mockOptions: ApiHandlerOptions = {
+	const mockOptions = makeApiHandlerOptions({
 		requestyApiKey: "test-key",
 		requestyModelId: "coding/claude-4-sonnet",
-	}
+	})
 
-	beforeEach(() => vitest.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("initializes with correct options", () => {
 		const handler = new RequestyHandler(mockOptions)
@@ -244,12 +245,14 @@ describe("RequestyHandler", () => {
 		})
 
 		it("uses adaptive thinking for Claude Fable 5 when reasoning is enabled", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-fable-5",
-				enableReasoningEffort: true,
-				modelMaxTokens: 32768,
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
 
 			const mockStream = asyncStreamFrom([
 				{
@@ -275,12 +278,14 @@ describe("RequestyHandler", () => {
 		})
 
 		it("uses adaptive thinking for Claude Sonnet 5 when reasoning is enabled", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-sonnet-5",
-				enableReasoningEffort: true,
-				modelMaxTokens: 32768,
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-sonnet-5",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
 
 			const mockStream = asyncStreamFrom([
 				{
@@ -306,12 +311,14 @@ describe("RequestyHandler", () => {
 		})
 
 		it("uses adaptive thinking for Claude Opus 5 when reasoning is enabled", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-opus-5",
-				enableReasoningEffort: true,
-				modelMaxTokens: 32768,
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-opus-5",
+					enableReasoningEffort: true,
+					modelMaxTokens: 32768,
+				}),
+			)
 
 			const mockStream = asyncStreamFrom([
 				{
@@ -574,10 +581,12 @@ describe("RequestyHandler", () => {
 		})
 
 		it("omits temperature for Claude Fable 5 in completePrompt", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-fable-5",
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-fable-5",
+				}),
+			)
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
 
 			await handler.completePrompt("test prompt")
@@ -591,10 +600,12 @@ describe("RequestyHandler", () => {
 		})
 
 		it("omits temperature for Claude Sonnet 5 in completePrompt", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-sonnet-5",
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-sonnet-5",
+				}),
+			)
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
 
 			await handler.completePrompt("test prompt")
@@ -608,10 +619,12 @@ describe("RequestyHandler", () => {
 		})
 
 		it("omits temperature for Claude Opus 5 in completePrompt", async () => {
-			const handler = new RequestyHandler({
-				requestyApiKey: "test-key",
-				requestyModelId: "anthropic/claude-opus-5",
-			})
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-opus-5",
+				}),
+			)
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "test completion" } }] })
 
 			await handler.completePrompt("test prompt")

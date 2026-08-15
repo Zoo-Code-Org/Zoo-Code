@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"kenariApiKey": "Kenari API 密钥",
 		"getKenariApiKey": "获取 Kenari API 密钥",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API 密钥",
+			"getApiKey": "获取 NanoGPT API 密钥",
+			"model": "模型",
+			"routingPreference": "路由偏好",
+			"routingOptions": {
+				"automatic": "自动",
+				"fastest": "最快",
+				"cheapest": "最便宜",
+				"lowestLatency": "最低延迟",
+				"highestThroughput": "最高吞吐量",
+				"toolCapable": "支持工具",
+				"cacheCapable": "支持缓存"
+			},
+			"automaticExplanation": "自动模式不应用路由后缀。",
+			"billingWarning": "高级路由偏好可能使用按用量付费路由，并且根据 NanoGPT 当前的计费规则，可能不在订阅范围内。",
+			"routingDocs": "查看 NanoGPT 路由和计费详情"
+		},
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -495,6 +514,9 @@
 		"openAiApiKey": "OpenAI API 密钥",
 		"apiKey": "API 密钥",
 		"openAiBaseUrl": "OpenAI 基础 URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure 部署名称",
+		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",
 		"getOpenAiApiKey": "获取 OpenAI API 密钥",
 		"mistralApiKey": "Mistral API 密钥",
 		"getMistralApiKey": "获取 Mistral / Codestral API 密钥",

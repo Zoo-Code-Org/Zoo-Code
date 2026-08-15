@@ -42,6 +42,7 @@ import {
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
 	KenariHandler,
+	NanoGptHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
 	MimoHandler,
@@ -224,6 +225,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new OpencodeGoHandler(options)
 		case providerIdentifiers.kenari:
 			return new KenariHandler(options)
+		case providerIdentifiers.nanogpt:
+			return new NanoGptHandler(options)
 		case providerIdentifiers.zooGateway:
 			return new ZooGatewayHandler(options)
 		case providerIdentifiers.minimax:

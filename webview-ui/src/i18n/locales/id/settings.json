@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Dapatkan Kenari API Key",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Key",
+			"getApiKey": "Dapatkan NanoGPT API Key",
+			"model": "Model",
+			"routingPreference": "Preferensi Routing",
+			"routingOptions": {
+				"automatic": "Otomatis",
+				"fastest": "Tercepat",
+				"cheapest": "Termurah",
+				"lowestLatency": "Latensi terendah",
+				"highestThroughput": "Throughput tertinggi",
+				"toolCapable": "Mendukung tool",
+				"cacheCapable": "Mendukung cache"
+			},
+			"automaticExplanation": "Otomatis tidak menerapkan akhiran routing.",
+			"billingWarning": "Preferensi routing lanjutan dapat menggunakan routing bayar sesuai pemakaian dan dapat melewati cakupan langganan, tergantung aturan penagihan NanoGPT saat ini.",
+			"routingDocs": "Lihat detail routing dan penagihan NanoGPT"
+		},
 		"apiKeyStorageNotice": "API key disimpan dengan aman di Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -495,6 +514,9 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nama deployment Azure",
+		"azureOpenAiDeploymentNameDescription": "Masukkan nama deployment dari Azure AI Studio, bukan nama model dasarnya.",
 		"getOpenAiApiKey": "Dapatkan OpenAI API Key",
 		"mistralApiKey": "Mistral API Key",
 		"getMistralApiKey": "Dapatkan Mistral / Codestral API Key",

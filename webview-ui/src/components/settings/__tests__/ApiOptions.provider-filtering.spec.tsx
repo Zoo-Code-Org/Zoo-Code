@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { screen } from "@testing-library/react"
+
+import { renderWithExtensionState } from "@/utils/test-utils"
 
 import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
 
@@ -11,6 +12,7 @@ import { MODELS_BY_PROVIDER, PROVIDERS } from "../constants"
 
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: vi.fn(() => ({
 		organizationAllowList: undefined,
 		cloudIsAuthenticated: false,
@@ -94,12 +96,6 @@ vi.mock("@src/components/ui", () => ({
 }))
 
 describe("ApiOptions Provider Filtering", () => {
-	const queryClient = new QueryClient({
-		defaultOptions: {
-			queries: { retry: false },
-		},
-	})
-
 	const defaultProps = {
 		uriScheme: "vscode",
 		apiConfiguration: {
@@ -113,11 +109,7 @@ describe("ApiOptions Provider Filtering", () => {
 	}
 
 	const renderWithProviders = (props = defaultProps) => {
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<ApiOptions {...props} />
-			</QueryClientProvider>,
-		)
+		return renderWithExtensionState(<ApiOptions {...props} />)
 	}
 
 	it("should show all providers when no organization allow list is provided", () => {

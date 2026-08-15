@@ -23,6 +23,17 @@ vi.mock("@roo-code/core", () => ({
 	},
 }))
 
+// presentAssistantMessage records tool usage through TelemetryService.instance.
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureToolUsage: vi.fn(),
+			captureConsecutiveMistakeError: vi.fn(),
+			captureEvent: vi.fn(),
+		},
+	},
+}))
+
 import { customToolRegistry } from "@roo-code/core"
 
 describe("presentAssistantMessage - Custom Tool Recording", () => {

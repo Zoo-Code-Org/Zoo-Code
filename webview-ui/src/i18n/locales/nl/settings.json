@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
 		"kenariApiKey": "Kenari API-sleutel",
 		"getKenariApiKey": "Kenari API-sleutel ophalen",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API-sleutel",
+			"getApiKey": "NanoGPT API-sleutel ophalen",
+			"model": "Model",
+			"routingPreference": "Routeringsvoorkeur",
+			"routingOptions": {
+				"automatic": "Automatisch",
+				"fastest": "Snelste",
+				"cheapest": "Goedkoopste",
+				"lowestLatency": "Laagste latentie",
+				"highestThroughput": "Hoogste doorvoer",
+				"toolCapable": "Geschikt voor tools",
+				"cacheCapable": "Geschikt voor cache"
+			},
+			"automaticExplanation": "Automatisch past geen routeringsachtervoegsel toe.",
+			"billingWarning": "Geavanceerde routeringsvoorkeuren kunnen betalen-per-gebruik-routering gebruiken en kunnen, afhankelijk van de huidige factureringsregels van NanoGPT, buiten je abonnement vallen.",
+			"routingDocs": "Routerings- en factureringsdetails van NanoGPT bekijken"
+		},
 		"apiKeyStorageNotice": "API-sleutels worden veilig opgeslagen in de geheime opslag van VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -495,6 +514,9 @@
 		"apiKey": "API-sleutel",
 		"openAiApiKey": "OpenAI API-sleutel",
 		"openAiBaseUrl": "Basis-URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
+		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",
 		"getOpenAiApiKey": "OpenAI API-sleutel ophalen",
 		"mistralApiKey": "Mistral API-sleutel",
 		"getMistralApiKey": "Mistral / Codestral API-sleutel ophalen",

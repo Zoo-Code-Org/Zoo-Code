@@ -18,9 +18,10 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { OpenRouterHandler } from "../openrouter"
-import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -102,12 +103,12 @@ vitest.mock("../fetchers/modelCache", () => ({
 }))
 
 describe("OpenRouterHandler", () => {
-	const mockOptions: ApiHandlerOptions = {
+	const mockOptions = makeApiHandlerOptions({
 		openRouterApiKey: "test-key",
 		openRouterModelId: "anthropic/claude-sonnet-4",
-	}
+	})
 
-	beforeEach(() => vitest.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)
@@ -147,12 +148,14 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("honors custom maxTokens for thinking models", async () => {
-			const handler = new OpenRouterHandler({
-				openRouterApiKey: "test-key",
-				openRouterModelId: "anthropic/claude-3.7-sonnet:thinking",
-				modelMaxTokens: 32_768,
-				modelMaxThinkingTokens: 16_384,
-			})
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-3.7-sonnet:thinking",
+					modelMaxTokens: 32_768,
+					modelMaxThinkingTokens: 16_384,
+				}),
+			)
 
 			const result = await handler.fetchModel()
 			// With the new clamping logic, 128000 tokens (64% of 200000 context window)
@@ -163,11 +166,13 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("does not honor custom maxTokens for non-thinking models", async () => {
-			const handler = new OpenRouterHandler({
-				...mockOptions,
-				modelMaxTokens: 32_768,
-				modelMaxThinkingTokens: 16_384,
-			})
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					modelMaxTokens: 32_768,
+					modelMaxThinkingTokens: 16_384,
+				}),
+			)
 
 			const result = await handler.fetchModel()
 			expect(result.maxTokens).toBe(8192)
@@ -176,10 +181,12 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("adds excludedTools and includedTools for OpenAI models", async () => {
-			const handler = new OpenRouterHandler({
-				openRouterApiKey: "test-key",
-				openRouterModelId: "openai/gpt-4o",
-			})
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
 
 			const result = await handler.fetchModel()
 			expect(result.id).toBe("openai/gpt-4o")
@@ -189,10 +196,12 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("merges excludedTools and includedTools with existing values for OpenAI models", async () => {
-			const handler = new OpenRouterHandler({
-				openRouterApiKey: "test-key",
-				openRouterModelId: "openai/o1",
-			})
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "openai/o1",
+				}),
+			)
 
 			const result = await handler.fetchModel()
 			expect(result.id).toBe("openai/o1")
@@ -208,10 +217,12 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("does not add excludedTools or includedTools for non-OpenAI models", async () => {
-			const handler = new OpenRouterHandler({
-				openRouterApiKey: "test-key",
-				openRouterModelId: "anthropic/claude-sonnet-4",
-			})
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "anthropic/claude-sonnet-4",
+				}),
+			)
 
 			const result = await handler.fetchModel()
 			expect(result.id).toBe("anthropic/claude-sonnet-4")
@@ -281,10 +292,12 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("adds cache control for supported models", async () => {
-			const handler = new OpenRouterHandler({
-				...mockOptions,
-				openRouterModelId: "anthropic/claude-3.5-sonnet",
-			})
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-3.5-sonnet",
+				}),
+			)
 
 			const mockStream = asyncStreamFrom([
 				{

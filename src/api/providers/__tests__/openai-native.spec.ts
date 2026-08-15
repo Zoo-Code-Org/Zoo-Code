@@ -18,7 +18,9 @@ import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } f
 import { OpenAiNativeHandler } from "../openai-native"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
+import { expectRequestObjectContaining, makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { deleteGlobalFetch } from "../../../test-utils/reset"
 
 // Mock OpenAI client - now everything uses Responses API
 const mockResponsesCreate = vitest.fn()
@@ -41,18 +43,16 @@ const serviceTierPricingCases = [
 	},
 ]
 
-vitest.mock("openai", () => {
-	return {
-		__esModule: true,
-		default: vitest.fn().mockImplementation(function () {
-			return {
-				responses: {
-					create: mockResponsesCreate,
-				},
-			}
-		}),
-	}
-})
+vitest.mock("openai", () => ({
+	__esModule: true,
+	default: vitest.fn().mockImplementation(function () {
+		return {
+			responses: {
+				create: mockResponsesCreate,
+			},
+		}
+	}),
+}))
 
 describe("OpenAiNativeHandler", () => {
 	let handler: OpenAiNativeHandler
@@ -66,24 +66,15 @@ describe("OpenAiNativeHandler", () => {
 	]
 
 	beforeEach(() => {
-		mockOptions = {
-			apiModelId: "gpt-4.1",
-			openAiNativeApiKey: "test-api-key",
-		}
+		mockOptions = makeApiHandlerOptions()
 		handler = new OpenAiNativeHandler(mockOptions)
 		mockResponsesCreate.mockClear()
 		mockCaptureException.mockClear()
-		// Clear fetch mock if it exists
-		if ((global as any).fetch) {
-			delete (global as any).fetch
-		}
+		deleteGlobalFetch()
 	})
 
 	afterEach(() => {
-		// Clean up fetch mock
-		if ((global as any).fetch) {
-			delete (global as any).fetch
-		}
+		deleteGlobalFetch()
 	})
 
 	describe("constructor", () => {
@@ -152,7 +143,7 @@ describe("OpenAiNativeHandler", () => {
 			await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(mockResponsesCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ [SERVICE_TIER_KEY]: serviceTier }),
+				expectRequestObjectContaining({ [SERVICE_TIER_KEY]: serviceTier }),
 				expect.any(Object),
 			)
 		})

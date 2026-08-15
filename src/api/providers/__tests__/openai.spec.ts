@@ -3,9 +3,14 @@
 import { OpenAiHandler, getOpenAiModels } from "../openai"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
-import { openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import OpenAI, { AzureOpenAI } from "openai"
+import {
+	openAiModelInfoSaneDefaults,
+	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	azureOpenAiDefaultApiVersion,
+} from "@roo-code/types"
 import { Package } from "../../../shared/package"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import axios from "axios"
 
@@ -19,6 +24,7 @@ const mockCreate = vitest.fn()
 
 vitest.mock("openai", () => {
 	const mockConstructor = vitest.fn()
+	const mockAzureConstructor = vitest.fn()
 	return {
 		__esModule: true,
 		default: mockConstructor.mockImplementation(function () {
@@ -73,6 +79,7 @@ vitest.mock("openai", () => {
 				},
 			}
 		}),
+		AzureOpenAI: mockAzureConstructor,
 	}
 })
 
@@ -88,11 +95,11 @@ describe("OpenAiHandler", () => {
 	let mockOptions: ApiHandlerOptions
 
 	beforeEach(() => {
-		mockOptions = {
+		mockOptions = makeApiHandlerOptions({
 			openAiApiKey: "test-api-key",
 			openAiModelId: "gpt-4",
 			openAiBaseUrl: "https://api.openai.com/v1",
-		}
+		})
 		handler = new OpenAiHandler(mockOptions)
 		mockCreate.mockClear()
 	})
@@ -124,6 +131,43 @@ describe("OpenAiHandler", () => {
 				},
 				timeout: MOCK_TIMEOUT_MS,
 			})
+		})
+
+		it.each([
+			["https://resource.openai.azure.com", "https://resource.openai.azure.com/openai"],
+			["https://resource.openai.azure.com/", "https://resource.openai.azure.com/openai"],
+			["https://resource.openai.azure.com/openai", "https://resource.openai.azure.com/openai"],
+			["https://resource.openai.azure.com/openai/", "https://resource.openai.azure.com/openai"],
+		])("normalizes Azure OpenAI base URL %s", (openAiBaseUrl, expectedBaseUrl) => {
+			new OpenAiHandler({ ...mockOptions, openAiBaseUrl })
+
+			expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					baseURL: expectedBaseUrl,
+					apiKey: mockOptions.openAiApiKey,
+					apiVersion: azureOpenAiDefaultApiVersion,
+					defaultHeaders: expect.any(Object),
+					timeout: MOCK_TIMEOUT_MS,
+				}),
+			)
+		})
+
+		it("normalizes reverse-proxy URLs when Azure mode is enabled", () => {
+			new OpenAiHandler({
+				...mockOptions,
+				openAiBaseUrl: "https://models.example.com/azure/",
+				openAiUseAzure: true,
+			})
+
+			expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					baseURL: "https://models.example.com/azure/openai",
+					apiKey: mockOptions.openAiApiKey,
+					apiVersion: azureOpenAiDefaultApiVersion,
+					defaultHeaders: expect.any(Object),
+					timeout: MOCK_TIMEOUT_MS,
+				}),
+			)
 		})
 	})
 
@@ -851,6 +895,16 @@ describe("OpenAiHandler", () => {
 			const azureHandler = new OpenAiHandler(azureOptions)
 			expect(azureHandler).toBeInstanceOf(OpenAiHandler)
 			expect(azureHandler.getModel().id).toBe(azureOptions.openAiModelId)
+		})
+
+		it("should keep Azure AI Inference precedence when Azure mode is enabled", () => {
+			vi.mocked(OpenAI).mockClear()
+			vi.mocked(AzureOpenAI).mockClear()
+
+			new OpenAiHandler({ ...azureOptions, openAiUseAzure: true })
+
+			expect(vi.mocked(OpenAI)).toHaveBeenCalled()
+			expect(vi.mocked(AzureOpenAI)).not.toHaveBeenCalled()
 		})
 
 		it("should handle streaming responses with Azure AI Inference Service", async () => {

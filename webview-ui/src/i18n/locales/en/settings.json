@@ -468,6 +468,25 @@
 		"getOpencodeGoApiKey": "Get Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Get Kenari API Key",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Key",
+			"getApiKey": "Get NanoGPT API Key",
+			"model": "Model",
+			"routingPreference": "Routing Preference",
+			"routingOptions": {
+				"automatic": "Automatic",
+				"fastest": "Fastest",
+				"cheapest": "Cheapest",
+				"lowestLatency": "Lowest latency",
+				"highestThroughput": "Highest throughput",
+				"toolCapable": "Tool-capable",
+				"cacheCapable": "Cache-capable"
+			},
+			"automaticExplanation": "Automatic applies no routing suffix.",
+			"billingWarning": "Advanced routing preferences may use pay-as-you-go routing and may bypass subscription coverage, depending on NanoGPT's current billing rules.",
+			"routingDocs": "View NanoGPT routing and billing details"
+		},
 		"apiKeyStorageNotice": "API keys are stored securely in VSCode's Secret Storage",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -575,6 +594,9 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure deployment name",
+		"azureOpenAiDeploymentNameDescription": "Enter the deployment name from Azure AI Studio, not the underlying model name.",
 		"getOpenAiApiKey": "Get OpenAI API Key",
 		"mistralApiKey": "Mistral API Key",
 		"getMistralApiKey": "Get Mistral / Codestral API Key",

@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Obtener clave API de Opencode Go",
 		"kenariApiKey": "Clave API de Kenari",
 		"getKenariApiKey": "Obtener clave API de Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Clave API de NanoGPT",
+			"getApiKey": "Obtener clave API de NanoGPT",
+			"model": "Modelo",
+			"routingPreference": "Preferencia de enrutamiento",
+			"routingOptions": {
+				"automatic": "Automática",
+				"fastest": "Más rápida",
+				"cheapest": "Más barata",
+				"lowestLatency": "Menor latencia",
+				"highestThroughput": "Mayor rendimiento",
+				"toolCapable": "Compatible con herramientas",
+				"cacheCapable": "Compatible con caché"
+			},
+			"automaticExplanation": "Automática no aplica ningún sufijo de enrutamiento.",
+			"billingWarning": "Las preferencias de enrutamiento avanzadas pueden usar enrutamiento de pago por uso y pueden omitir la cobertura de la suscripción, según las reglas de facturación actuales de NanoGPT.",
+			"routingDocs": "Ver detalles de enrutamiento y facturación de NanoGPT"
+		},
 		"apiKeyStorageNotice": "Las claves API se almacenan de forma segura en el Almacenamiento Secreto de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -495,6 +514,9 @@
 		"openAiApiKey": "Clave API de OpenAI",
 		"apiKey": "Clave API",
 		"openAiBaseUrl": "URL base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nombre de implementación de Azure",
+		"azureOpenAiDeploymentNameDescription": "Introduce el nombre de la implementación de Azure AI Studio, no el nombre del modelo subyacente.",
 		"getOpenAiApiKey": "Obtener clave API de OpenAI",
 		"mistralApiKey": "Clave API de Mistral",
 		"getMistralApiKey": "Obtener clave API de Mistral / Codestral",
