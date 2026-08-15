@@ -1,6 +1,42 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { parseMarkdownChecklist } from "../UpdateTodoListTool"
+import { parseMarkdownChecklist, setPendingTodoList, updateTodoListTool } from "../UpdateTodoListTool"
 import { TodoItem } from "@roo-code/types"
+import type { Task } from "../../task/Task"
+import type { ToolCallbacks } from "../BaseTool"
+
+describe("UpdateTodoListTool", () => {
+	it("waits for the user-edited todo message before persisting the edited list", async () => {
+		let resolveSay: (() => void) | undefined
+		const sayPromise = new Promise<void>((resolve) => {
+			resolveSay = resolve
+		})
+		const editedTodos: TodoItem[] = [{ id: "edited", content: "Edited task", status: "in_progress" }]
+		const task = {
+			consecutiveMistakeCount: 0,
+			recordToolError: vi.fn(),
+			didToolFailInCurrentTurn: false,
+			todoList: [],
+			say: vi.fn().mockReturnValue(sayPromise),
+		} as unknown as Task
+		const callbacks = {
+			pushToolResult: vi.fn(),
+			handleError: vi.fn(),
+			askApproval: vi.fn().mockImplementation(async () => {
+				setPendingTodoList(editedTodos)
+				return true
+			}),
+		} as unknown as ToolCallbacks
+
+		const executionPromise = updateTodoListTool.execute({ todos: "[ ] Original task" }, task, callbacks)
+		await vi.waitFor(() => expect(task.say).toHaveBeenCalled())
+
+		expect(task.todoList).toEqual([])
+		resolveSay?.()
+		await executionPromise
+
+		expect(task.todoList).toEqual(editedTodos)
+	})
+})
 
 describe("parseMarkdownChecklist", () => {
 	describe("standard checkbox format (without dash prefix)", () => {

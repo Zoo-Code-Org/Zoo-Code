@@ -73,6 +73,12 @@ describe("executeCommand", () => {
 
 		// Mock TerminalRegistry.getOrCreateTerminal
 		;(TerminalRegistry.getOrCreateTerminal as any).mockResolvedValue(mockTerminal)
+		vitest.mocked(Terminal.isActiveShellCmdExe).mockReturnValue(false)
+	})
+
+	afterEach(() => {
+		vitest.useRealTimers()
+		vitest.restoreAllMocks()
 	})
 
 	describe("Working Directory Behavior", () => {
@@ -265,6 +271,30 @@ describe("executeCommand", () => {
 	})
 
 	describe("Terminal Provider Selection", () => {
+		it("posts fallback status when cmd.exe requires the Execa provider", async () => {
+			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(true)
+			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+				setTimeout(() => {
+					void callbacks.onCompleted("Command output", mockProcess)
+					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
+				}, 0)
+				return mockProcess
+			})
+
+			await executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				command: "echo test",
+				terminalShellIntegrationDisabled: false,
+			})
+
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "commandExecutionStatus",
+					text: expect.stringContaining('"status":"fallback"'),
+				}),
+			)
+		})
+
 		it("should use vscode provider when shell integration is enabled", async () => {
 			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
@@ -311,6 +341,34 @@ describe("executeCommand", () => {
 	})
 
 	describe("Command Execution States", () => {
+		it("posts timeout status when command execution exceeds the user limit", async () => {
+			vitest.useFakeTimers()
+			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			mockTerminal.runCommand.mockReturnValue(pendingProcess)
+
+			const executionPromise = executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				command: "sleep 10",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 1_000,
+			})
+			await vitest.advanceTimersByTimeAsync(1_000)
+			const [rejected, result] = await executionPromise
+
+			expect(rejected).toBe(false)
+			expect(result).toContain("terminated after exceeding")
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "commandExecutionStatus",
+					text: expect.stringContaining('"status":"timeout"'),
+				}),
+			)
+			expect(pendingProcess.abort).toHaveBeenCalled()
+		})
+
 		it("logs rejected command status updates without failing the command", async () => {
 			const postError = new Error("webview unavailable")
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => undefined)
