@@ -476,7 +476,7 @@
 	},
 	"api/transform/__tests__/gemini-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/transform/__tests__/mistral-format.spec.ts": {
