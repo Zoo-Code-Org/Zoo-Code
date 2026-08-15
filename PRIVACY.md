@@ -1,6 +1,6 @@
 # Zoo Code Privacy Policy
 
-**Last Updated: May 13th, 2026**
+**Last Updated: August 15th, 2026**
 
 Zoo Code respects your privacy and is committed to transparency about how we
 handle your data. Below is a simple breakdown of where key pieces of data
@@ -37,11 +37,11 @@ go—and, importantly, where they don't.
   Code machine ID, feature usage patterns, and exception reports. The VS Code
   machine ID is a persistent identifier and may be considered personal data in
   some jurisdictions; we use it only for product analytics and error grouping.
-  We retain telemetry only as long as needed for product analytics and
-  debugging. This PostHog-based telemetry does **not** collect your code or AI
+  PostHog event data is retained for 12 months under our current project
+  configuration. This PostHog-based telemetry does **not** collect your code or AI
   prompts. Telemetry is on by default. To turn it off, choose "Disabled" in
-  the settings or in the notice shown on first use; closing that notice
-  without a choice leaves telemetry on. Telemetry also follows VS Code's own
+  the settings or in the notice shown on first use. The notice remains until
+  you explicitly Accept or Decline. Telemetry also follows VS Code's own
   global telemetry setting: if you turn that off, Zoo Code stops sending
   telemetry right away, even if the Zoo Code setting says "Enabled."
 - **Marketplace Requests**: When you browse or search the Marketplace for Model

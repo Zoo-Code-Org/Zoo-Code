@@ -1,4 +1,4 @@
-import { memo, useState } from "react"
+import { memo } from "react"
 import { Trans } from "react-i18next"
 import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 
@@ -9,23 +9,12 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 const TelemetryBanner = () => {
 	const { t } = useAppTranslation()
-	const [isDismissed, setIsDismissed] = useState(false)
-
-	// A neutral dismiss ("x") intentionally sends no message, leaving the setting
-	// "unset" so the disclosed opt-out default (telemetry on) stays in effect.
-	// Only an explicit Decline (-> "disabled") opts out. Only the explicit
-	// Accept/Decline actions record the user's choice.
-	const handleClose = () => {
-		setIsDismissed(true)
-	}
 
 	const handleAccept = () => {
-		setIsDismissed(true)
 		vscode.postMessage({ type: "telemetrySetting", text: "enabled" satisfies TelemetrySetting })
 	}
 
 	const handleDecline = () => {
-		setIsDismissed(true)
 		vscode.postMessage({ type: "telemetrySetting", text: "disabled" satisfies TelemetrySetting })
 	}
 
@@ -37,20 +26,8 @@ const TelemetryBanner = () => {
 		})
 	}
 
-	if (isDismissed) {
-		return null
-	}
-
 	return (
-		<div className="relative px-4 py-2.5 pr-10 bg-vscode-banner-background border-b border-vscode-panel-border text-sm leading-normal text-vscode-foreground">
-			{/* Close button (X) - neutral dismiss, does not record a choice */}
-			<button
-				onClick={handleClose}
-				className="absolute top-1.5 right-2 bg-transparent border-none text-vscode-foreground cursor-pointer text-2xl p-1 opacity-70 hover:opacity-100 transition-opacity duration-200 leading-none"
-				aria-label="Close">
-				×
-			</button>
-
+		<div className="px-4 py-2.5 bg-vscode-banner-background border-b border-vscode-panel-border text-sm leading-normal text-vscode-foreground">
 			<div className="mb-0.5 font-bold">{t("welcome:telemetry.helpImprove")}</div>
 			<div className="mb-2">
 				<Trans

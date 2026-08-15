@@ -36,30 +36,26 @@ describe("TelemetryBanner", () => {
 		expect(screen.getByRole("button", { name: "Decline" })).toBeInTheDocument()
 	})
 
-	it("sends an enabled setting and dismisses when Accept is clicked", () => {
-		const { container } = render(<TelemetryBanner />)
+	it("sends an enabled setting when Accept is clicked", () => {
+		render(<TelemetryBanner />)
 
 		fireEvent.click(screen.getByRole("button", { name: "Accept" }))
 
 		expect(mockPostMessage).toHaveBeenCalledWith({ type: "telemetrySetting", text: "enabled" })
-		expect(container.firstChild).toBeNull()
 	})
 
-	it("sends a disabled setting and dismisses when Decline is clicked", () => {
-		const { container } = render(<TelemetryBanner />)
+	it("sends a disabled setting when Decline is clicked", () => {
+		render(<TelemetryBanner />)
 
 		fireEvent.click(screen.getByRole("button", { name: "Decline" }))
 
 		expect(mockPostMessage).toHaveBeenCalledWith({ type: "telemetrySetting", text: "disabled" })
-		expect(container.firstChild).toBeNull()
 	})
 
-	it("dismisses without sending any message when the close (x) button is clicked", () => {
-		const { container } = render(<TelemetryBanner />)
+	it("requires an explicit telemetry choice", () => {
+		render(<TelemetryBanner />)
 
-		fireEvent.click(screen.getByRole("button", { name: /close/i }))
-
+		expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Accept", "Decline"])
 		expect(mockPostMessage).not.toHaveBeenCalled()
-		expect(container.firstChild).toBeNull()
 	})
 })
