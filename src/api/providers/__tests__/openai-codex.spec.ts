@@ -441,6 +441,40 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		expect(mockFetch).not.toHaveBeenCalled()
 	})
 
+	// The service has accepted the request by the time it emits, so refreshing the token and
+	// sending it again would bill a second generation and hand the caller both.
+	it("does not retry with a refreshed token when the SDK fails after emitting", async () => {
+		const handler = createHandler()
+		const refresh = vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+		const create = vitest.fn().mockResolvedValue(
+			(async function* () {
+				yield { type: "response.output_text.delta", delta: "feat: add" }
+				throw new Error("Codex API invalid token")
+			})(),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).rejects.toThrow(/completionError|invalid token/)
+		expect(refresh).not.toHaveBeenCalled()
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// An abort is not a transport failure, so spending a second request on an already-aborted
+	// signal only turns the cancellation into a connection error.
+	it("does not fall back to SSE when the SDK fails because the caller aborted", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("Request was aborted"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toThrow()
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
 	it("wraps failures from both transports as a completion error", async () => {
 		const handler = createHandler()
 		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))

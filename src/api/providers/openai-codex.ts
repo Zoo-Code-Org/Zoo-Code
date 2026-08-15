@@ -142,6 +142,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	private sawTextDeltaInCurrentResponse = false
 	// Tracks tool call IDs emitted via streaming partial events to prevent done-event duplicates.
 	private streamedToolCallIds = new Set<string>()
+	// Tracks whether the SDK stream produced an event, which is the point where the service has
+	// accepted the request and its output is already with the caller. Neither transport may be
+	// replayed after that: doing so appends a second generation to the first.
+	private sawSdkEventInCurrentResponse = false
 
 	// Event types handled by the shared event processor
 	private readonly coreHandledEventTypes = new Set<string>([
@@ -234,6 +238,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		this.pendingToolCallName = undefined
 		this.sawTextOutputInCurrentResponse = false
 		this.sawTextDeltaInCurrentResponse = false
+		this.sawSdkEventInCurrentResponse = false
 		this.streamedToolCallIds.clear()
 
 		// Get access token from OAuth manager
@@ -281,7 +286,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				const message = error instanceof Error ? error.message : String(error)
 				const isAuthFailure = /unauthorized|invalid token|not authenticated|authentication|401/i.test(message)
 
-				if (attempt === 0 && isAuthFailure) {
+				// Retrying is only safe while nothing has come back yet. Once the SDK has emitted,
+				// the service has accepted the request, so a refreshed-token retry would replay it
+				// and append a second generation to output the caller already has.
+				if (attempt === 0 && isAuthFailure && !this.sawSdkEventInCurrentResponse) {
 					// Force refresh the token for retry
 					const refreshed = await openAiCodexOAuthManager.forceRefreshAccessToken()
 					if (!refreshed) {
@@ -456,11 +464,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}
 		}
 
-		// Once the SDK stream has produced an event the request has been accepted and its output is
-		// already with the caller, so replaying it over SSE would append a second generation to the
-		// first. The fallback below is only for an SDK that could not be used at all.
-		let sawSdkEvent = false
-
 		try {
 			// Prefer OpenAI SDK streaming (same approach as openai-native) so event handling
 			// is consistent across providers.
@@ -500,7 +503,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 					// Set before the event is processed, not after: `processEvent` also mutates
 					// response state, so a throw from it must not replay either.
-					sawSdkEvent = true
+					this.sawSdkEventInCurrentResponse = true
 
 					for await (const outChunk of this.processEvent(event, model)) {
 						if (outChunk.type === "text") {
@@ -510,7 +513,14 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					}
 				}
 			} catch (sdkErr) {
-				if (sawSdkEvent) {
+				// The fallback is only for an SDK that could not be used at all. Once the stream has
+				// emitted, the request has been accepted and its output is already with the caller,
+				// so replaying it over SSE would append a second generation to the first.
+				//
+				// A cancellation is not a transport failure either. Falling back would spend a
+				// second request on an already-aborted signal and report the cancellation as a
+				// connection error.
+				if (this.sawSdkEventInCurrentResponse || this.abortController?.signal.aborted) {
 					throw sdkErr
 				}
 
