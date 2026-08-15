@@ -456,6 +456,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}
 		}
 
+		// Once the SDK stream has produced an event the request has been accepted and its output is
+		// already with the caller, so replaying it over SSE would append a second generation to the
+		// first. The fallback below is only for an SDK that could not be used at all.
+		let sawSdkEvent = false
+
 		try {
 			// Prefer OpenAI SDK streaming (same approach as openai-native) so event handling
 			// is consistent across providers.
@@ -493,6 +498,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						break
 					}
 
+					// Set before the event is processed, not after: `processEvent` also mutates
+					// response state, so a throw from it must not replay either.
+					sawSdkEvent = true
+
 					for await (const outChunk of this.processEvent(event, model)) {
 						if (outChunk.type === "text") {
 							this.sawTextOutputInCurrentResponse = true
@@ -500,7 +509,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						yield outChunk
 					}
 				}
-			} catch (_sdkErr) {
+			} catch (sdkErr) {
+				if (sawSdkEvent) {
+					throw sdkErr
+				}
+
 				// Fallback to manual SSE via fetch (Codex backend).
 				yield* this.makeCodexRequest(requestBody, model, accessToken, effectiveSessionId)
 			}
@@ -1302,8 +1315,21 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 			}
 
+			// Both transports end quietly on abort - they break out of their loops rather than
+			// throwing - so returning here would report a cancelled generation as a finished one and
+			// hand the caller whatever partial text had arrived.
+			if (options?.abortSignal?.aborted) {
+				throw new DOMException("OpenAI Codex completion was aborted", "AbortError")
+			}
+
 			return text
 		} catch (error) {
+			// Cancelling is the caller's own doing, not a provider failure, so it is neither
+			// reported to telemetry nor relabelled as a completion error.
+			if (options?.abortSignal?.aborted) {
+				throw error
+			}
+
 			const errorModel = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, errorModel.id, "completePrompt")

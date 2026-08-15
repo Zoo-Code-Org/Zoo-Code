@@ -382,7 +382,9 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 
 	// The caller's signal is linked to the internal controller rather than passed through, so what
 	// matters is that aborting the caller's one aborts the signal the request is actually using.
-	it("passes the caller's abort signal down to the request", async () => {
+	// The stream then ends quietly, so rejecting is the only thing that tells the caller apart a
+	// cancelled generation from a finished one.
+	it("rejects and stops the request when cancelled mid-stream", async () => {
 		const handler = createHandler()
 		const controller = new AbortController()
 		let signalDuringRequest: AbortSignal | undefined
@@ -393,27 +395,50 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 			controller.abort()
 			return Promise.resolve(
 				asyncStreamFrom([
+					{ type: "response.output_text.delta", delta: "feat: half a" },
 					{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
 				]),
 			)
 		})
 		Reflect.set(handler, "client", { responses: { create } })
 
-		await handler.completePrompt("Hello", { abortSignal: controller.signal })
+		await expect(handler.completePrompt("Hello", { abortSignal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+		})
 
 		expect(signalDuringRequest).toBeInstanceOf(AbortSignal)
 		expect(signalDuringRequest!.aborted).toBe(true)
 	})
 
-	it("aborts immediately when the caller's signal is already aborted", async () => {
+	it("rejects when the caller's signal is already aborted", async () => {
 		const handler = createHandler()
 		const create = injectStream(handler, [
 			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
 		])
 
-		await handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })
+		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
+			name: "AbortError",
+		})
 
 		expect(create.mock.calls[0][1].signal.aborted).toBe(true)
+	})
+
+	// The SSE fallback is for an SDK that could not be used at all. Replaying the request after the
+	// SDK has already produced output would append a second generation to the first.
+	it("does not replay over SSE when the SDK fails after emitting", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockResolvedValue(
+			(async function* () {
+				yield { type: "response.output_text.delta", delta: "feat: add" }
+				throw new Error("stream broke")
+			})(),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).rejects.toThrow(/completionError|stream broke/)
+		expect(mockFetch).not.toHaveBeenCalled()
 	})
 
 	it("wraps failures from both transports as a completion error", async () => {
