@@ -233,6 +233,36 @@ describe("convertAnthropicMessageToGemini", () => {
 		])
 	})
 
+	it("should preserve an empty tool result array as a user function response", () => {
+		const toolIdToName = new Map([["calculator-123", "calculator"]])
+		const anthropicMessage: Anthropic.Messages.MessageParam = {
+			role: "user",
+			content: [
+				{
+					type: "tool_result",
+					tool_use_id: "calculator-123",
+					content: [],
+				},
+			],
+		}
+
+		const result = convertAnthropicMessageToGemini(anthropicMessage, { toolIdToName })
+
+		expect(result).toEqual([
+			{
+				role: "user",
+				parts: [
+					{
+						functionResponse: {
+							name: "calculator",
+							response: { name: "calculator", content: "(empty)" },
+						},
+					},
+				],
+			},
+		])
+	})
+
 	it("should convert a message with tool result as array with text only", () => {
 		const toolIdToName = new Map<string, string>()
 		toolIdToName.set("search-123", "search")
