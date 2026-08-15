@@ -39,7 +39,7 @@ describe("RequestConfigBuilder", () => {
 		})
 	})
 
-	describe("addAbortSignal", () => {
+	describe("setAbortSignal", () => {
 		test("should set signal when metadata contains abortSignal", () => {
 			const controller = new AbortController()
 			const metadata: ApiHandlerCreateMessageMetadata = {
@@ -48,7 +48,7 @@ describe("RequestConfigBuilder", () => {
 			}
 
 			const builder = new RequestConfigBuilder()
-			const result = builder.addAbortSignal(metadata)
+			const result = builder.setAbortSignal(metadata)
 
 			expect(result).toBe(builder) // chainable
 			const config = builder.build() as { signal?: AbortSignal }
@@ -57,7 +57,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("should do nothing when metadata is undefined", () => {
 			const builder = new RequestConfigBuilder({ initial: "value" })
-			builder.addAbortSignal(undefined)
+			builder.setAbortSignal(undefined)
 
 			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal).toBeUndefined()
@@ -69,7 +69,7 @@ describe("RequestConfigBuilder", () => {
 			}
 
 			const builder = new RequestConfigBuilder({ initial: "value" })
-			builder.addAbortSignal(metadata)
+			builder.setAbortSignal(metadata)
 
 			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal).toBeUndefined()
@@ -80,7 +80,7 @@ describe("RequestConfigBuilder", () => {
 			const controller2 = new AbortController()
 
 			const builder = new RequestConfigBuilder({ signal: controller1.signal })
-			builder.addAbortSignal({
+			builder.setAbortSignal({
 				taskId: "test-task",
 				abortSignal: controller2.signal,
 			} as ApiHandlerCreateMessageMetadata)
@@ -97,7 +97,7 @@ describe("RequestConfigBuilder", () => {
 			}
 
 			const builder = new RequestConfigBuilder()
-			const result = builder.addAbortSignal(metadata).setOption("customKey", "customValue")
+			const result = builder.setAbortSignal(metadata).setOption("customKey", "customValue")
 
 			expect(result).toBe(builder)
 			const config = builder.build() as { signal?: AbortSignal; customKey?: string }
@@ -268,7 +268,7 @@ describe("RequestConfigBuilder", () => {
 			}
 
 			const builder = new RequestConfigBuilder()
-			builder.addAbortSignal(metadata).addHeaders({ "X-Custom": "value" }).setOption("modelId", "test-model")
+			builder.setAbortSignal(metadata).addHeaders({ "X-Custom": "value" }).setOption("modelId", "test-model")
 
 			const config = builder.build() as {
 				signal?: AbortSignal
@@ -373,6 +373,23 @@ describe("RequestConfigBuilder", () => {
 			expect(config.signal?.aborted).toBe(true)
 		})
 
+		test("should abort merged signal when internal controller is aborted", () => {
+			const internalController = new AbortController()
+			const externalController = new AbortController()
+			const builder = new RequestConfigBuilder()
+
+			builder.addMergedSignal(internalController, {
+				taskId: "test-task",
+				abortSignal: externalController.signal,
+			})
+
+			const config = builder.build() as { signal?: AbortSignal }
+			expect(config.signal?.aborted).toBe(false)
+
+			internalController.abort()
+			expect(config.signal?.aborted).toBe(true)
+		})
+
 		test("should clear timeout when cleanup runs before timeout fires", async () => {
 			vi.useFakeTimers()
 			try {
@@ -431,115 +448,6 @@ describe("RequestConfigBuilder", () => {
 		})
 	})
 
-	describe("static mergeAbortSignals", () => {
-		test("should return primary signal directly when secondarySignal is undefined", () => {
-			const controller = new AbortController()
-			const result = RequestConfigBuilder.mergeAbortSignals(controller.signal)
-
-			expect(result).toBe(controller.signal)
-			expect(result.aborted).toBe(false)
-		})
-
-		test("should return merged signal when secondarySignal is already aborted", () => {
-			const primaryController = new AbortController()
-			const secondaryController = new AbortController()
-			secondaryController.abort()
-
-			const result = RequestConfigBuilder.mergeAbortSignals(primaryController.signal, secondaryController.signal)
-			expect(result.aborted).toBe(true)
-		})
-
-		test("should return merged signal when both signals are active", () => {
-			const primaryController = new AbortController()
-			const secondaryController = new AbortController()
-
-			const result = RequestConfigBuilder.mergeAbortSignals(primaryController.signal, secondaryController.signal)
-			expect(result).not.toBe(primaryController.signal)
-			expect(result).not.toBe(secondaryController.signal)
-			expect(result.aborted).toBe(false)
-		})
-
-		test("should abort merged signal when primarySignal is aborted", () => {
-			const primaryController = new AbortController()
-			const secondaryController = new AbortController()
-
-			const mergedSignal = RequestConfigBuilder.mergeAbortSignals(
-				primaryController.signal,
-				secondaryController.signal,
-			)
-
-			let aborted = false
-			mergedSignal.addEventListener(
-				"abort",
-				() => {
-					aborted = true
-				},
-				{ once: true },
-			)
-
-			primaryController.abort()
-
-			expect(aborted).toBe(true)
-		})
-
-		test("should abort merged signal when secondarySignal is aborted", () => {
-			const primaryController = new AbortController()
-			const secondaryController = new AbortController()
-
-			const mergedSignal = RequestConfigBuilder.mergeAbortSignals(
-				primaryController.signal,
-				secondaryController.signal,
-			)
-
-			let aborted = false
-			mergedSignal.addEventListener(
-				"abort",
-				() => {
-					aborted = true
-				},
-				{ once: true },
-			)
-
-			secondaryController.abort()
-
-			expect(aborted).toBe(true)
-		})
-
-		test("should not abort merged signal when neither signal is aborted", () => {
-			const primaryController = new AbortController()
-			const secondaryController = new AbortController()
-
-			const mergedSignal = RequestConfigBuilder.mergeAbortSignals(
-				primaryController.signal,
-				secondaryController.signal,
-			)
-
-			let aborted = false
-			mergedSignal.addEventListener(
-				"abort",
-				() => {
-					aborted = true
-				},
-				{ once: true },
-			)
-
-			expect(aborted).toBe(false)
-		})
-
-		test("should handle primary already aborted before merge", () => {
-			const primaryController = new AbortController()
-			const secondaryController = new AbortController()
-
-			primaryController.abort()
-
-			const mergedSignal = RequestConfigBuilder.mergeAbortSignals(
-				primaryController.signal,
-				secondaryController.signal,
-			)
-			expect(mergedSignal.aborted).toBe(true)
-		})
-	})
-
 	describe("integration tests", () => {
 		test("should support full chain of operations", () => {
 			const controller = new AbortController()
@@ -556,7 +464,7 @@ describe("RequestConfigBuilder", () => {
 			}
 
 			const builder = new RequestConfigBuilder<TestOptions>({ modelId: "default-model" })
-			builder.addAbortSignal(metadata)
+			builder.setAbortSignal(metadata)
 			builder.addHeaders({ "X-API-Key": "secret" })
 			builder.setOption("maxTokens", 2000)
 

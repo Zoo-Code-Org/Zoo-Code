@@ -64,6 +64,20 @@ describe("abort-signal utilities", () => {
 			expect(result.signal?.aborted).toBe(false)
 			expect(vi.getTimerCount()).toBe(0)
 		})
+
+		it("aborts via timeout alone when the external signal stays active", async () => {
+			vi.useFakeTimers()
+			const controller = new AbortController()
+
+			const result = mergeAbortSignalAndTimeout(controller.signal, 100)
+
+			expect(result.signal).not.toBe(controller.signal)
+			expect(result.signal?.aborted).toBe(false)
+
+			await vi.advanceTimersByTimeAsync(100)
+
+			expect(result.signal?.aborted).toBe(true)
+		})
 	})
 
 	describe("mergeAbortSignals", () => {
@@ -86,6 +100,29 @@ describe("abort-signal utilities", () => {
 			expect(result.aborted).toBe(false)
 
 			secondaryController.abort()
+
+			expect(result.aborted).toBe(true)
+		})
+
+		it("aborts merged signal when primary signal is aborted", () => {
+			const primaryController = new AbortController()
+			const secondaryController = new AbortController()
+
+			const result = mergeAbortSignals(primaryController.signal, secondaryController.signal)
+
+			expect(result.aborted).toBe(false)
+
+			primaryController.abort()
+
+			expect(result.aborted).toBe(true)
+		})
+
+		it("returns an aborted signal when primary is already aborted", () => {
+			const primaryController = new AbortController()
+			const secondaryController = new AbortController()
+			primaryController.abort()
+
+			const result = mergeAbortSignals(primaryController.signal, secondaryController.signal)
 
 			expect(result.aborted).toBe(true)
 		})

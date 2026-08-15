@@ -31,12 +31,14 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	}
 
 	/**
-	 * Add an abort signal from metadata.
+	 * Set the abort signal from metadata, replacing any previously configured
+	 * signal (including one created by addMergedSignal). Use addMergedSignal to
+	 * combine signals instead of overwriting them.
 	 *
 	 * @param metadata - Optional metadata containing an abortSignal
 	 * @returns this for chainable calls
 	 */
-	addAbortSignal(metadata?: ApiHandlerCreateMessageMetadata): this {
+	setAbortSignal(metadata?: ApiHandlerCreateMessageMetadata): this {
 		if (!metadata?.abortSignal) {
 			return this
 		}
@@ -130,15 +132,16 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	 * Returns a shallow copy of the internal options to ensure immutability.
 	 * Returns undefined if no options have been set.
 	 *
-	 * @returns The built configuration or undefined if empty
+	 * @returns A partial built configuration (only the options that were set) or
+	 * undefined if empty
 	 */
-	build(): TOptions | undefined {
+	build(): Partial<TOptions> | undefined {
 		const keys = Object.keys(this.options as object)
 		if (keys.length === 0) {
 			return undefined
 		}
 
-		return { ...this.options } as TOptions
+		return { ...this.options }
 	}
 
 	/**
@@ -151,23 +154,9 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	static fromMetadata<TOptions extends RequestConfigOptionsBase = RequestConfigOptions>(
 		metadata?: ApiHandlerCreateMessageMetadata,
 		extraOptions?: Partial<TOptions>,
-	): TOptions | undefined {
+	): Partial<TOptions> | undefined {
 		const builder = new RequestConfigBuilder<TOptions>(extraOptions)
-		builder.addAbortSignal(metadata)
+		builder.setAbortSignal(metadata)
 		return builder.build()
-	}
-
-	/**
-	 * Merge multiple abort signals using the standard API.
-	 *
-	 * Uses `AbortSignal.any()` which correctly handles the case where
-	 * any signal is already aborted.
-	 *
-	 * @param primarySignal - The primary abort signal
-	 * @param secondarySignal - Optional secondary abort signal
-	 * @returns A merged AbortSignal that aborts when any input signal aborts
-	 */
-	static mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: AbortSignal): AbortSignal {
-		return mergeAbortSignals(primarySignal, secondarySignal)
 	}
 }
