@@ -308,7 +308,8 @@ describe("GeminiHandler", () => {
 				},
 			]
 			const metadata = {
-				tools: [{ function: { name: "read_file", description: "", parameters: {} } }],
+				taskId: "test-task",
+				tools: [{ type: "function", function: { name: "read_file", description: "", parameters: {} } }],
 			} satisfies ApiHandlerCreateMessageMetadata
 
 			mockGenerateContentStream.mockResolvedValue(
