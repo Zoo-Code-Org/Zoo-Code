@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Opencode Go API Anahtarı Al",
 		"kenariApiKey": "Kenari API Anahtarı",
 		"getKenariApiKey": "Kenari API Anahtarı Al",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Anahtarı",
+			"getApiKey": "NanoGPT API Anahtarı Al",
+			"model": "Model",
+			"routingPreference": "Yönlendirme Tercihi",
+			"routingOptions": {
+				"automatic": "Otomatik",
+				"fastest": "En hızlı",
+				"cheapest": "En ucuz",
+				"lowestLatency": "En düşük gecikme",
+				"highestThroughput": "En yüksek verim",
+				"toolCapable": "Araç destekli",
+				"cacheCapable": "Önbellek destekli"
+			},
+			"automaticExplanation": "Otomatik, yönlendirme son eki uygulamaz.",
+			"billingWarning": "Gelişmiş yönlendirme tercihleri kullanıma göre ödeme yönlendirmesini kullanabilir ve NanoGPT'nin güncel faturalandırma kurallarına bağlı olarak abonelik kapsamını atlayabilir.",
+			"routingDocs": "NanoGPT yönlendirme ve faturalandırma ayrıntılarını görüntüle"
+		},
 		"apiKeyStorageNotice": "API anahtarları VSCode'un Gizli Depolamasında güvenli bir şekilde saklanır",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

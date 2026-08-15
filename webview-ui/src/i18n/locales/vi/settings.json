@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"kenariApiKey": "Khóa API Kenari",
 		"getKenariApiKey": "Lấy khóa API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Khóa API NanoGPT",
+			"getApiKey": "Lấy khóa API NanoGPT",
+			"model": "Mô hình",
+			"routingPreference": "Tùy chọn định tuyến",
+			"routingOptions": {
+				"automatic": "Tự động",
+				"fastest": "Nhanh nhất",
+				"cheapest": "Rẻ nhất",
+				"lowestLatency": "Độ trễ thấp nhất",
+				"highestThroughput": "Thông lượng cao nhất",
+				"toolCapable": "Hỗ trợ công cụ",
+				"cacheCapable": "Hỗ trợ bộ nhớ đệm"
+			},
+			"automaticExplanation": "Tự động không áp dụng hậu tố định tuyến.",
+			"billingWarning": "Tùy chọn định tuyến nâng cao có thể sử dụng định tuyến trả theo mức dùng và có thể không thuộc phạm vi gói đăng ký, tùy theo quy tắc thanh toán hiện tại của NanoGPT.",
+			"routingDocs": "Xem chi tiết định tuyến và thanh toán NanoGPT"
+		},
 		"apiKeyStorageNotice": "Khóa API được lưu trữ an toàn trong Bộ lưu trữ bí mật của VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

@@ -344,9 +344,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Exécute des tâches plus longues sans interruption avec Destructive Command Guard (DCG) — DCG bloque les commandes dangereuses tout en laissant Zoo travailler sans que tu aies à appuyer continuellement sur les boutons d'approbation.",
-			"highlight2": "Meilleurs contrôles et fiabilité des providers — choisis la vitesse de réponse d'OpenAI Codex, utilise les configurations DeepSeek mises à jour et isole les tâches en cours des changements de profil.",
-			"highlight3": "Correction critique de l'exécution dans le terminal — Zoo attend désormais la fin des commandes du terminal avant de commencer l'étape suivante."
+			"highlight1": "Trois nouveaux modèles majeurs sont arrivés — utilise les tout nouveaux Gemini 3.7 Flash, GLM 5.3 et Qwen3.8 Max, ainsi que les améliorations du raisonnement, des tarifs et de la couverture des providers de DeepSeek V4.",
+			"highlight2": "Connecte-toi à NanoGPT — profite de la découverte dynamique des modèles, du streaming et de la complétion des prompts, avec des préférences de routage pour la vitesse, le prix, la latence, le débit, la prise en charge des outils et le cache.",
+			"highlight3": "Providers et tâches plus fiables — les correctifs améliorent la configuration des endpoints Azure OpenAI, les limites de sortie de Kimi Code, la conservation des titres dans l'historique des tâches et l'import/export des paramètres Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

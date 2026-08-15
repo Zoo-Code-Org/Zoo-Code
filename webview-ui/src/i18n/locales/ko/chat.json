@@ -344,9 +344,9 @@
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
 			"heading": "새로운 기능:",
-			"highlight1": "Destructive Command Guard(DCG)로 더 긴 task를 중단 없이 실행하세요 — DCG가 위험한 명령을 차단하므로 승인 버튼을 계속 누르지 않아도 Zoo가 작업을 이어갈 수 있습니다.",
-			"highlight2": "향상된 provider 제어와 안정성 — OpenAI Codex 응답 속도를 선택하고, 업데이트된 DeepSeek 구성을 사용하며, 실행 중인 task를 프로필 변경과 격리할 수 있습니다.",
-			"highlight3": "중요한 터미널 실행 문제 수정 — 이제 Zoo는 터미널 명령이 끝날 때까지 기다린 후 다음 단계를 시작합니다."
+			"highlight1": "주요 신규 모델 3종이 출시되었습니다 — 완전히 새로운 Gemini 3.7 Flash, GLM 5.3, Qwen3.8 Max 모델과 업데이트된 DeepSeek V4 reasoning, 가격 및 provider 지원을 사용해 보세요.",
+			"highlight2": "NanoGPT에 연결하세요 — 동적 모델 검색, 스트리밍 및 prompt completion과 함께 속도, 가격, 지연 시간, 처리량, 도구 지원, 캐싱을 기준으로 한 라우팅 설정을 사용할 수 있습니다.",
+			"highlight3": "더 안정적인 provider와 task — Azure OpenAI endpoint 설정, Kimi Code 출력 제한, task 기록 제목 보존, Zoo 설정 가져오기/내보내기가 개선되었습니다."
 		},
 		"cloudAgents": {
 			"heading": "클라우드의 새로운 기능:",

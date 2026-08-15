@@ -603,4 +603,110 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			}),
 		)
 	})
+
+	it("buffers and saves the complete NanoGPT provider configuration from cached state", async () => {
+		const liveApiConfiguration = {
+			apiProvider: "nanogpt" as const,
+			nanoGptApiKey: "original-key",
+			nanoGptModelId: "openai/original",
+			nanoGptRoutingPreference: "auto" as const,
+		}
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: liveApiConfiguration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<div>
+				<input
+					data-testid="cached-nanogpt-key"
+					value={apiConfiguration.nanoGptApiKey ?? ""}
+					onChange={(event) => setApiConfigurationField("nanoGptApiKey", event.target.value)}
+				/>
+				<input
+					data-testid="cached-nanogpt-model"
+					value={apiConfiguration.nanoGptModelId ?? ""}
+					onChange={(event) => setApiConfigurationField("nanoGptModelId", event.target.value)}
+				/>
+				<select
+					data-testid="cached-nanogpt-routing"
+					value={apiConfiguration.nanoGptRoutingPreference ?? "auto"}
+					onChange={(event) =>
+						setApiConfigurationField(
+							"nanoGptRoutingPreference",
+							event.target.value as
+								| "auto"
+								| "fast"
+								| "cheap"
+								| "latency"
+								| "throughput"
+								| "tools"
+								| "caching",
+						)
+					}>
+					<option value="auto">Automatic</option>
+					<option value="tools">Tool-capable</option>
+				</select>
+			</div>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+
+		expect(await screen.findByTestId("cached-nanogpt-key")).toHaveValue("original-key")
+		expect(screen.getByTestId("cached-nanogpt-model")).toHaveValue("openai/original")
+		expect(screen.getByTestId("cached-nanogpt-routing")).toHaveValue("auto")
+
+		fireEvent.change(screen.getByTestId("cached-nanogpt-key"), { target: { value: "unsaved-key" } })
+		fireEvent.change(screen.getByTestId("cached-nanogpt-model"), { target: { value: "openai/next" } })
+		fireEvent.change(screen.getByTestId("cached-nanogpt-routing"), { target: { value: "tools" } })
+
+		expect(liveApiConfiguration).toEqual({
+			apiProvider: "nanogpt",
+			nanoGptApiKey: "original-key",
+			nanoGptModelId: "openai/original",
+			nanoGptRoutingPreference: "auto",
+		})
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				apiProvider: "nanogpt",
+				nanoGptApiKey: "unsaved-key",
+				nanoGptModelId: "openai/next",
+				nanoGptRoutingPreference: "tools",
+			},
+		})
+	})
+
+	it("discards NanoGPT cached edits and restores the extension values", async () => {
+		const onDone = vi.fn()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: {
+				apiProvider: "nanogpt",
+				nanoGptApiKey: "saved-key",
+				nanoGptModelId: "openai/saved",
+				nanoGptRoutingPreference: "cheap",
+			},
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<input
+				data-testid="cached-nanogpt-key"
+				value={apiConfiguration.nanoGptApiKey ?? ""}
+				onChange={(event) => setApiConfigurationField("nanoGptApiKey", event.target.value)}
+			/>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
+		fireEvent.change(await screen.findByTestId("cached-nanogpt-key"), { target: { value: "discard-me" } })
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+
+		await waitFor(() => expect(screen.getByTestId("cached-nanogpt-key")).toHaveValue("saved-key"))
+		expect(onDone).toHaveBeenCalledOnce()
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+	})
 })

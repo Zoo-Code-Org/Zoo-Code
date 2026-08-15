@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Obtenir clau API de Opencode Go",
 		"kenariApiKey": "Clau API de Kenari",
 		"getKenariApiKey": "Obtenir clau API de Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Clau API de NanoGPT",
+			"getApiKey": "Obtenir clau API de NanoGPT",
+			"model": "Model",
+			"routingPreference": "Preferència d'encaminament",
+			"routingOptions": {
+				"automatic": "Automàtica",
+				"fastest": "Més ràpida",
+				"cheapest": "Més econòmica",
+				"lowestLatency": "Latència més baixa",
+				"highestThroughput": "Rendiment més alt",
+				"toolCapable": "Compatible amb eines",
+				"cacheCapable": "Compatible amb memòria cau"
+			},
+			"automaticExplanation": "L'opció Automàtica no aplica cap sufix d'encaminament.",
+			"billingWarning": "Les preferències d'encaminament avançades poden utilitzar encaminament de pagament per ús i poden quedar fora de la cobertura de la subscripció, segons les regles de facturació actuals de NanoGPT.",
+			"routingDocs": "Consulta els detalls d'encaminament i facturació de NanoGPT"
+		},
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

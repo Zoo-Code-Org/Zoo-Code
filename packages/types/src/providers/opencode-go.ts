@@ -86,6 +86,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"GLM-5.1 is Zhipu's most capable model with a 200k context window, 128k max output, and built-in thinking capabilities. Available via the Opencode Go plan.",
 	},
+	"glm-5.3": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheReadsPrice: 0.26,
+		description:
+			"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available via the Opencode Go plan.",
+	},
 	"glm-5.2": {
 		maxTokens: 131_072,
 		contextWindow: 1_000_000,
@@ -292,9 +307,23 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Qwen3.7 Max - Alibaba's flagship text-only reasoning agent model with a 1M context window, designed for long-horizon agent workflows. Available via the Opencode Go plan.",
 	},
+	"qwen3.8-max": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.25,
+		cacheWritesPrice: 2.5,
+		description:
+			"Qwen3.8 Max - Alibaba's flagship multimodal reasoning model with a 1M context window, 128k max output, and long-horizon coding and agentic capabilities. Available via the Opencode Go plan.",
+	},
 
 	// --- DeepSeek ---
 	"deepseek-v4-pro": {
+		displayName: "DeepSeek V4 Pro 0813",
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
 		supportsImages: false,
@@ -308,11 +337,11 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
 		preserveReasoning: true,
 		reasoningEffort: "high",
-		inputPrice: 1.74,
-		outputPrice: 3.48,
-		cacheReadsPrice: 0.0145,
+		inputPrice: 0.435,
+		outputPrice: 0.87,
+		cacheReadsPrice: 0.003625,
 		description:
-			"DeepSeek-V4-Pro is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
+			"DeepSeek-V4-Pro-0813 is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
 	},
 	"deepseek-v4-flash": {
 		maxTokens: 384_000,
@@ -349,6 +378,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
  */
 export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 	// --- Alibaba Qwen ---
+	"qwen3.8-max",
 	"qwen3.7-max",
 	"qwen3.7-plus",
 	"qwen3.6-plus",

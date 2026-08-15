@@ -1,10 +1,16 @@
-import { anthropicDefaultModelId, mainlandZAiDefaultModelId, providerIdentifiers } from "@roo-code/types"
+import {
+	anthropicDefaultModelId,
+	mainlandZAiDefaultModelId,
+	nanoGptDefaultModelId,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import {
 	PROVIDER_SERVICE_CONFIG,
 	PROVIDER_DEFAULT_MODEL_IDS,
 	getProviderServiceConfig,
 	getProviderModelConfig,
+	getProviderDocsSlug,
 	getDefaultModelIdForProvider,
 	getStaticModelsForProvider,
 	isStaticModelProvider,
@@ -110,6 +116,15 @@ describe("providerModelConfig", () => {
 			expect(defaultId.length).toBeGreaterThan(0)
 		})
 
+		it("returns mainland default for Z.ai with china_api entrypoint", () => {
+			expect(
+				getDefaultModelIdForProvider("zai", {
+					apiProvider: "zai",
+					zaiApiLine: "china_api",
+				}),
+			).toBe(mainlandZAiDefaultModelId)
+		})
+
 		it("returns international default for Z.ai with international_coding entrypoint", () => {
 			const defaultId = getDefaultModelIdForProvider("zai", {
 				apiProvider: "zai",
@@ -159,6 +174,19 @@ describe("providerModelConfig", () => {
 			const config = getProviderModelConfig(providerIdentifiers.anthropic)
 			expect(config).toEqual({ field: "apiModelId", default: anthropicDefaultModelId })
 		})
+
+		it("returns NanoGPT's dynamic model field and fallback", () => {
+			expect(getProviderModelConfig(providerIdentifiers.nanogpt)).toEqual({
+				field: "nanoGptModelId",
+				default: nanoGptDefaultModelId,
+			})
+		})
+	})
+
+	describe("getProviderDocsSlug", () => {
+		it("uses NanoGPT's provider identifier as its external documentation slug", () => {
+			expect(getProviderDocsSlug(providerIdentifiers.nanogpt)).toBe("nanogpt")
+		})
 	})
 
 	describe("getStaticModelsForProvider", () => {
@@ -176,6 +204,30 @@ describe("providerModelConfig", () => {
 		it("returns empty object for providers without static models", () => {
 			const models = getStaticModelsForProvider("openrouter")
 			expect(Object.keys(models).length).toBe(0)
+		})
+
+		it("shows GLM-5.3 only for Z.ai Coding Plan entrypoints", () => {
+			const internationalCoding = getStaticModelsForProvider("zai", undefined, {
+				apiProvider: "zai",
+				zaiApiLine: "international_coding",
+			})
+			const chinaCoding = getStaticModelsForProvider("zai", undefined, {
+				apiProvider: "zai",
+				zaiApiLine: "china_coding",
+			})
+			const internationalApi = getStaticModelsForProvider("zai", undefined, {
+				apiProvider: "zai",
+				zaiApiLine: "international_api",
+			})
+			const chinaApi = getStaticModelsForProvider("zai", undefined, {
+				apiProvider: "zai",
+				zaiApiLine: "china_api",
+			})
+
+			expect(internationalCoding).toHaveProperty("glm-5.3")
+			expect(chinaCoding).toHaveProperty("glm-5.3")
+			expect(internationalApi).not.toHaveProperty("glm-5.3")
+			expect(chinaApi).not.toHaveProperty("glm-5.3")
 		})
 	})
 

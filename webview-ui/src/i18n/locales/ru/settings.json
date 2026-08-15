@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
 		"kenariApiKey": "Ключ API Kenari",
 		"getKenariApiKey": "Получить ключ API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Ключ API NanoGPT",
+			"getApiKey": "Получить ключ API NanoGPT",
+			"model": "Модель",
+			"routingPreference": "Предпочтение маршрутизации",
+			"routingOptions": {
+				"automatic": "Автоматически",
+				"fastest": "Самая быстрая",
+				"cheapest": "Самая дешёвая",
+				"lowestLatency": "Минимальная задержка",
+				"highestThroughput": "Максимальная пропускная способность",
+				"toolCapable": "С поддержкой инструментов",
+				"cacheCapable": "С поддержкой кеша"
+			},
+			"automaticExplanation": "Автоматический режим не применяет суффикс маршрутизации.",
+			"billingWarning": "Расширенные предпочтения маршрутизации могут использовать оплату по факту использования и могут обходить покрытие подписки в зависимости от текущих правил оплаты NanoGPT.",
+			"routingDocs": "Подробнее о маршрутизации и оплате NanoGPT"
+		},
 		"apiKeyStorageNotice": "API-ключи хранятся безопасно в Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

@@ -21,6 +21,7 @@ import { getOpenRouterModels } from "./openrouter"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
 import { getKenariModels } from "./kenari"
+import { getNanoGptModels } from "./nanogpt"
 import { getRequestyModels } from "./requesty"
 import { getUnboundModels } from "./unbound"
 import { getLiteLLMModels } from "./litellm"
@@ -95,6 +96,7 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.moonshot, // Per-key model visibility (api.moonshot.ai vs api.moonshot.cn)
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
+	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
 ])
 
 // Providers whose model lists are scoped to the signed-in user (e.g. per-account
@@ -252,6 +254,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case providerIdentifiers.kenari:
 			models = await getKenariModels(options.apiKey)
+			break
+		case providerIdentifiers.nanogpt:
+			models = await getNanoGptModels(options.apiKey)
 			break
 		case providerIdentifiers.poe:
 			models = await getPoeModels(options.apiKey, options.baseUrl)
@@ -457,6 +462,10 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 			{
 				provider: providerIdentifiers.vercelAiGateway,
 				options: { provider: providerIdentifiers.vercelAiGateway },
+			},
+			{
+				provider: providerIdentifiers.nanogpt,
+				options: { provider: providerIdentifiers.nanogpt },
 			},
 		]
 

@@ -2,13 +2,12 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import {
-	internationalZAiModels,
-	mainlandZAiModels,
 	internationalZAiDefaultModelId,
 	mainlandZAiDefaultModelId,
 	type ModelInfo,
 	ZAI_DEFAULT_TEMPERATURE,
 	zaiApiLineConfigs,
+	getZAiModels,
 } from "@roo-code/types"
 
 import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/api"
@@ -29,14 +28,15 @@ type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStream
 
 export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 	constructor(options: ApiHandlerOptions) {
-		const isChina = zaiApiLineConfigs[options.zaiApiLine ?? "international_coding"].isChina
-		const models = (isChina ? mainlandZAiModels : internationalZAiModels) as unknown as Record<string, ModelInfo>
+		const apiLine = options.zaiApiLine ?? "international_coding"
+		const isChina = zaiApiLineConfigs[apiLine].isChina
+		const models = getZAiModels(apiLine)
 		const defaultModelId = (isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId) as string
 
 		super({
 			...options,
 			providerName: "Z.ai",
-			baseURL: zaiApiLineConfigs[options.zaiApiLine ?? "international_coding"].baseUrl,
+			baseURL: zaiApiLineConfigs[apiLine].baseUrl,
 			apiKey: options.zaiApiKey ?? "not-provided",
 			defaultProviderModelId: defaultModelId,
 			providerModels: models,
@@ -85,12 +85,15 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			this.options.enableReasoningEffort === false
 				? undefined
 				: (this.options.reasoningEffort ?? info.reasoningEffort)
+		const requiresReasoning = info.requiredReasoningEffort === true
 		const effort =
-			raw && raw !== "disable" && Array.isArray(supported) && !supported.includes(raw)
+			requiresReasoning && (!raw || raw === "disable")
 				? info.reasoningEffort
-				: raw
+				: raw && Array.isArray(supported) && !supported.includes(raw)
+					? info.reasoningEffort
+					: raw
 		const reasoningEffort = effort && effort !== "disable" ? effort : undefined
-		const useReasoning = reasoningEffort !== undefined
+		const useReasoning = requiresReasoning || reasoningEffort !== undefined
 
 		const max_tokens =
 			this.options.modelMaxTokens ||
@@ -114,7 +117,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
 			stream: true,
 			stream_options: { include_usage: true },
-			// Thinking is ON by default for these models, so explicitly disable it when needed.
+			// Models with required reasoning stay enabled even when an old setting requests disable.
 			thinking: useReasoning ? { type: "enabled" } : { type: "disabled" },
 			reasoning_effort: reasoningEffort,
 			tools: this.convertToolsForOpenAI(metadata?.tools),

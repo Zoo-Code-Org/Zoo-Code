@@ -77,6 +77,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	NanoGPT,
 	ZooGateway,
 	MiniMax,
 	Mimo,
@@ -677,6 +678,17 @@ const ApiOptions = ({
 						/>
 					)}
 
+					{selectedProvider === providerIdentifiers.nanogpt && (
+						<NanoGPT
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
 					{selectedProvider === providerIdentifiers.zooGateway && (
 						<ZooGateway
 							apiConfiguration={apiConfiguration}
@@ -722,6 +734,7 @@ const ApiOptions = ({
 								models={getStaticModelsForProvider(
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
+									apiConfiguration,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}

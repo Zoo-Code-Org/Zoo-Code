@@ -46,38 +46,22 @@ export const normalizeDeepSeekReasoningEffort = (
 	modelId: DeepSeekModelId,
 	reasoningEffort?: string,
 ): "low" | "high" | "max" | undefined => {
+	// still check the modelId so non-supported models won't produce reasoning efforts
 	switch (modelId) {
 		case "deepseek-v4-flash":
+		case "deepseek-v4-pro":
 			switch (reasoningEffort) {
 				case "low":
 					return "low"
 
+				case "medium":
 				case "high":
-					return "high"
-
 				case "xhigh":
 					return "high"
 
 				case "max":
 					return "max"
 			}
-			break
-
-		case "deepseek-v4-pro":
-			switch (reasoningEffort) {
-				case "low":
-					return "high"
-
-				case "high":
-					return "high"
-
-				case "xhigh":
-					return "max"
-
-				case "max":
-					return "max"
-			}
-			break
 	}
 
 	return undefined

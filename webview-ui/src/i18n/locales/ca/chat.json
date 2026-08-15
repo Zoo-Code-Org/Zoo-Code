@@ -344,9 +344,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Executa tasques més llargues i sense interrupcions amb Destructive Command Guard (DCG) — DCG bloqueja les ordres perilloses mentre permet que Zoo continuï treballant sense que hagis de prémer contínuament els botons d'aprovació.",
-			"highlight2": "Millors controls i fiabilitat dels proveïdors — tria la velocitat de resposta d'OpenAI Codex, utilitza configuracions de DeepSeek actualitzades i mantén les tasques en execució aïllades dels canvis de perfil.",
-			"highlight3": "Correcció crítica de l'execució al terminal — Zoo ara espera que les ordres del terminal acabin abans d'iniciar el pas següent."
+			"highlight1": "Han arribat tres grans models nous — utilitza els nous Gemini 3.7 Flash, GLM 5.3 i Qwen3.8 Max, a més de millores en el raonament, els preus i la cobertura de proveïdors de DeepSeek V4.",
+			"highlight2": "Connecta't a NanoGPT — utilitza el descobriment dinàmic de models, streaming i completions de prompts, i preferències d'encaminament per velocitat, preu, latència, rendiment, compatibilitat amb eines i memòria cau.",
+			"highlight3": "Proveïdors i tasques més fiables — les correccions milloren la configuració dels endpoints d'Azure OpenAI, els límits de sortida de Kimi Code, la conservació dels títols de l'historial de tasques i la importació/exportació de configuració de Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

@@ -20,8 +20,8 @@ import {
 	vscodeLlmDefaultModelId,
 	openAiCodexModels,
 	sambaNovaModels,
-	internationalZAiModels,
-	mainlandZAiModels,
+	getZAiModels,
+	zaiApiLineConfigs,
 	fireworksModels,
 	friendliModels,
 	basetenModels,
@@ -31,6 +31,7 @@ import {
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
+	nanoGptDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
@@ -305,11 +306,12 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.zai: {
-			const isChina = apiConfiguration.zaiApiLine === "china_coding"
-			const models = isChina ? mainlandZAiModels : internationalZAiModels
+			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
+			const isChina = zaiApiLineConfigs[apiLine].isChina
+			const models = getZAiModels(apiLine)
 			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = models[id as keyof typeof models]
+			const id = getValidatedModelId(apiConfiguration.apiModelId, models, defaultModelId)
+			const info = models[id]
 			return { id, info }
 		}
 		case providerIdentifiers.openaiNative: {
@@ -431,6 +433,15 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels[providerIdentifiers.kenari]?.[id] ?? kenariDefaultModelInfo
+			return { id, info }
+		}
+		case providerIdentifiers.nanogpt: {
+			const id = getValidatedModelId(
+				apiConfiguration.nanoGptModelId,
+				routerModels[providerIdentifiers.nanogpt],
+				defaultModelId,
+			)
+			const info = routerModels[providerIdentifiers.nanogpt]?.[id] ?? nanoGptDefaultModelInfo
 			return { id, info }
 		}
 		case providerIdentifiers.zooGateway: {

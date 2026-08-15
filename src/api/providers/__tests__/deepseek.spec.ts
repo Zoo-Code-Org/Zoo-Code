@@ -214,7 +214,7 @@ describe("DeepSeekHandler", () => {
 			expect(model.info).toBeDefined()
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsImages).toBe(false)
 			expect(model.info.supportsPromptCache).toBe(true) // Should be true now
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 		})
@@ -229,7 +229,7 @@ describe("DeepSeekHandler", () => {
 			expect(model.id).toBe("deepseek-v4-flash")
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsImages).toBe(false)
 			expect((model.info as ModelInfo).supportsReasoningEffort).toContain("max")
 		})
 
@@ -243,7 +243,7 @@ describe("DeepSeekHandler", () => {
 			expect(model.info).toBeDefined()
 			expect(model.info.maxTokens).toBe(384_000)
 			expect(model.info.contextWindow).toBe(1_000_000)
-			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsImages).toBe(false)
 			expect(model.info.supportsPromptCache).toBe(true)
 			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")
@@ -617,6 +617,7 @@ describe("DeepSeekHandler", () => {
 
 	describe("normalizeDeepSeekReasoningEffort", () => {
 		// https://api-docs.deepseek.com/guides/thinking_mode/
+		// updated on 2026-08-13
 		it("should map acceptable reasoning efforts the same way as stated by the official documentation", async () => {
 			const mappings: {
 				modelId: DeepSeekModelId
@@ -632,6 +633,11 @@ describe("DeepSeekHandler", () => {
 					modelId: "deepseek-v4-flash",
 					rawReasoningEffort: "low",
 					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash",
+					rawReasoningEffort: "medium",
+					mappedReasoningEffort: "high",
 				},
 				{
 					modelId: "deepseek-v4-flash",
@@ -656,6 +662,11 @@ describe("DeepSeekHandler", () => {
 				{
 					modelId: "deepseek-v4-pro",
 					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "medium",
 					mappedReasoningEffort: "high",
 				},
 				{
@@ -666,7 +677,7 @@ describe("DeepSeekHandler", () => {
 				{
 					modelId: "deepseek-v4-pro",
 					rawReasoningEffort: "xhigh",
-					mappedReasoningEffort: "max",
+					mappedReasoningEffort: "high",
 				},
 				{
 					modelId: "deepseek-v4-pro",

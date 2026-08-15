@@ -46,13 +46,13 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.76.0
+## Điểm mới trong v3.78.0
 
-- **Chạy tác vụ lâu hơn, không bị gián đoạn với Destructive Command Guard (DCG)** — DCG chặn các lệnh nguy hiểm trong khi vẫn để Zoo tiếp tục làm việc mà bạn không phải liên tục bấm nút phê duyệt, đồng thời tăng cường bảo mật cho việc tải xuống và cài đặt binary được quản lý.
-- **Kiểm soát provider và độ tin cậy tốt hơn** — chọn tốc độ phản hồi của OpenAI Codex, dùng cấu hình DeepSeek đã cập nhật và hưởng lợi từ khả năng cách ly mạnh hơn giữa thay đổi hồ sơ provider với tác vụ đang chạy.
-- **Bản sửa lỗi quan trọng cho việc chạy lệnh terminal** — Zoo giờ sẽ chờ lệnh terminal hoàn tất trước khi bắt đầu bước tiếp theo, ngăn công việc chồng chéo và model tiếp tục quá sớm.
-- Cơ chế gom nhóm thông minh hơn sẽ nhóm các phê duyệt công cụ liên quan và giữ riêng những yêu cầu không liên quan.
-- Việc gửi telemetry và tải cache model ổn định hơn khi có lỗi hoặc nhiều yêu cầu đồng thời.
+- **Ba model mới quan trọng đã xuất hiện** — sử dụng các model hoàn toàn mới Gemini 3.7 Flash, GLM 5.3 và Qwen3.8 Max, cùng reasoning, giá và phạm vi provider được cập nhật cho DeepSeek V4.
+- **Kết nối với NanoGPT** — sử dụng khám phá model động, streaming và hoàn thành Prompt, cùng tùy chọn định tuyến theo tốc độ, giá, độ trễ, throughput, hỗ trợ tool và caching.
+- **Provider và task đáng tin cậy hơn** — các bản sửa lỗi cải thiện thiết lập endpoint Azure OpenAI, giới hạn đầu ra Kimi Code, giữ nguyên tiêu đề lịch sử task và nhập/xuất cài đặt Zoo.
+- Destructive Command Guard hiện hỗ trợ máy Mac dùng chip Intel.
+- Các bản cập nhật bảo mật khắc phục lỗ hổng trong `undici` và Mermaid.
 
 ## Zoo Code có thể làm gì cho BẠN?
 
