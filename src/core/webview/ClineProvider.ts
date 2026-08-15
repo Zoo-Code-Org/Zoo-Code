@@ -198,6 +198,7 @@ export class ClineProvider
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
+	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		this.delegationTransitionLocks ??= new Map()
@@ -1113,10 +1114,31 @@ export class ClineProvider
 		await this.handleZooCodeCallback(token)
 	}
 
-	public async createTaskWithHistoryItem(
+	public createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
-	) {
+	): Promise<Task> {
+		// History navigation can arrive concurrently (for example, two rapid
+		// showTaskWithId messages). Serialize the full eviction/installation
+		// transition so both callers cannot observe the same previous registry
+		// state and schedule distinct Task instances for one history item.
+		// Fail forward so one rejected restoration does not poison the queue.
+		const previous = this.historyTaskCreationQueue ?? Promise.resolve()
+		const run = previous.then(
+			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
+			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
+		)
+		this.historyTaskCreationQueue = run.then(
+			() => {},
+			() => {},
+		)
+		return run
+	}
+
+	private async createTaskWithHistoryItemUnlocked(
+		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
+		options?: { startTask?: boolean },
+	): Promise<Task> {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
 		// Restoring provider profiles from task history can overwrite those
