@@ -45,6 +45,29 @@ export function sanitizeSurrogates(text: string): string {
 	return text.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD")
 }
 
+/**
+ * Applies {@link sanitizeSurrogates} to every string nested in a tool-call argument object. The
+ * backend rejects the whole request for a lone surrogate anywhere in the JSON payload, so a tool
+ * argument carrying a sliced astral character fails the request just as message text would.
+ */
+function sanitizeSurrogatesDeep(value: unknown): unknown {
+	if (typeof value === "string") {
+		return sanitizeSurrogates(value)
+	}
+	if (Array.isArray(value)) {
+		return value.map(sanitizeSurrogatesDeep)
+	}
+	if (value && typeof value === "object") {
+		return Object.fromEntries(
+			Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
+				sanitizeSurrogates(key),
+				sanitizeSurrogatesDeep(nested),
+			]),
+		)
+	}
+	return value
+}
+
 export function convertToVsCodeLmMessages(
 	anthropicMessages: Anthropic.Messages.MessageParam[],
 ): vscode.LanguageModelChatMessage[] {
@@ -162,7 +185,7 @@ export function convertToVsCodeLmMessages(
 							new vscode.LanguageModelToolCallPart(
 								toolMessage.id,
 								toolMessage.name,
-								asObjectSafe(toolMessage.input),
+								sanitizeSurrogatesDeep(asObjectSafe(toolMessage.input)) as object,
 							),
 					),
 				]

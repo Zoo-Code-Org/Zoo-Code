@@ -163,6 +163,22 @@ export function trailingPartialToolMarkerLength(text: string): number {
 }
 
 /**
+ * True when an unclosed `<function_calls>` wrapper is open at the end of `before`.
+ *
+ * The probe (.roo/skills/probe-vscode-lm-api/SKILL.md) found this to be the sharpest available
+ * discriminator: all 14 genuine emitted invocations were wrapped, and all 44 quoted-in-prose cases
+ * were bare. Requiring the wrapper therefore makes untrusted bare `<invoke>` markup — which a
+ * prompt-injected file or a quoted example can contain — unable to become a real call.
+ */
+function isInsideFunctionCallsWrapper(before: string): boolean {
+	const lastOpen = before.search(/<(?:antml:)?function_calls\s*>(?![\s\S]*<(?:antml:)?function_calls\s*>)/i)
+	if (lastOpen === -1) {
+		return false
+	}
+	return !/<\/(?:antml:)?function_calls\s*>/i.test(before.slice(lastOpen))
+}
+
+/**
  * True when the block spanning `[index, endIndex)` is being quoted — inside a fenced code block,
  * inside an inline code span, or embedded mid-sentence in plain prose — rather than invoked.
  */
@@ -227,6 +243,7 @@ export function extractLeakedToolCalls(
 		// Quote detection needs the text streamed before the buffer, since a fence may have opened there.
 		if (
 			validToolNames.has(name) &&
+			isInsideFunctionCallsWrapper(precedingText + text.slice(0, match.index)) &&
 			!isQuotedAsCode(
 				precedingText + text,
 				precedingText.length + match.index,

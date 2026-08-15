@@ -385,7 +385,7 @@ describe("VsCodeLmHandler", () => {
 			it("recovers a tool call the model streamed as raw invoke XML", async () => {
 				const chunks = await collect([
 					"Thinking. ",
-					'<invoke name="calculator"><parameter name="operation">add</parameter></invoke>',
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
 				])
 
 				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "Thinking. " }])
@@ -401,8 +401,8 @@ describe("VsCodeLmHandler", () => {
 
 			it("detects a marker split across stream chunks", async () => {
 				const chunks = await collect([
-					"abc <inv",
-					'oke name="calculator"><parameter name="operation">sub</parameter></invoke>',
+					"abc <function_calls><inv",
+					'oke name="calculator"><parameter name="operation">sub</parameter></invoke></function_calls>',
 				])
 
 				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "abc " }])
@@ -423,10 +423,10 @@ describe("VsCodeLmHandler", () => {
 
 			it("buffers across chunks that arrive after the marker", async () => {
 				const chunks = await collect([
-					'prose <invoke name="calculator">',
+					'prose <function_calls><invoke name="calculator">',
 					'<parameter name="operation">',
 					"mul</parameter>",
-					"</invoke>",
+					"</invoke></function_calls>",
 				])
 
 				expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "prose " }])
@@ -446,7 +446,7 @@ describe("VsCodeLmHandler", () => {
 			it("emits prose before the recovered tool call", async () => {
 				const chunks = await collect([
 					"Thinking. ",
-					'<invoke name="calculator"><parameter name="operation">add</parameter></invoke>',
+					'<function_calls><invoke name="calculator"><parameter name="operation">add</parameter></invoke></function_calls>',
 				])
 
 				expect(chunks.map((chunk) => chunk.type)).toEqual(["text", "tool_call", "usage"])
@@ -1347,10 +1347,11 @@ describe("leaked tool-call recovery", () => {
 	// mistaken for a real tool call.
 	const invoke = (name: string, body: string) => `<in${"voke"} name="${name}">${body}</in${"voke"}>`
 	const param = (name: string, value: string) => `<param${"eter"} name="${name}">${value}</param${"eter"}>`
+	const wrap = (body: string) => `<function${"_calls"}>${body}</function${"_calls"}>`
 
 	describe("extractLeakedToolCalls", () => {
 		it("recovers a known-tool block and strips it from the leftover text", () => {
-			const text = `Working on it.\n${invoke("update_todo_list", param("todos", "[x] one\n[ ] two"))}`
+			const text = `Working on it.\n${wrap(invoke("update_todo_list", param("todos", "[x] one\n[ ] two")))}`
 
 			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
@@ -1358,13 +1359,30 @@ describe("leaked tool-call recovery", () => {
 			expect(leftoverText).toBe("Working on it.\n")
 		})
 
-		it("recovers an unwrapped leak preceded by a stray token", () => {
-			const text = `court\n${invoke("update_todo_list", param("todos", "[x] done"))}`
+		it("recovers a wrapped leak preceded by a stray token", () => {
+			const text = `court\n${wrap(invoke("update_todo_list", param("todos", "[x] done")))}`
 
 			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
 			expect(calls).toEqual([{ name: "update_todo_list", input: { todos: "[x] done" } }])
 			expect(leftoverText).toBe("court\n")
+		})
+
+		it("does not recover a bare invoke block with no function_calls wrapper", () => {
+			const text = `court\n${invoke("update_todo_list", param("todos", "[x] done"))}`
+
+			const { calls, leftoverText } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
+			expect(leftoverText).toBe(text)
+		})
+
+		it("does not recover an invoke that follows an already-closed wrapper", () => {
+			const text = `${wrap("")}\n${invoke("update_todo_list", param("todos", "[x] done"))}`
+
+			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
+
+			expect(calls).toHaveLength(0)
 		})
 
 		it("recovers multiple params and strips function-call wrapper tags", () => {
@@ -1485,7 +1503,7 @@ describe("leaked tool-call recovery", () => {
 		})
 
 		it("recovers an invoke block that follows a closed code fence", () => {
-			const text = "```\nexample output\n```\n" + invoke("update_todo_list", param("todos", "[x] one"))
+			const text = "```\nexample output\n```\n" + wrap(invoke("update_todo_list", param("todos", "[x] one")))
 
 			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 
@@ -1495,7 +1513,7 @@ describe("leaked tool-call recovery", () => {
 		it("does not treat doubled angle brackets as trailing prose after stripping", () => {
 			// Defect 1: a single strip pass turns `<<x>>` into a tag-looking `<x>`, so the
 			// trailing-text check must strip repeatedly until stable.
-			const text = invoke("update_todo_list", param("todos", "x")) + "<<script>>"
+			const text = wrap(invoke("update_todo_list", param("todos", "x")) + "<<script>>")
 
 			const { calls } = extractLeakedToolCalls(text, new Set(["update_todo_list"]))
 

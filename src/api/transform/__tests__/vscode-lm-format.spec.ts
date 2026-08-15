@@ -397,6 +397,24 @@ describe("convertToVsCodeLmMessages surrogate sanitization", () => {
 		expect(textValues(result[0])).toContain(sanitized)
 	})
 
+	it("sanitizes strings nested in tool_use input", () => {
+		const result = convertToVsCodeLmMessages([
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use",
+						id: "tool-1",
+						name: "read_file",
+						input: { path: lone, nested: { list: [lone] } },
+					},
+				],
+			},
+		])
+		const toolCall = result[0].content[0] as MockLanguageModelToolCallPart
+		expect(toolCall.input).toEqual({ path: sanitized, nested: { list: [sanitized] } })
+	})
+
 	it("sanitizes assistant text blocks", () => {
 		const result = convertToVsCodeLmMessages([{ role: "assistant", content: [{ type: "text", text: lone }] }])
 		expect(textValues(result[0])).toContain(sanitized)
