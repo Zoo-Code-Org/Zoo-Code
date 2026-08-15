@@ -471,7 +471,42 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		const mockFetch = vitest.fn()
 		vitest.stubGlobal("fetch", mockFetch)
 
-		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toThrow()
+		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// The abort arrives while the request is still in flight, before any event, which is the case
+	// that only works if the caller's signal is genuinely linked to the internal controller. A
+	// broken link would leave the request hanging on a signal that never fires.
+	it("aborts the in-flight request when the caller cancels before any event", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		let signalDuringRequest: AbortSignal | undefined
+
+		const create = vitest.fn().mockImplementation(
+			(_body: unknown, options: { signal: AbortSignal }) =>
+				new Promise((_resolve, reject) => {
+					signalDuringRequest = options.signal
+					// Reject the way the SDK does once the signal it was handed aborts.
+					options.signal.addEventListener("abort", () => reject(new Error("Request was aborted")), {
+						once: true,
+					})
+				}),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const completion = handler.completePrompt("Hello", { abortSignal: controller.signal })
+		// The token lookup and the listener that links the two signals are both async, so aborting
+		// synchronously here would fire before anything is listening.
+		await vitest.waitFor(() => expect(create).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(signalDuringRequest!.aborted).toBe(true)
 		expect(mockFetch).not.toHaveBeenCalled()
 	})
 

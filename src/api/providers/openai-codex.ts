@@ -1335,9 +1335,13 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			return text
 		} catch (error) {
 			// Cancelling is the caller's own doing, not a provider failure, so it is neither
-			// reported to telemetry nor relabelled as a completion error.
+			// reported to telemetry nor relabelled as a completion error. A transport that rejects
+			// on abort reports it in its own words, so it is restated here: callers get one abort
+			// result whether the stream ended quietly or the request threw.
 			if (options?.abortSignal?.aborted) {
-				throw error
+				throw error instanceof DOMException && error.name === "AbortError"
+					? error
+					: new DOMException("OpenAI Codex completion was aborted", "AbortError")
 			}
 
 			const errorModel = this.getModel()
