@@ -97,7 +97,7 @@ describe("executeCommandTool", () => {
 						terminalOutputCharacterLimit: 100000,
 						terminalShellIntegrationDisabled: true,
 					}),
-					postMessageToWebview: vitest.fn(),
+					postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
 				}),
 			},
 			lastMessageTs: Date.now(),
@@ -580,7 +580,7 @@ describe("executeCommandTool", () => {
 			mockCline.providerRef.deref.mockResolvedValue({
 				contextProxy: { getValue: vitest.fn().mockReturnValue(false) },
 				getState: vitest.fn().mockResolvedValue({ terminalShellIntegrationDisabled: false }),
-				postMessageToWebview: vitest.fn(),
+				postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
 			})
 			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(false)
 			const terminal = await setupControllableTerminal()

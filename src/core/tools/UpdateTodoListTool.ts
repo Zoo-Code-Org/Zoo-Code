@@ -64,7 +64,7 @@ export class UpdateTodoListTool extends BaseTool<"update_todo_list"> {
 				approvedTodoList !== undefined && JSON.stringify(normalizedTodos) !== JSON.stringify(approvedTodoList)
 			if (isTodoListChanged) {
 				normalizedTodos = approvedTodoList ?? []
-				task.say(
+				await task.say(
 					"user_edit_todos",
 					JSON.stringify({
 						tool: "updateTodoList",
