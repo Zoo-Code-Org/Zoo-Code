@@ -366,5 +366,56 @@ describe("TaskHeader", () => {
 			expect(scrollBox).not.toBeNull()
 			expect(scrollBox?.className).toContain("max-h-80")
 		})
+
+		it("renders headings and lists in the expanded view", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "# Heading\n- item one\n- item two",
+					images: [],
+				},
+			})
+
+			// Expand via the header container (the raw multi-line title is not a stable text target).
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			const heading = await screen.findByRole("heading")
+			expect(heading.textContent).toBe("Heading")
+			expect(container.querySelector("ul li")).not.toBeNull()
+		})
+
+		it("does not collapse the panel when a rendered markdown link is clicked", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "**bold** [example](https://example.com)",
+					images: [],
+				},
+			})
+
+			// Expand the header.
+			fireEvent.click(screen.getByText("**bold** [example](https://example.com)"))
+			const link = await screen.findByRole("link", { name: "example" })
+
+			// Clicking a rendered link must not toggle isTaskExpanded (the header click
+			// handler ignores anchor targets), so the expanded content stays visible.
+			fireEvent.click(link)
+			expect(container.querySelector("strong")).not.toBeNull()
+		})
+
+		it("renders an empty prompt without crashing", () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: undefined as any, images: [] },
+			})
+
+			// No title text to click, so expand via the header container itself.
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			// The empty prompt renders nothing but must not crash; the rest of the
+			// expanded header (cost row) is still present.
+			expect(screen.getByText("$0.05")).toBeInTheDocument()
+		})
 	})
 })

@@ -165,7 +165,9 @@ const TaskHeader = ({
 							e.target.closest('[role="button"]') ||
 							e.target.closest("[data-radix-popper-content-wrapper]") ||
 							e.target.closest("img") ||
-							e.target.tagName === "IMG")
+							e.target.tagName === "IMG" ||
+							e.target.closest("a") ||
+							e.target.tagName === "A")
 					) {
 						return
 					}
