@@ -326,7 +326,7 @@ const TaskHeader = ({
 							className="text-vscode-font-size overflow-y-auto break-words break-anywhere relative">
 							<div
 								ref={textRef}
-								className="overflow-auto max-h-80 break-words break-anywhere cursor-text py-0.5"
+								className="scrollable overflow-auto max-h-80 break-words break-anywhere cursor-text py-0.5"
 								style={{
 									display: "-webkit-box",
 									WebkitLineClamp: "unset",

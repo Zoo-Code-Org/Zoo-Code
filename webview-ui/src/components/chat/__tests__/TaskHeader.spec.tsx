@@ -351,5 +351,20 @@ describe("TaskHeader", () => {
 			// The raw markdown source must not be displayed verbatim in the expanded view.
 			expect(screen.queryByText("**bold** and `code`")).not.toBeInTheDocument()
 		})
+
+		it("uses the shared scrollable style for the expanded prompt box", () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: "prompt", images: [] },
+			})
+
+			// Expand the header.
+			fireEvent.click(screen.getByText("prompt"))
+
+			// The prompt box must use the VS Code-style .scrollable scrollbar (hover-reveal),
+			// not a default always-visible Chromium scrollbar, so it matches the message list.
+			const scrollBox = container.querySelector(".scrollable")
+			expect(scrollBox).not.toBeNull()
+			expect(scrollBox?.className).toContain("max-h-80")
+		})
 	})
 })
