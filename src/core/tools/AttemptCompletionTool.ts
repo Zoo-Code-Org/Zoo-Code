@@ -78,6 +78,16 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			task.consecutiveMistakeCount = 0
 
+			// Inline subtask phase completion (auto-flattened): clear the marker and let the
+			// loop continue with a tool_result. No askFinishSubTaskApproval — the user is
+			// already watching this same conversation, so an approval popup would be double
+			// friction. This task itself continues as before; it has NOT completed.
+			if (task.inlineSubtask) {
+				task.inlineSubtask = undefined
+				pushToolResult(`[inline subtask completed]\n${result}\nThe parent conversation continues.`)
+				return
+			}
+
 			await task.say("completion_result", result, undefined, false)
 
 			// Whether this attempt_completion call is a stale replay of an already-completed

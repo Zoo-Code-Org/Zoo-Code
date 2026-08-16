@@ -2,7 +2,10 @@ import * as vscode from "vscode"
 
 import { TodoItem } from "@roo-code/types"
 
+import { DEFAULT_AUTO_FLATTEN_ON_LIMIT, DEFAULT_MAX_NESTING_DEPTH } from "@roo-code/types"
+
 import { Task } from "../task/Task"
+import { decideInlineFlatten } from "./inlineSubtask"
 import { getModeBySlug } from "../../shared/modes"
 import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
@@ -96,6 +99,38 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 				return
 			}
 
+			// Auto-flatten inline decision (depth check BEFORE any approval prompt).
+			// When the subtask would exceed maxNestingDepth and autoFlattenOnLimit is set,
+			// it runs inline in this task's own conversation instead of opening a child tab.
+			const maxNestingDepth = state?.maxNestingDepth ?? DEFAULT_MAX_NESTING_DEPTH
+			const autoFlattenOnLimit = state?.autoFlattenOnLimit ?? DEFAULT_AUTO_FLATTEN_ON_LIMIT
+			const decision = decideInlineFlatten({
+				childDepth: task.depth + 1,
+				maxNestingDepth,
+				autoFlattenOnLimit,
+				inlineActive: task.inlineSubtask !== undefined,
+				message: unescapedMessage,
+				todos: todoItems,
+			})
+
+			if (decision.action === "reject-nested") {
+				pushToolResult(formatResponse.toolError(decision.message))
+				return
+			}
+
+			if (decision.action === "flatten") {
+				// Set the phase marker and let the tool_result double as the inline prompt.
+				task.inlineSubtask = { message: unescapedMessage, todos: todoItems }
+				pushToolResult(decision.directive)
+				return
+			}
+
+			if (decision.action === "reject-limit") {
+				pushToolResult(formatResponse.toolError(decision.message))
+				return
+			}
+
+			// decision.action === "delegate" — normal flow unchanged.
 			const toolMessage = JSON.stringify({
 				tool: "newTask",
 				mode: targetMode.name,

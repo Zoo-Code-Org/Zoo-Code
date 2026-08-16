@@ -142,6 +142,24 @@ const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
+/**
+ * In-memory phase marker for an auto-flattened inline subtask.
+ *
+ * When `new_task` would exceed `maxNestingDepth` and `autoFlattenOnLimit` is set,
+ * the subtask is NOT opened as a child Task. Instead the parent Task records this
+ * marker and executes the instruction inline in its own conversation (the tool_result
+ * doubles as the inline prompt). The marker is cleared when the inline phase completes
+ * (`attempt_completion`) or the task is aborted/cancelled.
+ *
+ * Deliberately NOT persisted: inline state is a transient execution phase, not lineage.
+ */
+export interface InlineSubtask {
+	/** The subtask instruction to execute inline. */
+	message: string
+	/** Parsed todos for the subtask (empty when none were provided). */
+	todos: TodoItem[]
+}
+
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
 	apiConfiguration: ProviderSettings
@@ -178,6 +196,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * resumed without their live parent — the provider backfills those before first save.
 	 */
 	readonly depthAuthoritative: boolean
+	/**
+	 * Set while an auto-flattened subtask is executing inline in this task's own
+	 * conversation. Cleared on completion or abort. Never persisted.
+	 */
+	inlineSubtask?: InlineSubtask
 	pendingNewTaskToolCallId?: string
 
 	readonly instanceId: string
@@ -2284,6 +2307,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.abort = true
+
+		// Clear any in-flight inline subtask phase so a cancelled task resumes as an
+		// ordinary parent conversation with no orphaned marker.
+		this.inlineSubtask = undefined
 
 		// Reset consecutive error counters on abort (manual intervention)
 		this.consecutiveNoToolUseCount = 0
