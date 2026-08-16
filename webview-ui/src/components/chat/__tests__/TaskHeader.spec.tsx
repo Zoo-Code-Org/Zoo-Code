@@ -329,4 +329,27 @@ describe("TaskHeader", () => {
 			expect(screen.getByText("25%")).toBeInTheDocument()
 		})
 	})
+
+	describe("Expanded task text markdown rendering", () => {
+		it("shows raw source while collapsed and formatted markdown when expanded", async () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: "**bold** and `code`", images: [] },
+			})
+
+			// Collapsed state renders the raw task text (no markdown formatting yet).
+			expect(screen.getByText("**bold** and `code`")).toBeInTheDocument()
+			expect(container.querySelector("strong")).toBeNull()
+
+			// Expand the header by clicking the collapsed title.
+			fireEvent.click(screen.getByText("**bold** and `code`"))
+
+			// Expanded state applies markdown: **bold** becomes <strong>, `code` becomes <code>.
+			const bold = await screen.findByText("bold")
+			expect(bold.tagName).toBe("STRONG")
+			expect(container.querySelector("code")?.textContent).toBe("code")
+
+			// The raw markdown source must not be displayed verbatim in the expanded view.
+			expect(screen.queryByText("**bold** and `code`")).not.toBeInTheDocument()
+		})
+	})
 })
