@@ -57,6 +57,11 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	getCurrentTaskStack(): string[]
 	/**
+	 * Sets the TaskScheduler concurrency for extension-host tests.
+	 * Intended for test/integration harnesses that need to exercise fan-out.
+	 */
+	setTaskSchedulerMaxConcurrency(maxConcurrency: number): void
+	/**
 	 * Clears the current task.
 	 */
 	clearCurrentTask(lastMessage?: string): Promise<void>

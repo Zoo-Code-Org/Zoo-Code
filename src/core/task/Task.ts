@@ -145,6 +145,8 @@ const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window error
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
 	apiConfiguration: ProviderSettings
+	/** Immutable mode/profile values captured by the provider before task construction. */
+	startupSnapshot?: TaskStartupSnapshot
 	enableCheckpoints?: boolean
 	checkpointTimeout?: number
 	consecutiveMistakeLimit?: number
@@ -163,6 +165,12 @@ export interface TaskOptions extends CreateTaskOptions {
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
 	rateLimitClock?: RateLimitClock
 	diffFuzzyThreshold?: number
+}
+
+export interface TaskStartupSnapshot {
+	apiConfiguration: ProviderSettings
+	mode: string
+	apiConfigName?: string
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -479,6 +487,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		initialStatus,
 		rateLimitClock,
 		diffFuzzyThreshold,
+		startupSnapshot,
 	}: TaskOptions) {
 		super()
 
@@ -527,12 +536,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Failed to initialize RooIgnoreController:", error)
 		})
 
-		this.apiConfiguration = apiConfiguration
+		this.apiConfiguration = startupSnapshot?.apiConfiguration ?? apiConfiguration
 		this.api = buildApiHandler(this.apiConfiguration)
 		this.rateLimitClock = rateLimitClock ?? createRateLimitClock()
 		this.autoApprovalHandler = new AutoApprovalHandler()
 
-		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
+		this.consecutiveMistakeLimit =
+			startupSnapshot?.apiConfiguration.consecutiveMistakeLimit ??
+			consecutiveMistakeLimit ??
+			DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 		this.providerRef = new WeakRef(provider)
 		this.globalStoragePath = provider.context.globalStorageUri.fsPath
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
@@ -552,6 +564,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
 			TelemetryService.instance.captureTaskRestarted(this.taskId)
+		} else if (startupSnapshot) {
+			this._taskMode = startupSnapshot.mode
+			this._taskApiConfigName = startupSnapshot.apiConfigName ?? "default"
+			this.taskModeReady = Promise.resolve()
+			this.taskApiConfigReady = Promise.resolve()
+			TelemetryService.instance.captureTaskCreated(this.taskId)
 		} else {
 			// For new tasks, don't set the mode/apiConfigName yet - wait for async initialization.
 			this._taskMode = undefined
@@ -4053,7 +4071,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			autoCondenseContextPercent = 100,
 			profileThresholds = {},
 		} = state ?? {}
-		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
+		// Use task-local mode/apiConfiguration values, not shared provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
 		const apiConfiguration = this.apiConfiguration
 

@@ -9,6 +9,44 @@ describe("TaskSemaphore", () => {
 		release()
 	})
 
+	it("tryAcquire() reserves an immediately available permit without queueing", async () => {
+		const sem = new TaskSemaphore(1)
+		const release = await sem.tryAcquire()
+
+		expect(release).toBeDefined()
+		expect(sem.available).toBe(0)
+		expect(sem.waiting).toBe(0)
+
+		const queued = sem.acquire()
+		await Promise.resolve()
+		const unavailable = await sem.tryAcquire()
+		expect(unavailable).toBeUndefined()
+		expect(sem.waiting).toBe(1)
+
+		release!()
+		;(await queued)()
+	})
+
+	it("tryAcquire() reserves a permit while a queued waiter is being handed one", async () => {
+		const sem = new TaskSemaphore(2)
+		const release1 = await sem.acquire()
+		const release2 = await sem.acquire()
+		const queued = sem.acquire()
+
+		expect(sem.waiting).toBe(1)
+		release1()
+		release2()
+
+		const reserved = await sem.tryAcquire()
+		expect(reserved).toBeDefined()
+
+		const queuedRelease = await queued
+		queuedRelease()
+		reserved!()
+		expect(sem.available).toBe(2)
+		expect(sem.waiting).toBe(0)
+	})
+
 	it("second acquire() queues when no permits remain; resolves after release", async () => {
 		const sem = new TaskSemaphore(1)
 		const release1 = await sem.acquire()

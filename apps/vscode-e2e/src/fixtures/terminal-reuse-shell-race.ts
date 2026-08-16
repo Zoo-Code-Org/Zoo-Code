@@ -4,10 +4,19 @@ import { toolResultContains } from "./tool-result"
 
 export function addTerminalReuseShellRaceFixtures(mock: InstanceType<typeof LLMock>) {
 	// First command completes — model issues a second command on the same terminal.
-	// With the temp-script fix, both commands now deliver real output.
 	mock.addFixture({
 		match: {
-			predicate: (req) => toolResultContains(req, "call_terminal_reuse_001", ["first", "Exit code: 0"]),
+			predicate: (req) => {
+				const messages = Array.isArray(req?.messages) ? req.messages : []
+				const lastToolMsg = messages.filter((message) => message?.role === "tool").at(-1)
+
+				return (
+					lastToolMsg?.tool_call_id === "call_terminal_reuse_001" &&
+					toolResultContains(req, "call_terminal_reuse_001", [
+						"Command was submitted in the VS Code terminal",
+					])
+				)
+			},
 		},
 		response: {
 			toolCalls: [
@@ -25,7 +34,17 @@ export function addTerminalReuseShellRaceFixtures(mock: InstanceType<typeof LLMo
 	// Second command on the reused terminal also completes.
 	mock.addFixture({
 		match: {
-			predicate: (req) => toolResultContains(req, "call_terminal_reuse_002", ["second", "Exit code: 0"]),
+			predicate: (req) => {
+				const messages = Array.isArray(req?.messages) ? req.messages : []
+				const lastToolMsg = messages.filter((message) => message?.role === "tool").at(-1)
+
+				return (
+					lastToolMsg?.tool_call_id === "call_terminal_reuse_002" &&
+					toolResultContains(req, "call_terminal_reuse_002", [
+						"Command was submitted in the VS Code terminal",
+					])
+				)
+			},
 		},
 		response: {
 			toolCalls: [

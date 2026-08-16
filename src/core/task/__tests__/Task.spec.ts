@@ -60,6 +60,13 @@ function requireDefined<T>(value: T | null | undefined): T {
 	return value
 }
 
+async function getProviderStateWithOverrides(
+	provider: ClineProvider,
+	overrides: Partial<ProviderState>,
+): Promise<ProviderState> {
+	return { ...(await provider.getState()), ...overrides }
+}
+
 // Mock delay before any imports that might use it
 vi.mock("delay", () => ({
 	__esModule: true,
@@ -472,6 +479,48 @@ describe("Cline", () => {
 			expect(cline.diffStrategy).toBeDefined()
 		})
 
+		it("uses startupSnapshot configuration, mode, profile, and mistake-limit precedence", async () => {
+			const startupApiConfiguration: ProviderSettings = {
+				...mockApiConfig,
+				apiModelId: "snapshot-model",
+				consecutiveMistakeLimit: 11,
+			}
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 5,
+				task: "test task",
+				startTask: false,
+				startupSnapshot: {
+					apiConfiguration: startupApiConfiguration,
+					mode: "architect",
+					apiConfigName: "child-profile",
+				},
+			})
+
+			expect(cline.apiConfiguration).toEqual(startupApiConfiguration)
+			expect(cline.consecutiveMistakeLimit).toBe(11)
+			expect(await cline.getTaskMode()).toBe("architect")
+			expect(await cline.getTaskApiConfigName()).toBe("child-profile")
+		})
+
+		it("falls back to the constructor mistake limit when the snapshot has none", async () => {
+			const cline = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				consecutiveMistakeLimit: 7,
+				task: "test task",
+				startTask: false,
+				startupSnapshot: {
+					apiConfiguration: { ...mockApiConfig },
+					mode: "code",
+				},
+			})
+
+			expect(cline.consecutiveMistakeLimit).toBe(7)
+			await expect(cline.getTaskApiConfigName()).resolves.toBe("default")
+		})
+
 		it("should use default consecutiveMistakeLimit when not provided", () => {
 			const cline = new Task({
 				provider: mockProvider,
@@ -725,6 +774,61 @@ describe("Cline", () => {
 					},
 				])
 				expect(Object.keys(cleanConversationHistory[0]!)).toEqual(["role", "content"])
+			})
+
+			it("uses task-local mode and apiConfiguration in request metadata when provider state diverges", async () => {
+				const taskApiConfiguration = {
+					...mockApiConfig,
+					apiProvider: providerIdentifiers.gemini,
+				} as ProviderSettings
+
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					await getProviderStateWithOverrides(mockProvider, {
+						mode: "ask",
+						apiConfiguration: taskApiConfiguration,
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					}),
+				)
+
+				const cline = new Task({
+					provider: mockProvider,
+					apiConfiguration: taskApiConfiguration,
+					task: "test task",
+					startTask: false,
+				})
+				await cline.getTaskMode()
+				vi.spyOn(getTaskTestAccess(cline), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(cline.api, "getModel").mockReturnValue({
+					id: requireDefined(mockApiConfig.apiModelId),
+					info: { contextWindow: 200000, maxTokens: 4096 } as ModelInfo,
+				})
+
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(
+					await getProviderStateWithOverrides(mockProvider, {
+						mode: "code",
+						apiConfiguration: {
+							...mockApiConfig,
+							apiProvider: providerIdentifiers.anthropic,
+						},
+						autoApprovalEnabled: true,
+						requestDelaySeconds: 0,
+					}),
+				)
+
+				const mockStream = (async function* () {
+					yield { type: "text", text: "response" } as ApiStreamChunk
+				})()
+				const createMessageSpy = vi.spyOn(cline.api, "createMessage").mockReturnValue(mockStream)
+				cline.apiConversationHistory = [
+					{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+				]
+
+				await cline.attemptApiRequest(0).next()
+
+				const [, , metadata] = requireDefined(createMessageSpy.mock.calls[0])
+				expect(metadata?.mode).toBe("ask")
+				expect(metadata?.allowedFunctionNames).toBeDefined()
 			})
 
 			it("should shape image blocks for API compatibility before request construction", async () => {

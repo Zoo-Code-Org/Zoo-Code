@@ -102,7 +102,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/provi
 import { ContextProxy } from "../config/ContextProxy"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { Task } from "../task/Task"
+import { Task, type TaskStartupSnapshot } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { ClineMessage, TodoItem } from "@roo-code/types"
@@ -159,6 +159,13 @@ function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): voi
 	void scheduler
 		.schedule(task, () => task.run())
 		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
+}
+
+/** Run `task` using a permit already reserved via `TaskScheduler.tryReserve()`. */
+function runReservedTask(scheduler: TaskScheduler, release: () => void, task: Task, source: string): void {
+	void scheduler
+		.runWithReservation(release, task, () => task.run())
+		.catch((error) => console.error(`[${source}] taskScheduler.runWithReservation failed:`, error))
 }
 
 export class ClineProvider
@@ -563,13 +570,17 @@ export class ClineProvider
 
 	// Removes and destroys the top Cline instance (the current finished task),
 	// activating the previous one (resuming the parent task).
-	async removeClineFromStack() {
+	//
+	// Pass `taskId` to evict a specific task regardless of focus (e.g. rollback
+	// cleanup of a just-created child after focus has already moved elsewhere).
+	// Defaults to the current task, preserving prior behavior.
+	async removeClineFromStack(taskId?: string) {
 		if (this.taskRegistry.length === 0) {
 			return
 		}
 
-		// Remove the focused Cline instance from the stack.
-		let task = this.taskRegistry.current
+		const targetId = taskId ?? this.taskRegistry.current?.taskId
+		let task = targetId ? this.taskRegistry.getById(targetId) : undefined
 		if (task) {
 			task = this.taskRegistry.remove(task.taskId)
 		}
@@ -695,6 +706,17 @@ export class ClineProvider
 
 	public getCurrentTaskStack(): string[] {
 		return this.taskRegistry.taskIds
+	}
+
+	public setTaskSchedulerMaxConcurrency(maxConcurrency: number): void {
+		if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
+			throw new Error(`maxConcurrency must be a positive integer, got ${maxConcurrency}`)
+		}
+		if (this.taskRegistry.length > 0) {
+			throw new Error("Cannot change task scheduler concurrency while tasks are active")
+		}
+		this.taskScheduler.cancelQueued()
+		this.taskScheduler = new TaskScheduler(maxConcurrency)
 	}
 
 	// Pending Edit Operations Management
@@ -1588,7 +1610,25 @@ export class ClineProvider
 	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
-	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+	public async handleModeSwitch(
+		newMode: Mode,
+		targetTask: Task | null | undefined = this.getCurrentTask(),
+	): Promise<void> {
+		await this.handleModeSwitchAndGetStartupSnapshot(newMode, targetTask)
+	}
+
+	public async handleModeSwitchForChild(newMode: Mode, targetTask?: Task | null): Promise<TaskStartupSnapshot> {
+		const startupSnapshot = await this.handleModeSwitchAndGetStartupSnapshot(newMode, targetTask)
+		if (!startupSnapshot) {
+			throw new Error(`Unable to capture startup snapshot for mode '${newMode}'`)
+		}
+		return startupSnapshot
+	}
+
+	private handleModeSwitchAndGetStartupSnapshot(
+		newMode: Mode,
+		targetTask: Task | null | undefined = this.getCurrentTask(),
+	): Promise<TaskStartupSnapshot | undefined> {
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
@@ -1598,7 +1638,7 @@ export class ClineProvider
 		newMode: Mode,
 		targetTask: Task | null | undefined,
 		signal?: AbortSignal,
-	): Promise<void> {
+	): Promise<TaskStartupSnapshot | undefined> {
 		const task = targetTask
 
 		if (task) {
@@ -1639,7 +1679,11 @@ export class ClineProvider
 			if (targetTask !== null) {
 				await this.postStateToWebview()
 			}
-			return
+			return {
+				apiConfiguration: structuredClone(this.contextProxy.getProviderSettings()),
+				mode: newMode,
+				apiConfigName: this.getGlobalState("currentApiConfigName"),
+			}
 		}
 
 		if (signal?.aborted) return
@@ -1673,6 +1717,20 @@ export class ClineProvider
 						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
 						signal,
 					)
+
+					if (signal?.aborted) return
+
+					const startupSnapshot: TaskStartupSnapshot = {
+						apiConfiguration: fullProfile,
+						mode: newMode,
+						apiConfigName: fullProfile.name,
+					}
+
+					if (targetTask !== null) {
+						await this.postStateToWebview()
+					}
+
+					return startupSnapshot
 				} else {
 					// The task will continue with the current/default configuration.
 				}
@@ -1694,6 +1752,12 @@ export class ClineProvider
 
 		if (targetTask !== null) {
 			await this.postStateToWebview()
+		}
+
+		return {
+			apiConfiguration: structuredClone(this.contextProxy.getProviderSettings()),
+			mode: newMode,
+			apiConfigName: this.getGlobalState("currentApiConfigName"),
 		}
 	}
 
@@ -3190,6 +3254,11 @@ export class ClineProvider
 		return this.taskRegistry.current
 	}
 
+	/** All tasks concurrently active in the registry (parent(s) plus any fanned-out children). */
+	public getRunningTasks(): Task[] {
+		return this.taskRegistry.getRunning()
+	}
+
 	private logWebviewHiddenDiagnostics(): void {
 		const task = this.getCurrentTask()
 		if (!task || task.abort || task.abandoned) {
@@ -3262,6 +3331,7 @@ export class ClineProvider
 		parentTask?: Task,
 		options: CreateTaskOptions = {},
 		configuration: RooCodeSettings = {},
+		startupSnapshot?: TaskStartupSnapshot,
 	): Promise<Task> {
 		if (configuration) {
 			await this.setValues(configuration)
@@ -3304,13 +3374,14 @@ export class ClineProvider
 		}
 
 		const {
-			apiConfiguration,
+			apiConfiguration: stateApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
 			experiments,
 			organizationAllowList,
 			diffFuzzyThreshold,
 		} = await this.getState()
+		const apiConfiguration = startupSnapshot?.apiConfiguration ?? stateApiConfiguration
 
 		// Single-open-task invariant: always enforce for user-initiated top-level tasks.
 		if (!parentTask) {
@@ -3326,6 +3397,7 @@ export class ClineProvider
 		const task = new Task({
 			provider: this,
 			apiConfiguration,
+			startupSnapshot,
 			enableCheckpoints,
 			checkpointTimeout,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
@@ -3345,7 +3417,25 @@ export class ClineProvider
 			rateLimitClock: this.rateLimitClock,
 		})
 
-		await this.addClineToStack(task)
+		try {
+			await this.addClineToStack(task)
+		} catch (error) {
+			// addClineToStack() registers the task before preparation/state validation.
+			// If a later setup step fails, remove that exact instance so callers never
+			// inherit a partially registered task.
+			if (this.taskRegistry.getById(task.taskId) === task) {
+				try {
+					await this.removeClineFromStack(task.taskId)
+				} catch (cleanupError) {
+					this.log(
+						`[createTask] Failed to clean up partially registered task ${task.taskId}: ${
+							cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+						}`,
+					)
+				}
+			}
+			throw error
+		}
 		if (options.startTask !== false) {
 			scheduleTask(this.taskScheduler, task, "createTask")
 		}
@@ -3656,12 +3746,49 @@ export class ClineProvider
 	}
 
 	/**
+	 * Undo the "parent kept running" (fan-out) or "parent evicted" (non-fan-out)
+	 * side effect from step 3 of `delegateParentAndOpenChild`, for failures that
+	 * happen before a child exists to attach lineage to. Shared by the
+	 * `createTask()` failure path and the metadata-persistence failure path.
+	 */
+	private async restoreParentOrReleasePermit(
+		parentTaskId: string,
+		fanOut: boolean,
+		childReservedRelease: (() => void) | undefined,
+	): Promise<void> {
+		if (!fanOut) {
+			const maxAttempts = 2
+			for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+				try {
+					const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
+					await this.createTaskWithHistoryItem(parentHistory)
+					return
+				} catch (rollbackError) {
+					this.log(
+						`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback (attempt ${attempt}/${maxAttempts}): ${
+							(rollbackError as Error)?.message ?? String(rollbackError)
+						}`,
+					)
+				}
+			}
+			vscode.window.showErrorMessage(
+				"Failed to restore the parent task after subtask creation failed. Reopen the task from history to continue.",
+			)
+		} else {
+			// The child never reached step 6, so the reserved permit must be
+			// released here or it leaks for the lifetime of the scheduler.
+			childReservedRelease?.()
+		}
+	}
+
+	/**
 	 * Delegate parent task and open child task.
 	 *
-	 * - Enforce single-open invariant
+	 * - Enforce single-open invariant, unless fan-out (maxConcurrency > 1 with a
+	 *   free permit) keeps the parent running alongside the child
 	 * - Persist parent delegation metadata
 	 * - Emit TaskDelegated (task-level; API forwards to provider/bridge)
-	 * - Create child as sole active and switch mode to child's mode
+	 * - Create and focus child, preserving parent reference for lineage, and switch mode to child's mode
 	 */
 	public async delegateParentAndOpenChild(params: {
 		parentTaskId: string
@@ -3717,11 +3844,28 @@ export class ClineProvider
 			)
 		}
 
-		// 3) Enforce single-open invariant by closing/disposing the parent first
-		//    This ensures we never have >1 tasks open at any time during delegation.
+		// 3) Enforce single-open invariant by closing/disposing the parent first —
+		//    unless fan-out is enabled (maxConcurrency > 1) AND a permit can be
+		//    reserved for the child right now, in which case the parent stays
+		//    active on the registry and runs concurrently with the child. This
+		//    path is only reachable via explicit TaskScheduler configuration; at
+		//    the default maxConcurrency=1 it can never be taken.
+		//
+		//    The permit is reserved here — not just checked via `available > 0` —
+		//    because several awaits follow before the child actually starts
+		//    running (mode switch, task creation, history persistence). Checking
+		//    availability without reserving would leave a window where another
+		//    delegation could consume the last permit, leaving the parent live
+		//    but the child queued rather than concurrent. childReservedRelease is
+		//    handed to the scheduler in step 6 instead of it acquiring its own.
 		//    Await abort completion to ensure clean disposal and prevent unhandled rejections.
+		const childReservedRelease =
+			this.taskScheduler.maxConcurrency > 1 ? await this.taskScheduler.tryReserve() : undefined
+		const fanOut = childReservedRelease !== undefined
 		try {
-			await this.removeClineFromStack()
+			if (!fanOut) {
+				await this.removeClineFromStack()
+			}
 		} catch (error) {
 			this.log(
 				`[delegateParentAndOpenChild] Error during parent disposal (non-fatal): ${
@@ -3735,17 +3879,34 @@ export class ClineProvider
 		//    This ensures the child's system prompt and configuration are based on the correct mode.
 		//    The mode switch must happen before createTask() because the Task constructor
 		//    initializes its mode from provider.getState() during initializeTaskMode().
+		//    In fan-out, the parent is still `getCurrentTask()` at this point (it hasn't been
+		//    removed and the child doesn't exist yet) — pass `null` so handleModeSwitch applies
+		//    the global mode/API-config side effects for the child's benefit without stomping
+		//    the still-running parent's own `_taskMode`.
+		const requestedMode = mode as Mode
+		let startupSnapshot: TaskStartupSnapshot | undefined
 		try {
-			await this.handleModeSwitch(mode as any)
+			startupSnapshot = await this.handleModeSwitchForChild(requestedMode, fanOut ? null : undefined)
 		} catch (e) {
 			this.log(
 				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
 					(e as Error)?.message ?? String(e)
 				}`,
 			)
+			// Mode switching happens before child creation. If it fails, do not
+			// leave a fan-out reservation held or leave the parent evicted in the
+			// serial path with no task to resume it.
+			await this.restoreParentOrReleasePermit(parentTaskId, fanOut, childReservedRelease)
+			throw e
+		}
+		if (!startupSnapshot) {
+			await this.restoreParentOrReleasePermit(parentTaskId, fanOut, childReservedRelease)
+			throw new Error(`[delegateParentAndOpenChild] No startup snapshot for mode '${mode}'`)
 		}
 
-		// 4) Create child as sole active (parent reference preserved for lineage)
+		// 4) Create and focus child, preserving parent reference for lineage.
+		// In the non-fan-out path the parent was already removed above, so the
+		// child is the sole active task; in fan-out both remain active.
 		// Pass initialStatus: "active" to ensure the child task's historyItem is created
 		// with status from the start, avoiding race conditions where the task might
 		// call attempt_completion before status is persisted separately.
@@ -3756,11 +3917,60 @@ export class ClineProvider
 		// Without this, the child's fire-and-forget startTask() races with step 5,
 		// and the last writer to globalState overwrites the other's changes—
 		// causing the parent's delegation fields to be lost.
-		const child = await this.createTask(message, undefined, parent as any, {
-			initialTodos,
-			initialStatus: "active",
-			startTask: false,
-		})
+		let child: Task
+		try {
+			child = await this.createTask(
+				message,
+				undefined,
+				parent,
+				{
+					initialTodos,
+					initialStatus: "active",
+					startTask: false,
+				},
+				{},
+				startupSnapshot,
+			)
+		} catch (err) {
+			this.log(
+				`[delegateParentAndOpenChild] createTask failed for parent ${parentTaskId}: ${
+					(err as Error)?.message ?? String(err)
+				}`,
+			)
+			// No child was created, so there is no lineage to unwind — just undo
+			// step 3's parent-eviction (or release the reserved permit in fan-out).
+			await this.restoreParentOrReleasePermit(parentTaskId, fanOut, childReservedRelease)
+			throw err
+		}
+
+		// createTask() -> addClineToStack() -> taskRegistry.push() already focuses
+		// the child. In the fan-out case the parent remains in the registry
+		// alongside it instead of being evicted, so both are now tracked with the
+		// child focused.
+		const cleanupCreatedChild = async (): Promise<void> => {
+			try {
+				// Evict the child by id regardless of current focus. A concurrent
+				// transition may have focused another task since creation.
+				if (this.taskRegistry.getById(child.taskId)) {
+					await this.removeClineFromStack(child.taskId)
+				}
+			} catch (cleanupError) {
+				this.log(
+					`[delegateParentAndOpenChild] Failed to close child ${child.taskId} during rollback: ${
+						cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+					}`,
+				)
+			}
+			try {
+				await this.deleteTaskWithId(child.taskId, false)
+			} catch (cleanupError) {
+				this.log(
+					`[delegateParentAndOpenChild] Failed to delete child ${child.taskId} during rollback: ${
+						cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+					}`,
+				)
+			}
+		}
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a
@@ -3823,43 +4033,31 @@ export class ClineProvider
 					(err as Error)?.message ?? String(err)
 				}`,
 			)
-			try {
-				// Only pop the stack if the child we just created is still on top.
-				// A concurrent delegation could have pushed another child since we created ours.
-				if (this.getCurrentTask()?.taskId === child.taskId) {
-					await this.removeClineFromStack()
-				}
-			} catch (cleanupError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to close paused child ${child.taskId} during rollback: ${
-						(cleanupError as Error)?.message ?? String(cleanupError)
-					}`,
-				)
-			}
-			try {
-				await this.deleteTaskWithId(child.taskId, false)
-			} catch (cleanupError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to delete paused child ${child.taskId} during rollback: ${
-						(cleanupError as Error)?.message ?? String(cleanupError)
-					}`,
-				)
-			}
-			try {
-				const { historyItem: parentHistory } = await this.getTaskWithId(parentTaskId)
-				await this.createTaskWithHistoryItem(parentHistory)
-			} catch (rollbackError) {
-				this.log(
-					`[delegateParentAndOpenChild] Failed to restore parent ${parentTaskId} during rollback: ${
-						(rollbackError as Error)?.message ?? String(rollbackError)
-					}`,
-				)
-			}
+			await cleanupCreatedChild()
+			// In the fan-out case the parent was never removed from the registry
+			// (it kept running throughout), so it must not be re-created here —
+			// doing so would push a duplicate parent Task instance. If the child was
+			// still focused, removeClineFromStack() above already re-focused the
+			// registry onto the parent (TaskRegistry.remove only reassigns focus
+			// when the removed task was current).
+			await this.restoreParentOrReleasePermit(parentTaskId, fanOut, childReservedRelease)
 			throw err
 		}
 
 		// 6) Start the child task now that parent metadata is safely persisted.
-		scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
+		if (
+			fanOut &&
+			(this.taskRegistry.getById(parentTaskId) !== parent || !this.taskRegistry.hasRunning(parentTaskId))
+		) {
+			await cleanupCreatedChild()
+			childReservedRelease?.()
+			throw new Error(`[delegateParentAndOpenChild] Parent ${parentTaskId} is no longer live`)
+		}
+		if (childReservedRelease) {
+			runReservedTask(this.taskScheduler, childReservedRelease, child, "delegateParentAndOpenChild")
+		} else {
+			scheduleTask(this.taskScheduler, child, "delegateParentAndOpenChild")
+		}
 
 		// 7) Emit TaskDelegated (provider-level)
 		try {

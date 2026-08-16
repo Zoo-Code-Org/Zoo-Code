@@ -23,6 +23,7 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 		mockProvider = {
 			context: {} as vscode.ExtensionContext,
 			getTaskWithId: mockGetTaskWithId,
+			setTaskSchedulerMaxConcurrency: vi.fn(),
 			on: vi.fn(),
 		} as unknown as ClineProvider
 
@@ -41,5 +42,11 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 		mockGetTaskWithId.mockRejectedValue(new Error("Task not found"))
 
 		await expect(api.getTaskApiConversationHistoryLength("missing-task")).resolves.toBe(0)
+	})
+
+	it("forwards the test-only scheduler concurrency setting to the provider", () => {
+		api.setTaskSchedulerMaxConcurrency(2)
+
+		expect(mockProvider.setTaskSchedulerMaxConcurrency).toHaveBeenCalledWith(2)
 	})
 })

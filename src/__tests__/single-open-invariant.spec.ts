@@ -21,6 +21,7 @@ type PrivateClineProviderMethods = {
 		this: unknown,
 		...args: Parameters<ClineProvider["createTaskWithHistoryItem"]>
 	) => ReturnType<ClineProvider["createTaskWithHistoryItem"]>
+	addClineToStack: (this: unknown, task: Task) => ReturnType<ClineProvider["addClineToStack"]>
 	evictCurrentTask: (this: unknown) => ReturnType<ClineProvider["evictCurrentTask"]>
 }
 
@@ -33,6 +34,8 @@ vi.mock("../core/task/Task", () => {
 		public instanceId = "inst"
 		public parentTask?: unknown
 		public apiConfiguration: unknown
+		public abort = false
+		public abandoned = false
 		public rootTask?: unknown
 		public abort = false
 		public abandoned = false
@@ -47,6 +50,9 @@ vi.mock("../core/task/Task", () => {
 			this.parentTask = opts.parentTask
 			this.apiConfiguration = opts.apiConfiguration ?? { apiProvider: "anthropic" }
 			opts.onCreated?.(this)
+		}
+		abortTask() {
+			return Promise.resolve()
 		}
 		start() {}
 		run() {
@@ -157,6 +163,54 @@ describe("Single-open-task invariant", () => {
 
 		expect(removeClineFromStack).not.toHaveBeenCalled()
 		expect(addClineToStack).toHaveBeenCalledTimes(1)
+	})
+
+	it("Subtask create: removes the exact child when stack preparation fails after registration", async () => {
+		vi.spyOn(ProfileValidatorMod.ProfileValidator, "isProfileAllowed").mockReturnValue(true)
+		const parentTask = { taskId: "parent-1", abort: false, abandoned: false }
+		const registry = new TaskRegistry()
+		registry.push(parentTask as unknown as Task)
+		const getState = vi
+			.fn()
+			.mockResolvedValueOnce({
+				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				enableCheckpoints: true,
+				checkpointTimeout: 60,
+				organizationAllowList: "*",
+			})
+			.mockResolvedValueOnce({
+				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				mode: undefined,
+				enableCheckpoints: true,
+				checkpointTimeout: 60,
+				organizationAllowList: "*",
+			})
+		const provider = {
+			taskRegistry: registry,
+			taskScheduler: new TaskScheduler(),
+			setValues: vi.fn(),
+			getState,
+			get addClineToStack() {
+				return privateClineProvider.addClineToStack.bind(this)
+			},
+			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			removeClineFromStack: vi.fn(async (taskId?: string) => {
+				const task = taskId ? registry.getById(taskId) : registry.current
+				if (task) registry.remove(task.taskId)
+			}),
+			setProviderProfile: vi.fn(),
+			log: vi.fn(),
+			customModesManager: { getCustomModes: vi.fn().mockResolvedValue([]) },
+			providerSettingsManager: { getModeConfigId: vi.fn(), listConfig: vi.fn() },
+			taskCreationCallback: vi.fn(),
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			taskEventListeners: new WeakMap(),
+		} as unknown as ClineProvider
+
+		await expect(
+			privateClineProvider.createTask.call(provider, "Subtask", undefined, parentTask as unknown as Task),
+		).rejects.toThrow("retrieve_current_mode")
+		expect(registry.taskIds).toEqual([parentTask.taskId])
 	})
 
 	it("History resume path always closes current before rehydration (non-rehydrating case)", async () => {

@@ -254,6 +254,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return this.sidebarProvider.getCurrentTaskStack()
 	}
 
+	public setTaskSchedulerMaxConcurrency(maxConcurrency: number): void {
+		this.sidebarProvider.setTaskSchedulerMaxConcurrency(maxConcurrency)
+	}
+
 	public async clearCurrentTask(_lastMessage?: string) {
 		// Legacy finishSubTask removed; clear current by closing active task instance.
 		await this.sidebarProvider.evictCurrentTask()

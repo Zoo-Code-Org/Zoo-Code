@@ -89,7 +89,7 @@ export function addSearchFilesResultFixtures(mock: InstanceType<typeof LLMock>) 
 			toolName: "search_files",
 			arguments: '{"path":"search-files-tool-fixture","regex":"nonExistentPattern12345"}',
 			toolCallId: "call_search_files_no_match_001",
-			expected: ["No results found"],
+			expected: ["Found 0 results."],
 			result: "No matches were found for `nonExistentPattern12345` in the search fixture directory.",
 			id: "call_search_files_no_match_002",
 		},

@@ -25,7 +25,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
-import { Task, TaskOptions } from "../../task/Task"
+import { Task, TaskOptions, type TaskStartupSnapshot } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import { ClineProvider } from "../ClineProvider"
@@ -1871,6 +1871,44 @@ describe("ClineProvider", () => {
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+
+		it("returns a child startup snapshot without posting parent state when targetTask is null", async () => {
+			const profile = {
+				name: "child-profile",
+				id: "child-profile-id",
+				apiProvider: "anthropic" as const,
+				apiModelId: "child-model",
+			}
+			const fullProfile = { ...profile, apiKey: "child-key" }
+			;(provider as unknown as { providerSettingsManager: Record<string, unknown> }).providerSettingsManager = {
+				getModeConfigId: vi.fn().mockResolvedValue(profile.id),
+				listConfig: vi.fn().mockResolvedValue([profile]),
+				getProfile: vi.fn().mockResolvedValue(fullProfile),
+				activateProfile: vi.fn().mockResolvedValue(fullProfile),
+				setModeConfig: vi.fn(),
+			}
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			const snapshot = await provider.handleModeSwitchForChild("architect", null)
+
+			expect(snapshot).toEqual({
+				apiConfiguration: fullProfile,
+				mode: "architect",
+				apiConfigName: "child-profile",
+			} satisfies TaskStartupSnapshot)
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		it("fails defensively when a child startup snapshot cannot be captured", async () => {
+			const providerWithSnapshotSeam = provider as unknown as {
+				handleModeSwitchAndGetStartupSnapshot: (mode: string, targetTask?: null) => Promise<undefined>
+			}
+			vi.spyOn(providerWithSnapshotSeam, "handleModeSwitchAndGetStartupSnapshot").mockResolvedValue(undefined)
+
+			await expect(provider.handleModeSwitchForChild("architect", null)).rejects.toThrow(
+				"Unable to capture startup snapshot for mode 'architect'",
+			)
 		})
 
 		test("saves current config when switching to mode without config", async () => {

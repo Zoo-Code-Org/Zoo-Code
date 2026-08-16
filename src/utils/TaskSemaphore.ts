@@ -36,6 +36,26 @@ export class TaskSemaphore {
 		return this._waiting
 	}
 
+	/**
+	 * Reserve a permit only if one is immediately free; never queues.
+	 *
+	 * `async-mutex`'s `Semaphore.acquire()` resolves its permit synchronously
+	 * (inside the Promise executor, before `acquire()` returns) whenever a
+	 * permit is free at call time — the queue is only used when none is
+	 * free. So `isLocked()` (== false means a permit is free) followed
+	 * immediately by `acquire()`, with no `await` between them, cannot race:
+	 * nothing else runs on the event loop in that gap. If `isLocked()` was
+	 * false, the following `acquire()` is guaranteed not to queue.
+	 *
+	 * Returns `undefined` without side effects if no permit was free.
+	 */
+	async tryAcquire(): Promise<(() => void) | undefined> {
+		if (this.sem.isLocked()) {
+			return undefined
+		}
+		return this.acquire()
+	}
+
 	async acquire(): Promise<() => void> {
 		// Only count as waiting if the permit won't be granted immediately.
 		const willQueue = this.sem.isLocked()

@@ -13,6 +13,38 @@ describe("TaskScheduler", () => {
 		expect(ran).toBe(true)
 	})
 
+	it("tryReserve() never queues and reserved execution releases on success, error, and abort", async () => {
+		const scheduler = new TaskScheduler(1)
+		const release = await scheduler.tryReserve()
+		expect(release).toBeDefined()
+		expect(scheduler.available).toBe(0)
+		expect(await scheduler.tryReserve()).toBeUndefined()
+
+		await scheduler.runWithReservation(release!, stubTask(), async () => {})
+		expect(scheduler.available).toBe(1)
+
+		const errorRelease = await scheduler.tryReserve()
+		await expect(
+			scheduler.runWithReservation(errorRelease!, stubTask(), async () => {
+				throw new Error("reserved boom")
+			}),
+		).rejects.toThrow("reserved boom")
+		expect(scheduler.available).toBe(1)
+
+		const abortRelease = await scheduler.tryReserve()
+		const abortedTask = { abort: true, abandoned: false } as unknown as Task
+		await scheduler.runWithReservation(abortRelease!, abortedTask, async () => {
+			throw new Error("must not run")
+		})
+		expect(scheduler.available).toBe(1)
+	})
+
+	it("rejects invalid maxConcurrency values", () => {
+		expect(() => new TaskScheduler(0)).toThrow("must be a positive integer")
+		expect(() => new TaskScheduler(1.5)).toThrow("must be a positive integer")
+		expect(() => new TaskScheduler(-1)).toThrow("must be a positive integer")
+	})
+
 	it("queues a second task at maxConcurrency=1 until the first completes", async () => {
 		const scheduler = new TaskScheduler(1)
 		const order: number[] = []
