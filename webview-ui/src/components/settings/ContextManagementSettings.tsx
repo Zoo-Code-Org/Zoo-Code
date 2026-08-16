@@ -3,7 +3,7 @@ import React from "react"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { VSCodeCheckbox, VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
 import { ListChevronsDownUp } from "lucide-react"
-import { DEFAULT_DIFF_FUZZY_THRESHOLD } from "@roo-code/types"
+import { DEFAULT_AUTO_FLATTEN_ON_LIMIT, DEFAULT_DIFF_FUZZY_THRESHOLD, DEFAULT_MAX_NESTING_DEPTH } from "@roo-code/types"
 
 import { supportPrompt } from "@roo/support-prompt"
 
@@ -40,6 +40,8 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	maxDiagnosticMessages?: number
 	writeDelayMs: number
 	diffFuzzyThreshold?: number
+	maxNestingDepth?: number
+	autoFlattenOnLimit?: boolean
 	includeCurrentTime?: boolean
 	includeCurrentCost?: boolean
 	maxGitStatusFiles?: number
@@ -59,6 +61,8 @@ type ContextManagementSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "maxDiagnosticMessages"
 		| "writeDelayMs"
 		| "diffFuzzyThreshold"
+		| "maxNestingDepth"
+		| "autoFlattenOnLimit"
 		| "includeCurrentTime"
 		| "includeCurrentCost"
 		| "maxGitStatusFiles"
@@ -81,6 +85,8 @@ export const ContextManagementSettings = ({
 	maxDiagnosticMessages,
 	writeDelayMs,
 	diffFuzzyThreshold,
+	maxNestingDepth,
+	autoFlattenOnLimit,
 	includeCurrentTime,
 	includeCurrentCost,
 	maxGitStatusFiles,
@@ -430,6 +436,44 @@ export const ContextManagementSettings = ({
 					</div>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
 						{t("settings:contextManagement.fileEdits.diffFuzzyThreshold.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="context-max-nesting-depth"
+					section="contextManagement"
+					label={t("settings:taskTree.maxNestingDepth.label")}>
+					<span className="block font-medium mb-1">{t("settings:taskTree.maxNestingDepth.label")}</span>
+					<div className="flex items-center gap-2">
+						<Slider
+							min={0}
+							max={5}
+							step={1}
+							value={[maxNestingDepth ?? DEFAULT_MAX_NESTING_DEPTH]}
+							onValueChange={([value]) => setCachedStateField("maxNestingDepth", value)}
+							data-testid="max-nesting-depth-slider"
+						/>
+						<span className="w-10">{maxNestingDepth ?? DEFAULT_MAX_NESTING_DEPTH}</span>
+					</div>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:taskTree.maxNestingDepth.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="context-auto-flatten-on-limit"
+					section="contextManagement"
+					label={t("settings:taskTree.autoFlattenOnLimit.label")}>
+					<VSCodeCheckbox
+						checked={autoFlattenOnLimit ?? DEFAULT_AUTO_FLATTEN_ON_LIMIT}
+						onChange={(e: any) => setCachedStateField("autoFlattenOnLimit", e.target.checked)}
+						data-testid="auto-flatten-on-limit-checkbox">
+						<label className="block font-medium mb-1">
+							{t("settings:taskTree.autoFlattenOnLimit.label")}
+						</label>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1 mb-3">
+						{t("settings:taskTree.autoFlattenOnLimit.description")}
 					</div>
 				</SearchableSetting>
 

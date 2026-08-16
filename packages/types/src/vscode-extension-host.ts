@@ -341,6 +341,8 @@ export type ExtensionState = Pick<
 
 	writeDelayMs: number
 	diffFuzzyThreshold: number
+	maxNestingDepth?: number // Maximum task nesting depth (root = 0); default 2, range 0–5
+	autoFlattenOnLimit?: boolean // Execute subtasks inline when the nesting limit is reached; default true
 
 	enableCheckpoints: boolean
 	checkpointTimeout: number // Timeout for checkpoint initialization in seconds (default: 15)

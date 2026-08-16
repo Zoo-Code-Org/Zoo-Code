@@ -767,6 +767,16 @@
 				"description": "Els llindars més baixos fan que les edicions de fitxer siguin més resistents a variacions de format i espais en blanc. Un llindar del 100% requereix una coincidència exacta."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Profunditat màxima d'encadenament de tasques",
+				"description": "Quants nivells de subtasques es poden encadenar (arrel = 0). Un valor de 0 desactiva completament la delegació — cada new_task s'executa en línia a la conversa actual. Interval: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Aplanar automàticament subtasques al límit d'encadenament",
+				"description": "Quan una subtasca superaria la profunditat màxima d'encadenament, s'executa en línia a la conversa actual en lloc d'obrir una nova pestanya. Quan està desactivat, aquestes sol·licituds es rebutgen perquè continueu treballant directament."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Llindar d'activació de condensació",
 			"selectProfile": "Configura el llindar per al perfil",

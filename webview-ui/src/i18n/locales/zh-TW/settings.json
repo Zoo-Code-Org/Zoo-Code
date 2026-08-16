@@ -804,6 +804,16 @@
 				"description": "較低的閾值使檔案編輯對格式和空白變化更具彈性。100%的閾值要求完全匹配。"
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "任務最大巢狀深度",
+				"description": "子任務可以巢狀多少層（根 = 0）。值為 0 時完全停用委派——每個 new_task 都在目前對話中內聯執行。範圍：0–5。"
+			},
+			"autoFlattenOnLimit": {
+				"label": "達到巢狀上限時自動壓平子任務",
+				"description": "當子任務將超過最大巢狀深度時，在目前對話中內聯執行，而不是開啟新分頁。停用後，此類請求將被拒絕，以便你直接繼續工作。"
+			}
+		},
 		"condensingThreshold": {
 			"label": "壓縮觸發閾值",
 			"selectProfile": "設定檔的閾值",

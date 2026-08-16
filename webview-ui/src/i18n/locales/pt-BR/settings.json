@@ -767,6 +767,16 @@
 				"description": "Limites mais baixos tornam as edições de arquivo mais resistentes a variações de formatação e espaços em branco. Um limite de 100% exige uma correspondência exata."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Profundidade máxima de aninhamento de tarefas",
+				"description": "Quantos níveis de subtarefas podem ser aninhados (raiz = 0). Um valor de 0 desativa completamente a delegação — cada new_task é executado em linha na conversa atual. Intervalo: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Achatar automaticamente subtarefas no limite de aninhamento",
+				"description": "Quando uma subtarefa excederia a profundidade máxima de aninhamento, ela é executada em linha na conversa atual em vez de abrir uma nova aba. Quando desativado, essas solicitações são rejeitadas para que você continue trabalhando diretamente."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Limite de Ativação de Condensação",
 			"selectProfile": "Configurar limite para perfil",

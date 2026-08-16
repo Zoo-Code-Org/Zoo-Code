@@ -767,6 +767,16 @@
 				"description": "Niższe progi sprawiają, że edycje plików są bardziej odporne na różnice w formatowaniu i białych znakach. Próg 100% wymaga dokładnego dopasowania."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Maksymalna głębokość zagnieżdżania zadań",
+				"description": "Ile poziomów podzadań może być zagnieżdżonych (korzeń = 0). Wartość 0 całkowicie wyłącza delegowanie — każde new_task jest wykonywane inline w bieżącej rozmowie. Zakres: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Automatyczne spłaszczanie podzadań przy limicie zagnieżdżania",
+				"description": "Gdy podzadanie przekroczyłoby maksymalną głębokość zagnieżdżania, jest wykonywane inline w bieżącej rozmowie zamiast otwierania nowej karty. Gdy wyłączone, takie żądania są odrzucane, abyś mógł kontynuować pracę bezpośrednio."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Próg wyzwalania kondensacji",
 			"selectProfile": "Skonfiguruj próg dla profilu",

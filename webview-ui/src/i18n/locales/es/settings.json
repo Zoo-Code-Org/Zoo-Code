@@ -777,6 +777,16 @@
 				"description": "Los umbrales más bajos hacen que las ediciones de archivos sean más resistentes a variaciones de formato y espacios en blanco. Un umbral del 100% requiere una coincidencia exacta."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Profundidad máxima de anidación de tareas",
+				"description": "Cuántos niveles de subtareas pueden anidarse (raíz = 0). Un valor de 0 desactiva por completo la delegación — cada new_task se ejecuta en línea en la conversación actual. Rango: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Aplanar automáticamente subtareas al límite de anidación",
+				"description": "Cuando una subtarea superaría la profundidad máxima de anidación, se ejecuta en línea en la conversación actual en lugar de abrir una nueva pestaña. Cuando está desactivado, dichas solicitudes se rechazan para que continúes trabajando directamente."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Umbral de condensación de contexto",
 			"selectProfile": "Configurar umbral para perfil",

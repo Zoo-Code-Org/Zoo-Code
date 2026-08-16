@@ -767,6 +767,16 @@
 				"description": "Soglie più basse rendono le modifiche ai file più resilienti a variazioni di formattazione e spazi bianchi. Una soglia del 100% richiede una corrispondenza esatta."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Profondità massima di annidamento dei task",
+				"description": "Quanti livelli di sotto-task possono essere annidati (radice = 0). Un valore di 0 disabilita completamente la delega — ogni new_task viene eseguito in linea nella conversazione attuale. Intervallo: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Appiattisci automaticamente i sotto-task al limite di annidamento",
+				"description": "Quando un sotto-task supererebbe la profondità massima di annidamento, viene eseguito in linea nella conversazione attuale invece di aprire una nuova scheda. Quando disattivato, tali richieste vengono rifiutate così continui a lavorare direttamente."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Soglia di attivazione condensazione",
 			"selectProfile": "Configura soglia per profilo",

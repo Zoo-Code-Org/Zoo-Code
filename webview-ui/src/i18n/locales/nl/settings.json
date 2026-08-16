@@ -777,6 +777,16 @@
 				"description": "Lagere drempelwaarden maken bestandbewerkingen beter bestand tegen opmaak- en witruimtevariaties. Een drempelwaarde van 100% vereist een exacte overeenkomst."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Maximale nestingsdiepte van taken",
+				"description": "Hoeveel niveaus van subtaken genest kunnen worden (wortel = 0). Een waarde van 0 schakelt delegering volledig uit — elke new_task wordt inline uitgevoerd in het huidige gesprek. Bereik: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Subtaken automatisch platteien op nestingslimiet",
+				"description": "Wanneer een subtaak de maximale nestingsdiepte zou overschrijden, wordt deze inline uitgevoerd in het huidige gesprek in plaats van een nieuw tabblad te openen. Wanneer uitgeschakeld, worden dergelijke verzoeken afgewezen zodat u direct blijft werken."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Compressie trigger drempelwaarde",
 			"selectProfile": "Drempelwaarde voor profiel configureren",

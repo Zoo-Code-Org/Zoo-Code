@@ -767,6 +767,16 @@
 				"description": "Ngưỡng thấp hơn làm cho việc chỉnh sửa tệp linh hoạt hơn với các biến thể định dạng và khoảng trắng. Ngưỡng 100% yêu cầu khớp chính xác."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Độ sâu lồng nhau tối đa của tác vụ",
+				"description": "Số mức phụ tác vụ có thể lồng vào nhau (gốc = 0). Giá trị 0 tắt hoàn toàn việc ủy quyền — mọi new_task chạy inline trong cuộc trò chuyện hiện tại. Phạm vi: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Tự động dẹt phụ tác vụ ở giới hạn lồng nhau",
+				"description": "Khi một phụ tác vụ vượt quá độ sâu lồng nhau tối đa, nó được thực thi inline trong cuộc trò chuyện hiện tại thay vì mở tab mới. Khi tắt, các yêu cầu như vậy bị từ chối để bạn tiếp tục làm việc trực tiếp."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Ngưỡng kích hoạt nén",
 			"selectProfile": "Cấu hình ngưỡng cho hồ sơ",

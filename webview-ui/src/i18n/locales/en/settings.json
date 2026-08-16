@@ -857,6 +857,16 @@
 				"description": "Lower thresholds make file edits more resilient to formatting and whitespace variations. A threshold of 100% requires an exact match."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Maximum task nesting depth",
+				"description": "How many levels of subtasks can be nested (root = 0). A value of 0 disables delegation entirely — every new_task runs inline in the current conversation. Range: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Auto-flatten subtasks at nesting limit",
+				"description": "When a subtask would exceed the maximum nesting depth, execute it inline in the current conversation instead of opening a new tab. When disabled, such requests are rejected so you continue working directly."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Condensing Trigger Threshold",
 			"selectProfile": "Configure threshold for profile",

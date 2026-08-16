@@ -745,6 +745,16 @@
 				"description": "Ambang batas yang lebih rendah membuat pengeditan file lebih tahan terhadap variasi format dan spasi. Ambang batas 100% memerlukan kecocokan yang tepat."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Kedalaman penempatan tugas maksimum",
+				"description": "Berapa tingkat sub-tugas yang dapat ditumpuk (akar = 0). Nilai 0 menonaktifkan delegasi sepenuhnya — setiap new_task berjalan inline di percakapan saat ini. Rentang: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Ratakan otomatis sub-tugas pada batas penempatan",
+				"description": "Ketika sub-tugas akan melebihi kedalaman penempatan maksimum, jalankan secara inline di percakapan saat ini alih-alih membuka tab baru. Saat dinonaktifkan, permintaan semacam itu ditolak agar Anda terus bekerja langsung."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Ambang Batas Pemicu Kondensasi",
 			"selectProfile": "Konfigurasi ambang batas untuk profil",

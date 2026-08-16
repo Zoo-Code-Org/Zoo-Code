@@ -49,6 +49,25 @@ export const DEFAULT_DIFF_FUZZY_THRESHOLD = 1.0
 export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 
 /**
+ * Default maximum task nesting depth (root = 0).
+ *
+ * A value of `0` disables delegation entirely — every `new_task` call is executed
+ * inline in the current conversation instead of opening a child tab. The range is
+ * clamped to 0–5 by the settings UI and validated here.
+ */
+export const DEFAULT_MAX_NESTING_DEPTH = 2
+
+/**
+ * Default for auto-flattening when the nesting limit is reached.
+ *
+ * When `true`, a `new_task` call that would exceed `maxNestingDepth` is executed inline
+ * in the current conversation (same Task instance, phase marker) rather than opening a
+ * child tab. When `false`, such a call is rejected with an error result so the model
+ * continues working directly.
+ */
+export const DEFAULT_AUTO_FLATTEN_ON_LIMIT = true
+
+/**
  * Terminal output preview size options for persisted command output.
  *
  * Controls how much command output is kept in memory as a "preview" before
@@ -150,6 +169,18 @@ export const globalSettingsSchema = z.object({
 	allowedMaxCost: z.number().nullish(),
 	autoCondenseContext: z.boolean().optional(),
 	autoCondenseContextPercent: z.number().optional(),
+
+	/**
+	 * Maximum task nesting depth (root = 0). Range 0–5; `0` disables delegation entirely.
+	 * @default 2
+	 */
+	maxNestingDepth: z.number().int().min(0).max(5).optional(),
+	/**
+	 * When the nesting limit is reached, execute the subtask inline in the current
+	 * conversation instead of opening a child tab. When `false`, such calls are rejected.
+	 * @default true
+	 */
+	autoFlattenOnLimit: z.boolean().optional(),
 
 	/**
 	 * Whether to include current time in the environment details

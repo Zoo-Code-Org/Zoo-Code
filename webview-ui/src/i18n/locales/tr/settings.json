@@ -767,6 +767,16 @@
 				"description": "Düşük eşikler, dosya düzenlemelerini biçimlendirme ve boşluk farklılıklarına karşı daha dayanıklı hale getirir. %100 eşik, tam eşleşme gerektirir."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Maksimum görev iç içe derinliği",
+				"description": "Kaç düzeyde alt görevin iç içe geçirilebileceği (kök = 0). 0 değeri devri tamamen devre dışı bırakır — her new_task mevcut sohbette satır içi çalıştırılır. Aralık: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "İç içe sınırında alt görevleri otomatik düzleştir",
+				"description": "Bir alt görev maksimum iç içe derinliği aşacaksa, yeni bir sekme açmak yerine mevcut sohbette satır içi çalıştırılır. Devre dışı bırakıldığında bu tür istekler reddedilir ve doğrudan çalışmaya devam edersiniz."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Sıkıştırma Tetikleme Eşiği",
 			"selectProfile": "Profil için eşik yapılandır",

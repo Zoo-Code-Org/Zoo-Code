@@ -777,6 +777,16 @@
 				"description": "Des seuils plus bas rendent les modifications de fichiers plus résistantes aux variations de formatage et d'espaces blancs. Un seuil de 100% nécessite une correspondance exacte."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Profondeur d'imbrication maximale des tâches",
+				"description": "Nombre de niveaux de sous-tâches pouvant être imbriqués (racine = 0). Une valeur de 0 désactive entièrement la délégation — chaque new_task s'exécute en ligne dans la conversation actuelle. Plage : 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Aplatir automatiquement les sous-tâches à la limite d'imbrication",
+				"description": "Lorsqu'une sous-tâche dépasserait la profondeur maximale d'imbrication, elle s'exécute en ligne dans la conversation actuelle au lieu d'ouvrir un nouvel onglet. Désactivé, ces demandes sont rejetées afin de continuer à travailler directement."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Seuil de condensation du contexte",
 			"selectProfile": "Configurer le seuil pour le profil",

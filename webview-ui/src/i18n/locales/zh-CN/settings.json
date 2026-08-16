@@ -767,6 +767,16 @@
 				"description": "较低的阈值使文件编辑对格式和空白变化更具弹性。100%的阈值要求完全匹配。"
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "任务最大嵌套深度",
+				"description": "子任务可以嵌套多少层（根 = 0）。值为 0 时完全禁用委派——每个 new_task 都在当前对话中内联执行。范围：0–5。"
+			},
+			"autoFlattenOnLimit": {
+				"label": "达到嵌套上限时自动压平子任务",
+				"description": "当子任务将超过最大嵌套深度时，在当前对话中内联执行，而不是打开新标签页。禁用后，此类请求将被拒绝，以便你直接继续工作。"
+			}
+		},
 		"condensingThreshold": {
 			"label": "压缩触发阈值",
 			"selectProfile": "配置配置文件阈值",

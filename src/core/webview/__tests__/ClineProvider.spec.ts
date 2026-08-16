@@ -1474,6 +1474,88 @@ describe("ClineProvider", () => {
 		expect(state.diffFuzzyThreshold).toBe(0.5)
 	})
 
+	describe("taskTree settings round-trip", () => {
+		test("getState defaults maxNestingDepth to 2 and autoFlattenOnLimit to true when unset", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Ensure the settings are not set so their documented defaults apply.
+			await provider.contextProxy.setValue("maxNestingDepth", undefined)
+			await provider.contextProxy.setValue("autoFlattenOnLimit", undefined)
+
+			const state = await provider.getState()
+			expect(state.maxNestingDepth).toBe(2)
+			expect(state.autoFlattenOnLimit).toBe(true)
+		})
+
+		test("handles maxNestingDepth message and clamps out-of-range values", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock
+				.calls[0][0]
+
+			// In-range value persists unchanged.
+			await messageHandler({ type: "updateSettings", updatedSettings: { maxNestingDepth: 3 } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("maxNestingDepth", 3)
+
+			// Above the range clamps to 5.
+			await messageHandler({ type: "updateSettings", updatedSettings: { maxNestingDepth: 9 } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("maxNestingDepth", 5)
+
+			// Below the range clamps to 0 (delegation disabled).
+			await messageHandler({ type: "updateSettings", updatedSettings: { maxNestingDepth: -1 } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("maxNestingDepth", 0)
+
+			// Non-numeric falls back to the default.
+			await messageHandler({ type: "updateSettings", updatedSettings: { maxNestingDepth: "abc" } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("maxNestingDepth", 2)
+
+			// Unset values are not persisted (skipped).
+			const before = updateGlobalStateSpy.mock.calls.length
+			await messageHandler({ type: "updateSettings", updatedSettings: { maxNestingDepth: undefined } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledTimes(before)
+		})
+
+		test("handles autoFlattenOnLimit message as a boolean", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as ReturnType<typeof vi.fn>).mock
+				.calls[0][0]
+
+			await messageHandler({ type: "updateSettings", updatedSettings: { autoFlattenOnLimit: false } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("autoFlattenOnLimit", false)
+
+			// A truthy non-boolean is normalized to true.
+			await messageHandler({ type: "updateSettings", updatedSettings: { autoFlattenOnLimit: 1 } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledWith("autoFlattenOnLimit", true)
+
+			// Unset values are not persisted (skipped).
+			const before = updateGlobalStateSpy.mock.calls.length
+			await messageHandler({ type: "updateSettings", updatedSettings: { autoFlattenOnLimit: undefined } })
+			expect(updateGlobalStateSpy).toHaveBeenCalledTimes(before)
+		})
+
+		test("getStateToPostToWebview returns saved taskTree values", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			await provider.contextProxy.setValue("maxNestingDepth", 4)
+			await provider.contextProxy.setValue("autoFlattenOnLimit", false)
+
+			const state = await provider.getStateToPostToWebview()
+			expect(state.maxNestingDepth).toBe(4)
+			expect(state.autoFlattenOnLimit).toBe(false)
+		})
+
+		test("getStateToPostToWebview defaults taskTree values when unset", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Ensure the settings are not set so their documented defaults apply.
+			await provider.contextProxy.setValue("maxNestingDepth", undefined)
+			await provider.contextProxy.setValue("autoFlattenOnLimit", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+			expect(state.maxNestingDepth).toBe(2)
+			expect(state.autoFlattenOnLimit).toBe(true)
+		})
+	})
+
 	it("loads saved API config when switching modes", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]

@@ -28,6 +28,8 @@ import {
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
+	DEFAULT_MAX_NESTING_DEPTH,
+	DEFAULT_AUTO_FLATTEN_ON_LIMIT,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -801,6 +803,21 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "maxNestingDepth") {
+						// Normalize to an integer clamped to 0–5; skip persistence when unset.
+						if (value === undefined || value === null) {
+							continue
+						}
+						const parsed = Math.round(Number(value))
+						newValue = Number.isFinite(parsed)
+							? Math.min(5, Math.max(0, parsed))
+							: DEFAULT_MAX_NESTING_DEPTH
+					} else if (key === "autoFlattenOnLimit") {
+						// Persist as a boolean; skip persistence when unset.
+						if (value === undefined || value === null) {
+							continue
+						}
+						newValue = Boolean(value)
 					}
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)

@@ -529,4 +529,61 @@ describe("ContextManagementSettings", () => {
 			})
 		})
 	})
+
+	describe("taskTree settings", () => {
+		it("renders max nesting depth slider with default value when unset", () => {
+			render(<ContextManagementSettings {...defaultProps} />)
+
+			const slider = screen.getByTestId("max-nesting-depth-slider")
+			expect(slider).toBeInTheDocument()
+			// Default is 2 (DEFAULT_MAX_NESTING_DEPTH) when the prop is unset.
+			expect(slider).toHaveValue("2")
+		})
+
+		it("renders max nesting depth slider with an explicit value", () => {
+			render(<ContextManagementSettings {...defaultProps} maxNestingDepth={4} />)
+
+			const slider = screen.getByTestId("max-nesting-depth-slider")
+			expect(slider).toHaveValue("4")
+		})
+
+		it("calls setCachedStateField when the max nesting depth slider changes", async () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+			const slider = screen.getByTestId("max-nesting-depth-slider")
+			fireEvent.change(slider, { target: { value: "3" } })
+
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("maxNestingDepth", 3)
+			})
+		})
+
+		it("renders the auto-flatten checkbox checked by default when unset", () => {
+			render(<ContextManagementSettings {...defaultProps} />)
+
+			const checkbox = screen.getByTestId("auto-flatten-on-limit-checkbox")
+			expect(checkbox.querySelector("input")).toBeChecked()
+		})
+
+		it("renders the auto-flatten checkbox unchecked when explicitly false", () => {
+			render(<ContextManagementSettings {...defaultProps} autoFlattenOnLimit={false} />)
+
+			const checkbox = screen.getByTestId("auto-flatten-on-limit-checkbox")
+			expect(checkbox.querySelector("input")).not.toBeChecked()
+		})
+
+		it("calls setCachedStateField when the auto-flatten checkbox is toggled", async () => {
+			const setCachedStateField = vi.fn()
+			render(<ContextManagementSettings {...defaultProps} setCachedStateField={setCachedStateField} />)
+
+			// Default (true) → clicking produces false.
+			const checkbox = screen.getByTestId("auto-flatten-on-limit-checkbox").querySelector("input")!
+			fireEvent.click(checkbox)
+
+			await waitFor(() => {
+				expect(setCachedStateField).toHaveBeenCalledWith("autoFlattenOnLimit", false)
+			})
+		})
+	})
 })

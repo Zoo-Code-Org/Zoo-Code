@@ -767,6 +767,16 @@
 				"description": "Niedrigere Schwellenwerte machen Dateibearbeitungen widerstandsfähiger gegen Formatierungs- und Leerzeichenunterschiede. Ein Schwellenwert von 100% erfordert eine exakte Übereinstimmung."
 			}
 		},
+		"taskTree": {
+			"maxNestingDepth": {
+				"label": "Maximale Aufgaben-Nestungstiefe",
+				"description": "Wie viele Ebenen von Unteraufgaben verschachtelt werden können (Wurzel = 0). Ein Wert von 0 deaktiviert die Delegation vollständig — jedes new_task wird inline im aktuellen Gespräch ausgeführt. Bereich: 0–5."
+			},
+			"autoFlattenOnLimit": {
+				"label": "Unteraufgaben am Nestungslimit automatisch aplanen",
+				"description": "Wenn eine Unteraufgabe die maximale Nestungstiefe überschreiten würde, wird sie stattdessen inline im aktuellen Gespräch ausgeführt und es wird kein neuer Tab geöffnet. Wenn deaktiviert, werden solche Anfragen abgelehnt, damit Sie direkt weiterarbeiten."
+			}
+		},
 		"condensingThreshold": {
 			"label": "Schwellenwert für Kontextkomprimierung",
 			"selectProfile": "Profil für Schwellenwert konfigurieren",
