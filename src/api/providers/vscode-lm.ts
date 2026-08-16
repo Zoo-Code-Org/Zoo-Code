@@ -165,10 +165,10 @@ export function trailingPartialToolMarkerLength(text: string): number {
 /**
  * True when an unclosed `<function_calls>` wrapper is open at the end of `before`.
  *
- * The probe (.roo/skills/probe-vscode-lm-api/SKILL.md) found this to be the sharpest available
- * discriminator: all 14 genuine emitted invocations were wrapped, and all 44 quoted-in-prose cases
- * were bare. Requiring the wrapper therefore makes untrusted bare `<invoke>` markup — which a
- * prompt-injected file or a quoted example can contain — unable to become a real call.
+ * Probing live Copilot models, every genuine invocation observed was wrapped and every
+ * quoted-in-prose case was bare, making the wrapper the sharpest discriminator available.
+ * Requiring it keeps untrusted bare `<invoke>` markup — which a prompt-injected file or a quoted
+ * example can contain — from becoming a real call.
  */
 function isInsideFunctionCallsWrapper(before: string): boolean {
 	const lastOpen = before.search(/<(?:antml:)?function_calls\s*>(?![\s\S]*<(?:antml:)?function_calls\s*>)/i)
