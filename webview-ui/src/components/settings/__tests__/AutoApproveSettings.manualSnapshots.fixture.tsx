@@ -1,3 +1,4 @@
+/* v8 ignore file -- Manual PNG fixtures are baseline assets, not behavior under test. */
 import React from "react"
 
 import screenshot1 from "./__screenshots__/screenshot-1-.png"
