@@ -132,7 +132,7 @@ import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHist
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
 import { MessageManager } from "../message-manager"
-import { validateAndFixToolResultIds } from "./validateToolResultIds"
+import { hoistToolResultsToFront, validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
@@ -4668,9 +4668,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Default path for regular messages (no embedded reasoning)
 			if (msg.role) {
+				const content =
+					msg.role === "user" && Array.isArray(msg.content)
+						? // Fix already-broken persisted tasks affected by bug
+							// https://github.com/Zoo-Code-Org/Zoo-Code/issues/1259
+							// that were created before the `hoistToolResultsToFront()` fix was introduced,
+							// by calling it here.
+							hoistToolResultsToFront(msg.content as Anthropic.Messages.ContentBlockParam[])
+						: (msg.content as Anthropic.Messages.ContentBlockParam[] | string)
+
 				cleanConversationHistory.push({
 					role: msg.role,
-					content: msg.content as Anthropic.Messages.ContentBlockParam[] | string,
+					content,
 				})
 			}
 		}
