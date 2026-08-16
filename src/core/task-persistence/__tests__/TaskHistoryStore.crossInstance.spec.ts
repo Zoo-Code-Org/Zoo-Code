@@ -164,4 +164,52 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(storeA.getAll().length).toBe(10)
 		expect(storeB.getAll().length).toBe(10)
 	})
+
+	/**
+	 * Regression for #1231: two hosts each hold only their own task in cache and
+	 * flush `_index.json` without watcher reconciliation. A cache-snapshot writer
+	 * would drop the other host's entry; disk-authoritative rebuild must keep both.
+	 */
+	it("stale in-memory snapshots cannot drop peer entries from _index.json on flush", async () => {
+		await storeA.initialize()
+		await storeB.initialize()
+
+		// Model both processes flushing inside the watcher debounce window:
+		// no reconcile between upserts and index flushes.
+		disableBackgroundReconciliation(storeA)
+		disableBackgroundReconciliation(storeB)
+
+		await storeA.upsert(makeHistoryItem({ id: "task-a", task: "from A", ts: 1000 }))
+		await storeB.upsert(makeHistoryItem({ id: "task-b", task: "from B", ts: 2000 }))
+
+		// Each cache is intentionally partial — the pre-fix failure mode.
+		expect(storeA.get("task-a")).toBeDefined()
+		expect(storeA.get("task-b")).toBeUndefined()
+		expect(storeB.get("task-b")).toBeDefined()
+		expect(storeB.get("task-a")).toBeUndefined()
+
+		await storeA.flushIndex()
+		await storeB.flushIndex()
+
+		const tasksDir = path.join(tmpDir, "tasks")
+		const taskDirs = (await fs.readdir(tasksDir)).filter((name) => !name.startsWith("_") && !name.startsWith("."))
+		expect(taskDirs.sort()).toEqual(["task-a", "task-b"])
+
+		const indexRaw = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
+		const index = JSON.parse(indexRaw) as { entries: HistoryItem[] }
+		const indexIds = index.entries.map((entry) => entry.id).sort()
+		expect(indexIds).toEqual(["task-a", "task-b"])
+	})
 })
+
+/** Stop fs.watch / periodic reconcile so flushes exercise the stale-cache path only. */
+function disableBackgroundReconciliation(store: TaskHistoryStore): void {
+	if (store["fsWatcher"]) {
+		store["fsWatcher"].close()
+		store["fsWatcher"] = null
+	}
+	if (store["reconcileTimer"]) {
+		clearTimeout(store["reconcileTimer"])
+		store["reconcileTimer"] = null
+	}
+}

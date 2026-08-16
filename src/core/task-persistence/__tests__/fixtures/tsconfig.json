@@ -1,0 +1,10 @@
+{
+	"extends": "../../../../tsconfig.json",
+	"compilerOptions": {
+		"baseUrl": ".",
+		"paths": {
+			"vscode": ["../../../../__mocks__/vscode.js"]
+		}
+	},
+	"include": ["./*.ts"]
+}

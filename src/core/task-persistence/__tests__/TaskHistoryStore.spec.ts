@@ -430,6 +430,30 @@ describe("TaskHistoryStore", () => {
 			expect(index.entries).toHaveLength(1)
 			expect(index.entries[0].id).toBe("flush-task")
 		})
+
+		it("rebuilds the index from on-disk task files rather than a stale cache snapshot", async () => {
+			await store.initialize()
+
+			const cached = makeHistoryItem({ id: "cached-only", task: "in cache", ts: 1000 })
+			const onDiskOnly = makeHistoryItem({ id: "disk-only", task: "on disk", ts: 2000 })
+
+			await store.upsert(cached)
+
+			// Peer process wrote a task file the local cache never saw.
+			const diskOnlyDir = path.join(tmpDir, "tasks", onDiskOnly.id)
+			await fs.mkdir(diskOnlyDir, { recursive: true })
+			await fs.writeFile(path.join(diskOnlyDir, GlobalFileNames.historyItem), JSON.stringify(onDiskOnly), "utf8")
+
+			// Local cache still only knows about its own upsert.
+			expect(store.get("disk-only")).toBeUndefined()
+
+			await store.flushIndex()
+
+			const indexPath = path.join(tmpDir, "tasks", GlobalFileNames.historyIndex)
+			const index = JSON.parse(await fs.readFile(indexPath, "utf8")) as { entries: HistoryItem[] }
+			const ids = index.entries.map((entry) => entry.id).sort()
+			expect(ids).toEqual(["cached-only", "disk-only"])
+		})
 	})
 
 	describe("dispose()", () => {

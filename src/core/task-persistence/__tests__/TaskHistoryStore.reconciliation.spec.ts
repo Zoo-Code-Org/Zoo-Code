@@ -836,6 +836,7 @@ describe("TaskHistoryStore migrateFromGlobalState reconciliation", () => {
 
 	afterEach(async () => {
 		store.dispose()
+		await store.flushIndex()
 		await fs.rm(tmpDir, { recursive: true, force: true })
 	})
 
