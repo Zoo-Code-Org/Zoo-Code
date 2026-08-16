@@ -20,6 +20,8 @@ export interface SubtaskTreeNode {
 	children: SubtaskTreeNode[]
 	/** Whether this node's children are expanded in the UI */
 	isExpanded: boolean
+	/** Nesting depth of this node (root = 0). From persisted `depth` when present, else parentDepth + 1. */
+	depth?: number
 }
 
 /**

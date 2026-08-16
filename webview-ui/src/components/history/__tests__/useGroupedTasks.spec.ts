@@ -558,6 +558,45 @@ describe("buildSubtree", () => {
 		expect(node.children[0].children[0].isExpanded).toBe(true) // grandchild expanded
 		expect(node.children[0].children[0].children[0].isExpanded).toBe(false) // great-grandchild not expanded
 	})
+
+	it("derives depth from the persisted depth field when present", () => {
+		const root = createMockTask({ id: "root", task: "Root", depth: 0 })
+		const child = createMockTask({ id: "child", task: "Child", parentTaskId: "root", depth: 1 })
+
+		const childrenMap = new Map<string, HistoryItem[]>()
+		childrenMap.set("root", [child])
+
+		const node = buildSubtree(root, childrenMap, new Set<string>())
+
+		expect(node.depth).toBe(0)
+		expect(node.children[0].depth).toBe(1)
+	})
+
+	it("falls back to tree position (parentDepth + 1) for legacy items without depth", () => {
+		const root = createMockTask({ id: "root", task: "Root" }) // no depth field
+		const child = createMockTask({ id: "child", task: "Child", parentTaskId: "root" })
+		const grandchild = createMockTask({ id: "grandchild", task: "Grandchild", parentTaskId: "child" })
+
+		const childrenMap = new Map<string, HistoryItem[]>()
+		childrenMap.set("root", [child])
+		childrenMap.set("child", [grandchild])
+
+		const node = buildSubtree(root, childrenMap, new Set<string>())
+
+		// Isolated root resolves to depth 0; descendants derive from tree position.
+		expect(node.depth).toBe(0)
+		expect(node.children[0].depth).toBe(1)
+		expect(node.children[0].children[0].depth).toBe(2)
+	})
+
+	it("honors an explicit parentDepth argument over the default -1", () => {
+		const child = createMockTask({ id: "child", task: "Child" }) // no depth field
+
+		// Called with parentDepth=4 (as if nested under a depth-4 node) → resolves to 5.
+		const node = buildSubtree(child, new Map<string, HistoryItem[]>(), new Set<string>(), 4)
+
+		expect(node.depth).toBe(5)
+	})
 })
 
 describe("countAllSubtasks", () => {

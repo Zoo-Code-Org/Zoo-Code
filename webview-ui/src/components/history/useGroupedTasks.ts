@@ -9,19 +9,25 @@ import type { DisplayHistoryItem, SubtaskTreeNode, TaskGroup, GroupedTasksResult
  * @param task - The task to build a tree node for
  * @param childrenMap - Map of parentId → direct children
  * @param expandedIds - Set of task IDs whose children are currently expanded
+ * @param parentDepth - Depth of the parent node; fallback when `task.depth` is unset (legacy data). Defaults to -1 so an isolated root resolves to depth 0.
  * @returns A SubtaskTreeNode with recursively built children sorted by ts (newest first)
  */
 export function buildSubtree(
 	task: HistoryItem,
 	childrenMap: Map<string, HistoryItem[]>,
 	expandedIds: Set<string>,
+	parentDepth = -1,
 ): SubtaskTreeNode {
 	const directChildren = (childrenMap.get(task.id) || []).slice().sort((a, b) => b.ts - a.ts)
 
+	// Prefer the persisted depth; fall back to tree position for legacy items.
+	const nodeDepth = task.depth ?? parentDepth + 1
+
 	return {
 		item: task as DisplayHistoryItem,
-		children: directChildren.map((child) => buildSubtree(child, childrenMap, expandedIds)),
+		children: directChildren.map((child) => buildSubtree(child, childrenMap, expandedIds, nodeDepth)),
 		isExpanded: expandedIds.has(task.id),
+		depth: nodeDepth,
 	}
 }
 

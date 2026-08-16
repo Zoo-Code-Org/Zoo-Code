@@ -712,6 +712,58 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Cancel cascade: interrupt every LIVE child of the given parent task.
+	 *
+	 * When a task is cancelled, any children it spawned that are still running in the
+	 * registry would otherwise keep streaming as orphans. This aborts each live child
+	 * instance (which also clears its inlineSubtask phase marker) and marks its persisted
+	 * status "interrupted" so the user can resume it later. The parent's delegation link is
+	 * left intact — this mirrors markDelegatedChildInterrupted() on the parent side.
+	 *
+	 * No-op when the task has no live children (the common single-open case, where the child
+	 * is itself the current task and is handled by cancelTaskInternal's own interruption path).
+	 */
+	private async interruptLiveChildren(parentTaskId: string): Promise<void> {
+		const parentHistory = this.taskHistoryStore.get(parentTaskId)
+		const childIds = parentHistory?.childIds ?? []
+
+		for (const childId of childIds) {
+			// Skip children already in a terminal state — never overwrite completed/interrupted.
+			const existingStatus = this.taskHistoryStore.get(childId)?.status
+			if (existingStatus === "interrupted" || existingStatus === "completed") {
+				continue
+			}
+
+			// Only cascade to children that are actually running (not already aborted/abandoned).
+			const liveChild = this.taskRegistry.getById(childId)
+			if (!liveChild || liveChild.abort || liveChild.abandoned) {
+				continue
+			}
+
+			this.log(`[interruptLiveChildren] Cancelling parent ${parentTaskId} — interrupting live child ${childId}`)
+			try {
+				// Abort the live instance (clears inlineSubtask, stops its stream). Fire-and-forget is
+				// acceptable: abortTask settles asynchronously and cancelTaskInternal awaits the parent's
+				// own abort promise before persisting "interrupted".
+				void liveChild.abortTask().catch((err) => {
+					this.log(
+						`[interruptLiveChildren] Failed to abort child ${childId}: ${err instanceof Error ? err.message : String(err)}`,
+					)
+				})
+
+				const childHistory = this.taskHistoryStore.get(childId)
+				if (childHistory && childHistory.status !== "interrupted") {
+					await this.updateTaskHistory({ ...childHistory, status: "interrupted" })
+				}
+			} catch (err) {
+				this.log(
+					`[interruptLiveChildren] Failed to interrupt child ${childId}: ${err instanceof Error ? err.message : String(err)}`,
+				)
+			}
+		}
+	}
+
 	getTaskStackSize(): number {
 		return this.taskRegistry.length
 	}
@@ -3520,6 +3572,14 @@ export class ClineProvider
 		// Wait for abortTask to fully settle (including its final saveClineMessages write)
 		// before we persist "interrupted", so our write is always the last one.
 		await abortPromise.catch(() => {})
+
+		// Cancel cascade: interrupt any live children of this task so they don't keep streaming
+		// as orphans. No-op in the common single-open case (the child is the current task itself).
+		void this.interruptLiveChildren(task.taskId).catch((err) => {
+			this.log(
+				`[cancelTask] Failed to interrupt live children of ${task.taskId}: ${err instanceof Error ? err.message : String(err)}`,
+			)
+		})
 
 		// Defensive safeguard: if current instance already changed, skip rehydrate
 		const current = this.getCurrentTask()
