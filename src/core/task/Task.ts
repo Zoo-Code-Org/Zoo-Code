@@ -117,6 +117,11 @@ import {
 	saveTaskMessages,
 	taskMetadata,
 } from "../task-persistence"
+import {
+	saveConversationCheckpoint,
+	listConversationCheckpoints,
+	type ConversationCheckpoint,
+} from "../checkpoints/conversation-checkpoint"
 import { getEnvironmentDetails } from "../environment/getEnvironmentDetails"
 import { checkContextWindowExceededError } from "../context/context-management/context-error-handling"
 import {
@@ -1194,6 +1199,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Failed to save Roo messages:", error)
 			return false
 		}
+	}
+
+	/**
+	 * Manually-triggered conversation checkpoint (P4 of the Task Tree plan).
+	 *
+	 * Snapshots the task's full message history to `<taskDir>/checkpoints/<id>.json` so the
+	 * user can restore the conversation to this point later. This is distinct from the
+	 * git-based file checkpoints: it captures the CONVERSATION, not the working tree.
+	 */
+	async createConversationCheckpoint(summary?: string): Promise<ConversationCheckpoint> {
+		const taskDir = await getTaskDirectoryPath(this.globalStoragePath, this.taskId)
+		return saveConversationCheckpoint({
+			taskDir,
+			taskId: this.taskId,
+			messages: structuredClone(this.clineMessages),
+			summary,
+		})
+	}
+
+	/** Lists all conversation checkpoints for this task, newest first. */
+	async listConversationCheckpoints(): Promise<ConversationCheckpoint[]> {
+		const taskDir = await getTaskDirectoryPath(this.globalStoragePath, this.taskId)
+		return listConversationCheckpoints(taskDir)
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
