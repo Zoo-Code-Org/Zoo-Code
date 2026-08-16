@@ -345,9 +345,9 @@
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "使用 Destructive Command Guard（DCG）长时间不间断地运行任务 — DCG 会拦截危险命令，让 Zoo 无需你持续点击批准按钮也能继续工作。",
-			"highlight2": "更好的提供商控制和可靠性 — 选择 OpenAI Codex 响应速度、使用更新后的 DeepSeek 配置，并让运行中的任务不受配置文件更改影响。",
-			"highlight3": "关键终端执行问题修复 — Zoo 现在会等待终端命令结束后再开始下一步。"
+			"highlight1": "三款重磅新模型现已推出 — 使用全新的 Gemini 3.7 Flash、GLM 5.3 和 Qwen3.8 Max 模型，以及更新后的 DeepSeek V4 推理、定价和提供商覆盖。",
+			"highlight2": "连接 NanoGPT — 使用动态模型发现、流式传输和 Prompt 补全，并按速度、价格、延迟、吞吐量、工具支持和缓存设置路由偏好。",
+			"highlight3": "更可靠的提供商和任务 — 修复改进了 Azure OpenAI endpoint 设置、Kimi Code 输出限制、任务历史标题保留以及 Zoo 设置的导入/导出。"
 		},
 		"cloudAgents": {
 			"heading": "云端新功能：",

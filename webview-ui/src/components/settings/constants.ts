@@ -70,6 +70,7 @@ export const PROVIDERS: Array<{ value: string; label: string; proxy: boolean }> 
 	{ value: providerIdentifiers.vercelAiGateway, label: "Vercel AI Gateway", proxy: false },
 	{ value: providerIdentifiers.opencodeGo, label: "Opencode Go", proxy: false },
 	{ value: providerIdentifiers.kenari, label: "Kenari", proxy: false },
+	{ value: providerIdentifiers.nanogpt, label: "NanoGPT", proxy: false },
 	{ value: providerIdentifiers.zooGateway, label: "Zoo Gateway", proxy: false },
 	{ value: providerIdentifiers.minimax, label: "MiniMax", proxy: false },
 	{ value: providerIdentifiers.mimo, label: "Xiaomi MiMo", proxy: false },

@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Opencode Go APIキーを取得",
 		"kenariApiKey": "Kenari APIキー",
 		"getKenariApiKey": "Kenari APIキーを取得",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT APIキー",
+			"getApiKey": "NanoGPT APIキーを取得",
+			"model": "モデル",
+			"routingPreference": "ルーティング設定",
+			"routingOptions": {
+				"automatic": "自動",
+				"fastest": "最速",
+				"cheapest": "最安",
+				"lowestLatency": "最低レイテンシ",
+				"highestThroughput": "最高スループット",
+				"toolCapable": "ツール対応",
+				"cacheCapable": "キャッシュ対応"
+			},
+			"automaticExplanation": "自動ではルーティングサフィックスを適用しません。",
+			"billingWarning": "高度なルーティング設定では従量課金ルーティングが使用され、NanoGPTの現在の請求ルールによってはサブスクリプションの対象外になる場合があります。",
+			"routingDocs": "NanoGPTのルーティングと請求の詳細を表示"
+		},
 		"apiKeyStorageNotice": "APIキーはVSCodeのシークレットストレージに安全に保存されます",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

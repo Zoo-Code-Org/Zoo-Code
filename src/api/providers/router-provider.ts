@@ -26,17 +26,10 @@ export abstract class RouterProvider extends BaseProvider {
 	protected readonly modelId?: string
 	protected readonly defaultModelId: string
 	protected readonly defaultModelInfo: ModelInfo
+	protected readonly apiKey?: string
 	protected readonly client: OpenAI
 
-	constructor({
-		options,
-		name,
-		baseURL,
-		apiKey = "not-provided",
-		modelId,
-		defaultModelId,
-		defaultModelInfo,
-	}: RouterProviderOptions) {
+	constructor({ options, name, baseURL, apiKey, modelId, defaultModelId, defaultModelInfo }: RouterProviderOptions) {
 		super()
 
 		this.options = options
@@ -44,10 +37,11 @@ export abstract class RouterProvider extends BaseProvider {
 		this.modelId = modelId
 		this.defaultModelId = defaultModelId
 		this.defaultModelInfo = defaultModelInfo
+		this.apiKey = apiKey
 
 		this.client = new OpenAI({
 			baseURL,
-			apiKey,
+			apiKey: apiKey ?? "not-provided",
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
@@ -88,7 +82,7 @@ export abstract class RouterProvider extends BaseProvider {
 		if (!this.modelFetchPromise) {
 			this.modelFetchPromise = getModels({
 				provider: this.name,
-				apiKey: this.client.apiKey,
+				apiKey: this.apiKey,
 				baseUrl: this.client.baseURL,
 			})
 				.then((models) => {
@@ -127,7 +121,7 @@ export abstract class RouterProvider extends BaseProvider {
 		const cachedModels = getModelsFromCache({
 			provider: this.name,
 			baseUrl: this.client.baseURL,
-			apiKey: this.client.apiKey,
+			apiKey: this.apiKey,
 		})
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls

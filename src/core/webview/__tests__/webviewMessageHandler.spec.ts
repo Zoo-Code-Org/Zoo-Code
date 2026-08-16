@@ -485,6 +485,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
 		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -503,6 +505,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
 				"kimi-code": {},
 			},
 			values: undefined,
@@ -606,6 +609,53 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
+	it("fetches NanoGPT publicly without an API key", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: {} })
+		mockGetModels.mockResolvedValue({
+			"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: "nanogpt" },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(mockFlushModels).not.toHaveBeenCalled()
+	})
+
+	it("prefers an unsaved NanoGPT key and refreshes the matching key-scoped cache", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: { nanoGptApiKey: "saved-key" },
+		})
+		mockGetModels.mockResolvedValue({
+			"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: "nanogpt", nanoGptApiKey: "unsaved-key" },
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "unsaved-key" }, true)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "unsaved-key" })
+	})
+
+	it("uses the saved NanoGPT key for manual refresh", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: { nanoGptApiKey: "saved-key" },
+		})
+		mockGetModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: "nanogpt", refresh: true },
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "saved-key" }, true)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "saved-key" })
+	})
+
 	it("handles LiteLLM models with values from message when config is missing", async () => {
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
@@ -691,6 +741,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
 				"kimi-code": {},
 			},
 			values: undefined,
@@ -716,6 +767,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockResolvedValueOnce(mockModels) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
+			.mockResolvedValueOnce(mockModels) // kenari
+			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
@@ -753,6 +806,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
 				"kimi-code": {},
 			},
 			values: undefined,

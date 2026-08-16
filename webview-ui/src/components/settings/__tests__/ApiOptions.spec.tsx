@@ -420,6 +420,7 @@ describe("ApiOptions", () => {
 		const optionTexts = Array.from(options).map((opt) => opt.textContent)
 		expect(optionTexts).toContain("OpenAI")
 		expect(optionTexts).toContain("Anthropic")
+		expect(optionTexts).toContain("NanoGPT")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options

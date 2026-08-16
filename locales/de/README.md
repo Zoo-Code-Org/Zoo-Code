@@ -47,13 +47,13 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.76.0
+## Neu in v3.78.0
 
-- **Längere, unterbrechungsfreie Aufgaben mit Destructive Command Guard (DCG)** — DCG blockiert gefährliche Befehle und lässt Zoo gleichzeitig weiterarbeiten, ohne dass du ständig Genehmigungen anklicken musst. Abgesicherte Downloads und Installationen der verwalteten Binärdatei sorgen dabei für zusätzliche Sicherheit.
-- **Bessere Anbietersteuerung und Zuverlässigkeit** — wähle die Antwortgeschwindigkeit von OpenAI Codex, nutze aktualisierte DeepSeek-Konfigurationen und profitiere von einer stärkeren Isolierung zwischen Änderungen an Anbieterprofilen und laufenden Aufgaben.
-- **Kritische Korrektur der Terminalausführung** — Zoo wartet jetzt, bis Terminalbefehle abgeschlossen sind, bevor der nächste Schritt beginnt. Dadurch werden sich überschneidende Arbeiten und ein vorzeitiges Fortfahren des Modells verhindert.
-- Intelligentere Bündelung fasst Genehmigungen für zusammengehörige Tools zusammen und hält unabhängige Anfragen getrennt.
-- Telemetrieübermittlung und das Abrufen des Modell-Caches sind bei Fehlern und gleichzeitigen Anfragen robuster.
+- **Drei bedeutende neue Modelle sind da** — nutze die brandneuen Modelle Gemini 3.7 Flash, GLM 5.3 und Qwen3.8 Max sowie aktualisiertes Reasoning, Preise und Anbieterabdeckung für DeepSeek V4.
+- **Verbinde dich mit NanoGPT** — nutze dynamische Modellerkennung, Streaming und Prompt-Vervollständigung sowie Routing-Einstellungen für Geschwindigkeit, Preis, Latenz, Durchsatz, Tool-Unterstützung und Caching.
+- **Zuverlässigere Anbieter und Aufgaben** — Korrekturen verbessern die Einrichtung von Azure-OpenAI-Endpunkten, Kimi-Code-Ausgabelimits, die Beibehaltung von Titeln im Aufgabenverlauf sowie den Import und Export von Zoo-Einstellungen.
+- Destructive Command Guard unterstützt jetzt Intel-basierte Macs.
+- Sicherheitsupdates beheben Schwachstellen in `undici` und Mermaid.
 
 ## Was kann Zoo Code für DICH tun?
 

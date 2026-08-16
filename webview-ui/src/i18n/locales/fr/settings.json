@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Obtenir la clé API Opencode Go",
 		"kenariApiKey": "Clé API Kenari",
 		"getKenariApiKey": "Obtenir la clé API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Clé API NanoGPT",
+			"getApiKey": "Obtenir une clé API NanoGPT",
+			"model": "Modèle",
+			"routingPreference": "Préférence de routage",
+			"routingOptions": {
+				"automatic": "Automatique",
+				"fastest": "Le plus rapide",
+				"cheapest": "Le moins cher",
+				"lowestLatency": "Latence la plus faible",
+				"highestThroughput": "Débit le plus élevé",
+				"toolCapable": "Compatible avec les outils",
+				"cacheCapable": "Compatible avec le cache"
+			},
+			"automaticExplanation": "Automatique n'applique aucun suffixe de routage.",
+			"billingWarning": "Les préférences de routage avancées peuvent utiliser une facturation à l'usage et peuvent contourner la couverture de l'abonnement, selon les règles de facturation actuelles de NanoGPT.",
+			"routingDocs": "Voir les détails de routage et de facturation de NanoGPT"
+		},
 		"apiKeyStorageNotice": "Les clés API sont stockées en toute sécurité dans le stockage sécurisé de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

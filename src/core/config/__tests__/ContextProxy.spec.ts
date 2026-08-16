@@ -308,6 +308,25 @@ describe("ContextProxy", () => {
 	})
 
 	describe("setProviderSettings", () => {
+		it("stores and returns the complete NanoGPT configuration across secret and global state", async () => {
+			await proxy.setProviderSettings({
+				apiProvider: "nanogpt",
+				nanoGptApiKey: "nanogpt-secret",
+				nanoGptModelId: "openai/model",
+				nanoGptRoutingPreference: "throughput",
+			})
+
+			expect(mockSecrets.store).toHaveBeenCalledWith("nanoGptApiKey", "nanogpt-secret")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("nanoGptModelId", "openai/model")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("nanoGptRoutingPreference", "throughput")
+			expect(proxy.getProviderSettings()).toMatchObject({
+				apiProvider: "nanogpt",
+				nanoGptApiKey: "nanogpt-secret",
+				nanoGptModelId: "openai/model",
+				nanoGptRoutingPreference: "throughput",
+			})
+		})
+
 		it("should clear old API configuration values and set new ones", async () => {
 			// Set up initial API configuration values
 			await proxy.updateGlobalState("apiModelId", "old-model")

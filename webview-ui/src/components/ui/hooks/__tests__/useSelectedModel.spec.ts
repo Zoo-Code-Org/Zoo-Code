@@ -16,6 +16,8 @@ import {
 	litellmDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
+	nanoGptDefaultModelId,
+	nanoGptDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
@@ -31,6 +33,9 @@ import {
 	kimiCodeDefaultModelInfo,
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
+	getZAiModels,
+	internationalZAiDefaultModelId,
+	mainlandZAiDefaultModelId,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
 } from "@roo-code/types"
@@ -188,6 +193,7 @@ const emptyRouterModels: RouterModels = {
 	"opencode-go": {},
 	kenari: {},
 	"kimi-code": {},
+	nanogpt: {},
 	ollama: {},
 	lmstudio: {},
 }
@@ -1281,6 +1287,48 @@ describe("useSelectedModel", () => {
 		})
 	})
 
+	describe("nanogpt provider", () => {
+		it("uses dynamic metadata for the configured NanoGPT model", () => {
+			const dynamicInfo: ModelInfo = {
+				maxTokens: 16_384,
+				contextWindow: 256_000,
+				supportsPromptCache: false,
+				description: "Dynamic NanoGPT model",
+			}
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ nanogpt: { "openai/custom": dynamicInfo } }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.nanogpt,
+						nanoGptModelId: "openai/custom",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("openai/custom")
+			expect(result.current.info).toEqual(dynamicInfo)
+		})
+
+		it("uses NanoGPT's shared fallback when its dynamic catalog is empty", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ nanogpt: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.nanogpt,
+						nanoGptModelId: "missing-model",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(nanoGptDefaultModelId)
+			expect(result.current.info).toEqual(nanoGptDefaultModelInfo)
+		})
+	})
+
 	describe("openai provider", () => {
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue({
@@ -1524,6 +1572,50 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+	})
+
+	describe("Z AI provider", () => {
+		it("uses the International Coding catalog when no API line is configured", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(getZAiModels("international_coding")["glm-5.3"])
+		})
+
+		it("uses the China Coding catalog for GLM-5.3", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+				zaiApiLine: "china_coding",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(getZAiModels("china_coding")["glm-5.3"])
+			expect(result.current.info?.inputPrice).toBe(0.68)
+		})
+
+		it.each([
+			["international_api", internationalZAiDefaultModelId],
+			["china_api", mainlandZAiDefaultModelId],
+		] as const)("falls back when GLM-5.3 is unavailable on %s", (zaiApiLine, expectedModelId) => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+				zaiApiLine,
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(expectedModelId)
+			expect(result.current.info).toEqual(getZAiModels(zaiApiLine)[expectedModelId])
 		})
 	})
 

@@ -46,13 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.76.0 में नया क्या है
+## v3.78.0 में नया क्या है
 
-- **Destructive Command Guard (DCG) के साथ लंबे और बिना रुकावट वाले tasks चलाओ** — DCG खतरनाक commands को block करता है और Zoo को लगातार approval buttons दबवाए बिना काम करते रहने देता है; managed binary downloads और installation को भी अधिक सुरक्षित बनाया गया है।
-- **बेहतर provider controls और reliability** — OpenAI Codex की response speed चुनो, updated DeepSeek configurations इस्तेमाल करो और provider-profile changes व चल रहे tasks के बीच अधिक मज़बूत isolation का लाभ लो।
-- **Terminal execution का अहम fix** — Zoo अब अगला step शुरू करने से पहले terminal commands के पूरा होने का इंतज़ार करता है, जिससे overlapping work और model का समय से पहले आगे बढ़ना रुकता है।
-- Smarter batching संबंधित tool approvals को एक साथ रखती है और असंबंधित requests को अलग रखती है।
-- Failures और concurrent requests के दौरान telemetry delivery और model-cache fetching अब अधिक भरोसेमंद हैं।
+- **तीन बड़े नए models आ गए हैं** — बिल्कुल नए Gemini 3.7 Flash, GLM 5.3 और Qwen3.8 Max models का उपयोग करो, साथ ही DeepSeek V4 के updated reasoning, pricing और provider coverage का लाभ लो।
+- **NanoGPT से connect करो** — dynamic model discovery, streaming और prompt completions के साथ speed, price, latency, throughput, tool support और caching के लिए routing preferences का उपयोग करो।
+- **अधिक reliable providers और tasks** — fixes Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation और Zoo settings import/export को बेहतर बनाते हैं।
+- Destructive Command Guard अब Intel-आधारित Macs को support करता है।
+- Security updates `undici` और Mermaid की vulnerabilities को ठीक करते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

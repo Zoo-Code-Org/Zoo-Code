@@ -46,13 +46,13 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.76.0
+## What's New in v3.78.0
 
-- **Run longer, uninterrupted tasks with Destructive Command Guard (DCG)** — DCG blocks dangerous commands while letting Zoo keep working without you continuously pressing approval buttons, backed by hardened managed-binary downloads and installation.
-- **Better provider controls and reliability** — choose OpenAI Codex response speed, use updated DeepSeek configurations, and benefit from stronger isolation between provider-profile changes and running tasks.
-- **Critical terminal execution fix** — Zoo now waits for terminal commands to finish before starting the next step, preventing overlapping work and premature model continuation.
-- Smarter batching groups related tool approvals while keeping unrelated requests separate.
-- Telemetry delivery and model-cache fetching are more resilient under failures and concurrent requests.
+- **Three major new models have arrived** — use the brand-new Gemini 3.7 Flash, GLM 5.3, and Qwen3.8 Max models, plus updated DeepSeek V4 reasoning, pricing, and provider coverage.
+- **Connect to NanoGPT** — use dynamic model discovery, streaming and prompt completions, and routing preferences for speed, price, latency, throughput, tool support, and caching.
+- **More reliable providers and tasks** — fixes improve Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation, and Zoo settings import/export.
+- Destructive Command Guard now supports Intel-based Macs.
+- Security updates address vulnerabilities in `undici` and Mermaid.
 
 <details>
   <summary>🌐 Available languages</summary>

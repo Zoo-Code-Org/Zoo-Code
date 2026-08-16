@@ -388,6 +388,25 @@
 		"getOpencodeGoApiKey": "Opencode Go API कुंजी प्राप्त करें",
 		"kenariApiKey": "Kenari API कुंजी",
 		"getKenariApiKey": "Kenari API कुंजी प्राप्त करें",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API कुंजी",
+			"getApiKey": "NanoGPT API कुंजी प्राप्त करें",
+			"model": "मॉडल",
+			"routingPreference": "रूटिंग प्राथमिकता",
+			"routingOptions": {
+				"automatic": "स्वचालित",
+				"fastest": "सबसे तेज़",
+				"cheapest": "सबसे सस्ता",
+				"lowestLatency": "सबसे कम विलंबता",
+				"highestThroughput": "सबसे अधिक थ्रूपुट",
+				"toolCapable": "टूल-सक्षम",
+				"cacheCapable": "कैश-सक्षम"
+			},
+			"automaticExplanation": "स्वचालित कोई रूटिंग प्रत्यय लागू नहीं करता।",
+			"billingWarning": "NanoGPT के मौजूदा बिलिंग नियमों के आधार पर उन्नत रूटिंग प्राथमिकताएँ भुगतान-प्रति-उपयोग रूटिंग का उपयोग कर सकती हैं और सदस्यता कवरेज को छोड़ सकती हैं।",
+			"routingDocs": "NanoGPT रूटिंग और बिलिंग विवरण देखें"
+		},
 		"apiKeyStorageNotice": "API कुंजियाँ VSCode के सुरक्षित स्टोरेज में सुरक्षित रूप से संग्रहीत हैं",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

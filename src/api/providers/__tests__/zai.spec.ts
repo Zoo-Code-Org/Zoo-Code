@@ -11,6 +11,7 @@ import {
 	internationalZAiModels,
 	mainlandZAiModels,
 	ZAI_DEFAULT_TEMPERATURE,
+	getZAiModels,
 } from "@roo-code/types"
 
 import { ZAiHandler } from "../zai"
@@ -136,6 +137,30 @@ describe("ZAiHandler", () => {
 			expect(model.info.reasoningEffort).toBe("high")
 			expect(model.info.preserveReasoning).toBe(true)
 			expect(model.info.supportsMaxTokens).toBe(true)
+			expect(model.info.inputPrice).toBe(1.4)
+			expect(model.info.outputPrice).toBe(4.4)
+			expect(model.info.cacheReadsPrice).toBe(0.26)
+		})
+
+		it("should expose GLM-5.3 for the international Coding Plan with provisional GLM-5.2 pricing", () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe("glm-5.3")
+			expect(model.info).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 131_072,
+				supportsImages: false,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["low", "high", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "max",
+				preserveReasoning: true,
+			})
 			expect(model.info.inputPrice).toBe(1.4)
 			expect(model.info.outputPrice).toBe(4.4)
 			expect(model.info.cacheReadsPrice).toBe(0.26)
@@ -277,6 +302,22 @@ describe("ZAiHandler", () => {
 			expect(model.info.cacheReadsPrice).toBe(0.13)
 		})
 
+		it("should expose GLM-5.3 for the China Coding Plan", () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "china_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe("glm-5.3")
+			expect(model.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(model.info.requiredReasoningEffort).toBe(true)
+			expect(model.info.reasoningEffort).toBe("max")
+			expect(model.info.inputPrice).toBe(0.68)
+			expect(model.info.outputPrice).toBe(2.28)
+			expect(model.info.cacheReadsPrice).toBe(0.13)
+		})
+
 		it("should return GLM-4.7 China model with thinking support", () => {
 			const testModelId: MainlandZAiModelId = "glm-4.7"
 			const handlerWithModel = new ZAiHandler({
@@ -348,6 +389,16 @@ describe("ZAiHandler", () => {
 			expect(model.id).toBe(testModelId)
 			expect(model.info).toEqual(internationalZAiModels[testModelId])
 		})
+
+		it("should not expose Coding Plan-only models", () => {
+			expect(getZAiModels("international_api")).not.toHaveProperty("glm-5.3")
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_api",
+			})
+			expect(handlerWithModel.getModel().id).toBe(internationalZAiDefaultModelId)
+		})
 	})
 
 	describe("China API", () => {
@@ -386,6 +437,10 @@ describe("ZAiHandler", () => {
 			const model = handlerWithModel.getModel()
 			expect(model.id).toBe(testModelId)
 			expect(model.info).toEqual(mainlandZAiModels[testModelId])
+		})
+
+		it("should not expose Coding Plan-only models", () => {
+			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.3")
 		})
 	})
 
@@ -607,6 +662,50 @@ describe("ZAiHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "glm-5.2",
+					thinking: { type: "enabled" },
+					reasoning_effort: "max",
+				}),
+			)
+		})
+
+		it("should keep GLM-5.3 reasoning enabled when a persisted setting requests disable", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "disable",
+			})
+
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.3",
+					thinking: { type: "enabled" },
+					reasoning_effort: "max",
+				}),
+			)
+		})
+
+		it("should keep GLM-5.3 reasoning enabled when the master reasoning setting is disabled", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				enableReasoningEffort: false,
+			})
+
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.3",
 					thinking: { type: "enabled" },
 					reasoning_effort: "max",
 				}),

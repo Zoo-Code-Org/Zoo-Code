@@ -272,7 +272,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.76.0-dcg-providers-terminal" // v3.76.0 destructive command guard, provider improvements, and terminal execution fix
+	public readonly latestAnnouncementId = "aug-2026-v3.78.0-models-nanogpt-reliability" // v3.78.0 new models, NanoGPT, and provider/task reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
