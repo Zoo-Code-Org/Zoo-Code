@@ -713,6 +713,68 @@ export class ClineProvider
 	}
 
 	/**
+	 * Re-establish a parent→child delegation link when an interrupted child is resumed.
+	 *
+	 * The interrupt path (cancelTask / evictCurrentTask) preserves the link only while the
+	 * parent is still "delegated". After a crash or resume cycle the parent can be left
+	 * "active" with no awaitingChildId, so AttemptCompletionTool refuses to route the child's
+	 * completion back (it requires parent.awaitingChildId === this child). Restoring the link
+	 * here — the common funnel for every resume path — lets a resumed child report back.
+	 *
+	 * Safe by construction:
+	 *  - only called for children whose delegation was NOT intentionally severed
+	 *    (cancelledDelegationChildIds),
+	 *  - never clobbers a live delegation to a different child,
+	 *  - and only transitions an "active" parent to "delegated" (the sole legal path).
+	 * Non-fatal: any failure is logged and the resume proceeds without the link.
+	 */
+	private async reestablishDelegationLinkOnResume(childTaskId: string, parentTaskId: string): Promise<void> {
+		// A child whose delegation was intentionally severed (abandonSubtask) or that failed a
+		// cancel must NOT be reattached — its parentTaskId may still point at the old parent.
+		if (this.cancelledDelegationChildIds.has(childTaskId)) {
+			return
+		}
+
+		try {
+			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (parent) => {
+				// Already linked to this child — nothing to do.
+				if (parent.status === "delegated" && parent.awaitingChildId === childTaskId) {
+					return parent
+				}
+
+				// Never clobber a live delegation to a different child.
+				if (parent.awaitingChildId && parent.awaitingChildId !== childTaskId) {
+					const otherStatus = this.taskHistoryStore.get(parent.awaitingChildId)?.status
+					if (otherStatus === "active" || otherStatus === "delegated") {
+						return parent
+					}
+				}
+
+				// Only an "active" parent can legally become "delegated"; any other status is left untouched.
+				if (parent.status !== "active") {
+					return parent
+				}
+
+				const childIds = Array.from(new Set([...(parent.childIds ?? []), childTaskId]))
+				this.log(
+					`[reestablishDelegationLinkOnResume] Restored link: parent ${parentTaskId} → child ${childTaskId}`,
+				)
+				return {
+					...parent,
+					status: "delegated" as const,
+					awaitingChildId: childTaskId,
+					delegatedToId: childTaskId,
+					childIds,
+				}
+			})
+		} catch (err) {
+			this.log(
+				`[reestablishDelegationLinkOnResume] Failed to restore link for parent ${parentTaskId} → child ${childTaskId}: ${err instanceof Error ? err.message : String(err)}`,
+			)
+		}
+	}
+
+	/**
 	 * Cancel cascade: interrupt every LIVE child of the given parent task.
 	 *
 	 * When a task is cancelled, any children it spawned that are still running in the
@@ -1227,6 +1289,16 @@ export class ClineProvider
 
 		if (!isRehydratingCurrentTask) {
 			await this.evictCurrentTask()
+		}
+
+		// Re-establish the parent→child delegation link when resuming an interrupted child.
+		// The interrupt path preserves the link only while the parent is still "delegated";
+		// after a crash or resume cycle the parent can be left "active" with no awaitingChildId,
+		// which would prevent the resumed child's completion from routing back (AttemptCompletionTool
+		// requires parent.awaitingChildId === this child). Restoring it here — before the child Task
+		// instance starts writing its own history — lets a resumed child report back to its parent.
+		if (historyItem.parentTaskId && historyItem.status === "interrupted") {
+			await this.reestablishDelegationLinkOnResume(historyItem.id, historyItem.parentTaskId)
 		}
 
 		// If the history item has a saved mode, restore it and its associated API configuration.

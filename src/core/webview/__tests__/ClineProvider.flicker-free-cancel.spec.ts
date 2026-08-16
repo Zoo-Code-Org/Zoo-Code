@@ -872,6 +872,158 @@ describe("ClineProvider flicker-free cancel", () => {
 		expect(provider.getTaskWithId).not.toHaveBeenCalled()
 	})
 
+	describe("reestablishDelegationLinkOnResume (Problem A: link lost across interrupt/resume)", () => {
+		// The outer afterEach calls provider.dispose(), which needs the REAL store. We swap in a
+		// minimal fake per test and restore the original here so dispose() sees it.
+		let originalStore: unknown
+		beforeEach(() => {
+			originalStore = provider["taskHistoryStore"]
+		})
+		afterEach(() => {
+			setStore(originalStore)
+		})
+
+		// taskHistoryStore is `public readonly`, so a direct assignment fails type-checking.
+		// Object.assign sidesteps the compile-time readonly check (it's an own data property at
+		// runtime) so we can swap in a minimal fake; the real store is restored before dispose().
+		function setStore(store: unknown): void {
+			Object.assign(provider, { taskHistoryStore: store })
+		}
+
+		// Minimal Map-backed store mirroring the real TaskHistoryStore's atomicReadAndUpdate/get
+		// semantics closely enough to exercise the provider's restore logic in isolation.
+		function makeFakeStore(items: Record<string, HistoryItem>) {
+			const cache = new Map(Object.entries(items))
+			return {
+				get: (id: string) => cache.get(id),
+				// provider.dispose() calls this; no-op for the fake.
+				dispose: () => {},
+				atomicReadAndUpdate: async (taskId: string, updater: (current: HistoryItem) => HistoryItem) => {
+					const current = cache.get(taskId)
+					if (!current) throw new Error(`not found in cache: ${taskId}`)
+					const snapshot = structuredClone(current)
+					const updated = updater(snapshot)
+					if (updated.id !== taskId) throw new Error("updater changed task id")
+					cache.set(taskId, updated)
+					return [updated]
+				},
+			}
+		}
+
+		it("restores the parent link when an interrupted child is resumed and the parent was demoted to active", async () => {
+			// The exact Problem A state: parent left "active" with no awaitingChildId after a
+			// crash/resume cycle, while the child (interrupted) still points at it.
+			const store = makeFakeStore({
+				["parent-1"]: {
+					id: "parent-1",
+					number: 1,
+					task: "parent task",
+					ts: Date.now(),
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: "/test/workspace",
+					status: "active",
+				} as HistoryItem,
+			})
+			setStore(store)
+
+			await provider["reestablishDelegationLinkOnResume"]("child-1", "parent-1")
+
+			const parent = store.get("parent-1")!
+			expect(parent.status).toBe("delegated")
+			expect(parent.awaitingChildId).toBe("child-1")
+			expect(parent.delegatedToId).toBe("child-1")
+			expect(parent.childIds).toContain("child-1")
+		})
+
+		it("is a no-op when the parent is already delegated to this child", async () => {
+			const store = makeFakeStore({
+				["parent-1"]: {
+					id: "parent-1",
+					number: 1,
+					task: "parent task",
+					ts: Date.now(),
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: "/test/workspace",
+					status: "delegated",
+					awaitingChildId: "child-1",
+					delegatedToId: "child-1",
+				} as HistoryItem,
+			})
+			setStore(store)
+
+			await provider["reestablishDelegationLinkOnResume"]("child-1", "parent-1")
+
+			const parent = store.get("parent-1")!
+			expect(parent.status).toBe("delegated")
+			expect(parent.awaitingChildId).toBe("child-1")
+		})
+
+		it("never clobbers a live delegation to a different child", async () => {
+			const store = makeFakeStore({
+				["parent-1"]: {
+					id: "parent-1",
+					number: 1,
+					task: "parent task",
+					ts: Date.now(),
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: "/test/workspace",
+					status: "delegated",
+					awaitingChildId: "other-child",
+					delegatedToId: "other-child",
+				} as HistoryItem,
+				["other-child"]: {
+					id: "other-child",
+					number: 3,
+					task: "other child",
+					ts: Date.now(),
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: "/test/workspace",
+					status: "active",
+				} as HistoryItem,
+			})
+			setStore(store)
+
+			await provider["reestablishDelegationLinkOnResume"]("child-1", "parent-1")
+
+			const parent = store.get("parent-1")!
+			// Still awaiting the live other-child — child-1 must not have displaced it.
+			expect(parent.awaitingChildId).toBe("other-child")
+		})
+
+		it("does not reattach a child whose delegation was intentionally severed", async () => {
+			const store = makeFakeStore({
+				["parent-1"]: {
+					id: "parent-1",
+					number: 1,
+					task: "parent task",
+					ts: Date.now(),
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: "/test/workspace",
+					status: "active",
+				} as HistoryItem,
+			})
+			setStore(store)
+			// abandonSubtask / a failed cancel adds the child to this fail-closed set.
+			provider["cancelledDelegationChildIds"].add("child-1")
+
+			await provider["reestablishDelegationLinkOnResume"]("child-1", "parent-1")
+
+			const parent = store.get("parent-1")!
+			expect(parent.status).toBe("active")
+			expect(parent.awaitingChildId).toBeUndefined()
+		})
+	})
+
 	afterAll(() => {
 		vi.restoreAllMocks()
 	})

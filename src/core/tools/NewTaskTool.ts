@@ -157,8 +157,10 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 				return
 			}
 
-			// Delegate parent and open child as sole active task
-			const child = await (provider as any).delegateParentAndOpenChild({
+			// Delegate parent and open child as sole active task.
+			// `provider` is already narrowed to ClineProvider above (WeakRef deref + null check),
+			// so this is a typed method call — no cast needed.
+			const child = await provider.delegateParentAndOpenChild({
 				parentTaskId: task.taskId,
 				message: unescapedMessage,
 				initialTodos: todoItems,
