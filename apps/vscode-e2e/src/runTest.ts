@@ -9,6 +9,7 @@ import { LLMock } from "@copilotkit/aimock"
 import { addApplyDiffResultFixtures } from "./fixtures/apply-diff"
 import { addDeepSeekV4Fixtures } from "./fixtures/deepseek-v4"
 import { addExecuteCommandResultFixtures } from "./fixtures/execute-command"
+import { addInlineFlattenFixtures } from "./fixtures/inline-flatten"
 import { addFastExitShellRaceResultFixtures } from "./fixtures/fast-exit-shell-race"
 import { addZeroChunkShellRaceResultFixtures } from "./fixtures/zero-chunk-shell-race"
 import { addTerminalReuseShellRaceFixtures } from "./fixtures/terminal-reuse-shell-race"
@@ -139,6 +140,7 @@ async function main() {
 				addListFilesResultFixtures(mock)
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
+				addInlineFlattenFixtures(mock)
 				addSubtaskFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
