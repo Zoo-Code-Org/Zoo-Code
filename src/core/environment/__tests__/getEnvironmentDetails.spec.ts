@@ -464,4 +464,31 @@ describe("getEnvironmentDetails", () => {
 		const result = await getEnvironmentDetails(mockCline as Task, true)
 		expect(result).toContain("File listing unavailable: unexpected string rejection")
 	})
+
+	it("should surface task nesting depth for a root task", async () => {
+		mockCline = { ...mockCline, depth: 0 }
+
+		const result = await getEnvironmentDetails(mockCline as Task)
+
+		expect(result).toContain("# Task Context")
+		expect(result).toContain("Nesting depth: 0 (root = 0)")
+		expect(result).not.toContain("Parent task:")
+	})
+
+	it("should surface nesting depth and parent id for a child task", async () => {
+		mockCline = { ...mockCline, depth: 2, parentTaskId: "parent-task-id" }
+
+		const result = await getEnvironmentDetails(mockCline as Task)
+
+		expect(result).toContain("# Task Context")
+		expect(result).toContain("Nesting depth: 2 (root = 0)")
+		expect(result).toContain("Parent task: parent-task-id")
+	})
+
+	it("should omit the task context section when depth is unknown", async () => {
+		const result = await getEnvironmentDetails(mockCline as Task)
+
+		expect(result).not.toContain("# Task Context")
+		expect(result).not.toContain("Nesting depth:")
+	})
 })

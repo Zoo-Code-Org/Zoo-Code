@@ -226,6 +226,18 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 	details += `<name>${modeDetails.name}</name>\n`
 	details += `<model>${modelId}</model>\n`
 
+	// Surface this task's position in the delegation tree so a subtask can report
+	// its own nesting level — depth is never visible to the model anywhere else.
+	// The parent id is included only for children; resolving the parent's title
+	// would need a history-store lookup on every environment refresh, which we avoid.
+	if (typeof cline.depth === "number") {
+		details += `\n\n# Task Context`
+		details += `Nesting depth: ${cline.depth} (root = 0)`
+		if (cline.parentTaskId) {
+			details += `\nParent task: ${cline.parentTaskId}`
+		}
+	}
+
 	if (includeFileDetails) {
 		details += `\n\n# Current Workspace Directory (${cline.cwd.toPosix()}) Files\n`
 		const isDesktop = arePathsEqual(cline.cwd, path.join(os.homedir(), "Desktop"))
