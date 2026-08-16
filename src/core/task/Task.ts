@@ -170,6 +170,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly rootTaskId?: string
 	readonly parentTaskId?: string
 	childTaskId?: string
+	/** Nesting level; root = 0, child = parent.depth + 1. */
+	readonly depth: number
+	/**
+	 * True when `depth` was derived authoritatively (persisted value, live parent,
+	 * or a genuine root) and is safe to persist on save. False for legacy children
+	 * resumed without their live parent — the provider backfills those before first save.
+	 */
+	readonly depthAuthoritative: boolean
 	pendingNewTaskToolCallId?: string
 
 	readonly instanceId: string
@@ -504,6 +512,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.rootTaskId = historyItem ? historyItem.rootTaskId : rootTask?.taskId
 		this.parentTaskId = historyItem ? historyItem.parentTaskId : parentTask?.taskId
 		this.childTaskId = undefined
+
+		// Nesting depth (root = 0). A persisted value is authoritative; otherwise derive it
+		// from the live parent task (parent.depth + 1) or default to root (0).
+		const persistedDepth = historyItem?.depth
+		if (typeof persistedDepth === "number" && Number.isInteger(persistedDepth) && persistedDepth >= 0) {
+			this.depth = persistedDepth
+			this.depthAuthoritative = true
+		} else if (parentTask) {
+			// Live parent available: its depth is authoritative, so the child's is too.
+			this.depth = parentTask.depth + 1
+			this.depthAuthoritative = true
+		} else if (!this.parentTaskId) {
+			// No persisted depth and no parent reference at all: this task is a root.
+			this.depth = 0
+			this.depthAuthoritative = true
+		} else {
+			// Legacy child resumed without its live parent (e.g. reopened from history):
+			// the depth cannot be derived here, so mark it non-authoritative and let
+			// ClineProvider.createTaskWithHistoryItem() backfill it before first save.
+			this.depth = 0
+			this.depthAuthoritative = false
+		}
 
 		this.metadata = {
 			task: historyItem ? historyItem.task : task,
@@ -1121,6 +1151,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
 				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
 				initialStatus: this.initialStatus,
+				// Only persist depth when it was derived authoritatively; a legacy child resumed
+				// without its live parent carries a placeholder 0 that must not be written back.
+				depth: this.depthAuthoritative ? this.depth : undefined,
 			})
 
 			// Emit token/tool usage updates using debounced function

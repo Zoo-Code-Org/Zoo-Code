@@ -25,6 +25,8 @@ export type TaskMetadataOptions = {
 	apiConfigName?: string
 	/** Initial status for the task (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
+	/** Nesting level; root = 0, child = parent.depth + 1. Persisted when known. */
+	depth?: number
 }
 
 export async function taskMetadata({
@@ -38,6 +40,7 @@ export async function taskMetadata({
 	mode,
 	apiConfigName,
 	initialStatus,
+	depth,
 }: TaskMetadataOptions) {
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, id)
 
@@ -112,6 +115,7 @@ export async function taskMetadata({
 		mode,
 		...(typeof apiConfigName === "string" && apiConfigName.length > 0 ? { apiConfigName } : {}),
 		...(initialStatus && { status: initialStatus }),
+		...(typeof depth === "number" && Number.isInteger(depth) && depth >= 0 ? { depth } : {}),
 	}
 
 	return { historyItem, tokenUsage }

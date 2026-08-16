@@ -94,6 +94,8 @@ export interface CreateTaskOptions {
 	/** Whether to start the task loop immediately (default: true).
 	 *  When false, the caller must invoke `task.start()` manually. */
 	startTask?: boolean
+	/** Nesting level for newly created tasks; root = 0, child = parent.depth + 1. */
+	depth?: number
 }
 
 export enum TaskStatus {
@@ -116,6 +118,8 @@ export interface TaskLike {
 	readonly rootTaskId?: string
 	readonly parentTaskId?: string
 	readonly childTaskId?: string
+	/** Nesting level; root = 0, child = parent.depth + 1. */
+	readonly depth: number
 	readonly metadata: TaskMetadata
 	readonly taskStatus: TaskStatus
 	readonly taskAsk: ClineMessage | undefined
