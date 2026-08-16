@@ -271,7 +271,13 @@
 		"resultContent": "Alt Görev Sonuçları",
 		"defaultResult": "Lütfen sonraki göreve devam edin.",
 		"completionInstructions": "Alt görev tamamlandı! Sonuçları inceleyebilir ve düzeltmeler veya sonraki adımlar önerebilirsiniz. Her şey iyi görünüyorsa, sonucu üst göreve döndürmek için onaylayın.",
-		"goToSubtask": "Görevi görüntüle"
+		"goToSubtask": "Görevi görüntüle",
+		"inlineStarted": "Alt görev içine düzleştirildi",
+		"inlineRejected": "İç içe alt görev reddedildi",
+		"inlineConfigure": "Görev ağacı ayarlarını düzenle",
+		"inlineStartedDetail": "Yiyeşleme sınırı {{maxDepth}}'e ulaşıldı — alt görev düzleştirildi ve bu sohbette satır içi olarak çalıştırılıyor.",
+		"inlineRejectedLimitDetail": "Yiyeşleme sınırı {{maxDepth}}'e ulaşıldı ve otomatik düzleştirme kapalı. Devretmek yerine mevcut sohbette doğrudan çalışmaya devam edin.",
+		"inlineRejectedNestedDetail": "Satır içi bir alt görev sürerken iç içe geçmiş bir alt görev başlatılamaz. Önce attempt_completion ile mevcut satır içi alt görevi tamamlayın."
 	},
 	"questions": {
 		"hasQuestion": "Zoo'nun bir sorusu var"

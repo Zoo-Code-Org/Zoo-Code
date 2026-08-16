@@ -270,7 +270,13 @@
 		"resultContent": "サブタスク結果",
 		"defaultResult": "次のタスクに進んでください。",
 		"completionInstructions": "サブタスク完了！結果を確認し、修正や次のステップを提案できます。問題なければ、親タスクに結果を返すために確認してください。",
-		"goToSubtask": "タスクを表示"
+		"goToSubtask": "タスクを表示",
+		"inlineStarted": "サブタスクをインラインにフラット化しました",
+		"inlineRejected": "ネストしたサブタスクを拒否しました",
+		"inlineConfigure": "タスクツリー設定を調整する",
+		"inlineStartedDetail": "ネスト上限 {{maxDepth}} に到達 — サブタスクはフラット化され、この会話でインライン実行されています。",
+		"inlineRejectedLimitDetail": "ネスト上限 {{maxDepth}} に到達し、自動フラット化が無効です。委任する代わりに現在の会話で直接作業を続けてください。",
+		"inlineRejectedNestedDetail": "インラインサブタスクが進行中の間は、ネストしたサブタスクを開始できません。まず attempt_completion で現在のインラインサブタスクを完了してください。"
 	},
 	"questions": {
 		"hasQuestion": "Zooは質問があります"

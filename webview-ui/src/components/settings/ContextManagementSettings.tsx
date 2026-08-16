@@ -442,8 +442,10 @@ export const ContextManagementSettings = ({
 				<SearchableSetting
 					settingId="context-max-nesting-depth"
 					section="contextManagement"
-					label={t("settings:taskTree.maxNestingDepth.label")}>
-					<span className="block font-medium mb-1">{t("settings:taskTree.maxNestingDepth.label")}</span>
+					label={t("settings:contextManagement.taskTree.maxNestingDepth.label")}>
+					<span className="block font-medium mb-1">
+						{t("settings:contextManagement.taskTree.maxNestingDepth.label")}
+					</span>
 					<div className="flex items-center gap-2">
 						<Slider
 							min={0}
@@ -456,24 +458,24 @@ export const ContextManagementSettings = ({
 						<span className="w-10">{maxNestingDepth ?? DEFAULT_MAX_NESTING_DEPTH}</span>
 					</div>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
-						{t("settings:taskTree.maxNestingDepth.description")}
+						{t("settings:contextManagement.taskTree.maxNestingDepth.description")}
 					</div>
 				</SearchableSetting>
 
 				<SearchableSetting
 					settingId="context-auto-flatten-on-limit"
 					section="contextManagement"
-					label={t("settings:taskTree.autoFlattenOnLimit.label")}>
+					label={t("settings:contextManagement.taskTree.autoFlattenOnLimit.label")}>
 					<VSCodeCheckbox
 						checked={autoFlattenOnLimit ?? DEFAULT_AUTO_FLATTEN_ON_LIMIT}
 						onChange={(e: any) => setCachedStateField("autoFlattenOnLimit", e.target.checked)}
 						data-testid="auto-flatten-on-limit-checkbox">
 						<label className="block font-medium mb-1">
-							{t("settings:taskTree.autoFlattenOnLimit.label")}
+							{t("settings:contextManagement.taskTree.autoFlattenOnLimit.label")}
 						</label>
 					</VSCodeCheckbox>
 					<div className="text-vscode-descriptionForeground text-sm mt-1 mb-3">
-						{t("settings:taskTree.autoFlattenOnLimit.description")}
+						{t("settings:contextManagement.taskTree.autoFlattenOnLimit.description")}
 					</div>
 				</SearchableSetting>
 

@@ -270,7 +270,13 @@
 		"resultContent": "Resultados de la subtarea",
 		"defaultResult": "Por favor, continúa con la siguiente tarea.",
 		"completionInstructions": "¡Subtarea completada! Puedes revisar los resultados y sugerir correcciones o próximos pasos. Si todo se ve bien, confirma para devolver el resultado a la tarea principal.",
-		"goToSubtask": "Ver tarea"
+		"goToSubtask": "Ver tarea",
+		"inlineStarted": "Subtarea aplanada en línea",
+		"inlineRejected": "Subtarea anidada rechazada",
+		"inlineConfigure": "Ajustar configuración del árbol de tareas",
+		"inlineStartedDetail": "Se alcanzó el límite de anidamiento {{maxDepth}} — la subtarea se aplanó y se ejecuta en línea en esta conversación.",
+		"inlineRejectedLimitDetail": "Se alcanzó el límite de anidamiento {{maxDepth}} y el aplanado automático está desactivado. Continúa trabajando directamente en la conversación actual en lugar de delegar.",
+		"inlineRejectedNestedDetail": "No se puede iniciar una subtarea anidada mientras hay una subtarea en línea en curso. Completa primero la subtarea en línea con attempt_completion."
 	},
 	"questions": {
 		"hasQuestion": "Zoo tiene una pregunta"

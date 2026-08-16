@@ -25,6 +25,8 @@ export const isBoundary = (msg: BatchableMessage): boolean => {
 		(msg.say === "text" && !!msg.text?.trim()) ||
 		msg.say === "completion_result" ||
 		msg.say === "checkpoint_saved" ||
+		msg.say === "inline_subtask_started" ||
+		msg.say === "inline_subtask_rejected" ||
 		msg.say === "error" ||
 		msg.say === "condense_context" ||
 		msg.say === "codebase_search_result"

@@ -321,7 +321,13 @@
 		"resultContent": "Hasil Subtugas",
 		"defaultResult": "Silakan lanjutkan ke tugas berikutnya.",
 		"completionInstructions": "Subtugas selesai! Kamu bisa meninjau hasilnya dan menyarankan koreksi atau langkah selanjutnya. Jika semuanya terlihat baik, konfirmasi untuk mengembalikan hasil ke tugas induk.",
-		"goToSubtask": "Lihat tugas"
+		"goToSubtask": "Lihat tugas",
+		"inlineStarted": "Subtugas diratakan inline",
+		"inlineRejected": "Subtugas bersarang ditolak",
+		"inlineConfigure": "Atur pengaturan pohon tugas",
+		"inlineStartedDetail": "Batas penempaan {{maxDepth}} tercapai — sub-tugas diratakan dan dijalankan inline dalam percakapan ini.",
+		"inlineRejectedLimitDetail": "Batas penempaan {{maxDepth}} tercapai dan auto-flatten nonaktif. Terus bekerja langsung di percakapan saat ini alih-alih mendelegasikan.",
+		"inlineRejectedNestedDetail": "Tidak dapat memulai sub-tugas bersarang saat sub-tugas inline sedang berjalan. Selesaikan dulu sub-tugas inline dengan attempt_completion."
 	},
 	"questions": {
 		"hasQuestion": "Zoo punya pertanyaan"

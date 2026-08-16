@@ -531,6 +531,16 @@ describe("ContextManagementSettings", () => {
 	})
 
 	describe("taskTree settings", () => {
+		// Regression: the task-tree controls must resolve their i18n keys under
+		// contextManagement.taskTree.* (where the translations live), not a top-level
+		// taskTree.* — otherwise the raw key is rendered in the UI.
+		it("resolves task-tree labels via the nested contextManagement.taskTree path", () => {
+			render(<ContextManagementSettings {...defaultProps} />)
+
+			expect(screen.getByText("settings:contextManagement.taskTree.maxNestingDepth.label")).toBeInTheDocument()
+			expect(screen.queryByText("settings:taskTree.maxNestingDepth.label")).not.toBeInTheDocument()
+		})
+
 		it("renders max nesting depth slider with default value when unset", () => {
 			render(<ContextManagementSettings {...defaultProps} />)
 

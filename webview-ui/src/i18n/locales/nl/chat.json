@@ -265,7 +265,13 @@
 		"resultContent": "Subtaakresultaten",
 		"defaultResult": "Ga verder met de volgende taak.",
 		"completionInstructions": "Subtaak voltooid! Je kunt de resultaten bekijken en eventuele correcties of volgende stappen voorstellen. Als alles goed is, bevestig dan om het resultaat terug te sturen naar de hoofdtaak.",
-		"goToSubtask": "Taak weergeven"
+		"goToSubtask": "Taak weergeven",
+		"inlineStarted": "Onderopdracht inline afgevlakt",
+		"inlineRejected": "Geneste onderopdracht afgewezen",
+		"inlineConfigure": "Instellingen van de taakboom aanpassen",
+		"inlineStartedDetail": "Nestingslimiet {{maxDepth}} bereikt — de subtaak is afgevlakt en wordt inline in dit gesprek uitgevoerd.",
+		"inlineRejectedLimitDetail": "Nestingslimiet {{maxDepth}} bereikt en automatisch afvlakken is uitgeschakeld. Ga door met direct werken in het huidige gesprek in plaats van delegeren.",
+		"inlineRejectedNestedDetail": "Een geneste subtaak kan niet gestart worden terwijl een inline-subtaak bezig is. Voltooi eerst de huidige inline-subtaak met attempt_completion."
 	},
 	"questions": {
 		"hasQuestion": "Zoo heeft een vraag"

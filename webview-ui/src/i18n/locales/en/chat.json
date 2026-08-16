@@ -312,7 +312,13 @@
 		"resultContent": "Subtask completed",
 		"defaultResult": "Please continue to the next task.",
 		"completionInstructions": "You can review the results and suggest any corrections or next steps. If everything looks good, confirm to return the result to the parent task.",
-		"goToSubtask": "View task"
+		"goToSubtask": "View task",
+		"inlineStarted": "Subtask flattened to inline",
+		"inlineRejected": "Nested subtask rejected",
+		"inlineConfigure": "Adjust task tree settings",
+		"inlineStartedDetail": "Nesting limit {{maxDepth}} reached — subtask flattened and executing inline in this conversation.",
+		"inlineRejectedLimitDetail": "Nesting limit {{maxDepth}} reached and auto-flatten is disabled. Continue working directly in the current conversation instead of delegating.",
+		"inlineRejectedNestedDetail": "Cannot start a nested subtask while an inline subtask is already in progress. Complete the current inline subtask with attempt_completion first."
 	},
 	"questions": {
 		"hasQuestion": "Zoo has a question"

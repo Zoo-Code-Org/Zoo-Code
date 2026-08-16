@@ -270,7 +270,13 @@
 		"resultContent": "Teilaufgabenergebnisse",
 		"defaultResult": "Bitte fahre mit der nächsten Aufgabe fort.",
 		"completionInstructions": "Teilaufgabe abgeschlossen! Du kannst die Ergebnisse überprüfen und Korrekturen oder nächste Schritte vorschlagen. Wenn alles gut aussieht, bestätige, um das Ergebnis an die übergeordnete Aufgabe zurückzugeben.",
-		"goToSubtask": "Aufgabe anzeigen"
+		"goToSubtask": "Aufgabe anzeigen",
+		"inlineStarted": "Unteraufgabe inline ausgeführt",
+		"inlineRejected": "Verschachtelte Unteraufgabe abgelehnt",
+		"inlineConfigure": "Aufgabenbaum-Einstellungen anpassen",
+		"inlineStartedDetail": "Nestigungsgrenze {{maxDepth}} erreicht — Unteraufgabe wurde eingeebnet und wird inline in diesem Gespräch ausgeführt.",
+		"inlineRejectedLimitDetail": "Nestigungsgrenze {{maxDepth}} erreicht und Auto-Einbiegen ist deaktiviert. Führe die Arbeit direkt in der aktuellen Konversation fort, statt zu delegieren.",
+		"inlineRejectedNestedDetail": "Während eine Inline-Unteraufgabe läuft, kann keine verschachtelte Unteraufgabe gestartet werden. Schließe zuerst die aktuelle Inline-Unteraufgabe mit attempt_completion ab."
 	},
 	"questions": {
 		"hasQuestion": "Zoo hat eine Frage"

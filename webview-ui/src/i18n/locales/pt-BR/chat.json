@@ -270,7 +270,13 @@
 		"resultContent": "Resultados da subtarefa",
 		"defaultResult": "Por favor, continue com a próxima tarefa.",
 		"completionInstructions": "Subtarefa concluída! Você pode revisar os resultados e sugerir correções ou próximos passos. Se tudo parecer bom, confirme para retornar o resultado à tarefa principal.",
-		"goToSubtask": "Ver tarefa"
+		"goToSubtask": "Ver tarefa",
+		"inlineStarted": "Subtarefa achatada em linha",
+		"inlineRejected": "Subtarefa aninhada rejeitada",
+		"inlineConfigure": "Ajustar configurações da árvore de tarefas",
+		"inlineStartedDetail": "Limite de aninhamento {{maxDepth}} atingido — a subtarefa foi achatada e está sendo executada em linha nesta conversa.",
+		"inlineRejectedLimitDetail": "Limite de aninhamento {{maxDepth}} atingido e o achatamento automático está desativado. Continue trabalhando diretamente na conversa atual em vez de delegar.",
+		"inlineRejectedNestedDetail": "Não é possível iniciar uma subtarefa aninhada enquanto há uma subtarefa em linha em andamento. Conclua primeiro a subtarefa em linha com attempt_completion."
 	},
 	"questions": {
 		"hasQuestion": "Zoo tem uma pergunta"

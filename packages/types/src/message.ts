@@ -140,6 +140,8 @@ export function isNonBlockingAsk(ask: ClineAsk): ask is NonBlockingAsk {
  * - `condense_context_error`: Error occurred during context condensation
  * - `codebase_search_result`: Results from searching the codebase
  * - `too_many_tools_warning`: Warning that too many MCP tools are enabled, which may confuse the LLM
+ * - `inline_subtask_started`: A subtask was auto-flattened and is now executing inline in this conversation
+ * - `inline_subtask_rejected`: A nested new_task call was rejected (an inline phase is already active)
  */
 export const clineSays = [
 	"error",
@@ -161,6 +163,8 @@ export const clineSays = [
 	"mcp_server_request_started",
 	"mcp_server_response",
 	"subtask_result",
+	"inline_subtask_started",
+	"inline_subtask_rejected",
 	"checkpoint_saved",
 	"rooignore_error",
 	"diff_error",

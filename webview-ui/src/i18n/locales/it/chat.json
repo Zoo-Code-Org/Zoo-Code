@@ -270,7 +270,13 @@
 		"resultContent": "Risultati sottoattività",
 		"defaultResult": "Per favore continua con la prossima attività.",
 		"completionInstructions": "Sottoattività completata! Puoi rivedere i risultati e suggerire correzioni o prossimi passi. Se tutto sembra a posto, conferma per restituire il risultato all'attività principale.",
-		"goToSubtask": "Visualizza attività"
+		"goToSubtask": "Visualizza attività",
+		"inlineStarted": "Compito secondario appiattito in linea",
+		"inlineRejected": "Compito secondario annidato rifiutato",
+		"inlineConfigure": "Regola le impostazioni dell'albero dei compiti",
+		"inlineStartedDetail": "Limite di annidamento {{maxDepth}} raggiunto — il sotto-compito è stato appiattito e viene eseguito in linea in questa conversazione.",
+		"inlineRejectedLimitDetail": "Limite di annidamento {{maxDepth}} raggiunto e l'appiattimento automatico è disattivato. Continua a lavorare direttamente nella conversazione attuale invece di delegare.",
+		"inlineRejectedNestedDetail": "Non è possibile avviare un sotto-compito annidato mentre ne è in corso uno in linea. Completa prima il sotto-compito in linea con attempt_completion."
 	},
 	"questions": {
 		"hasQuestion": "Zoo ha una domanda"

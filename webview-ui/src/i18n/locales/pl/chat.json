@@ -270,7 +270,13 @@
 		"resultContent": "Wyniki podzadania",
 		"defaultResult": "Proszę kontynuować następne zadanie.",
 		"completionInstructions": "Podzadanie zakończone! Możesz przejrzeć wyniki i zasugerować poprawki lub następne kroki. Jeśli wszystko wygląda dobrze, potwierdź, aby zwrócić wynik do zadania nadrzędnego.",
-		"goToSubtask": "Wyświetl zadanie"
+		"goToSubtask": "Wyświetl zadanie",
+		"inlineStarted": "Zadanie podrzędne spłaszczone do inline",
+		"inlineRejected": "Zagnieżdżone zadanie odrzucone",
+		"inlineConfigure": "Dostosuj ustawienia drzewa zadań",
+		"inlineStartedDetail": "Osiągnięto limit zagnieżdżania {{maxDepth}} — podzadanie zostało spłaszczone i jest wykonywane inline w tej rozmowie.",
+		"inlineRejectedLimitDetail": "Osiągnięto limit zagnieżdżania {{maxDepth}}, a automatyczne spłaszczanie jest wyłączone. Kontynuuj pracę bezpośrednio w bieżącej rozmowie zamiast delegować.",
+		"inlineRejectedNestedDetail": "Nie można uruchomić zagnieżdżonego podzadania, gdy trwa podzadanie inline. Najpierw zakończ bieżące podzadanie inline za pomocą attempt_completion."
 	},
 	"questions": {
 		"hasQuestion": "Zoo ma pytanie"
