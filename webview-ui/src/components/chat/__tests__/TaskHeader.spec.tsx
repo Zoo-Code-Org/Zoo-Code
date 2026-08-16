@@ -407,7 +407,8 @@ describe("TaskHeader", () => {
 
 		it("renders an empty prompt without crashing", () => {
 			const { container } = renderTaskHeader({
-				task: { type: "say", ts: Date.now(), text: undefined as any, images: [] },
+				// `text` is optional on ClineMessage; omit it to exercise the empty-prompt path.
+				task: { type: "say", ts: Date.now(), images: [] },
 			})
 
 			// No title text to click, so expand via the header container itself.
