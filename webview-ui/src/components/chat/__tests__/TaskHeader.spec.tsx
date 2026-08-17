@@ -405,6 +405,30 @@ describe("TaskHeader", () => {
 			expect(container.querySelector("strong")).not.toBeNull()
 		})
 
+		it("keeps context mentions clickable in the expanded markdown view", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "Inspect @/src/file.ts, @problems, and @terminal.",
+					images: [],
+				},
+			})
+
+			// Expand via the header container because the collapsed title contains split mention spans.
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+			await screen.findByText(/Inspect/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions).toHaveLength(3)
+			expect(mentions[0].textContent).toBe("@/src/file.ts")
+			expect(mentions[1].textContent).toBe("@problems")
+			expect(mentions[2].textContent).toBe("@terminal")
+
+			fireEvent.click(mentions[0])
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "/src/file.ts" })
+		})
+
 		it("renders an empty prompt without crashing", () => {
 			const { container } = renderTaskHeader({
 				// `text` is optional on ClineMessage; omit it to exercise the empty-prompt path.

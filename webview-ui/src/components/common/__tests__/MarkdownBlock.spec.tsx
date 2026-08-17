@@ -1,12 +1,20 @@
-import { render, screen } from "@/utils/test-utils"
+import { render, screen, fireEvent } from "@/utils/test-utils"
 
 import MarkdownBlock from "../MarkdownBlock"
 
+const { mockPostMessage } = vi.hoisted(() => ({
+	mockPostMessage: vi.fn(),
+}))
+
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
-		postMessage: vi.fn(),
+		postMessage: mockPostMessage,
 	},
 }))
+
+beforeEach(() => {
+	mockPostMessage.mockClear()
+})
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
@@ -216,5 +224,99 @@ describe("MarkdownBlock", () => {
 		expect(screen.getByText("Second level unordered")).toBeInTheDocument()
 		expect(screen.getByText("Third level ordered")).toBeInTheDocument()
 		expect(screen.getByText("Back to first level")).toBeInTheDocument()
+	})
+
+	describe("Context mentions (#559)", () => {
+		it("renders @/path/file.ts as a clickable mention span", async () => {
+			const markdown = "Check out @/src/components/chat/TaskHeader.tsx for details."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Check out/, { exact: false })
+
+			// The mention should be wrapped in a span with the mention-context-highlight class.
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@/src/components/chat/TaskHeader.tsx")
+
+			// The trailing period must remain outside the mention span.
+			expect(container.querySelector("p")?.textContent).toBe(
+				"Check out @/src/components/chat/TaskHeader.tsx for details.",
+			)
+		})
+
+		it("renders @problems as a clickable mention span", async () => {
+			const markdown = "Review the issues listed in @problems before proceeding."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Review/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@problems")
+		})
+
+		it("renders @terminal as a clickable mention span", async () => {
+			const markdown = "See the output captured in @terminal."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/See/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@terminal")
+		})
+
+		it("renders multiple mentions in the same paragraph", async () => {
+			const markdown = "Check @/src/file.ts and @problems, then review @terminal."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Check/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(3)
+			expect(mentions[0].textContent).toBe("@/src/file.ts")
+			expect(mentions[1].textContent).toBe("@problems")
+			expect(mentions[2].textContent).toBe("@terminal")
+		})
+
+		it("posts openMention message when a mention span is clicked", async () => {
+			const markdown = "See @/src/components/chat/TaskHeader.tsx."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/See/, { exact: false })
+
+			const mentionSpan = container.querySelector("span.mention-context-highlight")!
+			fireEvent.click(mentionSpan)
+
+			expect(mockPostMessage).toHaveBeenCalledWith({
+				type: "openMention",
+				text: "/src/components/chat/TaskHeader.tsx",
+			})
+		})
+
+		it("does not match @ in the middle of a word or log entry", async () => {
+			const markdown = "Error: Failed@localhost/status code 404."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Error/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(0)
+		})
+
+		it("preserves regular text around mentions", async () => {
+			const markdown = "Before @problems middle after"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Before/, { exact: false })
+
+			const paragraph = container.querySelector("p")
+			expect(paragraph?.textContent).toBe("Before @problems middle after")
+
+			// The mention span should only contain the mention itself.
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@problems")
+		})
 	})
 })

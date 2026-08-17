@@ -6,11 +6,65 @@ import rehypeKatex from "rehype-katex"
 import remarkMath from "remark-math"
 import remarkGfm from "remark-gfm"
 
+import { mentionRegexGlobal } from "@roo/context-mentions"
+
 import { vscode } from "@src/utils/vscode"
 import { type AlertType, remarkGithubAlerts } from "@src/utils/markdown"
 
 import CodeBlock from "./CodeBlock"
 import MermaidBlock from "./MermaidBlock"
+
+/**
+ * Rehype plugin that wraps context mentions (@/path, @problems, @terminal, etc.)
+ * in clickable spans matching the styling used by the collapsed Mention component.
+ */
+function rehypeMentions() {
+	return (tree: any) => {
+		visit(tree, "text", (node: any, index, parent) => {
+			if (parent?.tagName === "span" && parent.properties?.className?.includes("mention-context-highlight")) {
+				return
+			}
+
+			const originalValue = String(node.value)
+			const matches = Array.from(originalValue.matchAll(mentionRegexGlobal))
+
+			if (matches.length === 0) {
+				return
+			}
+
+			const children: any[] = []
+			let lastIndex = 0
+
+			for (const match of matches) {
+				const mentionText = match[0]
+				const mentionValue = match[1] ?? mentionText.slice(1) // capture group or full mention without @
+				const mentionStart = match.index!
+
+				if (mentionStart > lastIndex) {
+					children.push({ type: "text", value: originalValue.slice(lastIndex, mentionStart) })
+				}
+
+				children.push({
+					type: "element",
+					tagName: "span",
+					properties: {
+						className: ["mention-context-highlight", "text-[0.9em]", "cursor-pointer"],
+						onClick: () => vscode.postMessage({ type: "openMention", text: mentionValue }),
+					},
+					children: [{ type: "text", value: mentionText }],
+				})
+
+				lastIndex = mentionStart + mentionText.length
+			}
+
+			if (lastIndex < originalValue.length) {
+				children.push({ type: "text", value: originalValue.slice(lastIndex) })
+			}
+
+			parent.children.splice(index, 1, ...children)
+		})
+	}
+}
 
 // Codicon glyphs used as the leading icon for each GitHub-style alert type.
 const ALERT_ICONS: Record<AlertType, string> = {
@@ -415,7 +469,7 @@ const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
 						}
 					},
 				]}
-				rehypePlugins={[rehypeKatex as any]}
+				rehypePlugins={[rehypeMentions, rehypeKatex as any]}
 				components={components}>
 				{markdown || ""}
 			</ReactMarkdown>
