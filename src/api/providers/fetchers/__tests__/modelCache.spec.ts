@@ -145,6 +145,24 @@ describe("getModels with new GetModelsOptions", () => {
 		expect(result).toEqual(mockModels)
 	})
 
+	it("forwards the OpenRouter API key to getOpenRouterModels", async () => {
+		const mockModels = {
+			"openrouter/model": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+		mockGetOpenRouterModels.mockResolvedValue(mockModels)
+
+		await getModels({ provider: providerIdentifiers.openrouter, apiKey: "openrouter-key" })
+
+		expect(mockGetOpenRouterModels).toHaveBeenCalledWith({
+			openRouterApiKey: "openrouter-key",
+			openRouterBaseUrl: undefined,
+		})
+	})
+
 	it("calls getRequestyModels with optional API key", async () => {
 		const mockModels = {
 			"requesty/model": {
@@ -1125,9 +1143,10 @@ describe("NanoGPT key-scoped cache isolation", () => {
 
 describe("compound cache key derivation across scoping dimensions", () => {
 	// Exercises every branch of getCacheKey via the public getModels() entry point.
-	// litellm is url-scoped AND key-scoped; openrouter is neither, so it hits the bare
-	// provider fallback. The fetcher mocks let us observe the cache key the result is
-	// written under (first arg of the matching memoryCache.set call).
+	// litellm is url-scoped AND key-scoped; openrouter is key-scoped only, so it hits the
+	// key discriminator branch (or the bare provider fallback when no key is supplied). The
+	// fetcher mocks let us observe the cache key the result is written under (first arg of
+	// the matching memoryCache.set call).
 	const mockModels = {
 		"compound/model": {
 			maxTokens: 4096,
@@ -1193,14 +1212,30 @@ describe("compound cache key derivation across scoping dimensions", () => {
 		expect(cacheKey).toBe("litellm:http://host:4000")
 	})
 
-	it("falls back to the bare provider name for providers that are neither url- nor key-scoped", async () => {
-		await getModels({
-			provider: providerIdentifiers.openrouter,
-			apiKey: "ignored-key",
-			baseUrl: "http://ignored:4000",
-		})
+	it("falls back to the bare provider name for a key-scoped provider without an API key", async () => {
+		await getModels({ provider: providerIdentifiers.openrouter })
 		const cacheKey = writtenCacheKey()
 
 		expect(cacheKey).toBe("openrouter")
+	})
+
+	it("includes only the key discriminator for a key-scoped provider without a custom URL", async () => {
+		await getModels({ provider: providerIdentifiers.openrouter, apiKey: "openrouter-key" })
+		const cacheKey = writtenCacheKey()
+
+		expect(cacheKey).toMatch(/^openrouter:[0-9a-f]{8}$/)
+	})
+
+	it("writes different cache keys for two different OpenRouter API keys", async () => {
+		await getModels({ provider: providerIdentifiers.openrouter, apiKey: "key-one" })
+		const firstKey = writtenCacheKey()
+
+		mockSet.mockClear()
+		await getModels({ provider: providerIdentifiers.openrouter, apiKey: "key-two" })
+		const secondKey = writtenCacheKey()
+
+		expect(firstKey).toBeDefined()
+		expect(secondKey).toBeDefined()
+		expect(firstKey).not.toEqual(secondKey)
 	})
 })

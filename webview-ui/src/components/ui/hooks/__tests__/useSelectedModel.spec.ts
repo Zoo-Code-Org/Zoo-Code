@@ -383,6 +383,50 @@ describe("useSelectedModel", () => {
 			})
 		})
 
+		it("keeps @preset/flash selected when it is present in OpenRouter models (no silent swap)", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {
+						"@preset/flash": {
+							contextWindow: 200_000,
+							supportsPromptCache: false,
+							description: "Flash preset",
+						},
+						"anthropic/claude-sonnet-4.5": {
+							maxTokens: 8192,
+							contextWindow: 200_000,
+							supportsImages: true,
+							supportsPromptCache: true,
+						},
+					},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "@preset/flash",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.id).toBe("@preset/flash")
+			expect(result.current.info).toMatchObject({
+				contextWindow: 200_000,
+				supportsPromptCache: false,
+			})
+		})
+
 		it("should demonstrate the merging behavior validates the comment about missing fields", () => {
 			const baseModelInfo: ModelInfo = {
 				maxTokens: 4096,

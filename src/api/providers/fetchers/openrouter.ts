@@ -91,15 +91,73 @@ const openRouterModelEndpointsResponseSchema = z.object({
 type OpenRouterModelEndpointsResponse = z.infer<typeof openRouterModelEndpointsResponseSchema>
 
 /**
+ * OpenRouterPreset
+ */
+
+const openRouterPresetSchema = z.object({
+	id: z.string(),
+	name: z.string(),
+	slug: z.string(),
+	description: z.string().nullish(),
+})
+
+/**
+ * OpenRouterPresetsResponse
+ */
+
+const openRouterPresetsResponseSchema = z.object({
+	data: z.array(openRouterPresetSchema),
+})
+
+type OpenRouterPresetsResponse = z.infer<typeof openRouterPresetsResponseSchema>
+
+// Presets are user-defined aliases (referenced as `@preset/{slug}`) that route to a
+// user-configured list of underlying models. The /presets endpoint does not expose a fixed
+// context window or pricing, so we synthesize a conservative ModelInfo that keeps the
+// webview validation path working without inventing per-token costs. Requests still route
+// server-side, and a missing maxTokens lets OpenRouter apply its own default.
+const OPENROUTER_PRESET_DEFAULT_CONTEXT_WINDOW = 200_000
+
+function buildOpenRouterAuthHeaders(apiKey?: string): Record<string, string> | undefined {
+	if (!apiKey) {
+		return undefined
+	}
+
+	return { Authorization: `Bearer ${apiKey}` }
+}
+
+function addOpenRouterModels(models: Record<string, ModelInfo>, data: OpenRouterModel[]): void {
+	for (const model of data) {
+		const { id, architecture, top_provider, supported_parameters = [] } = model
+
+		// Skip image generation models (models that output images)
+		if (architecture?.output_modalities?.includes("image")) {
+			continue
+		}
+
+		models[id] = parseOpenRouterModel({
+			id,
+			model,
+			inputModality: architecture?.input_modalities,
+			outputModality: architecture?.output_modalities,
+			maxTokens: top_provider?.max_completion_tokens,
+			supportedParameters: supported_parameters,
+		})
+	}
+}
+
+/**
  * getOpenRouterModels
  */
 
 export async function getOpenRouterModels(options?: ApiHandlerOptions): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
+	const apiKey = options?.openRouterApiKey
+	const headers = buildOpenRouterAuthHeaders(apiKey)
 
 	try {
-		const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models`)
+		const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models`, { headers })
 		const result = openRouterModelsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 
@@ -107,29 +165,56 @@ export async function getOpenRouterModels(options?: ApiHandlerOptions): Promise<
 			console.error("OpenRouter models response is invalid", result.error.format())
 		}
 
-		for (const model of data) {
-			const { id, architecture, top_provider, supported_parameters = [] } = model
-
-			// Skip image generation models (models that output images)
-			if (architecture?.output_modalities?.includes("image")) {
-				continue
-			}
-
-			const parsedModel = parseOpenRouterModel({
-				id,
-				model,
-				inputModality: architecture?.input_modalities,
-				outputModality: architecture?.output_modalities,
-				maxTokens: top_provider?.max_completion_tokens,
-				supportedParameters: supported_parameters,
-			})
-
-			models[id] = parsedModel
-		}
+		addOpenRouterModels(models, data)
 	} catch (error) {
 		console.error(
 			`Error fetching OpenRouter models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 		)
+	}
+
+	// Private/user-scoped models (e.g. per-account allowlists) are only returned by the
+	// authenticated /models/user endpoint, so merge them into the public list.
+	if (apiKey) {
+		try {
+			const response = await axios.get<OpenRouterModelsResponse>(`${baseURL}/models/user`, { headers })
+			const result = openRouterModelsResponseSchema.safeParse(response.data)
+			const data = result.success ? result.data.data : response.data.data
+
+			if (!result.success) {
+				console.error("OpenRouter user models response is invalid", result.error.format())
+			}
+
+			addOpenRouterModels(models, data)
+		} catch (error) {
+			console.error(
+				`Error fetching OpenRouter user models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+			)
+		}
+
+		// Presets are only surfaced by the authenticated /presets endpoint and are referenced
+		// as `@preset/{slug}`. Add them so preset selections validate instead of being
+		// rejected/substituted by the webview model picker.
+		try {
+			const response = await axios.get<OpenRouterPresetsResponse>(`${baseURL}/presets`, { headers })
+			const result = openRouterPresetsResponseSchema.safeParse(response.data)
+			const data = result.success ? result.data.data : response.data.data
+
+			if (!result.success) {
+				console.error("OpenRouter presets response is invalid", result.error.format())
+			}
+
+			for (const preset of data) {
+				models[`@preset/${preset.slug}`] = {
+					contextWindow: OPENROUTER_PRESET_DEFAULT_CONTEXT_WINDOW,
+					supportsPromptCache: false,
+					description: preset.description ?? preset.name,
+				}
+			}
+		} catch (error) {
+			console.error(
+				`Error fetching OpenRouter presets: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+			)
+		}
 	}
 
 	return models
@@ -145,9 +230,12 @@ export async function getOpenRouterModelEndpoints(
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
+	const headers = buildOpenRouterAuthHeaders(options?.openRouterApiKey)
 
 	try {
-		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`)
+		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`, {
+			headers,
+		})
 		const result = openRouterModelEndpointsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data
 

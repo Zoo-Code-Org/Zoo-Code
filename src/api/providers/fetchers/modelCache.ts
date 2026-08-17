@@ -90,6 +90,7 @@ const URL_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 // identity -- see the URL_SCOPED_PROVIDERS comment above for why this matters despite caching
 // being skipped for both.
 const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
+	providerIdentifiers.openrouter, // Per-key private/preset models (e.g. @preset/*)
 	providerIdentifiers.litellm, // Per-key model allowlists are a first-class LiteLLM proxy feature
 	providerIdentifiers.poe, // Per-account model availability
 	providerIdentifiers.requesty, // Per-account custom model policies
@@ -228,7 +229,10 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 
 	switch (provider) {
 		case providerIdentifiers.openrouter:
-			models = await getOpenRouterModels()
+			models = await getOpenRouterModels({
+				openRouterApiKey: options.apiKey,
+				openRouterBaseUrl: options.baseUrl,
+			})
 			break
 		case providerIdentifiers.requesty:
 			// Requesty models endpoint requires an API key for per-user custom policies.

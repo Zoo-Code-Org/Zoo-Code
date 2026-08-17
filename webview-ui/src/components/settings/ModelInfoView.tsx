@@ -57,12 +57,14 @@ export const ModelInfoView = ({
 	const fmt = (n?: number) => (typeof n === "number" ? formatPrice(n) : "—")
 
 	const baseInfoItems = [
-		typeof modelInfo?.contextWindow === "number" && modelInfo.contextWindow > 0 && (
-			<>
-				<span className="font-medium">{t("settings:modelInfo.contextWindow")}</span>{" "}
-				{modelInfo.contextWindow?.toLocaleString()} tokens
-			</>
-		),
+		typeof modelInfo?.contextWindow === "number" &&
+			modelInfo.contextWindow > 0 &&
+			!selectedModelId.startsWith("@preset/") && (
+				<>
+					<span className="font-medium">{t("settings:modelInfo.contextWindow")}</span>{" "}
+					{modelInfo.contextWindow?.toLocaleString()} tokens
+				</>
+			),
 		typeof modelInfo?.maxTokens === "number" && modelInfo.maxTokens > 0 && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.maxOutput")}:</span>{" "}

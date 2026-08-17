@@ -540,4 +540,208 @@ describe("OpenRouter API", () => {
 			expect(resultWithoutTools.supportedParameters).toContain("max_tokens")
 		})
 	})
+
+	describe("getOpenRouterModels auth and private/preset models", () => {
+		it("omits the Authorization header and skips user/preset endpoints when no API key is provided", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: [] } })
+
+			await getOpenRouterModels()
+
+			expect(getSpy).toHaveBeenCalledWith(expect.stringContaining("/models"), { headers: undefined })
+			expect(getSpy).not.toHaveBeenCalledWith(expect.stringContaining("/models/user"), expect.anything())
+			expect(getSpy).not.toHaveBeenCalledWith(expect.stringContaining("/presets"), expect.anything())
+
+			getSpy.mockRestore()
+		})
+
+		it("sends the Authorization header to models, user models, and presets when a key is provided", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: [] } })
+
+			await getOpenRouterModels({ openRouterApiKey: "test-key" })
+
+			const authHeader = expect.objectContaining({ headers: { Authorization: "Bearer test-key" } })
+
+			expect(getSpy).toHaveBeenCalledWith(expect.stringContaining("/models"), authHeader)
+			expect(getSpy).toHaveBeenCalledWith(expect.stringContaining("/models/user"), authHeader)
+			expect(getSpy).toHaveBeenCalledWith(expect.stringContaining("/presets"), authHeader)
+
+			getSpy.mockRestore()
+		})
+
+		it("merges public, user, and preset models into the returned record", async () => {
+			const publicModel = {
+				id: "openai/gpt-4o",
+				name: "GPT-4o",
+				context_length: 128000,
+				pricing: { prompt: "0.000005", completion: "0.000015" },
+			}
+			const userModel = {
+				id: "private/account-model",
+				name: "Account model",
+				context_length: 65536,
+				pricing: { prompt: "0", completion: "0" },
+			}
+
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockResolvedValueOnce({ data: { data: [publicModel] } })
+				.mockResolvedValueOnce({ data: { data: [userModel] } })
+				.mockResolvedValueOnce({
+					data: {
+						data: [
+							{
+								id: "preset-1",
+								name: "Flash",
+								slug: "flash",
+								description: null,
+								models: ["openai/gpt-4o"],
+							},
+						],
+					},
+				})
+
+			const models = await getOpenRouterModels({ openRouterApiKey: "test-key" })
+
+			expect(models["openai/gpt-4o"]).toBeDefined()
+			expect(models["private/account-model"]).toBeDefined()
+			const preset = models["@preset/flash"]
+			expect(preset).toBeDefined()
+			expect(preset).not.toHaveProperty("contextWindow")
+			expect(preset).not.toHaveProperty("description")
+			expect(preset?.supportsPromptCache).toBe(false)
+
+			getSpy.mockRestore()
+		})
+
+		it("derives a single-model preset context window from its underlying model", async () => {
+			const publicModel = {
+				id: "openai/gpt-4o",
+				name: "GPT-4o",
+				context_length: 128000,
+				pricing: { prompt: "0.000005", completion: "0.000015" },
+			}
+
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockResolvedValueOnce({ data: { data: [publicModel] } })
+				.mockResolvedValueOnce({ data: { data: [] } })
+				.mockResolvedValueOnce({
+					data: {
+						data: [
+							{
+								id: "preset-1",
+								name: "Flash",
+								slug: "flash",
+								description: null,
+								models: ["openai/gpt-4o"],
+							},
+						],
+					},
+				})
+
+			const models = await getOpenRouterModels({ openRouterApiKey: "test-key" })
+
+			const preset = models["@preset/flash"]
+			expect(preset).toBeDefined()
+			expect(preset).not.toHaveProperty("contextWindow")
+			expect(preset).not.toHaveProperty("description")
+			expect(preset?.supportsPromptCache).toBe(false)
+
+			getSpy.mockRestore()
+		})
+
+		it("derives a multi-model preset context window as the max across its models", async () => {
+			const smallModel = {
+				id: "openai/gpt-4o-mini",
+				name: "GPT-4o mini",
+				context_length: 128000,
+				pricing: { prompt: "0.00000015", completion: "0.0000006" },
+			}
+			const largeModel = {
+				id: "anthropic/claude-3.7-sonnet",
+				name: "Claude 3.7 Sonnet",
+				context_length: 200000,
+				pricing: { prompt: "0.000003", completion: "0.000015" },
+			}
+
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockResolvedValueOnce({ data: { data: [smallModel, largeModel] } })
+				.mockResolvedValueOnce({ data: { data: [] } })
+				.mockResolvedValueOnce({
+					data: {
+						data: [
+							{
+								id: "preset-1",
+								name: "Mixed",
+								slug: "mixed",
+								description: null,
+								models: ["openai/gpt-4o-mini", "anthropic/claude-3.7-sonnet"],
+							},
+						],
+					},
+				})
+
+			const models = await getOpenRouterModels({ openRouterApiKey: "test-key" })
+
+			const preset = models["@preset/mixed"]
+			expect(preset).toBeDefined()
+			expect(preset).not.toHaveProperty("contextWindow")
+			expect(preset).not.toHaveProperty("description")
+			expect(preset?.supportsPromptCache).toBe(false)
+
+			getSpy.mockRestore()
+		})
+
+		it("falls back to a conservative context window when a preset's models cannot be resolved", async () => {
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockResolvedValueOnce({ data: { data: [] } })
+				.mockResolvedValueOnce({ data: { data: [] } })
+				.mockResolvedValueOnce({
+					data: {
+						data: [
+							{
+								id: "preset-1",
+								name: "Orphan",
+								slug: "orphan",
+								description: null,
+								models: ["unknown/model-not-in-list"],
+							},
+						],
+					},
+				})
+
+			const models = await getOpenRouterModels({ openRouterApiKey: "test-key" })
+
+			const preset = models["@preset/orphan"]
+			expect(preset).toBeDefined()
+			expect(preset).not.toHaveProperty("contextWindow")
+			expect(preset).not.toHaveProperty("description")
+			expect(preset?.supportsPromptCache).toBe(false)
+
+			getSpy.mockRestore()
+		})
+	})
+
+	describe("parseOpenRouterModel accepts preset ids", () => {
+		it("parses an @preset/flash id without rejecting the @ prefix", () => {
+			const result = parseOpenRouterModel({
+				id: "@preset/flash",
+				model: { name: "Flash preset", context_length: 200000 },
+				inputModality: ["text"],
+				outputModality: ["text"],
+				maxTokens: undefined,
+			})
+
+			expect(result.contextWindow).toBe(200000)
+			expect(result.supportsPromptCache).toBe(false)
+		})
+	})
 })

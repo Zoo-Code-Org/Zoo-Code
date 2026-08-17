@@ -164,7 +164,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	private async loadDynamicModels(): Promise<void> {
 		try {
 			const [models, endpoints] = await Promise.all([
-				getModels({ provider: "openrouter" }),
+				getModels({
+					provider: "openrouter",
+					apiKey: this.options.openRouterApiKey,
+					baseUrl: this.options.openRouterBaseUrl,
+				}),
 				getModelEndpoints({
 					router: "openrouter",
 					modelId: this.options.openRouterModelId,
@@ -535,7 +539,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 	public async fetchModel() {
 		const [models, endpoints] = await Promise.all([
-			getModels({ provider: "openrouter" }),
+			getModels({
+				provider: "openrouter",
+				apiKey: this.options.openRouterApiKey,
+				baseUrl: this.options.openRouterBaseUrl,
+			}),
 			getModelEndpoints({
 				router: "openrouter",
 				modelId: this.options.openRouterModelId,

@@ -90,6 +90,29 @@ describe("Model Validation Functions", () => {
 			expect(result).toBeUndefined()
 		})
 
+		it("accepts @preset/flash when it is present in the OpenRouter model map", () => {
+			const presetRouterModels: RouterModels = {
+				...mockRouterModels,
+				openrouter: {
+					...mockRouterModels.openrouter,
+					"@preset/flash": {
+						contextWindow: 200_000,
+						supportsPromptCache: false,
+						description: "Flash preset",
+					},
+				},
+			}
+
+			const config: ProviderSettings = {
+				apiProvider: "openrouter",
+				openRouterApiKey: "valid-key",
+				openRouterModelId: "@preset/flash",
+			}
+
+			const result = getModelValidationError(config, presetRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
 		it("returns error for invalid OpenRouter model", () => {
 			const config: ProviderSettings = {
 				apiProvider: "openrouter",

@@ -1098,9 +1098,19 @@ export const webviewMessageHandler = async (
 				}
 			}
 
+			// OpenRouter's public /models endpoint works without auth, but private models and
+			// presets (e.g. @preset/flash) are only returned by the authenticated endpoints, so
+			// forward the saved key when present. Prefer an explicitly supplied unsaved key.
+			const openRouterApiKey = message?.values?.openRouterApiKey ?? apiConfiguration.openRouterApiKey
+
+			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
+			if (message?.values?.openRouterApiKey !== undefined) {
+				await flushModels({ provider: "openrouter", apiKey: openRouterApiKey }, true)
+			}
+
 			// Base candidates (only those handled by this aggregate fetcher)
 			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
-				{ key: "openrouter", options: { provider: "openrouter" } },
+				{ key: "openrouter", options: { provider: "openrouter", apiKey: openRouterApiKey } },
 				{
 					key: "requesty",
 					options: {
