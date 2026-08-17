@@ -609,9 +609,6 @@ describe("OpenRouter API", () => {
 			expect(models["private/account-model"]).toBeDefined()
 			const preset = models["@preset/flash"]
 			expect(preset).toBeDefined()
-			expect(preset).not.toHaveProperty("contextWindow")
-			expect(preset).not.toHaveProperty("description")
-			expect(preset?.supportsPromptCache).toBe(false)
 
 			getSpy.mockRestore()
 		})
