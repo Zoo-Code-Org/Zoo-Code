@@ -1,0 +1,297 @@
+import os from "os"
+import path from "path"
+
+import ignore from "ignore"
+
+/**
+ * Matching of file paths against user-configured file patterns.
+ *
+ * This is used to grant an access permission for a few named files instead of
+ * for the whole workspace, for example `allowedWriteFiles`, which lists the
+ * files Zoo may create or edit without asking.
+ *
+ * The syntax is gitignore-inspired, but deliberately differs from it in how a
+ * path is anchored, because these patterns can name files anywhere on the
+ * filesystem rather than only inside one repository:
+ *
+ * | Pattern               | Matches                                          |
+ * | --------------------- | ------------------------------------------------ |
+ * | `notes.md`            | that filename in any directory of the workspace  |
+ * | `*.md`                | any such file in any directory of the workspace  |
+ * | `docs/notes.md`       | that path relative to the workspace root         |
+ * | `docs/scratch/**`     | everything below that workspace directory        |
+ * | `./notes.md`          | that file in the workspace root only             |
+ * | `../shared/notes.md`  | that path next to the workspace                  |
+ * | `/tmp/notes.md`       | that absolute path (`/` is the filesystem root)  |
+ * | `C:/tmp/notes.md`     | that absolute path on Windows                    |
+ * | `~/notes.md`          | that path in the user's home directory           |
+ * | `!docs/secret.md`     | excludes a file matched by an earlier pattern    |
+ *
+ * The differences from gitignore are all about reaching outside the workspace,
+ * which gitignore has no need to do. Of the three spellings below, gitignore
+ * accepts each without complaint and then matches nothing with it:
+ * - `/notes.md` is an absolute filesystem path, whereas gitignore would read it
+ *   as the workspace root. Absolute paths have to be expressible, and `/` is the
+ *   spelling users expect for them.
+ * - `./notes.md` anchors to the workspace root, the role gitignore gives to
+ *   `/notes.md`.
+ * - `../shared/notes.md` is resolved against the workspace root, so it names a
+ *   path outside the workspace. For gitignore, `..` is a literal segment that no
+ *   path inside the repository can match.
+ *
+ * `/` is the only directory separator, also on Windows, since a backslash
+ * escapes the character after it.
+ *
+ * # Why patterns and paths are rewritten before matching
+ *
+ * The `ignore` library matches a path against patterns as `git` does against
+ * `.gitignore` entries, so both have to be relative to, and below, one base
+ * directory. It therefore cannot handle:
+ * - absolute paths (`/tmp/notes.md`, `C:/tmp/notes.md`), or
+ * - paths that climb out of the base directory (`../shared/notes.md`).
+ * Running `ignore`'s matching ()`ignores()`) against such a path throws
+ * `RangeError` ("path should be a `path.relative()`d string").
+ * Passing such a *pattern* to `add()` throws nothing at all:
+ * It is accepted and then quietly never matches, which would
+ * turn a mistyped permission into a silent no-op.
+ *
+ * Both the configured patterns and the path being checked are therefore
+ * rewritten into a single form the library accepts: a path relative to the
+ * filesystem root (`/`), with any Windows drive as its first segment.
+ *
+ * An alternative implementation would be to remember for each pattern whether
+ * it's a workspace-scoped pattern or an absolute-filesystem pattern, and then
+ * run `ignore` twice, with different base dirs. We do not do that because it
+ * makes implementing negation patterns (`!`) harder, as `ignore` checks for
+ * negations only within the given set of patterns; if we had 2 such sets (one
+ * for workspace, one for absolute), then an absolute negation pattern like
+ * `!/path/to/my/repo/secret.txt` would surprisingly not deny a relative pattern
+ * such as `*.txt`, because those would be handled by different `ignore`
+ * instances.
+ */
+
+/** Convert Windows path separators so patterns and paths share one syntax. */
+function pathsepsToPosix(value: string): string {
+	return value.replace(/\\/g, "/")
+}
+
+function isAbsolutePosixPath(value: string): boolean {
+	// Posix ("/tmp/x") or Windows with a drive letter ("C:/tmp/x").
+	return value.startsWith("/") || /^[a-zA-Z]:\//.test(value)
+}
+
+function escapesWorkspace(posixPath: string): boolean {
+	return posixPath.split("/").includes("..")
+}
+
+/**
+ * Rewrite an absolute path as a path relative to the filesystem root, since the
+ * `ignore` library rejects paths that start with `/`.
+ *
+ * The Windows drive becomes the first path segment (lowercased, since Windows
+ * treats drive letters case-insensitively), which keeps drives apart: a `c:/`
+ * pattern cannot match a `d:/` path.
+ *
+ * - `"/tmp/notes.md"` -> `"tmp/notes.md"`
+ * - `"C:/tmp/notes.md"` -> `"c:/tmp/notes.md"`
+ */
+function toRootRelativePath(absolutePosixPath: string): string {
+	const drive = absolutePosixPath.match(/^([a-zA-Z]):\//)
+
+	if (drive) {
+		return `${drive[1].toLowerCase()}:/${absolutePosixPath.slice(drive[0].length)}`
+	}
+
+	return absolutePosixPath.slice(1)
+}
+
+/**
+ * Rewrite a user-supplied pattern so that it matches the root-relative paths
+ * produced by `toMatcherPath()`.
+ *
+ * Patterns that name a directory rather than a file are rejected (`undefined`).
+ *
+ * The workspace root (`cwd`) is normally known, but is absent when no folder is
+ * open in VS Code, and in contexts that build the extension state without one.
+ * Without it, a workspace-relative pattern is rejected rather than matched
+ * loosely: there is no workspace for it to be relative to, and a bare gitignore
+ * pattern matches in *any* directory, so `passwd` would otherwise match
+ * `/etc/passwd`, and a bare `*` would match every file on the machine.
+ * That would be quite a footgun.
+ * Only absolute patterns remain usable in that situation.
+ *
+ * When the root is known, a workspace-relative pattern has that root prefixed
+ * onto it, which puts it in the same form as an absolute one. gitignore anchors
+ * any pattern that has a separator at its beginning or middle, so prefixing turns
+ * a bare filename such as `notes.md`, which is meant to match in any directory,
+ * into a workspace-root-only match. Its reach is restored by inserting a `/**`
+ * segment (whose trailing slash cannot be written in this comment, as it would
+ * close the comment block) between the root and the filename: that wildcard stands
+ * for any number of directories including none, so the result matches
+ * `base/notes.md` as well as `base/a/b/notes.md`.
+ *
+ * In the below examples, `(star-star)` stands for the `**` wildcard,
+ * which cannot be written literally here because its trailing slash
+ * would close the JSDoc comment block.
+ *
+ * Examples (home directory `/home/me`).
+ * - For workspace root `cwd = "/path/to/repo"`:
+ *   - `"notes.md"` -> `"/path/to/repo/(star-star)/notes.md"`
+ *   - `"*.md"` -> `"/path/to/repo/(star-star)/*.md"`
+ *   - `"docs/notes.md"` -> `"/path/to/repo/docs/notes.md"`
+ *   - `"docs/scratch/**"` -> `"/path/to/repo/docs/scratch/**"`
+ *   - `"./notes.md"` -> `"/path/to/repo/notes.md"`
+ *   - `"../shared/notes.md"` -> `"/path/to/shared/notes.md"`
+ *     resolved against the workspace root, so it lands outside the workspace
+ *   - `"~/notes.md"` -> `"/home/me/notes.md"`
+ *   - `"C:/tmp/notes.md"` -> `"/c:/tmp/notes.md"`
+ *   - `"!docs/secret.md"` -> `"!/path/to/repo/docs/secret.md"`
+ *   - `"mydir/"` -> `undefined` (because it names a dir)
+ *   - `"~"` -> `undefined` (because it names a dir)
+ * - For workspace root `cwd = undefined`:
+ *   - `"notes.md"` with no workspace root -> `undefined`
+ *     (as is any workspace-relative pattern, see above)
+ *
+ * Whitespace and backslashes are left as typed, because the `ignore` library
+ * applies gitignore's own rules to them: leading whitespace is part of the
+ * filename, trailing whitespace is dropped unless escaped (`"notes.md\ "`), and
+ * a backslash escapes the character after it. Only patterns consisting solely of
+ * whitespace are rejected, since they name no file.
+ *
+ * @param pattern - Raw pattern as typed by the user.
+ * @param cwd - Workspace root, used to resolve workspace-relative patterns.
+ * @returns The rewritten pattern, or `undefined` when the pattern can never
+ * match a file (empty, a directory, or escaping an unknown workspace root).
+ */
+export function toMatcherPattern(pattern: string, cwd?: string): string | undefined {
+	if (typeof pattern !== "string") {
+		return undefined
+	}
+
+	// Set gitignore's negation aside so the path is rewritten on its own merits,
+	// then restore it, so that a negation is anchored exactly like the pattern it
+	// is written to cancel.
+	const negation = pattern.startsWith("!") ? "!" : ""
+	let normalized = pattern.slice(negation.length)
+
+	if (!normalized.trim() || normalized === "." || normalized === "~" || normalized.endsWith("/")) {
+		return undefined
+	}
+
+	if (normalized.startsWith("~/")) {
+		normalized = pathsepsToPosix(path.join(os.homedir(), normalized.slice(2)))
+	}
+
+	if (!isAbsolutePosixPath(normalized) && escapesWorkspace(normalized)) {
+		if (!cwd) {
+			return undefined
+		}
+
+		normalized = pathsepsToPosix(path.resolve(cwd, normalized))
+	}
+
+	if (isAbsolutePosixPath(normalized)) {
+		return `${negation}/${toRootRelativePath(normalized)}`
+	}
+
+	// "./notes.md" names the workspace root explicitly.
+	const isWorkspaceRootAnchored = normalized.startsWith("./")
+
+	if (isWorkspaceRootAnchored) {
+		normalized = normalized.slice(2)
+	}
+
+	if (!cwd) {
+		// No workspace to be relative to; see the note above on why this is not
+		// matched loosely instead.
+		return undefined
+	}
+
+	const workspaceBase = toRootRelativePath(pathsepsToPosix(path.resolve(cwd)))
+
+	// gitignore anchors a pattern to the base directory as soon as it has a
+	// separator "at the beginning or middle (or both)" (gitignore(5)), and only a
+	// pattern with no separator at all matches at any level below. Prefixing the
+	// workspace root necessarily adds separators, which would silently turn a bare
+	// filename into a root-only match; a double-star segment, standing for any
+	// number of directories including none, restores its reach.
+	const matchesInAnyDirectory = !isWorkspaceRootAnchored && !normalized.includes("/")
+
+	return `${negation}/${workspaceBase}/${matchesInAnyDirectory ? "**/" : ""}${normalized}`
+}
+
+/**
+ * Rewrite the path of the file being checked into the same root-relative form
+ * that `toMatcherPattern` produces.
+ *
+ * @returns The rewritten path, or `undefined` when it names no file, or when it
+ * is relative and there is no workspace root to resolve it against.
+ */
+function toMatcherPath(filePath: string, cwd?: string): string | undefined {
+ // Not trimmed: whitespace can be part of a filename.
+ const normalized = pathsepsToPosix(filePath)
+
+ if (!normalized.trim() || normalized === ".") {
+ 	return undefined
+ }
+
+ if (isAbsolutePosixPath(normalized)) {
+ 	return toRootRelativePath(normalized)
+ }
+
+ if (!cwd) {
+ 	// A relative path cannot be placed on the filesystem without a root, and
+ 	// the only patterns that survive without one are absolute, which such a
+ 	// path could never match anyway.
+ 	return undefined
+ }
+
+ return toRootRelativePath(pathsepsToPosix(path.resolve(cwd, normalized)))
+}
+
+/**
+ * Check whether a file path is covered by any of the configured patterns.
+ *
+ * Patterns are applied in the order given and the last one to match decides, so
+ * a `!` pattern excludes files matched by the patterns before it.
+ *
+ * @param filePath - Path of the file, either absolute or relative to `cwd`.
+ * @param cwd - Workspace root.
+ * @param patterns - Raw patterns as configured by the user.
+ */
+export function isFileMatchedByPatterns({
+	filePath,
+	cwd,
+	patterns,
+}: {
+	filePath?: string
+	cwd?: string
+	patterns?: string[]
+}): boolean {
+	if (!filePath || !Array.isArray(patterns) || !patterns.length) {
+		return false
+	}
+
+	const candidate = toMatcherPath(filePath, cwd)
+
+	if (!candidate) {
+		return false
+	}
+
+	const matcherPatterns = patterns
+		.map((pattern) => toMatcherPattern(pattern, cwd))
+		.filter((pattern): pattern is string => !!pattern)
+
+	if (!matcherPatterns.length) {
+		return false
+	}
+
+	try {
+		return ignore().add(matcherPatterns).ignores(candidate)
+	} catch (error) {
+		// A path the matcher rejects cannot be confirmed as matching, so treat it
+		// as unmatched.
+		console.error(`[auto-approval] Failed to match path ${filePath}:`, error)
+		return false
+	}
+}

@@ -1248,6 +1248,86 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	})
 })
 
+// Both allowlists are normalized by the same branch, so both are held to the
+// same contract.
+describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists the configured patterns", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md", "docs/scratch/**"] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, ["notes.md", "docs/scratch/**"])
+	})
+
+	it("drops entries that cannot name a file", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md", "", "   ", 42 as unknown as string] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, ["notes.md"])
+	})
+
+	// Whitespace is significant in gitignore syntax, so it must survive saving.
+	it("keeps whitespace within a pattern", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: [" notes.md", "my notes.md", "notes.md\\ "] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, [
+			" notes.md",
+			"my notes.md",
+			"notes.md\\ ",
+		])
+	})
+
+	it("persists an empty list when the setting is cleared", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: [] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, [])
+	})
+
+	// Unlike allowed/denied commands, these settings have no
+	// workspace-configuration counterpart, so nothing should be written to VS
+	// Code settings.
+	it("does not write to the VS Code workspace configuration", async () => {
+		const update = vi.fn()
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update } as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md"] },
+		})
+
+		expect(update).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - allowlists together", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists both allowlists from one save", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedReadFiles: ["read.md"], allowedWriteFiles: ["write.md"] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedReadFiles", ["read.md"])
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedWriteFiles", ["write.md"])
+	})
+})
+
 describe("webviewMessageHandler - terminalProfile", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

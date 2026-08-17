@@ -386,6 +386,20 @@
 				"description": "Allow Zoo to create and edit protected files (like .rooignore and .roo/ configuration files) without requiring approval."
 			}
 		},
+		"allowlists": {
+			"label": "Allowlists",
+			"description": "Grant access to individual files, without auto-approving a whole category of actions. One pattern per line, in .gitignore-inspired syntax: \"notes.md\" matches that file in any directory of the workspace, \"docs/scratch/**\" everything below that directory, and \"*.md\" any Markdown file. A leading \"./\" means the workspace root, while a leading \"/\" means the filesystem root, so \"/tmp/notes.md\" and \"~/notes.md\" reach outside the workspace. Prefix a pattern with \"!\" to exclude what an earlier line matched; as in .gitignore, the last matching line wins, so order counts. Workspace-relative patterns are ignored while no folder is open.",
+			"readFiles": {
+				"label": "Read allowlist patterns",
+				"description": "Files Zoo may read without approval, even when \"Read\" above is off. Files in the write allowlist below can always be read too, so they do not need to be listed twice. Directory listings and searches always follow the \"Read\" setting.",
+				"placeholder": "One pattern per line, e.g. notes.md"
+			},
+			"writeFiles": {
+				"label": "Write allowlist patterns",
+				"description": "Files Zoo may create and edit without approval, even when \"Write\" above is off. Protected files still require approval unless \"Include protected files\" is enabled (in the settings of the \"Write\" Auto-Approve).",
+				"placeholder": "One pattern per line, e.g. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Enable auto-approval of individual MCP tools in the MCP Servers view (requires both this setting and the tool's individual \"Always allow\" checkbox)"
