@@ -1238,32 +1238,41 @@ export class ClineProvider
 		// This overrides any mode-based config restoration above, because the task's
 		// specific provider profile takes precedence over mode defaults.
 		if (historyItem.apiConfigName && !skipProfileRestoreFromHistory) {
-			const listApiConfig = await this.providerSettingsManager.listConfig()
-			// Keep global state/UI in sync with latest profiles for parity with mode restoration above.
-			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
-			const profile = listApiConfig.find(({ name }) => name === historyItem.apiConfigName)
+			const currentApiConfigName = this.contextProxy.getValues().currentApiConfigName
 
-			if (profile?.name) {
-				try {
-					if (profile.apiProvider) {
-						await this.activateProviderProfile(
-							{ name: profile.name },
-							{ persistModeConfig: false, persistTaskHistory: false },
+			if (currentApiConfigName && currentApiConfigName !== historyItem.apiConfigName) {
+				this.log(
+					`Keeping current provider profile '${currentApiConfigName}' instead of restoring stale profile '${historyItem.apiConfigName}' for task ${historyItem.id}.`,
+				)
+				historyItem.apiConfigName = currentApiConfigName
+			} else {
+				const listApiConfig = await this.providerSettingsManager.listConfig()
+				// Keep global state/UI in sync with latest profiles for parity with mode restoration above.
+				await this.updateGlobalState("listApiConfigMeta", listApiConfig)
+				const profile = listApiConfig.find(({ name }) => name === historyItem.apiConfigName)
+
+				if (profile?.name) {
+					try {
+						if (profile.apiProvider) {
+							await this.activateProviderProfile(
+								{ name: profile.name },
+								{ persistModeConfig: false, persistTaskHistory: false },
+							)
+						}
+					} catch (error) {
+						// Log the error but continue with task restoration.
+						this.log(
+							`Failed to restore API configuration '${historyItem.apiConfigName}' for task: ${
+								error instanceof Error ? error.message : String(error)
+							}. Continuing with current configuration.`,
 						)
 					}
-				} catch (error) {
-					// Log the error but continue with task restoration.
+				} else {
+					// Profile no longer exists, log warning but continue
 					this.log(
-						`Failed to restore API configuration '${historyItem.apiConfigName}' for task: ${
-							error instanceof Error ? error.message : String(error)
-						}. Continuing with current configuration.`,
+						`Provider profile '${historyItem.apiConfigName}' from history no longer exists. Using current configuration.`,
 					)
 				}
-			} else {
-				// Profile no longer exists, log warning but continue
-				this.log(
-					`Provider profile '${historyItem.apiConfigName}' from history no longer exists. Using current configuration.`,
-				)
 			}
 		} else if (historyItem.apiConfigName && skipProfileRestoreFromHistory) {
 			this.log(

@@ -301,6 +301,10 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
+		// Seed the ContextProxy state cache with the current profile (initialize() is not
+		// called in these tests, so the cache starts empty).
+		await provider.contextProxy.setValue("currentApiConfigName", "default-profile")
+
 		// Wait for the async TaskHistoryStore initialization to complete
 		await new Promise((resolve) => setTimeout(resolve, 10))
 
@@ -488,10 +492,10 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 	})
 
 	describe("createTaskWithHistoryItem", () => {
-		it("should restore provider profile from history item when reopening task outside CLI runtime", async () => {
+		it("should restore provider profile from history item when it matches the current profile", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			// Create a history item with saved provider profile
+			// Create a history item with saved provider profile matching the current profile
 			const historyItem: HistoryItem = {
 				id: "test-task-id",
 				number: 1,
@@ -503,7 +507,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				cacheReads: 0,
 				totalCost: 0.001,
 				mode: "code",
-				apiConfigName: "saved-profile", // Saved provider profile
+				apiConfigName: "default-profile", // Matches currentApiConfigName in beforeEach
 			}
 
 			// Mock activateProviderProfile to track calls
@@ -513,7 +517,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "saved-profile", id: "saved-profile-id", apiProvider: "anthropic" },
+				{ name: "default-profile", id: "default-profile-id", apiProvider: "anthropic" },
 			])
 
 			// Initialize task with history item
@@ -521,9 +525,45 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			// Verify provider profile was restored via activateProviderProfile (restore-only: don't persist mode config)
 			expect(activateProviderProfileSpy).toHaveBeenCalledWith(
-				{ name: "saved-profile" },
+				{ name: "default-profile" },
 				{ persistModeConfig: false, persistTaskHistory: false },
 			)
+		})
+
+		it("should keep the current provider profile when it differs from the history item's stale profile", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// The task was last saved with "saved-profile", but the user has since
+			// switched to "default-profile" (the current profile in beforeEach).
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				number: 1,
+				ts: Date.now(),
+				task: "Test task",
+				tokensIn: 100,
+				tokensOut: 200,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0.001,
+				mode: "code",
+				apiConfigName: "saved-profile",
+			}
+
+			const activateProviderProfileSpy = vi
+				.spyOn(provider, "activateProviderProfile")
+				.mockResolvedValue(undefined)
+
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "saved-profile", id: "saved-profile-id", apiProvider: "anthropic" },
+			])
+
+			await provider.createTaskWithHistoryItem(historyItem)
+
+			// The stale profile must NOT be reactivated over the user's current selection.
+			expect(activateProviderProfileSpy).not.toHaveBeenCalledWith({ name: "saved-profile" }, expect.anything())
+
+			// The history item's sticky profile is corrected so the new selection persists.
+			expect(historyItem.apiConfigName).toBe("default-profile")
 		})
 
 		it("should not restore an empty task apiConfigName profile from history", async () => {
@@ -540,7 +580,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				cacheReads: 0,
 				totalCost: 0.001,
 				mode: "ask",
-				apiConfigName: "default",
+				apiConfigName: "default-profile", // Matches current profile so the restore path runs
 			}
 
 			const activateProviderProfileSpy = vi
@@ -548,7 +588,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				.mockResolvedValue(undefined)
 
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "default", id: "default-id" },
+				{ name: "default-profile", id: "default-profile-id" },
 			])
 
 			await provider.createTaskWithHistoryItem(historyItem)
@@ -657,7 +697,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 		it("should override mode-based config with task's apiConfigName", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			// Create a history item with both mode and apiConfigName
+			// Create a history item with both mode and apiConfigName (matching the current profile)
 			const historyItem: HistoryItem = {
 				id: "test-task-id",
 				number: 1,
@@ -669,7 +709,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				cacheReads: 0,
 				totalCost: 0.001,
 				mode: "architect", // Mode has a different preferred profile
-				apiConfigName: "task-specific-profile", // Task's actual profile
+				apiConfigName: "default-profile", // Task's actual profile (matches currentApiConfigName)
 			}
 
 			// Track all activateProviderProfile calls
@@ -684,14 +724,14 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-config-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ name: "mode-preferred-profile", id: "mode-config-id", apiProvider: "anthropic" },
-				{ name: "task-specific-profile", id: "task-profile-id", apiProvider: "openai" },
+				{ name: "default-profile", id: "default-profile-id", apiProvider: "openai" },
 			])
 
 			// Initialize task with history item
 			await provider.createTaskWithHistoryItem(historyItem)
 
 			// Verify task's apiConfigName was activated LAST (overriding mode-based config)
-			expect(activateCalls[activateCalls.length - 1]).toBe("task-specific-profile")
+			expect(activateCalls[activateCalls.length - 1]).toBe("default-profile")
 		})
 
 		it("should handle missing provider profile gracefully", async () => {
@@ -708,7 +748,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				cacheWrites: 0,
 				cacheReads: 0,
 				totalCost: 0.001,
-				apiConfigName: "deleted-profile", // Profile that doesn't exist
+				apiConfigName: "default-profile", // Matches current profile, but profile doesn't exist
 			}
 
 			// Mock providerSettingsManager.listConfig to return empty (profile doesn't exist)
@@ -722,7 +762,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			// Verify a warning was logged
 			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("Provider profile 'deleted-profile' from history no longer exists"),
+				expect.stringContaining("Provider profile 'default-profile' from history no longer exists"),
 			)
 		})
 	})
@@ -991,12 +1031,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 				cacheWrites: 0,
 				cacheReads: 0,
 				totalCost: 0.001,
-				apiConfigName: "failing-profile",
+				apiConfigName: "default-profile", // Matches current profile so the restore path runs
 			}
 
 			// Mock providerSettingsManager.listConfig to return the profile
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "failing-profile", id: "failing-profile-id", apiProvider: "anthropic" },
+				{ name: "default-profile", id: "default-profile-id", apiProvider: "anthropic" },
 			])
 
 			// Mock activateProviderProfile to throw error
@@ -1010,7 +1050,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			// Verify error was logged
 			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("Failed to restore API configuration 'failing-profile' for task"),
+				expect.stringContaining("Failed to restore API configuration 'default-profile' for task"),
 			)
 		})
 	})
