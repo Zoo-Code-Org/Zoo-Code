@@ -339,6 +339,28 @@ function sumDailyRowsToTotals(rows: DailyRollupDetailedRow[], cacheRatio?: numbe
 }
 
 /**
+ * Sums an array of StatsBucket into a single totals bucket.
+ */
+export function sumBucketsToTotals(buckets: StatsBucket[]): StatsBucket {
+	const totals = createEmptyBucket()
+	for (const b of buckets) {
+		totals.events += b.events
+		totals.completedCalls += b.completedCalls
+		totals.failedCalls += b.failedCalls
+		totals.cancelledCalls += b.cancelledCalls
+		totals.inputTokens += b.inputTokens
+		totals.outputTokens += b.outputTokens
+		totals.cacheReadTokens += b.cacheReadTokens
+		totals.cacheWriteTokens += b.cacheWriteTokens
+		totals.reasoningTokens += b.reasoningTokens
+		totals.totalTokens += b.totalTokens
+		totals.costUsd += b.costUsd
+		totals.unknownEventCount += b.unknownEventCount
+	}
+	return totals
+}
+
+/**
  * Converts lifetime totals (from queryLifetimeTotalsFiltered) to a StatsBucket.
  */
 function lifetimeTotalsToBucket(
@@ -547,41 +569,6 @@ function assembleRollupSnapshotFast(
 	// registry. This overrides the stale stored value with the correct one.
 	const hasCustomPricing = customPricing !== undefined && customPricing.size > 0
 
-	// Compute the recomputed total discount base (for totals/lifetime path)
-	let recomputedTotalDiscountBase: number | undefined
-	if (hasCustomPricing) {
-		recomputedTotalDiscountBase = computeTotalRecomputedDiscountBase(
-			db,
-			fromEpochMs,
-			toEpochMs,
-			includeCancelled,
-			customPricing!,
-		)
-	}
-
-	// Compute totals
-	let totals: StatsBucket
-	if (isAllTime) {
-		const lifetimeTotals = db.queryLifetimeTotalsFiltered(includeCancelled)
-		totals = lifetimeTotalsToBucket(lifetimeTotals, cacheRatio)
-		// Override stale cacheDiscountBase with recomputed value
-		if (recomputedTotalDiscountBase !== undefined) {
-			totals.costUsd = applyCacheDiscount(lifetimeTotals.totalCost, recomputedTotalDiscountBase, cacheRatio)
-		}
-	} else {
-		const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
-		totals = sumDailyRowsToTotals(dailyRows, cacheRatio)
-		// Override stale cacheDiscountBase with recomputed value
-		if (recomputedTotalDiscountBase !== undefined) {
-			// Recompute the total cost from the raw daily cost sum + recomputed discount base
-			let rawCostSum = 0
-			for (const row of dailyRows) {
-				rawCostSum += row.costUsd
-			}
-			totals.costUsd = applyCacheDiscount(rawCostSum, recomputedTotalDiscountBase, cacheRatio)
-		}
-	}
-
 	// Compute breakdown buckets
 	let buckets: StatsBucket[] = []
 
@@ -638,6 +625,46 @@ function assembleRollupSnapshotFast(
 
 	// Sort buckets
 	buckets = sortBuckets(buckets, groupBy)
+
+	// Compute totals: when groupBy is present, synthesize totals from the computed buckets
+	// to ensure totals.costUsd === sum(buckets.costUsd) and avoid global discount offsets.
+	let totals: StatsBucket
+	if (groupBy.length > 0) {
+		totals = sumBucketsToTotals(buckets)
+	} else {
+		// Compute the recomputed total discount base (only needed for groupBy.length === 0 totals/lifetime path)
+		let recomputedTotalDiscountBase: number | undefined
+		if (hasCustomPricing) {
+			recomputedTotalDiscountBase = computeTotalRecomputedDiscountBase(
+				db,
+				fromEpochMs,
+				toEpochMs,
+				includeCancelled,
+				customPricing!,
+			)
+		}
+
+		if (isAllTime) {
+			const lifetimeTotals = db.queryLifetimeTotalsFiltered(includeCancelled)
+			totals = lifetimeTotalsToBucket(lifetimeTotals, cacheRatio)
+			// Override stale cacheDiscountBase with recomputed value
+			if (recomputedTotalDiscountBase !== undefined) {
+				totals.costUsd = applyCacheDiscount(lifetimeTotals.totalCost, recomputedTotalDiscountBase, cacheRatio)
+			}
+		} else {
+			const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
+			totals = sumDailyRowsToTotals(dailyRows, cacheRatio)
+			// Override stale cacheDiscountBase with recomputed value
+			if (recomputedTotalDiscountBase !== undefined) {
+				// Recompute the total cost from the raw daily cost sum + recomputed discount base
+				let rawCostSum = 0
+				for (const row of dailyRows) {
+					rawCostSum += row.costUsd
+				}
+				totals.costUsd = applyCacheDiscount(rawCostSum, recomputedTotalDiscountBase, cacheRatio)
+			}
+		}
+	}
 
 	// Compute coverage from the DB (fast indexed query)
 	const coverageStats = db.queryCoverageStats(fromEpochMs, toEpochMs, includeCancelled)

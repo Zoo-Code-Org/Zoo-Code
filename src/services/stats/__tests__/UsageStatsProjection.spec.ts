@@ -13,6 +13,7 @@ import {
 	computeHeatmapSnapshot,
 	applyEventToProjection,
 	computeDayBucket,
+	sumBucketsToTotals,
 	StatsProjError,
 } from "../UsageStatsProjection"
 import { UsageAggregator, computeEventContribution, serializeBucketKey } from "../UsageAggregator"
@@ -1032,6 +1033,182 @@ describe("UsageStatsProjection", () => {
 
 			// Both paths should produce the same cost
 			expect(fastSnapshot.totals.costUsd).toBeCloseTo(eventScanSnapshot.totals.costUsd, 10)
+		})
+	})
+
+	// ── sumBucketsToTotals ─────────────────────────────────────────────────
+
+	describe("sumBucketsToTotals", () => {
+		it("should return a zeroed bucket for empty buckets array", () => {
+			const totals = sumBucketsToTotals([])
+			expect(totals.events).toBe(0)
+			expect(totals.completedCalls).toBe(0)
+			expect(totals.failedCalls).toBe(0)
+			expect(totals.cancelledCalls).toBe(0)
+			expect(totals.inputTokens).toBe(0)
+			expect(totals.outputTokens).toBe(0)
+			expect(totals.cacheReadTokens).toBe(0)
+			expect(totals.cacheWriteTokens).toBe(0)
+			expect(totals.reasoningTokens).toBe(0)
+			expect(totals.totalTokens).toBe(0)
+			expect(totals.costUsd).toBe(0)
+			expect(totals.unknownEventCount).toBe(0)
+			expect(totals.key).toEqual({})
+		})
+
+		it("should accurately aggregate all metrics across multiple buckets", () => {
+			const b1 = {
+				key: { model: "model-a" },
+				events: 2,
+				completedCalls: 2,
+				failedCalls: 0,
+				cancelledCalls: 0,
+				inputTokens: 1000,
+				outputTokens: 200,
+				cacheReadTokens: 100,
+				cacheWriteTokens: 50,
+				reasoningTokens: 25,
+				totalTokens: 1200,
+				costUsd: 0.05,
+				unknownEventCount: 1,
+			}
+			const b2 = {
+				key: { model: "model-b" },
+				events: 3,
+				completedCalls: 1,
+				failedCalls: 1,
+				cancelledCalls: 1,
+				inputTokens: 2000,
+				outputTokens: 400,
+				cacheReadTokens: 300,
+				cacheWriteTokens: 100,
+				reasoningTokens: 50,
+				totalTokens: 2400,
+				costUsd: 0.1,
+				unknownEventCount: 0,
+			}
+
+			const totals = sumBucketsToTotals([b1, b2])
+
+			expect(totals.events).toBe(5)
+			expect(totals.completedCalls).toBe(3)
+			expect(totals.failedCalls).toBe(1)
+			expect(totals.cancelledCalls).toBe(1)
+			expect(totals.inputTokens).toBe(3000)
+			expect(totals.outputTokens).toBe(600)
+			expect(totals.cacheReadTokens).toBe(400)
+			expect(totals.cacheWriteTokens).toBe(150)
+			expect(totals.reasoningTokens).toBe(75)
+			expect(totals.totalTokens).toBe(3600)
+			expect(totals.costUsd).toBeCloseTo(0.15, 10)
+			expect(totals.unknownEventCount).toBe(1)
+			expect(totals.key).toEqual({})
+		})
+	})
+
+	describe("rollup totals synthesis (sumBucketsToTotals)", () => {
+		it("maintains sum(buckets.costUsd) === totals.costUsd when mixing priced and unpriced models", () => {
+			// Event 1: Model with custom pricing
+			const evtPriced = makeEvent({
+				eventId: "evt-priced",
+				idempotencyKey: "idem-priced",
+				provider: "openai",
+				model: "priced-custom-model",
+				usage: {
+					inputTokens: { value: 10000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.05, source: "provider" },
+				},
+			})
+
+			// Event 2: Model without pricing (0 cost, missing from custom pricing map)
+			const evtUnpriced = makeEvent({
+				eventId: "evt-unpriced",
+				idempotencyKey: "idem-unpriced",
+				provider: "openai",
+				model: "unpriced-custom-model",
+				usage: {
+					inputTokens: { value: 50000, source: "provider" },
+					outputTokens: { value: 200, source: "provider" },
+					costUsd: { value: 0, source: "provider" },
+				},
+			})
+
+			db.append(evtPriced)
+			db.append(evtUnpriced)
+
+			// Custom pricing ONLY provided for the first model
+			const customPricing = new Map([["openai|priced-custom-model", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+
+			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.94 }), {
+				customPricing,
+			})
+
+			// Invariant: sum of bucket costUsd must equal totals.costUsd exactly
+			const bucketCostSum = snapshot.buckets.reduce((acc, b) => acc + b.costUsd, 0)
+			expect(snapshot.totals.costUsd).toBeCloseTo(bucketCostSum, 10)
+
+			// The priced model should receive its discount:
+			// discountBase = (10000 / 1M) * (2.0 - 0.5) = 0.015
+			// cost = 0.05 - 0.94 * 0.015 = 0.0359
+			const pricedBucket = snapshot.buckets.find((b) => b.key.model === "priced-custom-model")
+			expect(pricedBucket).toBeDefined()
+			expect(pricedBucket!.costUsd).toBeCloseTo(0.0359, 10)
+
+			// The unpriced model has 0 cost
+			const unpricedBucket = snapshot.buckets.find((b) => b.key.model === "unpriced-custom-model")
+			expect(unpricedBucket).toBeDefined()
+			expect(unpricedBucket!.costUsd).toBe(0)
+
+			// Totals cost must NOT be offset to 0 by any global calculation
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.0359, 10)
+			expect(snapshot.totals.costUsd).toBeGreaterThan(0)
+		})
+
+		it("maintains sum(buckets.costUsd) === totals.costUsd for other single-axis groupBys (provider, day)", () => {
+			const evt1 = makeEvent({
+				eventId: "evt-p1",
+				idempotencyKey: "idem-p1",
+				occurredAt: "2026-07-19T10:00:00.000Z",
+				provider: "openai",
+				model: "model-1",
+				usage: {
+					inputTokens: { value: 10000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					costUsd: { value: 0.03, source: "provider" },
+				},
+			})
+			const evt2 = makeEvent({
+				eventId: "evt-p2",
+				idempotencyKey: "idem-p2",
+				occurredAt: "2026-07-20T10:00:00.000Z",
+				provider: "anthropic",
+				model: "claude-sonnet-4-20250514",
+				usage: {
+					inputTokens: { value: 20000, source: "provider" },
+					outputTokens: { value: 1000, source: "provider" },
+					costUsd: { value: 0.06, source: "provider" },
+				},
+			})
+
+			db.append(evt1)
+			db.append(evt2)
+
+			const customPricing = new Map([["openai|model-1", { inputPrice: 2.0, cacheReadsPrice: 0.5 }]])
+
+			// Test provider axis
+			const providerSnapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["provider"], cacheRatio: 0.5 }), {
+				customPricing,
+			})
+			const providerCostSum = providerSnapshot.buckets.reduce((acc, b) => acc + b.costUsd, 0)
+			expect(providerSnapshot.totals.costUsd).toBeCloseTo(providerCostSum, 10)
+
+			// Test day axis
+			const daySnapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["day"], cacheRatio: 0.5 }), {
+				customPricing,
+			})
+			const dayCostSum = daySnapshot.buckets.reduce((acc, b) => acc + b.costUsd, 0)
+			expect(daySnapshot.totals.costUsd).toBeCloseTo(dayCostSum, 10)
 		})
 	})
 })
