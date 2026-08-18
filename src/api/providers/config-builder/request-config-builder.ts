@@ -22,11 +22,21 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	protected options: Partial<TOptions>
 
 	constructor(defaultOptions?: Partial<TOptions>) {
-		this.options = defaultOptions
-			? (Object.fromEntries(
-					Object.entries(defaultOptions).filter(([, value]) => value !== undefined),
-				) as Partial<TOptions>)
-			: {}
+		if (!defaultOptions) {
+			this.options = {}
+			return
+		}
+
+		const defined = Object.fromEntries(
+			Object.entries(defaultOptions).filter(([, value]) => value !== undefined),
+		) as Partial<TOptions>
+
+		// Own the headers object so later mutations of the caller's defaults do not leak in.
+		if (defined.headers) {
+			defined.headers = { ...defined.headers }
+		}
+
+		this.options = defined
 	}
 
 	/**
@@ -116,7 +126,9 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	/**
 	 * Build the final configuration object.
 	 *
-	 * Returns a shallow copy of the internal options to ensure immutability.
+	 * Copies the top-level options and the nested headers object, so mutating the
+	 * result does not change builder state. The abort signal is a live object and
+	 * is shared by reference on purpose. Other nested option values are not cloned.
 	 * Returns undefined if no options have been set.
 	 *
 	 * @returns A partial built configuration (only the options that were set) or
@@ -128,7 +140,12 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 			return undefined
 		}
 
-		return { ...this.options }
+		const result = { ...this.options }
+		if (result.headers) {
+			result.headers = { ...result.headers }
+		}
+
+		return result
 	}
 
 	/**

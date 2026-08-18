@@ -5,6 +5,7 @@ describe("abort-signal utilities", () => {
 		it("returns undefined when no signal or positive timeout is provided", () => {
 			expect(mergeAbortSignalAndTimeout(undefined, 0)).toBeUndefined()
 			expect(mergeAbortSignalAndTimeout(undefined, -1)).toBeUndefined()
+			expect(mergeAbortSignalAndTimeout(undefined, NaN)).toBeUndefined()
 			expect(mergeAbortSignalAndTimeout()).toBeUndefined()
 		})
 
@@ -12,6 +13,7 @@ describe("abort-signal utilities", () => {
 			const controller = new AbortController()
 
 			expect(mergeAbortSignalAndTimeout(controller.signal, -1)).toBe(controller.signal)
+			expect(mergeAbortSignalAndTimeout(controller.signal, NaN)).toBe(controller.signal)
 			expect(mergeAbortSignalAndTimeout(controller.signal)).toBe(controller.signal)
 		})
 
@@ -21,9 +23,7 @@ describe("abort-signal utilities", () => {
 			expect(result).toBeInstanceOf(AbortSignal)
 			expect(result?.aborted).toBe(false)
 
-			await new Promise((resolve) => setTimeout(resolve, 120))
-
-			expect(result?.aborted).toBe(true)
+			await vi.waitFor(() => expect(result?.aborted).toBe(true))
 		})
 
 		it("merges external signal and timeout signal", () => {
@@ -48,9 +48,7 @@ describe("abort-signal utilities", () => {
 			expect(result).not.toBe(controller.signal)
 			expect(result?.aborted).toBe(false)
 
-			await new Promise((resolve) => setTimeout(resolve, 120))
-
-			expect(result?.aborted).toBe(true)
+			await vi.waitFor(() => expect(result?.aborted).toBe(true))
 		})
 	})
 

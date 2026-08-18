@@ -1,6 +1,6 @@
-import { describe, expect, test } from "vitest"
+import { describe, expect, test, vi } from "vitest"
 
-import type { ApiHandlerCreateMessageMetadata } from "../../index"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { RequestConfigBuilder } from "../config-builder/request-config-builder"
 
 describe("RequestConfigBuilder", () => {
@@ -30,15 +30,27 @@ describe("RequestConfigBuilder", () => {
 
 			expect(builder.build()).toBeUndefined()
 		})
+
+		test("should keep falsy-but-defined values", () => {
+			const builder = new RequestConfigBuilder({ count: 0, enabled: false, label: "" })
+
+			expect(builder.build()).toEqual({ count: 0, enabled: false, label: "" })
+		})
+
+		test("should not alias the caller's default headers", () => {
+			const defaults = { headers: { A: "1" } }
+			const builder = new RequestConfigBuilder(defaults)
+
+			defaults.headers.A = "2"
+
+			expect(builder.getOption("headers")).toEqual({ A: "1" })
+		})
 	})
 
 	describe("setAbortSignal", () => {
 		test("should set signal when metadata contains abortSignal", () => {
 			const controller = new AbortController()
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-				abortSignal: controller.signal,
-			}
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 
 			const builder = new RequestConfigBuilder()
 			const result = builder.setAbortSignal(metadata)
@@ -57,9 +69,7 @@ describe("RequestConfigBuilder", () => {
 		})
 
 		test("should do nothing when metadata.abortSignal is undefined", () => {
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-			}
+			const metadata = makeCreateMessageMetadata()
 
 			const builder = new RequestConfigBuilder({ initial: "value" })
 			builder.setAbortSignal(metadata)
@@ -73,10 +83,7 @@ describe("RequestConfigBuilder", () => {
 			const controller2 = new AbortController()
 
 			const builder = new RequestConfigBuilder({ signal: controller1.signal })
-			builder.setAbortSignal({
-				taskId: "test-task",
-				abortSignal: controller2.signal,
-			} as ApiHandlerCreateMessageMetadata)
+			builder.setAbortSignal(makeCreateMessageMetadata({ abortSignal: controller2.signal }))
 
 			const config = builder.build() as { signal?: AbortSignal }
 			expect(config?.signal).toBe(controller2.signal)
@@ -84,10 +91,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("should support chaining with other methods", () => {
 			const controller = new AbortController()
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-				abortSignal: controller.signal,
-			}
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 
 			const builder = new RequestConfigBuilder()
 			const result = builder.setAbortSignal(metadata).setOption("customKey", "customValue")
@@ -207,6 +211,16 @@ describe("RequestConfigBuilder", () => {
 			expect(config.objectKey).toEqual({ nested: true })
 		})
 
+		test("should keep falsy-but-defined values", () => {
+			const builder = new RequestConfigBuilder()
+			builder.setOption("count", 0).setOption("enabled", false).setOption("label", "")
+
+			const config = builder.build() as { count?: number; enabled?: boolean; label?: string }
+			expect(config.count).toBe(0)
+			expect(config.enabled).toBe(false)
+			expect(config.label).toBe("")
+		})
+
 		test("should support chaining", () => {
 			const builder = new RequestConfigBuilder()
 			const result = builder.setOption("key1", "value1").setOption("key2", "value2")
@@ -253,12 +267,18 @@ describe("RequestConfigBuilder", () => {
 			expect(builder.getOption("key")).toBe("value")
 		})
 
+		test("mutating returned headers should not affect internal state", () => {
+			const builder = new RequestConfigBuilder({ headers: { Authorization: "Bearer x" } })
+			const config = builder.build() as { headers?: Record<string, string> }
+
+			config.headers!.Authorization = "TAMPERED"
+
+			expect(builder.getOption("headers")).toEqual({ Authorization: "Bearer x" })
+		})
+
 		test("should return all set options", () => {
 			const controller = new AbortController()
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-				abortSignal: controller.signal,
-			}
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 
 			const builder = new RequestConfigBuilder()
 			builder.setAbortSignal(metadata).addHeaders({ "X-Custom": "value" }).setOption("modelId", "test-model")
@@ -282,10 +302,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("should set signal from metadata.abortSignal", () => {
 			const controller = new AbortController()
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-				abortSignal: controller.signal,
-			}
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 
 			const result = RequestConfigBuilder.fromMetadata(metadata) as { signal?: AbortSignal }
 			expect(result.signal).toBe(controller.signal)
@@ -293,10 +310,7 @@ describe("RequestConfigBuilder", () => {
 
 		test("should merge extraOptions with metadata signal", () => {
 			const controller = new AbortController()
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-				abortSignal: controller.signal,
-			}
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 			const extraOptions = { modelId: "test-model", customKey: "customValue" }
 
 			const result = RequestConfigBuilder.fromMetadata(metadata, extraOptions) as {
@@ -322,7 +336,7 @@ describe("RequestConfigBuilder", () => {
 		})
 
 		test("should not set signal when metadata.abortSignal is undefined", () => {
-			const metadata: ApiHandlerCreateMessageMetadata = { taskId: "test-task" }
+			const metadata = makeCreateMessageMetadata()
 			const extraOptions = { modelId: "test-model" }
 
 			const result = RequestConfigBuilder.fromMetadata(metadata, extraOptions) as {
@@ -351,10 +365,10 @@ describe("RequestConfigBuilder", () => {
 			const externalController = new AbortController()
 			const builder = new RequestConfigBuilder()
 
-			builder.addMergedSignal(internalController, {
-				taskId: "test-task",
-				abortSignal: externalController.signal,
-			})
+			builder.addMergedSignal(
+				internalController,
+				makeCreateMessageMetadata({ abortSignal: externalController.signal }),
+			)
 
 			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal).not.toBe(internalController.signal)
@@ -369,10 +383,10 @@ describe("RequestConfigBuilder", () => {
 			const externalController = new AbortController()
 			const builder = new RequestConfigBuilder()
 
-			builder.addMergedSignal(internalController, {
-				taskId: "test-task",
-				abortSignal: externalController.signal,
-			})
+			builder.addMergedSignal(
+				internalController,
+				makeCreateMessageMetadata({ abortSignal: externalController.signal }),
+			)
 
 			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal?.aborted).toBe(false)
@@ -391,8 +405,7 @@ describe("RequestConfigBuilder", () => {
 			expect(config.signal).not.toBe(internalController.signal)
 			expect(config.signal?.aborted).toBe(false)
 
-			await new Promise((resolve) => setTimeout(resolve, 120))
-			expect(config.signal?.aborted).toBe(true)
+			await vi.waitFor(() => expect(config.signal?.aborted).toBe(true))
 		})
 
 		test("should immediately abort when metadata signal is already aborted", () => {
@@ -401,12 +414,30 @@ describe("RequestConfigBuilder", () => {
 			externalController.abort()
 			const builder = new RequestConfigBuilder()
 
-			builder.addMergedSignal(internalController, {
-				taskId: "test-task",
-				abortSignal: externalController.signal,
-			})
+			builder.addMergedSignal(
+				internalController,
+				makeCreateMessageMetadata({ abortSignal: externalController.signal }),
+			)
 
 			const config = builder.build() as { signal?: AbortSignal }
+			expect(config.signal?.aborted).toBe(true)
+		})
+
+		test("should propagate abort from internal controller when all three sources are merged", () => {
+			const internalController = new AbortController()
+			const externalController = new AbortController()
+			const builder = new RequestConfigBuilder()
+
+			builder.addMergedSignal(
+				internalController,
+				makeCreateMessageMetadata({ abortSignal: externalController.signal }),
+				10_000,
+			)
+
+			const config = builder.build() as { signal?: AbortSignal }
+			expect(config.signal?.aborted).toBe(false)
+
+			internalController.abort()
 			expect(config.signal?.aborted).toBe(true)
 		})
 	})
@@ -414,10 +445,7 @@ describe("RequestConfigBuilder", () => {
 	describe("integration tests", () => {
 		test("should support full chain of operations", () => {
 			const controller = new AbortController()
-			const metadata: ApiHandlerCreateMessageMetadata = {
-				taskId: "test-task",
-				abortSignal: controller.signal,
-			}
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
 
 			type TestOptions = {
 				modelId?: string
