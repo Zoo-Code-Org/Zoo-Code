@@ -34,15 +34,6 @@ export function assertValidTransition(from: HistoryItemStatus | undefined, to: H
 }
 
 /**
- * Index file format for fast startup reads.
- */
-interface HistoryIndex {
-	version: number
-	updatedAt: number
-	entries: HistoryItem[]
-}
-
-/**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
@@ -75,15 +66,14 @@ interface DelegationRepairIntent {
  *
  * Each task's HistoryItem is stored as an individual JSON file in its
  * existing task directory (`globalStorage/tasks/<taskId>/history_item.json`).
- * A single index file (`globalStorage/tasks/_index.json`) is maintained
- * as a cache for fast list reads at startup.
+ * There is no shared index file. Reads scan the task directories.
  *
- * Cross-process safety for per-task files and `_index.json` comes from
- * `safeWriteJson`'s `proper-lockfile` with a `merge` callback: each
- * write reads the current file under the advisory lock and merges
- * incoming fields, so a concurrent writer's changes are preserved
- * rather than silently dropped. Within a single extension host process,
- * an in-process write lock serializes mutations.
+ * Cross-process safety for per-task files comes from `safeWriteJson`'s
+ * `proper-lockfile` with a `merge` callback: each write reads the
+ * current file under the advisory lock and merges incoming fields, so
+ * a concurrent writer's changes are preserved rather than silently
+ * dropped. Within a single extension host process, an in-process write
+ * lock serializes mutations.
  */
 /**
  * Options for TaskHistoryStore constructor.
@@ -103,7 +93,6 @@ export class TaskHistoryStore {
 	private cache: Map<string, HistoryItem> = new Map()
 	private taskFileMtimes: Map<string, number> = new Map()
 	private writeLock: Promise<void> = Promise.resolve()
-	private indexWriteTimer: ReturnType<typeof setTimeout> | null = null
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
 	private disposed = false
@@ -114,9 +103,6 @@ export class TaskHistoryStore {
 	 */
 	public readonly initialized: Promise<void>
 	private resolveInitialized!: () => void
-
-	/** Debounce window for index writes in milliseconds. */
-	private static readonly INDEX_WRITE_DEBOUNCE_MS = 2000
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
@@ -139,30 +125,27 @@ export class TaskHistoryStore {
 			const tasksDir = await this.getTasksDir()
 			await fs.mkdir(tasksDir, { recursive: true })
 
-			// 1. Load existing index into the cache
-			await this.loadIndex()
-
-			// 2. Reconcile cache against actual task directories on disk
+			// 1. Scan task directories to populate the cache
 			await this.reconcile({ forceRefresh: true })
 			// Capture which active tasks were present in persisted state before replay can
 			// change any statuses. Reconciliation must not treat a replay-repaired parent
 			// as an orphaned active child in the same startup pass.
 			const persistedActiveIds = this.getPersistedActiveIds()
 
-			// 3. Complete any two-record repair interrupted after its intent was durable.
+			// 2. Complete any two-record repair interrupted after its intent was durable.
 			try {
 				await this.replayDelegationRepairIntent()
 			} catch (error) {
 				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
 			}
 
-			// 4. Repair delegation inconsistencies left by a previous crash
+			// 3. Repair delegation inconsistencies left by a previous crash
 			await this.reconcileDelegationState(persistedActiveIds)
 
-			// 5. Start fs.watch for cross-instance reactivity
+			// 4. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
 
-			// 6. Start periodic reconciliation as a defensive fallback
+			// 5. Start periodic reconciliation as a defensive fallback
 			this.startPeriodicReconciliation()
 		} finally {
 			// Mark initialization as complete so callers awaiting `initialized` can proceed
@@ -176,11 +159,6 @@ export class TaskHistoryStore {
 	dispose(): void {
 		this.disposed = true
 
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-			this.indexWriteTimer = null
-		}
-
 		if (this.reconcileTimer) {
 			clearTimeout(this.reconcileTimer)
 			this.reconcileTimer = null
@@ -190,11 +168,6 @@ export class TaskHistoryStore {
 			this.fsWatcher.close()
 			this.fsWatcher = null
 		}
-
-		// Synchronously flush the index (best-effort)
-		this.flushIndex().catch((err) => {
-			console.error("[TaskHistoryStore] Error flushing index on dispose:", err)
-		})
 	}
 
 	// ────────────────────────────── Reads ──────────────────────────────
@@ -272,8 +245,6 @@ export class TaskHistoryStore {
 
 		// Update in-memory cache
 		this.cache.set(merged.id, merged)
-		// Schedule debounced index write
-		this.scheduleIndexWrite()
 
 		const all = this.getAll()
 
@@ -301,8 +272,6 @@ export class TaskHistoryStore {
 				// File may already be deleted
 			}
 
-			this.scheduleIndexWrite()
-
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
@@ -326,8 +295,6 @@ export class TaskHistoryStore {
 					// File may already be deleted
 				}
 			}
-
-			this.scheduleIndexWrite()
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -356,20 +323,18 @@ export class TaskHistoryStore {
 				return // tasks dir doesn't exist yet
 			}
 
-			// Filter out the index file and hidden files
+			// Filter out hidden and reserved names
 			const taskDirNames = dirEntries.filter((name) => !name.startsWith("_") && !name.startsWith("."))
 
 			const onDiskIds = new Set(taskDirNames)
 			const cacheIds = new Set(this.cache.keys())
-			let changed = false
+			const liveIds = new Set<string>()
 
-			// Task files are authoritative during startup. Later watcher and periodic
-			// reconciliations use mtime change detection to avoid rewriting the index when
-			// nothing changed on disk.
 			for (const taskId of onDiskIds) {
 				try {
 					const taskFilePath = await this.getTaskFilePath(taskId)
 					const { mtimeMs } = await fs.stat(taskFilePath)
+					liveIds.add(taskId)
 					if (
 						!options.forceRefresh &&
 						this.cache.has(taskId) &&
@@ -384,25 +349,19 @@ export class TaskHistoryStore {
 						this.taskFileMtimes.set(taskId, mtimeMs)
 						if (!deepEqual(previous, item)) {
 							this.cache.set(taskId, item)
-							changed = true
 						}
 					}
 				} catch {
-					// Corrupted or missing file, skip
+					// history_item.json missing or corrupt — not live
 				}
 			}
 
-			// Tasks in cache but not on disk: remove from cache
+			// Evict tasks whose history_item.json no longer exists
 			for (const taskId of cacheIds) {
-				if (!onDiskIds.has(taskId)) {
+				if (!liveIds.has(taskId)) {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
-					changed = true
 				}
-			}
-
-			if (changed) {
-				this.scheduleIndexWrite()
 			}
 		})
 	}
@@ -594,12 +553,6 @@ export class TaskHistoryStore {
 				await this.onWrite(this.getAll())
 			}
 			await this.removeDelegationRepairIntent()
-			// Task files are authoritative and the intent is the recovery journal.
-			// Clean up the journal before scheduling the derived index: a crash after
-			// cleanup but before the index write is safe because startup rebuilds the
-			// index from task files, while the reverse ordering could make the index
-			// appear durable before recovery metadata is settled.
-			this.scheduleIndexWrite()
 		})
 	}
 
@@ -655,9 +608,6 @@ export class TaskHistoryStore {
 			await this.onWrite(this.getAll())
 		}
 		await this.removeDelegationRepairIntent()
-		// The index is derived state; keep the intent until authoritative task-file
-		// writes and write-through have completed, then schedule the index update.
-		this.scheduleIndexWrite()
 	}
 
 	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
@@ -855,124 +805,10 @@ export class TaskHistoryStore {
 				}
 			}
 
-			// Write the index
-			await this.writeIndex()
-
 			// Repair any delegation inconsistencies introduced by the migrated entries.
 			// Run the lock-free core because migration already holds the store lock.
 			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
 		})
-	}
-
-	// ────────────────────────────── Private: Index management ──────────────────────────────
-
-	/**
-	 * Load the `_index.json` file into the in-memory cache.
-	 */
-	private async loadIndex(): Promise<void> {
-		const indexPath = await this.getIndexPath()
-
-		try {
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index: HistoryIndex = JSON.parse(raw)
-
-			if (index.version === 1 && Array.isArray(index.entries)) {
-				for (const entry of index.entries) {
-					if (entry.id) {
-						this.cache.set(entry.id, entry)
-					}
-				}
-			}
-		} catch {
-			// Index doesn't exist or is corrupted; cache stays empty.
-			// Reconciliation will rebuild it from per-task files.
-		}
-	}
-
-	/**
-	 * Write the index to disk, merging entries from other hosts.
-	 *
-	 * Peer entries (task ids present on disk but absent from this host's
-	 * cache) are kept only if their task directory still exists, so a
-	 * local delete propagates instead of being undone by the merge.
-	 */
-	private async writeIndex(): Promise<void> {
-		const indexPath = await this.getIndexPath()
-		const tasksDir = await this.getTasksDir()
-		const index: HistoryIndex = {
-			version: 1,
-			updatedAt: Date.now(),
-			entries: this.getAll(),
-		}
-
-		let liveIds: Set<string>
-		try {
-			const dirEntries = await fs.readdir(tasksDir)
-			const candidates = dirEntries.filter((n) => !n.startsWith("_") && !n.startsWith("."))
-			const checks = await Promise.all(
-				candidates.map(async (id) => {
-					try {
-						await fs.access(path.join(tasksDir, id, GlobalFileNames.historyItem))
-						return id
-					} catch {
-						return null
-					}
-				}),
-			)
-			liveIds = new Set(checks.filter((id): id is string => id !== null))
-		} catch {
-			liveIds = new Set()
-		}
-
-		await safeWriteJson(indexPath, index, {
-			merge: (existing, incoming) => {
-				const prev = existing as HistoryIndex | null
-				const next = incoming as HistoryIndex
-				if (!prev || prev.version !== 1 || !Array.isArray(prev.entries)) {
-					return next
-				}
-				const ourIds = new Set(next.entries.map((e) => e.id))
-				const peerEntries = prev.entries.filter((e) => e.id && !ourIds.has(e.id) && liveIds.has(e.id))
-				return {
-					...next,
-					entries: [...next.entries, ...peerEntries].sort((a, b) => b.ts - a.ts),
-				}
-			},
-		})
-	}
-
-	/**
-	 * Schedule a debounced index write.
-	 */
-	private scheduleIndexWrite(): void {
-		if (this.disposed) {
-			return
-		}
-
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-		}
-
-		this.indexWriteTimer = setTimeout(async () => {
-			this.indexWriteTimer = null
-			try {
-				await this.writeIndex()
-			} catch (err) {
-				console.error("[TaskHistoryStore] Failed to write index:", err)
-			}
-		}, TaskHistoryStore.INDEX_WRITE_DEBOUNCE_MS)
-	}
-
-	/**
-	 * Force an immediate index write (called on dispose/shutdown).
-	 */
-	async flushIndex(): Promise<void> {
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-			this.indexWriteTimer = null
-		}
-
-		await this.writeIndex()
 	}
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
@@ -1186,7 +1022,6 @@ export class TaskHistoryStore {
 			this.cache.set(firstId, mergedFirst)
 			this.cache.set(secondId, mergedSecond)
 
-			this.scheduleIndexWrite()
 			const all = this.getAll()
 			if (this.onWrite) {
 				await this.onWrite(all)
@@ -1226,13 +1061,5 @@ export class TaskHistoryStore {
 	private async getTaskFilePath(taskId: string): Promise<string> {
 		const tasksDir = await this.getTasksDir()
 		return path.join(tasksDir, taskId, GlobalFileNames.historyItem)
-	}
-
-	/**
-	 * Get the path to the `_index.json` file.
-	 */
-	private async getIndexPath(): Promise<string> {
-		const tasksDir = await this.getTasksDir()
-		return path.join(tasksDir, GlobalFileNames.historyIndex)
 	}
 }

@@ -142,6 +142,27 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(storeB.get("shared-task")).toBeUndefined()
 	})
 
+	it("delete by instance A is detected even when the task directory remains", async () => {
+		await storeA.initialize()
+		await storeB.initialize()
+
+		const item = makeHistoryItem({ id: "file-only-delete" })
+		await storeA.upsert(item)
+		await storeB.reconcile()
+
+		expect(storeB.get("file-only-delete")).toBeDefined()
+
+		// delete() unlinks history_item.json but leaves the task directory.
+		await storeA.delete("file-only-delete")
+
+		// Directory still exists (other files like ui_messages.json may remain).
+		const taskDir = path.join(tmpDir, "tasks", "file-only-delete")
+		await expect(fs.access(taskDir)).resolves.toBeUndefined()
+
+		await storeB.reconcile()
+		expect(storeB.get("file-only-delete")).toBeUndefined()
+	})
+
 	it("per-task file updates by one instance are visible to another after invalidation", async () => {
 		await storeA.initialize()
 		await storeB.initialize()
@@ -184,69 +205,6 @@ describe("TaskHistoryStore cross-instance safety", () => {
 	})
 
 	/**
-	 * Two hosts each hold only their own task in cache
-	 * and flush `_index.json` without watcher reconciliation. The merge
-	 * callback in writeIndex preserves peer entries so neither host's
-	 * flush drops the other's task.
-	 */
-	it("index flush merges peer entries instead of clobbering them", async () => {
-		await storeA.initialize()
-		await storeB.initialize()
-
-		disableBackgroundReconciliation(storeA)
-		disableBackgroundReconciliation(storeB)
-
-		await storeA.upsert(makeHistoryItem({ id: "task-a", task: "from A", ts: 1000 }))
-		await storeB.upsert(makeHistoryItem({ id: "task-b", task: "from B", ts: 2000 }))
-
-		// Each cache is intentionally partial.
-		expect(storeA.get("task-a")).toBeDefined()
-		expect(storeA.get("task-b")).toBeUndefined()
-		expect(storeB.get("task-b")).toBeDefined()
-		expect(storeB.get("task-a")).toBeUndefined()
-
-		await storeA.flushIndex()
-		await storeB.flushIndex()
-
-		// Both entries survive in the index — no reconcile needed.
-		const tasksDir = path.join(tmpDir, "tasks")
-		const indexRaw = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
-		const index = JSON.parse(indexRaw) as { entries: HistoryItem[] }
-		const indexIds = index.entries.map((entry) => entry.id).sort()
-		expect(indexIds).toEqual(["task-a", "task-b"])
-	})
-
-	/**
-	 * A deleted task must not reappear in the index after a subsequent flush.
-	 * The merge keeps peer entries only if their history_item.json exists.
-	 * delete() unlinks history_item.json but leaves the task directory.
-	 */
-	it("index flush does not resurrect deleted tasks via the merge", async () => {
-		await storeA.initialize()
-		await storeB.initialize()
-
-		disableBackgroundReconciliation(storeA)
-		disableBackgroundReconciliation(storeB)
-
-		await storeA.upsert(makeHistoryItem({ id: "keep", ts: 1000 }))
-		await storeA.upsert(makeHistoryItem({ id: "doomed", ts: 2000 }))
-		await storeA.flushIndex()
-
-		// delete() removes from cache and unlinks history_item.json.
-		// The task directory remains — the liveness check must use the
-		// file, not the directory.
-		await storeA.delete("doomed")
-
-		await storeA.flushIndex()
-
-		const tasksDir = path.join(tmpDir, "tasks")
-		const indexRaw = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
-		const index = JSON.parse(indexRaw) as { entries: HistoryItem[] }
-		const indexIds = index.entries.map((entry) => entry.id).sort()
-		expect(indexIds).toEqual(["keep"])
-	})
-
-	/**
 	 * Host B completes a task on disk while host A's cache still has it
 	 * active. Host A's next save updates only totalCost (a full-object
 	 * upsert — the realistic production shape). The diff-delta merge
@@ -276,6 +234,9 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		// status — it was unchanged relative to A's cache.
 		expect(final.status).toBe("completed")
 		expect(final.completionResultSummary).toBe("done by host B")
+
+		// Cache reflects the caller's totalCost change.
+		expect(storeA.get("shared-task")!.totalCost).toBe(9.99)
 	})
 
 	/**
@@ -301,15 +262,3 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(final.totalCost).toBe(2.0)
 	})
 })
-
-/** Stop fs.watch / periodic reconcile so flushes exercise the stale-cache path only. */
-function disableBackgroundReconciliation(store: TaskHistoryStore): void {
-	if (store["fsWatcher"]) {
-		store["fsWatcher"].close()
-		store["fsWatcher"] = null
-	}
-	if (store["reconcileTimer"]) {
-		clearTimeout(store["reconcileTimer"])
-		store["reconcileTimer"] = null
-	}
-}

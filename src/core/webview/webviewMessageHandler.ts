@@ -1002,7 +1002,6 @@ export const webviewMessageHandler = async (
 				// so a retry after a partial-copy failure still reconciles the store.
 				await provider.taskHistoryStore.invalidateAll()
 				await provider.taskHistoryStore.reconcile()
-				await provider.taskHistoryStore.flushIndex()
 				await provider.postStateToWebview()
 				await provider.postMessageToWebview({
 					type: "rooHistoryImportProgress",
