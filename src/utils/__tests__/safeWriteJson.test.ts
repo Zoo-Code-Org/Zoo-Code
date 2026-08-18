@@ -497,6 +497,41 @@ describe("safeWriteJson", () => {
 		expect(content).toEqual({ value: 42 })
 	})
 
+	test("should propagate non-ENOENT read errors during merge instead of silently losing data", async () => {
+		const initial = { a: 1, b: 2 }
+		await safeWriteJson(currentTestFilePath, initial)
+
+		const eio = Object.assign(new Error("I/O error"), { code: "EIO" })
+		vi.mocked(fs.readFile).mockRejectedValueOnce(eio)
+
+		await expect(
+			safeWriteJson(
+				currentTestFilePath,
+				{ b: 99 },
+				{
+					merge: (existing, incoming) => ({
+						...(existing as Record<string, unknown>),
+						...(incoming as Record<string, unknown>),
+					}),
+				},
+			),
+		).rejects.toThrow("I/O error")
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ a: 1, b: 2 })
+	})
+
+	test("should treat corrupt JSON as null during merge", async () => {
+		await fs.writeFile(currentTestFilePath, "not valid json", "utf8")
+
+		const mergeFn = vi.fn((_existing, incoming) => incoming)
+		await safeWriteJson(currentTestFilePath, { value: 1 }, { merge: mergeFn })
+
+		expect(mergeFn).toHaveBeenCalledWith(null, { value: 1 })
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ value: 1 })
+	})
+
 	test("should write incoming data directly when no merge callback is provided", async () => {
 		const initial = { a: 1, b: 2 }
 		await safeWriteJson(currentTestFilePath, initial)

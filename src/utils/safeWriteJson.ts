@@ -100,8 +100,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			let existing: unknown = null
 			try {
 				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
-			} catch {
-				// No readable file yet, so the merge receives null.
+			} catch (error: unknown) {
+				const code =
+					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
+					throw error
+				}
 			}
 			data = options.merge(existing, data)
 		}
