@@ -116,7 +116,7 @@ type OpenRouterPresetsResponse = z.infer<typeof openRouterPresetsResponseSchema>
 // context window or pricing, so we synthesize a conservative ModelInfo that keeps the
 // webview validation path working without inventing per-token costs. Requests still route
 // server-side, and a missing maxTokens lets OpenRouter apply its own default.
-const OPENROUTER_PRESET_DEFAULT_CONTEXT_WINDOW = 200_000
+const OPENROUTER_PRESET_DEFAULT_CONTEXT_WINDOW = 1_000_000
 
 function buildOpenRouterAuthHeaders(apiKey?: string): Record<string, string> | undefined {
 	if (!apiKey) {
