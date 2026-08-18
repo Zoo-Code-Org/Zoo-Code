@@ -78,12 +78,11 @@ interface DelegationRepairIntent {
  * A single index file (`globalStorage/tasks/_index.json`) is maintained
  * as a cache for fast list reads at startup.
  *
- * Cross-process safety for per-task files comes from `safeWriteJson`'s
- * `proper-lockfile`. The shared `_index.json` is a best-effort startup
- * cache: it may lag or miss entries from other hosts, but
- * `reconcile()` rebuilds from authoritative per-task files — at startup
- * (`forceRefresh: true`), via `fs.watch`, and on a 5-minute periodic
- * fallback. Within a single extension host process,
+ * Cross-process safety for per-task files and `_index.json` comes from
+ * `safeWriteJson`'s `proper-lockfile` with a `merge` callback: each
+ * write reads the current file under the advisory lock and merges
+ * incoming fields, so a concurrent writer's changes are preserved
+ * rather than silently dropped. Within a single extension host process,
  * an in-process write lock serializes mutations.
  */
 /**
@@ -261,8 +260,15 @@ export class TaskHistoryStore {
 		// Merge: preserve existing metadata unless explicitly overwritten
 		const merged = existing ? { ...existing, ...item } : item
 
-		// Write per-task file (source of truth)
-		await this.writeTaskFile(merged)
+		// Compute the actual changed fields relative to the cached state.
+		// Only these are applied to the disk version, so fields updated by
+		// another process are preserved rather than reverted from a stale cache.
+		const delta = existing
+			? Object.fromEntries(
+					Object.entries(item).filter(([k, v]) => !deepEqual(v, (existing as Record<string, unknown>)[k])),
+				)
+			: undefined
+		await this.writeTaskFile(merged, delta ? ({ id: item.id, ...delta } as HistoryItem) : undefined)
 
 		// Update in-memory cache
 		this.cache.set(merged.id, merged)
@@ -884,17 +890,46 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Write the full index to disk.
+	 * Write the index to disk, merging entries from other hosts.
+	 *
+	 * Peer entries (task ids present on disk but absent from this host's
+	 * cache) are kept only if their task directory still exists, so a
+	 * local delete propagates instead of being undone by the merge.
 	 */
 	private async writeIndex(): Promise<void> {
 		const indexPath = await this.getIndexPath()
+		const tasksDir = await this.getTasksDir()
 		const index: HistoryIndex = {
 			version: 1,
 			updatedAt: Date.now(),
 			entries: this.getAll(),
 		}
 
-		await safeWriteJson(indexPath, index)
+		let onDiskIds: Set<string>
+		try {
+			const dirEntries = await fs.readdir(tasksDir)
+			onDiskIds = new Set(dirEntries.filter((n) => !n.startsWith("_") && !n.startsWith(".")))
+		} catch {
+			onDiskIds = new Set()
+		}
+
+		await safeWriteJson(indexPath, index, {
+			merge: (existing, incoming) => {
+				if (!existing || existing.version !== 1 || !Array.isArray(existing.entries)) {
+					return incoming
+				}
+				const ourIds = new Set(incoming.entries.map((e: HistoryItem) => e.id))
+				const peerEntries = existing.entries.filter(
+					(e: HistoryItem) => e.id && !ourIds.has(e.id) && onDiskIds.has(e.id),
+				)
+				return {
+					...incoming,
+					entries: [...incoming.entries, ...peerEntries].sort(
+						(a: HistoryItem, b: HistoryItem) => b.ts - a.ts,
+					),
+				}
+			},
+		})
 	}
 
 	/**
@@ -935,10 +970,26 @@ export class TaskHistoryStore {
 
 	/**
 	 * Write a HistoryItem to its per-task `history_item.json` file.
+	 *
+	 * When `delta` is provided, the merge callback applies only the
+	 * delta to the current disk state, so fields written by another
+	 * process are preserved. Without a delta the full item is written
+	 * as-is (used by administrative repair paths that are authoritative).
 	 */
-	private async writeTaskFile(item: HistoryItem): Promise<void> {
+	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<void> {
 		const filePath = await this.getTaskFilePath(item.id)
-		await safeWriteJson(filePath, item)
+		if (delta) {
+			await safeWriteJson(filePath, item, {
+				merge: (existing, incoming) => {
+					if (!existing || typeof existing !== "object" || !("id" in existing)) {
+						return incoming
+					}
+					return { ...existing, ...delta }
+				},
+			})
+		} else {
+			await safeWriteJson(filePath, item)
+		}
 	}
 
 	/**
@@ -1109,10 +1160,18 @@ export class TaskHistoryStore {
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
 
+			// Compute actual diffs against cached state, mirroring upsertCore.
+			const deltaFirst = Object.fromEntries(
+				Object.entries(updatedFirst).filter(([k, v]) => !deepEqual(v, (first as Record<string, unknown>)[k])),
+			)
+			const deltaSecond = Object.fromEntries(
+				Object.entries(updatedSecond).filter(([k, v]) => !deepEqual(v, (second as Record<string, unknown>)[k])),
+			)
+
 			// Write both files before touching the cache so readers never observe a
 			// half-updated in-memory state between the two await points.
-			await this.writeTaskFile(mergedFirst)
-			await this.writeTaskFile(mergedSecond)
+			await this.writeTaskFile(mergedFirst, { id: firstId, ...deltaFirst } as HistoryItem)
+			await this.writeTaskFile(mergedSecond, { id: secondId, ...deltaSecond } as HistoryItem)
 
 			// Both disk writes succeeded — now update the cache atomically.
 			this.cache.set(firstId, mergedFirst)

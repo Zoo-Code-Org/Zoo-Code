@@ -15,6 +15,16 @@ export interface SafeWriteJsonOptions {
 	 * @default false
 	 */
 	prettyPrint?: boolean
+
+	/**
+	 * When provided, the current file is read under the advisory lock
+	 * and passed to this function along with the incoming data. The
+	 * return value replaces `data` for the write. This turns a blind
+	 * overwrite into an atomic read-modify-write, preventing cross-process
+	 * lost updates. `existing` is null when the file does not exist or
+	 * cannot be parsed.
+	 */
+	merge?: (existing: unknown, incoming: unknown) => unknown
 }
 
 /**
@@ -76,6 +86,19 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
 		// Propagate the lock acquisition error
 		throw lockError
+	}
+
+	// If a merge callback was provided, read the current file under the lock
+	// and let the caller merge before we write.
+	if (options?.merge) {
+		let existing: unknown = null
+		try {
+			const raw = await fs.readFile(absoluteFilePath, "utf8")
+			existing = JSON.parse(raw)
+		} catch {
+			// No readable file yet, so the merge receives null.
+		}
+		data = options.merge(existing, data)
 	}
 
 	// Variables to hold the actual paths of temp files if they are created.

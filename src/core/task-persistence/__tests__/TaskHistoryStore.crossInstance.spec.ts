@@ -15,12 +15,30 @@ vi.mock("../../../utils/storage", () => ({
 	}),
 }))
 
-// Mock safeWriteJson to use plain fs writes in tests (avoids proper-lockfile issues)
+// Mock safeWriteJson to use plain fs writes but honor the merge callback.
 vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn().mockImplementation(async (filePath: string, data: any) => {
-		await fs.mkdir(path.dirname(filePath), { recursive: true })
-		await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
-	}),
+	safeWriteJson: vi
+		.fn()
+		.mockImplementation(
+			async (
+				filePath: string,
+				data: unknown,
+				options?: { merge?: (existing: unknown, incoming: unknown) => unknown },
+			) => {
+				await fs.mkdir(path.dirname(filePath), { recursive: true })
+				if (options?.merge) {
+					let existing: unknown = null
+					try {
+						const raw = await fs.readFile(filePath, "utf8")
+						existing = JSON.parse(raw)
+					} catch {
+						// File does not exist or is corrupt
+					}
+					data = options.merge(existing, data)
+				}
+				await fs.writeFile(filePath, JSON.stringify(data, null, "\t"), "utf8")
+			},
+		),
 }))
 
 function makeHistoryItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
@@ -166,12 +184,12 @@ describe("TaskHistoryStore cross-instance safety", () => {
 	})
 
 	/**
-	 * Regression for #1231: two hosts each hold only their own task in cache and
-	 * flush `_index.json` without watcher reconciliation. The last writer's
-	 * index reflects only its own cache (LWW). Per-task files remain intact,
-	 * and reconcile recovers the full set.
+	 * Two hosts each hold only their own task in cache
+	 * and flush `_index.json` without watcher reconciliation. The merge
+	 * callback in writeIndex preserves peer entries so neither host's
+	 * flush drops the other's task.
 	 */
-	it("reconcile recovers peer entries after a last-writer-wins index flush", async () => {
+	it("index flush merges peer entries instead of clobbering them", async () => {
 		await storeA.initialize()
 		await storeB.initialize()
 
@@ -181,6 +199,7 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		await storeA.upsert(makeHistoryItem({ id: "task-a", task: "from A", ts: 1000 }))
 		await storeB.upsert(makeHistoryItem({ id: "task-b", task: "from B", ts: 2000 }))
 
+		// Each cache is intentionally partial.
 		expect(storeA.get("task-a")).toBeDefined()
 		expect(storeA.get("task-b")).toBeUndefined()
 		expect(storeB.get("task-b")).toBeDefined()
@@ -189,28 +208,97 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		await storeA.flushIndex()
 		await storeB.flushIndex()
 
-		// Per-task files survive regardless of which host flushed last.
+		// Both entries survive in the index — no reconcile needed.
 		const tasksDir = path.join(tmpDir, "tasks")
-
-		// The index reflects the last writer's partial cache (LWW clobber).
-		const indexRawBefore = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
-		const indexBefore = JSON.parse(indexRawBefore) as { entries: HistoryItem[] }
-		expect(indexBefore.entries.map((e) => e.id)).toEqual(["task-b"])
-		const taskDirs = (await fs.readdir(tasksDir)).filter((name) => !name.startsWith("_") && !name.startsWith("."))
-		expect(taskDirs.sort()).toEqual(["task-a", "task-b"])
-
-		// Reconcile rebuilds the full picture from authoritative per-task files.
-		await storeA.reconcile({ forceRefresh: true })
-		expect(storeA.get("task-a")).toBeDefined()
-		expect(storeA.get("task-b")).toBeDefined()
-		expect(storeA.getAll()).toHaveLength(2)
-
-		// A post-reconcile flush writes the complete set.
-		await storeA.flushIndex()
 		const indexRaw = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
 		const index = JSON.parse(indexRaw) as { entries: HistoryItem[] }
 		const indexIds = index.entries.map((entry) => entry.id).sort()
 		expect(indexIds).toEqual(["task-a", "task-b"])
+	})
+
+	/**
+	 * A deleted task must not reappear in the index after a subsequent flush.
+	 * The merge keeps peer entries only if their task directory exists.
+	 */
+	it("index flush does not resurrect deleted tasks via the merge", async () => {
+		await storeA.initialize()
+		await storeB.initialize()
+
+		disableBackgroundReconciliation(storeA)
+		disableBackgroundReconciliation(storeB)
+
+		await storeA.upsert(makeHistoryItem({ id: "keep", ts: 1000 }))
+		await storeA.upsert(makeHistoryItem({ id: "doomed", ts: 2000 }))
+		await storeA.flushIndex()
+
+		// Delete doomed — removes from cache and unlinks the file.
+		await storeA.delete("doomed")
+		const taskDir = path.join(tmpDir, "tasks", "doomed")
+		await fs.rm(taskDir, { recursive: true, force: true })
+
+		// Flush again — the merge must not re-add "doomed" from the old index.
+		await storeA.flushIndex()
+
+		const tasksDir = path.join(tmpDir, "tasks")
+		const indexRaw = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
+		const index = JSON.parse(indexRaw) as { entries: HistoryItem[] }
+		const indexIds = index.entries.map((entry) => entry.id).sort()
+		expect(indexIds).toEqual(["keep"])
+	})
+
+	/**
+	 * Host B completes a task on disk while host A's cache still has it
+	 * active. Host A's next save updates only totalCost (a full-object
+	 * upsert — the realistic production shape). The diff-delta merge
+	 * preserves B's status because status did not change in A's cache.
+	 */
+	it("per-task diff-delta preserves a peer's status change on full-object upsert", async () => {
+		await storeA.initialize()
+
+		// Base item with an explicit status — mirrors real production items.
+		const base = makeHistoryItem({ id: "shared-task", status: "active", totalCost: 0.01, ts: 1000 })
+		await storeA.upsert(base)
+
+		// Host B completes the task on disk; A's cache still has "active".
+		const filePath = path.join(tmpDir, "tasks", "shared-task", GlobalFileNames.historyItem)
+		const onDisk = JSON.parse(await fs.readFile(filePath, "utf8"))
+		onDisk.status = "completed"
+		onDisk.completionResultSummary = "done by host B"
+		await fs.writeFile(filePath, JSON.stringify(onDisk), "utf8")
+
+		// Host A does a full-object upsert (the realistic path — spread the
+		// cached item and change one field). The cached item has status: "active".
+		await storeA.upsert({ ...storeA.get("shared-task")!, totalCost: 9.99 })
+
+		const final = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+		expect(final.totalCost).toBe(9.99)
+		// Status is preserved from disk because A's delta does not include
+		// status — it was unchanged relative to A's cache.
+		expect(final.status).toBe("completed")
+		expect(final.completionResultSummary).toBe("done by host B")
+	})
+
+	/**
+	 * When both hosts change the same field, the last writer wins.
+	 * This is expected — true conflict resolution requires application
+	 * semantics that a generic merge cannot provide.
+	 */
+	it("same-field changes from both hosts are last-writer-wins", async () => {
+		await storeA.initialize()
+		await storeB.initialize()
+
+		const base = makeHistoryItem({ id: "shared-task", status: "active", totalCost: 0.01, ts: 1000 })
+		await storeA.upsert(base)
+		await storeB.reconcile()
+
+		// Both hosts change totalCost.
+		await storeA.upsert({ ...storeA.get("shared-task")!, totalCost: 1.0 })
+		await storeB.upsert({ ...storeB.get("shared-task")!, totalCost: 2.0 })
+
+		const filePath = path.join(tmpDir, "tasks", "shared-task", GlobalFileNames.historyItem)
+		const final = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+		// B wrote last, so B's value wins.
+		expect(final.totalCost).toBe(2.0)
 	})
 })
 

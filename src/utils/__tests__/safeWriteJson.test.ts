@@ -468,4 +468,40 @@ describe("safeWriteJson", () => {
 
 		consoleErrorSpy.mockRestore()
 	})
+
+	// Merge option tests
+	test("should merge incoming data with existing file content when merge callback is provided", async () => {
+		const initial = { a: 1, b: 2 }
+		await safeWriteJson(currentTestFilePath, initial)
+
+		const incoming = { b: 3, c: 4 }
+		await safeWriteJson(currentTestFilePath, incoming, {
+			merge: (existing, data) => ({ ...existing, ...data }),
+		})
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ a: 1, b: 3, c: 4 })
+	})
+
+	test("should pass null to merge callback when file does not exist", async () => {
+		const newFilePath = path.join(tempDir, "nonexistent.json")
+		const mergeFn = vi.fn((existing, incoming) => incoming)
+
+		await safeWriteJson(newFilePath, { value: 42 }, { merge: mergeFn })
+
+		expect(mergeFn).toHaveBeenCalledWith(null, { value: 42 })
+		const content = await readFileContent(newFilePath)
+		expect(content).toEqual({ value: 42 })
+	})
+
+	test("should write incoming data directly when no merge callback is provided", async () => {
+		const initial = { a: 1, b: 2 }
+		await safeWriteJson(currentTestFilePath, initial)
+
+		const replacement = { c: 3 }
+		await safeWriteJson(currentTestFilePath, replacement)
+
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ c: 3 })
+	})
 })
