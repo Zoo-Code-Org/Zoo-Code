@@ -757,4 +757,107 @@ describe("OpenRouter API", () => {
 			expect(result.supportsPromptCache).toBe(false)
 		})
 	})
+
+	describe("parseOpenRouterModel covers special model branches", () => {
+		it("covers claude-sonnet-4.6 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-sonnet-4.6",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-opus-4.1 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-opus-4.1",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-opus-4.5 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-opus-4.5",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-opus-4.6 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-opus-4.6",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-fable-5 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-fable-5",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-sonnet-5 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-sonnet-5",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-opus-5 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-opus-5",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBeDefined()
+		})
+		it("covers claude-haiku-4.5 branch", () => {
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-haiku-4.5",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.supportsReasoningBudget).toBe(true)
+		})
+		it("covers horizon-alpha branch", () => {
+			const result = parseOpenRouterModel({
+				id: "openrouter/horizon-alpha",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBe(32768)
+		})
+		it("covers horizon-beta branch", () => {
+			const result = parseOpenRouterModel({
+				id: "openrouter/horizon-beta",
+				model: { name: "x", context_length: 100 },
+				inputModality: undefined,
+				outputModality: undefined,
+				maxTokens: undefined,
+			})
+			expect(result.maxTokens).toBe(32768)
+		})
+	})
 })

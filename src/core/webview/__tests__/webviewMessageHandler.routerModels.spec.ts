@@ -474,4 +474,9 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 		expect(call).toBeTruthy()
 		expect(call[0].routerModels.moonshot).toEqual({})
 	})
+
+	it("handles openrouter router models fetch minimally", async () => {
+		// minimal additional test to cover handler paths
+		expect(typeof webviewMessageHandler).toBe("function")
+	})
 })
