@@ -905,28 +905,37 @@ export class TaskHistoryStore {
 			entries: this.getAll(),
 		}
 
-		let onDiskIds: Set<string>
+		let liveIds: Set<string>
 		try {
 			const dirEntries = await fs.readdir(tasksDir)
-			onDiskIds = new Set(dirEntries.filter((n) => !n.startsWith("_") && !n.startsWith(".")))
+			const candidates = dirEntries.filter((n) => !n.startsWith("_") && !n.startsWith("."))
+			const checks = await Promise.all(
+				candidates.map(async (id) => {
+					try {
+						await fs.access(path.join(tasksDir, id, GlobalFileNames.historyItem))
+						return id
+					} catch {
+						return null
+					}
+				}),
+			)
+			liveIds = new Set(checks.filter((id): id is string => id !== null))
 		} catch {
-			onDiskIds = new Set()
+			liveIds = new Set()
 		}
 
 		await safeWriteJson(indexPath, index, {
 			merge: (existing, incoming) => {
-				if (!existing || existing.version !== 1 || !Array.isArray(existing.entries)) {
-					return incoming
+				const prev = existing as HistoryIndex | null
+				const next = incoming as HistoryIndex
+				if (!prev || prev.version !== 1 || !Array.isArray(prev.entries)) {
+					return next
 				}
-				const ourIds = new Set(incoming.entries.map((e: HistoryItem) => e.id))
-				const peerEntries = existing.entries.filter(
-					(e: HistoryItem) => e.id && !ourIds.has(e.id) && onDiskIds.has(e.id),
-				)
+				const ourIds = new Set(next.entries.map((e) => e.id))
+				const peerEntries = prev.entries.filter((e) => e.id && !ourIds.has(e.id) && liveIds.has(e.id))
 				return {
-					...incoming,
-					entries: [...incoming.entries, ...peerEntries].sort(
-						(a: HistoryItem, b: HistoryItem) => b.ts - a.ts,
-					),
+					...next,
+					entries: [...next.entries, ...peerEntries].sort((a, b) => b.ts - a.ts),
 				}
 			},
 		})

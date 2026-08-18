@@ -476,7 +476,10 @@ describe("safeWriteJson", () => {
 
 		const incoming = { b: 3, c: 4 }
 		await safeWriteJson(currentTestFilePath, incoming, {
-			merge: (existing, data) => ({ ...existing, ...data }),
+			merge: (existing, data) => ({
+				...(existing as Record<string, unknown>),
+				...(data as Record<string, unknown>),
+			}),
 		})
 
 		const content = await readFileContent(currentTestFilePath)

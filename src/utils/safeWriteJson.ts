@@ -88,24 +88,24 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw lockError
 	}
 
-	// If a merge callback was provided, read the current file under the lock
-	// and let the caller merge before we write.
-	if (options?.merge) {
-		let existing: unknown = null
-		try {
-			const raw = await fs.readFile(absoluteFilePath, "utf8")
-			existing = JSON.parse(raw)
-		} catch {
-			// No readable file yet, so the merge receives null.
-		}
-		data = options.merge(existing, data)
-	}
-
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
 	let actualTempBackupFilePath: string | null = null
 
 	try {
+		// If a merge callback was provided, read the current file under the lock
+		// and let the caller merge before we write. Must be inside try/finally
+		// so a throwing merge still releases the lock.
+		if (options?.merge) {
+			let existing: unknown = null
+			try {
+				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+			} catch {
+				// No readable file yet, so the merge receives null.
+			}
+			data = options.merge(existing, data)
+		}
+
 		// Step 1: Write data to a new temporary file.
 		actualTempNewFilePath = path.join(
 			path.dirname(absoluteFilePath),

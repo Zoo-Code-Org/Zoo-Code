@@ -218,7 +218,8 @@ describe("TaskHistoryStore cross-instance safety", () => {
 
 	/**
 	 * A deleted task must not reappear in the index after a subsequent flush.
-	 * The merge keeps peer entries only if their task directory exists.
+	 * The merge keeps peer entries only if their history_item.json exists.
+	 * delete() unlinks history_item.json but leaves the task directory.
 	 */
 	it("index flush does not resurrect deleted tasks via the merge", async () => {
 		await storeA.initialize()
@@ -231,12 +232,11 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		await storeA.upsert(makeHistoryItem({ id: "doomed", ts: 2000 }))
 		await storeA.flushIndex()
 
-		// Delete doomed — removes from cache and unlinks the file.
+		// delete() removes from cache and unlinks history_item.json.
+		// The task directory remains — the liveness check must use the
+		// file, not the directory.
 		await storeA.delete("doomed")
-		const taskDir = path.join(tmpDir, "tasks", "doomed")
-		await fs.rm(taskDir, { recursive: true, force: true })
 
-		// Flush again — the merge must not re-add "doomed" from the old index.
 		await storeA.flushIndex()
 
 		const tasksDir = path.join(tmpDir, "tasks")
