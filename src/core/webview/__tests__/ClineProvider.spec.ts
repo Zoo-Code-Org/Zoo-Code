@@ -794,6 +794,223 @@ describe("ClineProvider", () => {
 		expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "action" }))
 	})
 
+	test("postStateToWebviewWithoutTaskHistory waits for the webview post boundary", async () => {
+		let releasePost!: () => void
+		const pendingPost = new Promise<void>((resolve) => {
+			releasePost = resolve
+		})
+		let statePostSettled = false
+
+		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue({
+			taskHistory: [],
+		} as unknown as ExtensionState)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockReturnValue(pendingPost)
+
+		const statePost = provider.postStateToWebviewWithoutTaskHistory()
+		void statePost.then(() => {
+			statePostSettled = true
+		})
+		await Promise.resolve()
+
+		expect(postMessageSpy).toHaveBeenCalledOnce()
+		expect(statePostSettled).toBe(false)
+
+		releasePost()
+		await statePost
+		expect(statePostSettled).toBe(true)
+	})
+
+	test.each([
+		[
+			"postStateToWebviewWithoutTaskHistory",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
+		],
+		[
+			"postStateToWebviewWithoutClineMessages",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutClineMessages(),
+		],
+	])("%s skips task history computation", async (_methodName, postState) => {
+		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll")
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		await postState(provider)
+
+		expect(getAllSpy).not.toHaveBeenCalled()
+		expect(postMessageSpy).toHaveBeenCalledOnce()
+		expect(postMessageSpy.mock.calls[0]?.[0].state).not.toHaveProperty("taskHistory")
+	})
+
+	test("getStateToPostToWebview computes task history once after its base state resolves", async () => {
+		const historyItem = {
+			id: "history-task",
+			number: 1,
+			ts: 1,
+			task: "History task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const originalGetState = provider.getState.bind(provider)
+		let baseStateResolved = false
+		const getStateSpy = vi.spyOn(provider, "getState").mockImplementation(async (options) => {
+			const state = await originalGetState(options)
+			baseStateResolved = true
+			return state
+		})
+		const historyReadPhases: boolean[] = []
+		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll").mockImplementation(() => {
+			historyReadPhases.push(baseStateResolved)
+			return [historyItem]
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(getStateSpy).toHaveBeenCalledOnce()
+		expect(getStateSpy).toHaveBeenCalledWith({ includeTaskHistory: false })
+		expect(getAllSpy).toHaveBeenCalledOnce()
+		expect(historyReadPhases).toEqual([true])
+		expect(state.taskHistory).toEqual([historyItem])
+	})
+
+	describe("postStateToWebviewThrottled", () => {
+		beforeEach(() => {
+			vi.useFakeTimers()
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			vi.useRealTimers()
+		})
+
+		test("posts on the leading edge and coalesces a burst into one trailing post", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(499)
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		test("does not starve state posts during continuous updates", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(400)
+			await provider.postStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(400)
+			await provider.postStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(199)
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		test("flushes a pending trailing post exactly once and waits for it", async () => {
+			let releasePost!: () => void
+			const pendingPost = new Promise<void>((resolve) => {
+				releasePost = resolve
+			})
+			const postStateSpy = vi
+				.spyOn(provider, "postStateToWebviewWithoutTaskHistory")
+				.mockResolvedValueOnce(undefined)
+				.mockReturnValueOnce(pendingPost)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			let flushSettled = false
+			const flushPromise = provider.flushPostStateToWebviewThrottled()
+			void flushPromise.then(() => {
+				flushSettled = true
+			})
+			await Promise.resolve()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+			expect(flushSettled).toBe(false)
+
+			releasePost()
+			await flushPromise
+			expect(flushSettled).toBe(true)
+
+			await vi.advanceTimersByTimeAsync(1000)
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		test("does not duplicate an idle leading post when flushed", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.flushPostStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(1000)
+
+			expect(postStateSpy).toHaveBeenCalledOnce()
+		})
+
+		test("handles state post failures inside the debounced callback", async () => {
+			const error = new Error("state post failed")
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockRejectedValue(error)
+
+			await expect(provider.postStateToWebviewThrottled()).resolves.toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				"[ClineProvider#postStateToWebviewThrottled] Failed to post state: state post failed",
+			)
+		})
+
+		test("stringifies non-Error state post failures inside the debounced callback", async () => {
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockRejectedValue("state post failed")
+
+			await expect(provider.postStateToWebviewThrottled()).resolves.toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				"[ClineProvider#postStateToWebviewThrottled] Failed to post state: state post failed",
+			)
+		})
+
+		test("handles state post failures while flushing a pending trailing post", async () => {
+			const error = new Error("state post failed")
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			const postStateSpy = vi
+				.spyOn(provider, "postStateToWebviewWithoutTaskHistory")
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(error)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			await expect(provider.flushPostStateToWebviewThrottled()).resolves.toBeUndefined()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+			expect(logSpy).toHaveBeenCalledWith(
+				"[ClineProvider#postStateToWebviewThrottled] Failed to post state: state post failed",
+			)
+		})
+
+		test("cancels pending work on dispose and ignores later schedule or flush calls", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await provider.dispose()
+			await vi.advanceTimersByTimeAsync(1000)
+			await provider.postStateToWebviewThrottled()
+			await provider.flushPostStateToWebviewThrottled()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+		})
+	})
+
 	test("postMessageToWebview skips postMessage after dispose", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 

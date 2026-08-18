@@ -150,6 +150,12 @@ jobs:
               if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:ci:mock
 
+            - name: Run mocked restart-persistence E2E test
+              # Reuse the runner built by the full mocked suite; this direct invocation avoids
+              # test:run's dotenv loading and does not repeat the bundle or webview build.
+              if: github.event_name != 'pull_request' || steps.e2e-marker.outputs.cache-hit != 'true'
+              run: TEST_FILE=restart-persistence.test USE_MOCK=true xvfb-run -a pnpm --filter @roo-code/vscode-e2e exec node ./out/runTest.js
+
             - name: Explain skipped mocked E2E pass marker
               if: steps.e2e-marker.outputs.cache-hit != 'true' && steps.run-e2e.outcome == 'success' && steps.vscode-fallback.outputs.used == 'true'
               run: echo "Skipping mocked E2E pass marker because tests ran against a stale cached VS Code binary (VS Code download endpoints unreachable)."

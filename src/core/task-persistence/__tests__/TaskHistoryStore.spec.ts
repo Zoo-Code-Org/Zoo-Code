@@ -373,6 +373,46 @@ describe("TaskHistoryStore", () => {
 
 			expect(store.get("idem-task")).toBeDefined()
 		})
+
+		it("serializes migration cache and index updates behind the store lock", async () => {
+			const tasksDir = path.join(tmpDir, "tasks")
+			const migrated = makeHistoryItem({ id: "migration-locked" })
+			const concurrent = makeHistoryItem({ id: "migration-concurrent" })
+			const migratedFile = path.join(tasksDir, migrated.id, GlobalFileNames.historyItem)
+			await fs.mkdir(path.dirname(migratedFile), { recursive: true })
+
+			let releaseMigrationWrite!: () => void
+			const migrationWriteCanFinish = new Promise<void>((resolve) => {
+				releaseMigrationWrite = resolve
+			})
+			let signalMigrationWriteStarted!: () => void
+			const migrationWriteStarted = new Promise<void>((resolve) => {
+				signalMigrationWriteStarted = resolve
+			})
+			const storeInternals = store as unknown as { writeIndex: () => Promise<void> }
+			const originalWriteIndex = storeInternals.writeIndex.bind(store)
+			vi.spyOn(storeInternals, "writeIndex").mockImplementation(async () => {
+				signalMigrationWriteStarted()
+				await migrationWriteCanFinish
+				return originalWriteIndex()
+			})
+
+			const migration = store.migrateFromGlobalState([migrated])
+			await migrationWriteStarted
+			const concurrentUpsert = store.upsert(concurrent)
+
+			expect(store.get(concurrent.id)).toBeUndefined()
+			releaseMigrationWrite()
+			await Promise.all([migration, concurrentUpsert])
+
+			expect(store.get(migrated.id)).toEqual(migrated)
+			expect(store.get(concurrent.id)).toEqual(concurrent)
+			await store.flushIndex()
+			const index = JSON.parse(await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")) as {
+				entries: HistoryItem[]
+			}
+			expect(index.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([migrated.id, concurrent.id]))
+		})
 	})
 
 	describe("flushIndex()", () => {

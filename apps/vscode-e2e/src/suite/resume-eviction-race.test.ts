@@ -2,6 +2,7 @@ import * as assert from "assert"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
 import { waitUntilCompleted, waitFor } from "./utils"
+import { SCHED_COMPLETED_PROMPT } from "../fixtures/subtasks"
 
 // Regression test for the "Work #1 (no message)" title-clobber bug reported
 // against Zoo Code v3.76.0 (Discord, 2026-08-06).
@@ -92,5 +93,54 @@ suite("Resume eviction race (title clobber regression)", function () {
 			beforeResume.task,
 			`Title must not change during resume eviction. Got: "${afterEviction.task}"`,
 		)
+	})
+
+	test("concurrent resumes of one history item do not block the next task", async () => {
+		const api = globalThis.api
+
+		// Persist a resumable history item, then remove its live instance so both
+		// resume calls begin from the same "not current" state. This mirrors two
+		// showTaskWithId messages arriving before either restoration has installed
+		// its replacement instance.
+		const historyTaskId = await waitUntilCompleted({
+			api,
+			start: () =>
+				api.startNewTask({
+					configuration: {
+						mode: "ask",
+						autoApprovalEnabled: true,
+						enableCheckpoints: false,
+					},
+					text: SCHED_COMPLETED_PROMPT,
+				}),
+		})
+
+		while (api.getCurrentTaskStack().length > 0) {
+			await api.clearCurrentTask()
+		}
+
+		// Before the fix, both calls can construct and schedule distinct Task
+		// instances for historyTaskId. TaskRegistry.push() replaces the first map
+		// entry without disposing that instance, so its resume ask retains the
+		// scheduler's only permit while the visible replacement is queued.
+		await Promise.all([api.resumeTask(historyTaskId), api.resumeTask(historyTaskId)])
+		await waitFor(() => api.getCurrentTaskStack().at(-1) === historyTaskId)
+
+		// Starting a fresh task must evict the restored history task and acquire the
+		// scheduler permit. A leaked first restoration makes this wait time out.
+		const nextTaskId = await waitUntilCompleted({
+			api,
+			start: () =>
+				api.startNewTask({
+					configuration: {
+						mode: "ask",
+						autoApprovalEnabled: true,
+						enableCheckpoints: false,
+					},
+					text: SCHED_COMPLETED_PROMPT,
+				}),
+		})
+
+		assert.notStrictEqual(nextTaskId, historyTaskId, "A fresh task should start after duplicate history resumes")
 	})
 })

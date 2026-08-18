@@ -2,8 +2,14 @@ import { useCallback, useState, useEffect, useRef } from "react"
 import { VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { useQueryClient } from "@tanstack/react-query"
 
-import type { ProviderSettings, ExtensionMessage } from "@roo-code/types"
-import { moonshotDefaultModelId } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	type ExtensionMessage,
+	moonshotDefaultModelId,
+	providerIdentifiers,
+	allRouterModelsProvider,
+	RouterModelsMessageType,
+} from "@roo-code/types"
 
 import { RouterName } from "@roo/api"
 
@@ -14,7 +20,6 @@ import { vscode } from "@src/utils/vscode"
 import { Button } from "@src/components/ui"
 import { ModelPicker } from "../ModelPicker"
 import { handleModelChangeSideEffects } from "../utils/providerModelConfig"
-import type { ProviderName } from "@roo-code/types"
 
 import { inputEventTransform } from "../transforms"
 
@@ -24,29 +29,41 @@ type MoonshotProps = {
 	simplifySettings?: boolean
 }
 
+enum RefreshStatus {
+	Idle = "idle",
+	Loading = "loading",
+	Success = "success",
+	Error = "error",
+}
+
 export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifySettings }: MoonshotProps) => {
 	const { t } = useAppTranslation()
 	const { routerModels } = useExtensionState()
 	const queryClient = useQueryClient()
-	const [refreshStatus, setRefreshStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
+	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
 	const [refreshError, setRefreshError] = useState<string | undefined>()
 	const moonshotErrorJustReceived = useRef(false)
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
 			const message = event.data
-			if (message.type === "singleRouterModelFetchResponse" && !message.success) {
+			if (message.type === RouterModelsMessageType.singleRouterModelFetchResponse && !message.success) {
 				const providerName = message.values?.provider as RouterName
-				if (providerName === "moonshot" && refreshStatus === "loading") {
+				if (providerName === providerIdentifiers.moonshot && refreshStatus === RefreshStatus.Loading) {
 					moonshotErrorJustReceived.current = true
-					setRefreshStatus("error")
+					setRefreshStatus(RefreshStatus.Error)
 					setRefreshError(message.error)
 				}
-			} else if (message.type === "routerModels") {
-				if (refreshStatus === "loading") {
+			} else if (message.type === RouterModelsMessageType.routerModels) {
+				if (refreshStatus === RefreshStatus.Loading) {
 					if (!moonshotErrorJustReceived.current) {
-						setRefreshStatus("success")
-						queryClient.invalidateQueries({ queryKey: ["routerModels"] })
+						setRefreshStatus(RefreshStatus.Success)
+						void queryClient.invalidateQueries({
+							queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.moonshot],
+						})
+						void queryClient.invalidateQueries({
+							queryKey: [RouterModelsMessageType.routerModels, allRouterModelsProvider],
+						})
 					}
 				}
 			}
@@ -71,19 +88,19 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifyS
 
 	const handleRefreshModels = useCallback(() => {
 		moonshotErrorJustReceived.current = false
-		setRefreshStatus("loading")
+		setRefreshStatus(RefreshStatus.Loading)
 		setRefreshError(undefined)
 
 		const key = apiConfiguration.moonshotApiKey
 
 		if (!key) {
-			setRefreshStatus("error")
+			setRefreshStatus(RefreshStatus.Error)
 			setRefreshError(t("settings:providers.refreshModels.missingConfig"))
 			return
 		}
 
 		vscode.postMessage({
-			type: "requestRouterModels",
+			type: RouterModelsMessageType.requestRouterModels,
 			values: { moonshotApiKey: key, moonshotBaseUrl: apiConfiguration.moonshotBaseUrl },
 		})
 	}, [apiConfiguration, t])
@@ -138,15 +155,15 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifyS
 				serviceUrl="https://platform.moonshot.ai"
 				simplifySettings={simplifySettings}
 				onModelChange={(modelId) =>
-					handleModelChangeSideEffects("moonshot" as ProviderName, modelId, setApiConfigurationField)
+					handleModelChangeSideEffects(providerIdentifiers.moonshot, modelId, setApiConfigurationField)
 				}
 			/>
 			<Button
 				variant="outline"
 				onClick={handleRefreshModels}
-				disabled={refreshStatus === "loading" || !apiConfiguration.moonshotApiKey}>
+				disabled={refreshStatus === RefreshStatus.Loading || !apiConfiguration.moonshotApiKey}>
 				<div className="flex items-center gap-2">
-					{refreshStatus === "loading" ? (
+					{refreshStatus === RefreshStatus.Loading ? (
 						<span className="codicon codicon-loading codicon-modifier-spin" />
 					) : (
 						<span className="codicon codicon-refresh" />
@@ -154,15 +171,15 @@ export const Moonshot = ({ apiConfiguration, setApiConfigurationField, simplifyS
 					{t("settings:providers.refreshModels.label")}
 				</div>
 			</Button>
-			{refreshStatus === "loading" && (
+			{refreshStatus === RefreshStatus.Loading && (
 				<div className="text-sm text-vscode-descriptionForeground">
 					{t("settings:providers.refreshModels.loading")}
 				</div>
 			)}
-			{refreshStatus === "success" && (
+			{refreshStatus === RefreshStatus.Success && (
 				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
 			)}
-			{refreshStatus === "error" && (
+			{refreshStatus === RefreshStatus.Error && (
 				<div className="text-sm text-vscode-errorForeground">
 					{refreshError || t("settings:providers.refreshModels.error")}
 				</div>

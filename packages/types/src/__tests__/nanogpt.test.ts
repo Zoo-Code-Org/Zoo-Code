@@ -13,13 +13,16 @@ import {
 describe("NanoGPT shared contract", () => {
 	it("registers the stable dynamic-provider identity and default model", () => {
 		expect(providerIdentifiers.nanogpt).toBe("nanogpt")
-		expect(dynamicProviders).toContain("nanogpt")
-		expect(getProviderDefaultModelId("nanogpt")).toBe(nanoGptDefaultModelId)
+		expect(dynamicProviders).toContain(providerIdentifiers.nanogpt)
+		expect(getProviderDefaultModelId(providerIdentifiers.nanogpt)).toBe(nanoGptDefaultModelId)
 	})
 
 	it("classifies the API key as secret and resolves missing routing to auto", () => {
 		expect(isSecretStateKey("nanoGptApiKey")).toBe(true)
-		const settings = providerSettingsSchema.parse({ apiProvider: "nanogpt", nanoGptModelId: "model" })
+		const settings = providerSettingsSchema.parse({
+			apiProvider: providerIdentifiers.nanogpt,
+			nanoGptModelId: "model",
+		})
 		expect(settings.nanoGptRoutingPreference ?? nanoGptDefaultRoutingPreference).toBe("auto")
 		expect(getModelId(settings)).toBe("model")
 	})

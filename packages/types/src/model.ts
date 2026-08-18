@@ -186,3 +186,18 @@ export type ModelInfo = z.infer<typeof modelInfoSchema>
 export type ModelRecord = Record<string, ModelInfo>
 
 export type RouterModels = Record<DynamicProvider | LocalProvider, ModelRecord>
+
+export const routerModelsMessageTypes = [
+	"flushRouterModels",
+	"requestRouterModels",
+	"routerModels",
+	"singleRouterModelFetchResponse",
+] as const
+
+export const routerModelsMessageTypeSchema = z.enum(routerModelsMessageTypes)
+
+export const RouterModelsMessageType = routerModelsMessageTypeSchema.enum
+
+export type RouterModelsMessageType = z.infer<typeof routerModelsMessageTypeSchema>
+
+export const allRouterModelsProvider = "all" as const

@@ -18,6 +18,7 @@ import {
 	type Command,
 	type McpServer,
 	RouterModels,
+	RouterModelsMessageType,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
@@ -444,7 +445,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					setListApiConfigMeta(message.listApiConfig ?? [])
 					break
 				}
-				case "routerModels": {
+				case RouterModelsMessageType.routerModels: {
 					const provider = message.values?.provider as string | undefined
 					const incoming = message.routerModels
 					if (provider && incoming) {

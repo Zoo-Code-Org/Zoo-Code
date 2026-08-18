@@ -34,6 +34,9 @@ vi.mock("../core/task/Task", () => {
 		public parentTask?: unknown
 		public apiConfiguration: unknown
 		public rootTask?: unknown
+		public abort = false
+		public abandoned = false
+		public abortTask = vi.fn().mockResolvedValue(undefined)
 		constructor(opts: {
 			historyItem?: { id: string }
 			parentTask?: unknown
@@ -292,6 +295,88 @@ describe("Single-open-task invariant", () => {
 		expect(schedulespy).toHaveBeenCalledTimes(1)
 		// evictCurrentTask must NOT have been called — in-place replace, no stack pop
 		expect(removeClineFromStack).not.toHaveBeenCalled()
+	})
+
+	it("serializes concurrent history resumes before mutating the task registry", async () => {
+		let releaseFirstEviction!: () => void
+		const firstEvictionGate = new Promise<void>((resolve) => {
+			releaseFirstEviction = resolve
+		})
+		const registry = new TaskRegistry()
+		const evictCurrentTask = vi.fn().mockImplementation(async () => {
+			if (evictCurrentTask.mock.calls.length === 1) {
+				await firstEvictionGate
+			}
+			const current = registry.current
+			if (current) {
+				registry.remove(current.taskId)
+			}
+		})
+		const schedulespy = vi.fn().mockResolvedValue(undefined)
+
+		const provider = {
+			historyTaskCreationQueue: Promise.resolve(),
+			getCurrentTask: vi.fn(() => registry.current),
+			taskRegistry: registry,
+			taskHistoryStore: { get: vi.fn(() => undefined) },
+			evictCurrentTask,
+			addClineToStack: vi.fn().mockImplementation(async (task: Task) => registry.push(task)),
+			log: vi.fn(),
+			customModesManager: { getCustomModes: vi.fn().mockResolvedValue([]) },
+			providerSettingsManager: {
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([]),
+			},
+			getState: vi.fn().mockResolvedValue({
+				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				enableCheckpoints: true,
+				checkpointTimeout: 60,
+				experiments: {},
+				cloudUserInfo: null,
+				taskSyncEnabled: false,
+			}),
+			getPendingEditOperation: vi.fn().mockReturnValue(undefined),
+			clearPendingEditOperation: vi.fn(),
+			taskScheduler: { schedule: schedulespy },
+			taskEventListeners: new WeakMap(),
+			performPreparationTasks: vi.fn().mockResolvedValue(undefined),
+			context: { extension: { packageJSON: {} }, globalStorageUri: { fsPath: "/tmp" } },
+			contextProxy: {
+				extensionUri: {},
+				getValue: vi.fn(),
+				setValue: vi.fn(),
+				setProviderSettings: vi.fn(),
+				getProviderSettings: vi.fn(() => ({})),
+			},
+			postStateToWebview: vi.fn(),
+		} as unknown as ClineProvider
+
+		const historyItem = {
+			id: "hist-concurrent-1",
+			number: 1,
+			ts: Date.now(),
+			task: "Task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			workspace: "/tmp",
+		}
+
+		const firstResume = privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem)
+		const secondResume = privateClineProvider.createTaskWithHistoryItem.call(provider, historyItem)
+
+		await vi.waitFor(() => expect(evictCurrentTask).toHaveBeenCalledTimes(1))
+		expect(provider.getState).not.toHaveBeenCalled()
+
+		releaseFirstEviction()
+		const [firstTask, secondTask] = await Promise.all([firstResume, secondResume])
+
+		expect(firstTask).not.toBe(secondTask)
+		expect(firstTask.abortTask).toHaveBeenCalledWith(true)
+		expect(evictCurrentTask).toHaveBeenCalledTimes(1)
+		expect(registry.taskIds).toEqual([historyItem.id])
+		expect(registry.current).toBe(secondTask)
+		expect(schedulespy).toHaveBeenCalledTimes(2)
 	})
 
 	it("IPC StartNewTask path closes current before new task", async () => {

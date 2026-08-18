@@ -79,6 +79,8 @@ describe("Task token usage throttling", () => {
 			log: vi.fn(),
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 			postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
+			postStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
+			flushPostStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
 			updateTaskHistory: vi.fn().mockResolvedValue(undefined),
 		}
 
