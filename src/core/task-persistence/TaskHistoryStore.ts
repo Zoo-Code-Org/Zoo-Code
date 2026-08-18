@@ -34,6 +34,19 @@ export function assertValidTransition(from: HistoryItemStatus | undefined, to: H
 }
 
 /**
+ * Build a `safeWriteJson` merge callback that applies only `delta` to the
+ * current disk state, preserving fields written by another process.
+ */
+function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
+	return (existing, incoming) => {
+		if (!existing || typeof existing !== "object" || !("id" in existing)) {
+			return incoming
+		}
+		return { ...existing, ...delta }
+	}
+}
+
+/**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
@@ -233,15 +246,8 @@ export class TaskHistoryStore {
 		// Merge: preserve existing metadata unless explicitly overwritten
 		const merged = existing ? { ...existing, ...item } : item
 
-		// Compute the actual changed fields relative to the cached state.
-		// Only these are applied to the disk version, so fields updated by
-		// another process are preserved rather than reverted from a stale cache.
-		const delta = existing
-			? Object.fromEntries(
-					Object.entries(item).filter(([k, v]) => !deepEqual(v, (existing as Record<string, unknown>)[k])),
-				)
-			: undefined
-		await this.writeTaskFile(merged, delta ? ({ id: item.id, ...delta } as HistoryItem) : undefined)
+		const delta = existing ? ({ id: item.id, ...this.computeDelta(existing, item) } as HistoryItem) : undefined
+		await this.writeTaskFile(merged, delta)
 
 		// Update in-memory cache
 		this.cache.set(merged.id, merged)
@@ -814,6 +820,15 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
 
 	/**
+	 * Return only the fields in `incoming` that differ from `cached`.
+	 */
+	private computeDelta(cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
+		return Object.fromEntries(
+			Object.entries(incoming).filter(([k, v]) => !deepEqual(v, (cached as Record<string, unknown>)[k])),
+		) as Partial<HistoryItem>
+	}
+
+	/**
 	 * Write a HistoryItem to its per-task `history_item.json` file.
 	 *
 	 * When `delta` is provided, the merge callback applies only the
@@ -824,14 +839,7 @@ export class TaskHistoryStore {
 	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<void> {
 		const filePath = await this.getTaskFilePath(item.id)
 		if (delta) {
-			await safeWriteJson(filePath, item, {
-				merge: (existing, incoming) => {
-					if (!existing || typeof existing !== "object" || !("id" in existing)) {
-						return incoming
-					}
-					return { ...existing, ...delta }
-				},
-			})
+			await safeWriteJson(filePath, item, { merge: mergeWithDisk(delta) })
 		} else {
 			await safeWriteJson(filePath, item)
 		}
@@ -1005,18 +1013,14 @@ export class TaskHistoryStore {
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
 
-			// Compute actual diffs against cached state, mirroring upsertCore.
-			const deltaFirst = Object.fromEntries(
-				Object.entries(updatedFirst).filter(([k, v]) => !deepEqual(v, (first as Record<string, unknown>)[k])),
-			)
-			const deltaSecond = Object.fromEntries(
-				Object.entries(updatedSecond).filter(([k, v]) => !deepEqual(v, (second as Record<string, unknown>)[k])),
-			)
-
-			// Write both files before touching the cache so readers never observe a
-			// half-updated in-memory state between the two await points.
-			await this.writeTaskFile(mergedFirst, { id: firstId, ...deltaFirst } as HistoryItem)
-			await this.writeTaskFile(mergedSecond, { id: secondId, ...deltaSecond } as HistoryItem)
+			await this.writeTaskFile(mergedFirst, {
+				id: firstId,
+				...this.computeDelta(first, updatedFirst),
+			} as HistoryItem)
+			await this.writeTaskFile(mergedSecond, {
+				id: secondId,
+				...this.computeDelta(second, updatedSecond),
+			} as HistoryItem)
 
 			// Both disk writes succeeded — now update the cache atomically.
 			this.cache.set(firstId, mergedFirst)
