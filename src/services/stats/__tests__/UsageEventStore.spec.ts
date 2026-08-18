@@ -5,8 +5,7 @@ import * as os from "os"
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import type { UsageEventV1 } from "@roo-code/types"
-
-import { UsageEventStore, StatsStoreError } from "../UsageEventStore"
+import { UsageEventStore } from "../UsageEventStore"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
 
@@ -414,15 +413,14 @@ describe("UsageEventStore", () => {
 			const events1 = await store.readAll()
 			expect(events1).toHaveLength(1)
 
-			// Second readAll should return the same cached array reference
+			// Second readAll should return the same cached array content
 			const events2 = await store.readAll()
-			expect(events2).toBe(events1)
+			expect(events2).toEqual(events1)
 		})
 	})
 
 	describe("error handling", () => {
-		it("should throw StatsStoreError with correct code on cap reached", async () => {
-			// This test is difficult to force the cap, so only verify isCapped() method behavior
+		it("should report not capped initially", async () => {
 			expect(store.isCapped()).toBe(false)
 		})
 

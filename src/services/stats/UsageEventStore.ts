@@ -17,10 +17,10 @@ const SEGMENT_MAX_BYTES = 5 * 1024 * 1024 // 5 MiB
 const TOTAL_MAX_BYTES = 100 * 1024 * 1024 // 100 MiB
 
 /** Segment file name prefix */
-const SEGMENT_PREFIX = "events-"
+export const SEGMENT_PREFIX = "events-"
 
 /** Segment file extension */
-const SEGMENT_EXT = ".ndjson"
+export const SEGMENT_EXT = ".ndjson"
 
 /** Manifest file name */
 const MANIFEST_FILENAME = "manifest.json"
@@ -95,7 +95,7 @@ export interface QuarantineReportEntry {
 	segment: string
 	/** 1-based line number */
 	line: number
-	/** SHA-256 hash of the corrupt line content (first 16 chars) */
+	/** 32-bit rolling hash of the corrupt line content as an 8-character hex string */
 	hash: string
 	/** Discovery time (ISO 8601 UTC) */
 	at: string
@@ -247,13 +247,18 @@ export class UsageEventStore {
 				// Incremental cache update: only after durable success.
 				if (result && this.cachedEvents) {
 					// If a segment rotation happened during the append, the cached
-					// segment count no longer matches the manifest. Invalidate so the
+					// segment count no longer matches the disk files. Invalidate so the
 					// next readAll rescans from disk instead of returning stale data.
+					const currentSegmentFiles = await this.listSegmentFiles()
 					const manifest = await this.loadOrCreateManifest()
-					if (this.cachedSegmentCount !== manifest.currentSegment) {
+					if (this.cachedSegmentCount !== currentSegmentFiles.length) {
 						this.invalidateCache()
 					} else {
 						this.cachedEvents.push(event)
+						const activeSegmentPath = this.getSegmentPath(manifest.currentSegment)
+						const activeStat = await fs.stat(activeSegmentPath).catch(() => null)
+						this.cachedActiveSegmentSize = activeStat?.size ?? -1
+						this.cachedActiveSegmentMtimeMs = activeStat?.mtimeMs ?? -1
 					}
 				}
 				resolveFn(result)
@@ -299,7 +304,7 @@ export class UsageEventStore {
 			this.cachedActiveSegmentSize === activeSize &&
 			this.cachedActiveSegmentMtimeMs === activeMtimeMs
 		) {
-			return this.cachedEvents
+			return [...this.cachedEvents]
 		}
 
 		// Single-flight cold load: concurrent callers share one scan.
@@ -313,7 +318,7 @@ export class UsageEventStore {
 			this.cachedSegmentCount = currentSegmentFiles.length
 			this.cachedActiveSegmentSize = activeSize
 			this.cachedActiveSegmentMtimeMs = activeMtimeMs
-			return events
+			return [...events]
 		})
 
 		try {
@@ -344,7 +349,7 @@ export class UsageEventStore {
 		}
 
 		try {
-			const manifest = await this.loadOrCreateManifest()
+			const manifest = await this.loadOrCreateManifest(true)
 
 			// New generation number
 			const newGeneration = manifest.generation + 1
@@ -456,31 +461,26 @@ export class UsageEventStore {
 
 		for (const segmentFile of segmentFiles) {
 			const segmentPath = path.join(this.statsDir, segmentFile)
-			let content: string
 
+			let content: string
 			try {
 				content = await fs.readFile(segmentPath, "utf-8")
 			} catch (err) {
-				// Skip file read failures (ENOENT etc.)
-				if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
-					console.warn(`[UsageEventStore] failed to read segment ${segmentFile}:`, err)
-				}
-				continue
+				throw new StatsStoreError("STATS_STORE/readAll/002", `Failed to read segment file: ${segmentPath}`, err)
 			}
 
 			const lines = content.split("\n")
-			// Remove the last empty line (trailing newline)
+			// Remove the last element if it's empty (trailing newline)
 			if (lines.length > 0 && lines[lines.length - 1] === "") {
 				lines.pop()
 			}
 
-			// If the last line is unterminated/truncated, treat it as a crash tail and ignore
-			// (If the last line is valid JSON, it is parsed; otherwise it goes to quarantine)
 			for (let i = 0; i < lines.length; i++) {
-				const lineNum = i + 1
 				const line = lines[i]
+				const lineNum = i + 1
 				const isLastLine = i === lines.length - 1
 
+				// Skip empty lines
 				if (!line.trim()) {
 					continue
 				}
@@ -491,11 +491,13 @@ export class UsageEventStore {
 					if (result.success) {
 						events.push(result.data)
 					} else {
-						// zod validation failed: corrupt line
-						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
-						// Validation failure of the last line may be a crash tail, so exclude from quarantine
-						if (isLastLine) {
-							quarantineEntries.pop()
+						// Schema validation failed
+						// If it's the last line, it might be an unterminated/truncated crash tail.
+						// The architecture report states: "The last unterminated line is treated
+						// as a crash tail and ignored; parse failures before EOF are recorded to
+						// the quarantine report and skipped."
+						if (!isLastLine) {
+							quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
 						}
 					}
 				} catch {
@@ -560,7 +562,7 @@ export class UsageEventStore {
 		}
 
 		try {
-			const manifest = await this.loadOrCreateManifest()
+			const manifest = await this.loadOrCreateManifest(true)
 			const segmentPath = this.getSegmentPath(manifest.currentSegment)
 
 			// Check if the segment file exists and its size
@@ -628,16 +630,26 @@ export class UsageEventStore {
 	// ── Internal: Manifest ──────────────────────────────────────────────────
 
 	private manifest: UsageStatsManifest | null = null
+	private manifestMtimeMs = -1
 
 	/**
 	 * Loads the manifest or creates it with default values.
+	 * @param forceReload When true, bypasses the in-memory cached manifest and re-reads from disk.
 	 */
-	private async loadOrCreateManifest(): Promise<UsageStatsManifest> {
-		if (this.manifest) {
-			return this.manifest
+	private async loadOrCreateManifest(forceReload = false): Promise<UsageStatsManifest> {
+		if (!forceReload && this.manifest) {
+			try {
+				const stat = await fs.stat(this.manifestPath)
+				if (stat.mtimeMs === this.manifestMtimeMs) {
+					return this.manifest
+				}
+			} catch {
+				// file stat failed, fall through to re-read or create
+			}
 		}
 
 		try {
+			const stat = await fs.stat(this.manifestPath).catch(() => null)
 			const content = await fs.readFile(this.manifestPath, "utf-8")
 			const parsed = JSON.parse(content)
 			// Basic field validation
@@ -647,6 +659,7 @@ export class UsageEventStore {
 				typeof parsed.currentSegment === "number"
 			) {
 				this.manifest = parsed as UsageStatsManifest
+				this.manifestMtimeMs = stat?.mtimeMs ?? -1
 				return this.manifest
 			}
 			// On validation failure, overwrite with default values
@@ -664,6 +677,7 @@ export class UsageEventStore {
 			console.warn(`[UsageEventStore] failed to load manifest, using default:`, err)
 			const defaultManifest = { ...DEFAULT_MANIFEST, updatedAt: new Date().toISOString() }
 			this.manifest = defaultManifest
+			this.manifestMtimeMs = -1
 			return defaultManifest
 		}
 	}

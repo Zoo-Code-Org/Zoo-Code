@@ -5,17 +5,12 @@ import type { UsageEventV1 } from "@roo-code/types"
 import { UsageEventV1 as UsageEventV1Schema } from "@roo-code/types"
 
 import { UsageStatsDatabase, type MigrationCheckpoint } from "./UsageStatsDatabase"
+import { SEGMENT_PREFIX, SEGMENT_EXT } from "./UsageEventStore"
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 /** Number of events to migrate per batch. */
 const MIGRATION_BATCH_SIZE = 1000
-
-/** Segment file name prefix (must match UsageEventStore). */
-const SEGMENT_PREFIX = "events-"
-
-/** Segment file extension (must match UsageEventStore). */
-const SEGMENT_EXT = ".ndjson"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -76,7 +71,7 @@ export class UsageStatsMigration {
 	 * Runs the full migration from NDJSON segments to the SQLite database.
 	 * Resumes from the last checkpoint if interrupted.
 	 *
-	 * @returns The total number of events migrated (newly inserted).
+	 * @returns The total cumulative number of events migrated across checkpoints.
 	 */
 	migrate(): { totalMigrated: number; totalSkipped: number; complete: boolean } {
 		const checkpoint = this.db.getMigrationCheckpoint()
@@ -99,12 +94,11 @@ export class UsageStatsMigration {
 		}
 
 		// Build parent map for root task resolution
-		// We need to read all events first to build the parent map,
-		// but we do it in a streaming fashion: first pass collects
-		// taskId → parentTaskId mappings, second pass migrates.
+		// Reads segments to collect taskId → parentTaskId mappings for the migration.
 		const parentMap = this.buildParentMap(segmentFiles)
 
-		let totalMigrated = checkpoint.eventsMigrated
+		const initialMigrated = checkpoint.eventsMigrated
+		let runMigrated = 0
 		let totalSkipped = 0
 
 		// Determine starting point from checkpoint
@@ -198,14 +192,14 @@ export class UsageStatsMigration {
 				// Flush batch when full
 				if (batchCount >= MIGRATION_BATCH_SIZE) {
 					const result = this.flushBatch(batchEvents)
-					totalMigrated += result.migrated
+					runMigrated += result.migrated
 					totalSkipped += result.skipped
 
 					// Update checkpoint
 					this.db.setMigrationCheckpoint({
 						lastSegment: currentSegment,
 						lastLine: currentLine,
-						eventsMigrated: totalMigrated,
+						eventsMigrated: initialMigrated + runMigrated,
 						complete: false,
 					})
 
@@ -217,13 +211,13 @@ export class UsageStatsMigration {
 			// Flush remaining events for this segment
 			if (batchEvents.length > 0) {
 				const result = this.flushBatch(batchEvents)
-				totalMigrated += result.migrated
+				runMigrated += result.migrated
 				totalSkipped += result.skipped
 
 				this.db.setMigrationCheckpoint({
 					lastSegment: currentSegment,
 					lastLine: currentLine,
-					eventsMigrated: totalMigrated,
+					eventsMigrated: initialMigrated + runMigrated,
 					complete: false,
 				})
 
@@ -239,11 +233,11 @@ export class UsageStatsMigration {
 		this.db.setMigrationCheckpoint({
 			lastSegment: currentSegment || segmentFiles[segmentFiles.length - 1],
 			lastLine: currentLine,
-			eventsMigrated: totalMigrated,
+			eventsMigrated: initialMigrated + runMigrated,
 			complete: true,
 		})
 
-		return { totalMigrated, totalSkipped, complete: true }
+		return { totalMigrated: initialMigrated + runMigrated, totalSkipped, complete: true }
 	}
 
 	/**
@@ -307,9 +301,9 @@ export class UsageStatsMigration {
 	// ── Internal: Parent Map ─────────────────────────────────────────────────
 
 	/**
-	 * Builds a map of taskId → parentTaskId from all segment files.
-	 * This is needed for root task resolution during migration.
-	 * Done in a streaming fashion to avoid loading all events into memory.
+	 * Builds a map of taskId → parentTaskId by reading all segment files.
+	 * Extracts only taskId and parentTaskId from each event to keep the map compact
+	 * for root task resolution during migration.
 	 */
 	private buildParentMap(segmentFiles: string[]): Map<string, string | undefined> {
 		const parentMap = new Map<string, string | undefined>()

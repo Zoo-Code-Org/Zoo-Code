@@ -334,10 +334,10 @@ describe("UsageStatsDatabase", () => {
 		})
 
 		it("should update daily rollups", () => {
-			const date = new Date(2026, 0, 15, 10, 0, 0)
 			db.append(
 				makeEvent({
-					occurredAt: date.toISOString(),
+					occurredAt: "2026-01-15T01:00:00.000Z",
+					timezoneOffsetMinutes: 540,
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
 						costUsd: { value: 0.05, source: "provider" },

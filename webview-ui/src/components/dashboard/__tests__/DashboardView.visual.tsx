@@ -48,7 +48,15 @@ function makeBucket(overrides: Partial<StatsBucket> = {}): StatsBucket {
 	}
 }
 
-const now = Date.now()
+declare global {
+	interface Window {
+		__dashboardSubscriptions__?: unknown[]
+		__originalConsoleLog__?: typeof window.console.log
+	}
+}
+
+const FIXED_EPOCH = new Date("2026-05-15T12:00:00.000Z").getTime()
+const now = FIXED_EPOCH
 
 // 30 days of heatmap activity, oldest first, with a rising wave and lighter
 // weekends so the heatmap shows multiple intensity levels instead of a flat row.
@@ -184,12 +192,15 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 	mount,
 	page,
 }) => {
+	await page.clock.install({ time: FIXED_EPOCH })
+
 	// Intercept `console.log` inside the page before the component mounts. The
 	// vscode browser fallback (`src/utils/vscode.ts`) logs the posted message
 	// object; we store it on `window` so the test can read the requestId.
 	await page.evaluate(() => {
 		const originalLog = window.console.log.bind(window.console)
-		;(window as unknown as { __dashboardSubscriptions__: unknown[] }).__dashboardSubscriptions__ = []
+		window.__originalConsoleLog__ = originalLog
+		window.__dashboardSubscriptions__ = []
 		window.console.log = (...args: unknown[]) => {
 			const message = args[0]
 			if (
@@ -197,9 +208,7 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 				typeof message === "object" &&
 				(message as { type?: string }).type === "subscribeDashboardStats"
 			) {
-				;(window as unknown as { __dashboardSubscriptions__: unknown[] }).__dashboardSubscriptions__.push(
-					message,
-				)
+				window.__dashboardSubscriptions__?.push(message)
 			}
 			originalLog(...args)
 		}
@@ -210,8 +219,8 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 	// Wait for the subscription post to be captured, then deliver the snapshot.
 	const subscription = await page
 		.waitForFunction(() => {
-			const subs = (window as unknown as { __dashboardSubscriptions__: unknown[] }).__dashboardSubscriptions__
-			return subs.length > 0 ? subs[0] : undefined
+			const subs = window.__dashboardSubscriptions__
+			return subs && subs.length > 0 ? subs[0] : undefined
 		})
 		.then((handle) => handle.jsonValue())
 
@@ -243,4 +252,13 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 	})
 
 	await expect(component).toHaveScreenshot("dashboard-view-dark.png")
+
+	// Restore console.log and clean up subscription buffer (test isolation)
+	await page.evaluate(() => {
+		if (window.__originalConsoleLog__) {
+			window.console.log = window.__originalConsoleLog__
+			delete window.__originalConsoleLog__
+		}
+		delete window.__dashboardSubscriptions__
+	})
 })

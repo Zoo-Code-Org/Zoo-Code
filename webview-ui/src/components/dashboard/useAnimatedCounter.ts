@@ -32,51 +32,55 @@ export function useAnimatedCounter(targetValue: number, options: UseAnimatedCoun
 	const { duration = 600, respectReducedMotion = true } = options
 
 	const [displayValue, setDisplayValue] = useState(targetValue)
+	const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
 	const animationFrameRef = useRef<number | null>(null)
-	const startValueRef = useRef(targetValue)
+	const currentDisplayValueRef = useRef(targetValue)
 	const startTimeRef = useRef<number | null>(null)
-	const reducedMotionRef = useRef(false)
 
-	// Check reduced-motion preference once on mount.
+	// Check reduced-motion preference and track changes.
 	useEffect(() => {
 		if (!respectReducedMotion) {
-			reducedMotionRef.current = false
+			setPrefersReducedMotion(false)
+			return
+		}
+
+		if (typeof window === "undefined" || !window.matchMedia) {
 			return
 		}
 
 		const mediaQuery = window.matchMedia("(prefers-reduced-motion: reduce)")
-		reducedMotionRef.current = mediaQuery.matches
+		setPrefersReducedMotion(mediaQuery.matches)
 
 		const handleChange = (e: MediaQueryListEvent) => {
-			reducedMotionRef.current = e.matches
+			setPrefersReducedMotion(e.matches)
 		}
 		mediaQuery.addEventListener("change", handleChange)
 		return () => mediaQuery.removeEventListener("change", handleChange)
 	}, [respectReducedMotion])
 
-	// Animate towards targetValue whenever it changes.
+	// Animate towards targetValue whenever it changes or motion preference changes.
 	useEffect(() => {
-		// If reduced motion is active, snap immediately.
-		if (reducedMotionRef.current) {
-			startValueRef.current = targetValue
+		// Cancel any in-flight animation frame.
+		if (animationFrameRef.current !== null) {
+			cancelAnimationFrame(animationFrameRef.current)
+			animationFrameRef.current = null
+		}
+
+		// If reduced motion is active or duration is invalid/zero, snap immediately.
+		if (prefersReducedMotion || !Number.isFinite(duration) || duration <= 0) {
+			currentDisplayValueRef.current = targetValue
 			setDisplayValue(targetValue)
 			return
 		}
 
-		// If the value hasn't changed, do nothing.
-		if (targetValue === displayValue) return
-
-		// Cancel any in-flight animation.
-		if (animationFrameRef.current !== null) {
-			cancelAnimationFrame(animationFrameRef.current)
-		}
-
-		const startValue = displayValue
-		startValueRef.current = startValue
-		startTimeRef.current = null
+		const startValue = currentDisplayValueRef.current
 
 		// If start and target are the same, no animation needed.
-		if (startValue === targetValue) return
+		if (startValue === targetValue) {
+			return
+		}
+
+		startTimeRef.current = null
 
 		const animate = (timestamp: number) => {
 			if (startTimeRef.current === null) {
@@ -89,6 +93,7 @@ export function useAnimatedCounter(targetValue: number, options: UseAnimatedCoun
 			const eased = 1 - Math.pow(1 - progress, 3)
 			const current = startValue + (targetValue - startValue) * eased
 
+			currentDisplayValueRef.current = current
 			setDisplayValue(current)
 
 			if (progress < 1) {
@@ -106,8 +111,7 @@ export function useAnimatedCounter(targetValue: number, options: UseAnimatedCoun
 				animationFrameRef.current = null
 			}
 		}
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [targetValue, duration])
+	}, [targetValue, duration, prefersReducedMotion])
 
 	return displayValue
 }

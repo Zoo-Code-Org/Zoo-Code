@@ -154,14 +154,9 @@ describe("Sink Identity Bug", () => {
 		const sinkB = new MockSink()
 		coordinator.replaceSubscription(sinkB, makeSubscription({ requestId: "sub-new" }))
 
-		// BUG: The old subscription (sinkA) is NOT removed because
-		// replaceSubscription uses sink object identity as the key.
-		// The map now has BOTH sinkA and sinkB.
-		console.log("Subscription count after replace:", coordinator._subscriptionCount())
-
-		// The old subscription should have been removed
-		// Currently it's 2 (both sinkA and sinkB) — this is the bug
-		expect(coordinator._subscriptionCount()).toBe(1) // Should be 1 after replace
+		// Replace subscription with sinkB (new instance).
+		// The old subscription (sinkA) should be cleanly removed.
+		expect(coordinator._subscriptionCount()).toBe(1)
 
 		coordinator.dispose()
 	})
@@ -183,23 +178,19 @@ describe("Sink Identity Bug", () => {
 		sinkB.messages.length = 0
 
 		// Append a new event — triggers drain
-		db.append(makeEvent())
-		coordinator.notifyEventAppended(makeEvent())
+		const appendedEvent = makeEvent()
+		db.append(appendedEvent)
+		coordinator.notifyEventAppended(appendedEvent)
 		vi.advanceTimersByTime(100)
 
-		// sinkA should NOT receive deltas (it's orphaned)
+		// sinkA should NOT receive deltas (it was replaced)
 		const sinkADeltas = sinkA.messagesOfType("dashboardStatsStreamDelta")
-		console.log("sinkA deltas after replace:", sinkADeltas.length)
+		expect(sinkADeltas).toHaveLength(0)
 
 		// sinkB should receive deltas
 		const sinkBDeltas = sinkB.messagesOfType("dashboardStatsStreamDelta")
-		console.log("sinkB deltas after replace:", sinkBDeltas.length)
-
-		// After replace, only the new subscription should receive deltas
-		// But since sinkA is still in the map, it also gets deltas
-		// This means the webview receives BOTH old-epoch and new-epoch deltas
-		// The old-epoch deltas are rejected by the frontend, but this wastes bandwidth
-		// and could cause confusion
+		expect(sinkBDeltas).toHaveLength(1)
+		expect(sinkBDeltas[0].dashboardStatsStreamDelta?.requestId).toBe("sub-new")
 
 		coordinator.dispose()
 	})

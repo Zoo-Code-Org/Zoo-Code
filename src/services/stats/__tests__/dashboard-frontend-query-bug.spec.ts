@@ -100,27 +100,15 @@ describe("Frontend Query Bug Investigation", () => {
 		// Query with "all" preset
 		const allSnap = assembleRollupSnapshot(db, frontendQuery("all"))
 
-		console.log("today events:", todaySnap.totals.events)
-		console.log("7d events:", sevenDaySnap.totals.events)
-		console.log("all events:", allSnap.totals.events)
-		console.log("today coverage:", todaySnap.coverage)
-		console.log("7d coverage:", sevenDaySnap.coverage)
-
 		// All should include all 3 events
 		expect(allSnap.totals.events).toBe(3)
 
 		// 7d should include today + yesterday (2 events)
 		// (10 days ago is outside 7d range)
-		expect(sevenDaySnap.totals.events).toBeGreaterThanOrEqual(todaySnap.totals.events)
+		expect(sevenDaySnap.totals.events).toBe(2)
 
-		// Today should have at least 1 event
-		expect(todaySnap.totals.events).toBeGreaterThanOrEqual(1)
-
-		// 7d should have more events than today (unless all events are today)
-		if (sevenDaySnap.totals.events === todaySnap.totals.events) {
-			// This is the bug! Same data for different presets
-			console.error("BUG: 7d and today return same event count!")
-		}
+		// Today should have exactly 1 event
+		expect(todaySnap.totals.events).toBe(1)
 	})
 
 	it("sessions should be populated after seeding events", () => {
@@ -130,9 +118,6 @@ describe("Frontend Query Bug Investigation", () => {
 		db.append(makeEventAt({ occurredAt: now.toISOString(), rootTaskId: "r2", taskId: "t2" }))
 
 		const sessionPage = computeSessionPage(db, "test-req", undefined, 50)
-
-		console.log("sessions count:", sessionPage.sessions.length)
-		console.log("totalEstimate:", sessionPage.totalEstimate)
 
 		expect(sessionPage.sessions.length).toBeGreaterThanOrEqual(1)
 	})
@@ -156,9 +141,6 @@ describe("Frontend Query Bug Investigation", () => {
 
 		const heatmap = computeHeatmapSnapshot(db, 30, "Asia/Seoul")
 
-		console.log("heatmap values (last 5):", heatmap.values.slice(-5))
-		console.log("heatmap rangeDays:", heatmap.rangeDays)
-
 		// Today (last element) should have non-zero value
 		const todayValue = heatmap.values[heatmap.values.length - 1]
 		expect(todayValue).toBeGreaterThan(0)
@@ -173,8 +155,6 @@ describe("Frontend Query Bug Investigation", () => {
 		db.append(makeEventAt({ occurredAt: now.toISOString(), rootTaskId: "r2", taskId: "t2" }))
 
 		const snap = assembleRollupSnapshot(db, frontendQuery("all"))
-
-		console.log("coverage:", snap.coverage)
 
 		expect(snap.coverage.firstEventAt).toBeTruthy()
 		expect(snap.coverage.lastEventAt).toBeTruthy()

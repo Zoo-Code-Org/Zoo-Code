@@ -69,12 +69,15 @@ describe("Timezone Preset Bug Investigation", () => {
 	let db: UsageStatsDatabase
 
 	beforeEach(() => {
+		vi.useFakeTimers()
+		vi.setSystemTime(new Date("2026-06-15T12:00:00.000Z"))
 		tempDir = createTempDir()
 		db = new UsageStatsDatabase(tempDir)
 		db.initialize()
 	})
 
 	afterEach(() => {
+		vi.useRealTimers()
 		db.close()
 		fs.rmSync(tempDir, { recursive: true, force: true })
 	})
@@ -101,41 +104,19 @@ describe("Timezone Preset Bug Investigation", () => {
 		// Query with "all" preset
 		const allSnap = assembleRollupSnapshot(db, frontendQuery("all"))
 
-		console.log("=== Timezone Preset Test ===")
-		console.log("Current time (UTC):", now.toISOString())
-		console.log("today events:", todaySnap.totals.events)
-		console.log("7d events:", sevenDaySnap.totals.events)
-		console.log("all events:", allSnap.totals.events)
-		console.log("today coverage:", todaySnap.coverage.lastEventAt)
-
 		// All should include all 5 events
 		expect(allSnap.totals.events).toBe(5)
 
 		// 7d should include all 5 events (3 days ago is within 7 days)
 		expect(sevenDaySnap.totals.events).toBe(5)
 
-		// Today should have fewer events than 7d
-		// (only events from today in Seoul timezone)
-		expect(todaySnap.totals.events).toBeLessThanOrEqual(sevenDaySnap.totals.events)
-
-		// Verify data is actually different
-		if (todaySnap.totals.events === sevenDaySnap.totals.events) {
-			console.error("BUG: today and 7d return same event count!")
-			console.error("today totals:", todaySnap.totals)
-			console.error("7d totals:", sevenDaySnap.totals)
-		}
+		// Today should only include events from today in Seoul timezone (now, 1h ago, 12h ago)
+		expect(todaySnap.totals.events).toBe(3)
 	})
 
 	it("event at exactly midnight Seoul should be in today", () => {
-		// Create an event at exactly midnight Seoul time
-		// Midnight Seoul = 15:00 UTC previous day
-		const now = new Date()
-		const seoulMidnight = new Date(now)
-		seoulMidnight.setUTCHours(15, 0, 0, 0)
-		// If 15:00 UTC today is in the future, use yesterday's 15:00 UTC
-		if (seoulMidnight > now) {
-			seoulMidnight.setUTCDate(seoulMidnight.getUTCDate() - 1)
-		}
+		// Seoul midnight of today (2026-06-15 00:00:00 KST = 2026-06-14 15:00:00 UTC)
+		const seoulMidnight = new Date("2026-06-14T15:00:00.000Z")
 
 		db.append(
 			makeEventAt({
@@ -147,21 +128,13 @@ describe("Timezone Preset Bug Investigation", () => {
 
 		const todaySnap = assembleRollupSnapshot(db, frontendQuery("today"))
 
-		console.log("Seoul midnight event at:", seoulMidnight.toISOString())
-		console.log("today events for midnight event:", todaySnap.totals.events)
-
 		// The midnight event should be included in "today"
-		expect(todaySnap.totals.events).toBeGreaterThanOrEqual(1)
+		expect(todaySnap.totals.events).toBe(1)
 	})
 
 	it("event just before midnight Seoul should be in yesterday", () => {
-		const now = new Date()
-		// 14:59 UTC = 23:59 Seoul (just before midnight)
-		const beforeMidnight = new Date(now)
-		beforeMidnight.setUTCHours(14, 59, 0, 0)
-		if (beforeMidnight > now) {
-			beforeMidnight.setUTCDate(beforeMidnight.getUTCDate() - 1)
-		}
+		// 2026-06-14 23:59:00 KST = 2026-06-14 14:59:00 UTC (1 minute before Seoul midnight)
+		const beforeMidnight = new Date("2026-06-14T14:59:00.000Z")
 
 		db.append(
 			makeEventAt({
@@ -174,13 +147,8 @@ describe("Timezone Preset Bug Investigation", () => {
 		const todaySnap = assembleRollupSnapshot(db, frontendQuery("today"))
 		const sevenDaySnap = assembleRollupSnapshot(db, frontendQuery("7d"))
 
-		console.log("Before midnight event at:", beforeMidnight.toISOString())
-		console.log("today events:", todaySnap.totals.events)
-		console.log("7d events:", sevenDaySnap.totals.events)
-
-		// The event might or might not be in "today" depending on whether
-		// 23:59 Seoul is today or yesterday
-		// But 7d should definitely include it
-		expect(sevenDaySnap.totals.events).toBeGreaterThanOrEqual(1)
+		// Excluded from today, included in 7d
+		expect(todaySnap.totals.events).toBe(0)
+		expect(sevenDaySnap.totals.events).toBe(1)
 	})
 })

@@ -79,6 +79,12 @@ describe("UsageStatsService", () => {
 	})
 
 	afterEach(async () => {
+		try {
+			await service?.dispose()
+		} catch {
+			// ignore disposal errors
+		}
+		vi.useRealTimers()
 		// Clean up temp directory (test isolation)
 		try {
 			await fs.rm(tempDir, { recursive: true, force: true })
@@ -804,8 +810,6 @@ describe("UsageStatsService", () => {
 			vi.advanceTimersByTime(6 * 60 * 1000)
 
 			await expect(service.clearStats(nonce)).rejects.toThrow(StatsServiceError)
-
-			vi.useRealTimers()
 		})
 
 		it("should include error code STATS_SERVICE/clear/001 for expired nonce", async () => {
@@ -821,8 +825,6 @@ describe("UsageStatsService", () => {
 				expect(err).toBeInstanceOf(StatsServiceError)
 				expect((err as StatsServiceError).code).toBe("STATS_SERVICE/clear/001")
 			}
-
-			vi.useRealTimers()
 		})
 
 		it("should consume nonce after successful clear (one-time use)", async () => {
@@ -1242,8 +1244,6 @@ describe("UsageStatsService", () => {
 			vi.advanceTimersByTime(300)
 
 			expect(listener).toHaveBeenCalledOnce()
-
-			vi.useRealTimers()
 		})
 	})
 

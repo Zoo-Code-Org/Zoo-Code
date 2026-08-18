@@ -76,11 +76,11 @@
 		"status": "Trạng thái"
 	},
 	"time": {
-		"justNow": "vua xong",
-		"minutesAgo": "{{count}} phut truoc",
-		"hoursAgo": "{{count}} gio truoc",
-		"yesterday": "hom qua",
-		"daysAgo": "{{count}} ngay truoc"
+		"justNow": "vừa xong",
+		"minutesAgo": "{{count}} phút trước",
+		"hoursAgo": "{{count}} giờ trước",
+		"yesterday": "hôm qua",
+		"daysAgo": "{{count}} ngày trước"
 	},
 	"tasks": {
 		"title": "Tác vụ",
