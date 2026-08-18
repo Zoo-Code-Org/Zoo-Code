@@ -607,8 +607,24 @@ describe("OpenRouter API", () => {
 
 			expect(models["openai/gpt-4o"]).toBeDefined()
 			expect(models["private/account-model"]).toBeDefined()
-			expect(preset).not.toHaveProperty("contextWindow")
-			expect(preset).not.toHaveProperty("description")
+			expect(preset.contextWindow).toBe(200000)
+			expect(preset.description).toBe("fallback name")
+			expect(preset?.supportsPromptCache).toBe(false)
+
+			getSpy.mockRestore()
+		})
+
+		it("derives a multi-model preset context window as the max across its models", async () => {
+			expect(preset.contextWindow).toBe(200000)
+			expect(preset.description).toBe("fallback name")
+			expect(preset?.supportsPromptCache).toBe(false)
+
+			getSpy.mockRestore()
+		})
+
+		it("derives a multi-model preset context window as the max across its models", async () => {
+			expect(preset.contextWindow).toBe(200000)
+			expect(preset.description).toBe("fallback name")
 			expect(preset?.supportsPromptCache).toBe(false)
 
 			getSpy.mockRestore()
@@ -619,18 +635,6 @@ describe("OpenRouter API", () => {
 			expect(preset).not.toHaveProperty("description")
 			expect(preset?.supportsPromptCache).toBe(false)
 
-			getSpy.mockRestore()
-		})
-
-		it("derives a multi-model preset context window as the max across its models", async () => {
-			expect(preset).not.toHaveProperty("contextWindow")
-			expect(preset).not.toHaveProperty("description")
-			expect(preset?.supportsPromptCache).toBe(false)
-
-			getSpy.mockRestore()
-		})
-
-		it("derives a multi-model preset context window as the max across its models", async () => {
 			getSpy.mockRestore()
 		})
 
