@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "{{count}} MCP sunucusu bağlantısı kesilemedi. Ayrıntılar için çıktıyı kontrol edin.",
 		"toolNotFound": "Araç '{{toolName}}' sunucu '{{serverName}}' üzerinde mevcut değil. Mevcut araçlar: {{availableTools}}",
 		"serverNotFound": "MCP sunucusu '{{serverName}}' yapılandırılmamış. Mevcut sunucular: {{availableServers}}",
-		"toolDisabled": "Sunucu '{{serverName}}' üzerindeki araç '{{toolName}}' devre dışı. Mevcut etkin araçlar: {{availableTools}}"
+		"toolDisabled": "Sunucu '{{serverName}}' üzerindeki araç '{{toolName}}' devre dışı. Mevcut etkin araçlar: {{availableTools}}",
+		"exa_install_failed": "Exa MCP yüklenemedi: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "{{serverName}} MCP sunucusu yeniden başlatılıyor...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "MCP sunucuları zaten yenileniyor.",
 		"refreshing_all": "Tüm MCP sunucuları yenileniyor...",
 		"all_refreshed": "Tüm MCP sunucuları yenilendi.",
-		"project_config_deleted": "Proje MCP yapılandırma dosyası silindi. Tüm proje MCP sunucuları bağlantısı kesildi."
+		"project_config_deleted": "Proje MCP yapılandırma dosyası silindi. Tüm proje MCP sunucuları bağlantısı kesildi.",
+		"exa_install_prompt": "Zoo'ya web arama ve web içeriği getirme özellikleri kazandırmak için ücretsiz Exa MCP sunucusunu yüklemek ister misin?",
+		"exa_install_action": "Exa MCP'yi yükle",
+		"exa_install_success": "Exa MCP başarıyla yüklendi."
 	},
 	"oauth": {
 		"callback": {

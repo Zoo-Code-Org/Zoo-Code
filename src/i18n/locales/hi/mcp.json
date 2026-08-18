@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "{{count}} MCP सर्वर डिस्कनेक्ट करने में विफल। विवरण के लिए आउटपुट देखें।",
 		"toolNotFound": "टूल '{{toolName}}' सर्वर '{{serverName}}' पर मौजूद नहीं है। उपलब्ध टूल: {{availableTools}}",
 		"serverNotFound": "MCP सर्वर '{{serverName}}' कॉन्फ़िगर नहीं है। उपलब्ध सर्वर: {{availableServers}}",
-		"toolDisabled": "सर्वर '{{serverName}}' पर टूल '{{toolName}}' अक्षम है। उपलब्ध सक्षम टूल: {{availableTools}}"
+		"toolDisabled": "सर्वर '{{serverName}}' पर टूल '{{toolName}}' अक्षम है। उपलब्ध सक्षम टूल: {{availableTools}}",
+		"exa_install_failed": "Exa MCP इंस्टॉल नहीं हो सका: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "{{serverName}} MCP सर्वर पुनः प्रारंभ हो रहा है...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "एमसीपी सर्वर पहले से ही रीफ्रेश हो रहे हैं।",
 		"refreshing_all": "सभी एमसीपी सर्वर रीफ्रेश हो रहे हैं...",
 		"all_refreshed": "सभी एमसीपी सर्वर रीफ्रेश हो गए हैं।",
-		"project_config_deleted": "प्रोजेक्ट एमसीपी कॉन्फ़िगरेशन फ़ाइल हटा दी गई है। सभी प्रोजेक्ट एमसीपी सर्वर डिस्कनेक्ट कर दिए गए हैं।"
+		"project_config_deleted": "प्रोजेक्ट एमसीपी कॉन्फ़िगरेशन फ़ाइल हटा दी गई है। सभी प्रोजेक्ट एमसीपी सर्वर डिस्कनेक्ट कर दिए गए हैं।",
+		"exa_install_prompt": "क्या Zoo को वेब खोज और वेब सामग्री प्राप्त करने की सुविधा देने के लिए मुफ़्त Exa MCP सर्वर इंस्टॉल करना है?",
+		"exa_install_action": "Exa MCP इंस्टॉल करें",
+		"exa_install_success": "Exa MCP सफलतापूर्वक इंस्टॉल हो गया।"
 	},
 	"oauth": {
 		"callback": {

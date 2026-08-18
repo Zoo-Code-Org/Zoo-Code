@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "Failed to disconnect {{count}} MCP server(s). Check the output for details.",
 		"toolNotFound": "Tool '{{toolName}}' does not exist on server '{{serverName}}'. Available tools: {{availableTools}}",
 		"serverNotFound": "MCP server '{{serverName}}' is not configured. Available servers: {{availableServers}}",
-		"toolDisabled": "Tool '{{toolName}}' on server '{{serverName}}' is disabled. Available enabled tools: {{availableTools}}"
+		"toolDisabled": "Tool '{{toolName}}' on server '{{serverName}}' is disabled. Available enabled tools: {{availableTools}}",
+		"exa_install_failed": "Failed to install Exa MCP: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "Restarting {{serverName}} MCP server...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "MCP servers are already refreshing.",
 		"refreshing_all": "Refreshing all MCP servers...",
 		"all_refreshed": "All MCP servers have been refreshed.",
-		"project_config_deleted": "Project MCP configuration file deleted. All project MCP servers have been disconnected."
+		"project_config_deleted": "Project MCP configuration file deleted. All project MCP servers have been disconnected.",
+		"exa_install_prompt": "Install the free Exa MCP server to give Zoo web search and web fetching capabilities?",
+		"exa_install_action": "Install Exa MCP",
+		"exa_install_success": "Exa MCP installed successfully."
 	},
 	"oauth": {
 		"callback": {

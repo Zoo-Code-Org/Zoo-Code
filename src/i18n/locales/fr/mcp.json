@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "Échec de la déconnexion de {{count}} serveur(s) MCP. Vérifiez la sortie pour plus de détails.",
 		"toolNotFound": "L'outil '{{toolName}}' n'existe pas sur le serveur '{{serverName}}'. Outils disponibles : {{availableTools}}",
 		"serverNotFound": "Le serveur MCP '{{serverName}}' n'est pas configuré. Serveurs disponibles : {{availableServers}}",
-		"toolDisabled": "L'outil '{{toolName}}' sur le serveur '{{serverName}}' est désactivé. Outils activés disponibles : {{availableTools}}"
+		"toolDisabled": "L'outil '{{toolName}}' sur le serveur '{{serverName}}' est désactivé. Outils activés disponibles : {{availableTools}}",
+		"exa_install_failed": "Impossible d'installer Exa MCP : {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "Redémarrage du serveur MCP {{serverName}}...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "Les serveurs MCP sont déjà en cours de rafraîchissement.",
 		"refreshing_all": "Rafraîchissement de tous les serveurs MCP...",
 		"all_refreshed": "Tous les serveurs MCP ont été rafraîchis.",
-		"project_config_deleted": "Fichier de configuration MCP du projet supprimé. Tous les serveurs MCP du projet ont été déconnectés."
+		"project_config_deleted": "Fichier de configuration MCP du projet supprimé. Tous les serveurs MCP du projet ont été déconnectés.",
+		"exa_install_prompt": "Veux-tu installer le serveur MCP gratuit d'Exa pour permettre à Zoo de rechercher et récupérer du contenu web ?",
+		"exa_install_action": "Installer Exa MCP",
+		"exa_install_success": "Exa MCP a été installé."
 	},
 	"oauth": {
 		"callback": {

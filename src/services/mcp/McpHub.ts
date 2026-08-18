@@ -152,6 +152,12 @@ const McpSettingsSchema = z.object({
 	mcpServers: z.record(ServerConfigSchema),
 })
 
+export const EXA_MCP_SERVER_CONFIG = {
+	type: "streamable-http",
+	url: "https://mcp.exa.ai/mcp",
+	alwaysAllow: ["web_search_exa", "web_fetch_exa"],
+} as const
+
 export class McpHub {
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
@@ -506,16 +512,54 @@ export class McpHub {
 		)
 		const fileExists = await fileExistsAtPath(mcpSettingsFilePath)
 		if (!fileExists) {
-			await fs.writeFile(
-				mcpSettingsFilePath,
-				`{
-  "mcpServers": {
-
-  }
-}`,
-			)
+			await safeWriteJson(mcpSettingsFilePath, { mcpServers: {} }, { prettyPrint: true })
 		}
 		return mcpSettingsFilePath
+	}
+
+	public hasExaServer(): boolean {
+		return this.connections.some((connection) => {
+			if (connection.server.name.toLowerCase() === "exa") {
+				return true
+			}
+
+			try {
+				const config: unknown = JSON.parse(connection.server.config)
+				return (
+					typeof config === "object" &&
+					config !== null &&
+					"url" in config &&
+					config.url === EXA_MCP_SERVER_CONFIG.url
+				)
+			} catch {
+				return false
+			}
+		})
+	}
+
+	public async installExaServer(): Promise<void> {
+		if (this.hasExaServer()) {
+			return
+		}
+
+		const configPath = await this.getMcpSettingsFilePath()
+		const content = await fs.readFile(configPath, "utf-8")
+		const config: unknown = JSON.parse(content)
+
+		if (!config || typeof config !== "object") {
+			throw new Error("Invalid config structure")
+		}
+
+		const mcpSettings = config as { mcpServers?: Record<string, unknown> }
+		mcpSettings.mcpServers ??= {}
+
+		if (Object.keys(mcpSettings.mcpServers).some((name) => name.toLowerCase() === "exa")) {
+			return
+		}
+
+		mcpSettings.mcpServers.exa = EXA_MCP_SERVER_CONFIG
+		await safeWriteJson(configPath, { mcpServers: mcpSettings.mcpServers }, { prettyPrint: true })
+		await this.updateServerConnections(mcpSettings.mcpServers, "global")
 	}
 
 	private async watchMcpSettingsFile(): Promise<void> {

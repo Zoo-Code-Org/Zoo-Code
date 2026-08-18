@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "Ha fallat la desconnexió de {{count}} servidor(s) MCP. Comprova la sortida per més detalls.",
 		"toolNotFound": "L'eina '{{toolName}}' no existeix al servidor '{{serverName}}'. Eines disponibles: {{availableTools}}",
 		"serverNotFound": "El servidor MCP '{{serverName}}' no està configurat. Servidors disponibles: {{availableServers}}",
-		"toolDisabled": "L'eina '{{toolName}}' del servidor '{{serverName}}' està desactivada. Eines activades disponibles: {{availableTools}}"
+		"toolDisabled": "L'eina '{{toolName}}' del servidor '{{serverName}}' està desactivada. Eines activades disponibles: {{availableTools}}",
+		"exa_install_failed": "No s'ha pogut instal·lar Exa MCP: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "Reiniciant el servidor MCP {{serverName}}...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "Els servidors MCP ja s'estan actualitzant.",
 		"refreshing_all": "Actualitzant tots els servidors MCP...",
 		"all_refreshed": "Tots els servidors MCP han estat actualitzats.",
-		"project_config_deleted": "Fitxer de configuració MCP del projecte eliminat. Tots els servidors MCP del projecte han estat desconnectats."
+		"project_config_deleted": "Fitxer de configuració MCP del projecte eliminat. Tots els servidors MCP del projecte han estat desconnectats.",
+		"exa_install_prompt": "Vols instal·lar el servidor MCP gratuït d'Exa perquè Zoo pugui cercar i obtenir contingut web?",
+		"exa_install_action": "Instal·la Exa MCP",
+		"exa_install_success": "Exa MCP s'ha instal·lat correctament."
 	},
 	"oauth": {
 		"callback": {

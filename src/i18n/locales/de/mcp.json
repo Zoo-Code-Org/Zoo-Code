@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "Fehler beim Trennen von {{count}} MCP-Server(n). Überprüfe die Ausgabe für Details.",
 		"toolNotFound": "Tool '{{toolName}}' existiert nicht auf Server '{{serverName}}'. Verfügbare Tools: {{availableTools}}",
 		"serverNotFound": "MCP-Server '{{serverName}}' ist nicht konfiguriert. Verfügbare Server: {{availableServers}}",
-		"toolDisabled": "Tool '{{toolName}}' auf Server '{{serverName}}' ist deaktiviert. Verfügbare aktivierte Tools: {{availableTools}}"
+		"toolDisabled": "Tool '{{toolName}}' auf Server '{{serverName}}' ist deaktiviert. Verfügbare aktivierte Tools: {{availableTools}}",
+		"exa_install_failed": "Exa MCP konnte nicht installiert werden: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "MCP-Server {{serverName}} wird neu gestartet...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "MCP-Server werden bereits aktualisiert.",
 		"refreshing_all": "Alle MCP-Server werden aktualisiert...",
 		"all_refreshed": "Alle MCP-Server wurden aktualisiert.",
-		"project_config_deleted": "Projekt-MCP-Konfigurationsdatei gelöscht. Alle Projekt-MCP-Server wurden getrennt."
+		"project_config_deleted": "Projekt-MCP-Konfigurationsdatei gelöscht. Alle Projekt-MCP-Server wurden getrennt.",
+		"exa_install_prompt": "Möchtest du den kostenlosen Exa MCP-Server installieren, damit Zoo das Web durchsuchen und Webinhalte abrufen kann?",
+		"exa_install_action": "Exa MCP installieren",
+		"exa_install_success": "Exa MCP wurde erfolgreich installiert."
 	},
 	"oauth": {
 		"callback": {

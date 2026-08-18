@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "Не удалось отключить {{count}} MCP сервер(ов). Проверьте вывод для получения подробностей.",
 		"toolNotFound": "Инструмент '{{toolName}}' не существует на сервере '{{serverName}}'. Доступные инструменты: {{availableTools}}",
 		"serverNotFound": "MCP сервер '{{serverName}}' не настроен. Доступные серверы: {{availableServers}}",
-		"toolDisabled": "Инструмент '{{toolName}}' на сервере '{{serverName}}' отключен. Доступные включенные инструменты: {{availableTools}}"
+		"toolDisabled": "Инструмент '{{toolName}}' на сервере '{{serverName}}' отключен. Доступные включенные инструменты: {{availableTools}}",
+		"exa_install_failed": "Не удалось установить Exa MCP: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "Перезапуск сервера MCP {{serverName}}...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "MCP серверы уже обновляются.",
 		"refreshing_all": "Обновление всех MCP серверов...",
 		"all_refreshed": "Все MCP серверы обновлены.",
-		"project_config_deleted": "Файл конфигурации MCP проекта удален. Все MCP серверы проекта отключены."
+		"project_config_deleted": "Файл конфигурации MCP проекта удален. Все MCP серверы проекта отключены.",
+		"exa_install_prompt": "Установить бесплатный сервер Exa MCP, чтобы Zoo мог искать и получать контент из интернета?",
+		"exa_install_action": "Установить Exa MCP",
+		"exa_install_success": "Exa MCP успешно установлен."
 	},
 	"oauth": {
 		"callback": {

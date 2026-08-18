@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "Loskoppelen van {{count}} MCP-server(s) mislukt. Controleer de uitvoer voor details.",
 		"toolNotFound": "Tool '{{toolName}}' bestaat niet op server '{{serverName}}'. Beschikbare tools: {{availableTools}}",
 		"serverNotFound": "MCP-server '{{serverName}}' is niet geconfigureerd. Beschikbare servers: {{availableServers}}",
-		"toolDisabled": "Tool '{{toolName}}' op server '{{serverName}}' is uitgeschakeld. Beschikbare ingeschakelde tools: {{availableTools}}"
+		"toolDisabled": "Tool '{{toolName}}' op server '{{serverName}}' is uitgeschakeld. Beschikbare ingeschakelde tools: {{availableTools}}",
+		"exa_install_failed": "Exa MCP kon niet worden geïnstalleerd: {{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "{{serverName}} MCP-server wordt opnieuw gestart...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "MCP-servers worden al vernieuwd.",
 		"refreshing_all": "Alle MCP-servers worden vernieuwd...",
 		"all_refreshed": "Alle MCP-servers zijn vernieuwd.",
-		"project_config_deleted": "Project MCP-configuratiebestand verwijderd. Alle project MCP-servers zijn losgekoppeld."
+		"project_config_deleted": "Project MCP-configuratiebestand verwijderd. Alle project MCP-servers zijn losgekoppeld.",
+		"exa_install_prompt": "Wil je de gratis Exa MCP-server installeren zodat Zoo het web kan doorzoeken en webinhoud kan ophalen?",
+		"exa_install_action": "Exa MCP installeren",
+		"exa_install_success": "Exa MCP is geïnstalleerd."
 	},
 	"oauth": {
 		"callback": {

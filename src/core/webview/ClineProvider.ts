@@ -82,6 +82,7 @@ import WorkspaceTracker from "../../integrations/workspace/WorkspaceTracker"
 
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
+import { promptToInstallExaMcp } from "../../services/mcp/promptToInstallExaMcp"
 import { MarketplaceManager } from "../../services/marketplace"
 import { ShadowCheckpointService } from "../../services/checkpoints/ShadowCheckpointService"
 import { CodeIndexManager } from "../../services/code-index/manager"
@@ -356,9 +357,10 @@ export class ClineProvider
 
 		// Initialize MCP Hub through the singleton manager
 		McpServerManager.getInstance(this.context, this)
-			.then((hub) => {
+			.then(async (hub) => {
 				this.mcpHub = hub
 				this.mcpHub.registerClient()
+				await promptToInstallExaMcp(this.context, hub)
 			})
 			.catch((error) => {
 				this.log(`Failed to initialize MCP Hub: ${error}`)

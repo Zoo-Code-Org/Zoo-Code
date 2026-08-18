@@ -11,7 +11,8 @@
 		"disconnect_servers_partial": "断开 {{count}} 个 MCP 服务器失败。请查看输出了解详情。",
 		"toolNotFound": "工具 '{{toolName}}' 在服务器 '{{serverName}}' 上不存在。可用工具: {{availableTools}}",
 		"serverNotFound": "MCP 服务器 '{{serverName}}' 未配置。可用服务器: {{availableServers}}",
-		"toolDisabled": "服务器 '{{serverName}}' 上的工具 '{{toolName}}' 已禁用。可用的已启用工具: {{availableTools}}"
+		"toolDisabled": "服务器 '{{serverName}}' 上的工具 '{{toolName}}' 已禁用。可用的已启用工具: {{availableTools}}",
+		"exa_install_failed": "无法安装 Exa MCP：{{errorMessage}}"
 	},
 	"info": {
 		"server_restarting": "正在重启{{serverName}}MCP服务器...",
@@ -23,7 +24,10 @@
 		"already_refreshing": "MCP 服务器已在刷新中。",
 		"refreshing_all": "正在刷新所有 MCP 服务器...",
 		"all_refreshed": "所有 MCP 服务器已刷新。",
-		"project_config_deleted": "项目MCP配置文件已删除。所有项目MCP服务器已断开连接。"
+		"project_config_deleted": "项目MCP配置文件已删除。所有项目MCP服务器已断开连接。",
+		"exa_install_prompt": "是否安装免费的 Exa MCP 服务器，让 Zoo 能够搜索和获取网页内容？",
+		"exa_install_action": "安装 Exa MCP",
+		"exa_install_success": "Exa MCP 安装成功。"
 	},
 	"oauth": {
 		"callback": {
