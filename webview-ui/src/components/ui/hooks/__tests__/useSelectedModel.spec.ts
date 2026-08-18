@@ -15,6 +15,8 @@ import {
 	litellmDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
+	nanoGptDefaultModelId,
+	nanoGptDefaultModelInfo,
 	openAiModelInfoSaneDefaults,
 	minimaxDefaultModelId,
 	minimaxModels,
@@ -1035,6 +1037,48 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe(kenariDefaultModelId)
 			// Should use kenariDefaultModelInfo as fallback
 			expect(result.current.info).toEqual(kenariDefaultModelInfo)
+		})
+	})
+
+	describe("nanogpt provider", () => {
+		it("uses dynamic metadata for the configured NanoGPT model", () => {
+			const dynamicInfo: ModelInfo = {
+				maxTokens: 16_384,
+				contextWindow: 256_000,
+				supportsPromptCache: false,
+				description: "Dynamic NanoGPT model",
+			}
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ nanogpt: { "openai/custom": dynamicInfo } }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.nanogpt,
+						nanoGptModelId: "openai/custom",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("openai/custom")
+			expect(result.current.info).toEqual(dynamicInfo)
+		})
+
+		it("uses NanoGPT's shared fallback when its dynamic catalog is empty", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ nanogpt: {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.nanogpt,
+						nanoGptModelId: "missing-model",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(nanoGptDefaultModelId)
+			expect(result.current.info).toEqual(nanoGptDefaultModelInfo)
 		})
 	})
 

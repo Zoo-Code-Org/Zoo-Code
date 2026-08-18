@@ -46,13 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.76.0
+## Yang Baru di v3.78.0
 
-- **Jalankan task yang lebih panjang tanpa gangguan dengan Destructive Command Guard (DCG)** — DCG memblokir perintah berbahaya sambil membiarkan Zoo terus bekerja tanpa kamu harus terus-menerus menekan tombol persetujuan, didukung download dan instalasi managed binary yang diperkuat.
-- **Kontrol provider dan keandalan yang lebih baik** — pilih kecepatan respons OpenAI Codex, gunakan konfigurasi DeepSeek terbaru, dan dapatkan isolasi yang lebih kuat antara perubahan profil provider dan task yang sedang berjalan.
-- **Perbaikan penting untuk eksekusi terminal** — Zoo kini menunggu perintah terminal selesai sebelum memulai langkah berikutnya, sehingga pekerjaan tidak saling tumpang tindih dan model tidak melanjutkan terlalu dini.
-- Batching yang lebih cerdas mengelompokkan persetujuan tool terkait sambil tetap memisahkan permintaan yang tidak berkaitan.
-- Pengiriman telemetri dan pengambilan cache model kini lebih tangguh saat terjadi kegagalan dan permintaan bersamaan.
+- **Tiga model baru utama telah hadir** — gunakan model terbaru Gemini 3.7 Flash, GLM 5.3, dan Qwen3.8 Max, ditambah pembaruan reasoning, harga, dan cakupan provider DeepSeek V4.
+- **Hubungkan ke NanoGPT** — gunakan penemuan model dinamis, streaming dan penyelesaian prompt, serta preferensi routing untuk kecepatan, harga, latensi, throughput, dukungan tool, dan caching.
+- **Provider dan task yang lebih andal** — perbaikan meningkatkan pengaturan endpoint Azure OpenAI, batas output Kimi Code, penyimpanan judul riwayat task, serta impor/ekspor pengaturan Zoo.
+- Destructive Command Guard kini mendukung Mac berbasis Intel.
+- Pembaruan keamanan mengatasi kerentanan di `undici` dan Mermaid.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

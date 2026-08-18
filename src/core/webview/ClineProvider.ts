@@ -6,6 +6,7 @@ import EventEmitter from "events"
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
 import axios from "axios"
+import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
@@ -161,6 +162,10 @@ function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): voi
 		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 }
 
+type GetStateOptions = {
+	includeTaskHistory?: boolean
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -189,6 +194,21 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private readonly _postStateToWebviewThrottled = debounce(
+		async () => {
+			try {
+				await this.postStateToWebviewWithoutTaskHistory()
+			} catch (error) {
+				this.log(
+					`[ClineProvider#postStateToWebviewThrottled] Failed to post state: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+		},
+		500,
+		{ leading: true, trailing: true, maxWait: 1000 },
+	)
 	private readonly rateLimitClock: RateLimitClock = createRateLimitClock()
 
 	private recentTasksCache?: string[]
@@ -198,6 +218,7 @@ export class ClineProvider
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
+	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		this.delegationTransitionLocks ??= new Map()
@@ -272,7 +293,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.76.0-dcg-providers-terminal" // v3.76.0 destructive command guard, provider improvements, and terminal execution fix
+	public readonly latestAnnouncementId = "aug-2026-v3.78.0-models-nanogpt-reliability" // v3.78.0 new models, NanoGPT, and provider/task reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -746,6 +767,7 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -1113,10 +1135,31 @@ export class ClineProvider
 		await this.handleZooCodeCallback(token)
 	}
 
-	public async createTaskWithHistoryItem(
+	public createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
-	) {
+	): Promise<Task> {
+		// History navigation can arrive concurrently (for example, two rapid
+		// showTaskWithId messages). Serialize the full eviction/installation
+		// transition so both callers cannot observe the same previous registry
+		// state and schedule distinct Task instances for one history item.
+		// Fail forward so one rejected restoration does not poison the queue.
+		const previous = this.historyTaskCreationQueue ?? Promise.resolve()
+		const run = previous.then(
+			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
+			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
+		)
+		this.historyTaskCreationQueue = run.then(
+			() => {},
+			() => {},
+		)
+		return run
+	}
+
+	private async createTaskWithHistoryItemUnlocked(
+		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
+		options?: { startTask?: boolean },
+	): Promise<Task> {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
 		// Restoring provider profiles from task history can overwrite those
@@ -2286,11 +2329,33 @@ export class ClineProvider
 	 *   `taskHistoryUpdated` / `taskHistoryItemUpdated`.
 	 */
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
-		const state = await this.getStateToPostToWebview()
+		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
 		this.clineMessagesSeq++
 		state.clineMessagesSeq = this.clineMessagesSeq
 		const { taskHistory: _omit, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
+	}
+
+	/**
+	 * Schedules a debounced state-post attempt. A call made while the debounce timer is active returns
+	 * the result of the most recent invocation, so awaiting this method does not wait for the trailing
+	 * invocation scheduled by that call. Use `flushPostStateToWebviewThrottled()` to force and await any
+	 * pending trailing invocation before continuing.
+	 */
+	async postStateToWebviewThrottled(): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		await this._postStateToWebviewThrottled()
+	}
+
+	async flushPostStateToWebviewThrottled(): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		await this._postStateToWebviewThrottled.flush()
 	}
 
 	/**
@@ -2305,7 +2370,7 @@ export class ClineProvider
 	 *   (cloud auth, org settings, profiles, etc.) without interfering with task message streaming.
 	 */
 	async postStateToWebviewWithoutClineMessages(): Promise<void> {
-		const state = await this.getStateToPostToWebview()
+		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
 		const { clineMessages: _omitMessages, taskHistory: _omitHistory, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
 	}
@@ -2411,7 +2476,7 @@ export class ClineProvider
 		}
 	}
 
-	async getStateToPostToWebview(): Promise<ExtensionState> {
+	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
 
@@ -2440,7 +2505,6 @@ export class ClineProvider
 			ttsSpeed,
 			enableCheckpoints,
 			checkpointTimeout,
-			taskHistory,
 			soundVolume,
 			writeDelayMs,
 			diffFuzzyThreshold,
@@ -2503,7 +2567,7 @@ export class ClineProvider
 			autoCloseZooOpenedFiles,
 			autoCloseZooOpenedFilesAfterUserEdited,
 			autoCloseZooOpenedNewFiles,
-		} = await this.getState()
+		} = await this.getState({ includeTaskHistory: false })
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
 
@@ -2589,7 +2653,9 @@ export class ClineProvider
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
-			taskHistory: this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task),
+			taskHistory: includeTaskHistory
+				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)
+				: [],
 			soundEnabled: soundEnabled ?? false,
 			ttsEnabled: ttsEnabled ?? false,
 			ttsSpeed: ttsSpeed ?? 1.0,
@@ -2724,7 +2790,7 @@ export class ClineProvider
 	 * https://www.eliostruyf.com/devhack-code-extension-storage-options/
 	 */
 
-	async getState(): Promise<
+	async getState({ includeTaskHistory = true }: GetStateOptions = {}): Promise<
 		Omit<
 			ExtensionState,
 			"clineMessages" | "renderContext" | "hasOpenedModeSelector" | "version" | "shouldShowAnnouncement"
@@ -2820,7 +2886,7 @@ export class ClineProvider
 			allowedMaxCost: stateValues.allowedMaxCost,
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
-			taskHistory: this.taskHistoryStore.getAll(),
+			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
 			allowedCommands: stateValues.allowedCommands,
 			deniedCommands: stateValues.deniedCommands,
 			soundEnabled: stateValues.soundEnabled ?? false,

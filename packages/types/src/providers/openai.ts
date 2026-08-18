@@ -1,6 +1,16 @@
+import { z } from "zod"
+
 import type { ModelInfo } from "../model.js"
 
 // https://openai.com/api/pricing/
+export const openAiModelsMessageTypes = ["requestOpenAiModels", "openAiModels"] as const
+
+export const openAiModelsMessageTypeSchema = z.enum(openAiModelsMessageTypes)
+
+export const OpenAiModelsMessageType = openAiModelsMessageTypeSchema.enum
+
+export type OpenAiModelsMessageType = z.infer<typeof openAiModelsMessageTypeSchema>
+
 export type OpenAiNativeModelId = keyof typeof openAiNativeModels
 
 export const OPENAI_API_PROTOCOL = "openai"

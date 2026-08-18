@@ -1,10 +1,16 @@
-import { anthropicDefaultModelId, mainlandZAiDefaultModelId, providerIdentifiers } from "@roo-code/types"
+import {
+	anthropicDefaultModelId,
+	mainlandZAiDefaultModelId,
+	nanoGptDefaultModelId,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import {
 	PROVIDER_SERVICE_CONFIG,
 	PROVIDER_DEFAULT_MODEL_IDS,
 	getProviderServiceConfig,
 	getProviderModelConfig,
+	getProviderDocsSlug,
 	getDefaultModelIdForProvider,
 	getStaticModelsForProvider,
 	isStaticModelProvider,
@@ -167,6 +173,19 @@ describe("providerModelConfig", () => {
 		it("returns the static field config for a non-zai provider", () => {
 			const config = getProviderModelConfig(providerIdentifiers.anthropic)
 			expect(config).toEqual({ field: "apiModelId", default: anthropicDefaultModelId })
+		})
+
+		it("returns NanoGPT's dynamic model field and fallback", () => {
+			expect(getProviderModelConfig(providerIdentifiers.nanogpt)).toEqual({
+				field: "nanoGptModelId",
+				default: nanoGptDefaultModelId,
+			})
+		})
+	})
+
+	describe("getProviderDocsSlug", () => {
+		it("uses NanoGPT's provider identifier as its external documentation slug", () => {
+			expect(getProviderDocsSlug(providerIdentifiers.nanogpt)).toBe("nanogpt")
 		})
 	})
 

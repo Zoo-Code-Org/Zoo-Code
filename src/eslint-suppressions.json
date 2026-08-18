@@ -784,11 +784,6 @@
 			"count": 1
 		}
 	},
-	"core/task-persistence/__tests__/TaskHistoryStore.reconciliation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4

@@ -58,6 +58,7 @@ describe("Model Validation Functions", () => {
 		deepseek: {},
 		"opencode-go": {},
 		kenari: {},
+		nanogpt: {},
 		"zoo-gateway": {},
 		"kimi-code": {},
 		moonshot: {},
@@ -292,6 +293,36 @@ describe("Model Validation Functions", () => {
 
 			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
+		})
+	})
+
+	describe("NanoGPT validation", () => {
+		it("returns an apiKey error when the NanoGPT API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptModelId: "openai/model",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("returns a modelId error when the NanoGPT model is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "valid-key",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.modelId")
+		})
+
+		it("accepts a NanoGPT API key and selected model", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "valid-key",
+				nanoGptModelId: "openai/model",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
 		})
 	})
 

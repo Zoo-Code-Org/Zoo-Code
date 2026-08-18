@@ -6,6 +6,10 @@ export {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	kimiCodeAuthMethodSchema,
 	type KimiCodeAuthMethod,
+	nanoGptDefaultRoutingPreference,
+	nanoGptRoutingPreferences,
+	nanoGptRoutingPreferenceSchema,
+	type NanoGptRoutingPreference,
 	zaiApiLineSchema,
 	type ZaiApiLine,
 } from "./provider-settings/index.js"
@@ -67,6 +71,7 @@ export const dynamicProviders = [
 	providerIdentifiers.moonshot,
 	providerIdentifiers.opencodeGo,
 	providerIdentifiers.kenari,
+	providerIdentifiers.nanogpt,
 	providerIdentifiers.kimiCode,
 ] as const
 
@@ -280,6 +285,7 @@ export const modelIdKeys = [
 	"vercelAiGatewayModelId",
 	"opencodeGoModelId",
 	"kenariModelId",
+	"nanoGptModelId",
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
@@ -508,6 +514,7 @@ export const MODELS_BY_PROVIDER: Record<
 	},
 	[providerIdentifiers.opencodeGo]: { id: providerIdentifiers.opencodeGo, label: "Opencode Go", models: [] },
 	[providerIdentifiers.kenari]: { id: providerIdentifiers.kenari, label: "Kenari", models: [] },
+	[providerIdentifiers.nanogpt]: { id: providerIdentifiers.nanogpt, label: "NanoGPT", models: [] },
 	[providerIdentifiers.zooGateway]: { id: providerIdentifiers.zooGateway, label: "Zoo Gateway", models: [] },
 
 	// Local providers; models discovered from localhost endpoints.

@@ -118,7 +118,14 @@ describe("FireworksHandler", () => {
 			contextWindow: 1048576,
 			inputPrice: 1.74,
 			outputPrice: 3.48,
-			cacheReadsPrice: 0.14,
+			cacheReadsPrice: 0.145,
+		},
+		{
+			modelId: "accounts/fireworks/models/deepseek-v4-pro-0813" as const,
+			contextWindow: 1_000_000,
+			inputPrice: 1.32,
+			outputPrice: 3.96,
+			cacheReadsPrice: 0.044,
 		},
 	])(
 		"should expose newly added model $modelId",

@@ -4,6 +4,7 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	zooGatewayDefaultModelId,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
@@ -63,7 +64,7 @@ export const ZooGateway = ({
 	const authUrl = getZooCodeAuthUrl(uriScheme, zooCodeBaseUrl, deviceName)
 	const resolvedDashboardBase = zooCodeBaseUrl?.replace(/\/$/, "") || "https://www.zoocode.dev"
 
-	const zooModels = useMemo(() => routerModels?.["zoo-gateway"] ?? {}, [routerModels])
+	const zooModels = useMemo(() => routerModels?.[providerIdentifiers.zooGateway] ?? {}, [routerModels])
 	const modelIds = useMemo(() => Object.keys(zooModels), [zooModels])
 	const resolvedDefaultModelId = useMemo(() => pickZooGatewayDefaultModelId(modelIds), [modelIds])
 

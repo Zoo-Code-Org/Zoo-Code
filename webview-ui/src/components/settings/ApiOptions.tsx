@@ -10,6 +10,10 @@ import {
 	isRetiredProvider,
 	providerIdentifiers,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+	OllamaModelsMessageType,
+	OpenAiModelsMessageType,
+	RouterModelsMessageType,
+	VsCodeLmModelsMessageType,
 } from "@roo-code/types"
 
 import {
@@ -77,6 +81,7 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
+	NanoGPT,
 	ZooGateway,
 	MiniMax,
 	Mimo,
@@ -213,7 +218,7 @@ const ApiOptions = ({
 				const headerObject = convertHeadersToObject(customHeaders)
 
 				vscode.postMessage({
-					type: "requestOpenAiModels",
+					type: OpenAiModelsMessageType.requestOpenAiModels,
 					values: {
 						baseUrl: apiConfiguration?.openAiBaseUrl,
 						apiKey: apiConfiguration?.openAiApiKey,
@@ -223,7 +228,7 @@ const ApiOptions = ({
 				})
 			} else if (selectedProvider === providerIdentifiers.ollama) {
 				vscode.postMessage({
-					type: "requestOllamaModels",
+					type: OllamaModelsMessageType.requestOllamaModels,
 					values: {
 						baseUrl: apiConfiguration?.ollamaBaseUrl,
 						apiKey: apiConfiguration?.ollamaApiKey,
@@ -232,17 +237,17 @@ const ApiOptions = ({
 			} else if (selectedProvider === providerIdentifiers.lmstudio) {
 				requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl)
 			} else if (selectedProvider === providerIdentifiers.vscodeLm) {
-				vscode.postMessage({ type: "requestVsCodeLmModels" })
+				vscode.postMessage({ type: VsCodeLmModelsMessageType.requestVsCodeLmModels })
 			} else if (selectedProvider === providerIdentifiers.litellm) {
 				vscode.postMessage({
-					type: "requestRouterModels",
+					type: RouterModelsMessageType.requestRouterModels,
 					values: {
 						litellmApiKey: apiConfiguration?.litellmApiKey,
 						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
 					},
 				})
 			} else if (selectedProvider === providerIdentifiers.poe) {
-				vscode.postMessage({ type: "requestRouterModels" })
+				vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
 			}
 		},
 		250,
@@ -668,6 +673,17 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.kenari && (
 						<Kenari
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.nanogpt && (
+						<NanoGPT
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

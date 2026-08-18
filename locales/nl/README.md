@@ -47,13 +47,13 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.76.0
+## Nieuw in v3.78.0
 
-- **Voer langere, ononderbroken taken uit met Destructive Command Guard (DCG)** — DCG blokkeert gevaarlijke opdrachten en laat Zoo ondertussen doorwerken zonder dat je steeds op goedkeuringsknoppen hoeft te drukken, ondersteund door beter beveiligde downloads en installatie van de beheerde binary.
-- **Betere providerbediening en betrouwbaarheid** — kies de reactiesnelheid van OpenAI Codex, gebruik bijgewerkte DeepSeek-configuraties en profiteer van sterkere isolatie tussen wijzigingen aan providerprofielen en actieve taken.
-- **Kritieke oplossing voor terminaluitvoering** — Zoo wacht nu tot terminalopdrachten zijn afgerond voordat de volgende stap begint, zodat werk niet overlapt en het model niet te vroeg doorgaat.
-- Slimmere batching groepeert goedkeuringen voor gerelateerde tools en houdt niet-gerelateerde verzoeken gescheiden.
-- Telemetrieverzending en het ophalen van de modelcache zijn beter bestand tegen fouten en gelijktijdige verzoeken.
+- **Drie belangrijke nieuwe modellen zijn gearriveerd** — gebruik de gloednieuwe Gemini 3.7 Flash-, GLM 5.3- en Qwen3.8 Max-modellen, plus bijgewerkte reasoning, prijzen en providerondersteuning voor DeepSeek V4.
+- **Maak verbinding met NanoGPT** — gebruik dynamische modeldetectie, streaming en promptaanvulling, plus routeringsvoorkeuren voor snelheid, prijs, latentie, doorvoer, toolondersteuning en caching.
+- **Betrouwbaardere providers en taken** — oplossingen verbeteren de instelling van Azure OpenAI-endpoints, Kimi Code-uitvoerlimieten, het behouden van titels in de taakgeschiedenis en het importeren/exporteren van Zoo-instellingen.
+- Destructive Command Guard ondersteunt nu Intel-gebaseerde Macs.
+- Beveiligingsupdates verhelpen kwetsbaarheden in `undici` en Mermaid.
 
 ## Wat kan Zoo Code voor JOU doen?
 

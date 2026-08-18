@@ -23,6 +23,11 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	LmStudioModelsMessageType,
+	OllamaModelsMessageType,
+	OpenAiModelsMessageType,
+	RouterModelsMessageType,
+	VsCodeLmModelsMessageType,
 } from "@roo-code/types"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
@@ -1044,13 +1049,13 @@ export const webviewMessageHandler = async (
 		case "resetState":
 			await provider.resetState()
 			break
-		case "flushRouterModels":
+		case RouterModelsMessageType.flushRouterModels:
 			const routerNameFlush: RouterName = toRouterName(message.text)
 			// Note: flushRouterModels is a generic flush without credentials
 			// For providers that need credentials, use their specific handlers
 			await flushModels({ provider: routerNameFlush } as GetModelsOptions, true)
 			break
-		case "requestRouterModels": {
+		case RouterModelsMessageType.requestRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 
 			// Optional single provider filter from webview
@@ -1076,6 +1081,7 @@ export const webviewMessageHandler = async (
 						moonshot: {},
 						"opencode-go": {},
 						kenari: {},
+						nanogpt: {},
 						"kimi-code": {},
 					}
 
@@ -1219,6 +1225,19 @@ export const webviewMessageHandler = async (
 				options: { provider: "kenari", apiKey: kenariApiKey },
 			})
 
+			// NanoGPT's detailed catalog is public, while an optional key can expose a
+			// different allowlist. Prefer an explicitly supplied unsaved key and use the
+			// same key-scoped options for refresh and retrieval.
+			const nanoGptApiKey = message?.values?.nanoGptApiKey ?? apiConfiguration.nanoGptApiKey
+			if (message?.values?.nanoGptApiKey !== undefined) {
+				await flushModels({ provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey }, true)
+			}
+
+			candidates.push({
+				key: providerIdentifiers.nanogpt,
+				options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
+			})
+
 			if (!providerFilter || providerFilter === "kimi-code") {
 				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
 				const kimiCodeAuthMethod =
@@ -1268,7 +1287,7 @@ export const webviewMessageHandler = async (
 					routerModels[routerName] = {} // Ensure it's an empty object in the main routerModels message.
 
 					void provider.postMessageToWebview({
-						type: "singleRouterModelFetchResponse",
+						type: RouterModelsMessageType.singleRouterModelFetchResponse,
 						success: false,
 						error: errorMessage,
 						values: { provider: routerName },
@@ -1277,13 +1296,13 @@ export const webviewMessageHandler = async (
 			})
 
 			await provider.postMessageToWebview({
-				type: "routerModels",
+				type: RouterModelsMessageType.routerModels,
 				routerModels,
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
 			break
 		}
-		case "requestOllamaModels": {
+		case OllamaModelsMessageType.requestOllamaModels: {
 			// Specific handler for Ollama models only.
 			const { apiConfiguration: ollamaApiConfig } = await provider.getState()
 			// Prefer the baseUrl/apiKey from the message values (which reflect
@@ -1307,7 +1326,7 @@ export const webviewMessageHandler = async (
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to refresh model cache for ${logBaseUrl}: ${errorMsg}`)
 				await provider.postMessageToWebview({
-					type: "ollamaModels",
+					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
 					error: errorMsg,
 				})
@@ -1319,19 +1338,19 @@ export const webviewMessageHandler = async (
 
 				// Always post a response so the webview refresh status can
 				// transition out of "loading" — even when no models are found.
-				await provider.postMessageToWebview({ type: "ollamaModels", ollamaModels })
+				await provider.postMessageToWebview({ type: OllamaModelsMessageType.ollamaModels, ollamaModels })
 			} catch (error) {
 				const errorMsg = error instanceof Error ? error.message : String(error)
 				provider.log(`[requestOllamaModels] Failed to read models for ${logBaseUrl}: ${errorMsg}`)
 				await provider.postMessageToWebview({
-					type: "ollamaModels",
+					type: OllamaModelsMessageType.ollamaModels,
 					ollamaModels: {},
 					error: errorMsg,
 				})
 			}
 			break
 		}
-		case "requestLmStudioModels": {
+		case LmStudioModelsMessageType.requestLmStudioModels: {
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
 			try {
@@ -1352,7 +1371,7 @@ export const webviewMessageHandler = async (
 
 				if (Object.keys(lmStudioModels).length > 0) {
 					await provider.postMessageToWebview({
-						type: "lmStudioModels",
+						type: LmStudioModelsMessageType.lmStudioModels,
 						lmStudioModels: lmStudioModels,
 					})
 				}
@@ -1364,14 +1383,14 @@ export const webviewMessageHandler = async (
 		}
 		case "requestRooModels": {
 			await provider.postMessageToWebview({
-				type: "singleRouterModelFetchResponse",
+				type: RouterModelsMessageType.singleRouterModelFetchResponse,
 				success: false,
 				error: getRouterRemovalMessage(),
 				values: { provider: "roo" },
 			})
 			break
 		}
-		case "requestOpenAiModels":
+		case OpenAiModelsMessageType.requestOpenAiModels:
 			if (message?.values?.baseUrl && message?.values?.apiKey) {
 				const openAiModels = await getOpenAiModels(
 					message?.values?.baseUrl,
@@ -1379,14 +1398,14 @@ export const webviewMessageHandler = async (
 					message?.values?.openAiHeaders,
 				)
 
-				await provider.postMessageToWebview({ type: "openAiModels", openAiModels })
+				await provider.postMessageToWebview({ type: OpenAiModelsMessageType.openAiModels, openAiModels })
 			}
 
 			break
-		case "requestVsCodeLmModels":
+		case VsCodeLmModelsMessageType.requestVsCodeLmModels:
 			const vsCodeLmModels = await getVsCodeLmModels()
 			// TODO: Cache like we do for OpenRouter, etc?
-			await provider.postMessageToWebview({ type: "vsCodeLmModels", vsCodeLmModels })
+			await provider.postMessageToWebview({ type: VsCodeLmModelsMessageType.vsCodeLmModels, vsCodeLmModels })
 			break
 		case "openImage":
 			await openImage(message.text!, { values: message.values })
