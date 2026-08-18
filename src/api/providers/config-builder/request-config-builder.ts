@@ -20,7 +20,6 @@ type RequestConfigOptions = RequestConfigOptionsBase & Record<string, unknown>
 
 export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = RequestConfigOptions> {
 	protected options: Partial<TOptions>
-	private cleanupFn: () => void = () => {}
 
 	constructor(defaultOptions?: Partial<TOptions>) {
 		this.options = defaultOptions
@@ -67,7 +66,9 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 	 * Merge an internal controller signal with an external metadata signal and optional timeout.
 	 *
 	 * Use this for providers that already maintain their own AbortController but also need
-	 * to honor the request-level abort signal from metadata and/or a timeout.
+	 * to honor the request-level abort signal from metadata and/or a timeout. The timeout is
+	 * created via the native AbortSignal.timeout() API, which self-manages its timer — no
+	 * manual cleanup is required.
 	 *
 	 * @param internalController - Provider-owned AbortController for the current request
 	 * @param metadata - Optional metadata containing an external abortSignal
@@ -80,24 +81,10 @@ export class RequestConfigBuilder<TOptions extends RequestConfigOptionsBase = Re
 		timeoutMs?: number,
 	): this {
 		const merged = mergeAbortSignalAndTimeout(metadata?.abortSignal, timeoutMs)
-		const signal = mergeAbortSignals(internalController.signal, merged.signal)
+		const signal = mergeAbortSignals(internalController.signal, merged)
 
 		this.options = { ...this.options, signal }
-		const previousCleanup = this.cleanupFn
-		this.cleanupFn = () => {
-			previousCleanup()
-			merged.cleanup()
-		}
 		return this
-	}
-
-	/**
-	 * Get the cleanup function for resources created by addMergedSignal.
-	 *
-	 * @returns Cleanup function, or a no-op when no merged signal was added
-	 */
-	getCleanup(): () => void {
-		return this.cleanupFn
 	}
 
 	/**

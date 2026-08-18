@@ -1,36 +1,24 @@
-export type MergedAbortSignal = {
-	signal?: AbortSignal
-	cleanup: () => void
-}
-
-const noop = () => {}
-
 /**
  * Merge an optional external abort signal with an optional timeout.
  *
- * Timeout values <= 0 are treated as disabled. Call cleanup() from a finally
- * block to clear any pending timeout created by this helper.
+ * Timeout values <= 0 are treated as disabled. The timeout is created via the
+ * native AbortSignal.timeout() API, which self-manages its timer — callers do
+ * not need to (and cannot) clear it manually.
  */
-export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): MergedAbortSignal {
+export function mergeAbortSignalAndTimeout(externalSignal?: AbortSignal, timeoutMs?: number): AbortSignal | undefined {
 	const hasTimeout = typeof timeoutMs === "number" && timeoutMs > 0
 
-	if (!externalSignal && !hasTimeout) {
-		return { cleanup: noop }
+	if (!hasTimeout) {
+		return externalSignal
 	}
 
-	if (externalSignal && !hasTimeout) {
-		return { signal: externalSignal, cleanup: noop }
-	}
-
-	const timeoutController = new AbortController()
-	const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs)
-	const cleanup = () => clearTimeout(timeoutId)
+	const timeoutSignal = AbortSignal.timeout(timeoutMs)
 
 	if (!externalSignal) {
-		return { signal: timeoutController.signal, cleanup }
+		return timeoutSignal
 	}
 
-	return { signal: mergeAbortSignals(externalSignal, timeoutController.signal), cleanup }
+	return mergeAbortSignals(externalSignal, timeoutSignal)
 }
 
 /**

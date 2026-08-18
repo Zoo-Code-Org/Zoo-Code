@@ -1,4 +1,4 @@
-import { describe, expect, test, vi } from "vitest"
+import { describe, expect, test } from "vitest"
 
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import { RequestConfigBuilder } from "../config-builder/request-config-builder"
@@ -23,13 +23,6 @@ describe("RequestConfigBuilder", () => {
 			defaults.modelId = "modified-model"
 			const result = builder.build()
 			expect(result?.modelId).toBe("test-model")
-		})
-
-		test("should initialize cleanup as a no-op", () => {
-			const builder = new RequestConfigBuilder()
-
-			expect(builder.getCleanup()).toBeTypeOf("function")
-			expect(() => builder.getCleanup()()).not.toThrow()
 		})
 
 		test("should ignore undefined values from defaultOptions", () => {
@@ -349,10 +342,8 @@ describe("RequestConfigBuilder", () => {
 			const result = builder.addMergedSignal(internalController)
 
 			expect(result).toBe(builder)
-			const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
+			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal).toBe(internalController.signal)
-			expect(config).not.toHaveProperty("_cleanup")
-			expect(builder.getCleanup()).toBeTypeOf("function")
 		})
 
 		test("should merge internal controller signal with metadata abort signal", () => {
@@ -390,45 +381,18 @@ describe("RequestConfigBuilder", () => {
 			expect(config.signal?.aborted).toBe(true)
 		})
 
-		test("should clear timeout when cleanup runs before timeout fires", async () => {
-			vi.useFakeTimers()
-			try {
-				const internalController = new AbortController()
-				const builder = new RequestConfigBuilder()
+		test("should abort merged signal after timeout elapses without manual cleanup", async () => {
+			const internalController = new AbortController()
+			const builder = new RequestConfigBuilder()
 
-				builder.addMergedSignal(internalController, undefined, 100)
+			builder.addMergedSignal(internalController, undefined, 50)
 
-				const config = builder.build() as { signal?: AbortSignal; _cleanup?: () => void }
-				expect(config.signal).not.toBe(internalController.signal)
-				expect(config).not.toHaveProperty("_cleanup")
-				expect(config.signal?.aborted).toBe(false)
-				expect(vi.getTimerCount()).toBe(1)
+			const config = builder.build() as { signal?: AbortSignal }
+			expect(config.signal).not.toBe(internalController.signal)
+			expect(config.signal?.aborted).toBe(false)
 
-				builder.getCleanup()()
-
-				expect(vi.getTimerCount()).toBe(0)
-				await vi.advanceTimersByTimeAsync(100)
-				expect(config.signal?.aborted).toBe(false)
-			} finally {
-				vi.useRealTimers()
-			}
-		})
-
-		test("should cleanup timeouts from repeated addMergedSignal calls", () => {
-			vi.useFakeTimers()
-			try {
-				const internalController = new AbortController()
-				const builder = new RequestConfigBuilder()
-
-				builder.addMergedSignal(internalController, undefined, 100)
-				builder.addMergedSignal(internalController, undefined, 200)
-
-				expect(vi.getTimerCount()).toBe(2)
-				builder.getCleanup()()
-				expect(vi.getTimerCount()).toBe(0)
-			} finally {
-				vi.useRealTimers()
-			}
+			await new Promise((resolve) => setTimeout(resolve, 120))
+			expect(config.signal?.aborted).toBe(true)
 		})
 
 		test("should immediately abort when metadata signal is already aborted", () => {
@@ -444,7 +408,6 @@ describe("RequestConfigBuilder", () => {
 
 			const config = builder.build() as { signal?: AbortSignal }
 			expect(config.signal?.aborted).toBe(true)
-			expect(() => builder.getCleanup()()).not.toThrow()
 		})
 	})
 

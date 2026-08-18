@@ -2,81 +2,55 @@ import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../abort-signal"
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {
-		afterEach(() => {
-			vi.useRealTimers()
-		})
-
-		it("returns no signal and noop cleanup when no signal or positive timeout is provided", () => {
-			const result = mergeAbortSignalAndTimeout(undefined, 0)
-
-			expect(result.signal).toBeUndefined()
-			expect(() => result.cleanup()).not.toThrow()
+		it("returns undefined when no signal or positive timeout is provided", () => {
+			expect(mergeAbortSignalAndTimeout(undefined, 0)).toBeUndefined()
+			expect(mergeAbortSignalAndTimeout(undefined, -1)).toBeUndefined()
+			expect(mergeAbortSignalAndTimeout()).toBeUndefined()
 		})
 
 		it("forwards external signal directly when timeout is disabled", () => {
 			const controller = new AbortController()
 
-			const result = mergeAbortSignalAndTimeout(controller.signal, -1)
-
-			expect(result.signal).toBe(controller.signal)
-			expect(() => result.cleanup()).not.toThrow()
+			expect(mergeAbortSignalAndTimeout(controller.signal, -1)).toBe(controller.signal)
+			expect(mergeAbortSignalAndTimeout(controller.signal)).toBe(controller.signal)
 		})
 
-		it("creates a timeout signal when only positive timeout is provided", async () => {
-			vi.useFakeTimers()
+		it("creates a self-managed timeout signal when only positive timeout is provided", async () => {
+			const result = mergeAbortSignalAndTimeout(undefined, 50)
 
-			const result = mergeAbortSignalAndTimeout(undefined, 100)
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
 
-			expect(result.signal).toBeInstanceOf(AbortSignal)
-			expect(result.signal?.aborted).toBe(false)
+			await new Promise((resolve) => setTimeout(resolve, 120))
 
-			await vi.advanceTimersByTimeAsync(100)
-
-			expect(result.signal?.aborted).toBe(true)
+			expect(result?.aborted).toBe(true)
 		})
 
-		it("merges external signal and timeout signal", async () => {
-			vi.useFakeTimers()
+		it("merges external signal and timeout signal", () => {
 			const controller = new AbortController()
 
 			const result = mergeAbortSignalAndTimeout(controller.signal, 100)
 
-			expect(result.signal).toBeInstanceOf(AbortSignal)
-			expect(result.signal).not.toBe(controller.signal)
-			expect(result.signal?.aborted).toBe(false)
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result).not.toBe(controller.signal)
+			expect(result?.aborted).toBe(false)
 
 			controller.abort()
 
-			expect(result.signal?.aborted).toBe(true)
-
-			await vi.advanceTimersByTimeAsync(100)
-			expect(result.signal?.aborted).toBe(true)
-		})
-
-		it("clears timeout during cleanup", async () => {
-			vi.useFakeTimers()
-
-			const result = mergeAbortSignalAndTimeout(undefined, 100)
-			result.cleanup()
-
-			await vi.advanceTimersByTimeAsync(100)
-
-			expect(result.signal?.aborted).toBe(false)
-			expect(vi.getTimerCount()).toBe(0)
+			expect(result?.aborted).toBe(true)
 		})
 
 		it("aborts via timeout alone when the external signal stays active", async () => {
-			vi.useFakeTimers()
 			const controller = new AbortController()
 
-			const result = mergeAbortSignalAndTimeout(controller.signal, 100)
+			const result = mergeAbortSignalAndTimeout(controller.signal, 50)
 
-			expect(result.signal).not.toBe(controller.signal)
-			expect(result.signal?.aborted).toBe(false)
+			expect(result).not.toBe(controller.signal)
+			expect(result?.aborted).toBe(false)
 
-			await vi.advanceTimersByTimeAsync(100)
+			await new Promise((resolve) => setTimeout(resolve, 120))
 
-			expect(result.signal?.aborted).toBe(true)
+			expect(result?.aborted).toBe(true)
 		})
 	})
 
