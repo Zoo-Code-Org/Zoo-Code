@@ -3,6 +3,8 @@ import * as vscode from "vscode"
 import { existsSync } from "fs"
 import { userInfo } from "os"
 import { getShell } from "../shell"
+import { BaseTerminal } from "../../integrations/terminal/BaseTerminal"
+import { Terminal } from "../../integrations/terminal/Terminal"
 
 vi.mock("vscode", () => ({
 	workspace: {
@@ -77,12 +79,17 @@ describe("Shell Detection Tests", () => {
 		vi.mocked(userInfo).mockReturnValue({ shell: null } as any)
 		// Default: PowerShell 7 is not installed, so the probe falls back to legacy.
 		vi.mocked(existsSync).mockReturnValue(false)
+		// Clear Zoo profile override and execa shell path between tests.
+		Terminal.setTerminalProfile(undefined)
+		BaseTerminal.setExecaShellPath(undefined)
 	})
 
 	afterEach(() => {
 		Object.defineProperty(process, "platform", { value: originalPlatform })
 		process.env = originalEnv
 		vscode.workspace.getConfiguration = originalGetConfig
+		Terminal.setTerminalProfile(undefined)
+		BaseTerminal.setExecaShellPath(undefined)
 		vi.clearAllMocks()
 	})
 
@@ -512,6 +519,79 @@ describe("Shell Detection Tests", () => {
 			mockVsCodeConfig("linux", null, {})
 			vi.mocked(userInfo).mockReturnValue({ shell: "" } as any)
 			delete process.env.SHELL
+			expect(getShell()).toBe("/bin/bash")
+		})
+	})
+
+	// --------------------------------------------------------------------------
+	// Zoo profile override (Terminal.getProfileShell) takes precedence
+	// --------------------------------------------------------------------------
+	describe("Zoo profile override", () => {
+		it("uses Zoo profile shell over VS Code default profile", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			// VS Code default profile is PowerShell
+			vi.mocked(existsSync).mockReturnValue(true)
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			})
+			// Zoo profile override points to Git Bash
+			Terminal.setTerminalProfile("Git Bash")
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue({
+				shellPath: "C:\\Program Files\\Git\\bin\\bash.exe",
+			})
+			expect(getShell()).toBe("C:\\Program Files\\Git\\bin\\bash.exe")
+		})
+
+		it("falls through to VS Code default when Zoo profile has no resolvable shell", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation((p) => String(p) === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			})
+			Terminal.setTerminalProfile("Unresolvable")
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			expect(getShell()).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+		})
+	})
+
+	// --------------------------------------------------------------------------
+	// Explicit execa shell path takes highest precedence
+	// --------------------------------------------------------------------------
+	describe("Execa shell path override", () => {
+		it("uses explicit execa shell path over VS Code config", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockReturnValue(true)
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			})
+			BaseTerminal.setExecaShellPath("C:\\Program Files\\Git\\bin\\bash.exe")
+			expect(getShell()).toBe("C:\\Program Files\\Git\\bin\\bash.exe")
+		})
+
+		it("uses explicit execa shell path over Zoo profile override", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			mockVsCodeConfig("linux", null, {})
+			Terminal.setTerminalProfile("fish")
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue({
+				shellPath: "/usr/bin/fish",
+			})
+			BaseTerminal.setExecaShellPath("/bin/zsh")
+			expect(getShell()).toBe("/bin/zsh")
+		})
+
+		it("falls through to VS Code config when execa shell path is not set", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			vi.mocked(existsSync).mockImplementation((p) => String(p) === "/usr/bin/fish")
+			mockVsCodeConfig("linux", "fish", {
+				fish: { path: "/usr/bin/fish" },
+			})
+			expect(getShell()).toBe("/usr/bin/fish")
+		})
+
+		it("rejects non-allowlisted execa shell path and uses fallback", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			mockVsCodeConfig("linux", null, {})
+			BaseTerminal.setExecaShellPath("/opt/evil/shell")
 			expect(getShell()).toBe("/bin/bash")
 		})
 	})

@@ -3,6 +3,7 @@ import { existsSync } from "fs"
 import { userInfo } from "os"
 import * as path from "path"
 
+import { BaseTerminal } from "../integrations/terminal/BaseTerminal"
 import { Terminal } from "../integrations/terminal/Terminal"
 
 // Security: Allowlist of approved shell executables to prevent arbitrary command execution
@@ -119,20 +120,27 @@ const SHELL_PATHS = {
 // 1) VS Code Terminal Configuration Helper
 // -----------------------------------------------------
 
-/**
- * Attempts to retrieve the configured default shell path from VS Code's terminal
- * profile settings, using the same trusted-scope reads as Terminal (inspect()
- * globalValue/defaultValue only — workspace scope excluded per APPLICATION scope
- * restriction on terminal.integrated.defaultProfile.*).
- *
- * Returns null when no profile is configured or the profile has no resolvable path.
- */
 function preferredWindowsPowerShell(): string {
 	return existsSync(SHELL_PATHS.POWERSHELL_7) ? SHELL_PATHS.POWERSHELL_7 : SHELL_PATHS.POWERSHELL_LEGACY
 }
 
+/**
+ * Resolves the shell that VS Code's integrated terminal will use, matching the
+ * priority order from Terminal constructor: Zoo profile override first, then
+ * VS Code's configured default profile (trusted scopes only — workspace scope
+ * excluded per APPLICATION scope restriction).
+ *
+ * Returns null when no profile is configured or the profile has no resolvable path.
+ */
 function getShellFromVSCode(): string | null {
 	try {
+		// Zoo profile override takes precedence — this is the same path
+		// Terminal constructor uses to set shellPath on createTerminal().
+		const profileShell = Terminal.getProfileShell()
+		if (profileShell?.shellPath) {
+			return profileShell.shellPath
+		}
+
 		const profileName = Terminal.getConfiguredDefaultProfileName()
 
 		if (!profileName) {
@@ -262,25 +270,31 @@ function getSafeFallbackShell(): string {
 export function getShell(): string {
 	let shell: string | null = null
 
-	// 1. Check VS Code config first (trusted scopes only — workspace excluded).
-	shell = getShellFromVSCode()
+	// 1. Explicit execa shell path — when set, execa uses this exact executable
+	//    regardless of VS Code profile settings.
+	shell = BaseTerminal.getExecaShellPath() ?? null
 
-	// 2. If no shell from VS Code, try userInfo()
+	// 2. VS Code profile config (Zoo override first, then default profile).
+	if (!shell) {
+		shell = getShellFromVSCode()
+	}
+
+	// 3. If no shell from VS Code, try userInfo()
 	if (!shell) {
 		shell = getShellFromUserInfo()
 	}
 
-	// 3. If still nothing, try environment variable
+	// 4. If still nothing, try environment variable
 	if (!shell) {
 		shell = getShellFromEnv()
 	}
 
-	// 4. Finally, fall back to a default
+	// 5. Finally, fall back to a default
 	if (!shell) {
 		shell = getSafeFallbackShell()
 	}
 
-	// 5. Validate the shell against allowlist
+	// 6. Validate the shell against allowlist
 	if (!isShellAllowed(shell)) {
 		shell = getSafeFallbackShell()
 	}
