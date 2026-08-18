@@ -235,31 +235,72 @@ describe("UsageEventStore", () => {
 			expect(events[1].eventId).toBe("evt-2")
 		})
 
-		it("should skip corrupt lines and continue reading", async () => {
+		it("should quarantine corrupt last line if it ends with newline", async () => {
 			const event = makeEvent()
 			await store.append(event)
 
-			// Manually add a corrupt line
+			// Add a corrupt line that ends with \n (fully written, not a crash tail)
 			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
 			await fs.appendFile(segmentPath, "{invalid json line\n")
 
 			const events = await store.readAll()
 			expect(events).toHaveLength(1) // corrupt line is skipped
+
+			const quarantinePath = path.join(store._getStatsDir(), "quarantine", "corrupt-lines.jsonl")
+			const quarantineExists = await fs
+				.access(quarantinePath)
+				.then(() => true)
+				.catch(() => false)
+			expect(quarantineExists).toBe(true)
+
+			const quarantineContent = await fs.readFile(quarantinePath, "utf-8")
+			const quarantineEntries = quarantineContent
+				.trim()
+				.split("\n")
+				.map((l) => JSON.parse(l))
+			expect(quarantineEntries).toHaveLength(1)
+			expect(quarantineEntries[0].line).toBe(2)
 		})
 
-		it("should ignore truncated last line (crash tail)", async () => {
+		it("should quarantine schema-invalid last line if it ends with newline", async () => {
 			const event = makeEvent()
 			await store.append(event)
 
-			// Manually add a truncated line (last line)
+			// Add a schema-invalid line ending with \n
 			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
-			await fs.appendFile(segmentPath, '{"partial": tru') // Truncated JSON
+			await fs.appendFile(segmentPath, JSON.stringify({ schemaVersion: 999, invalid: true }) + "\n")
+
+			const events = await store.readAll()
+			expect(events).toHaveLength(1)
+
+			const quarantinePath = path.join(store._getStatsDir(), "quarantine", "corrupt-lines.jsonl")
+			const quarantineExists = await fs
+				.access(quarantinePath)
+				.then(() => true)
+				.catch(() => false)
+			expect(quarantineExists).toBe(true)
+		})
+
+		it("should ignore truncated last line (crash tail) without writing quarantine report", async () => {
+			const event = makeEvent()
+			await store.append(event)
+
+			// Manually add a truncated line (last line, no trailing newline)
+			const segmentPath = path.join(store._getStatsDir(), "events-000001.ndjson")
+			await fs.appendFile(segmentPath, '{"partial": tru') // Truncated JSON without \n
 
 			const events = await store.readAll()
 			expect(events).toHaveLength(1) // crash tail is ignored
+
+			const quarantinePath = path.join(store._getStatsDir(), "quarantine", "corrupt-lines.jsonl")
+			const quarantineExists = await fs
+				.access(quarantinePath)
+				.then(() => true)
+				.catch(() => false)
+			expect(quarantineExists).toBe(false)
 		})
 
-		it("should write quarantine report for corrupt lines", async () => {
+		it("should write quarantine report for corrupt lines in the middle", async () => {
 			const event = makeEvent()
 			await store.append(event)
 
@@ -352,7 +393,7 @@ describe("UsageEventStore", () => {
 			expect(result).toBe(true)
 		})
 
-		it("should move old segments to old-generation directory", async () => {
+		it("should clean up old-generation directory after clear", async () => {
 			await store.append(makeEvent())
 
 			await store.clear()
@@ -362,11 +403,11 @@ describe("UsageEventStore", () => {
 				.access(oldGenDir)
 				.then(() => true)
 				.catch(() => false)
-			expect(oldGenExists).toBe(true)
+			expect(oldGenExists).toBe(false)
 		})
 	})
 
-	describe("idempotency recovery on restart", () => {
+	describe("idempotency recovery on restart and multi-instance", () => {
 		it("should rebuild idempotency set from segment scan on re-init", async () => {
 			const event = makeEvent({ idempotencyKey: "idem-persist" })
 			await store.append(event)
@@ -378,6 +419,24 @@ describe("UsageEventStore", () => {
 			// Attempt to append with the same idempotencyKey → should be deduped
 			const result = await newStore.append(event)
 			expect(result).toBe(false)
+		})
+
+		it("should double-check idempotency across concurrent store instances sharing same directory", async () => {
+			const store2 = new UsageEventStore(tempDir)
+			await store2.initialize()
+
+			const event = makeEvent({ idempotencyKey: "idem-cross-instance" })
+
+			// First append on store1 succeeds
+			const result1 = await store.append(event)
+			expect(result1).toBe(true)
+
+			// Second append on store2 with same idempotencyKey is rejected under lock
+			const result2 = await store2.append(event)
+			expect(result2).toBe(false)
+
+			const events = await store2.readAll()
+			expect(events).toHaveLength(1)
 		})
 	})
 
@@ -419,7 +478,7 @@ describe("UsageEventStore", () => {
 		})
 	})
 
-	describe("error handling", () => {
+	describe("error handling and hard cap", () => {
 		it("should report not capped initially", async () => {
 			expect(store.isCapped()).toBe(false)
 		})
@@ -430,6 +489,22 @@ describe("UsageEventStore", () => {
 
 			// Re-appending the same event is not an error
 			await expect(store.append(event)).resolves.toBe(false)
+		})
+
+		it("should prospectively reject appends when hard cap would be reached", async () => {
+			const TOTAL_MAX_BYTES = 100 * 1024 * 1024 // 100 MiB
+			const statsDir = store._getStatsDir()
+
+			// Pre-fill a dummy segment file that puts total size just 50 bytes below 100 MiB
+			const dummySegment = path.join(statsDir, "events-000001.ndjson")
+			const dummySize = TOTAL_MAX_BYTES - 50
+			const buffer = Buffer.alloc(dummySize, " ")
+			await fs.writeFile(dummySegment, buffer)
+
+			const event = makeEvent()
+			// Appending an event (which serializes to > 100 bytes) must prospectively fail
+			await expect(store.append(event)).rejects.toThrow("Storage hard cap (100 MiB) reached")
+			expect(store.isCapped()).toBe(true)
 		})
 	})
 })

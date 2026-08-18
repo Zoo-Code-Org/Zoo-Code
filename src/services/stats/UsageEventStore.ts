@@ -384,6 +384,13 @@ export class UsageEventStore {
 			// Save new manifest (safeWriteJson pattern: temp → rename)
 			await this.writeManifestAtomic(newManifest)
 
+			// Clean up old-generation directory after successful manifest replacement
+			try {
+				await fs.rm(oldGenDir, { recursive: true, force: true })
+			} catch (err) {
+				console.warn(`[UsageEventStore] failed to clean up old generation dir ${oldGenDir}:`, err)
+			}
+
 			// Reset idempotency set
 			this.idempotencyKeys.clear()
 			this.capped = false
@@ -469,6 +476,7 @@ export class UsageEventStore {
 				throw new StatsStoreError("STATS_STORE/readAll/002", `Failed to read segment file: ${segmentPath}`, err)
 			}
 
+			const endsWithNewline = content.endsWith("\n")
 			const lines = content.split("\n")
 			// Remove the last element if it's empty (trailing newline)
 			if (lines.length > 0 && lines[lines.length - 1] === "") {
@@ -479,6 +487,7 @@ export class UsageEventStore {
 				const line = lines[i]
 				const lineNum = i + 1
 				const isLastLine = i === lines.length - 1
+				const isCrashTail = isLastLine && !endsWithNewline
 
 				// Skip empty lines
 				if (!line.trim()) {
@@ -492,18 +501,17 @@ export class UsageEventStore {
 						events.push(result.data)
 					} else {
 						// Schema validation failed
-						// If it's the last line, it might be an unterminated/truncated crash tail.
-						// The architecture report states: "The last unterminated line is treated
-						// as a crash tail and ignored; parse failures before EOF are recorded to
-						// the quarantine report and skipped."
-						if (!isLastLine) {
+						// If it's an unterminated/truncated crash tail at EOF, ignore.
+						// Otherwise (including corrupted lines ending with newline), quarantine.
+						if (!isCrashTail) {
 							quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
 						}
 					}
 				} catch {
 					// JSON parse failed
-					// Parse failure of the last line is treated as a crash tail and ignored
-					if (!isLastLine) {
+					// If it's an unterminated/truncated crash tail at EOF, ignore.
+					// Otherwise (including corrupted lines ending with newline), quarantine.
+					if (!isCrashTail) {
 						quarantineEntries.push(this.makeQuarantineEntry(segmentFile, lineNum, line))
 					}
 				}
@@ -563,6 +571,26 @@ export class UsageEventStore {
 
 		try {
 			const manifest = await this.loadOrCreateManifest(true)
+
+			// Idempotency double-check under lock (rebuild idempotency set from disk)
+			await this.rebuildIdempotencySet(manifest)
+			if (this.idempotencyKeys.has(event.idempotencyKey)) {
+				return false
+			}
+
+			// Prospective hard cap check under lock
+			const line = JSON.stringify(event) + "\n"
+			const serializedBytes = Buffer.byteLength(line, "utf-8")
+			const currentTotalBytes = await this.getTotalSizeBytes()
+
+			if (currentTotalBytes + serializedBytes >= TOTAL_MAX_BYTES) {
+				this.capped = true
+				throw new StatsStoreError(
+					"STATS_STORE/append/003",
+					"Storage hard cap (100 MiB) reached, new events suspended",
+				)
+			}
+
 			const segmentPath = this.getSegmentPath(manifest.currentSegment)
 
 			// Check if the segment file exists and its size
@@ -590,9 +618,6 @@ export class UsageEventStore {
 			// allowing a single segment to grow indefinitely.
 			const activeSegmentPath = this.getSegmentPath(manifest.currentSegment)
 
-			// Append event as compact JSON + \n
-			const line = JSON.stringify(event) + "\n"
-
 			try {
 				// Open in append mode and write
 				const handle = await fs.open(activeSegmentPath, "a")
@@ -615,7 +640,7 @@ export class UsageEventStore {
 			this.idempotencyKeys.add(event.idempotencyKey)
 
 			// Check total size and update cap
-			this.capped = await this.checkTotalSize()
+			this.capped = currentTotalBytes + serializedBytes >= TOTAL_MAX_BYTES
 
 			return true
 		} finally {
@@ -777,9 +802,9 @@ export class UsageEventStore {
 	// ── Internal: Size Management ────────────────────────────────────────────
 
 	/**
-	 * Checks the total event file size and returns whether the hard cap has been reached.
+	 * Returns the total size in bytes of all segment files on disk.
 	 */
-	private async checkTotalSize(): Promise<boolean> {
+	private async getTotalSizeBytes(): Promise<number> {
 		try {
 			const allFiles = await fs.readdir(this.statsDir)
 			const segmentFiles = allFiles.filter((f) => f.startsWith(SEGMENT_PREFIX) && f.endsWith(SEGMENT_EXT))
@@ -794,10 +819,18 @@ export class UsageEventStore {
 				}
 			}
 
-			return totalSize >= TOTAL_MAX_BYTES
+			return totalSize
 		} catch {
-			return false
+			return 0
 		}
+	}
+
+	/**
+	 * Checks the total event file size and returns whether the hard cap has been reached.
+	 */
+	private async checkTotalSize(): Promise<boolean> {
+		const totalBytes = await this.getTotalSizeBytes()
+		return totalBytes >= TOTAL_MAX_BYTES
 	}
 
 	// ── Internal: Quarantine ────────────────────────────────────────────────
