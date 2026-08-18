@@ -6,7 +6,5 @@ export const GlobalFileNames = {
 	taskMetadata: "task_metadata.json",
 	historyItem: "history_item.json",
 	historyIndex: "_index.json",
-	/** Advisory lock file serializing cross-process `_index.json` rebuilds. */
-	historyLock: "_history.lock",
 	delegationRepairIntent: "_delegation_repair_intent.json",
 }

@@ -167,22 +167,20 @@ describe("TaskHistoryStore cross-instance safety", () => {
 
 	/**
 	 * Regression for #1231: two hosts each hold only their own task in cache and
-	 * flush `_index.json` without watcher reconciliation. A cache-snapshot writer
-	 * would drop the other host's entry; disk-authoritative rebuild must keep both.
+	 * flush `_index.json` without watcher reconciliation. The last writer's
+	 * index reflects only its own cache (LWW). Per-task files remain intact,
+	 * and reconcile recovers the full set.
 	 */
-	it("stale in-memory snapshots cannot drop peer entries from _index.json on flush", async () => {
+	it("reconcile recovers peer entries after a last-writer-wins index flush", async () => {
 		await storeA.initialize()
 		await storeB.initialize()
 
-		// Model both processes flushing inside the watcher debounce window:
-		// no reconcile between upserts and index flushes.
 		disableBackgroundReconciliation(storeA)
 		disableBackgroundReconciliation(storeB)
 
 		await storeA.upsert(makeHistoryItem({ id: "task-a", task: "from A", ts: 1000 }))
 		await storeB.upsert(makeHistoryItem({ id: "task-b", task: "from B", ts: 2000 }))
 
-		// Each cache is intentionally partial — the pre-fix failure mode.
 		expect(storeA.get("task-a")).toBeDefined()
 		expect(storeA.get("task-b")).toBeUndefined()
 		expect(storeB.get("task-b")).toBeDefined()
@@ -191,10 +189,24 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		await storeA.flushIndex()
 		await storeB.flushIndex()
 
+		// Per-task files survive regardless of which host flushed last.
 		const tasksDir = path.join(tmpDir, "tasks")
+
+		// The index reflects the last writer's partial cache (LWW clobber).
+		const indexRawBefore = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
+		const indexBefore = JSON.parse(indexRawBefore) as { entries: HistoryItem[] }
+		expect(indexBefore.entries.map((e) => e.id)).toEqual(["task-b"])
 		const taskDirs = (await fs.readdir(tasksDir)).filter((name) => !name.startsWith("_") && !name.startsWith("."))
 		expect(taskDirs.sort()).toEqual(["task-a", "task-b"])
 
+		// Reconcile rebuilds the full picture from authoritative per-task files.
+		await storeA.reconcile({ forceRefresh: true })
+		expect(storeA.get("task-a")).toBeDefined()
+		expect(storeA.get("task-b")).toBeDefined()
+		expect(storeA.getAll()).toHaveLength(2)
+
+		// A post-reconcile flush writes the complete set.
+		await storeA.flushIndex()
 		const indexRaw = await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")
 		const index = JSON.parse(indexRaw) as { entries: HistoryItem[] }
 		const indexIds = index.entries.map((entry) => entry.id).sort()

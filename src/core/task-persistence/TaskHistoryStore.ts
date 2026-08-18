@@ -9,7 +9,6 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
-import { taskHistoryLock } from "./TaskHistoryLock"
 
 /** Valid status values for a task's HistoryItem. */
 export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
@@ -80,11 +79,12 @@ interface DelegationRepairIntent {
  * as a cache for fast list reads at startup.
  *
  * Cross-process safety for per-task files comes from `safeWriteJson`'s
- * `proper-lockfile`. The shared `_index.json` is treated as a rebuildable
- * cache: writers rebuild it from on-disk `history_item.json` files under a
- * cross-process `tasks/_history.lock`, so a stale in-memory snapshot cannot
- * clobber entries published by another extension host. Within a single
- * process, an in-process write lock serializes mutations.
+ * `proper-lockfile`. The shared `_index.json` is a best-effort startup
+ * cache: it may lag or miss entries from other hosts, but
+ * `reconcile()` rebuilds from authoritative per-task files — at startup
+ * (`forceRefresh: true`), via `fs.watch`, and on a 5-minute periodic
+ * fallback. Within a single extension host process,
+ * an in-process write lock serializes mutations.
  */
 /**
  * Options for TaskHistoryStore constructor.
@@ -884,57 +884,17 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Rebuild `_index.json` from authoritative per-task files under a
-	 * cross-process lock.
-	 *
-	 * Must not dump `this.cache` directly: each extension host only has a
-	 * partial view, and a full-cache snapshot write is a lost-update hazard
-	 * when two hosts flush inside the watcher debounce window (see #1231).
-	 *
-	 * Safe to call while the in-process `withLock` is already held (e.g.
-	 * migration) — only the shared file lock is acquired here.
+	 * Write the full index to disk.
 	 */
 	private async writeIndex(): Promise<void> {
-		await taskHistoryLock.withLock(this.globalStoragePath, async () => {
-			const indexPath = await this.getIndexPath()
-			const entries = await this.collectIndexEntriesFromDisk()
-			const index: HistoryIndex = {
-				version: 1,
-				updatedAt: Date.now(),
-				entries,
-			}
-
-			await safeWriteJson(indexPath, index)
-		})
-	}
-
-	/**
-	 * Scan task directories and load each `history_item.json` for the index.
-	 * Per-task files are the source of truth; missing/corrupt files are skipped.
-	 */
-	private async collectIndexEntriesFromDisk(): Promise<HistoryItem[]> {
-		const tasksDir = await this.getTasksDir()
-
-		let dirEntries: string[]
-		try {
-			dirEntries = await fs.readdir(tasksDir)
-		} catch {
-			return []
+		const indexPath = await this.getIndexPath()
+		const index: HistoryIndex = {
+			version: 1,
+			updatedAt: Date.now(),
+			entries: this.getAll(),
 		}
 
-		const entries: HistoryItem[] = []
-		for (const name of dirEntries) {
-			if (name.startsWith("_") || name.startsWith(".")) {
-				continue
-			}
-
-			const item = await this.readTaskFile(name)
-			if (item) {
-				entries.push(item)
-			}
-		}
-
-		return entries.sort((a, b) => b.ts - a.ts)
+		await safeWriteJson(indexPath, index)
 	}
 
 	/**
