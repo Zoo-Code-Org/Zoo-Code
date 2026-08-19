@@ -4,6 +4,7 @@ import { createInstance } from "i18next"
 
 import { TranslationContext } from "@/i18n/TranslationContext"
 import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
+import { TooltipProvider } from "@/components/ui/tooltip"
 import { AutoApproveSettings } from "../AutoApproveSettings"
 
 const i18n = createInstance()
@@ -39,19 +40,23 @@ const AutoApproveSettingsFixture = ({
 				autoApprovalEnabled: false,
 				alwaysAllowFollowupQuestions: alwaysAllowFollowupQuestions ?? false,
 			}}>
-			<div className="w-[680px] bg-vscode-editor-background p-4 text-vscode-foreground">
-				<AutoApproveSettings
-					alwaysAllowReadOnly={alwaysAllowReadOnly}
-					alwaysAllowWrite={alwaysAllowWrite}
-					alwaysAllowExecute={alwaysAllowExecute}
-					alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
-					followupAutoApproveTimeoutMs={followupAutoApproveTimeoutMs}
-					allowedCommands={allowedCommands}
-					deniedCommands={deniedCommands}
-					destructiveCommandGuardEnabled={destructiveCommandGuardEnabled}
-					setCachedStateField={() => {}}
-				/>
-			</div>
+			<TooltipProvider>
+				<div
+					data-testid="auto-approve-settings-visual"
+					className="w-[680px] bg-vscode-editor-background p-4 text-vscode-foreground">
+					<AutoApproveSettings
+						alwaysAllowReadOnly={alwaysAllowReadOnly}
+						alwaysAllowWrite={alwaysAllowWrite}
+						alwaysAllowExecute={alwaysAllowExecute}
+						alwaysAllowFollowupQuestions={alwaysAllowFollowupQuestions}
+						followupAutoApproveTimeoutMs={followupAutoApproveTimeoutMs}
+						allowedCommands={allowedCommands}
+						deniedCommands={deniedCommands}
+						destructiveCommandGuardEnabled={destructiveCommandGuardEnabled}
+						setCachedStateField={() => {}}
+					/>
+				</div>
+			</TooltipProvider>
 		</ExtensionStateContextProvider>
 	</TranslationContext.Provider>
 )

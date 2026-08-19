@@ -1,4 +1,4 @@
-import React, { createContext, useContext } from "react"
+import React, { createContext, useContext, useMemo, useState } from "react"
 
 const noop = () => undefined
 
@@ -18,9 +18,11 @@ const defaultState = {
 	enterBehavior: "send",
 	lockApiConfigAcrossModes: false,
 	telemetrySetting: "enabled",
+	autoApprovalEnabled: false,
 	togglePinnedApiConfig: noop,
 	setHasOpenedModeSelector: noop,
 	setApiConfiguration: noop,
+	setAutoApprovalEnabled: noop,
 }
 
 export const ExtensionStateContext = createContext<Record<string, unknown>>(defaultState)
@@ -32,10 +34,17 @@ export function ExtensionStateContextProvider({
 	children: React.ReactNode
 	initialState?: Record<string, unknown>
 }) {
+	const initialAutoApprovalEnabled = initialState?.autoApprovalEnabled
+	const [autoApprovalEnabled, setAutoApprovalEnabled] = useState(
+		typeof initialAutoApprovalEnabled === "boolean" ? initialAutoApprovalEnabled : defaultState.autoApprovalEnabled,
+	)
+	const value = useMemo(
+		() => ({ ...defaultState, ...initialState, autoApprovalEnabled, setAutoApprovalEnabled }),
+		[autoApprovalEnabled, initialState],
+	)
+
 	return (
-		<ExtensionStateContext.Provider value={{ ...defaultState, ...initialState }}>
-			{children}
-		</ExtensionStateContext.Provider>
+		<ExtensionStateContext.Provider value={value}>{children}</ExtensionStateContext.Provider>
 	)
 }
 
