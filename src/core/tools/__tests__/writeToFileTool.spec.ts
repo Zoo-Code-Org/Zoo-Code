@@ -259,6 +259,48 @@ describe("writeToFileTool", () => {
 			expect(mockCline.rooIgnoreController.validateAccess).toHaveBeenCalledWith(testFilePath)
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledWith(testFilePath)
 		})
+
+		it("finalizes the partial ask and clears per-task state when rooignore denies access", async () => {
+			// handlePartial() has no rooignore guard, so streaming deltas for a denied path
+			// still create a partial `tool` ask (partial: true) and open the diff view before
+			// execute() reaches the access check. The denial must clean up all of that:
+			// finalize the partial ask (spinner does not stick), reset the diff view (reset
+			// failures swallowed), and clear the per-task state (abort listener + maps).
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				let abortCleanup: (() => void) | undefined
+				mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+					if (event === RooCodeEventName.TaskAborted) {
+						abortCleanup = listener
+					}
+					return mockCline
+				})
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+
+				// Stream two deltas so the path stabilizes: handlePartial registers the abort
+				// cleanup and opens the partial ask + diff view for the (soon denied) path.
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				expect(mockCline.ask).toHaveBeenCalledTimes(1)
+				expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
+				expect(abortCleanup).toBeTypeOf("function")
+
+				// The completed block now reaches the access check, which denies the path.
+				await executeWriteFileTool({}, { fileExists: false, accessAllowed: false })
+
+				expect(mockCline.say).toHaveBeenCalledWith("rooignore_error", testFilePath)
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
 	})
 
 	describe("file existence detection", () => {

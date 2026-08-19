@@ -27,15 +27,38 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	readonly name = "write_to_file" as const
 
 	/**
-	 * Tracks filesystem failures from diff-view streaming by task id. Tool instances are
-	 * singletons, so this state must be keyed per task to avoid one task's failing partial
-	 * stream suppressing another task's streaming deltas.
+	 * Tracks filesystem failures from diff-view streaming, keyed by task id (taskId +
+	 * instanceId).
+	 *
+	 * This deliberately diverges from the sibling streaming tools (ApplyDiffTool,
+	 * EditFileTool, SearchReplaceTool, EditTool), which rely on BaseTool's singleton
+	 * lastSeenPartialPath / resetPartialState and keep no failure state. The divergence is
+	 * intentional, for two reasons:
+	 *
+	 * 1. Only this tool's handlePartial performs failure-prone streaming work
+	 *    (diffViewProvider.open/update, which can throw EACCES/EROFS); the siblings only
+	 *    send a task.ask preview. Without per-task failure tracking, every later delta for
+	 *    a failed path would re-attempt the failing operation and re-spawn a partial tool
+	 *    message.
+	 *
+	 * 2. The tool instance is a module-level singleton shared by every task, including
+	 *    tasks from different ClineProvider instances (e.g. sidebar and tab-panel
+	 *    providers, which activate independently). A single provider streams at most one
+	 *    task at a time — TaskScheduler gates task.run() at maxConcurrency=1 and
+	 *    delegation disposes the parent before the child starts — so per-task keying is
+	 *    reachable specifically across providers, where two providers can stream
+	 *    write_to_file concurrently through this same singleton.
+	 *
+	 * Lifting this per-task keying into BaseTool for all streaming tools is a follow-up
+	 * (separate PR); it is deliberately not done here.
 	 */
 	private partialStreamFailuresByTaskId = new Set<string>()
 
 	/**
-	 * Tracks partial path stabilization by task id. The tool is a singleton, so using the
-	 * BaseTool singleton path state lets concurrent tasks incorrectly stabilize each other.
+	 * Tracks partial path stabilization, keyed by task id (taskId + instanceId), so one
+	 * task's streaming deltas cannot stabilize another task's path. Keyed per task for the
+	 * same cross-provider reason as partialStreamFailuresByTaskId (see that note; the
+	 * divergence from the sibling tools' BaseTool state is deliberate).
 	 */
 	private lastSeenPartialPathByTaskId = new Map<string, string | undefined>()
 
@@ -129,6 +152,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		if (!accessAllowed) {
 			await task.say("rooignore_error", relPath)
 			pushToolResult(formatResponse.rooIgnoreError(relPath))
+			// handlePartial() has no rooignore guard, so streaming deltas for this denied
+			// path may already have created a partial `tool` ask (partial: true) and opened
+			// the diff view before execute() reached the access check. Denying here without
+			// cleanup would leave the UI spinner stuck (partial: true), the diff view open,
+			// and this task's abort listener / path-stabilization / failure-map entries
+			// leaked. Perform the same cleanup the try/finally path does before returning.
+			await this.finalizePartialToolAskAfterFailure(task)
+			await this.resetDiffViewAfterWrite(task)
+			this.resetTaskPartialState(task)
 			return
 		}
 
