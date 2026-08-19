@@ -98,6 +98,23 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
 		}
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		let abortSignal: AbortSignal | undefined
+		if (externalAbortSignal) {
+			const controller = new AbortController()
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+			abortSignal = controller.signal
+		}
+
 		switch (modelId) {
 			case "claude-sonnet-5":
 			case "claude-sonnet-4-6":
@@ -190,9 +207,12 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 								case "claude-haiku-4-5-20251001":
 								case "claude-3-haiku-20240307":
 									betas.push("prompt-caching-2024-07-31")
-									return { headers: { "anthropic-beta": betas.join(",") } }
+									return {
+										headers: { "anthropic-beta": betas.join(",") },
+										...(abortSignal && { signal: abortSignal }),
+									}
 								default:
-									return undefined
+									return abortSignal ? { signal: abortSignal } : undefined
 							}
 						})(),
 					)
@@ -223,6 +243,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 					}
 					stream = (await this.client.messages.create(
 						requestParams as Anthropic.Messages.MessageCreateParamsStreaming,
+						abortSignal ? { signal: abortSignal } : undefined,
 					)) as any
 				} catch (error) {
 					TelemetryService.instance.captureException(
@@ -436,14 +457,26 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 
 		let message
 		try {
-			message = await this.client.messages.create({
-				model,
-				max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
-				thinking: undefined,
-				temperature,
-				messages: [{ role: "user", content: prompt }],
-				stream: false,
-			})
+			// Build request options with both abortSignal and timeout handling
+			const requestOptions: Anthropic.RequestOptions = {}
+			if (options?.abortSignal) {
+				requestOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs) {
+				requestOptions.timeout = options.timeoutMs
+			}
+
+			message = await this.client.messages.create(
+				{
+					model,
+					max_tokens: ANTHROPIC_DEFAULT_MAX_TOKENS,
+					thinking: undefined,
+					temperature,
+					messages: [{ role: "user", content: prompt }],
+					stream: false,
+				},
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 		} catch (error) {
 			TelemetryService.instance.captureException(
 				new ApiProviderError(

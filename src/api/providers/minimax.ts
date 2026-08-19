@@ -85,6 +85,23 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
 		const { id: modelId, info, maxTokens, temperature } = this.getModel()
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		let abortSignal: AbortSignal | undefined
+		if (externalAbortSignal) {
+			const controller = new AbortController()
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+			abortSignal = controller.signal
+		}
+
 		// MiniMax M2 models support prompt caching
 		const supportsPromptCache = info.supportsPromptCache ?? false
 
@@ -113,7 +130,10 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: convertOpenAIToolChoice(metadata?.tool_choice),
 		}
 
-		const stream = await this.client.messages.create(requestParams)
+		const stream = await this.client.messages.create(
+			requestParams,
+			abortSignal ? { signal: abortSignal } : undefined,
+		)
 
 		let inputTokens = 0
 		let outputTokens = 0
@@ -292,13 +312,25 @@ export class MiniMaxHandler extends BaseProvider implements SingleCompletionHand
 	async completePrompt(prompt: string, options?: CompletePromptOptions) {
 		const { id: model, temperature } = this.getModel()
 
-		const message = await this.client.messages.create({
-			model,
-			max_tokens: 16_384,
-			temperature: temperature ?? 1.0,
-			messages: [{ role: "user", content: prompt }],
-			stream: false,
-		})
+		// Build request options with abortSignal and/or timeout handling
+		const requestOptions: Anthropic.RequestOptions = {}
+		if (options?.abortSignal) {
+			requestOptions.signal = options.abortSignal
+		}
+		if (options?.timeoutMs !== undefined) {
+			requestOptions.timeout = options.timeoutMs
+		}
+
+		const message = await this.client.messages.create(
+			{
+				model,
+				max_tokens: 16_384,
+				temperature: temperature ?? 1.0,
+				messages: [{ role: "user", content: prompt }],
+				stream: false,
+			},
+			Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+		)
 
 		const content = message.content.find(({ type }) => type === "text")
 		return content?.type === "text" ? content.text : ""

@@ -24,6 +24,7 @@ import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("XAIHandler", () => {
@@ -83,6 +84,7 @@ describe("XAIHandler", () => {
 				store: false,
 				include: ["reasoning.encrypted_content"],
 			}),
+			undefined,
 		)
 	})
 
@@ -212,6 +214,7 @@ describe("XAIHandler", () => {
 				tool_choice: "auto",
 				parallel_tool_calls: true,
 			}),
+			undefined,
 		)
 	})
 
@@ -232,6 +235,57 @@ describe("XAIHandler", () => {
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow(`xAI completion error: ${errorMessage}`)
 	})
 
+	it("completePrompt should pass abort signal through to client", async () => {
+		const controller = new AbortController()
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			signal: controller.signal,
+		})
+	})
+
+	it("completePrompt should work without options (backward compatible)", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		const result = await handler.completePrompt("test prompt")
+		expect(result).toBe("response")
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			undefined,
+		)
+	})
+
+	it("completePrompt should pass timeout through to client", async () => {
+		const controller = new AbortController()
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			signal: controller.signal,
+			timeout: 5000,
+		})
+	})
+
+	it("completePrompt should pass only timeoutMs when no signal provided", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { timeoutMs: 3000 })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+			timeout: 3000,
+		})
+	})
+
+	it("completePrompt should pass timeout when timeoutMs=0 (defined check)", async () => {
+		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
+
+		await handler.completePrompt("test prompt", { timeoutMs: 0 })
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({ model: expect.any(String) }),
+			{ timeout: 0 }, // !== undefined check means 0 is passed through
+		)
+	})
+
 	it("should include reasoning effort for mini models in Responses API format", async () => {
 		const miniModelHandler = new XAIHandler({
 			apiModelId: "grok-3-mini",
@@ -249,6 +303,7 @@ describe("XAIHandler", () => {
 					effort: "high",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -269,6 +324,7 @@ describe("XAIHandler", () => {
 					effort: "high",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -290,6 +346,7 @@ describe("XAIHandler", () => {
 					effort: "low",
 				}),
 			}),
+			undefined,
 		)
 	})
 
@@ -314,5 +371,65 @@ describe("XAIHandler", () => {
 
 		const stream = handler.createMessage("test prompt", [])
 		await expect(stream.next()).rejects.toThrow(`xAI completion error: ${errorMessage}`)
+	})
+
+	it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
+		const abortedController = new AbortController()
+		abortedController.abort()
+
+		mockResponsesCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+			if (options?.signal?.aborted) {
+				const error = new Error("The operation was aborted")
+				error.name = "AbortError"
+				throw error
+			}
+			return asyncStreamFrom([])
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+		)
+
+		await expect(stream.next()).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("should abort the request when the external signal aborts mid-flight", async () => {
+		const controller = new AbortController()
+
+		mockResponsesCreate.mockImplementation((_params: unknown, options?: { signal?: AbortSignal }) => {
+			return new Promise<void>((_resolve, reject) => {
+				const signal = options?.signal
+				if (!signal) {
+					return
+				}
+				if (signal.aborted) {
+					const error = new Error("The operation was aborted")
+					error.name = "AbortError"
+					reject(error)
+					return
+				}
+				signal.addEventListener(
+					"abort",
+					() => {
+						const error = new Error("The operation was aborted")
+						error.name = "AbortError"
+						reject(error)
+					},
+					{ once: true },
+				)
+			})
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+
+		const promise = stream.next()
+		controller.abort()
+		await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 	})
 })

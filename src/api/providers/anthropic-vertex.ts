@@ -86,6 +86,23 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
 		}
 
+		// Bridge the external abort signal from request metadata into a per-request
+		// controller so the SDK call is cancelled when the owning request is aborted
+		// (or when the signal is already aborted). Without an external signal the
+		// client-level timeout configured in the constructor remains the only
+		// cancellation mechanism, preserving the existing behavior.
+		const externalAbortSignal = metadata?.abortSignal
+		let abortSignal: AbortSignal | undefined
+		if (externalAbortSignal) {
+			const controller = new AbortController()
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+			abortSignal = controller.signal
+		}
+
 		/**
 		 * Vertex API has specific limitations for prompt caching:
 		 * 1. Maximum of 4 blocks can have cache_control
@@ -114,9 +131,18 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		} as Anthropic.Messages.MessageCreateParamsStreaming
 
 		// and prompt caching
-		const requestOptions = betas?.length ? { headers: { "anthropic-beta": betas.join(",") } } : undefined
+		const requestOptions: Anthropic.RequestOptions = {}
+		if (betas?.length) {
+			requestOptions.headers = { "anthropic-beta": betas.join(",") }
+		}
+		if (abortSignal) {
+			requestOptions.signal = abortSignal
+		}
 
-		const stream = await this.client.messages.create(params, requestOptions)
+		const stream = await this.client.messages.create(
+			params,
+			Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+		)
 
 		for await (const chunk of stream) {
 			switch (chunk.type) {
@@ -297,7 +323,19 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 				stream: false,
 			} as Anthropic.Messages.MessageCreateParamsNonStreaming
 
-			const response = await this.client.messages.create(params)
+			// Build request options with abortSignal and/or timeout handling
+			const requestOptions: Anthropic.RequestOptions = {}
+			if (options?.abortSignal) {
+				requestOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs !== undefined) {
+				requestOptions.timeout = options.timeoutMs
+			}
+
+			const response = await this.client.messages.create(
+				params,
+				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+			)
 			const content = response.content.find(({ type }) => type === "text")
 
 			return content?.type === "text" ? content.text : ""
