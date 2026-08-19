@@ -23,6 +23,11 @@ export class VSCodeAPIWrapper {
 		}
 	}
 
+	/**
+	 * Generates a unique identifier for this webview instance.
+	 *
+	 * @remarks Used only when no persisted identifier exists yet.
+	 */
 	private createViewStateId(): string {
 		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
 			return crypto.randomUUID()
@@ -31,6 +36,10 @@ export class VSCodeAPIWrapper {
 		return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 	}
 
+	/**
+	 * Returns the stable view state identifier for this webview, creating and persisting
+	 * one on first use so the extension can keep per-view state isolated across providers.
+	 */
 	public getViewStateId(): string {
 		const currentState = this.getState()
 		const stateObject =

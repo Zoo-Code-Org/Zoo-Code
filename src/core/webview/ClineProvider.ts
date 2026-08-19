@@ -538,6 +538,11 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Reads the registered viewStates map, returning a defensive copy.
+	 * When fresh is set, the map is read directly from globalState (bypassing the
+	 * ContextProxy cache) so serialized writes never observe a stale in-memory value.
+	 */
 	private getPersistedViewStates(options: { fresh?: boolean } = {}): Record<string, PersistedViewState> {
 		const viewStates = options.fresh
 			? this.context.globalState.get<GlobalState["viewStates"]>("viewStates")
@@ -550,6 +555,11 @@ export class ClineProvider
 		return { ...viewStates }
 	}
 
+	/**
+	 * Persists this view's non-secret selections through the serialized write queue.
+	 * The write re-reads the map fresh and merges into the existing entry, removing the
+	 * entry entirely when nothing persistable remains, so concurrent views cannot clobber it.
+	 */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		const viewStateId = this.viewStateId
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
@@ -587,6 +597,10 @@ export class ClineProvider
 		await write
 	}
 
+	/**
+	 * Removes the given view's entry from the registered viewStates map.
+	 * Runs through the serialized write queue to avoid racing concurrent view-state writes.
+	 */
 	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
@@ -598,6 +612,10 @@ export class ClineProvider
 		await write
 	}
 
+	/**
+	 * Keeps only the most recently updated entries of the persisted view states map,
+	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
+	 */
 	private prunePersistedViewStates(states: Record<string, PersistedViewState>): Record<string, PersistedViewState> {
 		return Object.fromEntries(
 			Object.entries(states)
@@ -606,6 +624,10 @@ export class ClineProvider
 		)
 	}
 
+	/**
+	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
+	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
+	 */
 	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
 		const normalizedViewStateId = viewStateId?.trim()
 
@@ -3379,6 +3401,11 @@ export class ClineProvider
 		await this._saveViewLocalStateFromMutation(values)
 	}
 
+	/**
+	 * Persists the view-local subset of a ContextProxy mutation, then updates the in-memory
+	 * viewLocalState buffer. Persistence is awaited first so a failed durable write cannot
+	 * leave the local cache ahead of the persisted state.
+	 */
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {
@@ -3436,6 +3463,10 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Writes the durably persisted subset of a mutation (mode and currentApiConfigName)
+	 * into the registered viewStates map for this view.
+	 */
 	private async _persistViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
 	): Promise<void> {

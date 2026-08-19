@@ -327,6 +327,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		this.sidebarProvider.getCurrentTask()?.approveAsk()
 	}
 
+	/**
+	 * Approves the pending ask for a specific task by its ID.
+	 *
+	 * @returns Whether a registered task with the given ID was found and approved.
+	 */
 	public async approveTaskAsk(taskId: string): Promise<boolean> {
 		const entry = this.tasksById.get(taskId)
 
@@ -338,6 +343,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return true
 	}
 
+	/**
+	 * Answers a task's pending ask with a follow-up suggestion, optionally switching that
+	 * task's provider to the suggestion's mode before responding.
+	 *
+	 * @returns Whether a registered task with the given ID was found and answered.
+	 */
 	public async selectTaskFollowupSuggestion({
 		taskId,
 		answer,
