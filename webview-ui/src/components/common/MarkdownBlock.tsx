@@ -44,7 +44,9 @@ function rehypeMentions() {
 
 			for (const match of matches) {
 				const mentionText = match[0]
-				const mentionValue = match[1] ?? mentionText.slice(1) // capture group or full mention without @
+				// mentionRegexGlobal has one mandatory capture group, so match[1] is always
+				// the non-empty value after "@" (match[0].slice(1) would be identical).
+				const mentionValue = match[1]
 				const mentionStart = match.index!
 
 				if (mentionStart > lastIndex) {

@@ -326,6 +326,22 @@ describe("MarkdownBlock", () => {
 			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
 		})
 
+		it("renders a standalone mention with no surrounding text", async () => {
+			// A mention that both starts and ends the text node exercises the
+			// no-leading-text and no-trailing-text branches of the splitter.
+			const markdown = "@problems"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText("@problems")
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@problems")
+
+			// No leading/trailing text: the paragraph is exactly the mention.
+			expect(container.querySelector("p")?.textContent).toBe("@problems")
+		})
+
 		it("makes mentions keyboard operable (role=button, tabIndex, Enter/Space)", async () => {
 			const markdown = "See @terminal."
 			const { container } = render(<MarkdownBlock markdown={markdown} />)
