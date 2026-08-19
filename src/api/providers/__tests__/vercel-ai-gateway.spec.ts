@@ -178,6 +178,21 @@ describe("VercelAiGatewayHandler", () => {
 			expect(result.info.supportsImages).toBe(false)
 		})
 
+		it("clamps a custom maxTokens override to the context window before requesting", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { role: "assistant", content: "ok" } }] })
+
+			const handler = new VercelAiGatewayHandler({
+				...mockOptions,
+				customModelInfo: { contextWindow: 1_000, maxTokens: 2_000 },
+			})
+			const result = await handler.fetchModel()
+
+			expect(result.info.maxTokens).toBe(1_000)
+
+			await handler.completePrompt("test")
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 1_000 }))
+		})
+
 		it("propagates customModelInfo maxTokens into the completePrompt request body", async () => {
 			mockCreate.mockImplementation(async () => ({
 				choices: [{ message: { role: "assistant", content: "ok" } }],

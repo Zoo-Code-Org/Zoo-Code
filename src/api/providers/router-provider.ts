@@ -71,7 +71,23 @@ export abstract class RouterProvider extends BaseProvider {
 			return info ?? fallback
 		}
 
-		return applyCustomModelInfo(info, this.options) ?? fallback
+		const resolvedInfo = applyCustomModelInfo(info, this.options) ?? fallback
+
+		// Gateway request builders forward `info.maxTokens` as max_completion_tokens.
+		// Keep that value within the effective context window so a persisted override
+		// cannot create a request the gateway will reject.
+		if (
+			typeof resolvedInfo.maxTokens === "number" &&
+			Number.isFinite(resolvedInfo.maxTokens) &&
+			resolvedInfo.maxTokens > 0 &&
+			Number.isFinite(resolvedInfo.contextWindow) &&
+			resolvedInfo.contextWindow > 0 &&
+			resolvedInfo.maxTokens > resolvedInfo.contextWindow
+		) {
+			return { ...resolvedInfo, maxTokens: resolvedInfo.contextWindow }
+		}
+
+		return resolvedInfo
 	}
 
 	public async fetchModel() {

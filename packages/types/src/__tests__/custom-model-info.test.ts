@@ -31,16 +31,33 @@ describe("custom model info", () => {
 		})
 	})
 
-	it("does not synthesize model info without a valid context window", () => {
+	it("does not synthesize model info from a max-tokens-only override", () => {
 		expect(
 			applyCustomModelInfo(undefined, {
 				customModelInfo: {
-					contextWindow: 0,
-					maxTokens: -1,
+					maxTokens: 8_192,
 					supportsImages: true,
 				},
 			}),
 		).toBeUndefined()
+	})
+
+	it("ignores invalid numeric overrides when discovered model info exists", () => {
+		const model: ModelInfo = {
+			contextWindow: 8_192,
+			maxTokens: 4_096,
+			supportsImages: false,
+			supportsPromptCache: false,
+		}
+
+		expect(
+			applyCustomModelInfo(model, {
+				customModelInfo: {
+					contextWindow: 0,
+					maxTokens: -1,
+				},
+			}),
+		).toEqual(model)
 	})
 
 	it("synthesizes safe defaults when only a context window is supplied", () => {
