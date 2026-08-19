@@ -49,7 +49,12 @@ function rehypeMentions() {
 					tagName: "span",
 					properties: {
 						className: ["mention-context-highlight", "text-[0.9em]", "cursor-pointer"],
-						onClick: () => vscode.postMessage({ type: "openMention", text: mentionValue }),
+						onClick: (event: React.MouseEvent<HTMLSpanElement>) => {
+							// Keep mention clicks from bubbling to the TaskHeader toggle, which
+							// would collapse the expanded panel right after opening the mention.
+							event.stopPropagation()
+							vscode.postMessage({ type: "openMention", text: mentionValue })
+						},
 					},
 					children: [{ type: "text", value: mentionText }],
 				})

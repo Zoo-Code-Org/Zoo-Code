@@ -427,6 +427,12 @@ describe("TaskHeader", () => {
 
 			fireEvent.click(mentions[0])
 			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "/src/file.ts" })
+
+			// The mention click must not bubble to the header toggle (the mention handler
+			// stops propagation), so the expanded markdown stays rendered after the
+			// mention is opened instead of the panel collapsing.
+			expect(screen.getByText(/Inspect/, { exact: false })).toBeInTheDocument()
+			expect(container.querySelectorAll("span.mention-context-highlight")).toHaveLength(3)
 		})
 
 		it("renders an empty prompt without crashing", () => {
