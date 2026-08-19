@@ -45,12 +45,30 @@ const RESOURCE_DIAGNOSTIC_EVENT_MAP = {
 
 const RESOURCE_DIAGNOSTIC_EVENTS = Object.keys(RESOURCE_DIAGNOSTIC_EVENT_MAP) as RooCodeResourceDiagnosticEventName[]
 
+/**
+ * Where the registerListeners() rebroadcast wiring subscribes each diagnostic
+ * event. TaskCreated and the delegation events fire on the provider emitter
+ * (the delegation events are additionally re-subscribed per task), while all
+ * other events fire on individual Task instances. Diagnostics count the
+ * listeners on the emitters the wiring actually attaches to — never on the
+ * public API emitter, whose subscribers are external consumers.
+ */
+const DIAGNOSTIC_EVENT_SCOPES: Record<RooCodeResourceDiagnosticEventName, { provider: boolean; task: boolean }> = {
+	[RooCodeEventName.Message]: { provider: false, task: true },
+	[RooCodeEventName.TaskCreated]: { provider: true, task: false },
+	[RooCodeEventName.TaskStarted]: { provider: false, task: true },
+	[RooCodeEventName.TaskCompleted]: { provider: false, task: true },
+	[RooCodeEventName.TaskAborted]: { provider: false, task: true },
+	[RooCodeEventName.TaskDelegationCompleted]: { provider: true, task: true },
+	[RooCodeEventName.TaskDelegationResumed]: { provider: true, task: true },
+	[RooCodeEventName.TaskModeSwitched]: { provider: false, task: true },
+}
+
 export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	private readonly outputChannel: vscode.OutputChannel
 	private readonly sidebarProvider: ClineProvider
 	private readonly context: vscode.ExtensionContext
 	private readonly ipc?: IpcServer
-	private readonly registeredTaskIds = new Set<string>()
 	private readonly log: (...args: unknown[]) => void
 	private logfile?: string
 
@@ -270,19 +288,41 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public getResourceDiagnostics(): RooCodeResourceDiagnostics {
-		const activeTaskIds = new Set(this.getCurrentTaskStack())
-		for (const taskId of this.registeredTaskIds) {
-			if (!activeTaskIds.has(taskId)) {
-				this.registeredTaskIds.delete(taskId)
-			}
-		}
+		// Task liveness is sourced from the provider's TaskRegistry — the single
+		// source of truth. No second registry and no read-time pruning: a task that
+		// fails to be removed from the registry stays visible until it is actually
+		// evicted, which is exactly the leak class this sentinel targets.
+		const registeredTaskCount = this.sidebarProvider.getTaskStackSize()
+
+		// Internal listener counts: the rebroadcast handlers attached in
+		// registerListeners() live on each Task instance (per-task events) and on
+		// the provider (TaskCreated) — not on the public API emitter. Counting them
+		// there keeps internal listener leaks visible without conflating external
+		// consumers (tests' api.on, IPC) with the internal wiring.
+		const liveTasks = this.sidebarProvider.getLiveTasks()
+		// Count listeners on the untyped base emitter: the diagnostic event union
+		// spans provider-level and task-level event names, so neither typed
+		// listenerCount accepts the raw string union directly.
+		const providerListenerCount = (eventName: string): number =>
+			(this.sidebarProvider as EventEmitter).listenerCount(eventName)
+		const taskListenerCount = (task: EventEmitter, eventName: string): number => task.listenerCount(eventName)
 
 		const listenerCounts = Object.fromEntries(
-			RESOURCE_DIAGNOSTIC_EVENTS.map((eventName) => [eventName, this.listenerCount(eventName)]),
+			RESOURCE_DIAGNOSTIC_EVENTS.map((eventName) => {
+				const scope = DIAGNOSTIC_EVENT_SCOPES[eventName]
+				let count = 0
+				if (scope.provider) {
+					count += providerListenerCount(eventName)
+				}
+				if (scope.task) {
+					count += liveTasks.reduce((sum, task) => sum + taskListenerCount(task, eventName), 0)
+				}
+				return [eventName, count]
+			}),
 		) as RooCodeResourceDiagnostics["listenerCounts"]
 
 		return {
-			registeredTaskCount: this.registeredTaskIds.size,
+			registeredTaskCount,
 			currentTaskStackLength: this.getCurrentTaskStack().length,
 			listenerCounts,
 		}
@@ -364,9 +404,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
-			this.registeredTaskIds.add(task.taskId)
-			const unregisterTask = () => this.registeredTaskIds.delete(task.taskId)
-
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
@@ -378,7 +415,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
 					isSubtask: !!task.parentTaskId,
 				})
-				unregisterTask()
 
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
@@ -387,7 +423,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
-				unregisterTask()
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {

@@ -640,6 +640,15 @@ export class ClineProvider
 		return this.taskRegistry.taskIds
 	}
 
+	/**
+	 * Live Task instances tracked by the provider's task registry — the single
+	 * source of task liveness for resource diagnostics. A task that is never
+	 * removed from the registry stays visible here until it is actually evicted.
+	 */
+	public getLiveTasks(): Task[] {
+		return this.taskRegistry.getAll()
+	}
+
 	// Pending Edit Operations Management
 
 	/**
