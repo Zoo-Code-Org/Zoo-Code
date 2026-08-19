@@ -1223,6 +1223,11 @@ describe("ChatTextArea", () => {
 			// "Cannot read properties of undefined (reading 'trim')" in the
 			// hasInputContent memo. It should render normally instead.
 
+			// The normalized value drives the textarea: a malformed input renders as empty.
+			const textarea = container.querySelector("textarea")
+			expect(textarea).toBeInTheDocument()
+			expect(textarea).toHaveValue("")
+
 			// Clicking "Enhance prompt" with an undefined input must not crash either:
 			// the undefined input behaves like an empty one, so nothing is sent.
 			mockPostMessage.mockClear()
@@ -1241,6 +1246,11 @@ describe("ChatTextArea", () => {
 			// any other non-string value must be treated as empty, not crash.
 			const badInput = { ...defaultProps, inputValue: value } as unknown as typeof defaultProps
 			const { container } = render(<ChatTextArea {...badInput} />)
+
+			// The normalized value drives the textarea: a non-string input renders as empty.
+			const textarea = container.querySelector("textarea")
+			expect(textarea).toBeInTheDocument()
+			expect(textarea).toHaveValue("")
 
 			mockPostMessage.mockClear()
 			fireEvent.click(getEnhancePromptButton())
