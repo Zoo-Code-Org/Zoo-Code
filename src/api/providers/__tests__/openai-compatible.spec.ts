@@ -89,16 +89,23 @@ describe("OpenAICompatibleHandler", () => {
 
 			// A never-expiring signal (or a pre-aborted one) would fail this check:
 			// the signal must fire on its own ~50ms timeout without any external abort.
+			let guardTimer: ReturnType<typeof setTimeout> | undefined
 			const fired = await Promise.race([
 				new Promise<boolean>((resolve) => {
 					abortSignal.addEventListener("abort", () => resolve(true), { once: true })
 				}),
 				new Promise<boolean>((resolve) => {
-					setTimeout(() => resolve(false), 1000)
+					guardTimer = setTimeout(() => resolve(false), 1000)
 				}),
 			])
-			expect(fired).toBe(true)
-			expect(abortSignal.aborted).toBe(true)
+			try {
+				expect(fired).toBe(true)
+				expect(abortSignal.aborted).toBe(true)
+			} finally {
+				// Clear the guard timer so a winning abort event does not leave an
+				// active timer behind that delays worker teardown.
+				clearTimeout(guardTimer)
+			}
 		})
 
 		it("should merge signal and timeout when both are provided", async () => {
@@ -126,16 +133,23 @@ describe("OpenAICompatibleHandler", () => {
 			expect(mergedSignal.aborted).toBe(false)
 
 			// With the caller signal left untouched, only the timeout component can fire
+			let guardTimer: ReturnType<typeof setTimeout> | undefined
 			const fired = await Promise.race([
 				new Promise<boolean>((resolve) => {
 					mergedSignal.addEventListener("abort", () => resolve(true), { once: true })
 				}),
 				new Promise<boolean>((resolve) => {
-					setTimeout(() => resolve(false), 1000)
+					guardTimer = setTimeout(() => resolve(false), 1000)
 				}),
 			])
-			expect(fired).toBe(true)
-			expect(mergedSignal.aborted).toBe(true)
+			try {
+				expect(fired).toBe(true)
+				expect(mergedSignal.aborted).toBe(true)
+			} finally {
+				// Clear the guard timer so a winning abort event does not leave an
+				// active timer behind that delays worker teardown.
+				clearTimeout(guardTimer)
+			}
 		})
 
 		it("should work without options (backward compatible)", async () => {
