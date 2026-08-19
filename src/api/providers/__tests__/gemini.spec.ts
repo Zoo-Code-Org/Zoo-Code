@@ -332,6 +332,45 @@ describe("GeminiHandler", () => {
 			})
 		})
 
+		it("appends a user continuation when history ends with an assistant turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+
+			await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Continue." }] },
+					],
+				}),
+			)
+		})
+
+		it("does not append a continuation when history ends with a user turn", async () => {
+			const generateContentStream = vitest.mocked(handler["client"].models.generateContentStream)
+			generateContentStream.mockResolvedValue(asyncStreamFrom([]))
+			const userEndingMessages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Hello" },
+				{ role: "assistant", content: "Hi there!" },
+				{ role: "user", content: "Please continue" },
+			]
+
+			await collectStream(handler.createMessage(systemPrompt, userEndingMessages))
+
+			expect(generateContentStream).toHaveBeenCalledWith(
+				expect.objectContaining({
+					contents: [
+						{ role: "user", parts: [{ text: "Hello" }] },
+						{ role: "model", parts: [{ text: "Hi there!" }] },
+						{ role: "user", parts: [{ text: "Please continue" }] },
+					],
+				}),
+			)
+		})
+
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
 			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)

@@ -14,8 +14,52 @@ export class VertexHandler extends GeminiHandler implements SingleCompletionHand
 
 	override getModel() {
 		const modelId = this.options.apiModelId
-		const id = modelId && modelId in vertexModels ? (modelId as VertexModelId) : vertexDefaultModelId
-		let info: ModelInfo = vertexModels[id]
+		let id: string
+		let info: ModelInfo
+
+		if (modelId && Object.hasOwn(vertexModels, modelId)) {
+			id = modelId
+			info = vertexModels[modelId as VertexModelId]
+		} else if (
+			modelId?.endsWith(":thinking") &&
+			Object.hasOwn(vertexModels, modelId.slice(0, -":thinking".length))
+		) {
+			const baseModelId = modelId.slice(0, -":thinking".length) as VertexModelId
+			id = modelId
+			info = vertexModels[baseModelId]
+		} else if (modelId && modelId.toLowerCase().startsWith("gemini-")) {
+			id = modelId
+			const baseModelId = modelId.endsWith(":thinking") ? modelId.slice(0, -":thinking".length) : modelId
+			const fallbackModelId: VertexModelId = (
+				Object.hasOwn(vertexModels, baseModelId)
+					? baseModelId
+					: "gemini-3.7-flash" in vertexModels
+						? "gemini-3.7-flash"
+						: "gemini-3.1-pro-preview" in vertexModels
+							? "gemini-3.1-pro-preview"
+							: vertexDefaultModelId
+			) as VertexModelId
+			const baseInfo = vertexModels[fallbackModelId] || vertexModels[vertexDefaultModelId]
+			info = {
+				...baseInfo,
+				inputPrice: undefined,
+				outputPrice: undefined,
+				cacheReadsPrice: undefined,
+				cacheWritesPrice: undefined,
+				tiers: undefined,
+			}
+		} else {
+			const defaultGeminiModel: VertexModelId = (
+				"gemini-3.7-flash" in vertexModels
+					? "gemini-3.7-flash"
+					: "gemini-3.1-pro-preview" in vertexModels
+						? "gemini-3.1-pro-preview"
+						: vertexDefaultModelId
+			) as VertexModelId
+			id = defaultGeminiModel
+			info = vertexModels[defaultGeminiModel]
+		}
+
 		const params = getModelParams({
 			format: "gemini",
 			modelId: id,
