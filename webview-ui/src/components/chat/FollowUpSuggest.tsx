@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { ClipboardCopy, Timer } from "lucide-react"
 
 import { Button, StandardTooltip } from "@/components/ui"
@@ -33,6 +33,17 @@ export const FollowUpSuggest = ({
 	const [suggestionSelected, setSuggestionSelected] = useState(false)
 	const { t } = useAppTranslation()
 
+	// The model may emit suggestions with missing or blank answers. Those render
+	// as empty buttons, and clicking "Copy to input" on one pushes an undefined
+	// string into the chat input and crashes the text area (issue #1226), so hide them.
+	const visibleSuggestions = useMemo(
+		() =>
+			suggestions.filter(
+				(suggestion) => typeof suggestion?.answer === "string" && suggestion.answer.trim().length > 0,
+			),
+		[suggestions],
+	)
+
 	// Start countdown timer when auto-approval is enabled for follow-up questions
 	useEffect(() => {
 		// Only start countdown if auto-approval is enabled for follow-up questions and no suggestion has been selected
@@ -40,7 +51,7 @@ export const FollowUpSuggest = ({
 		if (
 			autoApprovalEnabled &&
 			alwaysAllowFollowupQuestions &&
-			suggestions.length > 0 &&
+			visibleSuggestions.length > 0 &&
 			!suggestionSelected &&
 			!isAnswered &&
 			!isFollowUpAutoApprovalPaused
@@ -78,7 +89,7 @@ export const FollowUpSuggest = ({
 	}, [
 		autoApprovalEnabled,
 		alwaysAllowFollowupQuestions,
-		suggestions,
+		visibleSuggestions,
 		followupAutoApproveTimeoutMs,
 		suggestionSelected,
 		onCancelAutoApproval,
@@ -102,14 +113,14 @@ export const FollowUpSuggest = ({
 		[onSuggestionClick, onCancelAutoApproval],
 	)
 
-	// Don't render if there are no suggestions or no click handler.
-	if (!suggestions?.length || !onSuggestionClick) {
+	// Don't render if there are no visible suggestions or no click handler.
+	if (visibleSuggestions.length === 0 || !onSuggestionClick) {
 		return null
 	}
 
 	return (
 		<div className="flex mb-2 flex-col h-full gap-2">
-			{suggestions.map((suggestion, index) => {
+			{visibleSuggestions.map((suggestion, index) => {
 				const isFirstSuggestion = index === 0
 				const suggestionMode = getSuggestionMode(suggestion.mode)
 

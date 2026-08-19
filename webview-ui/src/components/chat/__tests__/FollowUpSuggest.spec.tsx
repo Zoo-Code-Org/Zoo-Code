@@ -707,4 +707,65 @@ describe("FollowUpSuggest", () => {
 			expect(mockOnCancelAutoApproval).toHaveBeenCalled()
 		})
 	})
+
+	describe("suggestions with blank or missing answers (issue #1226)", () => {
+		it("should not render anything when all answers are blank or missing", () => {
+			const suggestions = [{ answer: "" }, { answer: "   \n\t " }, { answer: undefined }] as any
+
+			const { container } = renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={suggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			// Blank suggestions are filtered out, so no buttons or countdown render.
+			expect(container.firstChild).toBeNull()
+		})
+
+		it("should only render suggestions with non-blank answers", () => {
+			const suggestions = [
+				{ answer: "" },
+				{ answer: "Valid suggestion" },
+				{ answer: undefined },
+				{ answer: "   " },
+			] as any
+
+			renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={suggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			expect(screen.getByText("Valid suggestion")).toBeInTheDocument()
+			expect(screen.queryAllByRole("button")).toHaveLength(1)
+		})
+
+		it("should not start the auto-approve countdown when all answers are blank", () => {
+			const suggestions = [{ answer: "" }, { answer: undefined }] as any
+
+			renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={suggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			vi.advanceTimersByTime(10000)
+
+			expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+			// Auto-approval must not select a blank suggestion.
+			expect(mockOnSuggestionClick).not.toHaveBeenCalled()
+		})
+	})
 })

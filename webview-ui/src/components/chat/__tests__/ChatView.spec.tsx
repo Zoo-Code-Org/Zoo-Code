@@ -67,6 +67,7 @@ vi.mock("../ChatRow", () => ({
 							<button
 								key={suggestion.answer}
 								type="button"
+								data-testid="followup-suggestion"
 								onClick={(event) => onSuggestionClick?.(suggestion, event)}>
 								{suggestion.answer}
 							</button>
@@ -1459,6 +1460,109 @@ describe("ChatView - Follow-up Suggestions", () => {
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
+	})
+
+	it("ignores a blank or missing suggestion answer instead of crashing (issue #1226)", async () => {
+		const { getAllByTestId } = renderChatView()
+
+		// JSON.stringify drops `answer: undefined`, mirroring how the extension
+		// delivers a malformed follow-up suggestion (no `answer` property).
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Pick one?",
+						suggest: [{ answer: undefined }, { answer: "Valid answer" }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestionButtons = await waitFor(() => {
+			const buttons = getAllByTestId("followup-suggestion")
+			if (buttons.length !== 2) {
+				throw new Error(`expected 2 suggestion buttons, got ${buttons.length}`)
+			}
+			return buttons
+		})
+		vscodePostMessageMock.cleanup()
+
+		// Clicking the blank suggestion must be ignored: no response is sent and
+		// no undefined value is pushed into the input state.
+		fireEvent.click(suggestionButtons[0])
+
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
+
+		// The valid suggestion still sends its answer.
+		fireEvent.click(suggestionButtons[1])
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith({
+				type: "askResponse",
+				askResponse: "messageResponse",
+				text: "Valid answer",
+				images: [],
+			})
+		})
+	})
+
+	it("appends a valid suggestion to the input on shift-click without sending it (issue #1226)", async () => {
+		const { getByTestId, getByRole } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Pick one?",
+						suggest: [{ answer: undefined }, { answer: "Copy me" }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Copy me" }))
+		vscodePostMessageMock.cleanup()
+
+		// Pre-fill the draft, then shift-click ("Copy to input") the valid suggestion.
+		const input = getByTestId("chat-textarea").querySelector("input")
+		if (!input) {
+			throw new Error("expected the chat input to be rendered")
+		}
+
+		fireEvent.change(input, { target: { value: "Draft text" } })
+
+		fireEvent.click(suggestion, { shiftKey: true })
+
+		// The answer is appended to the existing draft instead of being sent.
+		// JSDOM strips line breaks from <input> values (HTML spec "strip newlines"),
+		// so the appended "\n" is absent from the DOM value.
+		await waitFor(() => expect(input.value).toBe("Draft text Copy me"))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
 	})
 })
 

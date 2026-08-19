@@ -1205,4 +1205,34 @@ describe("ChatTextArea", () => {
 			expect(sendButton).toHaveClass("pointer-events-auto")
 		})
 	})
+
+	describe("blank suggestion copy crash (issue #1226)", () => {
+		it("renders without crashing and treats an undefined inputValue as empty", () => {
+			// Intentionally pass the malformed value that #1226 produced at runtime:
+			// clicking "Copy to input" on an empty follow-up suggestion pushed
+			// `undefined` into the input state.
+			const undefinedInput = { ...defaultProps, inputValue: undefined } as unknown as typeof defaultProps
+			const { container } = render(<ChatTextArea {...undefinedInput} />)
+
+			// Before the #1226 fix, mounting with an undefined inputValue threw
+			// "Cannot read properties of undefined (reading 'trim')" in the
+			// hasInputContent memo. It should render normally instead.
+
+			// Clicking "Enhance prompt" with an undefined input must not crash either:
+			// the undefined input behaves like an empty one, so nothing is sent.
+			mockPostMessage.mockClear()
+			fireEvent.click(getEnhancePromptButton())
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "enhancePrompt" }))
+			const buttons = container.querySelectorAll("button")
+			const sendButton = Array.from(buttons).find(
+				(button) => button.querySelector(".lucide-send-horizontal") !== null,
+			)
+
+			expect(sendButton).toBeInTheDocument()
+
+			// An undefined input behaves like an empty input: no content to send.
+			expect(sendButton).toHaveClass("opacity-0")
+			expect(sendButton).toHaveClass("pointer-events-none")
+		})
+	})
 })
