@@ -82,6 +82,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		},
 		ref,
 	) => {
+		// A malformed follow-up answer can push a non-string value into the input state
+		// (issue #1226). Normalize once so every string operation below (trim, slice,
+		// indexing, paste, drop, and the textarea value) is safe.
+		const normalizedInputValue = typeof inputValue === "string" ? inputValue : ""
+
 		const { t } = useAppTranslation()
 		const {
 			filePaths,
@@ -159,7 +164,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					if (message.text && textAreaRef.current) {
 						// Insert the command text at the current cursor position
 						const textarea = textAreaRef.current
-						const currentValue = inputValue
+						const currentValue = normalizedInputValue
 						const cursorPos = textarea.selectionStart || 0
 
 						// Check if we need to add a space before the command
@@ -205,7 +210,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 			window.addEventListener("message", messageHandler)
 			return () => window.removeEventListener("message", messageHandler)
-		}, [setInputValue, searchRequestId, inputValue])
+		}, [setInputValue, searchRequestId, normalizedInputValue])
 
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
@@ -228,7 +233,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			clineMessages,
 			taskHistory,
 			cwd,
-			inputValue,
+			inputValue: normalizedInputValue,
 			setInputValue,
 		})
 
@@ -244,7 +249,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		}, [selectedType, searchQuery])
 
 		const handleEnhancePrompt = useCallback(() => {
-			const trimmedInput = (inputValue ?? "").trim()
+			const trimmedInput = normalizedInputValue.trim()
 
 			if (trimmedInput) {
 				setIsEnhancingPrompt(true)
@@ -252,14 +257,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			} else {
 				setInputValue(t("chat:enhancePromptDescription"))
 			}
-		}, [inputValue, setInputValue, t])
+		}, [normalizedInputValue, setInputValue, t])
 
 		const allModes = useMemo(() => getAllModes(customModes), [customModes])
 
 		// Memoized check for whether the input has content (text or images)
 		const hasInputContent = useMemo(() => {
-			return (inputValue ?? "").trim().length > 0 || selectedImages.length > 0
-		}, [inputValue, selectedImages])
+			return normalizedInputValue.trim().length > 0 || selectedImages.length > 0
+		}, [normalizedInputValue, selectedImages])
 
 		// Compute the key combination text for the send button tooltip based on enterBehavior
 		const sendKeyCombination = useMemo(() => {
@@ -508,8 +513,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				}
 
 				if (event.key === "Backspace" && !isComposing) {
-					const charBeforeCursor = inputValue[cursorPosition - 1]
-					const charAfterCursor = inputValue[cursorPosition + 1]
+					const charBeforeCursor = normalizedInputValue[cursorPosition - 1]
+					const charAfterCursor = normalizedInputValue[cursorPosition + 1]
 
 					const charBeforeIsWhitespace =
 						charBeforeCursor === " " || charBeforeCursor === "\n" || charBeforeCursor === "\r\n"
@@ -521,7 +526,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					if (
 						charBeforeIsWhitespace &&
 						// "$" is added to ensure the match occurs at the end of the string.
-						inputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))
+						normalizedInputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))
 					) {
 						const newCursorPosition = cursorPosition - 1
 						// If mention is followed by another word, then instead
@@ -536,9 +541,9 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						setCursorPosition(newCursorPosition)
 						setJustDeletedSpaceAfterMention(true)
 					} else if (justDeletedSpaceAfterMention) {
-						const { newText, newPosition } = removeMention(inputValue, cursorPosition)
+						const { newText, newPosition } = removeMention(normalizedInputValue, cursorPosition)
 
-						if (newText !== inputValue) {
+						if (newText !== normalizedInputValue) {
 							event.preventDefault()
 							setInputValue(newText)
 							setIntendedCursorPosition(newPosition) // Store the new cursor position in state
@@ -558,7 +563,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				selectedMenuIndex,
 				handleMentionSelect,
 				selectedType,
-				inputValue,
+				normalizedInputValue,
 				cursorPosition,
 				setInputValue,
 				justDeletedSpaceAfterMention,
@@ -577,7 +582,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				textAreaRef.current.setSelectionRange(intendedCursorPosition, intendedCursorPosition)
 				setIntendedCursorPosition(null) // Reset the state.
 			}
-		}, [inputValue, intendedCursorPosition])
+		}, [normalizedInputValue, intendedCursorPosition])
 
 		// Ref to store the search timeout.
 		const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
@@ -677,7 +682,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					e.preventDefault()
 					const trimmedUrl = pastedText.trim()
 					const newValue =
-						inputValue.slice(0, cursorPosition) + trimmedUrl + " " + inputValue.slice(cursorPosition)
+						normalizedInputValue.slice(0, cursorPosition) +
+						trimmedUrl +
+						" " +
+						normalizedInputValue.slice(cursorPosition)
 					setInputValue(newValue)
 					const newCursorPosition = cursorPosition + trimmedUrl.length + 1
 					setCursorPosition(newCursorPosition)
@@ -740,7 +748,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					}
 				}
 			},
-			[shouldDisableImages, setSelectedImages, cursorPosition, setInputValue, inputValue, t],
+			[shouldDisableImages, setSelectedImages, cursorPosition, setInputValue, normalizedInputValue, t],
 		)
 
 		const handleMenuMouseDown = useCallback(() => {
@@ -790,7 +798,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		useLayoutEffect(() => {
 			updateHighlights()
-		}, [inputValue, updateHighlights])
+		}, [normalizedInputValue, updateHighlights])
 
 		const updateCursorPosition = useCallback(() => {
 			if (textAreaRef.current) {
@@ -822,7 +830,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 					if (lines.length > 0) {
 						// Process each line as a separate file path
-						let newValue = inputValue.slice(0, cursorPosition)
+						let newValue = normalizedInputValue.slice(0, cursorPosition)
 						let totalLength = 0
 
 						// Using a standard for loop instead of forEach for potential performance gains.
@@ -841,7 +849,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						}
 
 						// Add space after the last mention and append the rest of the input
-						newValue += " " + inputValue.slice(cursorPosition)
+						newValue += " " + normalizedInputValue.slice(cursorPosition)
 						totalLength += 1
 
 						setInputValue(newValue)
@@ -902,7 +910,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[
 				cursorPosition,
 				cwd,
-				inputValue,
+				normalizedInputValue,
 				setInputValue,
 				setCursorPosition,
 				setIntendedCursorPosition,
@@ -995,7 +1003,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								<ContextMenu
 									onSelect={handleMentionSelect}
 									searchQuery={searchQuery}
-									inputValue={inputValue}
+									inputValue={normalizedInputValue}
 									onMouseDown={handleMenuMouseDown}
 									selectedIndex={selectedMenuIndex}
 									setSelectedIndex={setSelectedMenuIndex}
@@ -1058,7 +1066,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									}
 									textAreaRef.current = el
 								}}
-								value={inputValue}
+								value={normalizedInputValue}
 								onChange={(e) => {
 									handleInputChange(e)
 									updateHighlights()
@@ -1264,7 +1272,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								</StandardTooltip>
 							</div>
 
-							{!inputValue && (
+							{!normalizedInputValue && (
 								<div
 									className={cn(
 										"absolute left-2 z-30 flex items-center h-8 font-vscode-font-family text-vscode-editor-font-size leading-vscode-editor-line-height",

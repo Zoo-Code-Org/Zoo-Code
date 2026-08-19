@@ -1207,6 +1207,11 @@ describe("ChatTextArea", () => {
 	})
 
 	describe("blank suggestion copy crash (issue #1226)", () => {
+		const getSendButton = (container: HTMLElement) => {
+			const buttons = container.querySelectorAll("button")
+			return Array.from(buttons).find((button) => button.querySelector(".lucide-send-horizontal") !== null)
+		}
+
 		it("renders without crashing and treats an undefined inputValue as empty", () => {
 			// Intentionally pass the malformed value that #1226 produced at runtime:
 			// clicking "Copy to input" on an empty follow-up suggestion pushed
@@ -1223,14 +1228,26 @@ describe("ChatTextArea", () => {
 			mockPostMessage.mockClear()
 			fireEvent.click(getEnhancePromptButton())
 			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "enhancePrompt" }))
-			const buttons = container.querySelectorAll("button")
-			const sendButton = Array.from(buttons).find(
-				(button) => button.querySelector(".lucide-send-horizontal") !== null,
-			)
-
-			expect(sendButton).toBeInTheDocument()
 
 			// An undefined input behaves like an empty input: no content to send.
+			const sendButton = getSendButton(container)
+			expect(sendButton).toBeInTheDocument()
+			expect(sendButton).toHaveClass("opacity-0")
+			expect(sendButton).toHaveClass("pointer-events-none")
+		})
+
+		it.each([0, false, { answer: "nope" }])("treats a non-string inputValue of %p as empty", (value) => {
+			// Only nullish values were normalized before the #1226 follow-up fix;
+			// any other non-string value must be treated as empty, not crash.
+			const badInput = { ...defaultProps, inputValue: value } as unknown as typeof defaultProps
+			const { container } = render(<ChatTextArea {...badInput} />)
+
+			mockPostMessage.mockClear()
+			fireEvent.click(getEnhancePromptButton())
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "enhancePrompt" }))
+
+			const sendButton = getSendButton(container)
+			expect(sendButton).toBeInTheDocument()
 			expect(sendButton).toHaveClass("opacity-0")
 			expect(sendButton).toHaveClass("pointer-events-none")
 		})

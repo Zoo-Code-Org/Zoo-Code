@@ -25,6 +25,14 @@ describe("Follow-up question auto-approval", () => {
 		}
 	})
 
+	it("falls back to asking when the follow-up has no text payload", async () => {
+		// Exercises the `text || "{}"` fallback: a follow-up without any payload must
+		// not schedule an auto-answer timeout.
+		const result = await checkAutoApproval({ state: baseState as never, ask: "followup" })
+
+		expect(result).toEqual({ decision: "ask" })
+	})
+
 	it("skips a blank or missing first answer and uses the next valid suggestion (issue #1226)", async () => {
 		// Mirrors a malformed model response where JSON round-tripping drops
 		// `answer: undefined` and the first item is unusable.
