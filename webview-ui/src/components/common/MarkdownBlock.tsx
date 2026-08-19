@@ -25,6 +25,13 @@ function rehypeMentions() {
 				return
 			}
 
+			// Code is literal content: never interactive-ify mention patterns inside it.
+			// Wrapping them would also corrupt the CodeBlock text extraction, which only
+			// keeps string children (the mention text would silently disappear).
+			if (parent?.tagName === "code") {
+				return
+			}
+
 			const originalValue = String(node.value)
 			const matches = Array.from(originalValue.matchAll(mentionRegexGlobal))
 
@@ -49,9 +56,20 @@ function rehypeMentions() {
 					tagName: "span",
 					properties: {
 						className: ["mention-context-highlight", "text-[0.9em]", "cursor-pointer"],
+						role: "button",
+						tabIndex: 0,
 						onClick: (event: React.MouseEvent<HTMLSpanElement>) => {
 							// Keep mention clicks from bubbling to the TaskHeader toggle, which
 							// would collapse the expanded panel right after opening the mention.
+							event.stopPropagation()
+							vscode.postMessage({ type: "openMention", text: mentionValue })
+						},
+						// Keyboard parity with the click handler (a role=button span is not a
+						// native button, so Enter/Space must be handled explicitly).
+						onKeyDown: (event: React.KeyboardEvent<HTMLSpanElement>) => {
+							if (event.key !== "Enter" && event.key !== " ") {
+								return
+							}
 							event.stopPropagation()
 							vscode.postMessage({ type: "openMention", text: mentionValue })
 						},

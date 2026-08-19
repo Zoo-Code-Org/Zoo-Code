@@ -304,6 +304,50 @@ describe("MarkdownBlock", () => {
 			expect(mentions.length).toBe(0)
 		})
 
+		it("keeps mention patterns literal inside fenced code blocks", async () => {
+			const markdown = "```bash\necho hello @problems\n```"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/echo/, { exact: false })
+
+			// Code is literal content: the mention must stay plain text, not become a
+			// clickable span (which would also make the text vanish from CodeBlock).
+			expect(container.querySelector("code")?.textContent).toBe("echo hello @problems\n")
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+		})
+
+		it("keeps mention patterns literal inside inline code", async () => {
+			const markdown = "Use `@problems` carefully."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Use/, { exact: false })
+
+			expect(container.querySelector("code")?.textContent).toBe("@problems")
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+		})
+
+		it("makes mentions keyboard operable (role=button, tabIndex, Enter/Space)", async () => {
+			const markdown = "See @terminal."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/See/, { exact: false })
+
+			const mention = container.querySelector("span.mention-context-highlight")!
+			expect(mention.getAttribute("role")).toBe("button")
+			expect(mention.getAttribute("tabindex")).toBe("0")
+
+			fireEvent.keyDown(mention, { key: "Enter" })
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "terminal" })
+
+			mockPostMessage.mockClear()
+			fireEvent.keyDown(mention, { key: " " })
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "terminal" })
+
+			mockPostMessage.mockClear()
+			fireEvent.keyDown(mention, { key: "a" })
+			expect(mockPostMessage).not.toHaveBeenCalled()
+		})
+
 		it("preserves regular text around mentions", async () => {
 			const markdown = "Before @problems middle after"
 			const { container } = render(<MarkdownBlock markdown={markdown} />)
