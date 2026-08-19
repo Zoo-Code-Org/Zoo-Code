@@ -5,7 +5,7 @@ import {
 	AutoApproveSettingsManualSnapshot1Fixture,
 	AutoApproveSettingsManualSnapshot2Fixture,
 	AutoApproveSettingsManualSnapshot3Fixture,
-} from "./AutoApproveSettings.manualSnapshots.fixture"
+} from "./AutoApproveSettings.visual.fixture"
 
 test("matches provided manual snapshot (1)", async ({ mount, page }) => {
 	const component = await mount(<AutoApproveSettingsManualSnapshot1Fixture />)
