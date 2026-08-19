@@ -18,6 +18,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 /**
  * Configuration options for creating an OpenAI-compatible provider.
@@ -176,6 +177,12 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 			toolChoice: this.mapToolChoice(metadata?.tool_choice),
 		}
 
+		// Forward the external abort signal (e.g. task cancellation) so the in-flight
+		// stream is aborted when the request is cancelled
+		if (metadata?.abortSignal) {
+			requestOptions.abortSignal = metadata.abortSignal
+		}
+
 		// Use streamText for streaming responses
 		const result = streamText(requestOptions)
 
@@ -200,12 +207,19 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const languageModel = this.getLanguageModel()
 
-		const { text } = await generateText({
+		const generateOptions: Parameters<typeof generateText>[0] & { abortSignal?: AbortSignal } = {
 			model: languageModel,
 			prompt,
 			maxOutputTokens: this.getMaxOutputTokens(),
 			temperature: this.config.temperature ?? 0,
-		})
+		}
+
+		const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		if (mergedAbortSignal) {
+			generateOptions.abortSignal = mergedAbortSignal
+		}
+
+		const { text } = await generateText(generateOptions)
 
 		return text
 	}
