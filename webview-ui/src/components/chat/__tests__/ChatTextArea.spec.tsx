@@ -1,6 +1,6 @@
 import { defaultModeSlug } from "@roo/modes"
 
-import { render, fireEvent, screen } from "@src/utils/test-utils"
+import { render, fireEvent, screen, act } from "@src/utils/test-utils"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 import * as pathMentions from "@src/utils/path-mentions"
@@ -1250,6 +1250,91 @@ describe("ChatTextArea", () => {
 			expect(sendButton).toBeInTheDocument()
 			expect(sendButton).toHaveClass("opacity-0")
 			expect(sendButton).toHaveClass("pointer-events-none")
+		})
+	})
+
+	describe("string operations on the normalized input (issue #1226)", () => {
+		const getTextarea = (container: HTMLElement) => {
+			const textarea = container.querySelector("textarea")
+			if (!textarea) {
+				throw new Error("expected the chat textarea to be rendered")
+			}
+			return textarea
+		}
+
+		it("inserts command text at the cursor via the insertTextIntoTextarea message", () => {
+			render(<ChatTextArea {...defaultProps} inputValue="hello " />)
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "insertTextIntoTextarea", text: "/command" } }),
+				)
+			})
+
+			// The cursor starts at 0, so the command is prepended with a trailing space.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("/command hello ")
+		})
+
+		it("inspects the characters around the cursor on Backspace without crashing", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="some text" />)
+			const textarea = getTextarea(container)
+
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Plain text: no mention manipulation, so the input is untouched.
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("removes a mention on the second Backspace after deleting the space after it", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			// Position the cursor after the trailing space and tell the component about it.
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+
+			// First Backspace: drops the space after the mention and arms the pending flag.
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Second Backspace: removes the mention itself.
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("hello ")
+		})
+
+		it("resets the pending mention flag without changing the input when the cursor is not after a mention", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			// Arm the pending flag with the first Backspace right after the mention.
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Move the cursor away from the mention before the next Backspace.
+			textarea.setSelectionRange(2, 2)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// removeMention finds no mention at the cursor, so the input is untouched.
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("adds a trailing space after a pasted URL", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="visit " />)
+			const textarea = getTextarea(container)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+
+			// The URL is inserted at cursor position 0, followed by a space.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("https://example.com visit ")
 		})
 	})
 })
