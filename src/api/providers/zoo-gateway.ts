@@ -219,9 +219,25 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
+		// Per-request controller so an external abort signal (e.g. task
+		// cancellation) can interrupt the in-flight streaming request.
+		// Bridge it to our controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		const controller = new AbortController()
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+		}
+
 		try {
 			const completion = await this.client.chat.completions.create(body, {
 				headers: requestHeaders,
+				signal: controller.signal,
 			})
 
 			for await (const chunk of completion) {
@@ -295,8 +311,16 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens
+			// Build request options with abortSignal and/or timeout
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs !== undefined) {
+				createOptions.timeout = options.timeoutMs
+			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			const response = await this.client.chat.completions.create(requestOptions, createOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			try {

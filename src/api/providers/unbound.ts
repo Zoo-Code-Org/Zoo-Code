@@ -158,9 +158,24 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			tool_choice: metadata?.tool_choice,
 		}
 
+		// Per-request controller so an external abort signal (e.g. task
+		// cancellation) can interrupt the in-flight streaming request.
+		// Bridge it to our controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		const controller = new AbortController()
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+		}
+
 		let stream
 		try {
-			stream = await this.client.chat.completions.create(completionParams)
+			stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}
@@ -212,10 +227,18 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			messages: openAiMessages,
 			temperature: temperature,
 		}
+		// Build request options with abortSignal and/or timeout
+		const createOptions: OpenAI.RequestOptions = {}
+		if (options?.abortSignal) {
+			createOptions.signal = options.abortSignal
+		}
+		if (options?.timeoutMs !== undefined) {
+			createOptions.timeout = options.timeoutMs
+		}
 
 		let response: OpenAI.Chat.ChatCompletion
 		try {
-			response = await this.client.chat.completions.create(completionParams)
+			response = await this.client.chat.completions.create(completionParams, createOptions)
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}

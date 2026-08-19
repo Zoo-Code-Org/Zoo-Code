@@ -165,8 +165,32 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	): ApiStream {
 		const { id: modelId, info, format, temperature, reasoningEffort, maxTokens } = await this.resolveModel()
 
+		// Per-request controller so an external abort signal (e.g. task
+		// cancellation) can interrupt the in-flight streaming request.
+		// Bridge it to our controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		const controller = new AbortController()
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+		}
+
 		if (format === "anthropic") {
-			yield* this.streamAnthropicMessage(modelId, info, temperature, maxTokens, systemPrompt, messages, metadata)
+			yield* this.streamAnthropicMessage(
+				modelId,
+				info,
+				temperature,
+				maxTokens,
+				systemPrompt,
+				messages,
+				controller.signal,
+				metadata,
+			)
 			return
 		}
 
@@ -198,7 +222,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			}),
 		}
 
-		const completion = await this.client.chat.completions.create(body)
+		const completion = await this.client.chat.completions.create(body, { signal: controller.signal })
 
 		for await (const chunk of completion) {
 			const delta = chunk.choices[0]?.delta
@@ -256,6 +280,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		maxTokens: number | undefined,
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
+		abortSignal: AbortSignal,
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
@@ -306,7 +331,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// errors propagate unchanged, matching the OpenAI streaming path.
 		let stream
 		try {
-			stream = await this.anthropicClient.messages.create(requestParams)
+			stream = await this.anthropicClient.messages.create(requestParams, { signal: abortSignal })
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
@@ -491,20 +516,32 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		if (format === "anthropic") {
 			try {
-				const message = await this.anthropicClient.messages.create({
-					model: modelId,
-					// Honour the same includeMaxTokens/modelMaxTokens override
-					// logic as the streaming path so non-streaming completions
-					// respect the user's max-output slider instead of always
-					// falling back to the model default.
-					max_tokens:
-						this.options.includeMaxTokens === true
-							? this.options.modelMaxTokens || maxTokens || 16_384
-							: (maxTokens ?? 16_384),
-					temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
-					messages: [{ role: "user", content: prompt }],
-					stream: false,
-				})
+				// Build request options with abortSignal and/or timeout handling
+				const requestOptions: Anthropic.RequestOptions = {}
+				if (options?.abortSignal) {
+					requestOptions.signal = options.abortSignal
+				}
+				if (options?.timeoutMs !== undefined) {
+					requestOptions.timeout = options.timeoutMs
+				}
+
+				const message = await this.anthropicClient.messages.create(
+					{
+						model: modelId,
+						// Honour the same includeMaxTokens/modelMaxTokens override
+						// logic as the streaming path so non-streaming completions
+						// respect the user's max-output slider instead of always
+						// falling back to the model default.
+						max_tokens:
+							this.options.includeMaxTokens === true
+								? this.options.modelMaxTokens || maxTokens || 16_384
+								: (maxTokens ?? 16_384),
+						temperature: this.supportsTemperature(modelId) ? (temperature ?? 1.0) : undefined,
+						messages: [{ role: "user", content: prompt }],
+						stream: false,
+					},
+					Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
+				)
 
 				const content = message.content.find(({ type }) => type === "text")
 				return content?.type === "text" ? content.text : ""
@@ -535,7 +572,16 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Build request options with abortSignal and/or timeout for OpenAI path
+			const createOptions: OpenAI.RequestOptions = {}
+			if (options?.abortSignal) {
+				createOptions.signal = options.abortSignal
+			}
+			if (options?.timeoutMs !== undefined) {
+				createOptions.timeout = options.timeoutMs
+			}
+
+			const response = await this.client.chat.completions.create(requestOptions, createOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof Error) {

@@ -36,6 +36,7 @@ import { Package } from "../../../shared/package"
 import { clearZooCodeToken } from "../../../services/zoo-code-auth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -289,6 +290,7 @@ describe("ZooGatewayHandler", () => {
 						"X-Zoo-Task-ID": "task-123",
 						"X-Zoo-Mode": "code",
 					},
+					signal: expect.any(AbortSignal),
 				}),
 			)
 		})
@@ -434,6 +436,7 @@ describe("ZooGatewayHandler", () => {
 					temperature: ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
+				{},
 			)
 		})
 
@@ -456,8 +459,112 @@ describe("ZooGatewayHandler", () => {
 
 			await expect(handler.completePrompt("Test")).resolves.toBe("")
 		})
+
+		it("should pass abort signal through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should pass timeoutMs=0 through to client", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 0 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new ZooGatewayHandler(mockOptions)
+			mockCreate.mockImplementation(async () => ({
+				choices: [{ message: { role: "assistant", content: "response" } }],
+			}))
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
 	})
 
+	describe("createMessage abort signal bridging", () => {
+		it("rejects with an AbortError when the external signal is already aborted", async () => {
+			mockCreate.mockImplementation(async () => {
+				throw new DOMException("The operation was aborted.", "AbortError")
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"prompt",
+				[{ role: "user", content: "hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return (async function* () {
+					yield {
+						choices: [{ delta: { content: "partial" }, index: 0 }],
+						index: 0,
+					}
+					await new Promise((_resolve, reject) => {
+						const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+						options?.signal?.addEventListener("abort", onAbort, { once: true })
+					})
+				})()
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"prompt",
+					[{ role: "user", content: "hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			// Let the request start and the first chunk be yielded before aborting.
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			controller.abort()
+
+			await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+			expect(capturedSignal?.aborted).toBe(true)
+		})
+	})
 	describe("classifyGatewayApiError", () => {
 		it("returns sign_in on 401", () => {
 			expect(classifyGatewayApiError(makeApiError(401))).toEqual({ kind: "sign_in" })

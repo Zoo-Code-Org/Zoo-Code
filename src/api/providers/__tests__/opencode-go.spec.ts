@@ -19,6 +19,7 @@ import { getModels } from "../fetchers/modelCache"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 vitest.mock("openai")
 vitest.mock("delay", () => ({
@@ -188,6 +189,7 @@ describe("OpencodeGoHandler", () => {
 					max_completion_tokens: 40_960,
 					temperature: expect.any(Number),
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -202,6 +204,7 @@ describe("OpencodeGoHandler", () => {
 					model: "glm-5.1",
 					reasoning_effort: "medium",
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -352,10 +355,67 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 999 }))
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_completion_tokens: 999 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 	})
 
+	describe("createMessage abort signal bridging", () => {
+		it("rejects with an AbortError when the external signal is already aborted", async () => {
+			mockCreate.mockImplementation(async () => {
+				throw new DOMException("The operation was aborted.", "AbortError")
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"sys",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				return (async function* () {
+					yield {
+						choices: [{ delta: { content: "partial" }, index: 0 }],
+						index: 0,
+					}
+					await new Promise((_resolve, reject) => {
+						const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
+						options?.signal?.addEventListener("abort", onAbort, { once: true })
+					})
+				})()
+			})
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+
+			const consumed = collectStream(
+				handler.createMessage(
+					"sys",
+					[{ role: "user", content: "hi" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			)
+
+			// Let the request start and the first chunk be yielded before aborting.
+			await new Promise((resolve) => setTimeout(resolve, 25))
+			controller.abort()
+
+			await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+			expect(capturedSignal?.aborted).toBe(true)
+		})
+	})
 	describe("completePrompt", () => {
 		it("returns the message content for a non-streaming completion", async () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "the answer" } }] })
@@ -369,6 +429,7 @@ describe("OpencodeGoHandler", () => {
 					max_completion_tokens: 40_960,
 					reasoning_effort: "medium",
 				}),
+				{},
 			)
 		})
 
@@ -394,7 +455,7 @@ describe("OpencodeGoHandler", () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 			const handler = new OpencodeGoHandler({ ...mockOptions, includeMaxTokens: true, modelMaxTokens: 4321 })
 			await handler.completePrompt("ping")
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }))
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ max_completion_tokens: 4321 }), {})
 		})
 	})
 
@@ -456,6 +517,7 @@ describe("OpencodeGoHandler", () => {
 					stream: true,
 					system: expect.arrayContaining([expect.objectContaining({ type: "text", text: "sys" })]),
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 			// The OpenAI chat completions endpoint must NOT be used for this model.
 			expect(mockCreate).not.toHaveBeenCalled()
@@ -537,6 +599,7 @@ describe("OpencodeGoHandler", () => {
 					// so the model default is used.
 					max_tokens: 65_536,
 				}),
+				undefined,
 			)
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
@@ -552,7 +615,7 @@ describe("OpencodeGoHandler", () => {
 				modelMaxTokens: 2048,
 			})
 			await handler.completePrompt("ping")
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }))
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 2048 }), undefined)
 		})
 
 		it("completePrompt rethrows non-Error values unchanged from the Anthropic path", async () => {
@@ -567,6 +630,125 @@ describe("OpencodeGoHandler", () => {
 			expect(await handler.completePrompt("ping")).toBe("")
 		})
 
+		it("completePrompt passes abort signal through to Anthropic client", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { abortSignal: controller.signal })
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("completePrompt passes both signal and timeoutMs through to Anthropic client", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const controller = new AbortController()
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				signal: controller.signal,
+				timeout: 10000,
+			})
+		})
+
+		it("completePrompt passes only timeoutMs when no signal is provided", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { timeoutMs: 5000 })
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				timeout: 5000,
+			})
+		})
+
+		it("completePrompt works without options (backward compatible, Anthropic path)", async () => {
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const result = await handler.completePrompt("ping")
+			expect(result).toBe("response")
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				undefined,
+			)
+		})
+
+		describe("completePrompt (OpenAI path)", () => {
+			const openaiOptions: ApiHandlerOptions = {
+				opencodeGoApiKey: "test-key",
+				apiModelId: "glm-5.1", // OpenAI-format model
+			}
+
+			beforeEach(() => {
+				vitest.clearAllMocks()
+			})
+
+			it("completePrompt returns text for OpenAI path", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+
+				const handler = new OpencodeGoHandler(openaiOptions)
+				expect(await handler.completePrompt("ping")).toBe("response")
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{}, // empty object when no options
+				)
+			})
+
+			it("completePrompt passes abort signal through to OpenAI client", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const controller = new AbortController()
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				await handler.completePrompt("ping", { abortSignal: controller.signal })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{ signal: controller.signal },
+				)
+			})
+
+			it("completePrompt passes both signal and timeoutMs through to OpenAI client", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const controller = new AbortController()
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				await handler.completePrompt("ping", { abortSignal: controller.signal, timeoutMs: 10000 })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{ signal: controller.signal, timeout: 10000 },
+				)
+			})
+
+			it("completePrompt passes only timeoutMs when no signal is provided", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				await handler.completePrompt("ping", { timeoutMs: 5000 })
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{ timeout: 5000 },
+				)
+			})
+
+			it("completePrompt works without options (backward compatible, OpenAI path)", async () => {
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				const result = await handler.completePrompt("ping")
+				expect(result).toBe("response")
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({ model: expect.any(String), stream: false }),
+					{}, // empty object when no options
+				)
+			})
+		})
 		it("omits tools and tool_choice from the Anthropic request when no tools are provided", async () => {
 			const handler = new OpencodeGoHandler(anthropicOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -712,7 +894,10 @@ describe("OpencodeGoHandler", () => {
 
 			await collectStream(handler.createMessage("sys", messages))
 
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 8192 }))
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_tokens: 8192 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("falls back to the model max_tokens when includeMaxTokens is on but modelMaxTokens is unset", async () => {
@@ -722,7 +907,10 @@ describe("OpencodeGoHandler", () => {
 			await collectStream(handler.createMessage("sys", messages))
 
 			// qwen3.7-max maxTokens (65_536) clamped to 20% of 1M context => 65_536.
-			expect(mockAnthropicCreate).toHaveBeenCalledWith(expect.objectContaining({ max_tokens: 65_536 }))
+			expect(mockAnthropicCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ max_tokens: 65_536 }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
+			)
 		})
 
 		it("accumulates output tokens across message_delta events into the final cost", async () => {
