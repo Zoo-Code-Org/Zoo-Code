@@ -89,6 +89,28 @@ suite("Roo Code View State", function () {
 			// api.getConfiguration() always reads the sidebar provider.
 			assert.strictEqual(globalThis.api.getConfiguration().mode, "ask")
 
+			// Both per-view writes are awaited through the serialized view-state write queue
+			// before the tasks complete, but a just-resolved globalState write can momentarily
+			// lag a synchronous globalState.get in the extension host. Poll until both
+			// persisted selections are visible before asserting on them.
+			await waitFor(
+				() => {
+					const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
+					if (!persisted) {
+						return false
+					}
+
+					const entries = Object.entries(persisted)
+
+					return (
+						entries.length >= 2 &&
+						entries.some(([, entry]) => entry.mode === "ask") &&
+						entries.some(([, entry]) => entry.mode === "debug")
+					)
+				},
+				{ timeout: 15_000 },
+			)
+
 			const viewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
 			assert.ok(viewStates, "Expected persisted viewStates to exist")
 
