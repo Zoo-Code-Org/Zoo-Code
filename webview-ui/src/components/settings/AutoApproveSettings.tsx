@@ -267,6 +267,7 @@ export const AutoApproveSettings = ({
 
 					<FilePatternAllowlist
 						field="allowedReadFiles"
+						settingId="auto-approve-allowed-read-files"
 						testIdPrefix="allowed-read-file"
 						translationKey="readFiles"
 						patterns={allowedReadFiles}
@@ -275,6 +276,7 @@ export const AutoApproveSettings = ({
 
 					<FilePatternAllowlist
 						field="allowedWriteFiles"
+						settingId="auto-approve-allowed-write-files"
 						testIdPrefix="allowed-write-file"
 						translationKey="writeFiles"
 						patterns={allowedWriteFiles}

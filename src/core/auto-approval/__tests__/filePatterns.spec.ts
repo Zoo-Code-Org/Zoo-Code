@@ -6,8 +6,13 @@ import { isFileMatchedByPatterns, toMatcherPattern } from "../filePatterns"
 
 const CWD = "/path/to/repo"
 
+// Both platforms' rules are exercised on whichever platform the tests run on, by
+// passing `isWindows` explicitly rather than reading `process.platform`.
 const matches = (filePath: string, patterns: string[], cwd: string | undefined = CWD) =>
-	isFileMatchedByPatterns({ filePath, cwd, patterns })
+	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: false })
+
+const matchesOnWindows = (filePath: string, patterns: string[], cwd: string | undefined = CWD) =>
+	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: true })
 
 const homeFromRoot = os.homedir().replace(/\\/g, "/").slice(1)
 
@@ -37,8 +42,8 @@ describe("toMatcherPattern", () => {
 		expect(toMatcherPattern("~/notes.md", CWD)).toBe(`/${homeFromRoot}/notes.md`)
 	})
 
-	it("lowercases a Windows drive so drive letters compare case-insensitively", () => {
-		expect(toMatcherPattern("C:/tmp/notes.md", CWD)).toBe("/c:/tmp/notes.md")
+	it("keeps a Windows drive as the first path segment", () => {
+		expect(toMatcherPattern("C:/tmp/notes.md", CWD)).toBe("/C:/tmp/notes.md")
 	})
 
 	it("anchors a negation exactly like the pattern it cancels", () => {
@@ -135,12 +140,19 @@ describe("isFileMatchedByPatterns", () => {
 	})
 
 	it("keeps Windows drives apart", () => {
-		expect(matches("C:/tmp/notes.md", ["c:/tmp/notes.md"])).toBe(true)
-		expect(matches("D:/tmp/notes.md", ["c:/tmp/notes.md"])).toBe(false)
+		expect(matchesOnWindows("C:/tmp/notes.md", ["c:/tmp/notes.md"])).toBe(true)
+		expect(matchesOnWindows("D:/tmp/notes.md", ["c:/tmp/notes.md"])).toBe(false)
 	})
 
-	it("matches a path that uses Windows separators", () => {
-		expect(matches("docs\\notes.md", ["docs/notes.md"])).toBe(true)
+	it("matches a path that uses Windows separators, on Windows", () => {
+		expect(matchesOnWindows("docs\\notes.md", ["docs/notes.md"])).toBe(true)
+	})
+
+	// A backslash is a legal character in a filename on other platforms, where
+	// `my\file` is one file rather than `file` inside `my`, so it must not be read
+	// as a separator there.
+	it("treats a backslash in a path as part of the filename off Windows", () => {
+		expect(matches("docs\\notes.md", ["docs/notes.md"])).toBe(false)
 	})
 
 	it("honours an escaped glob character in a pattern", () => {
@@ -171,5 +183,65 @@ describe("isFileMatchedByPatterns", () => {
 	it("honours a negation that excludes a file from a broader pattern", () => {
 		expect(matches("docs/secret.md", ["docs/**", "!docs/secret.md"])).toBe(false)
 		expect(matches("docs/notes.md", ["docs/**", "!docs/secret.md"])).toBe(true)
+	})
+
+	// A pattern grants access to a named file, so it must not also grant the
+	// different file that differs only in case.
+	describe("case sensitivity", () => {
+		it("does not match a differently-cased name off Windows", () => {
+			expect(matches("NOTES.md", ["notes.md"])).toBe(false)
+			expect(matches("Notes.Md", ["notes.md"])).toBe(false)
+			expect(matches("DOCS/notes.md", ["docs/notes.md"])).toBe(false)
+			expect(matches("notes.md", ["notes.md"])).toBe(true)
+		})
+
+		it("ignores case on Windows, whose filesystem does too", () => {
+			expect(matchesOnWindows("NOTES.md", ["notes.md"])).toBe(true)
+			expect(matchesOnWindows("DOCS/notes.md", ["docs/notes.md"])).toBe(true)
+		})
+	})
+
+	// A match on a directory must not decide the verdict of the files below it:
+	// see the note of the same name in filePatterns.ts.
+	describe("patterns that match a directory", () => {
+		it("does not grant a directory's contents", () => {
+			expect(matches("docs/notes.md", ["docs"])).toBe(false)
+			expect(matches("docs/nested/notes.md", ["docs"])).toBe(false)
+			expect(matches("elsewhere/docs/notes.md", ["docs"])).toBe(false)
+		})
+
+		it("still grants a file that has the pattern's name", () => {
+			expect(matches("docs", ["docs"])).toBe(true)
+			expect(matches("nested/docs", ["docs"])).toBe(true)
+		})
+
+		// A glob that matches a directory's *name* used to grant everything under
+		// it. It now grants only the files it matches itself, which for `*.d` are
+		// files ending in `.d` rather than the contents of a `build.d/` directory.
+		it("does not grant the contents of a directory whose name a glob matches", () => {
+			expect(matches("build.d/notes.md", ["*.d"])).toBe(false)
+			expect(matches("build.d", ["*.d"])).toBe(true)
+		})
+
+		// `*` names any file in any directory, exactly as `notes.md` and `*.md` do,
+		// so it does reach every file in the workspace. That is the documented
+		// meaning of a pattern without a slash, not the directory behaviour above:
+		// every one of those matches is against the file's own path.
+		it("keeps a bare wildcard matching files at any depth", () => {
+			expect(matches("notes.md", ["*"])).toBe(true)
+			expect(matches("nested/notes.md", ["*"])).toBe(true)
+			expect(matches("nested/notes.md", ["*.md"])).toBe(true)
+		})
+
+		it("keeps a directory glob granting everything below it", () => {
+			expect(matches("docs/notes.md", ["docs/**"])).toBe(true)
+			expect(matches("docs/nested/deeply/notes.md", ["docs/**"])).toBe(true)
+		})
+
+		it("honours a negation at any depth below a directory glob", () => {
+			expect(matches("docs/secret.md", ["docs/**", "!docs/secret.md"])).toBe(false)
+			expect(matches("docs/private/secret.md", ["docs/**", "!docs/private/secret.md"])).toBe(false)
+			expect(matches("docs/private/notes.md", ["docs/**", "!docs/private/secret.md"])).toBe(true)
+		})
 	})
 })

@@ -1303,14 +1303,6 @@ describe("ClineProvider", () => {
 		expect(state.allowedWriteFiles).toEqual([])
 	})
 
-	// Auto-approval resolves workspace-relative paths against `cwd`, and reads
-	// its state from `getState`, so the field has to be present there too.
-	test("getState returns the workspace path", async () => {
-		const state = await provider.getState()
-
-		expect(state.cwd).toBe(provider.cwd)
-	})
-
 	test("getStateToPostToWebview returns the saved allowed write files", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])

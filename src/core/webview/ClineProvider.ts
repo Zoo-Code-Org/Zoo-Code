@@ -2929,10 +2929,6 @@ export class ClineProvider
 			customModes,
 			maxOpenTabsContext: stateValues.maxOpenTabsContext ?? 20,
 			maxWorkspaceFiles: stateValues.maxWorkspaceFiles ?? 200,
-			// Consumers such as auto-approval resolve workspace-relative paths
-			// against this, so it must be present here as well as in
-			// `getStateToPostToWebview`.
-			cwd: this.cwd,
 			disabledTools: stateValues.disabledTools,
 			telemetrySetting: stateValues.telemetrySetting || "unset",
 			showRooIgnoredFiles: stateValues.showRooIgnoredFiles ?? false,

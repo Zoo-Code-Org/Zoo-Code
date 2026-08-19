@@ -12,6 +12,8 @@ interface FilePatternAllowlistProps {
 	field: AllowlistField
 	/** Key under `settings:autoApprove.allowlists` holding this list's strings. */
 	translationKey: "readFiles" | "writeFiles"
+	/** Id this list is registered under in the settings search index. */
+	settingId: string
 	/** Prefix for this list's `data-testid`s, so the two lists stay distinguishable. */
 	testIdPrefix: string
 	patterns?: string[]
@@ -36,6 +38,7 @@ interface FilePatternAllowlistProps {
 export const FilePatternAllowlist = ({
 	field,
 	translationKey,
+	settingId,
 	testIdPrefix,
 	patterns,
 	setCachedStateField,
@@ -45,7 +48,7 @@ export const FilePatternAllowlist = ({
 	const label = t(`settings:autoApprove.allowlists.${translationKey}.label`)
 
 	return (
-		<SearchableSetting settingId={`auto-approve-${testIdPrefix}s`} section="autoApprove" label={label}>
+		<SearchableSetting settingId={settingId} section="autoApprove" label={label}>
 			<label className="block font-medium mb-1" data-testid={`${testIdPrefix}s-heading`}>
 				{label}
 			</label>

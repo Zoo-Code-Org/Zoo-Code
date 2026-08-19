@@ -1,39 +1,15 @@
 // npx vitest run core/auto-approval/__tests__/negation.spec.ts
 
-import type { ExtensionState } from "@roo-code/types"
-
 import { isFileMatchedByPatterns } from "../filePatterns"
-import { checkAutoApproval, type AutoApprovalState, type AutoApprovalStateOptions } from ".."
-
-const CWD = "/path/to/repo"
-
-type State = Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
+import { checkAutoApproval } from ".."
+import { CWD, baseState, type State } from "./fixtures"
 
 const matches = (filePath: string, patterns: string[]) => isFileMatchedByPatterns({ filePath, cwd: CWD, patterns })
-
-const baseState: State = {
-	autoApprovalEnabled: true,
-	alwaysAllowReadOnly: false,
-	alwaysAllowReadOnlyOutsideWorkspace: false,
-	allowedReadFiles: [],
-	alwaysAllowWrite: false,
-	alwaysAllowWriteOutsideWorkspace: false,
-	alwaysAllowWriteProtected: false,
-	allowedWriteFiles: [],
-	cwd: CWD,
-	alwaysAllowMcp: false,
-	alwaysAllowModeSwitch: false,
-	alwaysAllowSubtasks: false,
-	alwaysAllowExecute: false,
-	alwaysAllowFollowupQuestions: false,
-	destructiveCommandGuardEnabled: false,
-	allowedCommands: [],
-	deniedCommands: [],
-}
 
 const readDecision = async (state: Partial<State>, path = "docs/secret.md") =>
 	checkAutoApproval({
 		state: { ...baseState, ...state },
+		cwd: CWD,
 		ask: "tool",
 		text: JSON.stringify({ tool: "readFile", path }),
 	})
@@ -79,10 +55,10 @@ describe("pattern negation", () => {
 	describe("across the two allowlists", () => {
 		// Each list is matched independently, so which box a pattern was typed
 		// into cannot change the outcome by reordering a concatenation.
-		it("does not let a write-list negation revoke read access", () => {
+		it("does not let a write-list negation revoke read access", async () => {
 			expect(
-				readDecision({ allowedReadFiles: ["docs/**"], allowedWriteFiles: ["!docs/secret.md"] }),
-			).resolves.toEqual({ decision: "approve" })
+				await readDecision({ allowedReadFiles: ["docs/**"], allowedWriteFiles: ["!docs/secret.md"] }),
+			).toEqual({ decision: "approve" })
 		})
 
 		it("does not let a read-list negation revoke read access granted by the write list", async () => {

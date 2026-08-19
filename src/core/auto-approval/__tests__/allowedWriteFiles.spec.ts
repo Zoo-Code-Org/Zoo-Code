@@ -1,31 +1,7 @@
 // npx vitest run core/auto-approval/__tests__/allowedWriteFiles.spec.ts
 
-import type { ExtensionState } from "@roo-code/types"
-
-import { checkAutoApproval, type AutoApprovalState, type AutoApprovalStateOptions } from ".."
-
-const CWD = "/path/to/repo"
-
-type State = Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
-
-const baseState: State = {
-	autoApprovalEnabled: true,
-	alwaysAllowReadOnly: false,
-	alwaysAllowReadOnlyOutsideWorkspace: false,
-	alwaysAllowWrite: false,
-	alwaysAllowWriteOutsideWorkspace: false,
-	alwaysAllowWriteProtected: false,
-	allowedWriteFiles: [],
-	cwd: CWD,
-	alwaysAllowMcp: false,
-	alwaysAllowModeSwitch: false,
-	alwaysAllowSubtasks: false,
-	alwaysAllowExecute: false,
-	alwaysAllowFollowupQuestions: false,
-	destructiveCommandGuardEnabled: false,
-	allowedCommands: [],
-	deniedCommands: [],
-}
+import { checkAutoApproval } from ".."
+import { CWD, baseState, type State } from "./fixtures"
 
 const askToWrite = async ({
 	path,
@@ -33,17 +9,22 @@ const askToWrite = async ({
 	tool = "newFileCreated",
 	isProtected,
 	isOutsideWorkspace,
+	cwd = CWD,
+	batchDiffs,
 }: {
-	path: string
+	path?: string
 	state: Partial<State>
 	tool?: string
 	isProtected?: boolean
 	isOutsideWorkspace?: boolean
+	cwd?: string
+	batchDiffs?: { path: string }[]
 }) =>
 	checkAutoApproval({
 		state: { ...baseState, ...state },
+		cwd,
 		ask: "tool",
-		text: JSON.stringify({ tool, path, isOutsideWorkspace, isProtected }),
+		text: JSON.stringify({ tool, path, isOutsideWorkspace, isProtected, batchDiffs }),
 		isProtected,
 	})
 
@@ -103,6 +84,7 @@ describe("allowedWriteFiles auto-approval", () => {
 		expect(
 			await checkAutoApproval({
 				state: { ...baseState, allowedWriteFiles: ["notes.md"] },
+				cwd: CWD,
 				ask: "tool",
 				text: JSON.stringify({ tool: "readFile", path: "notes.md" }),
 			}),
@@ -113,6 +95,7 @@ describe("allowedWriteFiles auto-approval", () => {
 		expect(
 			await checkAutoApproval({
 				state: { ...baseState, allowedWriteFiles: ["notes.md"] },
+				cwd: CWD,
 				ask: "tool",
 				text: JSON.stringify({ tool: "readFile", path: "src/index.ts" }),
 			}),
@@ -140,5 +123,60 @@ describe("allowedWriteFiles auto-approval", () => {
 				state: { alwaysAllowWrite: true },
 			}),
 		).toEqual({ decision: "ask" })
+	})
+
+	// A workspace-relative pattern and a workspace-relative path are only about the
+	// same file if both are resolved against the root the task actually runs in. A
+	// resumed or child task can run in a different one than the window shows, so the
+	// caller passes the task's own `cwd` rather than the provider's.
+	it("resolves the patterns against the cwd it is given", async () => {
+		const state = { allowedWriteFiles: ["/path/to/repo/notes.md"] }
+
+		expect(await askToWrite({ path: "notes.md", cwd: "/path/to/repo", state })).toEqual({
+			decision: "approve",
+		})
+
+		// The same relative path, in another workspace, is another file.
+		expect(await askToWrite({ path: "notes.md", cwd: "/path/to/other-repo", state })).toEqual({
+			decision: "ask",
+		})
+	})
+
+	describe("a write naming several files", () => {
+		// One approval covers the whole action, so a pattern has to cover all of it.
+		it("approves only when every file in the batch is listed", async () => {
+			expect(
+				await askToWrite({
+					state: { allowedWriteFiles: ["docs/**"] },
+					tool: "appliedDiff",
+					batchDiffs: [{ path: "docs/a.md" }, { path: "docs/b.md" }],
+				}),
+			).toEqual({ decision: "approve" })
+
+			expect(
+				await askToWrite({
+					state: { allowedWriteFiles: ["docs/**"] },
+					tool: "appliedDiff",
+					batchDiffs: [{ path: "docs/a.md" }, { path: "src/index.ts" }],
+				}),
+			).toEqual({ decision: "ask" })
+		})
+
+		it("does not let a listed batch carry an unlisted path", async () => {
+			expect(
+				await askToWrite({
+					path: "src/index.ts",
+					state: { allowedWriteFiles: ["docs/**"] },
+					tool: "appliedDiff",
+					batchDiffs: [{ path: "docs/a.md" }],
+				}),
+			).toEqual({ decision: "ask" })
+		})
+
+		it("asks when the action names no file at all", async () => {
+			expect(
+				await askToWrite({ state: { allowedWriteFiles: ["docs/**", "*", "**"] }, tool: "appliedDiff" }),
+			).toEqual({ decision: "ask" })
+		})
 	})
 })

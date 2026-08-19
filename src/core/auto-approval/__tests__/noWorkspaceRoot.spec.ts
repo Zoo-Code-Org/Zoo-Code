@@ -51,9 +51,9 @@ describe("patterns without a workspace root", () => {
 		})
 
 		it("honours an absolute negation", () => {
-			expect(matchesWithoutWorkspace("/tmp/scratch/secret.md", ["/tmp/scratch/**", "!/tmp/scratch/secret.md"])).toBe(
-				false,
-			)
+			expect(
+				matchesWithoutWorkspace("/tmp/scratch/secret.md", ["/tmp/scratch/**", "!/tmp/scratch/secret.md"]),
+			).toBe(false)
 		})
 	})
 
@@ -61,17 +61,23 @@ describe("patterns without a workspace root", () => {
 	// behaviour the rejection above preserves.
 	describe("for contrast, with a workspace root", () => {
 		it("confines a bare filename to the workspace", () => {
-			expect(isFileMatchedByPatterns({ filePath: "/etc/passwd", cwd: "/path/to/repo", patterns: ["passwd"] })).toBe(
-				false,
-			)
+			expect(
+				isFileMatchedByPatterns({ filePath: "/etc/passwd", cwd: "/path/to/repo", patterns: ["passwd"] }),
+			).toBe(false)
 
 			expect(
-				isFileMatchedByPatterns({ filePath: "/path/to/repo/etc/passwd", cwd: "/path/to/repo", patterns: ["passwd"] }),
+				isFileMatchedByPatterns({
+					filePath: "/path/to/repo/etc/passwd",
+					cwd: "/path/to/repo",
+					patterns: ["passwd"],
+				}),
 			).toBe(true)
 		})
 
 		it("confines a star to the workspace", () => {
-			expect(isFileMatchedByPatterns({ filePath: "/etc/passwd", cwd: "/path/to/repo", patterns: ["*"] })).toBe(false)
+			expect(isFileMatchedByPatterns({ filePath: "/etc/passwd", cwd: "/path/to/repo", patterns: ["*"] })).toBe(
+				false,
+			)
 		})
 	})
 })

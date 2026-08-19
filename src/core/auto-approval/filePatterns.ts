@@ -42,6 +42,20 @@ import ignore from "ignore"
  * `/` is the only directory separator, also on Windows, since a backslash
  * escapes the character after it.
  *
+ * Matching is case-sensitive, except on Windows, so that a pattern is as
+ * case-sensitive as the filesystem whose files it names.
+ * Pattern `notes.md` must not hand out access to `NOTES.md`,
+ * which on Linux is a different file.
+ * This follows `git`, which compares case-sensitively unless `core.ignoreCase`
+ * is set (`git init` sets it when it detects a case-insensitive filesystem).
+ * It does *not* follow the `ignore` library, whose default is `ignorecase: true`
+ * regardless of platform, so the option has to be passed explicitly.
+ *
+ * A pattern always names files, never directories: `docs/` is rejected, and
+ * `docs` grants access to a *file* named `docs`, not to the directory's
+ * contents. Use `docs/**` to name everything below a directory. See
+ * "Why a match on a directory must not decide a file's verdict" below.
+ *
  * # Why patterns and paths are rewritten before matching
  *
  * The `ignore` library matches a path against patterns as `git` does against
@@ -49,7 +63,7 @@ import ignore from "ignore"
  * directory. It therefore cannot handle:
  * - absolute paths (`/tmp/notes.md`, `C:/tmp/notes.md`), or
  * - paths that climb out of the base directory (`../shared/notes.md`).
- * Running `ignore`'s matching ()`ignores()`) against such a path throws
+ * Running `ignore`'s matching (`ignores()`) against such a path throws
  * `RangeError` ("path should be a `path.relative()`d string").
  * Passing such a *pattern* to `add()` throws nothing at all:
  * It is accepted and then quietly never matches, which would
@@ -68,11 +82,75 @@ import ignore from "ignore"
  * `!/path/to/my/repo/secret.txt` would surprisingly not deny a relative pattern
  * such as `*.txt`, because those would be handled by different `ignore`
  * instances.
- */
+ *
+ * # Why a match on a directory must not decide a file's verdict
+ *
+ * Git's `gitignore` decides a path by walking it from the top: it tests each ancestor
+ * directory first and, once one is excluded, stops and reports the file as
+ * excluded too, because
+ * > It is not possible to re-include a file if a parent directory of that file
+ * > is excluded.
+ * (`man 5 gitignore`). `ignore` reproduces this, testing each ancestor as a
+ * directory path (with a trailing slash) before the file path itself.
+ *
+ * Here a match grants a permission rather than withholding one, so that same
+ * sentence reads: it is not possible to deny a file if a parent directory of
+ * that file is granted. Which is exactly the objection: for a permission that
+ * is the wrong default, in two ways.
+ * - Any pattern that matches a *directory* would grant its whole subtree,
+ *   which is not apparent from the pattern: `docs` would grant every file under
+ *   every `docs/` directory, and a bare `*` the entire workspace, even though
+ *   the table above documents patterns as naming files and `docs/` is rejected
+ *   outright for naming a directory.
+ * - A negation below such a directory would be silently ineffective: with
+ *   `docs/**` followed by `!docs/private/secret.md`, the walk grants the
+ *   `docs/private/` directory and never gets to the negation for the file.
+ *
+ * (In the below, `(star-star)` stands for the `**` wildcard,
+ * which cannot be written literally here because its trailing slash
+ * would close the JSDoc comment block.)
 
-/** Convert Windows path separators so patterns and paths share one syntax. */
-function pathsepsToPosix(value: string): string {
-	return value.replace(/\\/g, "/")
+ * The ancestor walk is therefore neutralised by appending one rule that matches
+ * directories only, and nothing else, using `!(star-star)/`
+ * Being last, it decides every ancestor probe,
+ * since those are the only paths carrying a trailing slash, and it leaves the
+ * file's own verdict to the user's patterns. A pattern can therefore still name
+ * a *file* called `docs`, and `docs/**` still grants everything below `docs/`,
+ * because those rules match the file path directly rather than an ancestor.
+ *
+ * Example:
+ * For workspace root `/path/to/repo`, the two patterns
+ *     docs/(star-star)
+ *     !docs/private/secret.md
+ * are handed to `ignore` as
+ *     /path/to/repo/docs/(star-star)
+ *     !/path/to/repo/docs/private/secret.md
+ *     !(star-star)/       <- appended
+ * and `docs/private/secret.md` is checked as `path/to/repo/docs/private/secret.md`:
+ * the ancestor probes (`path/`, ..., `path/to/repo/docs/private/`) all end in a
+ * slash, so the appended rule has the last word and reports them as not granted;
+ * the file path is then matched by rule 1 (granted) and rule 2 (denied), and as
+ * the last match wins, the file is denied. Without the appended rule, the
+ * ancestor `path/to/repo/docs/private/` would match rule 1 and end the walk
+ * there, granting the file the negation was written to withhold.
+ */
+const MATCH_DIRECTORIES_ONLY_PATTERN = "!**/"
+
+/**
+ * Whether we're on Windows.
+ */
+const runningOnWindows = () => process.platform === "win32"
+
+/**
+ * Convert Windows path separators so patterns and paths share one syntax.
+ *
+ * Only on Windows: everywhere else a backslash is an ordinary character in a
+ * filename (`touch 'my\file'` creates a single file, not a directory), so
+ * converting it would rewrite a path into a different one, and let the pattern
+ * `my/file` grant access to the unrelated file `my\file`.
+ */
+function pathsepsToPosix(value: string, isWindows: boolean): string {
+	return isWindows ? value.replace(/\\/g, "/") : value
 }
 
 function isAbsolutePosixPath(value: string): boolean {
@@ -88,18 +166,20 @@ function escapesWorkspace(posixPath: string): boolean {
  * Rewrite an absolute path as a path relative to the filesystem root, since the
  * `ignore` library rejects paths that start with `/`.
  *
- * The Windows drive becomes the first path segment (lowercased, since Windows
- * treats drive letters case-insensitively), which keeps drives apart: a `c:/`
- * pattern cannot match a `d:/` path.
+ * An absolute POSIX path loses its leading slash.
+ * An absolute Windows path starts with a drive letter, so it doesn't
+ * have a leading slash so we don't have to strip anything from it.
+ *
+ * The drive letter's case is left as typed, since a drive letter only occurs on
+ * Windows, where the matcher ignores case anyway (see the case-sensitivity note
+ * at the top), so `C:/x` and `c:/x` already name the same file.
  *
  * - `"/tmp/notes.md"` -> `"tmp/notes.md"`
- * - `"C:/tmp/notes.md"` -> `"c:/tmp/notes.md"`
+ * - `"C:/tmp/notes.md"` -> `"C:/tmp/notes.md"`
  */
 function toRootRelativePath(absolutePosixPath: string): string {
-	const drive = absolutePosixPath.match(/^([a-zA-Z]):\//)
-
-	if (drive) {
-		return `${drive[1].toLowerCase()}:/${absolutePosixPath.slice(drive[0].length)}`
+	if (/^[a-zA-Z]:\//.test(absolutePosixPath)) {
+		return absolutePosixPath
 	}
 
 	return absolutePosixPath.slice(1)
@@ -160,14 +240,11 @@ function toRootRelativePath(absolutePosixPath: string): string {
  *
  * @param pattern - Raw pattern as typed by the user.
  * @param cwd - Workspace root, used to resolve workspace-relative patterns.
+ * @param isWindows - Whether to read paths by Windows' rules; see `pathsepsToPosix`.
  * @returns The rewritten pattern, or `undefined` when the pattern can never
  * match a file (empty, a directory, or escaping an unknown workspace root).
  */
-export function toMatcherPattern(pattern: string, cwd?: string): string | undefined {
-	if (typeof pattern !== "string") {
-		return undefined
-	}
-
+export function toMatcherPattern(pattern: string, cwd?: string, isWindows = runningOnWindows()): string | undefined {
 	// Set gitignore's negation aside so the path is rewritten on its own merits,
 	// then restore it, so that a negation is anchored exactly like the pattern it
 	// is written to cancel.
@@ -179,7 +256,7 @@ export function toMatcherPattern(pattern: string, cwd?: string): string | undefi
 	}
 
 	if (normalized.startsWith("~/")) {
-		normalized = pathsepsToPosix(path.join(os.homedir(), normalized.slice(2)))
+		normalized = pathsepsToPosix(path.join(os.homedir(), normalized.slice(2)), isWindows)
 	}
 
 	if (!isAbsolutePosixPath(normalized) && escapesWorkspace(normalized)) {
@@ -187,7 +264,7 @@ export function toMatcherPattern(pattern: string, cwd?: string): string | undefi
 			return undefined
 		}
 
-		normalized = pathsepsToPosix(path.resolve(cwd, normalized))
+		normalized = pathsepsToPosix(path.resolve(cwd, normalized), isWindows)
 	}
 
 	if (isAbsolutePosixPath(normalized)) {
@@ -207,7 +284,7 @@ export function toMatcherPattern(pattern: string, cwd?: string): string | undefi
 		return undefined
 	}
 
-	const workspaceBase = toRootRelativePath(pathsepsToPosix(path.resolve(cwd)))
+	const workspaceBase = toRootRelativePath(pathsepsToPosix(path.resolve(cwd), isWindows))
 
 	// gitignore anchors a pattern to the base directory as soon as it has a
 	// separator "at the beginning or middle (or both)" (gitignore(5)), and only a
@@ -227,59 +304,66 @@ export function toMatcherPattern(pattern: string, cwd?: string): string | undefi
  * @returns The rewritten path, or `undefined` when it names no file, or when it
  * is relative and there is no workspace root to resolve it against.
  */
-function toMatcherPath(filePath: string, cwd?: string): string | undefined {
- // Not trimmed: whitespace can be part of a filename.
- const normalized = pathsepsToPosix(filePath)
+function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boolean): string | undefined {
+	// Not trimmed: whitespace can be part of a filename.
+	const normalized = pathsepsToPosix(filePath, isWindows)
 
- if (!normalized.trim() || normalized === ".") {
- 	return undefined
- }
+	if (!normalized.trim() || normalized === ".") {
+		return undefined
+	}
 
- if (isAbsolutePosixPath(normalized)) {
- 	return toRootRelativePath(normalized)
- }
+	if (isAbsolutePosixPath(normalized)) {
+		return toRootRelativePath(normalized)
+	}
 
- if (!cwd) {
- 	// A relative path cannot be placed on the filesystem without a root, and
- 	// the only patterns that survive without one are absolute, which such a
- 	// path could never match anyway.
- 	return undefined
- }
+	if (!cwd) {
+		// A relative path cannot be placed on the filesystem without a root, and
+		// the only patterns that survive without one are absolute, which such a
+		// path could never match anyway.
+		return undefined
+	}
 
- return toRootRelativePath(pathsepsToPosix(path.resolve(cwd, normalized)))
+	return toRootRelativePath(pathsepsToPosix(path.resolve(cwd, normalized), isWindows))
 }
 
 /**
  * Check whether a file path is covered by any of the configured patterns.
  *
  * Patterns are applied in the order given and the last one to match decides, so
- * a `!` pattern excludes files matched by the patterns before it.
+ * a `!` pattern excludes files matched by the patterns before it. A pattern only
+ * ever decides the file it names: matching one of its parent directories grants
+ * nothing, see "Why a match on a directory must not decide a file's verdict".
  *
  * @param filePath - Path of the file, either absolute or relative to `cwd`.
  * @param cwd - Workspace root.
  * @param patterns - Raw patterns as configured by the user.
+ * @param isWindows - Whether to read paths by Windows' rules: `\` separates
+ * directories and case is ignored. Defaults to the platform in use; tests pass it
+ * explicitly to exercise either platform's rules.
  */
 export function isFileMatchedByPatterns({
 	filePath,
 	cwd,
 	patterns,
+	isWindows = runningOnWindows(),
 }: {
 	filePath?: string
 	cwd?: string
 	patterns?: string[]
+	isWindows?: boolean
 }): boolean {
 	if (!filePath || !Array.isArray(patterns) || !patterns.length) {
 		return false
 	}
 
-	const candidate = toMatcherPath(filePath, cwd)
+	const candidate = toMatcherPath(filePath, cwd, isWindows)
 
 	if (!candidate) {
 		return false
 	}
 
 	const matcherPatterns = patterns
-		.map((pattern) => toMatcherPattern(pattern, cwd))
+		.map((pattern) => toMatcherPattern(pattern, cwd, isWindows))
 		.filter((pattern): pattern is string => !!pattern)
 
 	if (!matcherPatterns.length) {
@@ -287,7 +371,9 @@ export function isFileMatchedByPatterns({
 	}
 
 	try {
-		return ignore().add(matcherPatterns).ignores(candidate)
+		return ignore({ ignoreCase: isWindows })
+			.add([...matcherPatterns, MATCH_DIRECTORIES_ONLY_PATTERN])
+			.ignores(candidate)
 	} catch (error) {
 		// A path the matcher rejects cannot be confirmed as matching, so treat it
 		// as unmatched.

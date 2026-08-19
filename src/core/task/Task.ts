@@ -1182,7 +1182,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
-		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
+		// `this.cwd`, not `provider.cwd`:
+		// The path inside `text` was made relative to this task's workspace,
+		// which for a resumed or child task need not be the one the provider
+		// currently reports.
+		const approval = await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 

@@ -1,46 +1,26 @@
 // npx vitest run core/auto-approval/__tests__/allowedReadFiles.spec.ts
 
-import type { ExtensionState } from "@roo-code/types"
-
-import { checkAutoApproval, type AutoApprovalState, type AutoApprovalStateOptions } from ".."
-
-const CWD = "/path/to/repo"
-
-type State = Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
-
-const baseState: State = {
-	autoApprovalEnabled: true,
-	alwaysAllowReadOnly: false,
-	alwaysAllowReadOnlyOutsideWorkspace: false,
-	allowedReadFiles: [],
-	alwaysAllowWrite: false,
-	alwaysAllowWriteOutsideWorkspace: false,
-	alwaysAllowWriteProtected: false,
-	allowedWriteFiles: [],
-	cwd: CWD,
-	alwaysAllowMcp: false,
-	alwaysAllowModeSwitch: false,
-	alwaysAllowSubtasks: false,
-	alwaysAllowExecute: false,
-	alwaysAllowFollowupQuestions: false,
-	destructiveCommandGuardEnabled: false,
-	allowedCommands: [],
-	deniedCommands: [],
-}
+import { checkAutoApproval } from ".."
+import { CWD, baseState, type State } from "./fixtures"
 
 const askToRead = async ({
 	state,
 	tool = "readFile",
+	cwd = CWD,
 	...payload
 }: {
 	state: Partial<State>
 	tool?: string
+	cwd?: string
 	path?: string
 	batchFiles?: Array<{ path: string }>
+	batchDirs?: Array<{ path: string }>
+	additionalFileCount?: number
 	isOutsideWorkspace?: boolean
 }) =>
 	checkAutoApproval({
 		state: { ...baseState, ...state },
+		cwd,
 		ask: "tool",
 		text: JSON.stringify({ tool, ...payload }),
 	})
@@ -69,9 +49,9 @@ describe("allowedReadFiles auto-approval", () => {
 	})
 
 	it("approves a file covered by a glob", async () => {
-		expect(await askToRead({ path: "docs/scratch/a.md", state: { allowedReadFiles: ["docs/scratch/**"] } })).toEqual(
-			{ decision: "approve" },
-		)
+		expect(
+			await askToRead({ path: "docs/scratch/a.md", state: { allowedReadFiles: ["docs/scratch/**"] } }),
+		).toEqual({ decision: "approve" })
 	})
 
 	// Write permission implies read permission.
@@ -85,10 +65,25 @@ describe("allowedReadFiles auto-approval", () => {
 		expect(
 			await checkAutoApproval({
 				state: { ...baseState, allowedReadFiles: ["notes.md"] },
+				cwd: CWD,
 				ask: "tool",
 				text: JSON.stringify({ tool: "newFileCreated", path: "notes.md" }),
 			}),
 		).toEqual({ decision: "ask" })
+	})
+
+	// The patterns and the path have to be resolved against the same root, which is
+	// the one the task runs in rather than the one the window currently shows.
+	it("resolves the patterns against the cwd it is given", async () => {
+		const state = { allowedReadFiles: ["/path/to/repo/notes.md"] }
+
+		expect(await askToRead({ path: "notes.md", cwd: "/path/to/repo", state })).toEqual({
+			decision: "approve",
+		})
+
+		expect(await askToRead({ path: "notes.md", cwd: "/path/to/other-repo", state })).toEqual({
+			decision: "ask",
+		})
 	})
 
 	describe("batch reads", () => {
@@ -120,6 +115,42 @@ describe("allowedReadFiles auto-approval", () => {
 				}),
 			).toEqual({ decision: "approve" })
 		})
+
+		it("does not let a listed batch carry an unlisted path", async () => {
+			expect(
+				await askToRead({
+					path: "src/index.ts",
+					batchFiles: [{ path: "notes.md" }],
+					state: { allowedReadFiles: ["notes.md"] },
+				}),
+			).toEqual({ decision: "ask" })
+		})
+
+		it("asks when the read names no file at all", async () => {
+			expect(await askToRead({ state: { allowedReadFiles: ["*", "**", "notes.md"] } })).toEqual({
+				decision: "ask",
+			})
+		})
+
+		// `additionalFileCount` reports files the message does not name, and the
+		// approval would cover them as well, so no pattern can vouch for them.
+		it("asks when the read carries files it does not name", async () => {
+			expect(
+				await askToRead({
+					path: "notes.md",
+					additionalFileCount: 2,
+					state: { allowedReadFiles: ["notes.md"] },
+				}),
+			).toEqual({ decision: "ask" })
+
+			expect(
+				await askToRead({
+					batchFiles: [{ path: "notes.md" }],
+					additionalFileCount: 1,
+					state: { allowedReadFiles: ["*.md"] },
+				}),
+			).toEqual({ decision: "ask" })
+		})
 	})
 
 	// The allowlist names files, but these tools act on directories and report
@@ -142,6 +173,19 @@ describe("allowedReadFiles auto-approval", () => {
 			expect(await askToRead({ tool: "listFiles", path: "docs", state: { alwaysAllowReadOnly: true } })).toEqual({
 				decision: "approve",
 			})
+		})
+
+		// Listing tools report their directories in `batchDirs`. They are turned away
+		// by the tool name, but assert it here as well so the two reasons cannot both
+		// disappear unnoticed.
+		it("asks for a directory listing batch even when the directories are listed", async () => {
+			expect(
+				await askToRead({
+					tool: "listFilesTopLevel",
+					batchDirs: [{ path: "docs" }, { path: "src" }],
+					state: { allowedReadFiles: ["docs", "src", "**"] },
+				}),
+			).toEqual({ decision: "ask" })
 		})
 	})
 
