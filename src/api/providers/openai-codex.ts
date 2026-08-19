@@ -29,6 +29,7 @@ import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
@@ -274,7 +275,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		// Make the request with retry on auth failure
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				yield* this.executeRequest(requestBody, model, accessToken, effectiveSessionId)
+				yield* this.executeRequest(requestBody, model, accessToken, effectiveSessionId, metadata)
 				return
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
@@ -438,9 +439,20 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		model: OpenAiCodexModel,
 		accessToken: string,
 		effectiveSessionId: string,
+		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
+
+		// Bridge the external abort signal into the internal controller (Bedrock pattern)
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				this.abortController.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => this.abortController?.abort(), { once: true })
+			}
+		}
 
 		try {
 			// Prefer OpenAI SDK streaming (same approach as openai-native) so event handling
@@ -1257,7 +1269,8 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		this.abortController = new AbortController()
+		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		const requestSignal = requestAbortSignal ?? new AbortController().signal
 
 		try {
 			const model = this.getModel()
@@ -1318,7 +1331,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				method: "POST",
 				headers,
 				body: JSON.stringify(requestBody),
-				signal: this.abortController.signal,
+				signal: requestSignal,
 			})
 
 			if (!response.ok) {
@@ -1354,12 +1367,15 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			const apiError = new ApiProviderError(errorMessage, this.providerName, errorModel.id, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
 
+			// Re-throw abort errors as-is so callers can detect cancellation by the "AbortError" name
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			if (error instanceof Error) {
 				throw new Error(t("common:errors.openAiCodex.completionError", { message: error.message }))
 			}
 			throw error
-		} finally {
-			this.abortController = undefined
 		}
 	}
 }

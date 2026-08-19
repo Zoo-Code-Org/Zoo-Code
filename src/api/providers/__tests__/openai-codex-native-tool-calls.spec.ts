@@ -518,4 +518,93 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			}),
 		)
 	})
+
+	describe("createMessage abort signal", () => {
+		it("should bridge the external abortSignal into the internal AbortController", async () => {
+			vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+			vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+			const mockCreate = vi.fn().mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "response.text.delta", delta: "test" }
+					yield {
+						type: "response.completed",
+						response: {
+							id: "resp_1",
+							status: "completed",
+							output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+							usage: { input_tokens: 1, output_tokens: 1 },
+						},
+					}
+				},
+			})
+			Object.assign(handler, {
+				client: {
+					responses: { create: mockCreate },
+				},
+			})
+
+			const controller = new AbortController()
+			const stream = handler.createMessage("system", [{ role: "user", content: "hello" }], {
+				taskId: "t",
+				abortSignal: controller.signal,
+			})
+
+			// Consume the stream to trigger the request
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalled()
+			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
+			expect(createCallArgs.signal).toBeDefined()
+			expect(createCallArgs.signal).toBeInstanceOf(AbortSignal)
+
+			// Verify the signal is not aborted before we abort the external one
+			expect(createCallArgs.signal?.aborted).toBe(false)
+
+			// Abort the external signal; the bridge aborts the internal controller
+			controller.abort()
+			expect(controller.signal.aborted).toBe(true)
+		})
+
+		it("should immediately abort when the external signal is already aborted", async () => {
+			vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+			vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+			const mockCreate = vi.fn().mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { type: "response.text.delta", delta: "test" }
+					yield {
+						type: "response.completed",
+						response: {
+							id: "resp_1",
+							status: "completed",
+							output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+							usage: { input_tokens: 1, output_tokens: 1 },
+						},
+					}
+				},
+			})
+			Object.assign(handler, {
+				client: {
+					responses: { create: mockCreate },
+				},
+			})
+
+			const controller = new AbortController()
+			controller.abort() // Pre-abort
+
+			const stream = handler.createMessage("system", [{ role: "user", content: "hello" }], {
+				taskId: "t",
+				abortSignal: controller.signal,
+			})
+
+			// Consume the stream to trigger the request
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalled()
+			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
+			// The internal signal should already be aborted since the external one was pre-aborted
+			expect(createCallArgs.signal?.aborted).toBe(true)
+		})
+	})
 })

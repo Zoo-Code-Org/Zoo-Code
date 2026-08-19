@@ -641,3 +641,367 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		})
 	})
 })
+
+describe("OpenAiCodexHandler.completePrompt", () => {
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	it("should call fetch with correct request body and return text response", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					output: [
+						{
+							type: "message",
+							role: "assistant",
+							content: [{ type: "output_text", text: "Hello world" }],
+						},
+					],
+				}),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const result = await handler.completePrompt("test prompt")
+
+		expect(result).toBe("Hello world")
+		expect(mockFetch).toHaveBeenCalledWith(
+			expect.stringContaining("/responses"),
+			expect.objectContaining({
+				method: "POST",
+				headers: expect.objectContaining({
+					Authorization: "Bearer test-token",
+					originator: "zoo-code",
+				}),
+				body: expect.stringContaining('"model":"gpt-5.1-codex"'),
+			}),
+		)
+	})
+
+	it("should treat timeoutMs=0 as no timeout", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		let fetchInit: RequestInit | undefined
+		const mockFetch = vitest.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+			fetchInit = init
+			return {
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						output: [
+							{
+								type: "message",
+								role: "assistant",
+								content: [{ type: "output_text", text: "response" }],
+							},
+						],
+					}),
+				text: () => Promise.resolve(""),
+			}
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await handler.completePrompt("test prompt", { timeoutMs: 0 })
+
+		expect(mockFetch).toHaveBeenCalled()
+		expect(fetchInit?.signal).toBeDefined()
+		expect(fetchInit?.signal?.aborted).toBe(false)
+	})
+
+	it("should merge abortSignal with local controller", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		let fetchInit: RequestInit | undefined
+		const mockFetch = vitest.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+			fetchInit = init
+			return {
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						output: [
+							{
+								type: "message",
+								role: "assistant",
+								content: [{ type: "output_text", text: "response" }],
+							},
+						],
+					}),
+				text: () => Promise.resolve(""),
+			}
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		controller.abort()
+		await promise
+
+		expect(mockFetch).toHaveBeenCalled()
+		expect(fetchInit?.signal).toBeDefined()
+		expect(fetchInit?.signal?.aborted).toBe(true)
+	})
+
+	it("should merge abortSignal and timeoutMs together", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		let fetchInit: RequestInit | undefined
+		const mockFetch = vitest.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+			fetchInit = init
+			return {
+				ok: true,
+				json: () =>
+					Promise.resolve({
+						output: [
+							{
+								type: "message",
+								role: "assistant",
+								content: [{ type: "output_text", text: "response" }],
+							},
+						],
+					}),
+				text: () => Promise.resolve(""),
+			}
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+		controller.abort()
+		await promise
+
+		expect(mockFetch).toHaveBeenCalled()
+		expect(fetchInit?.signal).toBeDefined()
+		expect(fetchInit?.signal?.aborted).toBe(true)
+	})
+
+	it("should reject with an AbortError when the signal is already aborted", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		// Emulate fetch semantics: an already-aborted signal rejects immediately
+		const mockFetch = vitest.fn().mockImplementation((_url: string, init?: RequestInit) => {
+			if (init?.signal?.aborted) {
+				const abortError = new Error("The operation was aborted")
+				abortError.name = "AbortError"
+				return Promise.reject(abortError)
+			}
+			return Promise.resolve({
+				ok: true,
+				json: () => Promise.resolve({}),
+				text: () => Promise.resolve(""),
+			})
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toSatisfy(
+			(error: unknown) => error instanceof Error && error.name === "AbortError",
+		)
+	})
+
+	it("should abort an in-flight request when the external signal aborts", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		// Emulate fetch semantics: the pending request rejects when the signal aborts
+		const mockFetch = vitest.fn().mockImplementation((_url: string, init?: RequestInit) => {
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener(
+					"abort",
+					() => {
+						const abortError = new Error("The operation was aborted")
+						abortError.name = "AbortError"
+						reject(abortError)
+					},
+					{ once: true },
+				)
+			})
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		await vitest.waitFor(() => expect(mockFetch).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(promise).rejects.toSatisfy(
+			(error: unknown) => error instanceof Error && error.name === "AbortError",
+		)
+	})
+
+	it("should return empty string when no output text found", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve({ output: [{ type: "message", role: "assistant", content: [] }] }),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const result = await handler.completePrompt("test prompt")
+
+		expect(result).toBe("")
+	})
+
+	it("should handle responseData.text fallback", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () => Promise.resolve({ text: "fallback response" }),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const result = await handler.completePrompt("test prompt")
+
+		expect(result).toBe("fallback response")
+	})
+
+	it("should throw error when not authenticated", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue(null)
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const controller = new AbortController()
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toThrow()
+	})
+
+	it("should throw error when fetch returns non-ok response", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: false,
+			status: 401,
+			text: () => Promise.resolve("Unauthorized"),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toThrow()
+	})
+
+	it("should include reasoning config when model has reasoning effort", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					output: [
+						{
+							type: "message",
+							role: "assistant",
+							content: [{ type: "output_text", text: "response" }],
+						},
+					],
+				}),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await handler.completePrompt("test prompt")
+
+		expect(mockFetch).toHaveBeenCalled()
+		const fetchOptions = mockFetch.mock.calls[0][1]
+		const requestBody = JSON.parse(fetchOptions.body)
+		expect(requestBody.include).toContain("reasoning.encrypted_content")
+		expect(requestBody.reasoning).toBeDefined()
+		expect(requestBody.reasoning.effort).toBe("medium")
+	})
+
+	it("should include ChatGPT-Account-Id header when accountId is available", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_12345")
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					output: [
+						{
+							type: "message",
+							role: "assistant",
+							content: [{ type: "output_text", text: "response" }],
+						},
+					],
+				}),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await handler.completePrompt("test prompt")
+
+		expect(mockFetch).toHaveBeenCalled()
+		const fetchOptions = mockFetch.mock.calls[0][1]
+		expect(fetchOptions.headers["ChatGPT-Account-Id"]).toBe("acct_12345")
+	})
+
+	it("should work without accountId when not available", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue(null)
+
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					output: [
+						{
+							type: "message",
+							role: "assistant",
+							content: [{ type: "output_text", text: "response" }],
+						},
+					],
+				}),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await handler.completePrompt("test prompt")
+
+		expect(mockFetch).toHaveBeenCalled()
+		const fetchOptions = mockFetch.mock.calls[0][1]
+		expect(fetchOptions.headers["ChatGPT-Account-Id"]).toBeUndefined()
+	})
+})
