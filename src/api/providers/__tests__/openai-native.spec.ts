@@ -18,7 +18,11 @@ import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } f
 import { OpenAiNativeHandler } from "../openai-native"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
-import { expectRequestObjectContaining, makeApiHandlerOptions } from "../../../test-utils/api"
+import {
+	expectRequestObjectContaining,
+	makeApiHandlerOptions,
+	makeCreateMessageMetadata,
+} from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { deleteGlobalFetch } from "../../../test-utils/reset"
 
@@ -375,6 +379,62 @@ describe("OpenAiNativeHandler", () => {
 				}
 			}).rejects.toThrow("OpenAI service error")
 		})
+
+		it("should reject with AbortError when the external abortSignal is already aborted (fallback path)", async () => {
+			const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+				if (options?.signal?.aborted) {
+					const error = new Error("This operation was aborted")
+					error.name = "AbortError"
+					return Promise.reject(error)
+				}
+				return new Promise<Response>(() => {})
+			})
+			global.fetch = mockFetch as typeof fetch
+
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should abort the fallback fetch when the external abortSignal is aborted mid-request", async () => {
+			const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+				return new Promise<Response>((_resolve, reject) => {
+					options?.signal?.addEventListener(
+						"abort",
+						() => {
+							const error = new Error("This operation was aborted")
+							error.name = "AbortError"
+							reject(error)
+						},
+						{ once: true },
+					)
+				})
+			})
+			global.fetch = mockFetch as typeof fetch
+
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			const controller = new AbortController()
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collected = collectStream(stream)
+			setTimeout(() => controller.abort(), 10)
+
+			await expect(collected).rejects.toMatchObject({ name: "AbortError" })
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -482,6 +542,197 @@ describe("OpenAiNativeHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 
 			expect(result).toBe("")
+		})
+		it("should pass the external abort signal through to the SDK request", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			const controller = new AbortController()
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			// Without a timeout the merged signal is the external signal itself
+			expect(mockResponsesCreate.mock.calls[0][1].signal).toBe(controller.signal)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			const result = await handler.completePrompt("Test prompt")
+
+			expect(result).toBe("response")
+			expect(mockResponsesCreate.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
+		})
+
+		it("completePrompt should abort its request signal when timeoutMs is reached", async () => {
+			// Node's AbortSignal.timeout() uses internal timers that vi.useFakeTimers() does not
+			// intercept, so this relies on a short real timeout instead of fake timers.
+			let requestSignal: AbortSignal | undefined
+			mockResponsesCreate.mockImplementationOnce(async (_body: unknown, options: { signal?: AbortSignal }) => {
+				requestSignal = options.signal
+				// Stay pending until the merged timeout signal aborts the request
+				await new Promise<void>((resolve) => {
+					options.signal?.addEventListener("abort", () => resolve(), { once: true })
+				})
+				return {
+					output: [
+						{
+							type: "message",
+							content: [{ type: "output_text", text: "response" }],
+						},
+					],
+				}
+			})
+
+			const result = await handler.completePrompt("Test prompt", { timeoutMs: 50 })
+
+			expect(result).toBe("response")
+			expect(requestSignal).toBeInstanceOf(AbortSignal)
+			expect(requestSignal?.aborted).toBe(true)
+		})
+
+		it("completePrompt should not replace an active streaming abort controller", async () => {
+			const activeStreamingController = new AbortController()
+			handler["abortController"] = activeStreamingController
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(handler["abortController"]).toBe(activeStreamingController)
+		})
+
+		it("completePrompt should merge the external signal and timeoutMs together", async () => {
+			const controller = new AbortController()
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+
+			const mergedSignal = mockResponsesCreate.mock.calls[0][1].signal as AbortSignal
+			expect(mergedSignal).toBeInstanceOf(AbortSignal)
+
+			// Aborting the external signal must abort the merged signal synchronously
+			controller.abort()
+			expect(mergedSignal.aborted).toBe(true)
+		})
+
+		it("completePrompt should reject with AbortError when the abortSignal is already aborted", async () => {
+			mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					const error = new Error("This operation was aborted")
+					error.name = "AbortError"
+					return Promise.reject(error)
+				}
+				return Promise.resolve({
+					output: [
+						{
+							type: "message",
+							content: [{ type: "output_text", text: "response" }],
+						},
+					],
+				})
+			})
+
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("Test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("completePrompt should rethrow non-Error failures after telemetry", async () => {
+			mockResponsesCreate.mockRejectedValue("string failure")
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toBe("string failure")
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "string failure",
+					provider: "OpenAI Native",
+					modelId: "gpt-4.1",
+					operation: "completePrompt",
+				}),
+			)
+		})
+
+		it("completePrompt should return direct response text fallback", async () => {
+			mockResponsesCreate.mockResolvedValue({ text: "fallback response" })
+
+			const result = await handler.completePrompt("Test prompt")
+
+			expect(result).toBe("fallback response")
+		})
+
+		it("completePrompt should include supported service tier, reasoning, verbosity, and prompt cache retention", async () => {
+			const configuredHandler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-5.1",
+				openAiNativeServiceTier: "flex",
+				enableResponsesReasoningSummary: true,
+			})
+			mockResponsesCreate.mockResolvedValue({
+				output: [
+					{
+						type: "message",
+						content: [{ type: "output_text", text: "response" }],
+					},
+				],
+			})
+
+			await configuredHandler.completePrompt("Test prompt")
+
+			const requestBody = mockResponsesCreate.mock.calls[0][0]
+			expect(requestBody.service_tier).toBe("flex")
+			expect(requestBody.include).toEqual(["reasoning.encrypted_content"])
+			expect(requestBody.reasoning).toEqual({ effort: "medium", summary: "auto" })
+			expect(requestBody.text).toEqual({ verbosity: "medium" })
+			expect(requestBody.prompt_cache_retention).toBe("24h")
+		})
+
+		it("should expose response id and encrypted reasoning content", () => {
+			handler["lastResponseId"] = "resp_123"
+			handler["lastResponseOutput"] = [
+				{ type: "message" },
+				{ type: "reasoning", encrypted_content: "encrypted", id: "reasoning_1" },
+			]
+
+			expect(handler.getResponseId()).toBe("resp_123")
+			expect(handler.getEncryptedContent()).toEqual({ encrypted_content: "encrypted", id: "reasoning_1" })
+		})
+
+		it("should return undefined when encrypted reasoning content is absent", () => {
+			expect(handler.getEncryptedContent()).toBeUndefined()
+
+			handler["lastResponseOutput"] = [{ type: "reasoning" }]
+
+			expect(handler.getEncryptedContent()).toBeUndefined()
 		})
 	})
 

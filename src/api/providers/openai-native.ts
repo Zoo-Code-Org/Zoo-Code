@@ -32,6 +32,7 @@ import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -413,6 +414,18 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
 
+		// Bridge external abort signal to our internal controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				this.abortController.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => this.abortController?.abort(), { once: true })
+			}
+		}
+
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
@@ -563,6 +576,18 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
 
+		// Bridge external abort signal to our internal controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				this.abortController.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => this.abortController?.abort(), { once: true })
+			}
+		}
+
 		// Build per-request headers using taskId when available, falling back to sessionId
 		const taskId = metadata?.taskId
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
@@ -644,6 +669,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 			// Handle streaming response
 			yield* this.handleStreamResponse(response.body, model)
 		} catch (error) {
+			// Re-throw abort errors as-is so callers can identify cancellations
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			const model = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
@@ -1489,9 +1519,12 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		return this.lastResponseId
 	}
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		try {
-			this.abortController = new AbortController()
+		// Request-local abort signal: merges the external abort signal with an optional
+		// timeout without touching this.abortController (owned by streaming requests).
+		const requestSignal =
+			mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs) ?? new AbortController().signal
 
+		try {
 			const model = this.getModel()
 			const { verbosity } = model
 
@@ -1550,7 +1583,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			// Make the non-streaming request
 			const response = await (this.client as any).responses.create(requestBody, {
-				signal: this.abortController.signal,
+				signal: requestSignal,
 			})
 
 			// Extract text from the response
@@ -1573,6 +1606,11 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			return ""
 		} catch (error) {
+			// Re-throw abort errors as-is so callers can identify cancellations
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			const errorModel = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, errorModel.id, "completePrompt")
@@ -1582,8 +1620,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw new Error(`OpenAI Native completion error: ${error.message}`)
 			}
 			throw error
-		} finally {
-			this.abortController = undefined
 		}
 	}
 }
