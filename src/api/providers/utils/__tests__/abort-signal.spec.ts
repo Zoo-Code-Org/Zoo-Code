@@ -1,4 +1,4 @@
-import { mergeAbortSignalAndTimeout, mergeAbortSignals } from "../abort-signal"
+import { mergeAbortSignalAndTimeout, mergeAbortSignals, throwIfAborted } from "../abort-signal"
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {
@@ -97,6 +97,33 @@ describe("abort-signal utilities", () => {
 			const result = mergeAbortSignals(primaryController.signal, secondaryController.signal)
 
 			expect(result.aborted).toBe(true)
+		})
+	})
+
+	describe("throwIfAborted", () => {
+		it("does not throw when signal is undefined", () => {
+			expect(() => throwIfAborted()).not.toThrow()
+		})
+
+		it("does not throw when signal is not aborted", () => {
+			const controller = new AbortController()
+
+			expect(() => throwIfAborted(controller.signal)).not.toThrow()
+		})
+
+		it("throws an AbortError when signal is already aborted", () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			let caught: unknown
+			try {
+				throwIfAborted(controller.signal)
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
 		})
 	})
 })

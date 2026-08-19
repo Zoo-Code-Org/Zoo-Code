@@ -35,3 +35,20 @@ export function mergeAbortSignals(primarySignal: AbortSignal, secondarySignal?: 
 
 	return AbortSignal.any([primarySignal, secondarySignal])
 }
+
+/**
+ * Throw an AbortError if the given signal is already aborted.
+ *
+ * Use as a fast-fail guard at the top of request-building code paths so
+ * callers receive a consistent `name === "AbortError"` when the operation
+ * was cancelled before it started, without building or issuing the request.
+ */
+export function throwIfAborted(signal?: AbortSignal): void {
+	if (!signal?.aborted) {
+		return
+	}
+
+	const abortError = new Error("This operation was aborted")
+	abortError.name = "AbortError"
+	throw abortError
+}
