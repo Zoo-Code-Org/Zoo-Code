@@ -35,6 +35,10 @@ function buildTask(provider: ProviderStub, taskCwd: string) {
 	task["cancelAutoApprovalTimeout"] = vi.fn(() => {})
 	task["checkpointSave"] = vi.fn(async () => {})
 	task["emit"] = vi.fn()
+	// A double assertion is unavoidable here: `providerRef` is a `WeakRef<ClineProvider>`,
+	// and the stub is neither a `WeakRef` nor a whole `ClineProvider`. Constructing
+	// either would drag in the extension host, when `Task.ask` only ever calls
+	// `deref()`, `getState()` and `postMessageToWebview()` on it.
 	task["providerRef"] = { deref: () => provider } as unknown as Task["providerRef"]
 	// `Task.cwd` reads `workspacePath`, which is `historyItem.workspace` for a
 	// resumed task and the parent's path for a child one. It is `readonly`, so the
