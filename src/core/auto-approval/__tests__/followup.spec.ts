@@ -1,7 +1,10 @@
-import { checkAutoApproval } from ".."
+import type { ExtensionState } from "@roo-code/types"
+import { checkAutoApproval, type AutoApprovalState, type AutoApprovalStateOptions } from ".."
+
+type AutoApprovalFields = Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
 
 describe("Follow-up question auto-approval", () => {
-	const baseState = {
+	const baseState: AutoApprovalFields = {
 		autoApprovalEnabled: true,
 		alwaysAllowFollowupQuestions: true,
 		followupAutoApproveTimeoutMs: 10_000,
@@ -9,8 +12,7 @@ describe("Follow-up question auto-approval", () => {
 
 	const followupText = (suggest: unknown) => JSON.stringify({ question: "Pick one?", suggest }) as string
 
-	const run = (state: Record<string, unknown>, text: string) =>
-		checkAutoApproval({ state: state as never, ask: "followup", text })
+	const run = (state: AutoApprovalFields, text: string) => checkAutoApproval({ state, ask: "followup", text })
 
 	it("schedules a timeout that auto-answers with the first valid suggestion", async () => {
 		const result = await run(baseState, followupText([{ answer: "Yes, proceed" }]))
@@ -28,7 +30,7 @@ describe("Follow-up question auto-approval", () => {
 	it("falls back to asking when the follow-up has no text payload", async () => {
 		// Exercises the `text || "{}"` fallback: a follow-up without any payload must
 		// not schedule an auto-answer timeout.
-		const result = await checkAutoApproval({ state: baseState as never, ask: "followup" })
+		const result = await checkAutoApproval({ state: baseState, ask: "followup" })
 
 		expect(result).toEqual({ decision: "ask" })
 	})
