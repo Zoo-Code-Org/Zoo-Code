@@ -2186,6 +2186,77 @@ describe("AwsBedrockHandler", () => {
 
 				await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
 			})
+
+			it("createMessage should detach the external abort listener when the request completes", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const streamChunks = [
+					JSON.stringify({ contentBlockDelta: { delta: { text: "hello" } } }),
+					JSON.stringify({ messageStop: {} }),
+				]
+
+				let secondSendSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockResolvedValueOnce({ stream: streamChunks })
+					.mockImplementation(async (_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						secondSendSignal = options?.abortSignal
+						return { stream: streamChunks }
+					})
+				handler["client"].send = mockSend
+
+				// First request completes normally with its own external signal
+				const firstController = new AbortController()
+				const firstRemoveSpy = vi.spyOn(firstController.signal, "removeEventListener")
+				const firstGenerator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: firstController.signal }),
+				)
+				const firstText = await (async () => {
+					let text = ""
+					for await (const chunk of firstGenerator) {
+						if (chunk.type === "text") {
+							text += chunk.text
+						}
+					}
+					return text
+				})()
+				expect(firstText).toBe("hello")
+
+				// The bridge listener must be detached as soon as the request completes
+				expect(firstRemoveSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+
+				// Second request starts with a DIFFERENT external signal
+				const secondController = new AbortController()
+				const secondGenerator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: secondController.signal }),
+				)
+				const secondText = await (async () => {
+					let text = ""
+					for await (const chunk of secondGenerator) {
+						if (chunk.type === "text") {
+							text += chunk.text
+						}
+					}
+					return text
+				})()
+				expect(secondText).toBe("hello")
+
+				// Aborting the first (already completed) signal late must not cancel the second request
+				firstController.abort()
+				expect(secondSendSignal).toBeDefined()
+				expect(secondSendSignal?.aborted).toBe(false)
+
+				firstRemoveSpy.mockRestore()
+			})
 		})
 	})
 })

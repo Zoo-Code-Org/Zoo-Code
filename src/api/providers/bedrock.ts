@@ -558,33 +558,37 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
 		}
 
-		// Create AbortController with 10 minute timeout
-		const controller = new AbortController()
+		// Create a request-local AbortController with 10 minute timeout. Keeping it
+		// request-local (and detaching the bridge listener in the finally block) means
+		// a completed request can never leave a stale listener on the caller's signal.
+		const requestController = new AbortController()
 		let timeoutId: NodeJS.Timeout | undefined
 
-		// Bridge external abort signal to our controller using the Bedrock pattern:
+		// Bridge external abort signal to the request controller using the Bedrock pattern:
 		// - pre-aborted guard: check if already aborted before adding listener
 		// - { once: true }: remove listener after first abort to avoid leaks
+		let abortListener: (() => void) | undefined
 		const externalAbortSignal = metadata?.abortSignal
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {
-				controller.abort()
+				requestController.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				abortListener = () => requestController.abort()
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
 			}
 		}
 
 		try {
 			timeoutId = setTimeout(
 				() => {
-					controller.abort()
+					requestController.abort()
 				},
 				10 * 60 * 1000,
 			)
 
 			const command = new ConverseStreamCommand(payload)
 			const response = await this.client.send(command, {
-				abortSignal: controller.signal,
+				abortSignal: requestController.signal,
 			})
 
 			if (!response.stream) {
@@ -832,6 +836,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				throw enhancedError
 			} else {
 				throw new Error("An unknown error occurred")
+			}
+		} finally {
+			// Detach the bridge listener once the request ends (success or error) so the
+			// external signal keeps no reference to this request's controller.
+			if (abortListener) {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
 			}
 		}
 	}
