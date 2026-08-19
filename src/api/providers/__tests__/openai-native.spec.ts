@@ -435,6 +435,88 @@ describe("OpenAiNativeHandler", () => {
 
 			await expect(collected).rejects.toMatchObject({ name: "AbortError" })
 		})
+
+		it("should not let a late abort from an earlier request cancel a later request", async () => {
+			// Regression: the external-signal bridge must detach on request completion.
+			// With a lingering listener (or one reading the mutable this.abortController
+			// field), aborting the FIRST request's signal after completion would cancel
+			// the SECOND request's controller.
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+			type OpenStream = {
+				controller?: ReadableStreamDefaultController<Uint8Array>
+				fetchSignal: AbortSignal
+			}
+			const openStreams: OpenStream[] = []
+			const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+				const entry: OpenStream = { fetchSignal: options?.signal as AbortSignal }
+				const body = new ReadableStream<Uint8Array>({
+					start: (controller) => {
+						entry.controller = controller
+					},
+				})
+				openStreams.push(entry)
+				return Promise.resolve({
+					ok: true,
+					body,
+				})
+			})
+			global.fetch = mockFetch as typeof fetch
+
+			const requireController = (index: number): ReadableStreamDefaultController<Uint8Array> => {
+				const entry = openStreams[index]
+				if (!entry?.controller) {
+					throw new Error("expected fallback fetch to have started")
+				}
+				return entry.controller
+			}
+
+			const firstController = new AbortController()
+			const secondController = new AbortController()
+
+			// First request: completes normally.
+			const firstStream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: firstController.signal }),
+			)
+			const firstCollected = collectStream(firstStream)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			requireController(0).enqueue(
+				new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
+			)
+			requireController(0).enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+			requireController(0).close()
+
+			const firstChunks = await firstCollected
+			expect(firstChunks.some((chunk) => chunk.type === "text" && chunk.text === "one")).toBe(true)
+
+			// Second request with a different external signal, left in-flight.
+			const secondStream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: secondController.signal }),
+			)
+			const secondCollected = collectStream(secondStream)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			expect(openStreams).toHaveLength(2)
+
+			// Aborting the FIRST request's signal must not leak into the second request.
+			firstController.abort()
+
+			// The second request's internal fetch signal must remain active...
+			expect(openStreams[1].fetchSignal.aborted).toBe(false)
+
+			// ...and the second stream must still complete normally.
+			requireController(1).enqueue(
+				new TextEncoder().encode('data: {"type":"response.text.delta","delta":"two"}\n\n'),
+			)
+			requireController(1).enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+			requireController(1).close()
+
+			const secondChunks = await secondCollected
+			expect(secondChunks.some((chunk) => chunk.type === "text" && chunk.text === "two")).toBe(true)
+		})
 	})
 
 	describe("completePrompt", () => {

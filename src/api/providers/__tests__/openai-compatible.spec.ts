@@ -78,27 +78,63 @@ describe("OpenAICompatibleHandler", () => {
 			expect(mockGenerateText.mock.calls[0][0].abortSignal).toBe(controller.signal)
 		})
 
-		it("should pass timeoutMs through to generateText as a timeout abort signal", async () => {
+		it("should pass timeoutMs through to generateText as a working timeout abort signal", async () => {
 			mockGenerateText.mockResolvedValue({ text: "response" })
 
-			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			await handler.completePrompt("test prompt", { timeoutMs: 50 })
 
 			const { abortSignal } = mockGenerateText.mock.calls[0][0]
 			expect(abortSignal).toBeInstanceOf(AbortSignal)
 			expect(abortSignal.aborted).toBe(false)
+
+			// A never-expiring signal (or a pre-aborted one) would fail this check:
+			// the signal must fire on its own ~50ms timeout without any external abort.
+			const fired = await Promise.race([
+				new Promise<boolean>((resolve) => {
+					abortSignal.addEventListener("abort", () => resolve(true), { once: true })
+				}),
+				new Promise<boolean>((resolve) => {
+					setTimeout(() => resolve(false), 1000)
+				}),
+			])
+			expect(fired).toBe(true)
+			expect(abortSignal.aborted).toBe(true)
 		})
 
 		it("should merge signal and timeout when both are provided", async () => {
 			mockGenerateText.mockResolvedValue({ text: "response" })
 
 			const controller = new AbortController()
-			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 50 })
 
 			const mergedSignal = mockGenerateText.mock.calls[0][0].abortSignal as AbortSignal
 			expect(mergedSignal).toBeInstanceOf(AbortSignal)
+			expect(mergedSignal.aborted).toBe(false)
 
 			// Aborting the external signal must abort the merged signal synchronously
 			controller.abort()
+			expect(mergedSignal.aborted).toBe(true)
+		})
+
+		it("should let the timeout component of a merged signal fire without the caller signal", async () => {
+			mockGenerateText.mockResolvedValue({ text: "response" })
+
+			await handler.completePrompt("test prompt", { abortSignal: new AbortController().signal, timeoutMs: 50 })
+
+			const mergedSignal = mockGenerateText.mock.calls[0][0].abortSignal as AbortSignal
+			expect(mergedSignal).toBeInstanceOf(AbortSignal)
+			expect(mergedSignal.aborted).toBe(false)
+
+			// With the caller signal left untouched, only the timeout component can fire
+			const fired = await Promise.race([
+				new Promise<boolean>((resolve) => {
+					mergedSignal.addEventListener("abort", () => resolve(true), { once: true })
+				}),
+				new Promise<boolean>((resolve) => {
+					setTimeout(() => resolve(false), 1000)
+				}),
+			])
+			expect(fired).toBe(true)
 			expect(mergedSignal.aborted).toBe(true)
 		})
 
@@ -119,6 +155,25 @@ describe("OpenAICompatibleHandler", () => {
 
 			await handler.completePrompt("test prompt", { timeoutMs: -1 })
 			expect(mockGenerateText.mock.calls[1][0].abortSignal).toBeUndefined()
+		})
+
+		it("should pass the caller signal unchanged when timeoutMs is 0", async () => {
+			mockGenerateText.mockResolvedValue({ text: "response" })
+
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 0 })
+
+			// A disabled timeout must not drop the caller's cancellation signal
+			expect(mockGenerateText.mock.calls[0][0].abortSignal).toBe(controller.signal)
+		})
+
+		it("should pass the caller signal unchanged when timeoutMs is negative", async () => {
+			mockGenerateText.mockResolvedValue({ text: "response" })
+
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: -1 })
+
+			expect(mockGenerateText.mock.calls[0][0].abortSignal).toBe(controller.signal)
 		})
 
 		it("should reject with AbortError when abortSignal is already aborted before request", async () => {
