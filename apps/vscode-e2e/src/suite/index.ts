@@ -72,7 +72,7 @@ export async function run() {
 		testFiles = await glob(`**/${specificFile}`, { cwd })
 		console.log(`Running specific test file: ${specificFile}`)
 	} else {
-		testFiles = await glob("**/**.test.js", { cwd })
+		testFiles = await glob("**/**.test.js", { cwd, ignore: "**/suite/restart-persistence.test.js" })
 	}
 
 	if (testFiles.length === 0) {

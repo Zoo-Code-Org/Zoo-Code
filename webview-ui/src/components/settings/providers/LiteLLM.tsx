@@ -7,6 +7,9 @@ import {
 	type OrganizationAllowList,
 	type ExtensionMessage,
 	litellmDefaultModelId,
+	providerIdentifiers,
+	allRouterModelsProvider,
+	RouterModelsMessageType,
 } from "@roo-code/types"
 
 import { RouterName } from "@roo/api"
@@ -27,6 +30,13 @@ type LiteLLMProps = {
 	simplifySettings?: boolean
 }
 
+enum RefreshStatus {
+	Idle = "idle",
+	Loading = "loading",
+	Success = "success",
+	Error = "error",
+}
+
 export const LiteLLM = ({
 	apiConfiguration,
 	setApiConfigurationField,
@@ -37,32 +47,35 @@ export const LiteLLM = ({
 	const { t } = useAppTranslation()
 	const queryClient = useQueryClient()
 	const { routerModels } = useExtensionState()
-	const [refreshStatus, setRefreshStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
+	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
 	const [refreshError, setRefreshError] = useState<string | undefined>()
 	const litellmErrorJustReceived = useRef(false)
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
 			const message = event.data
-			if (message.type === "singleRouterModelFetchResponse" && !message.success) {
+			if (message.type === RouterModelsMessageType.singleRouterModelFetchResponse && !message.success) {
 				const providerName = message.values?.provider as RouterName
-				if (providerName === "litellm") {
+				if (providerName === providerIdentifiers.litellm) {
 					litellmErrorJustReceived.current = true
-					setRefreshStatus("error")
+					setRefreshStatus(RefreshStatus.Error)
 					setRefreshError(message.error)
 				}
-			} else if (message.type === "routerModels") {
+			} else if (message.type === RouterModelsMessageType.routerModels) {
 				// If we were loading and no specific error for litellm was just received, mark as success.
 				// The ModelPicker will show available models or "no models found".
-				if (refreshStatus === "loading") {
+				if (refreshStatus === RefreshStatus.Loading) {
 					if (!litellmErrorJustReceived.current) {
-						setRefreshStatus("success")
-						// Invalidate only the LiteLLM router-models query so useSelectedModel
-						// picks up the refreshed list. useSelectedModel reads LiteLLM under the
-						// compound key ["routerModels", "litellm"] (see useRouterModels), so we
-						// target that exact key rather than the bare ["routerModels"] prefix,
-						// which would needlessly invalidate every other provider's query too.
-						queryClient.invalidateQueries({ queryKey: ["routerModels", "litellm"] })
+						setRefreshStatus(RefreshStatus.Success)
+						// Refresh the provider-scoped cache used by useSelectedModel and the shared cache used by
+						// ApiOptions. Target both exact keys rather than the bare ["routerModels"] prefix, which
+						// would needlessly invalidate every other provider's query too.
+						void queryClient.invalidateQueries({
+							queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.litellm],
+						})
+						void queryClient.invalidateQueries({
+							queryKey: [RouterModelsMessageType.routerModels, allRouterModelsProvider],
+						})
 					}
 					// If litellmErrorJustReceived.current is true, status is already (or will be) "error".
 				}
@@ -88,19 +101,22 @@ export const LiteLLM = ({
 
 	const handleRefreshModels = useCallback(() => {
 		litellmErrorJustReceived.current = false // Reset flag on new refresh action
-		setRefreshStatus("loading")
+		setRefreshStatus(RefreshStatus.Loading)
 		setRefreshError(undefined)
 
 		const key = apiConfiguration.litellmApiKey
 		const url = apiConfiguration.litellmBaseUrl
 
 		if (!key || !url) {
-			setRefreshStatus("error")
+			setRefreshStatus(RefreshStatus.Error)
 			setRefreshError(t("settings:providers.refreshModels.missingConfig"))
 			return
 		}
 
-		vscode.postMessage({ type: "requestRouterModels", values: { litellmApiKey: key, litellmBaseUrl: url } })
+		vscode.postMessage({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { litellmApiKey: key, litellmBaseUrl: url },
+		})
 	}, [apiConfiguration, setRefreshStatus, setRefreshError, t])
 
 	return (
@@ -130,11 +146,13 @@ export const LiteLLM = ({
 				variant="outline"
 				onClick={handleRefreshModels}
 				disabled={
-					refreshStatus === "loading" || !apiConfiguration.litellmApiKey || !apiConfiguration.litellmBaseUrl
+					refreshStatus === RefreshStatus.Loading ||
+					!apiConfiguration.litellmApiKey ||
+					!apiConfiguration.litellmBaseUrl
 				}
 				className="w-full">
 				<div className="flex items-center gap-2">
-					{refreshStatus === "loading" ? (
+					{refreshStatus === RefreshStatus.Loading ? (
 						<span className="codicon codicon-loading codicon-modifier-spin" />
 					) : (
 						<span className="codicon codicon-refresh" />
@@ -142,15 +160,15 @@ export const LiteLLM = ({
 					{t("settings:providers.refreshModels.label")}
 				</div>
 			</Button>
-			{refreshStatus === "loading" && (
+			{refreshStatus === RefreshStatus.Loading && (
 				<div className="text-sm text-vscode-descriptionForeground">
 					{t("settings:providers.refreshModels.loading")}
 				</div>
 			)}
-			{refreshStatus === "success" && (
+			{refreshStatus === RefreshStatus.Success && (
 				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
 			)}
-			{refreshStatus === "error" && (
+			{refreshStatus === RefreshStatus.Error && (
 				<div className="text-sm text-vscode-errorForeground">
 					{refreshError || t("settings:providers.refreshModels.error")}
 				</div>

@@ -2,7 +2,8 @@
 
 import React from "react"
 import { render, screen, fireEvent, waitFor, act } from "@/utils/test-utils"
-import type { ProviderSettings } from "@roo-code/types"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { allRouterModelsProvider, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { Moonshot } from "../Moonshot"
 
@@ -47,13 +48,18 @@ vi.mock("@vscode/webview-ui-toolkit/react", async (importOriginal) => {
 })
 
 // Mock the ModelPicker - must be a simple component that doesn't import anything
-vi.mock("../ModelPicker", () => ({
-	ModelPicker: function MockModelPicker() {
+vi.mock("../../ModelPicker", () => ({
+	ModelPicker: function MockModelPicker({ onModelChange }: { onModelChange?: (modelId: string) => void }) {
 		return React.createElement(
 			"div",
 			{ "data-testid": "model-picker" },
 			React.createElement("span", { "data-testid": "model-picker-default" }, "mock-default"),
 			React.createElement("span", { "data-testid": "model-picker-count" }, "0"),
+			React.createElement(
+				"button",
+				{ "data-testid": "change-model", onClick: () => onModelChange?.("moonshot-v1-128k") },
+				"Change model",
+			),
 		)
 	},
 }))
@@ -103,11 +109,6 @@ vi.mock("@src/components/common/VSCodeButtonLink", () => ({
 	),
 }))
 
-// Mock handleModelChangeSideEffects
-vi.mock("../utils/providerModelConfig", () => ({
-	handleModelChangeSideEffects: vi.fn(),
-}))
-
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 
@@ -117,7 +118,7 @@ describe("Moonshot Component", () => {
 	const mockSetApiConfigurationField = vi.fn()
 
 	const createDefaultApiConfiguration = (overrides?: Partial<ProviderSettings>): ProviderSettings => ({
-		apiProvider: "moonshot",
+		apiProvider: providerIdentifiers.moonshot,
 		moonshotBaseUrl: "https://api.moonshot.ai/v1",
 		...overrides,
 	})
@@ -223,6 +224,38 @@ describe("Moonshot Component", () => {
 		})
 	})
 
+	it("invalidates only the Moonshot and shared router-model caches after a successful refresh", async () => {
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+		const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries")
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<Moonshot
+					apiConfiguration={createDefaultApiConfiguration({ moonshotApiKey: "test-key" })}
+					setApiConfigurationField={mockSetApiConfigurationField}
+				/>
+			</QueryClientProvider>,
+		)
+
+		const refreshButton = screen
+			.getAllByTestId("button")
+			.find((button) => button.getAttribute("data-variant") === "outline")!
+		fireEvent.click(refreshButton)
+		act(() => {
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "routerModels" } }))
+		})
+
+		await waitFor(() => {
+			expect(invalidateQueries).toHaveBeenCalledWith({
+				queryKey: ["routerModels", providerIdentifiers.moonshot],
+			})
+			expect(invalidateQueries).toHaveBeenCalledWith({
+				queryKey: ["routerModels", allRouterModelsProvider],
+			})
+			expect(invalidateQueries).not.toHaveBeenCalledWith({ queryKey: ["routerModels"] })
+		})
+	})
+
 	it("shows error state after singleRouterModelFetchResponse error message", async () => {
 		mockUseExtensionState.mockReturnValue({
 			routerModels: {},
@@ -258,7 +291,7 @@ describe("Moonshot Component", () => {
 							type: "singleRouterModelFetchResponse",
 							success: false,
 							error: "API connection failed",
-							values: { provider: "moonshot" },
+							values: { provider: providerIdentifiers.moonshot },
 						},
 						"*",
 					)
@@ -272,6 +305,77 @@ describe("Moonshot Component", () => {
 		await waitFor(() => {
 			expect(screen.getByText("API connection failed")).toBeInTheDocument()
 		})
+	})
+
+	it("ignores another provider's failed refresh response while loading", async () => {
+		render(
+			<Moonshot
+				apiConfiguration={createDefaultApiConfiguration({ moonshotApiKey: "test-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		const refreshButton = screen
+			.getAllByTestId("button")
+			.find((button) => button.getAttribute("data-variant") === "outline")!
+		fireEvent.click(refreshButton)
+		await waitFor(() => expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument())
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "singleRouterModelFetchResponse",
+						success: false,
+						error: "OpenRouter unavailable",
+						values: { provider: providerIdentifiers.openrouter },
+					},
+				}),
+			)
+		})
+
+		expect(screen.queryByText("OpenRouter unavailable")).not.toBeInTheDocument()
+		expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+	})
+
+	it("ignores a Moonshot failure response before refresh starts", () => {
+		render(
+			<Moonshot
+				apiConfiguration={createDefaultApiConfiguration({ moonshotApiKey: "test-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "singleRouterModelFetchResponse",
+						success: false,
+						error: "Moonshot unavailable",
+						values: { provider: providerIdentifiers.moonshot },
+					},
+				}),
+			)
+		})
+
+		expect(screen.queryByText("Moonshot unavailable")).not.toBeInTheDocument()
+		expect(screen.queryByText("settings:providers.refreshModels.loading")).not.toBeInTheDocument()
+	})
+
+	it("resets model-specific settings when the selected model changes", () => {
+		render(
+			<Moonshot
+				apiConfiguration={createDefaultApiConfiguration({ moonshotApiKey: "test-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("change-model"))
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", undefined)
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("modelMaxTokens", undefined)
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("modelMaxThinkingTokens", undefined)
 	})
 
 	it("race condition: error arrives before routerModels success — stays in error state", async () => {
@@ -308,7 +412,7 @@ describe("Moonshot Component", () => {
 							type: "singleRouterModelFetchResponse",
 							success: false,
 							error: "API connection failed",
-							values: { provider: "moonshot" },
+							values: { provider: providerIdentifiers.moonshot },
 						},
 						"*",
 					)

@@ -7,6 +7,8 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	requestyDefaultModelId,
+	providerIdentifiers,
+	RouterModelsMessageType,
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
@@ -63,7 +65,7 @@ export const Requesty = ({
 	)
 
 	const getApiKeyUrl = () => {
-		const callbackUrl = getCallbackUrl("requesty", uriScheme)
+		const callbackUrl = getCallbackUrl(providerIdentifiers.requesty, uriScheme)
 		const baseUrl = toRequestyServiceUrl(apiConfiguration.requestyBaseUrl, "app")
 
 		const authUrl = new URL(`oauth/authorize?callback_url=${callbackUrl}`, baseUrl)
@@ -133,7 +135,10 @@ export const Requesty = ({
 			<Button
 				variant="outline"
 				onClick={() => {
-					vscode.postMessage({ type: "requestRouterModels", values: { provider: "requesty", refresh: true } })
+					vscode.postMessage({
+						type: RouterModelsMessageType.requestRouterModels,
+						values: { provider: providerIdentifiers.requesty, refresh: true },
+					})
 				}}>
 				<div className="flex items-center gap-2">
 					<span className="codicon codicon-refresh" />

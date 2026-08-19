@@ -784,11 +784,6 @@
 			"count": 1
 		}
 	},
-	"core/task-persistence/__tests__/TaskHistoryStore.reconciliation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
@@ -1711,7 +1706,7 @@
 	},
 	"utils/__tests__/shell.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 46
+			"count": 35
 		}
 	},
 	"utils/__tests__/storage.spec.ts": {

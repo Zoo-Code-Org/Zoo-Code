@@ -6,6 +6,7 @@ import {
 	NANOGPT_BASE_URL,
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
+	providerIdentifiers,
 	type NanoGptRoutingPreference,
 } from "@roo-code/types"
 
@@ -58,7 +59,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "nanogpt",
+			name: providerIdentifiers.nanogpt,
 			baseURL: NANOGPT_BASE_URL,
 			apiKey: options.nanoGptApiKey,
 			modelId: options.nanoGptModelId,

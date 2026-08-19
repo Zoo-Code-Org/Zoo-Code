@@ -9,6 +9,8 @@ import {
 	nanoGptDefaultModelId,
 	nanoGptDefaultRoutingPreference,
 	nanoGptRoutingPreferences,
+	providerIdentifiers,
+	RouterModelsMessageType,
 } from "@roo-code/types"
 
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
@@ -62,9 +64,9 @@ export const NanoGPT = ({
 
 	useEffect(() => {
 		vscode.postMessage({
-			type: "requestRouterModels",
+			type: RouterModelsMessageType.requestRouterModels,
 			values: {
-				provider: "nanogpt",
+				provider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: apiConfiguration.nanoGptApiKey,
 			},
 		})
@@ -93,7 +95,7 @@ export const NanoGPT = ({
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}
 				defaultModelId={nanoGptDefaultModelId}
-				models={routerModels?.nanogpt ?? {}}
+				models={routerModels?.[providerIdentifiers.nanogpt] ?? {}}
 				modelIdKey="nanoGptModelId"
 				serviceName={t("settings:providers.nanoGpt.provider")}
 				serviceUrl="https://nano-gpt.com/api"

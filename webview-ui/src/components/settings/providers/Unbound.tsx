@@ -7,6 +7,8 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 	unboundDefaultModelId,
+	providerIdentifiers,
+	RouterModelsMessageType,
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
@@ -81,7 +83,10 @@ export const Unbound = ({
 			<Button
 				variant="outline"
 				onClick={() => {
-					vscode.postMessage({ type: "requestRouterModels", values: { provider: "unbound", refresh: true } })
+					vscode.postMessage({
+						type: RouterModelsMessageType.requestRouterModels,
+						values: { provider: providerIdentifiers.unbound, refresh: true },
+					})
 				}}>
 				<div className="flex items-center gap-2">
 					<span className="codicon codicon-refresh" />

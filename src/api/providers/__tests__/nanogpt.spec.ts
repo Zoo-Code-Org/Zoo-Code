@@ -5,7 +5,7 @@ vi.mock("vscode", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { nanoGptDefaultModelId } from "@roo-code/types"
+import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -49,7 +49,7 @@ describe("NanoGptHandler", () => {
 	})
 
 	it("is constructed by the backend provider registry", () => {
-		expect(buildApiHandler({ apiProvider: "nanogpt" })).toBeInstanceOf(NanoGptHandler)
+		expect(buildApiHandler({ apiProvider: providerIdentifiers.nanogpt })).toBeInstanceOf(NanoGptHandler)
 	})
 
 	it("keeps the canonical model ID while applying request-only routing", async () => {
@@ -187,7 +187,9 @@ describe("NanoGptHandler", () => {
 		vi.mocked(getModels).mockResolvedValue({})
 		mockCreate.mockResolvedValue(asyncStreamFrom([]))
 		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
-		expect(getModels).toHaveBeenLastCalledWith(expect.objectContaining({ provider: "nanogpt", apiKey: undefined }))
+		expect(getModels).toHaveBeenLastCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.nanogpt, apiKey: undefined }),
+		)
 	})
 
 	it("maps usage with root-field precedence and no reasoning double count", async () => {
