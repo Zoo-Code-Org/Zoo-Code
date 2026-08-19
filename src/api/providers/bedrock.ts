@@ -838,6 +838,11 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				throw new Error("An unknown error occurred")
 			}
 		} finally {
+			// Clear the request timeout as soon as the generator ends. This also covers
+			// early termination by the caller (break/destroy), which bypasses the normal
+			// timeout-clearing path after the stream completes.
+			clearTimeout(timeoutId)
+
 			// Detach the bridge listener once the request ends (success or error) so the
 			// external signal keeps no reference to this request's controller.
 			if (abortListener) {

@@ -2257,6 +2257,59 @@ describe("AwsBedrockHandler", () => {
 
 				firstRemoveSpy.mockRestore()
 			})
+
+			it("createMessage should clear the request timeout when the generator is terminated early", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				// The stream yields one chunk and then hangs until released, so the
+				// generator is suspended mid-stream when it is terminated early.
+				let release: (() => void) | undefined
+				const pendingChunk = new Promise<void>((resolve) => {
+					release = resolve
+				})
+				const mockStream = async function* (): AsyncGenerator<string> {
+					yield JSON.stringify({ contentBlockDelta: { delta: { text: "hello" } } })
+					await pendingChunk
+				}
+				const mockSend = vi.fn().mockImplementation(() => Promise.resolve({ stream: mockStream() }))
+				handler["client"].send = mockSend
+
+				const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+				const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout")
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata(),
+				)
+
+				// Consume the first chunk; the generator is now suspended mid-stream
+				const firstResult = await generator.next()
+				expect(firstResult.done).toBe(false)
+				expect(firstResult.value).toEqual({ type: "text", text: "hello" })
+
+				// Terminate the generator early (before the stream completes)
+				const returnPromise = generator.return(undefined)
+				release?.()
+				await returnPromise
+
+				// The 10-minute request timer scheduled by createMessage must have been cleared
+				const timerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 10 * 60 * 1000)
+				expect(timerIndex).toBeGreaterThanOrEqual(0)
+				const timeoutHandle: NodeJS.Timeout | undefined = setTimeoutSpy.mock.results[timerIndex]?.value
+				expect(timeoutHandle).toBeDefined()
+				expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutHandle)
+
+				// Belt and braces: make sure no real 10-minute timer survives the test
+				setTimeoutSpy.mockRestore()
+				clearTimeoutSpy.mockRestore()
+				clearTimeout(timeoutHandle)
+			})
 		})
 	})
 })
