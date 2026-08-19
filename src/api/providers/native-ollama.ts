@@ -225,7 +225,6 @@ function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessagePa
 
 export class NativeOllamaHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
-	private client: Ollama | undefined
 	protected models: Record<string, ModelInfo> = {}
 
 	constructor(options: ApiHandlerOptions) {
@@ -233,27 +232,25 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		this.options = options
 	}
 
-	private ensureClient(): Ollama {
-		if (!this.client) {
-			try {
-				const clientOptions: OllamaOptions = {
-					host: this.options.ollamaBaseUrl || "http://localhost:11434",
-					// Note: The ollama npm package handles timeouts internally
-				}
+	/**
+	 * Creates a new Ollama client instance with the configured options.
+	 * Uses constructor `headers` option for API key instead of mutating config.
+	 */
+	private _createOllamaClient(): Ollama {
+		const clientOptions: OllamaOptions = {
+			host: this.options.ollamaBaseUrl || "http://localhost:11434",
+			// Note: The ollama npm package handles timeouts internally
+		}
 
-				// Add API key if provided (for Ollama cloud or authenticated instances)
-				if (this.options.ollamaApiKey) {
-					clientOptions.headers = {
-						Authorization: `Bearer ${this.options.ollamaApiKey}`,
-					}
-				}
-
-				this.client = new Ollama(clientOptions)
-			} catch (error: any) {
-				throw new Error(`Error creating Ollama client: ${error.message}`)
+		// Add API key if provided (for Ollama cloud or authenticated instances)
+		// Use constructor `headers` option instead of mutating (request as any).config
+		if (this.options.ollamaApiKey) {
+			clientOptions.headers = {
+				Authorization: `Bearer ${this.options.ollamaApiKey}`,
 			}
 		}
-		return this.client
+
+		return new Ollama(clientOptions)
 	}
 
 	/**
@@ -398,7 +395,28 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const client = this.ensureClient()
+		// Per-request client (SDK doesn't support per-call signal)
+		const client = this._createOllamaClient()
+
+		// Bridge the external abort signal into the per-request client. The Ollama
+		// SDK exposes cancellation only through the client-level abort(), so the
+		// external signal drives that same client instance instead of a separate
+		// internal controller.
+		const externalAbortSignal = metadata?.abortSignal
+		let onExternalAbort: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				client.abort()
+				const abortError = new Error("This operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+			onExternalAbort = () => {
+				client.abort()
+			}
+			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+		}
+
 		const { id: modelId } = await this.fetchModel()
 		const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
@@ -535,6 +553,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			console.error(`Ollama API error (${statusCode || "unknown"}): ${errorMessage}`)
 			throw error
 		}
+
+		// The request completed normally (the error path above always rethrows);
+		// detach the external-signal listener so it cannot outlive this request.
+		if (onExternalAbort) {
+			externalAbortSignal?.removeEventListener("abort", onExternalAbort)
+		}
 	}
 
 	async fetchModel() {
@@ -551,10 +575,40 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Ollama native client cancellation calls client.abort(), so any request with
+		// cancellation behavior must use a dedicated client instance to avoid aborting
+		// unrelated requests sharing a provider-level client. The Ollama SDK has no
+		// per-call signal, so every request uses a per-request client.
+		const client = this._createOllamaClient()
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		let onAbort: (() => void) | undefined
+
 		try {
-			const client = this.ensureClient()
 			const { id: modelId } = await this.fetchModel()
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
+
+			// Handle timeoutMs if provided
+			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
+				timeoutId = setTimeout(() => client.abort(), options.timeoutMs)
+			}
+
+			// Propagate abortSignal into the per-request client via client.abort()
+			if (options?.abortSignal) {
+				if (options.abortSignal.aborted) {
+					client.abort()
+					const abortError = new Error("This operation was aborted")
+					abortError.name = "AbortError"
+					throw abortError
+				} else {
+					onAbort = () => {
+						client.abort()
+						if (timeoutId !== undefined) {
+							clearTimeout(timeoutId)
+						}
+					}
+					options.abortSignal.addEventListener("abort", onAbort, { once: true })
+				}
+			}
 
 			// Reuse the shared request-option builder so single-shot
 			// completions respect the same reasoning configuration as the
@@ -571,10 +625,19 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			return response.message?.content || ""
 		} catch (error) {
-			if (error instanceof Error) {
+			// Let AbortError surface unmodified so callers can identify cancellations
+			// by `name === "AbortError"`; every other error keeps the historical wrap.
+			if (error instanceof Error && error.name !== "AbortError") {
 				throw new Error(`Ollama completion error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			if (timeoutId) {
+				clearTimeout(timeoutId)
+			}
+			if (onAbort && options?.abortSignal) {
+				options.abortSignal.removeEventListener("abort", onAbort)
+			}
 		}
 	}
 }
