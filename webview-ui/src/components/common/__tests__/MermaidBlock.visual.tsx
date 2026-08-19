@@ -96,5 +96,7 @@ for (const theme of themes) {
 		})
 
 		expect(contrastRatio).toBeGreaterThanOrEqual(4.5)
+
+		await expect(component).toHaveScreenshot(`mermaid-gantt-${theme.name}.png`)
 	})
 }
