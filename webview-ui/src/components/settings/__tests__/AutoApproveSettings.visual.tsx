@@ -8,34 +8,33 @@ import {
 } from "./AutoApproveSettings.visual.fixture"
 
 test("matches provided manual snapshot (1)", async ({ mount, page }) => {
-	const component = await mount(<AutoApproveSettingsManualSnapshot1Fixture />)
+	await mount(<AutoApproveSettingsManualSnapshot1Fixture />)
 
 	await page.evaluate(async () => {
 		await document.fonts.ready
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
-
-	await expect(component).toHaveScreenshot("screenshot-1-.png")
+	await expect(page.getByTestId("auto-approve-settings-visual")).toHaveScreenshot("screenshot-1-.png")
 })
 
 test("matches provided manual snapshot (2)", async ({ mount, page }) => {
-	const component = await mount(<AutoApproveSettingsManualSnapshot2Fixture />)
+	await mount(<AutoApproveSettingsManualSnapshot2Fixture />)
 
 	await page.evaluate(async () => {
 		await document.fonts.ready
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
 
-	await expect(component).toHaveScreenshot("screenshot-2-.png")
+	await expect(page.getByTestId("auto-approve-settings-visual")).toHaveScreenshot("screenshot-2-.png")
 })
 
 test("matches provided manual snapshot (3)", async ({ mount, page }) => {
-	const component = await mount(<AutoApproveSettingsManualSnapshot3Fixture />)
+	await mount(<AutoApproveSettingsManualSnapshot3Fixture />)
 
 	await page.evaluate(async () => {
 		await document.fonts.ready
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
 
-	await expect(component).toHaveScreenshot("screenshot-3-.png")
+	await expect(page.getByTestId("auto-approve-settings-visual")).toHaveScreenshot("screenshot-3-.png")
 })
