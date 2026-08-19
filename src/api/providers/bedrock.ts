@@ -50,6 +50,7 @@ import { shouldUseReasoningBudget } from "../../shared/api"
 import { normalizeToolSchema } from "../../utils/json-schema"
 import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 /************************************************************************************
  *
@@ -561,6 +562,18 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		const controller = new AbortController()
 		let timeoutId: NodeJS.Timeout | undefined
 
+		// Bridge external abort signal to our controller using the Bedrock pattern:
+		// - pre-aborted guard: check if already aborted before adding listener
+		// - { once: true }: remove listener after first abort to avoid leaks
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+			}
+		}
+
 		try {
 			timeoutId = setTimeout(
 				() => {
@@ -865,7 +878,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 
 			const command = new ConverseCommand(payload)
-			const response = await this.client.send(command)
+
+			// Build request options with abortSignal and/or timeoutMs.
+			// The shared helper keeps Bedrock aligned with other providers:
+			// positive timeout values create request-local cancellation, while
+			// zero/negative timeout values mean "no timeout".
+			const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+			const sendOptions = mergedAbortSignal ? { abortSignal: mergedAbortSignal } : undefined
+			const response = await this.client.send(command, sendOptions)
 
 			if (
 				response?.output?.message?.content &&

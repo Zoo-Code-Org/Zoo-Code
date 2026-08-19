@@ -68,6 +68,7 @@ import { NodeHttpHandler } from "@smithy/node-http-handler"
 import { HttpProxyAgent } from "http-proxy-agent"
 import { HttpsProxyAgent } from "https-proxy-agent"
 
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Get access to the mocked functions
@@ -1818,6 +1819,372 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
+			})
+			it("should pass abort signal through to client.send", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				// Set up the mock on the handler's client instance directly
+				const clientInstance = handler["client"]
+				expect(clientInstance).toBeDefined()
+				clientInstance.send = mockSend
+
+				const controller = new AbortController()
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+				expect(mockSend).toHaveBeenCalledWith(expect.any(Object), { abortSignal: controller.signal })
+			})
+
+			it("should work without options (backward compatible)", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				expect(clientInstance).toBeDefined()
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("response")
+				expect(mockSend).toHaveBeenCalledWith(expect.any(Object), undefined)
+			})
+
+			it("completePrompt should pass timeoutMs through to client", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+
+				expect(mockSend).toHaveBeenCalled()
+				// Verify the second argument (sendOptions) contains an abortSignal derived from timeoutMs
+				const sendOptions = mockSend.mock.calls[0][1]
+				expect(sendOptions).toBeDefined()
+				expect(sendOptions?.abortSignal).toBeDefined()
+			})
+
+			it("completePrompt should merge abortSignal and timeoutMs", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const controller = new AbortController()
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+
+				expect(mockSend).toHaveBeenCalled()
+				const sendOptions = mockSend.mock.calls[0][1]
+				expect(sendOptions?.abortSignal).toBeDefined()
+			})
+
+			it("should abort internal controller when external abortSignal is triggered", async () => {
+				const mockResult = {
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				}
+				const mockSend = vi.fn().mockResolvedValue(mockResult)
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				const controller = new AbortController()
+				let internalSignalCaptured: AbortSignal | undefined
+
+				// Spy on the send call to capture the abortSignal
+				mockSend.mockImplementation(async (_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+					internalSignalCaptured = options?.abortSignal
+					return mockResult
+				})
+
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+				expect(internalSignalCaptured).toBeDefined()
+				expect(internalSignalCaptured).toBeInstanceOf(AbortSignal)
+
+				// Abort the external signal and verify it propagates to the captured signal
+				controller.abort()
+				await new Promise((resolve) => setTimeout(resolve, 10))
+				expect(internalSignalCaptured?.aborted).toBe(true)
+			})
+
+			it("should abort immediately when signal is already aborted and timeoutMs > 0", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				const controller = new AbortController()
+				controller.abort() // Pre-abort the signal
+
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+
+				expect(mockSend).toHaveBeenCalled()
+				const sendOptions = mockSend.mock.calls[0][1]
+				expect(sendOptions?.abortSignal).toBeDefined()
+				expect(sendOptions?.abortSignal.aborted).toBe(true)
+			})
+
+			it("should return undefined sendOptions when timeoutMs is 0 and no signal", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
+				})
+
+				await handler.completePrompt("test prompt", { timeoutMs: 0 })
+
+				expect(mockSend).toHaveBeenCalled()
+				const sendOptions = mockSend.mock.calls[0][1]
+				// When timeoutMs is 0 and no abortSignal, bedrock.ts returns undefined (no signal created)
+				expect(sendOptions).toBeUndefined()
+			})
+
+			it("should return empty string when response content is empty", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [{ type: "text", text: "" }] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("")
+			})
+
+			it("should return empty string when response text extraction throws after validation", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				let textAccessCount = 0
+				const contentBlock = {
+					type: "text",
+					get text() {
+						textAccessCount++
+						if (textAccessCount >= 3) {
+							throw new Error("text getter failed")
+						}
+						return "response"
+					},
+				}
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [contentBlock] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("")
+			})
+
+			it("should return empty string when response content array is empty", async () => {
+				const mockSend = vi.fn()
+
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const clientInstance = handler["client"]
+				clientInstance.send = mockSend
+
+				mockSend.mockResolvedValueOnce({
+					output: { message: { content: [] }, stopReason: null },
+				})
+
+				const result = await handler.completePrompt("test prompt")
+
+				expect(result).toBe("")
+			})
+
+			it("createMessage should reject with an AbortError when the external signal is already aborted", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				let sendAbortSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockImplementation(async (_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						sendAbortSignal = options?.abortSignal
+						if (options?.abortSignal?.aborted) {
+							const abortError = new Error("The operation was aborted")
+							abortError.name = "AbortError"
+							throw abortError
+						}
+						return { stream: [] }
+					})
+				handler["client"].send = mockSend
+
+				const controller = new AbortController()
+				controller.abort()
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+
+				let thrown: unknown
+				try {
+					for await (const _chunk of generator) {
+						// error chunks are yielded before the rethrow
+					}
+				} catch (error) {
+					thrown = error
+				}
+
+				expect(mockSend).toHaveBeenCalledTimes(1)
+				// The internal controller must have been aborted by the pre-aborted external signal
+				expect(sendAbortSignal).toBeDefined()
+				expect(sendAbortSignal?.aborted).toBe(true)
+				expect(thrown).toMatchObject({ name: "AbortError" })
+			})
+
+			it("createMessage should abort the in-flight request when the external signal is aborted mid-stream", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				let internalSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						internalSignal = options?.abortSignal
+						return new Promise<void>((_resolve, reject) => {
+							internalSignal?.addEventListener(
+								"abort",
+								() => {
+									const abortError = new Error("The operation was aborted")
+									abortError.name = "AbortError"
+									reject(abortError)
+								},
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				const controller = new AbortController()
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+
+				const consumed = (async () => {
+					for await (const _chunk of generator) {
+						// ignore chunks
+					}
+				})()
+
+				// Wait until the request is in flight and the internal signal is captured
+				await vi.waitFor(() => {
+					expect(internalSignal).toBeDefined()
+				})
+				expect(internalSignal?.aborted).toBe(false)
+
+				// Abort the external signal mid-flight; the stream must reject with an AbortError
+				controller.abort()
+
+				await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
 			})
 		})
 	})
