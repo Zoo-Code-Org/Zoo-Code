@@ -375,6 +375,17 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	): ApiStream {
 		// Ensure clean state before starting a new request
 		this.ensureCleanState()
+
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal, so a
+		// pre-aborted external signal is reported immediately instead of being
+		// sent to the host.
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal?.aborted) {
+			const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+			abortError.name = "AbortError"
+			throw abortError
+		}
+
 		const client: vscode.LanguageModelChat = await this.getClient()
 
 		// Process messages
@@ -391,6 +402,18 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 		// Initialize cancellation token for the request
 		this.currentRequestCancellation = new vscode.CancellationTokenSource()
+		const cancellationTokenSource = this.currentRequestCancellation
+
+		// Bridge the caller's abort signal (e.g. a task abort) into the request's
+		// cancellation token: the VS Code LM API cannot carry an AbortSignal
+		// directly, so cancellation is signalled to the host through the token.
+		// The listener is kept in a named const and removed in the finally block
+		// because { once: true } only detaches it when the signal actually aborts.
+		let onExternalAbort: (() => void) | undefined
+		if (externalAbortSignal) {
+			onExternalAbort = () => cancellationTokenSource.cancel()
+			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+		}
 
 		// Calculate input tokens before starting the stream
 		const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
@@ -485,7 +508,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			this.ensureCleanState()
 
 			if (error instanceof vscode.CancellationError) {
-				throw new Error("Zoo Code <Language Model API>: Request cancelled by user")
+				// The host rejected because the request was cancelled: either the
+				// bridged external signal aborted or the user cancelled the request
+				// in VS Code. Both are aborts, so surface a standard abort error.
+				const abortError = new Error("Zoo Code <Language Model API>: Request cancelled by user")
+				abortError.name = "AbortError"
+				throw abortError
 			}
 
 			if (error instanceof Error) {
@@ -507,6 +535,17 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				const errorMessage = String(error)
 				console.error("Zoo Code <Language Model API>: Unknown stream error:", errorMessage)
 				throw new Error(`Zoo Code <Language Model API>: Response stream error: ${errorMessage}`)
+			}
+		} finally {
+			// Detach the abort bridge listener on every path (success, error, and
+			// early consumer break); { once: true } alone would leak it when the
+			// request completes without the signal ever aborting.
+			if (onExternalAbort !== undefined) {
+				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
+			}
+			if (this.currentRequestCancellation) {
+				this.currentRequestCancellation.dispose()
+				this.currentRequestCancellation = null
 			}
 		}
 	}
@@ -589,12 +628,43 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		const client = await this.getClient()
+
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal: sendRequest
+		// only accepts a CancellationToken. Bridge the external signal and timeout
+		// into a request-local CancellationTokenSource instead.
+		const tokenSource = new vscode.CancellationTokenSource()
+		const externalAbortSignal = options?.abortSignal
+
+		// Apply the timeout only when it is a positive value: cancelling at once for a
+		// zero/negative timeout would abort every such request immediately.
+		let timeoutId: ReturnType<typeof setTimeout> | undefined
+		if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
+			timeoutId = setTimeout(() => tokenSource.cancel(), options.timeoutMs)
+		}
+
+		// Bridge the external abort signal: a pre-aborted signal cancels the token
+		// immediately, otherwise a one-shot listener relays the abort to the host.
+		let onAbort: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				tokenSource.cancel()
+			} else {
+				onAbort = () => tokenSource.cancel()
+				externalAbortSignal.addEventListener("abort", onAbort, { once: true })
+			}
+		}
+
+		// The request counts as aborted when the host-side token was cancelled
+		// (timeout or bridged signal) or when the external signal itself aborted.
+		const isAborted = () =>
+			tokenSource.token.isCancellationRequested === true || externalAbortSignal?.aborted === true
+
 		try {
-			const client = await this.getClient()
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
 				{},
-				new vscode.CancellationTokenSource().token,
+				tokenSource.token,
 			)
 			let result = ""
 			for await (const chunk of response.stream) {
@@ -602,12 +672,39 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 					result += chunk.value
 				}
 			}
+
+			// Guard against a quiet completion after the request was aborted.
+			if (isAborted()) {
+				const abortError = new Error("VSCode LM completion aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			return result
 		} catch (error) {
+			// Report an aborted request (external signal, timeout, or host
+			// cancellation) as a standard AbortError instead of a generic
+			// completion error.
+			if (isAborted()) {
+				const abortError = new Error("VSCode LM completion aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			if (error instanceof Error) {
 				throw new Error(`VSCode LM completion error: ${error.message}`)
 			}
 			throw error
+		} finally {
+			if (timeoutId !== undefined) {
+				clearTimeout(timeoutId)
+			}
+			// { once: true } only detaches the listener when the signal actually
+			// aborts, so remove it explicitly on every path.
+			if (onAbort !== undefined) {
+				externalAbortSignal?.removeEventListener("abort", onAbort)
+			}
+			tokenSource.dispose()
 		}
 	}
 }
