@@ -206,7 +206,7 @@ describe("providerModelConfig", () => {
 			expect(Object.keys(models).length).toBe(0)
 		})
 
-		it("shows GLM-5.3 only for Z.ai Coding Plan entrypoints", () => {
+		it("shows GLM-5.3 for international Z.ai API and Coding Plan entrypoints", () => {
 			const internationalCoding = getStaticModelsForProvider("zai", undefined, {
 				apiProvider: "zai",
 				zaiApiLine: "international_coding",
@@ -226,7 +226,7 @@ describe("providerModelConfig", () => {
 
 			expect(internationalCoding).toHaveProperty("glm-5.3")
 			expect(chinaCoding).toHaveProperty("glm-5.3")
-			expect(internationalApi).not.toHaveProperty("glm-5.3")
+			expect(internationalApi).toHaveProperty("glm-5.3")
 			expect(chinaApi).not.toHaveProperty("glm-5.3")
 		})
 	})

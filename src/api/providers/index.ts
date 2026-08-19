@@ -1,3 +1,4 @@
+export { RequestConfigBuilder } from "./config-builder/request-config-builder"
 export { AnthropicVertexHandler } from "./anthropic-vertex"
 export { AnthropicHandler } from "./anthropic"
 export { AwsBedrockHandler } from "./bedrock"
