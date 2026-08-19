@@ -440,11 +440,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 					)}
 				</div>
 			</ToolUseBlock>
-			<AlertDialog
-				open={deleteId !== null}
-				onOpenChange={(open) => {
-					if (!open) cancelDelete()
-				}}>
+			<AlertDialog open={deleteId !== null} onOpenChange={cancelDelete}>
 				<AlertDialogContent className="max-w-xs">
 					<AlertDialogTitle className="sr-only">Delete todo item</AlertDialogTitle>
 					<AlertDialogDescription>Are you sure you want to delete this todo item?</AlertDialogDescription>
