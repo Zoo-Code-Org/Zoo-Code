@@ -1267,6 +1267,11 @@ describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessag
 	it("drops entries that cannot name a file", async () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
+			// The double assertion stands in for an untyped payload: the message
+			// arrives as JSON from the webview, so a non-string can reach the
+			// handler even though the type says otherwise. That is what the
+			// handler's `typeof` filter is there to catch, so the test has to be
+			// able to express it.
 			updatedSettings: { [key]: ["notes.md", "", "   ", 42 as unknown as string] },
 		})
 

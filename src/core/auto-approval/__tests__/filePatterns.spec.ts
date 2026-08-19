@@ -1,54 +1,60 @@
 // npx vitest run core/auto-approval/__tests__/filePatterns.spec.ts
 
-import os from "os"
-
 import { isFileMatchedByPatterns, toMatcherPattern } from "../filePatterns"
 
 const CWD = "/path/to/repo"
 
 // Both platforms' rules are exercised on whichever platform the tests run on, by
-// passing `isWindows` explicitly rather than reading `process.platform`.
+// passing `isWindows` and `homeDir` explicitly instead of reading the real
+// platform. Otherwise these assertions would encode the CI runner's OS: on
+// Windows a workspace lives on a drive, and `os.homedir()` starts with one.
+const HOME = "/home/me"
+const WINDOWS_CWD = "C:/path/to/repo"
+const WINDOWS_HOME = "C:\\Users\\me"
+
+// `cwd` is spelled out at every call rather than defaulted, since `undefined` is
+// itself a case under test (no folder open) and a default would silently replace
+// it with a workspace root.
 const matches = (filePath: string, patterns: string[], cwd: string | undefined = CWD) =>
-	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: false })
+	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: false, homeDir: HOME })
 
-const matchesOnWindows = (filePath: string, patterns: string[], cwd: string | undefined = CWD) =>
-	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: true })
+const matchesOnWindows = (filePath: string, patterns: string[], cwd: string | undefined = WINDOWS_CWD) =>
+	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: true, homeDir: WINDOWS_HOME })
 
-const homeFromRoot = os.homedir().replace(/\\/g, "/").slice(1)
+const toPattern = (pattern: string, cwd: string | undefined) => toMatcherPattern(pattern, cwd, false, HOME)
+
+const toWindowsPattern = (pattern: string, cwd: string | undefined = WINDOWS_CWD) =>
+	toMatcherPattern(pattern, cwd, true, WINDOWS_HOME)
 
 describe("toMatcherPattern", () => {
 	it("prefixes the workspace root and lets a bare filename match in any directory", () => {
-		expect(toMatcherPattern("notes.md", CWD)).toBe("/path/to/repo/**/notes.md")
+		expect(toPattern("notes.md", CWD)).toBe("/path/to/repo/**/notes.md")
 	})
 
 	it("anchors a pattern containing a slash to the workspace root", () => {
-		expect(toMatcherPattern("docs/notes.md", CWD)).toBe("/path/to/repo/docs/notes.md")
+		expect(toPattern("docs/notes.md", CWD)).toBe("/path/to/repo/docs/notes.md")
 	})
 
 	it("anchors an explicitly workspace-root-relative pattern", () => {
-		expect(toMatcherPattern("./notes.md", CWD)).toBe("/path/to/repo/notes.md")
+		expect(toPattern("./notes.md", CWD)).toBe("/path/to/repo/notes.md")
 	})
 
 	it("keeps backslashes, which gitignore uses to escape rather than to separate", () => {
-		expect(toMatcherPattern("notes.md\\ ", CWD)).toBe("/path/to/repo/**/notes.md\\ ")
-		expect(toMatcherPattern("\\#hash.md", CWD)).toBe("/path/to/repo/**/\\#hash.md")
+		expect(toPattern("notes.md\\ ", CWD)).toBe("/path/to/repo/**/notes.md\\ ")
+		expect(toPattern("\\#hash.md", CWD)).toBe("/path/to/repo/**/\\#hash.md")
 	})
 
 	it("resolves a workspace-escaping pattern against the workspace root", () => {
-		expect(toMatcherPattern("../shared/notes.md", CWD)).toBe("/path/to/shared/notes.md")
+		expect(toPattern("../shared/notes.md", CWD)).toBe("/path/to/shared/notes.md")
 	})
 
 	it("expands a leading ~ to the home directory", () => {
-		expect(toMatcherPattern("~/notes.md", CWD)).toBe(`/${homeFromRoot}/notes.md`)
-	})
-
-	it("keeps a Windows drive as the first path segment", () => {
-		expect(toMatcherPattern("C:/tmp/notes.md", CWD)).toBe("/C:/tmp/notes.md")
+		expect(toPattern("~/notes.md", CWD)).toBe("/home/me/notes.md")
 	})
 
 	it("anchors a negation exactly like the pattern it cancels", () => {
-		expect(toMatcherPattern("!notes.md", CWD)).toBe("!/path/to/repo/**/notes.md")
-		expect(toMatcherPattern("!/tmp/notes.md", CWD)).toBe("!/tmp/notes.md")
+		expect(toPattern("!notes.md", CWD)).toBe("!/path/to/repo/**/notes.md")
+		expect(toPattern("!/tmp/notes.md", CWD)).toBe("!/tmp/notes.md")
 	})
 
 	it.each([
@@ -58,22 +64,54 @@ describe("toMatcherPattern", () => {
 		["the home directory itself", "~"],
 		["a directory pattern", "mydir/"],
 	])("rejects %s", (_label, pattern) => {
-		expect(toMatcherPattern(pattern, CWD)).toBeUndefined()
+		expect(toPattern(pattern, CWD)).toBeUndefined()
 	})
 
 	it("preserves whitespace, which gitignore syntax treats as significant", () => {
-		expect(toMatcherPattern(" notes.md", CWD)).toBe("/path/to/repo/**/ notes.md")
-		expect(toMatcherPattern("my notes.md", CWD)).toBe("/path/to/repo/**/my notes.md")
+		expect(toPattern(" notes.md", CWD)).toBe("/path/to/repo/**/ notes.md")
+		expect(toPattern("my notes.md", CWD)).toBe("/path/to/repo/**/my notes.md")
 	})
 
 	// See noWorkspaceRoot.spec.ts for why this fails closed.
 	it("rejects a workspace-relative pattern when the workspace root is unknown", () => {
-		expect(toMatcherPattern("../shared/notes.md", undefined)).toBeUndefined()
-		expect(toMatcherPattern("notes.md", undefined)).toBeUndefined()
+		expect(toPattern("../shared/notes.md", undefined)).toBeUndefined()
+		expect(toPattern("notes.md", undefined)).toBeUndefined()
 	})
 
 	it("keeps an absolute pattern usable when the workspace root is unknown", () => {
-		expect(toMatcherPattern("/tmp/notes.md", undefined)).toBe("/tmp/notes.md")
+		expect(toPattern("/tmp/notes.md", undefined)).toBe("/tmp/notes.md")
+	})
+
+	// A drive letter is a Windows concept. Elsewhere `C:` is an ordinary directory
+	// name, so `C:/tmp/notes.md` names a file inside it, relative to the workspace.
+	describe("on Windows", () => {
+		it("keeps the drive of an absolute pattern as its first path segment", () => {
+			expect(toWindowsPattern("D:/tmp/notes.md")).toBe("/D:/tmp/notes.md")
+		})
+
+		it("gives a drive-less absolute pattern the workspace's drive", () => {
+			// The OS reads `/tmp/notes.md` as being on the current drive, so a
+			// pattern and a path spelled that way have to end up on one drive;
+			// otherwise they could never match.
+			expect(toWindowsPattern("/tmp/notes.md")).toBe("/C:/tmp/notes.md")
+		})
+
+		it("prefixes the workspace root, drive included", () => {
+			expect(toWindowsPattern("notes.md")).toBe("/C:/path/to/repo/**/notes.md")
+			expect(toWindowsPattern("docs/notes.md")).toBe("/C:/path/to/repo/docs/notes.md")
+		})
+
+		it("expands ~ to a home directory that has a drive", () => {
+			expect(toWindowsPattern("~/notes.md")).toBe("/C:/Users/me/notes.md")
+		})
+
+		it("reads a backslash as a directory separator", () => {
+			expect(toWindowsPattern("docs\\notes.md")).toBe("/C:/path/to/repo/docs/notes.md")
+		})
+
+		it("treats a drive-looking pattern as a directory off Windows", () => {
+			expect(toPattern("C:/tmp/notes.md", CWD)).toBe("/path/to/repo/C:/tmp/notes.md")
+		})
 	})
 })
 

@@ -2,9 +2,12 @@
 
 import { isFileMatchedByPatterns } from "../filePatterns"
 import { checkAutoApproval } from ".."
-import { CWD, baseState, type State } from "./fixtures"
+import { CWD, HOME, baseState, type State } from "./fixtures"
 
-const matches = (filePath: string, patterns: string[]) => isFileMatchedByPatterns({ filePath, cwd: CWD, patterns })
+// `isWindows` and `homeDir` are fixed rather than read from the platform, so the
+// expectations mean the same thing on every CI runner.
+const matches = (filePath: string, patterns: string[]) =>
+	isFileMatchedByPatterns({ filePath, cwd: CWD, patterns, isWindows: false, homeDir: HOME })
 
 const readDecision = async (state: Partial<State>, path = "docs/secret.md") =>
 	checkAutoApproval({
@@ -44,8 +47,11 @@ describe("pattern negation", () => {
 		expect(matches("other/secret.md", ["secret.md", "!docs/secret.md"])).toBe(true)
 	})
 
+	// Asserting only the exclusion would also pass if `~/**` matched nothing at
+	// all, so the sibling file has to come out granted.
 	it("excludes via a home-directory negation", () => {
-		expect(matches("~/notes.md".replace("~", process.env.HOME ?? "~"), ["~/**", "!~/notes.md"])).toBe(false)
+		expect(matches(`${HOME}/notes.md`, ["~/**", "!~/notes.md"])).toBe(false)
+		expect(matches(`${HOME}/other.md`, ["~/**", "!~/notes.md"])).toBe(true)
 	})
 
 	it("grants nothing when only negations are configured", () => {

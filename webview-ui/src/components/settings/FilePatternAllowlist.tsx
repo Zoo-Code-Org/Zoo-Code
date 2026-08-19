@@ -1,3 +1,4 @@
+import type { FormEvent } from "react"
 import { VSCodeTextArea } from "@vscode/webview-ui-toolkit/react"
 
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -35,6 +36,20 @@ interface FilePatternAllowlistProps {
  * The pattern syntax itself is explained once by the enclosing Allowlists
  * section, so each list only carries what is specific to it.
  */
+/**
+ * Read the current text out of a `VSCodeTextArea`'s input event.
+ *
+ * The toolkit component wraps a native `<textarea>` in a custom element, whose
+ * `value` is not part of `EventTarget`, so it is read through that element's own
+ * interface rather than by casting the event to `any`. The event is typed as the
+ * DOM `Event` the toolkit declares, which a React `FormEvent` also satisfies.
+ */
+function textareaValue(event: Event | FormEvent<HTMLElement>): string {
+	const target = event.currentTarget as (HTMLElement & { value?: string }) | null
+
+	return target?.value ?? ""
+}
+
 export const FilePatternAllowlist = ({
 	field,
 	translationKey,
@@ -46,22 +61,28 @@ export const FilePatternAllowlist = ({
 	const { t } = useAppTranslation()
 
 	const label = t(`settings:autoApprove.allowlists.${translationKey}.label`)
+	const headingId = `${settingId}-label`
+	const descriptionId = `${settingId}-description`
 
 	return (
 		<SearchableSetting settingId={settingId} section="autoApprove" label={label}>
-			<label className="block font-medium mb-1" data-testid={`${testIdPrefix}s-heading`}>
+			{/* The heading names the textarea rather than wrapping it: the toolkit
+			    renders a custom element, which a native `<label for>` cannot reach.  */}
+			<label id={headingId} className="block font-medium mb-1" data-testid={`${testIdPrefix}s-heading`}>
 				{label}
 			</label>
-			<div className="text-vscode-descriptionForeground text-sm mt-1 mb-2">
+			<div id={descriptionId} className="text-vscode-descriptionForeground text-sm mt-1 mb-2">
 				{t(`settings:autoApprove.allowlists.${translationKey}.description`)}
 			</div>
 			<VSCodeTextArea
 				resize="vertical"
 				rows={4}
 				value={(patterns ?? []).join("\n")}
-				onInput={(e: any) => setCachedStateField(field, (e.target?.value ?? "").split("\n"))}
+				onInput={(event) => setCachedStateField(field, textareaValue(event).split("\n"))}
 				placeholder={t(`settings:autoApprove.allowlists.${translationKey}.placeholder`)}
 				className="w-full"
+				aria-labelledby={headingId}
+				aria-describedby={descriptionId}
 				data-testid={`${testIdPrefix}-input`}
 			/>
 		</SearchableSetting>

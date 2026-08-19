@@ -15,6 +15,16 @@ export type State = Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOp
 export const CWD = "/path/to/repo"
 
 /**
+ * Home directory `~` stands for in the specs.
+ *
+ * Passed explicitly wherever `~` is involved, so the expectations do not depend
+ * on the machine running them: a real `os.homedir()` is `/home/someone` on Linux
+ * but `C:\Users\someone` on Windows, and `process.env.HOME` is normally unset
+ * there altogether.
+ */
+export const HOME = "/home/me"
+
+/**
  * Auto-approval enabled, every permission off, both allowlists empty.
  *
  * Every field is listed rather than relying on optionality, so that a test which
