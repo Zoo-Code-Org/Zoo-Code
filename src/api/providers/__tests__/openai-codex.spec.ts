@@ -748,7 +748,11 @@ describe("OpenAiCodexHandler.completePrompt", () => {
 		const controller = new AbortController()
 		const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
 		controller.abort()
-		await promise
+		// The mock transport completes without honoring the abort; an aborted request must
+		// reject with an AbortError rather than return the late response
+		await expect(promise).rejects.toSatisfy(
+			(error: unknown) => error instanceof Error && error.name === "AbortError",
+		)
 
 		expect(mockFetch).toHaveBeenCalled()
 		expect(fetchInit?.signal).toBeDefined()
@@ -784,7 +788,11 @@ describe("OpenAiCodexHandler.completePrompt", () => {
 		const controller = new AbortController()
 		const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
 		controller.abort()
-		await promise
+		// The mock transport completes without honoring the abort; an aborted request must
+		// reject with an AbortError rather than return the late response
+		await expect(promise).rejects.toSatisfy(
+			(error: unknown) => error instanceof Error && error.name === "AbortError",
+		)
 
 		expect(mockFetch).toHaveBeenCalled()
 		expect(fetchInit?.signal).toBeDefined()
@@ -1003,5 +1011,63 @@ describe("OpenAiCodexHandler.completePrompt", () => {
 		expect(mockFetch).toHaveBeenCalled()
 		const fetchOptions = mockFetch.mock.calls[0][1]
 		expect(fetchOptions.headers["ChatGPT-Account-Id"]).toBeUndefined()
+	})
+
+	it("should reject with an AbortError when the timeout elapses", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		// Emulate a hung fetch that rejects when its signal aborts (native AbortSignal.timeout)
+		const mockFetch = vitest.fn().mockImplementation((_url: string, init?: RequestInit) => {
+			return new Promise((_resolve, reject) => {
+				init?.signal?.addEventListener(
+					"abort",
+					() => {
+						const abortError = new Error("The operation was aborted")
+						abortError.name = "AbortError"
+						reject(abortError)
+					},
+					{ once: true },
+				)
+			})
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toSatisfy(
+			(error: unknown) => error instanceof Error && error.name === "AbortError",
+		)
+	})
+
+	it("should reject with an AbortError when the signal aborts and the transport completes anyway", async () => {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.1-codex" })
+
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+
+		// Emulate a transport that resolves successfully despite the aborted signal
+		const mockFetch = vitest.fn().mockResolvedValue({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					output: [
+						{
+							type: "message",
+							role: "assistant",
+							content: [{ type: "output_text", text: "late response" }],
+						},
+					],
+				}),
+			text: () => Promise.resolve(""),
+		})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const controller = new AbortController()
+		controller.abort()
+
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toSatisfy(
+			(error: unknown) => error instanceof Error && error.name === "AbortError",
+		)
 	})
 })

@@ -441,16 +441,22 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		effectiveSessionId: string,
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		// Create AbortController for cancellation
-		this.abortController = new AbortController()
+		// Create a request-local AbortController. The class field mirrors it so the
+		// existing abort handling keeps working, but the bridge listener below captures
+		// the local controller so a late abort can never hit a newer request's controller.
+		const requestController = new AbortController()
+		this.abortController = requestController
 
-		// Bridge the external abort signal into the internal controller (Bedrock pattern)
+		// Bridge the external abort signal into the request controller (Bedrock pattern)
 		const externalAbortSignal = metadata?.abortSignal
+		const bridgeAbort = () => requestController.abort()
+		let bridgeCleanup: (() => void) | undefined
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {
-				this.abortController.abort()
+				requestController.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => this.abortController?.abort(), { once: true })
+				externalAbortSignal.addEventListener("abort", bridgeAbort, { once: true })
+				bridgeCleanup = () => externalAbortSignal.removeEventListener("abort", bridgeAbort)
 			}
 		}
 
@@ -475,7 +481,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					})
 
 				const stream = (await (client as any).responses.create(requestBody, {
-					signal: this.abortController.signal,
+					signal: requestController.signal,
 					// If the SDK supports per-request overrides, ensure headers are present.
 					headers: codexHeaders,
 				})) as AsyncIterable<any>
@@ -487,7 +493,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 
 				for await (const event of stream) {
-					if (this.abortController.signal.aborted) {
+					if (requestController.signal.aborted) {
 						break
 					}
 
@@ -503,7 +509,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				yield* this.makeCodexRequest(requestBody, model, accessToken, effectiveSessionId)
 			}
 		} finally {
-			this.abortController = undefined
+			bridgeCleanup?.()
+			// Only clear the field if this request still owns it
+			if (this.abortController === requestController) {
+				this.abortController = undefined
+			}
 		}
 	}
 
@@ -1344,32 +1354,49 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 			const responseData = await response.json()
 
+			let result: string | undefined
 			if (responseData?.output && Array.isArray(responseData.output)) {
 				for (const outputItem of responseData.output) {
 					if (outputItem.type === "message" && outputItem.content) {
 						for (const content of outputItem.content) {
 							if (content.type === "output_text" && content.text) {
-								return content.text
+								result = content.text
+								break
 							}
+						}
+						if (result !== undefined) {
+							break
 						}
 					}
 				}
 			}
 
-			if (responseData?.text) {
-				return responseData.text
+			if (result === undefined && responseData?.text) {
+				result = responseData.text
 			}
 
-			return ""
+			// The request may have been cancelled while the transport was finishing;
+			// surface it as an abort instead of returning the completed response.
+			if (requestSignal.aborted) {
+				const abortError = new Error("This operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
+			return result ?? ""
 		} catch (error) {
 			const errorModel = this.getModel()
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, errorModel.id, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
 
-			// Re-throw abort errors as-is so callers can detect cancellation by the "AbortError" name
-			if (error instanceof Error && error.name === "AbortError") {
-				throw error
+			// An aborted request surfaces as "AbortError" (external signal) or "TimeoutError"
+			// (AbortSignal.timeout); normalize it so callers can detect cancellation by the
+			// "AbortError" name.
+			if (requestSignal.aborted) {
+				const abortError = new Error("This operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
 			}
 
 			if (error instanceof Error) {

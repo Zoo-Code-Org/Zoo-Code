@@ -524,19 +524,30 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 			vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
-			const mockCreate = vi.fn().mockResolvedValue({
-				async *[Symbol.asyncIterator]() {
-					yield { type: "response.text.delta", delta: "test" }
-					yield {
-						type: "response.completed",
-						response: {
-							id: "resp_1",
-							status: "completed",
-							output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
-							usage: { input_tokens: 1, output_tokens: 1 },
-						},
-					}
-				},
+			// The mock transport pauses mid-flight until the request-local signal aborts
+			const mockCreate = vi.fn().mockImplementation(async (_body: unknown, init?: { signal?: AbortSignal }) => {
+				return {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "response.text.delta", delta: "test" }
+						await new Promise<void>((resolve) => {
+							const signal = init?.signal
+							if (!signal || signal.aborted) {
+								resolve()
+								return
+							}
+							signal.addEventListener("abort", () => resolve(), { once: true })
+						})
+						yield {
+							type: "response.completed",
+							response: {
+								id: "resp_1",
+								status: "completed",
+								output: [{ type: "message", content: [{ type: "output_text", text: "test" }] }],
+								usage: { input_tokens: 1, output_tokens: 1 },
+							},
+						}
+					},
+				}
 			})
 			Object.assign(handler, {
 				client: {
@@ -550,20 +561,25 @@ describe("OpenAiCodexHandler native tool calls", () => {
 				abortSignal: controller.signal,
 			})
 
-			// Consume the stream to trigger the request
-			await collectStream(stream)
+			// Consume the stream (the mock transport pauses mid-flight)
+			const collected = collectStream(stream)
+
+			// Wait until the request has started; the bridge listener is registered before
+			// the SDK call, so aborting now lands mid-flight
+			await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled())
+
+			// Abort the external signal mid-flight; the bridge must abort the request-local controller
+			controller.abort()
+
+			const chunks = await collected
+			expect(chunks.length).toBeGreaterThan(0)
 
 			expect(mockCreate).toHaveBeenCalled()
 			const createCallArgs = mockCreate.mock.calls[0][1] as { signal?: AbortSignal }
+			// The captured (request-local) signal passed to the SDK must now be aborted
 			expect(createCallArgs.signal).toBeDefined()
 			expect(createCallArgs.signal).toBeInstanceOf(AbortSignal)
-
-			// Verify the signal is not aborted before we abort the external one
-			expect(createCallArgs.signal?.aborted).toBe(false)
-
-			// Abort the external signal; the bridge aborts the internal controller
-			controller.abort()
-			expect(controller.signal.aborted).toBe(true)
+			expect(createCallArgs.signal?.aborted).toBe(true)
 		})
 
 		it("should immediately abort when the external signal is already aborted", async () => {
