@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIUserAbortError } from "openai"
 
 import { type XAIModelId, xaiDefaultModelId, xaiModels, ApiProviderError } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -154,9 +154,12 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 				abortSignal ? { signal: abortSignal } : undefined,
 			)) as unknown as AsyncIterable<any>
 		} catch (error) {
-			// Let abort errors propagate unmodified so callers can recognize them
-			// via error.name === "AbortError".
-			if (error instanceof Error && error.name === "AbortError") {
+			// Let abort errors propagate unmodified so callers can recognize them:
+			// native AbortError (error.name === "AbortError") and the OpenAI SDK's
+			// APIUserAbortError, which the SDK throws when the request signal aborts
+			// (the SDK class does not set a distinctive error.name in v5, so use
+			// instanceof).
+			if ((error instanceof Error && error.name === "AbortError") || error instanceof APIUserAbortError) {
 				throw error
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
@@ -194,9 +197,12 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			// output_text is a convenience field on the Responses API response
 			return response.output_text || ""
 		} catch (error) {
-			// Let abort errors propagate unmodified so callers can recognize them
-			// via error.name === "AbortError".
-			if (error instanceof Error && error.name === "AbortError") {
+			// Let abort errors propagate unmodified so callers can recognize them:
+			// native AbortError (error.name === "AbortError") and the OpenAI SDK's
+			// APIUserAbortError, which the SDK throws when the request signal aborts
+			// (the SDK class does not set a distinctive error.name in v5, so use
+			// instanceof).
+			if ((error instanceof Error && error.name === "AbortError") || error instanceof APIUserAbortError) {
 				throw error
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)

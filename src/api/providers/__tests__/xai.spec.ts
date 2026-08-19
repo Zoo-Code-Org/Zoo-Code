@@ -14,10 +14,16 @@ const mockResponsesCreate = vitest.hoisted(() => vitest.fn())
 
 vitest.mock("openai", async () => {
 	const { mockOpenAiResponsesClient } = await import("../../../test-utils/api")
-	return mockOpenAiResponsesClient(mockResponsesCreate)
+	const actual = await vi.importActual<typeof import("openai")>("openai")
+	return {
+		...mockOpenAiResponsesClient(mockResponsesCreate),
+		// Expose the real SDK error class so the mock transport can throw it exactly
+		// the way the OpenAI SDK does when a request signal aborts.
+		APIUserAbortError: actual.APIUserAbortError,
+	}
 })
 
-import OpenAI from "openai"
+import OpenAI, { APIUserAbortError } from "openai"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
@@ -235,6 +241,18 @@ describe("XAIHandler", () => {
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow(`xAI completion error: ${errorMessage}`)
 	})
 
+	it("completePrompt should surface the SDK APIUserAbortError unmodified on abort", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const sdkAbortError = new APIUserAbortError()
+		mockResponsesCreate.mockRejectedValueOnce(sdkAbortError)
+
+		// The error must surface as the same SDK instance, not wrapped by handleOpenAIError
+		await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toBe(
+			sdkAbortError,
+		)
+	})
+
 	it("completePrompt should pass abort signal through to client", async () => {
 		const controller = new AbortController()
 		mockResponsesCreate.mockResolvedValueOnce({ output_text: "response" })
@@ -371,6 +389,30 @@ describe("XAIHandler", () => {
 
 		const stream = handler.createMessage("test prompt", [])
 		await expect(stream.next()).rejects.toThrow(`xAI completion error: ${errorMessage}`)
+	})
+
+	it("createMessage should surface the SDK APIUserAbortError unmodified on abort", async () => {
+		const abortedController = new AbortController()
+		abortedController.abort()
+		const sdkAbortError = new APIUserAbortError()
+
+		mockResponsesCreate.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+			// Mimic the OpenAI SDK: reject with its own APIUserAbortError when the
+			// request signal is aborted.
+			if (options?.signal?.aborted) {
+				throw sdkAbortError
+			}
+			return asyncStreamFrom([])
+		})
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: abortedController.signal }),
+		)
+
+		// The SDK error must surface as the same instance, not wrapped by handleOpenAIError
+		await expect(stream.next()).rejects.toBe(sdkAbortError)
 	})
 
 	it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {

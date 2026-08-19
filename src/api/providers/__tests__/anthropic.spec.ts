@@ -656,6 +656,15 @@ describe("AnthropicHandler", () => {
 			await handler.completePrompt("test prompt")
 			expect(mockCreate).toHaveBeenCalledWith(expect.any(Object), undefined)
 		})
+
+		it("should pass timeout when timeoutMs=0 (defined check)", async () => {
+			mockCreate.mockResolvedValueOnce({ content: [{ type: "text", text: "response" }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			// timeoutMs=0 must be forwarded as an explicit 0 timeout, not dropped as if unset
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: mockOptions.apiModelId }), {
+				timeout: 0,
+			})
+		})
 	})
 
 	describe("getModel", () => {

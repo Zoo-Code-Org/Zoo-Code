@@ -462,7 +462,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			if (options?.abortSignal) {
 				requestOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs) {
+			if (options?.timeoutMs !== undefined) {
 				requestOptions.timeout = options.timeoutMs
 			}
 
