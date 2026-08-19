@@ -148,6 +148,36 @@ describe("LmStudioHandler", () => {
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
 
+		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
+			// When both reasoning_content and reasoning are set, only reasoning_content
+			// should be emitted as a reasoning chunk (not both).
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									reasoning_content: "primary thought",
+									reasoning: "fallback thought",
+								},
+								index: 0,
+							},
+						],
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
+
+			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
+		})
+
 		it("still parses <think> tags embedded in content", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([
