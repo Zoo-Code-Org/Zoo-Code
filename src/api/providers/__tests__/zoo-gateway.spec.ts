@@ -487,17 +487,19 @@ describe("ZooGatewayHandler", () => {
 			)
 		})
 
-		it("should pass timeoutMs=0 through to client", async () => {
+		it("should omit the timeout option when timeoutMs is 0", async () => {
+			// The OpenAI SDK treats timeout: 0 as an immediate abort, so the
+			// "disabled" value must never be forwarded — assert the absence of
+			// the option (a forwarded timeout: 0 would fail this assertion).
 			const handler = new ZooGatewayHandler(mockOptions)
 			mockCreate.mockImplementation(async () => ({
 				choices: [{ message: { role: "assistant", content: "response" } }],
 			}))
 
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ model: expect.any(String) }),
-				expect.objectContaining({ timeout: 0 }),
-			)
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+			const requestOptions = call[1] as { timeout?: number } | undefined
+			expect(requestOptions).not.toHaveProperty("timeout")
 		})
 
 		it("should work without options (backward compatible)", async () => {
@@ -563,6 +565,41 @@ describe("ZooGatewayHandler", () => {
 
 			await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
 			expect(capturedSignal?.aborted).toBe(true)
+		})
+
+		it("detaches the bridged abort listener when the request completes normally", async () => {
+			// The listener is added with { once: true }, so it only detaches on
+			// abort. A task-scoped signal spanning many requests must not
+			// accumulate a listener per request: assert explicit removal after a
+			// normal (non-aborted) completion.
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						index: 0,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						index: 0,
+						usage: { prompt_tokens: 2, completion_tokens: 3 },
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+			const stream = handler.createMessage(
+				"prompt",
+				[{ role: "user", content: "hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(controller.signal.aborted).toBe(false)
 		})
 	})
 	describe("classifyGatewayApiError", () => {

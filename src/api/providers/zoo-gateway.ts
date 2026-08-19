@@ -224,13 +224,17 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		// Bridge it to our controller using the Bedrock pattern:
 		// - pre-aborted guard: check if already aborted before adding listener
 		// - { once: true }: remove listener after first abort to avoid leaks
+		// The listener is stored so it can be detached when the request ends:
+		// { once: true } only removes it on abort, so a task-scoped signal
+		// would otherwise accumulate one listener per request.
 		const controller = new AbortController()
 		const externalAbortSignal = metadata?.abortSignal
+		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {
 				controller.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
 			}
 		}
 
@@ -291,6 +295,8 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				)
 			}
 			throw error
+		} finally {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
 	}
 
@@ -311,12 +317,15 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens
-			// Build request options with abortSignal and/or timeout
+			// Build request options with abortSignal and/or timeout.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
 			const createOptions: OpenAI.RequestOptions = {}
 			if (options?.abortSignal) {
 				createOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs !== undefined) {
+			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 				createOptions.timeout = options.timeoutMs
 			}
 

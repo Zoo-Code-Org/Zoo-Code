@@ -415,6 +415,41 @@ describe("OpencodeGoHandler", () => {
 			await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
 			expect(capturedSignal?.aborted).toBe(true)
 		})
+
+		it("detaches the bridged abort listener when the request completes normally", async () => {
+			// The listener is added with { once: true }, so it only detaches on
+			// abort. A task-scoped signal spanning many requests must not
+			// accumulate a listener per request: assert explicit removal after a
+			// normal (non-aborted) completion.
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						index: 0,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						index: 0,
+						usage: { prompt_tokens: 2, completion_tokens: 3 },
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const controller = new AbortController()
+			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+			const stream = handler.createMessage(
+				"sys",
+				[{ role: "user", content: "hi" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toContainEqual({ type: "text", text: "ok" })
+			expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			expect(controller.signal.aborted).toBe(false)
+		})
 	})
 	describe("completePrompt", () => {
 		it("returns the message content for a non-streaming completion", async () => {
@@ -660,6 +695,20 @@ describe("OpencodeGoHandler", () => {
 			})
 		})
 
+		it("completePrompt omits the timeout option when timeoutMs is 0 (Anthropic path)", async () => {
+			// The SDK treats timeout: 0 as an immediate abort, so the "disabled"
+			// value must never be forwarded — assert the absence of the option.
+			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			await handler.completePrompt("ping", { timeoutMs: 0 })
+			const call = mockAnthropicCreate.mock.calls[mockAnthropicCreate.mock.calls.length - 1]
+			const requestOptions = call[1] as { timeout?: number } | undefined
+			// When no option is forwarded the provider omits the SDK options
+			// argument entirely, so absence means: undefined arg OR an arg
+			// without a timeout key.
+			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
+		})
+
 		it("completePrompt works without options (backward compatible, Anthropic path)", async () => {
 			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
 			const handler = new OpencodeGoHandler(anthropicOptions)
@@ -733,6 +782,20 @@ describe("OpencodeGoHandler", () => {
 					expect.objectContaining({ model: expect.any(String), stream: false }),
 					{ timeout: 5000 },
 				)
+			})
+
+			it("completePrompt omits the timeout option when timeoutMs is 0 (OpenAI path)", async () => {
+				// The OpenAI SDK treats timeout: 0 as an immediate abort, so the
+				// "disabled" value must never be forwarded — assert the absence of
+				// the option.
+				mockCreate.mockResolvedValueOnce({
+					choices: [{ message: { content: "response" } }],
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+				await handler.completePrompt("ping", { timeoutMs: 0 })
+				const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
+				const requestOptions = call[1] as { timeout?: number } | undefined
+				expect(requestOptions).not.toHaveProperty("timeout")
 			})
 
 			it("completePrompt works without options (backward compatible, OpenAI path)", async () => {

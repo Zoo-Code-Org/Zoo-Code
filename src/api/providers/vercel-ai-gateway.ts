@@ -74,62 +74,70 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 		// Bridge it to our controller using the Bedrock pattern:
 		// - pre-aborted guard: check if already aborted before adding listener
 		// - { once: true }: remove listener after first abort to avoid leaks
+		// The listener is stored so it can be detached when the request ends:
+		// { once: true } only removes it on abort, so a task-scoped signal
+		// would otherwise accumulate one listener per request.
 		const controller = new AbortController()
 		const externalAbortSignal = metadata?.abortSignal
+		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {
 				controller.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
 			}
 		}
 
-		const completion = await this.client.chat.completions.create(body, { signal: controller.signal })
+		try {
+			const completion = await this.client.chat.completions.create(body, { signal: controller.signal })
 
-		for await (const chunk of completion) {
-			// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
-			// rather than throwing, so surface it instead of returning an empty response.
-			if ("error" in chunk && chunk.error) {
-				const raw = chunk.error as { message?: unknown }
-				const message =
-					typeof raw.message === "string" && raw.message.length > 0
-						? raw.message
-						: "Vercel AI Gateway stream error"
-				throw new Error(message)
-			}
-
-			const delta = chunk.choices[0]?.delta
-			if (delta?.content) {
-				yield {
-					type: "text",
-					text: delta.content,
+			for await (const chunk of completion) {
+				// Vercel AI Gateway reports mid-stream failures as an in-band error chunk
+				// rather than throwing, so surface it instead of returning an empty response.
+				if ("error" in chunk && chunk.error) {
+					const raw = chunk.error as { message?: unknown }
+					const message =
+						typeof raw.message === "string" && raw.message.length > 0
+							? raw.message
+							: "Vercel AI Gateway stream error"
+					throw new Error(message)
 				}
-			}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				const delta = chunk.choices[0]?.delta
+				if (delta?.content) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "text",
+						text: delta.content,
+					}
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
+					const usage = chunk.usage as VercelAiGatewayUsage
+					yield {
+						type: "usage",
+						inputTokens: usage.prompt_tokens || 0,
+						outputTokens: usage.completion_tokens || 0,
+						cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
+						cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
+						totalCost: usage.cost ?? 0,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				const usage = chunk.usage as VercelAiGatewayUsage
-				yield {
-					type: "usage",
-					inputTokens: usage.prompt_tokens || 0,
-					outputTokens: usage.completion_tokens || 0,
-					cacheWriteTokens: usage.cache_creation_input_tokens || undefined,
-					cacheReadTokens: usage.prompt_tokens_details?.cached_tokens || undefined,
-					totalCost: usage.cost ?? 0,
-				}
-			}
+		} finally {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
 	}
 
@@ -148,12 +156,15 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens
-			// Build request options with abortSignal and/or timeout
+			// Build request options with abortSignal and/or timeout.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
 			const createOptions: OpenAI.RequestOptions = {}
 			if (options?.abortSignal) {
 				createOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs !== undefined) {
+			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 				createOptions.timeout = options.timeoutMs
 			}
 

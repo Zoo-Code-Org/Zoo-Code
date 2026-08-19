@@ -163,56 +163,64 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		// Bridge it to our controller using the Bedrock pattern:
 		// - pre-aborted guard: check if already aborted before adding listener
 		// - { once: true }: remove listener after first abort to avoid leaks
+		// The listener is stored so it can be detached when the request ends:
+		// { once: true } only removes it on abort, so a task-scoped signal
+		// would otherwise accumulate one listener per request.
 		const controller = new AbortController()
 		const externalAbortSignal = metadata?.abortSignal
+		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {
 				controller.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
 			}
 		}
 
-		let stream
 		try {
-			stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
-		}
-		let lastUsage: any = undefined
-
-		for await (const chunk of stream) {
-			const delta = chunk.choices[0]?.delta
-
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
+			let stream
+			try {
+				stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
+			} catch (error) {
+				throw handleOpenAIError(error, this.providerName)
 			}
+			let lastUsage: any = undefined
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+			for await (const chunk of stream) {
+				const delta = chunk.choices[0]?.delta
 
-			// Handle native tool calls
-			if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				// Handle native tool calls
+				if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
 					}
+				}
+
+				if (chunk.usage) {
+					lastUsage = chunk.usage
 				}
 			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, info)
 			}
-		}
-
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, info)
+		} finally {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
 	}
 
@@ -227,12 +235,15 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			messages: openAiMessages,
 			temperature: temperature,
 		}
-		// Build request options with abortSignal and/or timeout
+		// Build request options with abortSignal and/or timeout.
+		// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+		// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+		// abort, which would cancel the request right away.
 		const createOptions: OpenAI.RequestOptions = {}
 		if (options?.abortSignal) {
 			createOptions.signal = options.abortSignal
 		}
-		if (options?.timeoutMs !== undefined) {
+		if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 			createOptions.timeout = options.timeoutMs
 		}
 

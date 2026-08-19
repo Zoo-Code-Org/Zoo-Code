@@ -170,27 +170,35 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// Bridge it to our controller using the Bedrock pattern:
 		// - pre-aborted guard: check if already aborted before adding listener
 		// - { once: true }: remove listener after first abort to avoid leaks
+		// The listener is stored so it can be detached when the request ends:
+		// { once: true } only removes it on abort, so a task-scoped signal
+		// would otherwise accumulate one listener per request.
 		const controller = new AbortController()
 		const externalAbortSignal = metadata?.abortSignal
+		const abortListener = () => controller.abort()
 		if (externalAbortSignal) {
 			if (externalAbortSignal.aborted) {
 				controller.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
 			}
 		}
 
 		if (format === "anthropic") {
-			yield* this.streamAnthropicMessage(
-				modelId,
-				info,
-				temperature,
-				maxTokens,
-				systemPrompt,
-				messages,
-				controller.signal,
-				metadata,
-			)
+			try {
+				yield* this.streamAnthropicMessage(
+					modelId,
+					info,
+					temperature,
+					maxTokens,
+					systemPrompt,
+					messages,
+					controller.signal,
+					metadata,
+				)
+			} finally {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
+			}
 			return
 		}
 
@@ -222,42 +230,46 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			}),
 		}
 
-		const completion = await this.client.chat.completions.create(body, { signal: controller.signal })
+		try {
+			const completion = await this.client.chat.completions.create(body, { signal: controller.signal })
 
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
 
-			// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+				// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: chunk.usage.prompt_tokens || 0,
+						outputTokens: chunk.usage.completion_tokens || 0,
+						cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
-				}
-			}
+		} finally {
+			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
 	}
 
@@ -516,12 +528,15 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		if (format === "anthropic") {
 			try {
-				// Build request options with abortSignal and/or timeout handling
+				// Build request options with abortSignal and/or timeout handling.
+				// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+				// option entirely — the SDKs treat timeout: 0 as an immediate
+				// abort, which would cancel the request right away.
 				const requestOptions: Anthropic.RequestOptions = {}
 				if (options?.abortSignal) {
 					requestOptions.signal = options.abortSignal
 				}
-				if (options?.timeoutMs !== undefined) {
+				if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 					requestOptions.timeout = options.timeoutMs
 				}
 
@@ -572,12 +587,15 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					reasoningEffort as OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"]
 			}
 
-			// Build request options with abortSignal and/or timeout for OpenAI path
+			// Build request options with abortSignal and/or timeout for OpenAI path.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
 			const createOptions: OpenAI.RequestOptions = {}
 			if (options?.abortSignal) {
 				createOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs !== undefined) {
+			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 				createOptions.timeout = options.timeoutMs
 			}
 
