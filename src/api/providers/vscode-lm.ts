@@ -422,6 +422,16 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		let accumulatedText: string = ""
 
 		try {
+			// Re-check after client initialization: the external signal may have
+			// aborted while getClient() (or the token calculation) was pending. Bail
+			// before invoking the host so no request starts for a cancelled request.
+			if (externalAbortSignal?.aborted) {
+				cancellationTokenSource.cancel()
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
 				justification: `Zoo Code would like to use '${client.name}' from '${client.vendor}', Click 'Allow' to proceed.`,
@@ -436,6 +446,13 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 
 			// Consume the stream and handle both text and tool call chunks
 			for await (const chunk of response.stream) {
+				// A late abort while consuming must stop the stream instead of
+				// yielding stale chunks.
+				if (externalAbortSignal?.aborted) {
+					const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+					abortError.name = "AbortError"
+					throw abortError
+				}
 				if (chunk instanceof vscode.LanguageModelTextPart) {
 					// Validate text part value
 					if (typeof chunk.value !== "string") {

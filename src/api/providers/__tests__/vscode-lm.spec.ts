@@ -508,6 +508,43 @@ describe("VsCodeLmHandler", () => {
 			expect(mockLanguageModelChat.sendRequest).not.toHaveBeenCalled()
 		})
 
+		it("should reject with an AbortError when the external signal aborts during client initialization", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			// Gate model selection so the generator waits inside getClient(): the
+			// pre-abort check and listener attachment happened before this window.
+			let releaseClient: () => void = () => {}
+			const clientGate = new Promise<void>((resolve) => {
+				releaseClient = resolve
+			})
+			;(vscode.lm.selectChatModels as Mock).mockImplementation(() =>
+				clientGate.then(() => [{ ...mockLanguageModelChat }]),
+			)
+			handler["client"] = null
+
+			const controller = new AbortController()
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			const firstChunk = stream.next()
+
+			// Release the client, then abort before the generator can reach sendRequest.
+			releaseClient()
+			controller.abort()
+
+			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
+
+			// The abort landed after client initialization, so no host request started.
+			expect(handler["client"]).not.toBeNull()
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+
+			// The local token source was cancelled for the request that never started.
+			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
+		})
+
 		it("should bridge a mid-flight external abort to the request cancellation token", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
@@ -537,10 +574,11 @@ describe("VsCodeLmHandler", () => {
 			await vi.waitFor(() => expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1))
 
 			// Abort the external signal while the request is in flight, then let the
-			// (token-agnostic) mock stream finish.
+			// (token-agnostic) mock stream finish. The late abort must stop the stream
+			// instead of yielding stale chunks.
 			controller.abort()
 			releaseStream()
-			await expect(firstChunk).resolves.toEqual({ done: false, value: { type: "text", text: "Hello" } })
+			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
 
 			// The bridge relayed the abort to the request cancellation token.
 			const tokenSource = tokenSourceInstance()
