@@ -1,7 +1,13 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { type ModelInfo, type ModelRecord, requestyDefaultModelId, requestyDefaultModelInfo } from "@roo-code/types"
+import {
+	type ModelInfo,
+	type ModelRecord,
+	providerIdentifiers,
+	requestyDefaultModelId,
+	requestyDefaultModelInfo,
+} from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { calculateApiCostOpenAI } from "../../shared/cost"
@@ -11,7 +17,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { AnthropicProviderReasoningParams, getAnthropicProviderReasoning } from "../transform/reasoning"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -63,7 +69,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		this.options = options
 		this.baseURL = toRequestyServiceUrl(options.requestyBaseUrl)
 
-		const apiKey = this.options.requestyApiKey ?? "not-provided"
+		const apiKey = this.options.requestyApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({
 			baseURL: this.baseURL,
@@ -74,7 +80,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	public async fetchModel() {
-		this.models = await getModels({ provider: "requesty", baseUrl: this.baseURL })
+		this.models = await getModels({ provider: providerIdentifiers.requesty, baseUrl: this.baseURL })
 		return this.getModel()
 	}
 

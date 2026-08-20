@@ -537,7 +537,7 @@ describe("ClineProvider", () => {
 		defaultTaskOptions = {
 			provider,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 		}
 
@@ -700,7 +700,7 @@ describe("ClineProvider", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 			customInstructions: undefined,
 			alwaysAllowReadOnly: false,
@@ -709,7 +709,7 @@ describe("ClineProvider", () => {
 			codebaseIndexConfig: {
 				codebaseIndexEnabled: true,
 				codebaseIndexQdrantUrl: "",
-				codebaseIndexEmbedderProvider: "openai",
+				codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 				codebaseIndexEmbedderBaseUrl: "",
 				codebaseIndexEmbedderModelId: "",
 			},
@@ -1231,7 +1231,7 @@ describe("ClineProvider", () => {
 	test("getState and getStateToPostToWebview return the complete NanoGPT configuration", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setProviderSettings({
-			apiProvider: "nanogpt",
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "nanogpt-secret",
 			nanoGptModelId: "openai/model",
 			nanoGptRoutingPreference: "latency",
@@ -1240,7 +1240,7 @@ describe("ClineProvider", () => {
 		const state = await provider.getState()
 		const postedState = await provider.getStateToPostToWebview()
 		const expectedConfiguration = {
-			apiProvider: "nanogpt",
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "nanogpt-secret",
 			nanoGptModelId: "openai/model",
 			nanoGptRoutingPreference: "latency",
@@ -1478,7 +1478,11 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-		const profile: ProviderSettingsEntry = { name: "test-config", id: "test-id", apiProvider: "anthropic" }
+		const profile: ProviderSettingsEntry = {
+			name: "test-config",
+			id: "test-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
 
 		;(provider as any).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
@@ -1505,7 +1509,9 @@ describe("ClineProvider", () => {
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
-				.mockResolvedValue([{ name: "current-config", id: "current-id", apiProvider: "anthropic" }]),
+				.mockResolvedValue([
+					{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
+				]),
 			setModeConfig: vi.fn(),
 		} as any
 
@@ -1522,7 +1528,11 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-		const profile: ProviderSettingsEntry = { apiProvider: "anthropic", id: "new-id", name: "new-config" }
+		const profile: ProviderSettingsEntry = {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "new-id",
+			name: "new-config",
+		}
 
 		;(provider as any).providerSettingsManager = {
 			activateProfile: vi.fn().mockResolvedValue(profile),
@@ -1548,7 +1558,7 @@ describe("ClineProvider", () => {
 		const profile: ProviderSettingsEntry = {
 			name: "config-by-id",
 			id: "config-id-123",
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 		}
 
 		;(provider as any).providerSettingsManager = {
@@ -1722,7 +1732,11 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([
+					{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+				]),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
 		} as any
@@ -1731,7 +1745,7 @@ describe("ClineProvider", () => {
 		await messageHandler({
 			type: "upsertApiConfiguration",
 			text: "test-config",
-			apiConfiguration: { apiProvider: "anthropic" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 		})
 
 		// Should save config as default for current mode
@@ -1940,7 +1954,7 @@ describe("ClineProvider", () => {
 			// Test with mcpEnabled: true
 			vi.spyOn(provider, "getState").mockResolvedValueOnce({
 				apiConfiguration: {
-					apiProvider: "openrouter" as const,
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				mcpEnabled: true,
 				mode: "code" as const,
@@ -1964,7 +1978,7 @@ describe("ClineProvider", () => {
 			// Test with mcpEnabled: false
 			vi.spyOn(provider, "getState").mockResolvedValueOnce({
 				apiConfiguration: {
-					apiProvider: "openrouter" as const,
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				mcpEnabled: false,
 				mode: "code" as const,
@@ -2000,7 +2014,7 @@ describe("ClineProvider", () => {
 			// Mock getState to return custom instructions for code mode
 			vi.spyOn(provider, "getState").mockResolvedValue({
 				apiConfiguration: {
-					apiProvider: "openrouter" as const,
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				customModePrompts: {
 					code: { customInstructions: "Code mode specific instructions" },
@@ -2029,7 +2043,7 @@ describe("ClineProvider", () => {
 			// Mock getState to return architect mode instructions
 			vi.spyOn(provider, "getState").mockResolvedValue({
 				apiConfiguration: {
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				customModePrompts: {
 					architect: { customInstructions: "Architect mode instructions" },
@@ -2064,7 +2078,7 @@ describe("ClineProvider", () => {
 			const profile: ProviderSettingsEntry = {
 				name: "saved-config",
 				id: "saved-config-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}
 
 			;(provider as any).providerSettingsManager = {
@@ -2095,7 +2109,9 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "current-config", id: "current-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 				setModeConfig: vi.fn(),
 			} as any
 
@@ -2219,10 +2235,14 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "config-id", apiProvider: "anthropic" }]),
-				activateProfile: vi
-					.fn()
-					.mockResolvedValue({ name: "test-config", id: "config-id", apiProvider: "anthropic" }),
+					.mockResolvedValue([
+						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "config-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
 			}
 
 			// Spy on log method to verify no warning was logged
@@ -2354,7 +2374,9 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "config-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 				activateProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
 			}
 
@@ -2454,7 +2476,9 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			// Mock getState to provide necessary data
@@ -2467,7 +2491,7 @@ describe("ClineProvider", () => {
 			await messageHandler({
 				type: "upsertApiConfiguration",
 				text: "test-config",
-				apiConfiguration: { apiProvider: "anthropic", apiKey: "test-key" },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
 			})
 
 			// Verify error was logged and user was notified
@@ -2486,11 +2510,13 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			const testApiConfig = {
-				apiProvider: "anthropic" as const,
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 
@@ -2506,7 +2532,7 @@ describe("ClineProvider", () => {
 
 			// Verify state updates
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 
@@ -2529,7 +2555,9 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			// Setup Task instance with auto-mock from the top of the file
@@ -2537,7 +2565,7 @@ describe("ClineProvider", () => {
 			await provider.addClineToStack(mockCline)
 
 			const testApiConfig = {
-				apiProvider: "anthropic" as const,
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 
@@ -2556,7 +2584,7 @@ describe("ClineProvider", () => {
 
 			// Verify state was still updated
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 		})
@@ -2570,11 +2598,13 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			const testApiConfig = {
-				apiProvider: "anthropic" as const,
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 
@@ -2590,10 +2620,10 @@ describe("ClineProvider", () => {
 
 			// Verify state updates
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			expect(updateGlobalStateSpy).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 		})
 	})
@@ -3185,7 +3215,7 @@ describe("getTelemetryProperties", () => {
 		defaultTaskOptions = {
 			provider,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 		}
 
@@ -3426,21 +3456,21 @@ describe("ClineProvider - Router Models", () => {
 		await messageHandler({ type: "requestRouterModels" })
 
 		// Verify getModels was called for each provider with correct options
-		expect(getModels).toHaveBeenCalledWith({ provider: "openrouter" })
-		expect(getModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
-		expect(getModels).toHaveBeenCalledWith({ provider: "unbound" })
-		expect(getModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.unbound })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
 		expect(getModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.opencodeGo }))
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
 		// NanoGPT's detailed catalog is public and may be scoped by an optional key.
-		expect(getModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -3526,14 +3556,14 @@ describe("ClineProvider - Router Models", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockPostMessage).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 	})
 
@@ -3566,7 +3596,7 @@ describe("ClineProvider - Router Models", () => {
 
 		// Verify LiteLLM was called with values from message
 		expect(getModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-litellm-key",
 			baseUrl: "http://message-url:4000",
 		})
@@ -3595,7 +3625,7 @@ describe("ClineProvider - Router Models", () => {
 		// Verify LiteLLM was NOT called
 		expect(getModels).not.toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "litellm",
+				provider: providerIdentifiers.litellm,
 			}),
 		)
 
@@ -3645,7 +3675,7 @@ describe("ClineProvider - Router Models", () => {
 		})
 
 		expect(getModels).toHaveBeenCalledWith({
-			provider: "lmstudio",
+			provider: providerIdentifiers.lmstudio,
 			baseUrl: "http://localhost:1234",
 		})
 	})
@@ -3743,7 +3773,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 		defaultTaskOptions = {
 			provider,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 		}
 
@@ -4680,7 +4710,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
 				} as any)
 				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 				} as any)
 				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
 					currentApiConfigName: "Anthropic",
@@ -4698,7 +4728,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(upsertSpy).toHaveBeenCalledWith(
 					"Zoo Gateway",
 					expect.objectContaining({
-						apiProvider: "zoo-gateway",
+						apiProvider: providerIdentifiers.zooGateway,
 						zooSessionToken: "zoo_ext_token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
@@ -4711,7 +4741,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
 				} as any)
 				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 				} as any)
 				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
 					currentApiConfigName: "Zoo Gateway",
@@ -4721,18 +4751,18 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([
-						{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
-						{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
 					]),
 					getProfile: vi
 						.fn()
 						.mockResolvedValueOnce({
-							apiProvider: "zoo-gateway",
+							apiProvider: providerIdentifiers.zooGateway,
 							zooSessionToken: "old-token",
 							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
 						})
 						.mockResolvedValueOnce({
-							apiProvider: "zoo-gateway",
+							apiProvider: providerIdentifiers.zooGateway,
 							zooSessionToken: "old-token",
 						}),
 					saveConfig,
@@ -4794,7 +4824,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 					getProfile: vi.fn().mockResolvedValue({
 						zooSessionToken: "current-token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
@@ -4813,7 +4845,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 					getProfile: vi.fn().mockResolvedValue({
 						zooSessionToken: "stale-token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
@@ -4831,7 +4865,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 					getProfile: vi.fn().mockResolvedValue({
 						zooSessionToken: "current-token",
 						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",

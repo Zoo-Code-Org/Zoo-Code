@@ -8,6 +8,7 @@ import { TaskScheduler } from "../core/task/TaskScheduler"
 import { type Task } from "../core/task/Task"
 import { API } from "../extension/api"
 import * as ProfileValidatorMod from "../shared/ProfileValidator"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 type PrivateClineProviderMethods = {
 	createTask: (
@@ -45,7 +46,7 @@ vi.mock("../core/task/Task", () => {
 		}) {
 			this.taskId = opts.historyItem?.id ?? `task-${Math.random().toString(36).slice(2, 8)}`
 			this.parentTask = opts.parentTask
-			this.apiConfiguration = opts.apiConfiguration ?? { apiProvider: "anthropic" }
+			this.apiConfiguration = opts.apiConfiguration ?? { apiProvider: providerIdentifiers.anthropic }
 			opts.onCreated?.(this)
 		}
 		start() {}
@@ -86,7 +87,7 @@ describe("Single-open-task invariant", () => {
 			},
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
-				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, consecutiveMistakeLimit: 0 },
 				organizationAllowList: "*",
 				enableCheckpoints: true,
 				checkpointTimeout: 60,
@@ -130,7 +131,7 @@ describe("Single-open-task invariant", () => {
 			taskScheduler: new TaskScheduler(),
 			setValues: vi.fn(),
 			getState: vi.fn().mockResolvedValue({
-				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, consecutiveMistakeLimit: 0 },
 				organizationAllowList: "*",
 				enableCheckpoints: true,
 				checkpointTimeout: 60,
@@ -182,7 +183,7 @@ describe("Single-open-task invariant", () => {
 				listConfig: vi.fn().mockResolvedValue([]),
 			},
 			getState: vi.fn().mockResolvedValue({
-				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, consecutiveMistakeLimit: 0 },
 				enableCheckpoints: true,
 				checkpointTimeout: 60,
 				experiments: {},
@@ -256,7 +257,7 @@ describe("Single-open-task invariant", () => {
 				listConfig: vi.fn().mockResolvedValue([]),
 			},
 			getState: vi.fn().mockResolvedValue({
-				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, consecutiveMistakeLimit: 0 },
 				enableCheckpoints: true,
 				checkpointTimeout: 60,
 				experiments: {},
@@ -328,7 +329,7 @@ describe("Single-open-task invariant", () => {
 				listConfig: vi.fn().mockResolvedValue([]),
 			},
 			getState: vi.fn().mockResolvedValue({
-				apiConfiguration: { apiProvider: "anthropic", consecutiveMistakeLimit: 0 },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, consecutiveMistakeLimit: 0 },
 				enableCheckpoints: true,
 				checkpointTimeout: 60,
 				experiments: {},

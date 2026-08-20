@@ -8,6 +8,7 @@ import type { ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
 import { OpenAiHandler } from "./openai"
+import { NOT_PROVIDED } from "./constants"
 
 export class MoonshotHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
@@ -16,7 +17,7 @@ export class MoonshotHandler extends OpenAiHandler {
 		// OpenAI Node SDK path as the generic "OpenAI Compatible" provider.
 		super({
 			...options,
-			openAiApiKey: options.moonshotApiKey ?? "not-provided",
+			openAiApiKey: options.moonshotApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? moonshotDefaultModelId,
 			openAiBaseUrl: options.moonshotBaseUrl || "https://api.moonshot.ai/v1",
 		})

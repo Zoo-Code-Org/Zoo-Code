@@ -4,6 +4,7 @@ import {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	OpenAiCodexServiceTier,
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	type ProviderSettings,
 } from "@roo-code/types"
 
@@ -119,7 +120,7 @@ describe("ProviderSettingsManager", () => {
 							config: {},
 						},
 						test: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 						},
 					},
 					migrations: {
@@ -151,11 +152,11 @@ describe("ProviderSettingsManager", () => {
 							rateLimitSeconds: undefined,
 						},
 						test: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							rateLimitSeconds: undefined,
 						},
 						existing: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							// this should not really be possible, unless someone has loaded a hand edited config,
 							// but we don't overwrite so we'll check that
 							rateLimitSeconds: 43,
@@ -188,11 +189,11 @@ describe("ProviderSettingsManager", () => {
 							consecutiveMistakeLimit: undefined,
 						},
 						test: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							consecutiveMistakeLimit: undefined,
 						},
 						existing: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							// this should not really be possible, unless someone has loaded a hand edited config,
 							// but we don't overwrite so we'll check that
 							consecutiveMistakeLimit: 5,
@@ -228,11 +229,11 @@ describe("ProviderSettingsManager", () => {
 							todoListEnabled: undefined,
 						},
 						test: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							todoListEnabled: undefined,
 						},
 						existing: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							// this should not really be possible, unless someone has loaded a hand edited config,
 							// but we don't overwrite so we'll check that
 							todoListEnabled: false,
@@ -266,19 +267,19 @@ describe("ProviderSettingsManager", () => {
 						default: {
 							config: {},
 							id: "default",
-							apiProvider: "roo",
+							apiProvider: retiredProviderIdentifiers.roo,
 							apiModelId: "roo/code-supernova", // Old model ID
 						},
 						test: {
-							apiProvider: "roo",
+							apiProvider: retiredProviderIdentifiers.roo,
 							apiModelId: "roo/code-supernova", // Old model ID
 						},
 						existing: {
-							apiProvider: "roo",
+							apiProvider: retiredProviderIdentifiers.roo,
 							apiModelId: "roo/code-supernova-1-million", // Already migrated
 						},
 						otherProvider: {
-							apiProvider: "anthropic",
+							apiProvider: providerIdentifiers.anthropic,
 							apiModelId: "roo/code-supernova", // Should not be migrated (different provider)
 						},
 						noProvider: {
@@ -329,7 +330,7 @@ describe("ProviderSettingsManager", () => {
 
 			await providerSettingsManager.saveConfig("router-profile", {
 				id: "router-id",
-				apiProvider: "roo",
+				apiProvider: retiredProviderIdentifiers.roo,
 				apiModelId: "roo/code-supernova",
 				rooApiKey: "router-key",
 			} as any)
@@ -357,7 +358,7 @@ describe("ProviderSettingsManager", () => {
 						id: "default",
 					},
 					test: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						id: "test-id",
 					},
 				},
@@ -376,7 +377,7 @@ describe("ProviderSettingsManager", () => {
 			const configs = await providerSettingsManager.listConfig()
 			expect(configs).toEqual([
 				{ name: "default", id: "default", apiProvider: undefined },
-				{ name: "test", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 		})
 
@@ -426,7 +427,7 @@ describe("ProviderSettingsManager", () => {
 			)
 
 			const newConfig: ProviderSettings = {
-				apiProvider: "vertex",
+				apiProvider: providerIdentifiers.vertex,
 				apiModelId: "gemini-2.5-flash-preview-05-20",
 				vertexKeyFile: "test-key-file",
 			}
@@ -499,7 +500,7 @@ describe("ProviderSettingsManager", () => {
 			)
 
 			const newConfig: ProviderSettings = {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 			const newConfigWithExtra: ProviderSettings = {
@@ -538,7 +539,7 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					test: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "old-key",
 						id: "test-id",
 					},
@@ -551,7 +552,7 @@ describe("ProviderSettingsManager", () => {
 			mockSecrets.get.mockResolvedValue(JSON.stringify(existingConfig))
 
 			const updatedConfig: ProviderSettings = {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "new-key",
 			}
 
@@ -561,7 +562,7 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					test: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "new-key",
 						id: "test-id",
 					},
@@ -614,7 +615,7 @@ describe("ProviderSettingsManager", () => {
 			// Include a legacy provider-specific field (groqApiKey) that is no
 			// longer in the schema — passthrough() must keep it.
 			const retiredConfig = {
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 				apiKey: "legacy-key",
 				apiModelId: "legacy-model",
 				openAiBaseUrl: "https://legacy.example/v1",
@@ -647,7 +648,7 @@ describe("ProviderSettingsManager", () => {
 						id: "default",
 					},
 					test: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						id: "test-id",
 					},
 				},
@@ -704,7 +705,7 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					test: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "test-key",
 						id: "test-id",
 					},
@@ -720,7 +721,11 @@ describe("ProviderSettingsManager", () => {
 			const { name, ...providerSettings } = await providerSettingsManager.activateProfile({ name: "test" })
 
 			expect(name).toBe("test")
-			expect(providerSettings).toEqual({ apiProvider: "anthropic", apiKey: "test-key", id: "test-id" })
+			expect(providerSettings).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "test-key",
+				id: "test-id",
+			})
 
 			// Get the stored config to check the structure.
 			const calls = mockSecrets.store.mock.calls
@@ -728,7 +733,7 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.currentApiConfigName).toBe("test")
 
 			expect(storedConfig.apiConfigs.test).toEqual({
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 				id: "test-id",
 			})
@@ -751,7 +756,7 @@ describe("ProviderSettingsManager", () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
 					currentApiConfigName: "default",
-					apiConfigs: { test: { apiProvider: "anthropic", id: "test-id" } },
+					apiConfigs: { test: { apiProvider: providerIdentifiers.anthropic, id: "test-id" } },
 					migrations: {
 						rateLimitSecondsMigrated: true,
 						openAiHeadersMigrated: true,
@@ -771,7 +776,7 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "valid",
 				apiConfigs: {
 					valid: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "valid-key",
 						apiModelId: "claude-3-opus-20240229",
 						id: "valid-id",
@@ -818,7 +823,7 @@ describe("ProviderSettingsManager", () => {
 				apiConfigs: {
 					retiredProvider: {
 						id: "retired-id",
-						apiProvider: "groq",
+						apiProvider: retiredProviderIdentifiers.groq,
 						apiKey: "legacy-key",
 						apiModelId: "legacy-model",
 						openAiBaseUrl: "https://legacy.example/v1",
@@ -861,7 +866,7 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "valid",
 				apiConfigs: {
 					valid: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "valid-key",
 						apiModelId: "claude-3-opus-20240229",
 						rateLimitSeconds: 0,
@@ -912,7 +917,7 @@ describe("ProviderSettingsManager", () => {
 				apiConfigs: {
 					retired: {
 						id: "retired-id",
-						apiProvider: "groq",
+						apiProvider: retiredProviderIdentifiers.groq,
 						apiKey: "legacy-key",
 						apiModelId: "legacy-model",
 						openAiBaseUrl: "https://legacy.example/v1",
@@ -940,7 +945,7 @@ describe("ProviderSettingsManager", () => {
 				apiConfigs: {
 					glm: {
 						id: "glm-id",
-						apiProvider: "zai",
+						apiProvider: providerIdentifiers.zai,
 						apiModelId: "glm-5.1",
 						modelMaxTokens: 8192,
 						modelMaxThinkingTokens: 2048,
@@ -964,7 +969,7 @@ describe("ProviderSettingsManager", () => {
 				apiConfigs: {
 					anthropic: {
 						id: "anthropic-id",
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 						apiModelId: "claude-3-5-haiku-20241022",
 						modelMaxTokens: 8192,
 						modelMaxThinkingTokens: 2048,
@@ -987,7 +992,7 @@ describe("ProviderSettingsManager", () => {
 			mockSecrets.get.mockResolvedValue(
 				JSON.stringify({
 					currentApiConfigName: "test",
-					apiConfigs: { test: { apiProvider: "anthropic", id: "test-id" } },
+					apiConfigs: { test: { apiProvider: providerIdentifiers.anthropic, id: "test-id" } },
 				}),
 			)
 
@@ -1002,7 +1007,10 @@ describe("ProviderSettingsManager", () => {
 		it("should return true for existing config", async () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "default",
-				apiConfigs: { default: { id: "default" }, test: { apiProvider: "anthropic", id: "test-id" } },
+				apiConfigs: {
+					default: { id: "default" },
+					test: { apiProvider: providerIdentifiers.anthropic, id: "test-id" },
+				},
 				migrations: { rateLimitSecondsMigrated: false },
 			}
 
@@ -1045,7 +1053,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"cloud-profile": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "secret-key", // This should be removed
 					apiModelId: "claude-3-opus-20240229",
 				},
@@ -1060,7 +1068,7 @@ describe("ProviderSettingsManager", () => {
 			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
 			expect(storedConfig.apiConfigs["cloud-profile"]).toEqual({
 				id: "cloud-id-1",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiModelId: "claude-3-opus-20240229",
 				// apiKey should be removed
 			})
@@ -1074,7 +1082,7 @@ describe("ProviderSettingsManager", () => {
 					default: { id: "default-id" },
 					"existing-cloud": {
 						id: "cloud-id-1",
-						apiProvider: "anthropic" as const,
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "existing-secret",
 						apiModelId: "claude-3-haiku-20240307",
 					},
@@ -1087,7 +1095,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"updated-name": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-secret", // Should be ignored
 					apiModelId: "claude-3-opus-20240229",
 				},
@@ -1102,7 +1110,7 @@ describe("ProviderSettingsManager", () => {
 			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
 			expect(storedConfig.apiConfigs["updated-name"]).toEqual({
 				id: "cloud-id-1",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "existing-secret", // Preserved
 				apiModelId: "claude-3-opus-20240229", // Updated
 			})
@@ -1115,8 +1123,8 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					default: { id: "default-id" },
-					"cloud-profile-1": { id: "cloud-id-1", apiProvider: "anthropic" as const },
-					"cloud-profile-2": { id: "cloud-id-2", apiProvider: "openai" as const },
+					"cloud-profile-1": { id: "cloud-id-1", apiProvider: providerIdentifiers.anthropic },
+					"cloud-profile-2": { id: "cloud-id-2", apiProvider: providerIdentifiers.openai },
 				},
 				cloudProfileIds: ["cloud-id-1", "cloud-id-2"],
 			}
@@ -1126,7 +1134,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"cloud-profile-1": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 				},
 				// cloud-profile-2 is missing, should be deleted
 			}
@@ -1148,7 +1156,7 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					default: { id: "default-id" },
-					"conflict-name": { id: "local-id", apiProvider: "openai" as const },
+					"conflict-name": { id: "local-id", apiProvider: providerIdentifiers.openai },
 				},
 				cloudProfileIds: [],
 			}
@@ -1158,7 +1166,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"conflict-name": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 				},
 			}
 
@@ -1171,11 +1179,11 @@ describe("ProviderSettingsManager", () => {
 			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
 			expect(storedConfig.apiConfigs["conflict-name"]).toEqual({
 				id: "cloud-id-1",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 			expect(storedConfig.apiConfigs["conflict-name_local"]).toEqual({
 				id: "local-id",
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 			})
 			expect(storedConfig.cloudProfileIds).toEqual(["cloud-id-1"])
 		})
@@ -1185,8 +1193,8 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					default: { id: "default-id" },
-					"conflict-name": { id: "local-id-1", apiProvider: "openai" as const },
-					"conflict-name_local": { id: "local-id-2", apiProvider: "vertex" as const },
+					"conflict-name": { id: "local-id-1", apiProvider: providerIdentifiers.openai },
+					"conflict-name_local": { id: "local-id-2", apiProvider: providerIdentifiers.vertex },
 				},
 				cloudProfileIds: [],
 			}
@@ -1196,7 +1204,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"conflict-name": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 				},
 			}
 
@@ -1209,15 +1217,15 @@ describe("ProviderSettingsManager", () => {
 			const storedConfig = JSON.parse(mockSecrets.store.mock.calls[0][1])
 			expect(storedConfig.apiConfigs["conflict-name"]).toEqual({
 				id: "cloud-id-1",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 			expect(storedConfig.apiConfigs["conflict-name_1"]).toEqual({
 				id: "local-id-1",
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 			})
 			expect(storedConfig.apiConfigs["conflict-name_local"]).toEqual({
 				id: "local-id-2",
-				apiProvider: "vertex",
+				apiProvider: providerIdentifiers.vertex,
 			})
 		})
 
@@ -1226,8 +1234,8 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					default: { id: "default-id" },
-					"cloud-profile-1": { id: "cloud-id-1", apiProvider: "anthropic" as const },
-					"cloud-profile-2": { id: "cloud-id-2", apiProvider: "openai" as const },
+					"cloud-profile-1": { id: "cloud-id-1", apiProvider: providerIdentifiers.anthropic },
+					"cloud-profile-2": { id: "cloud-id-2", apiProvider: providerIdentifiers.openai },
 				},
 				cloudProfileIds: ["cloud-id-1", "cloud-id-2"],
 			}
@@ -1263,11 +1271,11 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"valid-profile": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 				},
 				"invalid-profile": {
 					// Missing id
-					apiProvider: "openai" as const,
+					apiProvider: providerIdentifiers.openai,
 				},
 			}
 
@@ -1288,9 +1296,9 @@ describe("ProviderSettingsManager", () => {
 				currentApiConfigName: "default",
 				apiConfigs: {
 					default: { id: "default-id" },
-					"keep-cloud": { id: "cloud-id-1", apiProvider: "anthropic" as const, apiKey: "secret1" },
-					"delete-cloud": { id: "cloud-id-2", apiProvider: "openai" as const },
-					"rename-me": { id: "local-id", apiProvider: "vertex" as const },
+					"keep-cloud": { id: "cloud-id-1", apiProvider: providerIdentifiers.anthropic, apiKey: "secret1" },
+					"delete-cloud": { id: "cloud-id-2", apiProvider: providerIdentifiers.openai },
+					"rename-me": { id: "local-id", apiProvider: providerIdentifiers.vertex },
 				},
 				cloudProfileIds: ["cloud-id-1", "cloud-id-2"],
 			}
@@ -1300,19 +1308,19 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"updated-keep": {
 					id: "cloud-id-1",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "new-secret", // Should be ignored
 					apiModelId: "claude-3-opus-20240229",
 				},
 				"rename-me": {
 					id: "cloud-id-3",
-					apiProvider: "openai" as const,
+					apiProvider: providerIdentifiers.openai,
 				},
 				// delete-cloud is missing (should be deleted)
 				// new profile
 				"new-cloud": {
 					id: "cloud-id-4",
-					apiProvider: "vertex" as const,
+					apiProvider: providerIdentifiers.vertex,
 				},
 			}
 
@@ -1331,7 +1339,7 @@ describe("ProviderSettingsManager", () => {
 			// Check updates
 			expect(storedConfig.apiConfigs["updated-keep"]).toEqual({
 				id: "cloud-id-1",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "secret1", // preserved
 				apiModelId: "claude-3-opus-20240229",
 			})
@@ -1339,17 +1347,17 @@ describe("ProviderSettingsManager", () => {
 			// Check renames
 			expect(storedConfig.apiConfigs["rename-me_local"]).toEqual({
 				id: "local-id",
-				apiProvider: "vertex",
+				apiProvider: providerIdentifiers.vertex,
 			})
 			expect(storedConfig.apiConfigs["rename-me"]).toEqual({
 				id: "cloud-id-3",
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 			})
 
 			// Check new additions
 			expect(storedConfig.apiConfigs["new-cloud"]).toEqual({
 				id: "cloud-id-4",
-				apiProvider: "vertex",
+				apiProvider: providerIdentifiers.vertex,
 			})
 
 			expect(storedConfig.cloudProfileIds).toEqual(["cloud-id-1", "cloud-id-3", "cloud-id-4"])
@@ -1376,7 +1384,7 @@ describe("ProviderSettingsManager", () => {
 				apiConfigs: {
 					"active-profile": {
 						id: "active-id",
-						apiProvider: "anthropic" as const,
+						apiProvider: providerIdentifiers.anthropic,
 						apiKey: "old-key",
 					},
 				},
@@ -1388,7 +1396,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"active-profile": {
 					id: "active-id",
-					apiProvider: "anthropic" as const,
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-opus-20240229", // Updated setting
 				},
 			}
@@ -1404,8 +1412,8 @@ describe("ProviderSettingsManager", () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "active-profile",
 				apiConfigs: {
-					"active-profile": { id: "active-id", apiProvider: "anthropic" as const },
-					"backup-profile": { id: "backup-id", apiProvider: "openai" as const },
+					"active-profile": { id: "active-id", apiProvider: providerIdentifiers.anthropic },
+					"backup-profile": { id: "backup-id", apiProvider: providerIdentifiers.openai },
 				},
 				cloudProfileIds: ["active-id"],
 			}
@@ -1425,7 +1433,7 @@ describe("ProviderSettingsManager", () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "only-profile",
 				apiConfigs: {
-					"only-profile": { id: "only-id", apiProvider: "anthropic" as const },
+					"only-profile": { id: "only-id", apiProvider: providerIdentifiers.anthropic },
 				},
 				cloudProfileIds: ["only-id"],
 			}
@@ -1449,8 +1457,8 @@ describe("ProviderSettingsManager", () => {
 			const existingConfig: ProviderProfiles = {
 				currentApiConfigName: "local-profile",
 				apiConfigs: {
-					"local-profile": { id: "local-id", apiProvider: "anthropic" as const },
-					"cloud-profile": { id: "cloud-id", apiProvider: "openai" as const },
+					"local-profile": { id: "local-id", apiProvider: providerIdentifiers.anthropic },
+					"cloud-profile": { id: "cloud-id", apiProvider: providerIdentifiers.openai },
 				},
 				cloudProfileIds: ["cloud-id"],
 			}
@@ -1460,7 +1468,7 @@ describe("ProviderSettingsManager", () => {
 			const cloudProfiles = {
 				"cloud-profile": {
 					id: "cloud-id",
-					apiProvider: "openai" as const,
+					apiProvider: providerIdentifiers.openai,
 					apiModelId: "gpt-4", // Updated cloud profile
 				},
 			}

@@ -15,6 +15,7 @@ import { convertToZAiFormat } from "../transform/zai-format"
 
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
+import { NOT_PROVIDED } from "./constants"
 import { handleOpenAIError } from "./utils/error-handler"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
@@ -37,7 +38,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			...options,
 			providerName: "Z.ai",
 			baseURL: zaiApiLineConfigs[apiLine].baseUrl,
-			apiKey: options.zaiApiKey ?? "not-provided",
+			apiKey: options.zaiApiKey ?? NOT_PROVIDED,
 			defaultProviderModelId: defaultModelId,
 			providerModels: models,
 			defaultTemperature: ZAI_DEFAULT_TEMPERATURE,

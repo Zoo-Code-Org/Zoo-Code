@@ -7,7 +7,7 @@ import { ApiHandlerOptions, RouterName } from "../../shared/api"
 import { BaseProvider } from "./base-provider"
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 
 type RouterProviderOptions = {
 	name: RouterName
@@ -41,7 +41,7 @@ export abstract class RouterProvider extends BaseProvider {
 
 		this.client = new OpenAI({
 			baseURL,
-			apiKey: apiKey ?? "not-provided",
+			apiKey: apiKey ?? NOT_PROVIDED,
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
