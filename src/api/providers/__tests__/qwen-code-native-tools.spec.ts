@@ -620,6 +620,34 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect(chunks).not.toContainEqual(expect.objectContaining({ type: "text", text: "b" }))
 			})
 
+			it("should tolerate degenerate stream shapes (empty choice, repeated content, zero usage)", async () => {
+				// Changed-line coverage: exercises the defensive branches of the stream
+				// loop — a chunk with no choice, a delta that repeats the previous full
+				// content (empty after trimming), a think block that starts the text so the
+				// split yields an empty leading segment, and a usage payload of zeros.
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{ choices: [] },
+						{ choices: [{ delta: { content: "hi" }, index: 0 }] },
+						{ choices: [{ delta: { content: "hi" }, index: 0 }] },
+						{ choices: [{ delta: { content: "<think>thought</think>out" }, index: 0 }] },
+						{
+							choices: [{ delta: {}, index: 0, finish_reason: "stop" }],
+							usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+						},
+					]),
+				)
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1" })
+				const chunks = await collectStream(stream)
+
+				const hiChunks = chunks.filter((chunk) => chunk.type === "text" && chunk.text === "hi")
+				expect(hiChunks).toHaveLength(1) // the repeated content chunk yields nothing
+				expect(chunks).toContainEqual({ type: "reasoning", text: "thought" })
+				expect(chunks).toContainEqual({ type: "text", text: "out" })
+				expect(chunks).toContainEqual({ type: "usage", inputTokens: 0, outputTokens: 0 })
+			})
+
 			it("should not retry after 401 when the abort signal fires during the refresh", async () => {
 				const external = new AbortController()
 				const fetchMock = vi.fn().mockImplementation(async () => {
