@@ -162,6 +162,39 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("max_completion_tokens")
 	})
 
+	it("uses sequential tool calls for Muse Spark 1.2 Contributor", async () => {
+		const modelId = "meta/muse-spark-1.2-contributor"
+		vi.mocked(getModels).mockResolvedValue({
+			[modelId]: {
+				maxTokens: 65_536,
+				contextWindow: 1_000_000,
+				supportsPromptCache: false,
+			},
+		})
+		const tools: OpenAI.Chat.ChatCompletionTool[] = [
+			{ type: "function", function: { name: "read_file", parameters: { type: "object" } } },
+		]
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: modelId }).createMessage("sys", messages, {
+				taskId: "task",
+				tools,
+				tool_choice: "auto",
+				parallelToolCalls: true,
+			}),
+		)
+
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: modelId,
+				tools: [expect.objectContaining({ function: expect.objectContaining({ name: "read_file" }) })],
+				tool_choice: "auto",
+				parallel_tool_calls: false,
+			}),
+			expect.anything(),
+		)
+	})
+
 	it("omits temperature when it was not explicitly configured", async () => {
 		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")

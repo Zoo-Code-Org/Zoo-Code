@@ -27,6 +27,8 @@ type NanoGptUsage = OpenAI.CompletionUsage & {
 
 type NanoGptCachingRequest = { caching?: true }
 
+const NANO_GPT_SEQUENTIAL_TOOL_CALL_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
+
 const OPENAI_REASONING_EFFORTS = ["low", "medium", "high"] as const
 type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number]
 
@@ -99,7 +101,9 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			max_tokens: info.maxTokens ?? undefined,
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			parallel_tool_calls: NANO_GPT_SEQUENTIAL_TOOL_CALL_MODELS.has(canonicalModelId)
+				? false
+				: (metadata?.parallelToolCalls ?? true),
 			...(this.options.nanoGptRoutingPreference === "caching" ? { caching: true } : {}),
 		}
 
