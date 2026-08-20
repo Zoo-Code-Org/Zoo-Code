@@ -11,7 +11,7 @@ vitest.mock("../utils/timeout-config", () => ({
 import { getApiRequestTimeout } from "../utils/timeout-config"
 
 import { clearAllMocks } from "../../../test-utils/reset"
-import { asyncStreamFrom } from "../../../test-utils/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 interface MockOpenAiClient {
 	chat: {
@@ -266,6 +266,30 @@ describe("LmStudioHandler abort signal wiring", () => {
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("AbortError")
 			expect((caught as Error).message).toMatch(/aborted$/)
+		})
+
+		it("should stream reasoning chunks from a reasoning_content delta", async () => {
+			// Changed-line coverage regression: reasoning models served by LM Studio
+			// stream thinking via delta.reasoning_content, and createMessage must yield
+			// a reasoning chunk from that dedicated field.
+			const handler = new LmStudioHandler(options)
+			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			const create = lastCreate()
+			create.mockResolvedValue(
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system", []))
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
+			expect(chunks).toContainEqual({ type: "text", text: "answer" })
 		})
 	})
 
