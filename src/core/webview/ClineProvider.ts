@@ -2013,7 +2013,7 @@ export class ClineProvider
 
 		const newConfiguration: ProviderSettings = {
 			...apiConfiguration,
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: apiKey,
 			openRouterModelId: apiConfiguration?.openRouterModelId || openRouterDefaultModelId,
 		}
@@ -2059,7 +2059,7 @@ export class ClineProvider
 			if (zooProfiles.length === 0) {
 				// No existing zoo-gateway profile — create the canonical default.
 				const newConfiguration: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: token,
 					zooGatewayModelId: apiConfiguration.zooGatewayModelId,
 					zooGatewayBaseUrl: derivedGatewayBaseUrl,
@@ -2107,7 +2107,7 @@ export class ClineProvider
 
 		const newConfiguration: ProviderSettings = {
 			...apiConfiguration,
-			apiProvider: "requesty",
+			apiProvider: providerIdentifiers.requesty,
 			requestyApiKey: code,
 			requestyModelId: apiConfiguration?.requestyModelId || requestyDefaultModelId,
 		}

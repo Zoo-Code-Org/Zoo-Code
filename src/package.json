@@ -529,6 +529,7 @@
 	},
 	"devDependencies": {
 		"@ai-sdk/openai-compatible": "2.0.56",
+		"@typescript-eslint/parser": "8.32.1",
 		"@roo-code/build": "workspace:^",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",

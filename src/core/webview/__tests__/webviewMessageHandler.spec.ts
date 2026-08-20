@@ -197,6 +197,7 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -232,7 +233,10 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			type: "requestLmStudioModels",
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "lmstudio", baseUrl: "http://localhost:1234" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.lmstudio,
+			baseUrl: "http://localhost:1234",
+		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "lmStudioModels",
@@ -332,7 +336,10 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 			type: "requestOllamaModels",
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "ollama", baseUrl: "http://localhost:1234" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.ollama,
+			baseUrl: "http://localhost:1234",
+		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
@@ -413,14 +420,14 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		// Should use the URL from message values, not the saved state
 		expect(mockFlushModels).toHaveBeenCalledWith(
 			{
-				provider: "ollama",
+				provider: providerIdentifiers.ollama,
 				baseUrl: "https://ollama.example.com",
 				apiKey: "secret-key",
 			},
 			true,
 		)
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "ollama",
+			provider: providerIdentifiers.ollama,
 			baseUrl: "https://ollama.example.com",
 			apiKey: "secret-key",
 		})
@@ -468,25 +475,27 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 
 		// Verify getModels was called for each provider
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "openrouter" })
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
 		expect(mockGetModels).toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "unbound",
+				provider: providerIdentifiers.unbound,
 			}),
 		)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		expect(mockGetModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.opencodeGo }),
+		)
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -533,7 +542,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
 
 		// Must be fetched despite no configured key, forwarding apiKey: undefined.
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.opencodeGo, apiKey: undefined })
 
 		const routerModelsCall = (mockClineProvider.postMessageToWebview as any).mock.calls.find(
 			([msg]: [{ type: string }]) => msg.type === "routerModels",
@@ -557,13 +566,16 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 			values: {
-				provider: "opencode-go",
+				provider: providerIdentifiers.opencodeGo,
 				opencodeGoApiKey: "fresh-key",
 			},
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: "fresh-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: "fresh-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.opencodeGo, apiKey: "fresh-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.opencodeGo, apiKey: "fresh-key" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {
@@ -571,7 +583,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 					"opencode/model": expect.objectContaining({ description: "Opencode model" }),
 				},
 			},
-			values: { provider: "opencode-go" },
+			values: { provider: providerIdentifiers.opencodeGo },
 		})
 	})
 
@@ -591,13 +603,16 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 			values: {
-				provider: "kenari",
+				provider: providerIdentifiers.kenari,
 				kenariApiKey: "fresh-kenari-key",
 			},
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.kenari, apiKey: "fresh-kenari-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.kenari, apiKey: "fresh-kenari-key" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {
@@ -605,7 +620,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 					"glm-5-2": expect.objectContaining({ description: "Kenari model" }),
 				},
 			},
-			values: { provider: "kenari" },
+			values: { provider: providerIdentifiers.kenari },
 		})
 	})
 
@@ -617,10 +632,10 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
-			values: { provider: "nanogpt" },
+			values: { provider: providerIdentifiers.nanogpt },
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 		expect(mockFlushModels).not.toHaveBeenCalled()
 	})
 
@@ -634,11 +649,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
-			values: { provider: "nanogpt", nanoGptApiKey: "unsaved-key" },
+			values: { provider: providerIdentifiers.nanogpt, nanoGptApiKey: "unsaved-key" },
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "unsaved-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "unsaved-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: "unsaved-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: "unsaved-key" })
 	})
 
 	it("uses the saved NanoGPT key for manual refresh", async () => {
@@ -649,11 +667,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
-			values: { provider: "nanogpt", refresh: true },
+			values: { provider: providerIdentifiers.nanogpt, refresh: true },
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "saved-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "saved-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: "saved-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: "saved-key" })
 	})
 
 	it("handles LiteLLM models with values from message when config is missing", async () => {
@@ -686,7 +707,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify LiteLLM was called with values from message
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-litellm-key",
 			baseUrl: "http://message-url:4000",
 		})
@@ -720,7 +741,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Verify LiteLLM was NOT called
 		expect(mockGetModels).not.toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "litellm",
+				provider: providerIdentifiers.litellm,
 			}),
 		)
 
@@ -779,14 +800,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 
 		// Verify final routerModels response includes successful providers and empty objects for failed ones
@@ -832,35 +853,35 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Structured error message",
-			values: { provider: "openrouter" },
+			values: { provider: providerIdentifiers.openrouter },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Unbound error",
-			values: { provider: "unbound" },
+			values: { provider: providerIdentifiers.unbound },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Vercel AI Gateway error",
-			values: { provider: "vercel-ai-gateway" },
+			values: { provider: providerIdentifiers.vercelAiGateway },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 	})
 
@@ -873,7 +894,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Roo Code Router has been removed. Please select and configure a different provider.",
-			values: { provider: "roo" },
+			values: { provider: retiredProviderIdentifiers.roo },
 		})
 	})
 
@@ -891,7 +912,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify message values take precedence over saved config (current unsaved field state wins)
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-key", // From message.values
 			baseUrl: "http://message-url", // From message.values
 		})
@@ -1631,23 +1652,23 @@ describe("zooCodeSignOut", () => {
 
 		;(mockClineProvider as any).contextProxy = {
 			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([
-				{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
-				{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
 			]),
 			getProfile: vi
 				.fn()
 				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: "token-active",
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				})
 				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: "token-backup",
 				}),
 			saveConfig,
@@ -1674,13 +1695,15 @@ describe("zooCodeSignOut", () => {
 
 		;(mockClineProvider as any).contextProxy = {
 			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 			getProfile: vi.fn().mockResolvedValue({
-				apiProvider: "zoo-gateway",
+				apiProvider: providerIdentifiers.zooGateway,
 				zooGatewayModelId: "anthropic/claude-sonnet-4",
 			}),
 			saveConfig: vi.fn(),

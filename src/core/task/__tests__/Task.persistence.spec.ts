@@ -10,6 +10,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 type TaskPersistenceAccess = {
 	resumeTaskFromHistory: () => Promise<void>
@@ -272,7 +273,7 @@ describe("Task persistence", () => {
 		) as ClineProvider & Record<string, any>
 
 		mockApiConfig = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiModelId: "claude-3-5-sonnet-20241022",
 			apiKey: "test-api-key",
 		}

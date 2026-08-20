@@ -2,6 +2,7 @@ import { buildApiHandler } from "../../index"
 import { KimiCodeHandler } from "../kimi-code"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
 	mockGetAccessToken: vi.fn(),
@@ -28,7 +29,7 @@ describe("KimiCodeHandler", () => {
 
 	it("is dispatched separately from Moonshot and preserves an unknown selected model", () => {
 		const handler = buildApiHandler({
-			apiProvider: "kimi-code",
+			apiProvider: providerIdentifiers.kimiCode,
 			kimiCodeAuthMethod: "api-key",
 			kimiCodeApiKey: "kimi-key",
 			apiModelId: "future-kimi-model",
