@@ -627,20 +627,20 @@ describe("costRecalculation", () => {
 			expect(info?.outputPrice).toBe(6.0)
 		})
 
-		it("lookupModelInfo should prefer static registry over customPricing map", () => {
-			// anthropic/claude-sonnet-4-5 is in the static registry.
-			// Even if customPricing has a different price, static wins.
+		it("lookupModelInfo should prefer customPricing map over static registry", () => {
+			// anthropic/claude-sonnet-4-5 is in the static registry with inputPrice=3.0.
+			// When customPricing specifies custom price overrides (e.g. 99.0),
+			// customPricing must take precedence over static default registry models.
 			const map = new Map([["anthropic|claude-sonnet-4-5", { inputPrice: 99.0, outputPrice: 99.0 }]])
 			const info = lookupModelInfo("anthropic", "claude-sonnet-4-5", undefined, map)
-			expect(info?.inputPrice).toBe(3.0) // from static registry, not 99.0
+			expect(info?.inputPrice).toBe(99.0)
 		})
 
-		it("lookupModelInfo should prefer event modelPricing over customPricing map", () => {
-			// Event-level modelPricing (capture-time) takes precedence over
-			// the query-time customPricing map.
+		it("lookupModelInfo should prefer customPricing map over event modelPricing", () => {
+			// User-configured custom pricing map takes precedence over capture-time modelPricing
 			const map = new Map([["openai|my-custom-model", { inputPrice: 99.0, outputPrice: 99.0 }]])
 			const info = lookupModelInfo("openai", "my-custom-model", { inputPrice: 2.0, outputPrice: 6.0 }, map)
-			expect(info?.inputPrice).toBe(2.0) // from modelPricing, not 99.0
+			expect(info?.inputPrice).toBe(99.0)
 		})
 
 		it("computeCacheDiscountBase should return positive discount for custom model with cacheReadsPrice via customPricing", () => {

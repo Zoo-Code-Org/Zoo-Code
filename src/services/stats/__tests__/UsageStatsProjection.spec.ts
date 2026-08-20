@@ -991,17 +991,16 @@ describe("UsageStatsProjection", () => {
 			// Even with customPricing that has cacheReadsPrice, reporting providers
 			// keep their verbatim cost (cacheRead=0 is a true miss).
 			const customPricing = new Map([
-				["anthropic|claude-sonnet-4-20250514", { inputPrice: 3.0, cacheReadsPrice: 0.3 }],
+				["anthropic|claude-sonnet-4-20250514", { inputPrice: 3.0, outputPrice: 15.0, cacheReadsPrice: 0.3 }],
 			])
 
 			const snapshot = assembleRollupSnapshot(db, makeQuery({ groupBy: ["model"], cacheRatio: 0.5 }), {
 				customPricing,
 			})
 
-			// For reporting providers, computeCostFromAggregated still computes the cost
-			// using static registry (since customPricing is ignored by lookupModelInfo).
-			// The recomputed cost from 10k input + 500 output for sonnet is 0.0375.
-			// The fast path overwrites the mock 0.02 with the correctly recomputed 0.0375.
+			// For reporting providers, no cache discount is applied because cacheRead=0
+			// is a true miss (providerReportsCache returns true).
+			// The recomputed cost from 10k input + 500 output is 0.0375.
 			expect(snapshot.totals.costUsd).toBeCloseTo(0.0375, 4)
 		})
 
@@ -1038,6 +1037,39 @@ describe("UsageStatsProjection", () => {
 			// and applies discount (0.05 - 0.94 * 0.03 = 0.0218).
 			// The fast path overwrites the cost completely from aggregated tokens (0.04 - 0.94 * 0.03 = 0.0118).
 			expect(fastSnapshot.totals.costUsd).toBeCloseTo(0.0118, 4)
+		})
+
+		it("should recompute cost for day axis with customPricing", () => {
+			const event = makeEvent({
+				eventId: "evt-custom-day-1",
+				idempotencyKey: "idem-custom-day-1",
+				occurredAt: "2026-08-20T10:00:00.000Z",
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 50_000, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			const customPricing = new Map([
+				["openai|my-custom-model", { inputPrice: 2.0, outputPrice: 10.0, cacheReadsPrice: 0.5 }],
+			])
+
+			const snapshot = assembleRollupSnapshot(
+				db,
+				makeQuery({ groupBy: ["day"], timezone: "UTC", cacheRatio: 0 }),
+				{ customPricing },
+			)
+
+			// 100K input at $2/1M = $0.20, 50K output at $10/1M = $0.50 -> Total = $0.70
+			expect(snapshot.buckets.length).toBeGreaterThan(0)
+			const dayBucket = snapshot.buckets.find((b) => b.key.day === "2026-08-20")
+			expect(dayBucket).toBeDefined()
+			expect(dayBucket?.costUsd).toBeCloseTo(0.7, 4)
+			expect(snapshot.totals.costUsd).toBeCloseTo(0.7, 4)
 		})
 	})
 

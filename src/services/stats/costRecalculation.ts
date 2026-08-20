@@ -180,15 +180,13 @@ const ANTHROPIC_SEMANTIC_PROVIDERS = new Set(["anthropic", "bedrock", "vertex"])
  * Looks up the {@link ModelInfo} for a given provider + model combination.
  *
  * Strategy:
- *  1. Direct lookup in the provider's static registry by exact model ID.
- *  2. If not found, attempt case-insensitive substring matching against
- *     known model IDs (handles versioned variants like
- *     "claude-sonnet-4-20250514" matching "claude-sonnet-4").
- *  3. Fallback to event-level `modelPricing` (capture-time snapshot for
- *     custom models). Only used when the model is NOT in the static registry.
- *  4. Fallback to query-time `customPricing` map (built from extension
- *     settings at query time). Used when neither the static registry nor
- *     the event-level snapshot has pricing.
+ *  1. Query-time `customPricing` map (from extension settings / profiles).
+ *     User-configured custom model pricing takes precedence over static defaults.
+ *  2. Direct lookup in the provider's static registry by exact model ID.
+ *  3. Case-insensitive substring matching against known model IDs in the provider's
+ *     static registry (handles versioned variants like "claude-sonnet-4-20250514"
+ *     matching "claude-sonnet-4").
+ *  4. Fallback to event-level `modelPricing` (capture-time snapshot for custom models).
  *  5. If still not found, return `undefined` (cost stays 0).
  *
  * @param provider The provider name from the usage event.
@@ -203,37 +201,7 @@ export function lookupModelInfo(
 	modelPricing?: UsageEventV1["modelPricing"],
 	customPricing?: CustomModelPricingMap,
 ): ModelInfo | undefined {
-	const registry = PROVIDER_MODEL_REGISTRIES[provider]
-
-	// 1. Static registry lookup (exact + substring match)
-	if (registry) {
-		// 1a. Exact match
-		if (model in registry) return registry[model]
-
-		// 1b. Case-insensitive substring match (longest known ID first for specificity)
-		const knownIds = Object.keys(registry)
-		const lowerModel = model.toLowerCase()
-		const sortedIds = [...knownIds].sort((a, b) => b.length - a.length)
-		for (const knownId of sortedIds) {
-			if (lowerModel.includes(knownId.toLowerCase())) {
-				return registry[knownId]
-			}
-		}
-	}
-
-	// 2. Fallback to event-level modelPricing (capture-time snapshot)
-	//    Only used when the model is NOT in the static registry, so static
-	//    registry prices always take precedence.
-	if (modelPricing) {
-		return {
-			inputPrice: modelPricing.inputPrice,
-			outputPrice: modelPricing.outputPrice,
-			cacheWritesPrice: modelPricing.cacheWritesPrice,
-			cacheReadsPrice: modelPricing.cacheReadsPrice,
-		} as ModelInfo
-	}
-
-	// 3. Fallback to query-time customPricing map (from extension settings)
+	// 1. Query-time customPricing map (user-defined custom pricing takes precedence)
 	if (customPricing) {
 		const cp = customPricing.get(customPricingKey(provider, model))
 		if (cp) {
@@ -244,6 +212,34 @@ export function lookupModelInfo(
 				cacheReadsPrice: cp.cacheReadsPrice,
 			} as ModelInfo
 		}
+	}
+
+	const registry = PROVIDER_MODEL_REGISTRIES[provider]
+
+	// 2. Static registry lookup (exact + substring match)
+	if (registry) {
+		// 2a. Exact match
+		if (model in registry) return registry[model]
+
+		// 2b. Case-insensitive substring match (longest known ID first for specificity)
+		const knownIds = Object.keys(registry)
+		const lowerModel = model.toLowerCase()
+		const sortedIds = [...knownIds].sort((a, b) => b.length - a.length)
+		for (const knownId of sortedIds) {
+			if (lowerModel.includes(knownId.toLowerCase())) {
+				return registry[knownId]
+			}
+		}
+	}
+
+	// 3. Fallback to event-level modelPricing (capture-time snapshot)
+	if (modelPricing) {
+		return {
+			inputPrice: modelPricing.inputPrice,
+			outputPrice: modelPricing.outputPrice,
+			cacheWritesPrice: modelPricing.cacheWritesPrice,
+			cacheReadsPrice: modelPricing.cacheReadsPrice,
+		} as ModelInfo
 	}
 
 	// 4. Not found

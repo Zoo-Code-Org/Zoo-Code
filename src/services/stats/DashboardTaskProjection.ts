@@ -12,7 +12,9 @@ import {
 	getEffectiveCost,
 	computeCacheDiscountBase,
 	computeCacheDiscountBaseFromAggregated,
+	computeCostFromAggregated,
 	applyCacheDiscount,
+	customPricingKey,
 } from "./costRecalculation"
 import type { CustomModelPricingMap } from "./costRecalculation"
 import { type StatsQueryRangeMs } from "./statsQueryRange"
@@ -53,7 +55,15 @@ export interface DashboardTaskUsageReader {
 		taskIds: string[],
 		rangeMs?: StatsQueryRangeMs,
 		includeCancelled?: boolean,
-	): Array<{ taskId: string; provider: string; model: string; inputTokens: number }>
+	): Array<{
+		taskId: string
+		provider: string
+		model: string
+		inputTokens: number
+		outputTokens?: number
+		cacheWriteTokens?: number
+		cacheReadTokens?: number
+	}>
 }
 
 /**
@@ -224,7 +234,15 @@ function computeTaskSummary(
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 	cacheRatio?: number,
 	customPricing?: CustomModelPricingMap,
-	inputTokensByTaskId: Array<{ taskId: string; provider: string; model: string; inputTokens: number }> = [],
+	inputTokensByTaskId: Array<{
+		taskId: string
+		provider: string
+		model: string
+		inputTokens: number
+		outputTokens?: number
+		cacheWriteTokens?: number
+		cacheReadTokens?: number
+	}> = [],
 ): DashboardTaskSummary {
 	const task = catalog.byId.get(taskId)!
 	const subtreeUsage = summarizeSubtreeUsage(
@@ -262,7 +280,15 @@ function summarizeSubtreeUsage(
 	identityByTaskId: ReadonlyMap<string, TaskIdentityAggregate>,
 	cacheRatio?: number,
 	customPricing?: CustomModelPricingMap,
-	inputTokensByTaskId: Array<{ taskId: string; provider: string; model: string; inputTokens: number }> = [],
+	inputTokensByTaskId: Array<{
+		taskId: string
+		provider: string
+		model: string
+		inputTokens: number
+		outputTokens?: number
+		cacheWriteTokens?: number
+		cacheReadTokens?: number
+	}> = [],
 ): SubtreeUsageSummary {
 	let totalCost = 0
 	let totalCacheDiscountBase = 0
@@ -274,13 +300,30 @@ function summarizeSubtreeUsage(
 	const subtreeModels: string[] = []
 	const subtreeModes: string[] = []
 
-	// Build a lookup map for per-(task, provider, model) input tokens
-	// so we can recompute cacheDiscountBase at query time when customPricing
+	// Build a lookup map for per-(task, provider, model) token counts
+	// so we can recompute cost and cacheDiscountBase at query time when customPricing
 	// is available (the stored value was 0 for custom models).
-	const inputTokensLookup = new Map<string, Array<{ provider: string; model: string; inputTokens: number }>>()
+	const inputTokensLookup = new Map<
+		string,
+		Array<{
+			provider: string
+			model: string
+			inputTokens: number
+			outputTokens: number
+			cacheWriteTokens: number
+			cacheReadTokens: number
+		}>
+	>()
 	for (const row of inputTokensByTaskId) {
 		const existing = inputTokensLookup.get(row.taskId) ?? []
-		existing.push({ provider: row.provider, model: row.model, inputTokens: row.inputTokens })
+		existing.push({
+			provider: row.provider,
+			model: row.model,
+			inputTokens: row.inputTokens,
+			outputTokens: row.outputTokens ?? 0,
+			cacheWriteTokens: row.cacheWriteTokens ?? 0,
+			cacheReadTokens: row.cacheReadTokens ?? 0,
+		})
 		inputTokensLookup.set(row.taskId, existing)
 	}
 
@@ -301,7 +344,39 @@ function summarizeSubtreeUsage(
 			continue
 		}
 
-		totalCost += usage.totalCost
+		// When customPricing is present and usage has events, recompute cost
+		// if stored usage.totalCost === 0 or if customPricing contains pricing for any model in the task.
+		if (customPricing && customPricing.size > 0 && usage.eventCount > 0) {
+			const perModelRows = inputTokensLookup.get(taskId)
+			if (perModelRows && perModelRows.length > 0) {
+				let taskRecomputedCost = 0
+				let hasRecomputedCost = false
+				for (const row of perModelRows) {
+					const hasCustom = customPricing.has(customPricingKey(row.provider, row.model))
+					if (hasCustom || usage.totalCost === 0) {
+						taskRecomputedCost += computeCostFromAggregated(
+							row.provider,
+							row.model,
+							row.inputTokens,
+							row.outputTokens,
+							row.cacheWriteTokens,
+							row.cacheReadTokens,
+							customPricing,
+						)
+						hasRecomputedCost = true
+					}
+				}
+				if (hasRecomputedCost) {
+					totalCost += taskRecomputedCost
+				} else {
+					totalCost += usage.totalCost
+				}
+			} else {
+				totalCost += usage.totalCost
+			}
+		} else {
+			totalCost += usage.totalCost
+		}
 
 		// When customPricing is available and the stored cacheDiscountBase
 		// is 0, recompute it from per-(provider, model) input token sums.

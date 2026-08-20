@@ -88,6 +88,15 @@ function createUsageReader(
 	usageByTaskId: Map<string, TaskUsageRow> = new Map(),
 	events: Array<UsageEventV1 & { sequence: number }> = [],
 	identityByTaskId: Map<string, TaskIdentityAggregate> = new Map(),
+	inputTokensByTaskId: Array<{
+		taskId: string
+		provider: string
+		model: string
+		inputTokens: number
+		outputTokens?: number
+		cacheWriteTokens?: number
+		cacheReadTokens?: number
+	}> = [],
 ): DashboardTaskUsageReader & {
 	queriedUsageTaskIds: string[][]
 	queriedEventTaskIds: string[][]
@@ -134,7 +143,7 @@ function createUsageReader(
 			)
 		},
 		queryInputTokensByTaskId() {
-			return []
+			return inputTokensByTaskId
 		},
 	}
 }
@@ -538,6 +547,55 @@ describe("DashboardTaskProjection", () => {
 			expect((err as DashboardTaskProjectionError).code).toBe("DASHBOARD_TASK_PROJECTION/computeTaskDetail/001")
 		}
 
+		catalog.dispose()
+	})
+
+	it("recomputes totalCost from aggregated tokens when customPricing is present and stored totalCost is 0", () => {
+		const catalog = createCatalog([makeHistoryItem({ id: "task-custom", ts: 300, task: "Custom model task" })])
+		const reader = createUsageReader(
+			new Map([
+				[
+					"task-custom",
+					makeUsageRow({
+						taskId: "task-custom",
+						totalCost: 0,
+						totalTokens: 15_000,
+						eventCount: 1,
+						model: "my-custom-model",
+						provider: "openai",
+					}),
+				],
+			]),
+			[],
+			new Map([
+				[
+					"task-custom",
+					{
+						inputTokens: 10_000,
+						outputTokens: 5_000,
+						models: ["my-custom-model"],
+						modes: ["code"],
+					},
+				],
+			]),
+			[
+				{
+					taskId: "task-custom",
+					provider: "openai",
+					model: "my-custom-model",
+					inputTokens: 10_000,
+					outputTokens: 5_000,
+					cacheWriteTokens: 0,
+					cacheReadTokens: 0,
+				},
+			],
+		)
+
+		const customPricing = new Map([["openai|my-custom-model", { inputPrice: 2.0, outputPrice: 10.0 }]])
+
+		const page = computeTaskPage(catalog, reader, "req-cp", undefined, 50, undefined, 0, customPricing)
+		// 10K input at $2/1M = $0.02, 5K output at $10/1M = $0.05 -> Total = $0.07
+		expect(page.tasks[0].totalCost).toBeCloseTo(0.07, 4)
 		catalog.dispose()
 	})
 })

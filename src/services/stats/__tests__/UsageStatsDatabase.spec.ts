@@ -2208,4 +2208,76 @@ describe("UsageStatsDatabase", () => {
 			expect(rows[0].day).toBe("2026-07-30")
 		})
 	})
+
+	describe("queryDailyTokensByProviderModel", () => {
+		it("should query tokens aggregated by hour, provider, and model", () => {
+			const event1 = makeEvent({
+				eventId: "evt-dt-1",
+				occurredAt: "2026-08-20T10:15:00.000Z",
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 1000, source: "provider" },
+					outputTokens: { value: 500, source: "provider" },
+					cacheWriteTokens: { value: 200, source: "provider" },
+					cacheReadTokens: { value: 100, source: "provider" },
+				},
+			})
+			const event2 = makeEvent({
+				eventId: "evt-dt-2",
+				occurredAt: "2026-08-20T10:45:00.000Z",
+				provider: "openai",
+				model: "my-custom-model",
+				usage: {
+					inputTokens: { value: 2000, source: "provider" },
+					outputTokens: { value: 800, source: "provider" },
+					cacheWriteTokens: { value: 0, source: "provider" },
+					cacheReadTokens: { value: 300, source: "provider" },
+				},
+			})
+
+			db.append(event1)
+			db.append(event2)
+
+			const fromEpoch = Date.parse("2026-08-20T00:00:00.000Z")
+			const toEpoch = Date.parse("2026-08-21T00:00:00.000Z")
+			const rows = db.queryDailyTokensByProviderModel(fromEpoch, toEpoch)
+
+			expect(rows).toHaveLength(1)
+			expect(rows[0].provider).toBe("openai")
+			expect(rows[0].model).toBe("my-custom-model")
+			expect(rows[0].inputTokens).toBe(3000)
+			expect(rows[0].outputTokens).toBe(1300)
+			expect(rows[0].cacheWriteTokens).toBe(200)
+			expect(rows[0].cacheReadTokens).toBe(400)
+		})
+	})
+
+	describe("queryInputTokensByTaskId with all token fields", () => {
+		it("should return input, output, cacheWrite, and cacheRead tokens per task", () => {
+			const event = makeEvent({
+				eventId: "evt-it-1",
+				taskId: "task-token-test",
+				occurredAt: "2026-08-20T10:00:00.000Z",
+				provider: "openai",
+				model: "custom-token-model",
+				usage: {
+					inputTokens: { value: 5000, source: "provider" },
+					outputTokens: { value: 2500, source: "provider" },
+					cacheWriteTokens: { value: 1000, source: "provider" },
+					cacheReadTokens: { value: 500, source: "provider" },
+				},
+			})
+
+			db.append(event)
+
+			const rows = db.queryInputTokensByTaskId(["task-token-test"])
+			expect(rows).toHaveLength(1)
+			expect(rows[0].taskId).toBe("task-token-test")
+			expect(rows[0].inputTokens).toBe(5000)
+			expect(rows[0].outputTokens).toBe(2500)
+			expect(rows[0].cacheWriteTokens).toBe(1000)
+			expect(rows[0].cacheReadTokens).toBe(500)
+		})
+	})
 })

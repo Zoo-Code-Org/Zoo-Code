@@ -1256,4 +1256,49 @@ describe("UsageStatsService", () => {
 			expect(value).toBe("")
 		})
 	})
+
+	describe("custom pricing refresh and coordinator notification", () => {
+		it("awaits refreshPricing during doInitialize so coordinator receives populated pricing", async () => {
+			const mockManager = {
+				listConfig: vi.fn().mockResolvedValue([{ name: "profile1", apiProvider: "openai" }]),
+				getProfile: vi.fn().mockResolvedValue({
+					openAiModelId: "custom-gpt",
+					openAiCustomModelInfo: { inputPrice: 2.5, outputPrice: 10.0 },
+				}),
+			}
+
+			const customService = new UsageStatsService(tempDir, undefined, undefined, mockManager)
+			await customService.initialize()
+
+			const coordinator = customService.getCoordinator()
+			expect(coordinator).not.toBeNull()
+			const provider = customService["customPricingProvider"]
+			expect(provider?.()).toBeDefined()
+			expect(provider?.()?.get("openai|custom-gpt")?.inputPrice).toBe(2.5)
+
+			customService.dispose()
+		})
+
+		it("calls coordinator.notifyUsageMutated when refreshPricing updates", async () => {
+			const mockManager = {
+				listConfig: vi.fn().mockResolvedValue([{ name: "profile1", apiProvider: "openai" }]),
+				getProfile: vi.fn().mockResolvedValue({
+					openAiModelId: "custom-gpt",
+					openAiCustomModelInfo: { inputPrice: 2.5, outputPrice: 10.0 },
+				}),
+			}
+
+			const customService = new UsageStatsService(tempDir, undefined, undefined, mockManager)
+			await customService.initialize()
+
+			const coordinator = customService.getCoordinator()
+			expect(coordinator).not.toBeNull()
+			const notifySpy = vi.spyOn(coordinator!, "notifyUsageMutated")
+
+			await customService.refreshPricing()
+			expect(notifySpy).toHaveBeenCalledOnce()
+
+			customService.dispose()
+		})
+	})
 })

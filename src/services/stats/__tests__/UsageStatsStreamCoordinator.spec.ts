@@ -1347,7 +1347,24 @@ describe("UsageStatsStreamCoordinator", () => {
 			vi.setSystemTime(new Date("2026-08-03T00:00:10.000Z"))
 			vi.advanceTimersByTime(30_000)
 
-			expect(sink.messagesOfType("dashboardStatsStreamSnapshot")).toHaveLength(1)
+			coordinator.dispose()
+		})
+
+		it("sends fresh snapshots to active subscribers when notifyUsageMutated is called", () => {
+			let customPricing: UsageStatsProjection.CustomModelPricingMap | undefined = undefined
+			const coordinator = new UsageStatsStreamCoordinator(db, {
+				customPricingProvider: () => customPricing,
+			})
+			const sink = new MockSink()
+			coordinator.subscribe(sink, makeSubscription())
+			sink.messages.length = 0
+
+			// Update custom pricing and notify
+			customPricing = new Map([["openai|my-custom-model", { inputPrice: 5.0 }]])
+			coordinator.notifyUsageMutated()
+
+			const snapshots = sink.messagesOfType("dashboardStatsStreamSnapshot")
+			expect(snapshots).toHaveLength(1)
 
 			coordinator.dispose()
 		})

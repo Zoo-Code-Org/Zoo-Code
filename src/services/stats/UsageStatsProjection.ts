@@ -49,6 +49,7 @@ import {
 	computeCostFromAggregated,
 } from "./costRecalculation"
 import type { CustomModelPricingMap } from "./costRecalculation"
+export type { CustomModelPricingMap }
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -446,8 +447,9 @@ function lifetimeTotalsToBucket(
  * @param fromEpochMs Time range start (inclusive).
  * @param toEpochMs Time range end (exclusive).
  * @param includeCancelled Whether to include cancelled events.
- * @param axis The breakdown axis ("model", "provider", "mode").
+ * @param axis The breakdown axis ("model", "provider", "mode", "day").
  * @param customPricing The query-time custom pricing map.
+ * @param timezone The query timezone (used when axis === "day").
  * @returns Map from axisValue → { costUsd, cacheDiscountBase } (USD).
  */
 function buildRecomputedPricingMap(
@@ -457,9 +459,42 @@ function buildRecomputedPricingMap(
 	includeCancelled: boolean,
 	axis: string,
 	customPricing: CustomModelPricingMap,
+	timezone?: string,
 ): Map<string, { costUsd: number; cacheDiscountBase: number }> {
-	const rows = db.queryTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
 	const result = new Map<string, { costUsd: number; cacheDiscountBase: number }>()
+
+	if (axis === "day") {
+		const tz = timezone ?? "UTC"
+		const rows = db.queryDailyTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
+		for (const row of rows) {
+			const costUsd = computeCostFromAggregated(
+				row.provider,
+				row.model,
+				row.inputTokens,
+				row.outputTokens,
+				row.cacheWriteTokens,
+				row.cacheReadTokens,
+				customPricing,
+			)
+			const discountBase = computeCacheDiscountBaseFromAggregated(
+				row.provider,
+				row.model,
+				row.inputTokens,
+				customPricing,
+			)
+
+			if (costUsd === 0 && discountBase === 0) continue
+
+			const axisValue = computeDayBucket(row.occurredAt, tz)
+			const current = result.get(axisValue) ?? { costUsd: 0, cacheDiscountBase: 0 }
+			current.costUsd += costUsd
+			current.cacheDiscountBase += discountBase
+			result.set(axisValue, current)
+		}
+		return result
+	}
+
+	const rows = db.queryTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
 
 	for (const row of rows) {
 		const costUsd = computeCostFromAggregated(
@@ -631,14 +666,28 @@ function assembleRollupSnapshotFast(
 		if (axis === "day") {
 			// Day axis: use detailed daily rollups
 			const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
+
+			// Recompute costUsd and cacheDiscountBase per day when customPricing is available
+			if (hasCustomPricing) {
+				const recomputedMap = buildRecomputedPricingMap(
+					db,
+					fromEpochMs,
+					toEpochMs,
+					includeCancelled,
+					axis,
+					customPricing!,
+					query.timezone,
+				)
+				for (const row of dailyRows) {
+					const recomputed = recomputedMap.get(row.day)
+					if (recomputed !== undefined) {
+						row.costUsd = recomputed.costUsd
+						row.cacheDiscountBase = recomputed.cacheDiscountBase
+					}
+				}
+			}
+
 			buckets = dailyRows.map((row) => dailyRowToBucket(row, cacheRatio))
-			// Note: For the day axis, we can't recompute per-day discount base
-			// from per-(provider, model) data because the day bucket uses a
-			// different timezone computation than the epoch ms range. The
-			// day-axis recomputation would require a per-day-per-provider-model
-			// query, which is a future optimization. For now, the day axis
-			// uses the stored value (which is correct for static-registry
-			// models and 0 for custom models).
 		} else {
 			// model/provider/mode axis: use breakdown rollups
 			let breakdownRows: BreakdownRollupRow[]

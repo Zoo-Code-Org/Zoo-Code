@@ -130,6 +130,7 @@ export class UsageStatsService {
 
 	/** Timer for periodic custom pricing map refresh. */
 	private pricingRefreshTimer: ReturnType<typeof setInterval> | null = null
+	private refreshPricingFn?: () => Promise<void>
 
 	constructor(
 		globalStoragePath: string,
@@ -152,10 +153,12 @@ export class UsageStatsService {
 			const refreshPricing = async () => {
 				try {
 					cachedPricing = await buildCustomPricingMapFromAllProfiles(providerSettingsManager)
+					this.coordinator?.notifyUsageMutated()
 				} catch {
 					// Keep the previous cache on error
 				}
 			}
+			this.refreshPricingFn = refreshPricing
 			// Initial async refresh (non-blocking)
 			void refreshPricing()
 			// Periodic refresh to pick up profile changes (every 10s)
@@ -182,7 +185,22 @@ export class UsageStatsService {
 		return this.initPromise
 	}
 
+	/**
+	 * Refreshes custom pricing from provider settings.
+	 */
+	async refreshPricing(): Promise<void> {
+		if (this.refreshPricingFn) {
+			await this.refreshPricingFn()
+		}
+	}
+
 	private async doInitialize(): Promise<void> {
+		// Await custom pricing refresh so cachedPricing is populated before
+		// coordinator subscriptions can receive empty pricing maps.
+		if (this.refreshPricingFn) {
+			await this.refreshPricingFn()
+		}
+
 		// The catalog is a History-store projection. Do not construct the stream
 		// until its source has completed initialization, otherwise the first page
 		// can race the initial history reconciliation.

@@ -367,6 +367,19 @@ export class UsageStatsStreamCoordinator {
 	}
 
 	/**
+	 * Called when custom pricing maps or profiles have been refreshed/mutated.
+	 * Sends refreshed snapshots to all active subscribers immediately.
+	 */
+	notifyUsageMutated(): void {
+		if (this.disposed || this.subscriptions.size === 0) return
+		for (const state of this.subscriptions.values()) {
+			if (!state.paused) {
+				this.sendSnapshot(state)
+			}
+		}
+	}
+
+	/**
 	 * Clears the store generation and sends a reset snapshot to all subscribers.
 	 */
 	resetGeneration(): void {

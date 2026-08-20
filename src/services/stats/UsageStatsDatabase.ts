@@ -3267,36 +3267,115 @@ export class UsageStatsDatabase {
 	}
 
 	/**
-	 * Queries per-(task_id, provider, model) input token sums from
+	 * Queries per-(hour/day, provider, model) token sums from usage_events.
+	 * Used for day-axis recomputation with custom pricing.
+	 *
+	 * @param fromEpochMs Start epoch ms (inclusive). 0 for no lower bound.
+	 * @param toEpochMs End epoch ms (exclusive). MAX_SAFE_INTEGER for no upper bound.
+	 * @param includeCancelled If true, includes cancelled events.
+	 * @returns Array of { occurredAt, provider, model, endpoint, mode, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } rows.
+	 */
+	queryDailyTokensByProviderModel(
+		fromEpochMs: number,
+		toEpochMs: number,
+		includeCancelled: boolean = false,
+	): Array<{
+		occurredAt: string
+		provider: string
+		model: string
+		endpoint: string | null
+		mode: string
+		inputTokens: number
+		outputTokens: number
+		cacheWriteTokens: number
+		cacheReadTokens: number
+	}> {
+		const db = this.getDb()
+
+		try {
+			let query = `SELECT occurred_at, provider, model, endpoint, mode,
+						SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens,
+						SUM(COALESCE(json_extract(usage_json, '$.outputTokens.value'), 0)) as output_tokens,
+						SUM(COALESCE(json_extract(usage_json, '$.cacheWriteTokens.value'), 0)) as cache_write_tokens,
+						SUM(COALESCE(json_extract(usage_json, '$.cacheReadTokens.value'), 0)) as cache_read_tokens
+						FROM usage_events
+						WHERE occurred_epoch_ms >= ? AND occurred_epoch_ms < ?`
+			const params: Array<number | string> = [fromEpochMs, toEpochMs]
+
+			if (!includeCancelled) {
+				query += ` AND status != 'cancelled'`
+			}
+
+			query += ` GROUP BY SUBSTR(occurred_at, 1, 13), provider, model, endpoint, mode`
+
+			const rows = db.prepare(query).all(...params) as Array<Record<string, unknown>>
+
+			return rows.map((row) => ({
+				occurredAt: (row.occurred_at as string) ?? "",
+				provider: (row.provider as string) ?? "",
+				model: (row.model as string) ?? "",
+				endpoint: (row.endpoint as string | null) ?? null,
+				mode: (row.mode as string) ?? "",
+				inputTokens: (row.input_tokens as number) ?? 0,
+				outputTokens: (row.output_tokens as number) ?? 0,
+				cacheWriteTokens: (row.cache_write_tokens as number) ?? 0,
+				cacheReadTokens: (row.cache_read_tokens as number) ?? 0,
+			}))
+		} catch (err) {
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query daily tokens by provider+model", err)
+		}
+	}
+
+	/**
+	 * Queries per-(task_id, provider, model) token sums from
 	 * usage_events for a given set of task IDs. Used by the task projection
-	 * to recompute `cache_discount_base` at query time when `customPricing`
-	 * is available, overriding the stale stored value (which was 0 for custom
-	 * models because pricing wasn't available at write time).
+	 * to recompute `totalCost` and `cache_discount_base` at query time when
+	 * `customPricing` is available, overriding the stale stored values (which
+	 * were 0 for custom models because pricing wasn't available at write time).
 	 *
 	 * @param taskIds The task IDs to query.
 	 * @param rangeMs Optional time range filter.
 	 * @param includeCancelled If true, includes cancelled events.
-	 * @returns Array of { taskId, provider, model, inputTokens } rows.
+	 * @returns Array of { taskId, provider, model, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } rows.
 	 */
 	queryInputTokensByTaskId(
 		taskIds: string[],
 		rangeMs?: StatsQueryRangeMs,
 		includeCancelled: boolean = false,
-	): Array<{ taskId: string; provider: string; model: string; inputTokens: number }> {
+	): Array<{
+		taskId: string
+		provider: string
+		model: string
+		inputTokens: number
+		outputTokens: number
+		cacheWriteTokens: number
+		cacheReadTokens: number
+	}> {
 		const db = this.getDb()
 		const uniqueTaskIds = [...new Set(taskIds)]
 
 		if (uniqueTaskIds.length === 0) return []
 
 		try {
-			const result: Array<{ taskId: string; provider: string; model: string; inputTokens: number }> = []
+			const result: Array<{
+				taskId: string
+				provider: string
+				model: string
+				inputTokens: number
+				outputTokens: number
+				cacheWriteTokens: number
+				cacheReadTokens: number
+			}> = []
 
 			for (let start = 0; start < uniqueTaskIds.length; start += TASK_ID_QUERY_CHUNK_SIZE) {
 				const chunk = uniqueTaskIds.slice(start, start + TASK_ID_QUERY_CHUNK_SIZE)
 				const placeholders = chunk.map(() => "?").join(", ")
 
 				let query = `SELECT task_id, provider, model,
-							SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens
+							SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens,
+							SUM(COALESCE(json_extract(usage_json, '$.outputTokens.value'), 0)) as output_tokens,
+							SUM(COALESCE(json_extract(usage_json, '$.cacheWriteTokens.value'), 0)) as cache_write_tokens,
+							SUM(COALESCE(json_extract(usage_json, '$.cacheReadTokens.value'), 0)) as cache_read_tokens
 							FROM usage_events
 							WHERE task_id IN (${placeholders})`
 				const params: Array<string | number> = [...chunk]
@@ -3324,6 +3403,9 @@ export class UsageStatsDatabase {
 						provider: (row.provider as string) ?? "",
 						model: (row.model as string) ?? "",
 						inputTokens: (row.input_tokens as number) ?? 0,
+						outputTokens: (row.output_tokens as number) ?? 0,
+						cacheWriteTokens: (row.cache_write_tokens as number) ?? 0,
+						cacheReadTokens: (row.cache_read_tokens as number) ?? 0,
 					})
 				}
 			}
