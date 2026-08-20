@@ -101,6 +101,7 @@ describe("QwenCodeHandler Native Tools", () => {
 					]),
 					parallel_tool_calls: true,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -120,6 +121,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					tool_choice: "auto",
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -220,6 +222,7 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect.objectContaining({
 					parallel_tool_calls: true,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -416,6 +419,349 @@ describe("QwenCodeHandler Native Tools", () => {
 			expect(reasoningChunks[0].text).toBe("Thinking about this...")
 			expect(partialChunks).toHaveLength(1)
 			expect(endChunks).toHaveLength(1)
+		})
+	})
+
+	describe("abort signal wiring", () => {
+		afterEach(() => {
+			vi.unstubAllGlobals()
+		})
+
+		// Mirror the OpenAI SDK's APIUserAbortError shape: name "Error", message
+		// "Request was aborted." It does not satisfy the Task.ts abort contract
+		// (message must end in "aborted"), so the provider must normalize it.
+		const sdkAbortError = (): Error => {
+			const err = new Error("Request was aborted.")
+			err.name = "Error"
+			return err
+		}
+
+		const unauthorizedError = (): Error & { status: number } =>
+			Object.assign(new Error("unauthorized"), { status: 401 })
+
+		const tokenResponse = (): { ok: boolean; json: () => Promise<Record<string, unknown>> } => ({
+			ok: true,
+			json: async () => ({
+				access_token: "new-access-token",
+				refresh_token: "new-refresh-token",
+				token_type: "Bearer",
+				expires_in: 3600,
+			}),
+		})
+
+		const waitForCreateCall = async (create: { mock: { calls: unknown[][] } }, timeoutMs = 5000): Promise<void> => {
+			const start = Date.now()
+			while (create.mock.calls.length === 0) {
+				if (Date.now() - start > timeoutMs) {
+					throw new Error("timed out waiting for the SDK create call")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+		}
+
+		const waitForSignalAbort = (signal: AbortSignal | undefined): Promise<void> => {
+			return new Promise((resolve, reject) => {
+				if (!signal) {
+					reject(new Error("SDK create was called without a signal"))
+					return
+				}
+				if (signal.aborted) {
+					resolve()
+					return
+				}
+				signal.addEventListener("abort", () => resolve(), { once: true })
+			})
+		}
+
+		describe("createMessage", () => {
+			it("should pass a request-local AbortSignal to the SDK and bridge the external signal", async () => {
+				const external = new AbortController()
+				let sdkSignal: AbortSignal | undefined
+				// A live stream: yield one chunk, then stay open until the SDK signal aborts.
+				mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+					sdkSignal = opts?.signal
+					return (async function* () {
+						yield { choices: [{ delta: { content: "x" } }] }
+						await waitForSignalAbort(sdkSignal)
+					})()
+				})
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				const first = await stream.next()
+				expect(first.value?.type).toBe("text")
+
+				const opts = mockCreate.mock.calls[0][1]
+				expect(opts?.signal).toBeInstanceOf(AbortSignal)
+				expect(opts.signal).not.toBe(external.signal) // request-local, not the external signal
+				expect(opts.signal.aborted).toBe(false)
+
+				external.abort()
+				expect(opts.signal.aborted).toBe(true) // the external abort is bridged to the SDK signal
+
+				await stream.next() // resume; the live stream ends once the signal aborts
+			})
+
+			it("should fast-fail with a normalized AbortError for a pre-aborted signal", async () => {
+				const external = new AbortController()
+				external.abort()
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				let caught: unknown
+				try {
+					await stream.next()
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+				expect(mockCreate).not.toHaveBeenCalled()
+			})
+
+			it("should abort the in-flight SDK request when the external signal fires", async () => {
+				const external = new AbortController()
+				// Simulate the OpenAI SDK: reject with its abort error when the signal aborts.
+				mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						if (!opts?.signal) {
+							reject(new Error("SDK create was called without a signal"))
+							return
+						}
+						opts.signal.addEventListener("abort", () => reject(sdkAbortError()), { once: true })
+					})
+				})
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				const pending = stream.next()
+				await waitForCreateCall(mockCreate)
+				external.abort()
+
+				let caught: unknown
+				try {
+					await pending
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+			})
+
+			it("should normalize an abort error thrown mid-stream", async () => {
+				const external = new AbortController()
+				// Simulate the OpenAI SDK stream: yield once, then reject with its
+				// abort error once the request-local signal is aborted.
+				mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+					return (async function* () {
+						yield { choices: [{ delta: { content: "partial" } }] }
+						await waitForSignalAbort(opts?.signal)
+						throw sdkAbortError()
+					})()
+				})
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				const chunks: { type: string; text?: string }[] = []
+				let caught: unknown
+				try {
+					for await (const chunk of stream) {
+						chunks.push(chunk)
+						if (chunk.type === "text") {
+							external.abort()
+						}
+					}
+				} catch (error) {
+					caught = error
+				}
+
+				expect(chunks).toContainEqual({ type: "text", text: "partial" })
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+			})
+
+			it("should rethrow non-abort stream errors unchanged", async () => {
+				const boom = new Error("boom")
+				mockCreate.mockImplementationOnce(() => {
+					return (async function* () {
+						yield { choices: [{ delta: { content: "x" } }] }
+						throw boom
+					})()
+				})
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1" })
+				let caught: unknown
+				try {
+					await collectStream(stream)
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBe(boom)
+			})
+
+			it("should split </think> tag boundaries across chunks into reasoning and text", async () => {
+				// Exercises the incremental think-tag parser: one chunk opens a
+				// thinking block (odd segment), the next one closes it (even
+				// segment) and continues as visible text.
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{ choices: [{ delta: { content: "a</think>b" } }] },
+						{ choices: [{ delta: { content: "c" } }] },
+					]),
+				)
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1" })
+				const chunks = await collectStream(stream)
+
+				expect(chunks).toContainEqual({ type: "reasoning", text: "b" })
+				expect(chunks).toContainEqual({ type: "text", text: "c" })
+				expect(chunks).not.toContainEqual(expect.objectContaining({ type: "text", text: "b" }))
+			})
+
+			it("should not retry after 401 when the abort signal fires during the refresh", async () => {
+				const external = new AbortController()
+				const fetchMock = vi.fn().mockImplementation(async () => {
+					external.abort() // simulate Stop pressed while the token refresh is in flight
+					return tokenResponse()
+				})
+				vi.stubGlobal("fetch", fetchMock)
+				mockCreate.mockRejectedValueOnce(unauthorizedError())
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				let caught: unknown
+				try {
+					await collectStream(stream)
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+				expect(mockCreate).toHaveBeenCalledTimes(1) // the retried request was never sent
+				expect(fetchMock).toHaveBeenCalledTimes(1)
+			})
+		})
+
+		describe("completePrompt", () => {
+			it("should pass the external signal through, and nothing without a signal or with a zero timeout", async () => {
+				mockCreate
+					.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+					.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+					.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+				const external = new AbortController()
+
+				expect(await handler.completePrompt("hi")).toBe("ok")
+				expect(mockCreate.mock.calls[0][1]).toBeUndefined() // no signal, no timeout: nothing reaches the SDK
+
+				expect(await handler.completePrompt("hi", { abortSignal: external.signal })).toBe("ok")
+				// no timeout: the merged signal is the external signal itself
+				expect(mockCreate.mock.calls[1][1]?.signal).toBe(external.signal)
+
+				// timeoutMs <= 0 means "no explicit timeout": nothing may reach the SDK
+				expect(await handler.completePrompt("hi", { timeoutMs: 0 })).toBe("ok")
+				expect(mockCreate.mock.calls[2][1]).toBeUndefined()
+			})
+
+			it("should merge the external signal with a positive timeoutMs", async () => {
+				const external = new AbortController()
+				mockCreate.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+					return new Promise((_resolve, reject) => {
+						const signal = opts?.signal
+						if (!signal) {
+							reject(new Error("SDK create was called without a signal"))
+							return
+						}
+						signal.addEventListener("abort", () => reject(sdkAbortError()), { once: true })
+					})
+				})
+
+				const pending = handler.completePrompt("hi", { abortSignal: external.signal, timeoutMs: 60_000 })
+				await waitForCreateCall(mockCreate)
+				const opts = mockCreate.mock.calls[0][1]
+				expect(opts?.signal).toBeInstanceOf(AbortSignal)
+				expect(opts.signal).not.toBe(external.signal) // merged via AbortSignal.any
+				expect(opts.signal.aborted).toBe(false)
+
+				external.abort()
+				let caught: unknown
+				try {
+					await pending
+				} catch (error) {
+					caught = error
+				}
+
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+			})
+
+			it("should fast-fail with a normalized AbortError for a pre-aborted signal", async () => {
+				const external = new AbortController()
+				external.abort()
+
+				let caught: unknown
+				try {
+					await handler.completePrompt("hi", { abortSignal: external.signal })
+				} catch (error) {
+					caught = error
+				}
+
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+				expect(fs.readFile).not.toHaveBeenCalled() // no work starts after a pre-aborted signal
+				expect(mockCreate).not.toHaveBeenCalled()
+			})
+
+			it("should retry after 401 and pass the same abort signal to the retry", async () => {
+				vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tokenResponse()))
+				mockCreate
+					.mockRejectedValueOnce(unauthorizedError())
+					.mockResolvedValueOnce({ choices: [{ message: { content: "retried" } }] })
+
+				const result = await handler.completePrompt("hi", { abortSignal: new AbortController().signal })
+
+				expect(result).toBe("retried")
+				expect(mockCreate).toHaveBeenCalledTimes(2)
+				expect(mockCreate.mock.calls[1][1]?.signal).toBe(mockCreate.mock.calls[0][1]?.signal)
+			})
+
+			it("should not retry after 401 when the abort signal fires during the refresh", async () => {
+				const external = new AbortController()
+				const fetchMock = vi.fn().mockImplementation(async () => {
+					external.abort() // simulate Stop pressed while the token refresh is in flight
+					return tokenResponse()
+				})
+				vi.stubGlobal("fetch", fetchMock)
+				mockCreate.mockRejectedValueOnce(unauthorizedError())
+
+				let caught: unknown
+				try {
+					await handler.completePrompt("hi", { abortSignal: external.signal })
+				} catch (error) {
+					caught = error
+				}
+
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+				expect(mockCreate).toHaveBeenCalledTimes(1) // the retried request was never sent
+				expect(fetchMock).toHaveBeenCalledTimes(1)
+			})
+
+			it("should normalize SDK abort errors instead of rethrowing them", async () => {
+				mockCreate.mockRejectedValueOnce(sdkAbortError())
+
+				let caught: unknown
+				try {
+					await handler.completePrompt("hi")
+				} catch (error) {
+					caught = error
+				}
+
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toMatch(/aborted$/)
+			})
 		})
 	})
 })

@@ -14,7 +14,9 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 const QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
@@ -50,6 +52,45 @@ function objectToUrlEncoded(data: Record<string, string>): string {
 	return Object.keys(data)
 		.map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
 		.join("&")
+}
+
+/**
+ * Minimal request-options shape for the generic RequestConfigBuilder. The
+ * SDK’s `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
+ * which does not satisfy the builder’s base constraint, so the builder is typed
+ * with only the options this provider sets. The built config is still
+ * assignable to the SDK’s `RequestOptions`.
+ */
+type OpenAiRequestOptions = {
+	signal?: AbortSignal
+}
+
+/**
+ * Whether a failure indicates an aborted request: the caller’s signal fired,
+ * the SDK raised a native abort error, or the error message mentions an
+ * aborted request.
+ */
+function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
+	const candidate = error as { name?: string; message?: string }
+	return (
+		Boolean(signal?.aborted) ||
+		candidate?.name === "AbortError" ||
+		candidate?.name === "APIUserAbortError" ||
+		(typeof candidate?.message === "string" && candidate.message.includes("abort"))
+	)
+}
+
+/**
+ * Fresh error satisfying the Task.ts abort contract: `name ===
+ * "AbortError"` and a message ending in "aborted" (no trailing period). The
+ * OpenAI SDK’s own abort error does not satisfy this contract (name "Error",
+ * message "Request was aborted."), so raw SDK abort errors must be
+ * normalized instead of rethrown.
+ */
+function createAbortError(): Error {
+	const abortError = new Error("The Qwen Code request was aborted")
+	abortError.name = "AbortError"
+	return abortError
 }
 
 export class QwenCodeHandler extends BaseProvider implements SingleCompletionHandler {
@@ -194,13 +235,27 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		return baseUrl.endsWith("/v1") ? baseUrl : `${baseUrl}/v1`
 	}
 
-	private async callApiWithRetry<T>(apiCall: () => Promise<T>): Promise<T> {
+	private async callApiWithRetry<T>(apiCall: () => Promise<T>, externalSignal?: AbortSignal): Promise<T> {
 		try {
 			return await apiCall()
 		} catch (error: any) {
+			// An aborted request must never be retried: normalize it to the
+			// Task.ts abort contract (name "AbortError", message ending in
+			// "aborted") instead of rethrowing the raw SDK abort error.
+			if (isRequestAborted(error, externalSignal)) {
+				throw createAbortError()
+			}
 			if (error.status === 401) {
-				// Token expired, refresh and retry
+				// Token expired, refresh and retry. The retry reuses apiCall’s
+				// captured request options, so it carries the same abort signal.
+				// (An already-aborted request is normalized above and never
+				// reaches this branch.)
 				this.credentials = await this.refreshAccessToken(this.credentials!)
+				// A stop can land while the refresh await is in flight — re-check
+				// before the retried request goes out so it is not sent.
+				if (externalSignal?.aborted) {
+					throw createAbortError()
+				}
 				const client = this.ensureClient()
 				client.apiKey = this.credentials.access_token
 				client.baseURL = this.getBaseUrl(this.credentials)
@@ -216,107 +271,141 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		await this.ensureAuthenticated()
-		const client = this.ensureClient()
-		const model = this.getModel()
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(metadata?.abortSignal)
 
-		const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
-			role: "system",
-			content: systemPrompt,
+		// Request-local abort controller — a class field would outlive this
+		// request and let concurrent requests abort each other.
+		const requestController = new AbortController()
+		const onExternalAbort = () => {
+			requestController.abort()
+		}
+		const externalSignal = metadata?.abortSignal
+		if (externalSignal) {
+			externalSignal.addEventListener("abort", onExternalAbort)
 		}
 
-		const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
+		try {
+			await this.ensureAuthenticated()
+			const client = this.ensureClient()
+			const model = this.getModel()
 
-		const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
-			model: model.id,
-			temperature: 0,
-			messages: convertedMessages,
-			stream: true,
-			stream_options: { include_usage: true },
-			max_completion_tokens: model.info.maxTokens,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
-		}
+			const systemMessage: OpenAI.Chat.ChatCompletionSystemMessageParam = {
+				role: "system",
+				content: systemPrompt,
+			}
 
-		const stream = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
+			const convertedMessages = [systemMessage, ...convertToOpenAiMessages(messages)]
 
-		let fullContent = ""
+			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+				model: model.id,
+				temperature: 0,
+				messages: convertedMessages,
+				stream: true,
+				stream_options: { include_usage: true },
+				max_completion_tokens: model.info.maxTokens,
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
+				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+			}
 
-		for await (const apiChunk of stream) {
-			const delta = apiChunk.choices[0]?.delta ?? {}
-			const finishReason = apiChunk.choices[0]?.finish_reason
+			// Bridge the request-local signal into the SDK request options so
+			// the in-flight request (and any 401 retry) can be cancelled.
+			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+				.setOption("signal", requestController.signal)
+				.build()
 
-			if (delta.content) {
-				let newText = delta.content
-				if (newText.startsWith(fullContent)) {
-					newText = newText.substring(fullContent.length)
-				}
-				fullContent = delta.content
+			const stream = await this.callApiWithRetry(
+				() => client.chat.completions.create(requestOptions, createOptions),
+				externalSignal,
+			)
 
-				if (newText) {
-					// Check for thinking blocks
-					if (newText.includes("<think>") || newText.includes("</think>")) {
-						// Simple parsing for thinking blocks
-						const parts = newText.split(/<\/?think>/g)
-						for (let i = 0; i < parts.length; i++) {
-							if (parts[i]) {
-								if (i % 2 === 0) {
-									// Outside thinking block
-									yield {
-										type: "text",
-										text: parts[i],
-									}
-								} else {
-									// Inside thinking block
-									yield {
-										type: "reasoning",
-										text: parts[i],
+			let fullContent = ""
+
+			for await (const apiChunk of stream) {
+				const delta = apiChunk.choices[0]?.delta ?? {}
+				const finishReason = apiChunk.choices[0]?.finish_reason
+
+				if (delta.content) {
+					let newText = delta.content
+					if (newText.startsWith(fullContent)) {
+						newText = newText.substring(fullContent.length)
+					}
+					fullContent = delta.content
+
+					if (newText) {
+						// Check for thinking blocks
+						if (newText.includes("<think>") || newText.includes("</think>")) {
+							// Simple parsing for thinking blocks
+							const parts = newText.split(/<\/?think>/g)
+							for (let i = 0; i < parts.length; i++) {
+								if (parts[i]) {
+									if (i % 2 === 0) {
+										// Outside thinking block
+										yield {
+											type: "text",
+											text: parts[i],
+										}
+									} else {
+										// Inside thinking block
+										yield {
+											type: "reasoning",
+											text: parts[i],
+										}
 									}
 								}
 							}
+						} else {
+							yield {
+								type: "text",
+								text: newText,
+							}
 						}
-					} else {
+					}
+				}
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
+				if (delta.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
 						yield {
-							type: "text",
-							text: newText,
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
 						}
 					}
 				}
-			}
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+				// Process finish_reason to emit tool_call_end events
+				if (finishReason) {
+					const endEvents = NativeToolCallParser.processFinishReason(finishReason)
+					for (const event of endEvents) {
+						yield event
+					}
+				}
 
-			// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
-			if (delta.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				if (apiChunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: apiChunk.usage.prompt_tokens || 0,
+						outputTokens: apiChunk.usage.completion_tokens || 0,
 					}
 				}
 			}
-
-			// Process finish_reason to emit tool_call_end events
-			if (finishReason) {
-				const endEvents = NativeToolCallParser.processFinishReason(finishReason)
-				for (const event of endEvents) {
-					yield event
-				}
+		} catch (error) {
+			if (isRequestAborted(error, externalSignal)) {
+				throw createAbortError()
 			}
-
-			if (apiChunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: apiChunk.usage.prompt_tokens || 0,
-					outputTokens: apiChunk.usage.completion_tokens || 0,
-				}
+			throw error
+		} finally {
+			if (externalSignal) {
+				externalSignal.removeEventListener("abort", onExternalAbort)
 			}
 		}
 	}
@@ -328,6 +417,21 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(options?.abortSignal)
+
+		// Merge the external stop signal with an optional per-call timeout. A
+		// timeoutMs <= 0 means "no explicit timeout" inside the util, so zero
+		// never reaches the SDK as an explicit timeout.
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
+		// CompletePromptOptions is not createMessage metadata (no taskId), so
+		// the generic builder takes the merged signal via setOption instead of
+		// setAbortSignal(metadata).
+		const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+			.setOption("signal", requestSignal)
+			.build()
+
 		await this.ensureAuthenticated()
 		const client = this.ensureClient()
 		const model = this.getModel()
@@ -338,7 +442,13 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			max_completion_tokens: model.info.maxTokens,
 		}
 
-		const response = await this.callApiWithRetry(() => client.chat.completions.create(requestOptions))
+		// The retry reuses the captured request options, so it carries the same
+		// merged signal — and the guard in callApiWithRetry refuses to retry
+		// once this signal has aborted.
+		const response = await this.callApiWithRetry(
+			() => client.chat.completions.create(requestOptions, createOptions),
+			requestSignal,
+		)
 
 		return response.choices[0]?.message.content || ""
 	}

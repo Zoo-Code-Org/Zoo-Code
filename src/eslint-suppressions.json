@@ -174,11 +174,6 @@
 			"count": 36
 		}
 	},
-	"api/providers/__tests__/lm-studio-timeout.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/__tests__/mimo.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 18

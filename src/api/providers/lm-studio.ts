@@ -18,10 +18,51 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+
+/**
+ * Minimal request-options shape for the generic RequestConfigBuilder. The
+ * SDK's `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
+ * which does not satisfy the builder's base constraint, so the builder is typed
+ * with only the options this provider sets. The built config is still
+ * assignable to the SDK's `RequestOptions`.
+ */
+type OpenAiRequestOptions = {
+	signal?: AbortSignal
+}
+
+/**
+ * Whether a failure indicates an aborted request: the caller's signal fired,
+ * the SDK raised a native abort error, or the error message mentions an
+ * aborted request.
+ */
+function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
+	const candidate = error as { name?: string; message?: string }
+	return (
+		Boolean(signal?.aborted) ||
+		candidate?.name === "AbortError" ||
+		candidate?.name === "APIUserAbortError" ||
+		(typeof candidate?.message === "string" && candidate.message.includes("abort"))
+	)
+}
+
+/**
+ * Fresh error satisfying the Task.ts abort contract: `name ===
+ * "AbortError"` and a message ending in "aborted" (no trailing period). The
+ * OpenAI SDK's own abort error does not satisfy this contract (name "Error",
+ * message "Request was aborted."), so raw SDK abort errors must be
+ * normalized instead of rethrown.
+ */
+function createAbortError(): Error {
+	const abortError = new Error("The LM Studio request was aborted")
+	abortError.name = "AbortError"
+	return abortError
+}
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -47,6 +88,9 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(metadata?.abortSignal)
+
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
 			...convertToOpenAiMessages(messages),
@@ -88,6 +132,17 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		let assistantText = ""
 		let reasoningOutput = ""
 
+		// Request-local abort controller — a class field would outlive this
+		// request and let concurrent requests abort each other.
+		const requestController = new AbortController()
+		const onExternalAbort = () => {
+			requestController.abort()
+		}
+		const externalSignal = metadata?.abortSignal
+		if (externalSignal) {
+			externalSignal.addEventListener("abort", onExternalAbort)
+		}
+
 		try {
 			const params: OpenAI.Chat.ChatCompletionCreateParamsStreaming & { draft_model?: string } = {
 				model: this.getModel().id,
@@ -103,10 +158,19 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				params.draft_model = this.options.lmStudioDraftModelId
 			}
 
+			// Bridge the request-local signal into the SDK request options so the
+			// in-flight request can be cancelled.
+			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+				.setOption("signal", requestController.signal)
+				.build()
+
 			let results
 			try {
-				results = await this.client.chat.completions.create(params)
+				results = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
+				if (isRequestAborted(error, externalSignal)) {
+					throw createAbortError()
+				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 
@@ -181,9 +245,16 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens,
 			} as const
 		} catch (error) {
+			if (isRequestAborted(error, externalSignal)) {
+				throw createAbortError()
+			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
+		} finally {
+			if (externalSignal) {
+				externalSignal.removeEventListener("abort", onExternalAbort)
+			}
 		}
 	}
 
@@ -206,6 +277,14 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the caller’s stop signal already fired before we started.
+		throwIfAborted(options?.abortSignal)
+
+		// Merge the external stop signal with an optional per-call timeout. A
+		// timeoutMs <= 0 means "no explicit timeout" inside the util, so zero
+		// never reaches the SDK as an explicit timeout.
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
 		try {
 			// Create params object with optional draft model
 			const params: any = {
@@ -220,14 +299,27 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				params.draft_model = this.options.lmStudioDraftModelId
 			}
 
+			// CompletePromptOptions is not createMessage metadata (no taskId), so
+			// the generic builder takes the merged signal via setOption instead of
+			// setAbortSignal(metadata).
+			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
+				.setOption("signal", requestSignal)
+				.build()
+
 			let response
 			try {
-				response = await this.client.chat.completions.create(params)
+				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
+				if (isRequestAborted(error, requestSignal)) {
+					throw createAbortError()
+				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			if (isRequestAborted(error, requestSignal)) {
+				throw createAbortError()
+			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
