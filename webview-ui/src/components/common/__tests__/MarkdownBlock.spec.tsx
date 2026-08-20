@@ -227,9 +227,22 @@ describe("MarkdownBlock", () => {
 	})
 
 	describe("Context mentions (#559)", () => {
+		it("keeps mention patterns inert when the mentions prop is not set", async () => {
+			// Mentions are only actionable where text is user-authored. Assistant
+			// content rendered through the default MarkdownBlock must keep mention
+			// patterns as plain, non-interactive text.
+			const markdown = "Check @/src/file.ts and @problems."
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			await screen.findByText(/Check/, { exact: false })
+
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			expect(container.querySelector("p")?.textContent).toBe("Check @/src/file.ts and @problems.")
+		})
+
 		it("renders @/path/file.ts as a clickable mention span", async () => {
 			const markdown = "Check out @/src/components/chat/TaskHeader.tsx for details."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/Check out/, { exact: false })
 
@@ -246,7 +259,7 @@ describe("MarkdownBlock", () => {
 
 		it("renders @problems as a clickable mention span", async () => {
 			const markdown = "Review the issues listed in @problems before proceeding."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/Review/, { exact: false })
 
@@ -257,7 +270,7 @@ describe("MarkdownBlock", () => {
 
 		it("renders @terminal as a clickable mention span", async () => {
 			const markdown = "See the output captured in @terminal."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/See/, { exact: false })
 
@@ -268,7 +281,7 @@ describe("MarkdownBlock", () => {
 
 		it("renders multiple mentions in the same paragraph", async () => {
 			const markdown = "Check @/src/file.ts and @problems, then review @terminal."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/Check/, { exact: false })
 
@@ -281,7 +294,7 @@ describe("MarkdownBlock", () => {
 
 		it("posts openMention message when a mention span is clicked", async () => {
 			const markdown = "See @/src/components/chat/TaskHeader.tsx."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/See/, { exact: false })
 
@@ -306,7 +319,7 @@ describe("MarkdownBlock", () => {
 
 		it("keeps mention patterns literal inside fenced code blocks", async () => {
 			const markdown = "```bash\necho hello @problems\n```"
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/echo/, { exact: false })
 
@@ -318,7 +331,7 @@ describe("MarkdownBlock", () => {
 
 		it("keeps mention patterns literal inside inline code", async () => {
 			const markdown = "Use `@problems` carefully."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/Use/, { exact: false })
 
@@ -326,11 +339,30 @@ describe("MarkdownBlock", () => {
 			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
 		})
 
+		it("keeps mention patterns literal inside link text even when enabled", async () => {
+			// A mention inside <a> must not become a nested role=button span: that
+			// is invalid interactive content (WHATWG) and would block the anchor's
+			// own openFile handler via stopPropagation.
+			const markdown = "see [open @/src/main.ts](/src/main.ts) please"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/please/, { exact: false })
+
+			const anchor = container.querySelector("a")!
+			expect(container.querySelectorAll("a span.mention-context-highlight").length).toBe(0)
+			expect(anchor.textContent).toBe("open @/src/main.ts")
+
+			// The anchor's own handler still fires (nothing swallows the click).
+			fireEvent.click(anchor)
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "/src/main.ts" })
+			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openMention" }))
+		})
+
 		it("renders a standalone mention with no surrounding text", async () => {
 			// A mention that both starts and ends the text node exercises the
 			// no-leading-text and no-trailing-text branches of the splitter.
 			const markdown = "@problems"
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText("@problems")
 
@@ -344,7 +376,7 @@ describe("MarkdownBlock", () => {
 
 		it("makes mentions keyboard operable (role=button, tabIndex, Enter/Space)", async () => {
 			const markdown = "See @terminal."
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/See/, { exact: false })
 
@@ -366,7 +398,7 @@ describe("MarkdownBlock", () => {
 
 		it("preserves regular text around mentions", async () => {
 			const markdown = "Before @problems middle after"
-			const { container } = render(<MarkdownBlock markdown={markdown} />)
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
 
 			await screen.findByText(/Before/, { exact: false })
 

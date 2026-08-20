@@ -25,10 +25,13 @@ function rehypeMentions() {
 				return
 			}
 
-			// Code is literal content: never interactive-ify mention patterns inside it.
-			// Wrapping them would also corrupt the CodeBlock text extraction, which only
-			// keeps string children (the mention text would silently disappear).
-			if (parent?.tagName === "code") {
+			// Code and links are literal or already-interactive content: never
+			// interactive-ify mention patterns inside them. Inside <a> a role=button
+			// span would be invalid nested interactive content (WHATWG) and its
+			// stopPropagation would block the anchor's own openFile handler; inside
+			// code it would corrupt the CodeBlock text extraction, which only keeps
+			// string children (the mention text would silently disappear).
+			if (parent?.tagName === "code" || parent?.tagName === "pre" || parent?.tagName === "a") {
 				return
 			}
 
@@ -111,6 +114,14 @@ const ALERT_LABELS: Record<AlertType, string> = {
 
 interface MarkdownBlockProps {
 	markdown?: string
+	/**
+	 * Render context mentions (@/path, @problems, @terminal, ...) as clickable
+	 * spans that post `openMention`. Off by default: mentions are only
+	 * actionable where the text is user-authored (the expanded task prompt).
+	 * Assistant-generated content (messages, reasoning, tool output, todos)
+	 * keeps mention patterns as inert text.
+	 */
+	mentions?: boolean
 }
 
 const StyledMarkdown = styled.div`
@@ -352,7 +363,7 @@ const StyledMarkdown = styled.div`
 	}
 `
 
-const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
+const MarkdownBlock = memo(({ markdown, mentions = false }: MarkdownBlockProps) => {
 	const components = useMemo(
 		() => ({
 			table: ({ children, ...props }: any) => {
@@ -494,7 +505,7 @@ const MarkdownBlock = memo(({ markdown }: MarkdownBlockProps) => {
 						}
 					},
 				]}
-				rehypePlugins={[rehypeMentions, rehypeKatex as any]}
+				rehypePlugins={[...(mentions ? [rehypeMentions] : []), rehypeKatex as any]}
 				components={components}>
 				{markdown || ""}
 			</ReactMarkdown>

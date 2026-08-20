@@ -334,7 +334,7 @@ const TaskHeader = ({
 									WebkitLineClamp: "unset",
 									WebkitBoxOrient: "vertical",
 								}}>
-								<MarkdownBlock markdown={task.text ?? ""} />
+								<MarkdownBlock markdown={task.text ?? ""} mentions />
 							</div>
 						</div>
 						{task.images && task.images.length > 0 && <Thumbnails images={task.images} />}
