@@ -26,12 +26,17 @@ vi.mock("vscode", () => {
 			})),
 		},
 		CancellationTokenSource: vi.fn(function () {
+			// Faithful to the real API: cancel() marks the token as requested so
+			// consumers that read isCancellationRequested observe the cancellation.
+			const token = {
+				isCancellationRequested: false,
+				onCancellationRequested: vi.fn(),
+			}
 			return {
-				token: {
-					isCancellationRequested: false,
-					onCancellationRequested: vi.fn(),
-				},
-				cancel: vi.fn(),
+				token,
+				cancel: vi.fn(() => {
+					token.isCancellationRequested = true
+				}),
 				dispose: vi.fn(),
 			}
 		}),
@@ -1220,20 +1225,6 @@ describe("VsCodeLmHandler", () => {
 		})
 
 		it("should reject with an AbortError when the signal is already aborted", async () => {
-			const mockModel = { ...mockLanguageModelChat }
-			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
-
-			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
-				stream: (async function* () {
-					yield new vscode.LanguageModelTextPart("Completed text")
-					return
-				})(),
-				text: (async function* () {
-					yield "Completed text"
-					return
-				})(),
-			})
-
 			handler["client"] = mockLanguageModelChat
 
 			const controller = new AbortController()
@@ -1242,9 +1233,9 @@ describe("VsCodeLmHandler", () => {
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
 			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
 
-			const tokenSource = tokenSourceInstance()
-			expect(tokenSource.cancel).toHaveBeenCalled()
-			expect(tokenSource.dispose).toHaveBeenCalled()
+			// Fails fast before invoking the host: no cancellation token source is
+			// created and the sendRequest is never called.
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 		})
 
 		it("should reject with an AbortError when the signal aborts mid-flight", async () => {
@@ -1309,10 +1300,12 @@ describe("VsCodeLmHandler", () => {
 				expect(tokenSource.cancel).toHaveBeenCalled()
 				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(1)
 
-				// The token-agnostic mock stream still completes, so the (unaborted-signal)
-				// completion resolves normally.
+				// The token-agnostic mock stream completes, but the cancelled token
+				// still makes the completion abort.
 				releaseStream()
-				await expect(promise).resolves.toBe("Completed text")
+				await expect(promise).rejects.toSatisfy(
+					(error) => error instanceof Error && error.name === "AbortError",
+				)
 			} finally {
 				vi.useRealTimers()
 			}
@@ -1360,6 +1353,19 @@ describe("VsCodeLmHandler", () => {
 					error.message === "VSCode LM completion error: LM error"
 				)
 			})
+		})
+
+		it("should reject with an AbortError when the host raises a CancellationError", async () => {
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValueOnce([mockModel])
+
+			// The host rejects with a CancellationError while the token flag is not set
+			// (no abort signal, no timeout), so only the error type signals the abort.
+			mockLanguageModelChat.sendRequest.mockRejectedValueOnce(new vscode.CancellationError())
+			handler["client"] = mockLanguageModelChat
+
+			const promise = handler.completePrompt("Test prompt")
+			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
 		})
 	})
 

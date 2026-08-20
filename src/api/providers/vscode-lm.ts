@@ -431,7 +431,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			const response: vscode.LanguageModelChatResponse = await client.sendRequest(
 				vsCodeLmMessages,
 				requestOptions,
-				this.currentRequestCancellation.token,
+				cancellationTokenSource.token,
 			)
 
 			// Consume the stream and handle both text and tool call chunks
@@ -505,8 +505,6 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
-			this.ensureCleanState()
-
 			if (error instanceof vscode.CancellationError) {
 				// The host rejected because the request was cancelled: either the
 				// bridged external signal aborted or the user cancelled the request
@@ -543,8 +541,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (onExternalAbort !== undefined) {
 				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
 			}
-			if (this.currentRequestCancellation) {
-				this.currentRequestCancellation.dispose()
+			// Dispose the request-local source. Clear the shared field only if it still
+			// points at this request's source: a newer request may have replaced it, and
+			// disposing the shared field here would cancel and dispose the newer request's
+			// token.
+			cancellationTokenSource.dispose()
+			if (this.currentRequestCancellation === cancellationTokenSource) {
 				this.currentRequestCancellation = null
 			}
 		}
@@ -628,6 +630,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fail fast if the caller already aborted before we even started: do not
+		// initialize or invoke the host request for a cancelled request.
+		if (options?.abortSignal?.aborted) {
+			const abortError = new Error("VSCode LM completion aborted")
+			abortError.name = "AbortError"
+			throw abortError
+		}
+
 		const client = await this.getClient()
 
 		// The VS Code LanguageModelChat API cannot carry an AbortSignal: sendRequest
@@ -661,6 +671,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			tokenSource.token.isCancellationRequested === true || externalAbortSignal?.aborted === true
 
 		try {
+			// Re-check before invoking the host: the signal may have aborted while the
+			// client was being initialized above.
+			if (externalAbortSignal?.aborted) {
+				const abortError = new Error("VSCode LM completion aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			const response = await client.sendRequest(
 				[vscode.LanguageModelChatMessage.User(prompt)],
 				{},
@@ -684,8 +702,10 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		} catch (error) {
 			// Report an aborted request (external signal, timeout, or host
 			// cancellation) as a standard AbortError instead of a generic
-			// completion error.
-			if (isAborted()) {
+			// completion error. A host CancellationError is treated as a cancellation
+			// even if the token flag was not observed (e.g. the host cancelled the
+			// request through the token without the flag being set).
+			if (isAborted() || error instanceof vscode.CancellationError) {
 				const abortError = new Error("VSCode LM completion aborted")
 				abortError.name = "AbortError"
 				throw abortError
