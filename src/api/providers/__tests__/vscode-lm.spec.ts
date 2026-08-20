@@ -513,7 +513,8 @@ describe("VsCodeLmHandler", () => {
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
 
 			// Gate model selection so the generator waits inside getClient(): the
-			// pre-abort check and listener attachment happened before this window.
+			// cancellation token source and the abort-bridge listener are established
+			// before this window, and the finally cleanup covers the getClient() await.
 			let releaseClient: () => void = () => {}
 			const clientGate = new Promise<void>((resolve) => {
 				releaseClient = resolve
@@ -524,6 +525,7 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = null
 
 			const controller = new AbortController()
+			const removeEventListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
 			const stream = handler.createMessage(
 				systemPrompt,
 				messages,
@@ -531,18 +533,24 @@ describe("VsCodeLmHandler", () => {
 			)
 			const firstChunk = stream.next()
 
-			// Release the client, then abort before the generator can reach sendRequest.
+			// Release the client, then abort before the next microtask can reach
+			// countTokens/sendRequest.
 			releaseClient()
 			controller.abort()
 
 			await expect(firstChunk).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
 
-			// The abort landed after client initialization, so no host request started.
+			// The abort landed after client initialization, so no host request started
+			// and no input tokens were counted (the post-init re-check bails first).
 			expect(handler["client"]).not.toBeNull()
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+			expect(mockLanguageModelChat.countTokens).toHaveBeenCalledTimes(0)
 
-			// The local token source was cancelled for the request that never started.
+			// The local token source was cancelled for the request that never started,
+			// and the abort-bridge listener was removed by the finally covering the
+			// initialization window.
 			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
 		})
 
 		it("should bridge a mid-flight external abort to the request cancellation token", async () => {
@@ -1344,6 +1352,39 @@ describe("VsCodeLmHandler", () => {
 				await expect(promise).rejects.toSatisfy(
 					(error) => error instanceof Error && error.name === "AbortError",
 				)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("should reject with an AbortError when the timeout fires during client initialization", async () => {
+			// Gate client initialization so the timeout timer (started before getClient())
+			// can fire while getClient() is still pending.
+			let releaseClient: () => void = () => {}
+			const clientGate = new Promise<void>((resolve) => {
+				releaseClient = resolve
+			})
+			;(vscode.lm.selectChatModels as Mock).mockImplementation(() =>
+				clientGate.then(() => [{ ...mockLanguageModelChat }]),
+			)
+			handler["client"] = null
+
+			vi.useFakeTimers()
+			try {
+				const promise = handler.completePrompt("Test prompt", { timeoutMs: 5000 })
+
+				// Advance past the timeout while getClient() is still pending: the timer
+				// fires and cancels the request token.
+				await vi.advanceTimersByTimeAsync(5000)
+				expect(tokenSourceInstance().cancel).toHaveBeenCalled()
+
+				// Release the client; the post-init re-check must abort before sendRequest.
+				releaseClient()
+
+				await expect(promise).rejects.toSatisfy(
+					(error) => error instanceof Error && error.name === "AbortError",
+				)
+				expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
 			} finally {
 				vi.useRealTimers()
 			}

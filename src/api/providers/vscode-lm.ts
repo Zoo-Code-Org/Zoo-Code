@@ -376,31 +376,15 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Ensure clean state before starting a new request
 		this.ensureCleanState()
 
-		// The VS Code LanguageModelChat API cannot carry an AbortSignal, so a
+		// The VS Code LanguageModelChat API cannot carry an AbortSignal, so the
+		// request cancellation is established before client initialization and a
 		// pre-aborted external signal is reported immediately instead of being
 		// sent to the host.
 		const externalAbortSignal = metadata?.abortSignal
-		if (externalAbortSignal?.aborted) {
-			const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
-			abortError.name = "AbortError"
-			throw abortError
-		}
 
-		const client: vscode.LanguageModelChat = await this.getClient()
-
-		// Process messages
-		const cleanedMessages = messages.map((msg) => ({
-			...msg,
-			content: this.cleanMessageContent(msg.content),
-		}))
-
-		// Convert Anthropic messages to VS Code LM messages
-		const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
-			vscode.LanguageModelChatMessage.Assistant(systemPrompt),
-			...convertToVsCodeLmMessages(cleanedMessages),
-		]
-
-		// Initialize cancellation token for the request
+		// Initialize cancellation token for the request before getClient() so the
+		// client-initialization await is covered by the abort bridge and the
+		// finally cleanup below.
 		this.currentRequestCancellation = new vscode.CancellationTokenSource()
 		const cancellationTokenSource = this.currentRequestCancellation
 
@@ -415,22 +399,45 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
 		}
 
-		// Calculate input tokens before starting the stream
-		const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
-
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
 
 		try {
-			// Re-check after client initialization: the external signal may have
-			// aborted while getClient() (or the token calculation) was pending. Bail
-			// before invoking the host so no request starts for a cancelled request.
+			// Fail fast if the caller already aborted before we even started: do not
+			// initialize or invoke the host request for a cancelled request.
 			if (externalAbortSignal?.aborted) {
 				cancellationTokenSource.cancel()
 				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
 				abortError.name = "AbortError"
 				throw abortError
 			}
+
+			const client: vscode.LanguageModelChat = await this.getClient()
+
+			// Re-check immediately after client initialization: the signal may have
+			// aborted while getClient() was pending. Bail before counting input
+			// tokens or invoking the host so no work happens for a cancelled request.
+			if (externalAbortSignal?.aborted) {
+				cancellationTokenSource.cancel()
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
+			// Process messages
+			const cleanedMessages = messages.map((msg) => ({
+				...msg,
+				content: this.cleanMessageContent(msg.content),
+			}))
+
+			// Convert Anthropic messages to VS Code LM messages
+			const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = [
+				vscode.LanguageModelChatMessage.Assistant(systemPrompt),
+				...convertToVsCodeLmMessages(cleanedMessages),
+			]
+
+			// Calculate input tokens before starting the stream
+			const totalInputTokens: number = await this.calculateTotalInputTokens(vsCodeLmMessages)
 
 			// Create the response stream with required options
 			const requestOptions: vscode.LanguageModelChatRequestOptions = {
@@ -522,6 +529,16 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
+			// When the external signal wins during client initialization (the signal
+			// was already aborted while getClient() was pending or rejected), surface a
+			// standard abort error instead of wrapping the getClient() failure as a
+			// generic stream error.
+			if (externalAbortSignal?.aborted) {
+				const abortError = new Error("Zoo Code <Language Model API>: Request aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
 			if (error instanceof vscode.CancellationError) {
 				// The host rejected because the request was cancelled: either the
 				// bridged external signal aborted or the user cancelled the request
@@ -647,24 +664,18 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		// Fail fast if the caller already aborted before we even started: do not
-		// initialize or invoke the host request for a cancelled request.
-		if (options?.abortSignal?.aborted) {
-			const abortError = new Error("VSCode LM completion aborted")
-			abortError.name = "AbortError"
-			throw abortError
-		}
-
-		const client = await this.getClient()
-
 		// The VS Code LanguageModelChat API cannot carry an AbortSignal: sendRequest
 		// only accepts a CancellationToken. Bridge the external signal and timeout
-		// into a request-local CancellationTokenSource instead.
+		// into a request-local CancellationTokenSource instead. Cancellation is
+		// established before client initialization so the getClient() await is covered
+		// by the timeout, the abort bridge, and the finally cleanup below.
 		const tokenSource = new vscode.CancellationTokenSource()
 		const externalAbortSignal = options?.abortSignal
 
 		// Apply the timeout only when it is a positive value: cancelling at once for a
-		// zero/negative timeout would abort every such request immediately.
+		// zero/negative timeout would abort every such request immediately. Starting
+		// the timer before getClient() means a timeout that fires during a slow client
+		// lookup still cancels the request before any sendRequest call.
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 			timeoutId = setTimeout(() => tokenSource.cancel(), options.timeoutMs)
@@ -688,9 +699,21 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			tokenSource.token.isCancellationRequested === true || externalAbortSignal?.aborted === true
 
 		try {
-			// Re-check before invoking the host: the signal may have aborted while the
-			// client was being initialized above.
-			if (externalAbortSignal?.aborted) {
+			// Fail fast if the caller already aborted before we even started: do not
+			// initialize or invoke the host request for a cancelled request.
+			if (isAborted()) {
+				const abortError = new Error("VSCode LM completion aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
+			const client = await this.getClient()
+
+			// Re-check after client initialization: the signal may have aborted (or the
+			// timeout fired) while getClient() was pending. Bail before invoking the host
+			// so a timeout that fired during a slow client lookup can never lead to a
+			// sendRequest call.
+			if (isAborted()) {
 				const abortError = new Error("VSCode LM completion aborted")
 				abortError.name = "AbortError"
 				throw abortError
