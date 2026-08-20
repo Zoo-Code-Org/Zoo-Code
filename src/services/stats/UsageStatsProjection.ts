@@ -43,7 +43,11 @@ import {
 	serializeBucketKey,
 	type BucketDeltaValues,
 } from "./UsageAggregator"
-import { applyCacheDiscount, computeCacheDiscountBaseFromAggregated } from "./costRecalculation"
+import {
+	applyCacheDiscount,
+	computeCacheDiscountBaseFromAggregated,
+	computeCostFromAggregated,
+} from "./costRecalculation"
 import type { CustomModelPricingMap } from "./costRecalculation"
 
 // ── Error Codes ─────────────────────────────────────────────────────────────
@@ -428,25 +432,53 @@ function lifetimeTotalsToBucket(
  * @param customPricing The query-time custom pricing map.
  * @returns Map from axisValue → recomputed discount base (USD).
  */
-function buildRecomputedDiscountBaseMap(
+/**
+ * Builds a map from axisValue → recomputed pricing (costUsd and cache discount base),
+ * using the per-(provider, model) token sums from `usage_events` and the current
+ * `customPricing` map.
+ *
+ * This is the query-time fix for the rollup fast path: the stored
+ * `costUsd` and `cache_discount_base` were computed at write time without
+ * `customPricing`, so they are 0 for custom models. This function recomputes
+ * the correct values from the raw event data.
+ *
+ * @param db The database to query.
+ * @param fromEpochMs Time range start (inclusive).
+ * @param toEpochMs Time range end (exclusive).
+ * @param includeCancelled Whether to include cancelled events.
+ * @param axis The breakdown axis ("model", "provider", "mode").
+ * @param customPricing The query-time custom pricing map.
+ * @returns Map from axisValue → { costUsd, cacheDiscountBase } (USD).
+ */
+function buildRecomputedPricingMap(
 	db: UsageStatsDatabase,
 	fromEpochMs: number,
 	toEpochMs: number,
 	includeCancelled: boolean,
 	axis: string,
 	customPricing: CustomModelPricingMap,
-): Map<string, number> {
-	const rows = db.queryInputTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
-	const result = new Map<string, number>()
+): Map<string, { costUsd: number; cacheDiscountBase: number }> {
+	const rows = db.queryTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
+	const result = new Map<string, { costUsd: number; cacheDiscountBase: number }>()
 
 	for (const row of rows) {
+		const costUsd = computeCostFromAggregated(
+			row.provider,
+			row.model,
+			row.inputTokens,
+			row.outputTokens,
+			row.cacheWriteTokens,
+			row.cacheReadTokens,
+			customPricing,
+		)
 		const discountBase = computeCacheDiscountBaseFromAggregated(
 			row.provider,
 			row.model,
 			row.inputTokens,
 			customPricing,
 		)
-		if (discountBase === 0) continue
+
+		if (costUsd === 0 && discountBase === 0) continue
 
 		// Build the axisValue the same way updateBreakdownRollups does
 		let axisValue: string
@@ -459,15 +491,18 @@ function buildRecomputedDiscountBaseMap(
 			axisValue = row.mode
 		}
 
-		result.set(axisValue, (result.get(axisValue) ?? 0) + discountBase)
+		const current = result.get(axisValue) ?? { costUsd: 0, cacheDiscountBase: 0 }
+		current.costUsd += costUsd
+		current.cacheDiscountBase += discountBase
+		result.set(axisValue, current)
 	}
 
 	return result
 }
 
 /**
- * Computes the total recomputed cache discount base across all (provider,
- * model) pairs, using the per-(provider, model) input token sums from
+ * Computes the total recomputed cost and cache discount base across all (provider,
+ * model) pairs, using the per-(provider, model) token sums from
  * `usage_events` and the current `customPricing` map.
  *
  * Used for the totals/lifetime path where there's no axis breakdown.
@@ -477,21 +512,36 @@ function buildRecomputedDiscountBaseMap(
  * @param toEpochMs Time range end (exclusive).
  * @param includeCancelled Whether to include cancelled events.
  * @param customPricing The query-time custom pricing map.
- * @returns Total recomputed discount base (USD).
+ * @returns Total recomputed { costUsd, cacheDiscountBase } (USD).
  */
-function computeTotalRecomputedDiscountBase(
+function computeTotalRecomputedPricing(
 	db: UsageStatsDatabase,
 	fromEpochMs: number,
 	toEpochMs: number,
 	includeCancelled: boolean,
 	customPricing: CustomModelPricingMap,
-): number {
-	const rows = db.queryInputTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
-	let total = 0
+): { costUsd: number; cacheDiscountBase: number } {
+	const rows = db.queryTokensByProviderModel(fromEpochMs, toEpochMs, includeCancelled)
+	let totalCostUsd = 0
+	let totalDiscountBase = 0
 	for (const row of rows) {
-		total += computeCacheDiscountBaseFromAggregated(row.provider, row.model, row.inputTokens, customPricing)
+		totalCostUsd += computeCostFromAggregated(
+			row.provider,
+			row.model,
+			row.inputTokens,
+			row.outputTokens,
+			row.cacheWriteTokens,
+			row.cacheReadTokens,
+			customPricing,
+		)
+		totalDiscountBase += computeCacheDiscountBaseFromAggregated(
+			row.provider,
+			row.model,
+			row.inputTokens,
+			customPricing,
+		)
 	}
-	return total
+	return { costUsd: totalCostUsd, cacheDiscountBase: totalDiscountBase }
 }
 
 // ── Public API: assembleRollupSnapshot ──────────────────────────────────────
@@ -601,9 +651,9 @@ function assembleRollupSnapshotFast(
 				breakdownRows = db.queryBreakdownRollups("daily", fromDay, toDay, axis, includeCancelled)
 			}
 
-			// Recompute cacheDiscountBase per axisValue when customPricing is available
+			// Recompute costUsd and cacheDiscountBase per axisValue when customPricing is available
 			if (hasCustomPricing) {
-				const recomputedMap = buildRecomputedDiscountBaseMap(
+				const recomputedMap = buildRecomputedPricingMap(
 					db,
 					fromEpochMs,
 					toEpochMs,
@@ -614,7 +664,8 @@ function assembleRollupSnapshotFast(
 				for (const row of breakdownRows) {
 					const recomputed = recomputedMap.get(row.axisValue)
 					if (recomputed !== undefined) {
-						row.cacheDiscountBase = recomputed
+						row.costUsd = recomputed.costUsd
+						row.cacheDiscountBase = recomputed.cacheDiscountBase
 					}
 				}
 			}
@@ -632,10 +683,10 @@ function assembleRollupSnapshotFast(
 	if (groupBy.length > 0) {
 		totals = sumBucketsToTotals(buckets)
 	} else {
-		// Compute the recomputed total discount base (only needed for groupBy.length === 0 totals/lifetime path)
-		let recomputedTotalDiscountBase: number | undefined
+		// Compute the recomputed total pricing (only needed for groupBy.length === 0 totals/lifetime path)
+		let recomputedTotalPricing: { costUsd: number; cacheDiscountBase: number } | undefined
 		if (hasCustomPricing) {
-			recomputedTotalDiscountBase = computeTotalRecomputedDiscountBase(
+			recomputedTotalPricing = computeTotalRecomputedPricing(
 				db,
 				fromEpochMs,
 				toEpochMs,
@@ -647,21 +698,24 @@ function assembleRollupSnapshotFast(
 		if (isAllTime) {
 			const lifetimeTotals = db.queryLifetimeTotalsFiltered(includeCancelled)
 			totals = lifetimeTotalsToBucket(lifetimeTotals, cacheRatio)
-			// Override stale cacheDiscountBase with recomputed value
-			if (recomputedTotalDiscountBase !== undefined) {
-				totals.costUsd = applyCacheDiscount(lifetimeTotals.totalCost, recomputedTotalDiscountBase, cacheRatio)
+			// Override stale costUsd with recomputed value
+			if (recomputedTotalPricing !== undefined) {
+				totals.costUsd = applyCacheDiscount(
+					recomputedTotalPricing.costUsd,
+					recomputedTotalPricing.cacheDiscountBase,
+					cacheRatio,
+				)
 			}
 		} else {
 			const dailyRows = db.queryDailyRollupsDetailed(fromDay, toDay, includeCancelled)
 			totals = sumDailyRowsToTotals(dailyRows, cacheRatio)
-			// Override stale cacheDiscountBase with recomputed value
-			if (recomputedTotalDiscountBase !== undefined) {
-				// Recompute the total cost from the raw daily cost sum + recomputed discount base
-				let rawCostSum = 0
-				for (const row of dailyRows) {
-					rawCostSum += row.costUsd
-				}
-				totals.costUsd = applyCacheDiscount(rawCostSum, recomputedTotalDiscountBase, cacheRatio)
+			// Override stale costUsd with recomputed value
+			if (recomputedTotalPricing !== undefined) {
+				totals.costUsd = applyCacheDiscount(
+					recomputedTotalPricing.costUsd,
+					recomputedTotalPricing.cacheDiscountBase,
+					cacheRatio,
+				)
 			}
 		}
 	}

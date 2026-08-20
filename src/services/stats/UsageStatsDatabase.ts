@@ -3202,9 +3202,9 @@ export class UsageStatsDatabase {
 	}
 
 	/**
-	 * Queries per-(provider, model, endpoint, mode) input token sums from
+	 * Queries per-(provider, model, endpoint, mode) token sums from
 	 * usage_events for a given time range. Used by the rollup fast path to
-	 * recompute `cache_discount_base` at query time when `customPricing` is
+	 * recompute `costUsd` and `cache_discount_base` at query time when `customPricing` is
 	 * available, overriding the stale stored value (which was 0 for custom
 	 * models because pricing wasn't available at write time).
 	 *
@@ -3215,18 +3215,30 @@ export class UsageStatsDatabase {
 	 * @param fromEpochMs Start epoch ms (inclusive). 0 for no lower bound.
 	 * @param toEpochMs End epoch ms (exclusive). MAX_SAFE_INTEGER for no upper bound.
 	 * @param includeCancelled If true, includes cancelled events.
-	 * @returns Array of { provider, model, endpoint, mode, inputTokens } rows.
+	 * @returns Array of { provider, model, endpoint, mode, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens } rows.
 	 */
-	queryInputTokensByProviderModel(
+	queryTokensByProviderModel(
 		fromEpochMs: number,
 		toEpochMs: number,
 		includeCancelled: boolean = false,
-	): Array<{ provider: string; model: string; endpoint: string | null; mode: string; inputTokens: number }> {
+	): Array<{
+		provider: string
+		model: string
+		endpoint: string | null
+		mode: string
+		inputTokens: number
+		outputTokens: number
+		cacheWriteTokens: number
+		cacheReadTokens: number
+	}> {
 		const db = this.getDb()
 
 		try {
 			let query = `SELECT provider, model, endpoint, mode,
-						SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens
+						SUM(COALESCE(json_extract(usage_json, '$.inputTokens.value'), 0)) as input_tokens,
+						SUM(COALESCE(json_extract(usage_json, '$.outputTokens.value'), 0)) as output_tokens,
+						SUM(COALESCE(json_extract(usage_json, '$.cacheWriteTokens.value'), 0)) as cache_write_tokens,
+						SUM(COALESCE(json_extract(usage_json, '$.cacheReadTokens.value'), 0)) as cache_read_tokens
 						FROM usage_events
 						WHERE occurred_epoch_ms >= ? AND occurred_epoch_ms < ?`
 			const params: Array<number | string> = [fromEpochMs, toEpochMs]
@@ -3245,9 +3257,12 @@ export class UsageStatsDatabase {
 				endpoint: (row.endpoint as string | null) ?? null,
 				mode: (row.mode as string) ?? "",
 				inputTokens: (row.input_tokens as number) ?? 0,
+				outputTokens: (row.output_tokens as number) ?? 0,
+				cacheWriteTokens: (row.cache_write_tokens as number) ?? 0,
+				cacheReadTokens: (row.cache_read_tokens as number) ?? 0,
 			}))
 		} catch (err) {
-			throw new StatsDbError("STATS_DB/read/001", "Failed to query input tokens by provider+model", err)
+			throw new StatsDbError("STATS_DB/read/001", "Failed to query tokens by provider+model", err)
 		}
 	}
 

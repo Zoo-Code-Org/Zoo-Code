@@ -419,6 +419,51 @@ export function computeCacheDiscountBase(event: UsageEventV1, customPricing?: Cu
 }
 
 /**
+ * Computes the total cost (USD) from aggregated token counts and a
+ * provider+model pair, using the current `customPricing` map.
+ *
+ * This is the query-time fix for the rollup fast path: when custom pricing
+ * is available, the stored `costUsd` (which was 0 for custom models) is
+ * recomputed from the aggregated token counts.
+ *
+ * @param provider The provider ID.
+ * @param model The model name.
+ * @param inputTokens Aggregated input tokens.
+ * @param outputTokens Aggregated output tokens.
+ * @param cacheWriteTokens Aggregated cache write tokens.
+ * @param cacheReadTokens Aggregated cache read tokens.
+ * @param customPricing Optional query-time pricing map.
+ * @returns The computed cost in USD.
+ */
+export function computeCostFromAggregated(
+	provider: string,
+	model: string,
+	inputTokens: number,
+	outputTokens: number,
+	cacheWriteTokens: number,
+	cacheReadTokens: number,
+	customPricing?: CustomModelPricingMap,
+): number {
+	const modelInfo = lookupModelInfo(provider, model, undefined, customPricing)
+	if (!modelInfo) return 0
+
+	if (inputTokens === 0 && outputTokens === 0 && cacheWriteTokens === 0 && cacheReadTokens === 0) {
+		return 0
+	}
+
+	const isAnthropicSemantic = ANTHROPIC_SEMANTIC_PROVIDERS.has(provider)
+
+	let result
+	if (isAnthropicSemantic) {
+		result = calculateApiCostAnthropic(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+	} else {
+		result = calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
+	}
+
+	return result.totalCost
+}
+
+/**
  * Computes the cache discount base from aggregated input tokens and a
  * provider+model pair, using the same pricing lookup as
  * {@link computeCacheDiscountBase}.
