@@ -2310,6 +2310,70 @@ describe("AwsBedrockHandler", () => {
 				clearTimeoutSpy.mockRestore()
 				clearTimeout(timeoutHandle)
 			})
+
+			it("createMessage should abort the in-flight request when the 10 minute request timeout fires", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				let internalSignal: AbortSignal | undefined
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						internalSignal = options?.abortSignal
+						return new Promise<unknown>((_resolve, reject) => {
+							internalSignal?.addEventListener(
+								"abort",
+								() => {
+									const abortError = new Error("The operation was aborted")
+									abortError.name = "AbortError"
+									reject(abortError)
+								},
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				// Capture the 10-minute request timer scheduled by createMessage
+				const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+
+				const generator = handler.createMessage(
+					"You are a helpful assistant",
+					[{ role: "user", content: "Hello" }],
+					makeCreateMessageMetadata(),
+				)
+				const consumed = (async () => {
+					for await (const _chunk of generator) {
+						// ignore chunks
+					}
+				})()
+
+				// Wait until the request is in flight and the 10-minute timer is scheduled
+				let timeoutHandle: NodeJS.Timeout | undefined
+				let timeoutCallback: (() => void) | undefined
+				await vi.waitFor(() => {
+					const timerIndex = setTimeoutSpy.mock.calls.findIndex(([, delay]) => delay === 10 * 60 * 1000)
+					expect(timerIndex).toBeGreaterThanOrEqual(0)
+					expect(internalSignal).toBeDefined()
+					timeoutHandle = setTimeoutSpy.mock.results[timerIndex]?.value as NodeJS.Timeout
+					timeoutCallback = setTimeoutSpy.mock.calls[timerIndex]?.[0] as () => void
+				})
+				expect(internalSignal?.aborted).toBe(false)
+
+				// Fire the 10-minute request timeout: it must abort the request-local
+				// controller, which cancels the in-flight request with an AbortError.
+				timeoutCallback?.()
+
+				await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+
+				// Belt and braces: make sure no real 10-minute timer survives the test
+				setTimeoutSpy.mockRestore()
+				clearTimeout(timeoutHandle)
+			})
 		})
 	})
 })
