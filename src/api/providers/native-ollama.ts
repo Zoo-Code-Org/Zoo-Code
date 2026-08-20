@@ -552,12 +552,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 			console.error(`Ollama API error (${statusCode || "unknown"}): ${errorMessage}`)
 			throw error
-		}
-
-		// The request completed normally (the error path above always rethrows);
-		// detach the external-signal listener so it cannot outlive this request.
-		if (onExternalAbort) {
-			externalAbortSignal?.removeEventListener("abort", onExternalAbort)
+		} finally {
+			// Detach the external-signal listener so it cannot outlive this request,
+			// including on error paths and early generator finalization.
+			if (onExternalAbort) {
+				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
+			}
 		}
 	}
 
@@ -584,15 +584,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		let onAbort: (() => void) | undefined
 
 		try {
-			const { id: modelId } = await this.fetchModel()
-			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
-
-			// Handle timeoutMs if provided
+			// Handle timeoutMs if provided (client already exists above, so the
+			// timer can abort the per-request client directly)
 			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 				timeoutId = setTimeout(() => client.abort(), options.timeoutMs)
 			}
 
-			// Propagate abortSignal into the per-request client via client.abort()
+			// Propagate abortSignal into the per-request client via client.abort().
+			// Set this up before fetchModel() so an already-aborted signal (or one
+			// that aborts during the model-list fetch) is honored before the
+			// request proceeds.
 			if (options?.abortSignal) {
 				if (options.abortSignal.aborted) {
 					client.abort()
@@ -609,6 +610,19 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					options.abortSignal.addEventListener("abort", onAbort, { once: true })
 				}
 			}
+
+			const { id: modelId } = await this.fetchModel()
+
+			// Re-check after the model-list fetch: if the signal aborted during
+			// fetchModel(), the listener above already aborted the client, and the
+			// request must reject instead of proceeding to chat().
+			if (options?.abortSignal?.aborted) {
+				const abortError = new Error("This operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			}
+
+			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
 			// Reuse the shared request-option builder so single-shot
 			// completions respect the same reasoning configuration as the

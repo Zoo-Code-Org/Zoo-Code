@@ -823,6 +823,20 @@ describe("NativeOllamaHandler", () => {
 		it("should call client.abort() when timeoutMs is reached", async () => {
 			const testTimeout = 5000
 			let capturedFn: (() => void) | undefined
+			let capturedInstanceAbort: (() => void) | undefined
+
+			// Capture the per-request client's abort spy so the assertion targets
+			// the actual abort() call rather than just the constructor call.
+			OllamaMock.mockImplementation(function (options?: { host?: string }) {
+				const instanceAbort = vitest.fn()
+				capturedInstanceAbort = instanceAbort
+				return {
+					chat: mockChat,
+					abort: instanceAbort,
+					_host: options?.host ?? "http://localhost:11434",
+					_instanceAbort: instanceAbort,
+				}
+			})
 
 			// The timer id is never consumed (the callback is captured and fired
 			// manually), so bridge the ambient setTimeout signature through unknown.
@@ -842,7 +856,8 @@ describe("NativeOllamaHandler", () => {
 			expect(capturedFn).toBeDefined()
 			if (capturedFn) capturedFn()
 			// The timeout callback should have invoked client.abort() on the request-local instance
-			expect(OllamaMock).toHaveBeenCalled()
+			expect(capturedInstanceAbort).toBeDefined()
+			expect(capturedInstanceAbort).toHaveBeenCalledTimes(1)
 		})
 
 		it("should call instance.abort() when abortSignal is aborted", async () => {
@@ -902,7 +917,22 @@ describe("NativeOllamaHandler", () => {
 			expect(capturedInstanceAbort).toHaveBeenCalledTimes(1)
 		})
 
-		it("should not create a request-local client or timer for non-positive timeoutMs", async () => {
+		it("should reject with AbortError without fetching models when abortSignal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("Test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+			})
+
+			// The pre-aborted check must short-circuit before any network call.
+			expect(mockGetOllamaModels).not.toHaveBeenCalled()
+			expect(mockChat).not.toHaveBeenCalled()
+		})
+
+		it("should not start a timeout timer for non-positive timeoutMs", async () => {
 			const setTimeoutSpy = vitest.spyOn(global, "setTimeout")
 			mockChat.mockResolvedValue({
 				message: { content: "Response" },
