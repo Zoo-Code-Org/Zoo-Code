@@ -1,5 +1,7 @@
 import { config } from "@roo-code/config-eslint/base"
 
+import { noRawProviderIdentifiers } from "./eslint-rules/no-raw-provider-identifiers.mjs"
+
 /** @type {import("eslint").Linter.Config} */
 export default [
 	...config,
@@ -29,6 +31,22 @@ export default [
 		files: ["__mocks__/**/*.js"],
 		rules: {
 			"no-undef": "off",
+		},
+	},
+	{
+		files: ["**/*.ts", "**/*.tsx"],
+		ignores: [
+			"**/fixtures/**",
+		],
+		plugins: {
+			zoo: {
+				rules: {
+					"no-raw-provider-identifiers": noRawProviderIdentifiers,
+				},
+			},
+		},
+		rules: {
+			"zoo/no-raw-provider-identifiers": "error",
 		},
 	},
 	{

@@ -23,6 +23,7 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -1412,7 +1413,7 @@ export const webviewMessageHandler = async (
 				type: RouterModelsMessageType.singleRouterModelFetchResponse,
 				success: false,
 				error: getRouterRemovalMessage(),
-				values: { provider: "roo" },
+				values: { provider: retiredProviderIdentifiers.roo },
 			})
 			break
 		}

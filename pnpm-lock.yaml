@@ -668,6 +668,9 @@ importers:
       '@types/vscode':
         specifier: 1.100.0
         version: 1.100.0
+      '@typescript-eslint/parser':
+        specifier: 8.32.1
+        version: 8.32.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 4.1.9
         version: 4.1.9(vitest@4.1.9)
