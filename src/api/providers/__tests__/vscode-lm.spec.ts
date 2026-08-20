@@ -624,6 +624,40 @@ describe("VsCodeLmHandler", () => {
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
 		})
 
+		it("should cancel the request token when the consumer stops consuming early", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			// The mock stream yields one chunk and then stays pending, so the host
+			// request is still in flight when the consumer gives up.
+			let releaseStream: () => void = () => {}
+			const streamGate = new Promise<void>((resolve) => {
+				releaseStream = resolve
+			})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Hello")
+					await streamGate
+				})(),
+				text: (async function* () {
+					yield "Hello"
+					await streamGate
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			await stream.next()
+			// Stop consuming before the stream finishes: the premature closure must
+			// cancel the request token so the host stops the request (dispose alone
+			// frees resources without cancelling).
+			// (the AsyncGenerator type requires the return value argument)
+			await stream.return(undefined)
+
+			const tokenSource = tokenSourceInstance()
+			expect(tokenSource.cancel).toHaveBeenCalled()
+			expect(tokenSource.dispose).toHaveBeenCalled()
+		})
+
 		it("should throw a Zoo Code branded error on stream error with error-like object", async () => {
 			const systemPrompt = "You are a helpful assistant"
 			const messages: Anthropic.Messages.MessageParam[] = [
@@ -1279,9 +1313,10 @@ describe("VsCodeLmHandler", () => {
 			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
 			await expect(promise).rejects.toSatisfy((error) => error instanceof Error && error.name === "AbortError")
 
-			// Fails fast before invoking the host: no cancellation token source is
-			// created and the sendRequest is never called.
+			// Fails fast before invoking the host: the pre-aborted signal cancels the
+			// request token and sendRequest is never called.
 			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledTimes(0)
+			expect(tokenSourceInstance().cancel).toHaveBeenCalled()
 		})
 
 		it("should reject with an AbortError when the signal aborts mid-flight", async () => {

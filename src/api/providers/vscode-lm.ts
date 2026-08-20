@@ -575,6 +575,12 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			if (onExternalAbort !== undefined) {
 				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
 			}
+			// Cancel before disposing: VS Code's CancellationTokenSource.dispose()
+			// frees resources without cancelling the token, so a premature consumer
+			// closure (break/return) would otherwise leave the host request running and
+			// consuming model quota. Cancel is idempotent, so this is a no-op on paths
+			// where the token was already cancelled (aborted or timed-out request).
+			cancellationTokenSource.cancel()
 			// Dispose the request-local source. Clear the shared field only if it still
 			// points at this request's source: a newer request may have replaced it, and
 			// disposing the shared field here would cancel and dispose the newer request's
