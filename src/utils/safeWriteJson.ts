@@ -64,7 +64,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// Acquire the lock before any file operations
 	try {
 		releaseLock = await lockfile.lock(absoluteFilePath, {
-			stale: 31000, // Stale after 31 seconds
+			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
 			retries: {
@@ -246,5 +246,7 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		stringifyStream.pipe(fileWriteStream)
 	})
 }
+
+export const LOCK_STALE_MS = 31_000
 
 export { safeWriteJson }

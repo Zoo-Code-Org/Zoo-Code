@@ -7,11 +7,22 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 
 /** Valid status values for a task's HistoryItem. */
 export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
+
+export class DeltaRejectedError extends Error {
+	constructor(
+		public readonly taskId: string,
+		public readonly diskStatus: HistoryItemStatus,
+		public readonly attemptedStatus: HistoryItemStatus,
+	) {
+		super(`Delta rejected for task ${taskId}: disk status ${diskStatus} rejects transition to ${attemptedStatus}`)
+		this.name = "DeltaRejectedError"
+	}
+}
 
 const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
 	active: ["delegated", "completed", "interrupted"],
@@ -48,10 +59,7 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 			if (delta.status !== diskStatus) {
 				const validTargets = VALID_TRANSITIONS[diskStatus]
 				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
-					console.warn(
-						`[TaskHistoryStore] Dropped stale delta for task ${disk.id}: disk status ${diskStatus} rejects transition to ${delta.status}`,
-					)
-					return disk
+					throw new DeltaRejectedError(disk.id, diskStatus, delta.status as HistoryItemStatus)
 				}
 			}
 		}
@@ -258,11 +266,14 @@ export class TaskHistoryStore {
 			if (item.status !== normalizedExisting) {
 				try {
 					assertValidTransition(existing.status, item.status)
-				} catch {
+				} catch (cacheError) {
 					// Cache may be stale from a peer write. Re-read disk
 					// under the store lock before rejecting the transition.
 					const diskItem = await this.readTaskFile(item.id)
-					assertValidTransition(diskItem?.status, item.status)
+					if (!diskItem) {
+						throw cacheError
+					}
+					assertValidTransition(diskItem.status, item.status)
 				}
 			}
 		}
@@ -270,8 +281,20 @@ export class TaskHistoryStore {
 		// Merge: preserve existing metadata unless explicitly overwritten
 		const merged = existing ? { ...existing, ...item } : item
 
-		const delta = existing ? this.buildDelta(item.id, existing, item) : undefined
-		const written = await this.writeTaskFile(merged, delta)
+		const delta = existing ? this.buildDelta(item.id, existing, item) : { ...item }
+		let written: HistoryItem
+		try {
+			written = await this.writeTaskFile(merged, delta)
+		} catch (error) {
+			if (error instanceof DeltaRejectedError) {
+				const diskItem = await this.readTaskFile(item.id)
+				if (diskItem) {
+					this.cache.set(item.id, diskItem)
+				}
+				throw error
+			}
+			throw error
+		}
 
 		// Update in-memory cache with what was actually persisted
 		this.cache.set(written.id, written)
@@ -388,8 +411,10 @@ export class TaskHistoryStore {
 					// write is in progress — keep the task live.
 					try {
 						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
-						await fs.access(lockPath)
-						liveIds.add(taskId)
+						const lockStat = await fs.stat(lockPath)
+						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
+							liveIds.add(taskId)
+						}
 					} catch {
 						// No lock file — file is genuinely absent
 					}
@@ -1063,12 +1088,17 @@ export class TaskHistoryStore {
 			const mergedSecond = { ...second, ...updatedSecond }
 
 			const writtenFirst = await this.writeTaskFile(mergedFirst, this.buildDelta(firstId, first, updatedFirst))
-			const writtenSecond = await this.writeTaskFile(
-				mergedSecond,
-				this.buildDelta(secondId, second, updatedSecond),
-			)
+			let writtenSecond: HistoryItem
+			try {
+				writtenSecond = await this.writeTaskFile(mergedSecond, this.buildDelta(secondId, second, updatedSecond))
+			} catch (error) {
+				// First record is committed on disk. Update cache so it
+				// reflects disk state before propagating the error.
+				this.cache.set(firstId, writtenFirst)
+				throw error
+			}
 
-			// Both disk writes succeeded — now update the cache atomically.
+			// Both disk writes succeeded — now update the cache.
 			this.cache.set(firstId, writtenFirst)
 			this.cache.set(secondId, writtenSecond)
 

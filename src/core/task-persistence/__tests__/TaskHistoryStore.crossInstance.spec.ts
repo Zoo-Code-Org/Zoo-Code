@@ -6,7 +6,7 @@ import * as os from "os"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { TaskHistoryStore } from "../TaskHistoryStore"
+import { TaskHistoryStore, DeltaRejectedError } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 
 vi.mock("../../../utils/storage", () => ({
@@ -235,8 +235,10 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		expect(final.status).toBe("completed")
 		expect(final.completionResultSummary).toBe("done by host B")
 
-		// Cache reflects the caller's totalCost change.
+		// Cache reflects the caller's totalCost change and the peer's status.
 		expect(storeA.get("shared-task")!.totalCost).toBe(9.99)
+		expect(storeA.get("shared-task")!.status).toBe("completed")
+		expect(storeA.get("shared-task")!.completionResultSummary).toBe("done by host B")
 	})
 
 	/**
@@ -245,7 +247,7 @@ describe("TaskHistoryStore cross-instance safety", () => {
 	 * The merge must reject the entire delta (including companion fields)
 	 * to prevent an internally-inconsistent record.
 	 */
-	it("merge rejects an invalid status transition against disk and drops the entire delta", async () => {
+	it("merge rejects an invalid status transition against disk and throws DeltaRejectedError", async () => {
 		await storeA.initialize()
 
 		const base = makeHistoryItem({ id: "guarded-task", status: "active", totalCost: 0.01, ts: 1000 })
@@ -261,15 +263,17 @@ describe("TaskHistoryStore cross-instance safety", () => {
 		// Host A's cache still has "active". It tries to delegate (active → delegated
 		// passes the cache check, but completed → delegated is invalid on disk).
 		const staleItem = storeA.get("guarded-task")!
-		await storeA.upsert({
-			...staleItem,
-			status: "delegated",
-			awaitingChildId: "child-99",
-			delegatedToId: "child-99",
-		})
+		await expect(
+			storeA.upsert({
+				...staleItem,
+				status: "delegated",
+				awaitingChildId: "child-99",
+				delegatedToId: "child-99",
+			}),
+		).rejects.toThrow(DeltaRejectedError)
 
 		const final = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
-		// Terminal status must survive.
+		// Terminal status must survive — disk is untouched.
 		expect(final.status).toBe("completed")
 		expect(final.completionResultSummary).toBe("done by peer")
 		// Companion fields from the rejected delta must NOT be applied.

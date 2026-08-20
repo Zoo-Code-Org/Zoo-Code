@@ -704,8 +704,9 @@ describe("TaskHistoryStore", () => {
 			const parentDisk = JSON.parse(await fs.readFile(parentFile, "utf8"))
 			expect(parentDisk.status).toBe("delegated")
 
-			// Cache was NOT updated (cache set is deferred until after both writes succeed)
-			expect(store.get("child-partial")?.status).toBe("active")
+			// First record's cache IS updated (it was committed to disk).
+			// Second record's cache is unchanged (write never completed).
+			expect(store.get("child-partial")?.status).toBe("completed")
 			expect(store.get("parent-partial")?.status).toBe("delegated")
 		})
 
