@@ -162,7 +162,7 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("max_completion_tokens")
 	})
 
-	it("uses sequential tool calls for Muse Spark 1.2 Contributor", async () => {
+	it("keeps Muse Spark tool-result history contiguous across turns", async () => {
 		const modelId = "meta/muse-spark-1.2-contributor"
 		vi.mocked(getModels).mockResolvedValue({
 			[modelId]: {
@@ -174,9 +174,33 @@ describe("NanoGptHandler", () => {
 		const tools: OpenAI.Chat.ChatCompletionTool[] = [
 			{ type: "function", function: { name: "read_file", parameters: { type: "object" } } },
 		]
+		const toolHistory: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call_1", name: "read_file", input: { path: "first.txt" } }],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "call_1", content: "first result" },
+					{ type: "text", text: "<environment_details>first context</environment_details>" },
+				],
+			},
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call_2", name: "read_file", input: { path: "second.txt" } }],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "call_2", content: "second result" },
+					{ type: "text", text: "<environment_details>second context</environment_details>" },
+				],
+			},
+		]
 
 		await collectStream(
-			new NanoGptHandler({ nanoGptModelId: modelId }).createMessage("sys", messages, {
+			new NanoGptHandler({ nanoGptModelId: modelId }).createMessage("sys", toolHistory, {
 				taskId: "task",
 				tools,
 				tool_choice: "auto",
@@ -187,9 +211,24 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
 				model: modelId,
+				messages: [
+					{ role: "system", content: "sys" },
+					expect.objectContaining({ role: "assistant", tool_calls: [expect.anything()] }),
+					{
+						role: "tool",
+						tool_call_id: "call_1",
+						content: "first result\n\n<environment_details>first context</environment_details>",
+					},
+					expect.objectContaining({ role: "assistant", tool_calls: [expect.anything()] }),
+					{
+						role: "tool",
+						tool_call_id: "call_2",
+						content: "second result\n\n<environment_details>second context</environment_details>",
+					},
+				],
 				tools: [expect.objectContaining({ function: expect.objectContaining({ name: "read_file" }) })],
 				tool_choice: "auto",
-				parallel_tool_calls: false,
+				parallel_tool_calls: true,
 			}),
 			expect.anything(),
 		)
