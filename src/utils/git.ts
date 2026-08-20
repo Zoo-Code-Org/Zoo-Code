@@ -588,7 +588,9 @@ async function readUntrackedFiles(cwd: string, files: GitFileChange[]): Promise<
 	const blocks: string[] = []
 
 	for (const file of untracked.slice(0, UNTRACKED_FILE_LIMIT)) {
-		blocks.push(`--- /dev/null\n+++ b/${file.path}\n${await readUntrackedFile(cwd, file.path)}`)
+		const body = await readUntrackedFile(cwd, file.path)
+
+		blocks.push([`--- /dev/null`, `+++ b/${file.path}`, body].filter(Boolean).join("\n"))
 	}
 
 	// The rest are still worth naming - that files were added is part of the change even when there
@@ -600,6 +602,23 @@ async function readUntrackedFiles(cwd: string, files: GitFileChange[]): Promise<
 	}
 
 	return blocks.join("\n\n")
+}
+
+/**
+ * Marks each line as an addition, which is what makes the block a diff rather than pasted text.
+ * Unprefixed, a new file's own content is read as diff syntax: a markdown bullet becomes a deleted
+ * line, front matter becomes a header, and the message describes changes nobody made.
+ */
+function asAddedLines(text: string): string {
+	const lines = text.split("\n")
+
+	// A file ending in a newline splits into a trailing empty segment. Prefixing it would add a
+	// bare `+` for a line the file does not have.
+	if (lines[lines.length - 1] === "") {
+		lines.pop()
+	}
+
+	return lines.map((line) => `+${line}`).join("\n")
 }
 
 /** Reads at most `UNTRACKED_FILE_BYTE_LIMIT` bytes, so a huge file costs one bounded read. */
@@ -618,7 +637,7 @@ async function readUntrackedFile(cwd: string, filePath: string): Promise<string>
 			return "(binary file)"
 		}
 
-		const text = contents.toString("utf8")
+		const text = asAddedLines(contents.toString("utf8"))
 
 		return bytesRead < UNTRACKED_FILE_BYTE_LIMIT ? text : `${text}\n(truncated)`
 	} catch {

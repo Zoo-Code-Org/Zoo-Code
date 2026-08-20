@@ -547,7 +547,31 @@ describe("git utils", () => {
 
 			expect(context.files).toEqual([{ status: "untracked", path: "src/added.ts" }])
 			expect(context.diff).toContain("+++ b/src/added.ts")
-			expect(context.diff).toContain("export const answer = 42")
+			// Prefixed, so the body reads as an addition rather than as pasted text.
+			expect(context.diff).toContain("+export const answer = 42")
+			// The file's trailing newline is not a line of its own.
+			expect(context.diff.split("\n")).not.toContain("+")
+		})
+
+		// An unprefixed body is not a diff, it is the file's own syntax: `- item` reads as a
+		// deletion and `---` as a header, so the model reports changes that were never made.
+		it("should render untracked contents as additions rather than diff syntax", async () => {
+			mockProbes()
+			mockGit(workingTree(`?? notes.md${NUL}`, ""))
+			mockUntrackedFile(Buffer.from("---\ntitle: Notes\n---\n\n- first item\n+++ b/not-a-header\n"))
+
+			const lines = (await expectContext()).diff.split("\n")
+
+			expect(lines).toEqual([
+				"--- /dev/null",
+				"+++ b/notes.md",
+				"+---",
+				"+title: Notes",
+				"+---",
+				"+",
+				"+- first item",
+				"++++ b/not-a-header",
+			])
 		})
 
 		it("should mark binary untracked files instead of inlining them", async () => {
