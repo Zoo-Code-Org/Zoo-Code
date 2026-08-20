@@ -38,6 +38,7 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -663,17 +664,19 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		// and forward the caller's abort signal / per-request timeout to the SDK. The client-level
-		// timeout remains as the default safety net; timeoutMs <= 0 disables the per-request timeout.
+		// and forward the caller's abort signal / per-request timeout to the SDK. The merged signal
+		// aborts when either the caller's signal or the timeout fires, so timeouts are normalized to
+		// AbortError in the catch below. The client-level timeout remains the default safety net;
+		// timeoutMs <= 0 disables the per-request timeout, and 0 is never passed to the SDK.
+		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+
 		const requestOptions: OpenAI.RequestOptions = {
 			...(modelId.startsWith("anthropic/")
 				? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
 				: undefined),
-			...(options?.abortSignal && { signal: options.abortSignal }),
+			...(requestAbortSignal && { signal: requestAbortSignal }),
 			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
 		}
-
-		const requestAbortSignal = options?.abortSignal
 
 		let response
 

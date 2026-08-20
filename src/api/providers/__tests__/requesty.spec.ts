@@ -620,6 +620,48 @@ describe("RequestyHandler", () => {
 			await expect(iteration).rejects.toMatchObject({ name: "AbortError" })
 			expect(chunks).toContainEqual({ type: "text", text: "first" })
 		})
+		it("rejects with AbortError when the external signal aborts during request creation", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				// Emulate the OpenAI SDK: the pending request rejects when the signal aborts.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			// Let the generator reach the pending create() call, then abort.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			await expect(nextPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("rethrows non-abort stream errors from createMessage", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockImplementationOnce(async () => {
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "first" } }] }
+					throw new Error("stream broke")
+				})()
+			})
+
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }])
+
+			await expect(collectStream(generator)).rejects.toThrow("stream broke")
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -740,9 +782,12 @@ describe("RequestyHandler", () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
 			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
-			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				timeout: 5000,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({
+					timeout: 5000,
+				}),
+			)
 		})
 
 		it("should work without options (backward compatible)", async () => {
@@ -789,6 +834,63 @@ describe("RequestyHandler", () => {
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+		it("rejects with AbortError when only a timeout is provided and it elapses", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				// Emulate the OpenAI SDK: the in-flight request rejects when the signal times out.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const timeoutError = new Error("TimeoutError: Request timed out.")
+				timeoutError.name = "TimeoutError"
+				throw timeoutError
+			})
+
+			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("rejects with AbortError when both an abort signal and a timeout are provided", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const promise = handler.completePrompt("test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 100_000,
+			})
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+			// The SDK received a merged signal (not the caller's signal) plus the timeout.
+			expect(requestSignal).toBeDefined()
+			expect(requestSignal).not.toBe(controller.signal)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({
+					timeout: 100_000,
+				}),
+			)
 		})
 	})
 })

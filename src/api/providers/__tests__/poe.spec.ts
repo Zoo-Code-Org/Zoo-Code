@@ -5,6 +5,7 @@ import { getModelsFromCache } from "../fetchers/modelCache"
 
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { collectStream } from "../../../test-utils/stream"
 
 const { mockStreamText, mockGenerateText, mockCreatePoe, mockGetModelsFromCache, mockCaptureException } =
 	vitest.hoisted(() => ({
@@ -302,6 +303,52 @@ describe("PoeHandler", () => {
 			await expect(iteration).rejects.toMatchObject({ name: "AbortError" })
 			expect(chunks).toContainEqual({ type: "text", text: "Hello " })
 		})
+		it("rejects with AbortError when the external signal aborts during request creation", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+
+			mockStreamText.mockImplementationOnce(() => {
+				// Emulate the AI SDK failing synchronously: abort the external signal first so
+				// the catch normalizes the failure to a DOM-standard AbortError.
+				controller.abort()
+				const abortError = new Error("The operation was aborted")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const nextPromise = handler
+				.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+				.next()
+
+			await expect(nextPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("rejects with a completion error when request creation fails without abort", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockImplementationOnce(() => {
+				throw new Error("boom")
+			})
+
+			await expect(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]).next(),
+			).rejects.toThrow("Poe completion error: boom")
+		})
+
+		it("rejects with a streaming error when the stream fails without abort", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {
+					yield { type: "text-delta", text: "Hello " }
+					throw new Error("stream broke")
+				})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			await expect(
+				collectStream(handler.createMessage("system", [{ role: "user" as const, content: "hi" }])),
+			).rejects.toThrow("Poe streaming error: stream broke")
+		})
 	})
 
 	describe("reasoning", () => {
@@ -590,6 +637,49 @@ describe("PoeHandler", () => {
 			mockGenerateText.mockRejectedValueOnce("not an error")
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow()
+		})
+		it("completePrompt rejects with AbortError when the response resolves after abort", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const controller = new AbortController()
+			mockGenerateText.mockImplementationOnce(async (args: { abortSignal?: AbortSignal }) => {
+				// The generation only settles once the abort signal has fired (late result).
+				await new Promise<void>((resolve) => {
+					if (args.abortSignal?.aborted) {
+						resolve()
+					} else {
+						args.abortSignal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				return { text: "late result" }
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("completePrompt should pass reasoning effort for effort-capable models", async () => {
+			const handler = new PoeHandler({
+				poeApiKey: "key",
+				apiModelId: "openai/o3",
+				enableReasoningEffort: true,
+				reasoningEffort: "low",
+				modelMaxTokens: 8192,
+			})
+			mockStreamText.mockReturnValueOnce({
+				fullStream: (async function* () {})(),
+				usage: Promise.resolve(undefined),
+			})
+
+			await handler.createMessage("system", [{ role: "user" as const, content: "hi" }]).next()
+
+			expect(mockStreamText).toHaveBeenCalledWith(
+				expect.objectContaining({
+					maxOutputTokens: 8192,
+					providerOptions: { poe: { reasoningEffort: "low", reasoningSummary: "auto" } },
+				}),
+			)
 		})
 	})
 })

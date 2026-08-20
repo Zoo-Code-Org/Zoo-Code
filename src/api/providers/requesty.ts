@@ -23,6 +23,7 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -276,10 +277,11 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			temperature: temperature,
 		}
 
-		const requestAbortSignal = options?.abortSignal
+		// Merge the caller's abort signal with the per-request timeout (timeoutMs <= 0 disables it)
+		// so both abort and timeout reject with a DOM-standard AbortError in the catch below. The
+		// client-level timeout remains the default safety net; 0 is never passed to the SDK timeout.
+		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 
-		// Forward the caller's abort signal / per-request timeout to the SDK. The client-level
-		// timeout remains as the default safety net; timeoutMs <= 0 disables the per-request timeout.
 		const createOptions: OpenAI.RequestOptions = {
 			...(requestAbortSignal && { signal: requestAbortSignal }),
 			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),

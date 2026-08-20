@@ -608,6 +608,224 @@ describe("OpenRouterHandler", () => {
 			await expect(iteration).rejects.toMatchObject({ name: "AbortError" })
 			expect(chunks).toContainEqual({ type: "text", text: "first" })
 		})
+		it("excludes reasoning for Gemini 2.5 Pro models by default", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-pro-preview",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const stream = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ reasoning: { exclude: true } }),
+				expect.any(Object),
+			)
+		})
+
+		it("uses user role for the system prompt with DeepSeek R1 models", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "deepseek/deepseek-r1",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const stream = handler.createMessage("system prompt", [{ role: "user" as const, content: "hi" }])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as { messages: { role: string; content: unknown }[] }
+			expect(params.messages[0].role).toBe("user")
+			expect(params.messages.map((m) => m.role)).not.toContain("system")
+		})
+
+		it("injects a fake encrypted reasoning block for Gemini tool calls without encrypted reasoning", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "google/gemini-2.5-flash",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			// reasoning_details is an OpenRouter extension field round-tripped on assistant
+			// messages; the Anthropic SDK types do not include it, hence the structural cast.
+			const assistantMessage = {
+				role: "assistant" as const,
+				content: [{ type: "tool_use" as const, id: "toolu_01", name: "get_weather", input: { city: "SF" } }],
+				reasoning_details: [{ type: "reasoning.text", id: "toolu_01", text: "thinking", index: 0 }],
+			}
+			const stream = handler.createMessage("system", [
+				assistantMessage as unknown as Anthropic.Messages.MessageParam,
+			])
+			await collectStream(stream)
+
+			const params = mockCreate.mock.calls[0][0] as {
+				messages: {
+					role: string
+					tool_calls?: { id: string }[]
+					reasoning_details?: { type: string; id: string; data: string }[]
+				}[]
+			}
+			const assistant = params.messages.find((m) => m.role === "assistant")
+			expect(assistant?.tool_calls).toHaveLength(1)
+			const encrypted = assistant?.reasoning_details?.find((d) => d.type === "reasoning.encrypted")
+			expect(encrypted).toMatchObject({
+				id: "toolu_01",
+				data: "skip_thought_signature_validator",
+			})
+		})
+
+		it("accumulates and yields reasoning_details from streamed chunks", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(
+				asyncStreamFrom([
+					{ id: "1", choices: [{ delta: { reasoning: "top-level thinking" } }] },
+					{
+						id: "2",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.text", index: 0, text: "thinking " }] } },
+						],
+					},
+					{
+						id: "3",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [
+										{
+											type: "reasoning.text",
+											index: 0,
+											text: "more",
+											id: "r1",
+											format: "google-gemini-v1",
+											signature: "sig",
+										},
+									],
+								},
+							},
+						],
+					},
+					{
+						id: "4",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.summary", index: 1, summary: "sum" }] } },
+						],
+					},
+					{ id: "5", choices: [{ delta: { content: "hello" } }] },
+					{
+						id: "6",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ type: "reasoning.summary", index: 1, summary: " more" }],
+								},
+							},
+						],
+					},
+					{
+						id: "7",
+						choices: [
+							{ delta: { reasoning_details: [{ type: "reasoning.encrypted", index: 2, data: "enc-" }] } },
+						],
+					},
+					{
+						id: "8",
+						choices: [
+							{
+								delta: {
+									reasoning_details: [{ type: "reasoning.encrypted", index: 2, data: "rypted" }],
+								},
+							},
+						],
+					},
+				]),
+			)
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const chunks = await collectStream(
+				handler.createMessage("system", [{ role: "user" as const, content: "hi" }]),
+			)
+
+			expect(chunks).toContainEqual({ type: "reasoning", text: "top-level thinking" })
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking " })
+			expect(chunks).toContainEqual({ type: "reasoning", text: "sum" })
+			expect(chunks).toContainEqual({ type: "reasoning", text: " more" })
+			expect(chunks).toContainEqual({ type: "text", text: "hello" })
+
+			const details = handler.getReasoningDetails()
+			expect(details).toHaveLength(3)
+			expect(details?.find((d) => d.type === "reasoning.summary")?.summary).toBe("sum more")
+			expect(details?.find((d) => d.type === "reasoning.encrypted")?.data).toBe("enc-rypted")
+		})
+
+		it("rejects with AbortError when the external signal aborts during request creation", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					// Emulate the OpenAI SDK: the pending request rejects when the signal aborts.
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			// Let the generator reach the pending create() call, then abort.
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			await expect(nextPromise).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("reports OpenRouter structured errors in createMessage with telemetry", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockRejectedValueOnce({
+				error: {
+					message: "Model not found",
+					code: 404,
+					metadata: { raw: '{"message":"upstream: model not found"}' },
+				},
+			})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }])
+
+			await expect(generator.next()).rejects.toThrow(/completion error/)
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -859,6 +1077,75 @@ describe("OpenRouterHandler", () => {
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+		})
+		it("rejects with AbortError when only a timeout is provided and it elapses", async () => {
+			// Non-Anthropic model: also exercises the no-beta-header branch of requestOptions.
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "openai/gpt-4o",
+				}),
+			)
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					// Emulate the OpenAI SDK: the in-flight request rejects when the signal times out.
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const timeoutError = new Error("TimeoutError: Request timed out.")
+					timeoutError.name = "TimeoutError"
+					throw timeoutError
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("rejects with AbortError when both an abort signal and a timeout are provided", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const promise = handler.completePrompt("test prompt", {
+				abortSignal: controller.signal,
+				timeoutMs: 100_000,
+			})
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+			// The SDK received a merged signal (not the caller's signal) plus the timeout.
+			expect(requestSignal).toBeDefined()
+			expect(requestSignal).not.toBe(controller.signal)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 100_000 }),
+			)
 		})
 	})
 })
