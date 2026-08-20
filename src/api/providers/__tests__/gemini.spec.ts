@@ -12,13 +12,21 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import type { GenerateContentResponse } from "@google/genai"
+
 import { type ModelInfo, geminiDefaultModelId, ApiProviderError } from "@roo-code/types"
 
 import { t } from "i18next"
 import { GeminiHandler } from "../gemini"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 const GEMINI_MODEL_NAME = geminiDefaultModelId
+
+// @google/genai's GenerateContentResponse exposes `text` via a getter backed by
+// `candidates`, so the stub only carries the field the provider reads; the double
+// cast is the least-friction way to satisfy the class type in mocks.
+const stubGenerateContentResponse = (text: string) => ({ text }) as unknown as GenerateContentResponse
 
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
@@ -342,6 +350,71 @@ describe("GeminiHandler", () => {
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
 		})
+
+		it("should pass abort signal through to client via config.abortSignal", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					abortSignal: controller.signal,
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should pass timeoutMs through to client via httpOptions with abortSignal on config", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					abortSignal: controller.signal,
+					httpOptions: { timeout: 10000 },
+					temperature: 1,
+				},
+			})
+		})
+
+		it("should pass only timeoutMs when no signal is provided", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: { timeout: 5000 },
+					temperature: 1,
+				},
+			})
+		})
 	})
 
 	describe("getModel", () => {
@@ -472,6 +545,142 @@ describe("GeminiHandler", () => {
 			const incompleteInfo: ModelInfo = { ...mockInfo, outputPrice: undefined }
 			const cost = handler.calculateCost({ info: incompleteInfo, inputTokens: 1000, outputTokens: 1000 })
 			expect(cost).toBeUndefined()
+		})
+	})
+
+	describe("completePrompt request options", () => {
+		it("should pass timeout and baseUrl through httpOptions", async () => {
+			const handlerWithBaseUrl = new GeminiHandler({
+				apiKey: "test-key",
+				apiModelId: GEMINI_MODEL_NAME,
+				geminiApiKey: "test-key",
+				googleGeminiBaseUrl: "https://gemini.example.test",
+			})
+			handlerWithBaseUrl["client"] = handler["client"]
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			const result = await handlerWithBaseUrl.completePrompt("Test prompt", { timeoutMs: 1234 })
+
+			expect(result).toBe("Response")
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: {
+							timeout: 1234,
+							baseUrl: "https://gemini.example.test",
+						},
+					}),
+				}),
+			)
+		})
+
+		it("should pass abortSignal on config instead of httpOptions", async () => {
+			const controller = new AbortController()
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						abortSignal: controller.signal,
+						httpOptions: undefined,
+					}),
+				}),
+			)
+		})
+
+		it("should omit httpOptions when timeoutMs and baseUrl are not provided", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Response"),
+			)
+
+			await handler.completePrompt("Test prompt")
+
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+				expect.objectContaining({
+					config: expect.objectContaining({
+						httpOptions: undefined,
+					}),
+				}),
+			)
+		})
+	})
+
+	describe("createMessage abort signal (bridging)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(handler["client"].models.generateContentStream).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight request when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			let capturedSignal: AbortSignal | undefined
+			const stub = vi.fn().mockImplementation(async (params: { config?: { abortSignal?: AbortSignal } }) => {
+				capturedSignal = params.config?.abortSignal
+				return (async function* () {
+					yield { text: "partial" }
+					if (capturedSignal?.aborted) {
+						throw new DOMException("aborted", "AbortError")
+					}
+					await new Promise((_resolve, reject) => {
+						capturedSignal?.addEventListener(
+							"abort",
+							() => reject(new DOMException("aborted", "AbortError")),
+							{ once: true },
+						)
+					})
+				})()
+			})
+			handler["client"].models.generateContentStream = stub
+
+			const stream = handler.createMessage(
+				"You are a helpful assistant",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			const error = await collector
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(capturedSignal).toBeDefined()
+			expect(capturedSignal?.aborted).toBe(true)
+		})
+
+		it("should not set config.abortSignal when no external signal is provided", async () => {
+			const stub = vi.fn().mockReturnValue((async function* () {})())
+			handler["client"].models.generateContentStream = stub
+
+			await collectStream(handler.createMessage("You are a helpful assistant", messages))
+
+			const config = stub.mock.calls[0][0].config
+			expect(config.abortSignal).toBeUndefined()
 		})
 	})
 

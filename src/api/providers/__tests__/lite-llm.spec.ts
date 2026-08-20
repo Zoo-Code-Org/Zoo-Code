@@ -6,6 +6,7 @@ import { ApiHandlerOptions } from "../../../shared/api"
 import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 // Mock vscode first to avoid import errors
 vi.mock("vscode", () => ({
@@ -1233,6 +1234,109 @@ describe("LiteLLMHandler", () => {
 
 			const requestHeaders = mockCreate.mock.calls[0][1]?.headers
 			expect(requestHeaders).not.toHaveProperty("X-Zoo-Session-ID")
+		})
+	})
+
+	describe("completePrompt", () => {
+		it("should pass abort signal through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const controller = new AbortController()
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should merge signal and timeoutMs together", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 10000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal, timeout: 10000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+	})
+
+	describe("createMessage abort signal (bridging)", () => {
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: "Hello",
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight stream when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			let capturedSignal: AbortSignal | undefined
+			// The stream is built inside the mock implementation so that capturedSignal
+			// is already set before the abort-aware chunk is created.
+			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				const mockStream = asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "partial" } }],
+						usage: undefined,
+					},
+					new Promise<never>((_resolve, reject) => {
+						const onAbort = () => reject(new DOMException("aborted", "AbortError"))
+						if (capturedSignal?.aborted) {
+							onAbort()
+							return
+						}
+						capturedSignal?.addEventListener("abort", onAbort, { once: true })
+					}),
+				])
+				return { withResponse: vi.fn().mockResolvedValue({ data: mockStream }) }
+			})
+
+			const stream = handler.createMessage(
+				"system",
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			const error = await collector
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(capturedSignal).toBeDefined()
+			expect(capturedSignal?.aborted).toBe(true)
 		})
 	})
 })

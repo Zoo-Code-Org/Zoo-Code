@@ -54,6 +54,7 @@ import { MistralHandler } from "../mistral"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import type { ApiStreamTextChunk, ApiStreamReasoningChunk, ApiStreamToolCallPartialChunk } from "../../transform/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 describe("MistralHandler", () => {
 	let handler: MistralHandler
@@ -447,11 +448,14 @@ describe("MistralHandler", () => {
 			const prompt = "Test prompt"
 			const result = await handler.completePrompt(prompt)
 
-			expect(mockComplete).toHaveBeenCalledWith({
-				model: mockOptions.apiModelId,
-				messages: [{ role: "user", content: prompt }],
-				temperature: 0,
-			})
+			expect(mockComplete).toHaveBeenCalledWith(
+				{
+					model: mockOptions.apiModelId,
+					messages: [{ role: "user", content: prompt }],
+					temperature: 0,
+				},
+				undefined,
+			)
 
 			expect(result).toBe("Test response")
 		})
@@ -482,6 +486,137 @@ describe("MistralHandler", () => {
 		it("should handle errors in completePrompt", async () => {
 			mockComplete.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("Mistral completion error: API Error")
+		})
+
+		it("should pass abort signal through to client", async () => {
+			const controller = new AbortController()
+			mockComplete.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				fetchOptions: { signal: controller.signal },
+			})
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			mockComplete.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const controller = new AbortController()
+			mockComplete.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				fetchOptions: { signal: controller.signal },
+				timeoutMs: 5000,
+			})
+		})
+
+		it("should pass only timeoutMs when no signal provided", async () => {
+			mockComplete.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+			await handler.completePrompt("test prompt", { timeoutMs: 3000 })
+			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				timeoutMs: 3000,
+			})
+		})
+
+		it("should still forward timeoutMs=0 (uses !== undefined check, not truthy check)", async () => {
+			mockComplete.mockResolvedValueOnce({
+				choices: [{ message: { content: "response" } }],
+			})
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				timeoutMs: 0,
+			})
+		})
+	})
+
+	describe("createMessage abort signal bridging", () => {
+		const systemPrompt = "You are a helpful assistant."
+		const messages: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "user",
+				content: [{ type: "text", text: "Hello!" }],
+			},
+		]
+
+		it("should reject immediately with AbortError when the external signal is pre-aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const error = await collectStream(stream).catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should abort the in-flight stream when the external signal is triggered", async () => {
+			const controller = new AbortController()
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(
+				async (_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) => {
+					capturedSignal = requestOptions?.fetchOptions?.signal
+					return asyncStreamFrom([
+						{
+							data: {
+								choices: [
+									{
+										delta: { content: "partial" },
+										index: 0,
+									},
+								],
+							},
+						},
+						new Promise<never>((_resolve, reject) => {
+							const onAbort = () => reject(new DOMException("aborted", "AbortError"))
+							if (capturedSignal?.aborted) {
+								onAbort()
+								return
+							}
+							capturedSignal?.addEventListener("abort", onAbort, { once: true })
+						}),
+					])
+				},
+			)
+
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const collector = collectStream(stream).catch((e: unknown) => e)
+			await new Promise((resolve) => setTimeout(resolve, 10))
+			controller.abort()
+
+			const error = await collector
+			expect(error).toBeInstanceOf(Error)
+			expect((error as Error).name).toBe("AbortError")
+			expect(capturedSignal).toBeDefined()
+			expect(capturedSignal?.aborted).toBe(true)
+		})
+
+		it("should not pass a signal to the stream call when no external signal is provided", async () => {
+			const stream = handler.createMessage(systemPrompt, messages)
+			await collectStream(stream)
+			const streamOptions = mockCreate.mock.calls[0][1]
+			expect(streamOptions).toBeUndefined()
 		})
 	})
 })

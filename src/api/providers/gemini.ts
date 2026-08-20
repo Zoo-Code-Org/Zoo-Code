@@ -344,7 +344,30 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 		}
 
-		const params: GenerateContentParameters = { model, contents, config }
+		// Bridge the external abort signal from Task (metadata.abortSignal) into a
+		// request-local controller so the in-flight generateContentStream request
+		// can be cancelled. The @google/genai SDK merges this signal with its own
+		// timeout handling, which is preserved rather than replaced.
+		// A pre-aborted signal rejects immediately with an AbortError.
+		const externalAbortSignal = metadata?.abortSignal
+		let requestAbortController: AbortController | undefined
+		let externalAbortListener: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				throw new DOMException("Gemini request aborted", "AbortError")
+			}
+			const controller = new AbortController()
+			requestAbortController = controller
+			const onExternalAbort = () => controller.abort()
+			externalAbortListener = onExternalAbort
+			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+		}
+
+		const params: GenerateContentParameters = {
+			model,
+			contents,
+			config: requestAbortController ? { ...config, abortSignal: requestAbortController.signal } : config,
+		}
 
 		try {
 			const result = await this.client.models.generateContentStream(params)
@@ -477,6 +500,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				}
 			}
 		} catch (error) {
+			// User-initiated abort: surface a standard AbortError rather than the
+			// wrapped provider error so callers can distinguish cancellation.
+			if (metadata?.abortSignal?.aborted) {
+				throw new DOMException("Gemini request aborted", "AbortError")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "createMessage")
 			TelemetryService.instance.captureException(apiError)
@@ -486,6 +514,10 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			throw error
+		} finally {
+			if (externalAbortSignal && externalAbortListener) {
+				externalAbortSignal.removeEventListener("abort", externalAbortListener)
+			}
 		}
 	}
 
@@ -585,12 +617,23 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			const temperatureConfig: number | undefined = supportsTemperature
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
+			const httpOpts: { timeout?: number; baseUrl?: string } = {}
+			if (options?.timeoutMs !== undefined) {
+				httpOpts.timeout = options.timeoutMs
+			}
+			if (this.options.googleGeminiBaseUrl) {
+				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
+			}
 
 			const promptConfig: GenerateContentConfig = {
-				httpOptions: this.options.googleGeminiBaseUrl
-					? { baseUrl: this.options.googleGeminiBaseUrl }
-					: undefined,
+				httpOptions: Object.keys(httpOpts).length > 0 ? httpOpts : undefined,
 				temperature: temperatureConfig,
+			}
+
+			// @google/genai expects request cancellation on config.abortSignal
+			// (not httpOptions.signal), so the signal is passed directly to the config.
+			if (options?.abortSignal) {
+				promptConfig.abortSignal = options.abortSignal
 			}
 
 			const request = {
@@ -613,6 +656,11 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 			return text
 		} catch (error) {
+			// User-initiated abort: surface a standard AbortError rather than the
+			// wrapped provider error so callers can distinguish cancellation.
+			if (options?.abortSignal?.aborted) {
+				throw new DOMException("Gemini completion aborted", "AbortError")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const apiError = new ApiProviderError(errorMessage, this.providerName, model, "completePrompt")
 			TelemetryService.instance.captureException(apiError)
