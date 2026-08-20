@@ -113,7 +113,7 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		}
 
 		// Build request options
-		const requestBody: Record<string, any> = {
+		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
 			model: model.id,
 			instructions: systemPrompt,
 			input: input,
@@ -144,15 +144,15 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
 		}
 
-		let stream: AsyncIterable<any>
+		let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
 		try {
-			stream = (await this.client.responses.create(
+			stream = await this.client.responses.create(
 				{
 					...requestBody,
 					stream: true,
-				} as any,
+				},
 				abortSignal ? { signal: abortSignal } : undefined,
-			)) as unknown as AsyncIterable<any>
+			)
 		} catch (error) {
 			// Let abort errors propagate unmodified so callers can recognize them:
 			// native AbortError (error.name === "AbortError") and the OpenAI SDK's
