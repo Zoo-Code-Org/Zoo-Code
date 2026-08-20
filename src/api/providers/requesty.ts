@@ -56,6 +56,16 @@ type RequestyChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
 	thinking?: AnthropicProviderReasoningParams
 }
 
+/**
+ * Create a DOM-standard AbortError so callers can detect aborted requests
+ * (matches the error name produced by native abort-based APIs).
+ */
+function createAbortError(message: string): Error {
+	const error = new Error(message)
+	error.name = "AbortError"
+	return error
+}
+
 export class RequestyHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	protected models: ModelRecord = {}
@@ -133,80 +143,124 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const {
-			id: model,
-			info,
-			maxTokens: max_tokens,
-			temperature,
-			reasoningEffort: reasoning_effort,
-			reasoning: thinking,
-		} = await this.fetchModel()
+		// Per-request AbortController: external aborts cancel the in-flight request
+		// without replacing the client-level timeout, which remains the default safety net.
+		const controller = new AbortController()
 
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(messages),
-		]
-
-		// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
-		const allowedEffort = (["low", "medium", "high"] as const).includes(reasoning_effort as any)
-			? (reasoning_effort as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming["reasoning_effort"])
-			: undefined
-
-		const completionParams: RequestyChatCompletionParamsStreaming = {
-			messages: openAiMessages,
-			model,
-			max_tokens,
-			temperature,
-			...(allowedEffort && { reasoning_effort: allowedEffort }),
-			...(thinking && { thinking }),
-			stream: true,
-			stream_options: { include_usage: true },
-			requesty: { trace_id: metadata?.taskId, extra: { mode: metadata?.mode } },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
+		// Bridge the external abort signal into the per-request controller:
+		// - pre-aborted guard: abort immediately when the signal is already aborted
+		// - { once: true }: the listener removes itself after the first abort
+		// - explicit removal in finally: the listener must not outlive a request that
+		//   completes (or fails) without being aborted
+		const externalAbortSignal = metadata?.abortSignal
+		let removeExternalAbortListener: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				const onExternalAbort = () => controller.abort()
+				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
+			}
 		}
 
-		let stream
 		try {
-			// With streaming params type, SDK returns an async iterable stream
-			stream = await this.client.chat.completions.create(completionParams)
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
-		}
-		let lastUsage: any = undefined
-
-		for await (const chunk of stream) {
-			const delta = chunk.choices[0]?.delta
-
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
+			// The request was already aborted before we started: fail fast without calling the API.
+			if (controller.signal.aborted) {
+				throw createAbortError("Requesty request aborted")
 			}
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			const {
+				id: model,
+				info,
+				maxTokens: max_tokens,
+				temperature,
+				reasoningEffort: reasoning_effort,
+				reasoning: thinking,
+			} = await this.fetchModel()
+
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
+
+			// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
+			const allowedEffort = (["low", "medium", "high"] as const).includes(reasoning_effort as any)
+				? (reasoning_effort as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming["reasoning_effort"])
+				: undefined
+
+			const completionParams: RequestyChatCompletionParamsStreaming = {
+				messages: openAiMessages,
+				model,
+				max_tokens,
+				temperature,
+				...(allowedEffort && { reasoning_effort: allowedEffort }),
+				...(thinking && { thinking }),
+				stream: true,
+				stream_options: { include_usage: true },
+				requesty: { trace_id: metadata?.taskId, extra: { mode: metadata?.mode } },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
 			}
 
-			// Handle native tool calls
-			if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+			let stream
+			try {
+				// With streaming params type, SDK returns an async iterable stream
+				stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError instead of
+				// a completion error.
+				if (controller.signal.aborted) {
+					throw createAbortError("Requesty request aborted")
+				}
+				throw handleOpenAIError(error, this.providerName)
+			}
+			try {
+				let lastUsage: any = undefined
+
+				for await (const chunk of stream) {
+					const delta = chunk.choices[0]?.delta
+
+					if (delta?.content) {
+						yield { type: "text", text: delta.content }
+					}
+
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
+
+					// Handle native tool calls
+					if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+						for (const toolCall of delta.tool_calls) {
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
+						}
+					}
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
-			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+				if (lastUsage) {
+					yield this.processUsageMetrics(lastUsage, info)
+				}
+			} catch (error) {
+				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
+				// DOM-standard AbortError so callers can detect the aborted request.
+				if (controller.signal.aborted) {
+					throw createAbortError("Requesty request aborted")
+				}
+				throw error
 			}
-		}
-
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, info)
+		} finally {
+			removeExternalAbortListener?.()
 		}
 	}
 
@@ -222,11 +276,30 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			temperature: temperature,
 		}
 
+		const requestAbortSignal = options?.abortSignal
+
+		// Forward the caller's abort signal / per-request timeout to the SDK. The client-level
+		// timeout remains as the default safety net; timeoutMs <= 0 disables the per-request timeout.
+		const createOptions: OpenAI.RequestOptions = {
+			...(requestAbortSignal && { signal: requestAbortSignal }),
+			...(typeof options?.timeoutMs === "number" && options.timeoutMs > 0 && { timeout: options.timeoutMs }),
+		}
+
 		let response: OpenAI.Chat.ChatCompletion
 		try {
-			response = await this.client.chat.completions.create(completionParams)
+			response = await this.client.chat.completions.create(completionParams, createOptions)
 		} catch (error) {
+			// Aborted requests are user-initiated: surface them as AbortError (this also covers
+			// timeouts, which abort the same signal) instead of a completion error.
+			if (requestAbortSignal?.aborted) {
+				throw createAbortError("Requesty completion aborted")
+			}
 			throw handleOpenAIError(error, this.providerName)
+		}
+
+		if (requestAbortSignal?.aborted) {
+			// The response resolved after the request was aborted: do not return the late result.
+			throw createAbortError("Requesty completion aborted")
 		}
 		return response.choices[0]?.message.content || ""
 	}

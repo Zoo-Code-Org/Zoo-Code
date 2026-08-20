@@ -21,7 +21,7 @@ import { providerIdentifiers } from "@roo-code/types"
 
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
-import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -289,7 +289,10 @@ describe("OpenRouterHandler", () => {
 					temperature: 0,
 					top_p: undefined,
 				}),
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				{
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				},
 			)
 		})
 
@@ -332,7 +335,10 @@ describe("OpenRouterHandler", () => {
 						}),
 					]),
 				}),
-				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
+				{
+					headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" },
+					signal: expect.any(AbortSignal),
+				},
 			)
 		})
 
@@ -539,6 +545,69 @@ describe("OpenRouterHandler", () => {
 			expect(endChunks).toHaveLength(1)
 			expect(endChunks[0].id).toBe("call_openrouter_test")
 		})
+		it("rejects with AbortError when the external signal is pre-aborted", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const controller = new AbortController()
+			controller.abort()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			await expect(
+				handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata).next(),
+			).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			let requestSignal: AbortSignal | undefined
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					requestSignal = options?.signal
+					// Emulate the OpenAI SDK: the first chunk arrives, then the in-flight
+					// response body rejects once the request signal aborts.
+					return (async function* () {
+						yield { id: "1", choices: [{ delta: { content: "first" } }] }
+						await new Promise<void>((resolve) => {
+							if (requestSignal?.aborted) {
+								resolve()
+							} else {
+								requestSignal?.addEventListener("abort", () => resolve(), { once: true })
+							}
+						})
+						const abortError = new Error("The user aborted a request")
+						abortError.name = "AbortError"
+						throw abortError
+					})()
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of generator) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({ name: "AbortError" })
+			expect(chunks).toContainEqual({ type: "text", text: "first" })
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -710,6 +779,86 @@ describe("OpenRouterHandler", () => {
 					status: 429,
 				}),
 			)
+		})
+		it("should pass abort signal through to client", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ signal: controller.signal }),
+			)
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 5000 }),
+			)
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+
+		it("rejects with AbortError when the signal is pre-aborted", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("rejects with AbortError when aborted mid-flight", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					// Emulate the OpenAI SDK: the in-flight request rejects when the signal aborts.
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
 	})
 })

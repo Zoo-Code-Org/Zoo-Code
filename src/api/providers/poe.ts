@@ -22,8 +22,19 @@ import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 const DEFAULT_THINKING_BUDGET = 8192
+
+/**
+ * Create a DOM-standard AbortError so callers can detect aborted requests
+ * (matches the error name produced by native abort-based APIs).
+ */
+function createAbortError(message: string): Error {
+	const error = new Error(message)
+	error.name = "AbortError"
+	return error
+}
 
 export class PoeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -54,105 +65,160 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id, info } = this.getModel()
-		const languageModel = this.poe(id)
+		// Per-request AbortController: external aborts cancel the in-flight AI SDK request
+		// (the AI SDK aborts the underlying fetch when its abortSignal fires).
+		const controller = new AbortController()
 
-		const aiSdkMessages = convertToAiSdkMessages(messages)
-		const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
-		const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
-
-		const useBudget = shouldUseReasoningBudget({ model: info, settings: this.options })
-		const useEffort = !useBudget && shouldUseReasoningEffort({ model: info, settings: this.options })
-
-		// Only pass temperature when the user explicitly configured it.
-		let temperature: number | undefined = this.options.modelTemperature ?? undefined
-		let maxOutputTokens: number | undefined
-		const providerOptions: NonNullable<Parameters<typeof streamText>[0]["providerOptions"]> & {
-			poe?: PoeScopedProviderOptions
-		} = {}
-
-		if (useBudget) {
-			const requestedBudget = this.options.modelMaxThinkingTokens ?? DEFAULT_THINKING_BUDGET
-			// maxOutputTokens is the text-only budget; reasoningBudgetTokens is
-			// separate, so total output = maxOutputTokens + reasoningBudgetTokens.
-			maxOutputTokens = this.options.modelMaxTokens ?? Math.max(0, (info.maxTokens ?? 0) - requestedBudget)
-			providerOptions.poe = {
-				reasoningBudgetTokens: requestedBudget,
-			}
-			temperature = 1.0
-		} else if (useEffort) {
-			let effort = (this.options.reasoningEffort ?? info.reasoningEffort ?? "medium") as ReasoningEffortExtended
-			// Validate that the effort level is actually supported by the current model
-			const supportedEfforts = info.supportsReasoningEffort
-			if (Array.isArray(supportedEfforts) && !supportedEfforts.includes(effort as any)) {
-				effort = (info.reasoningEffort as ReasoningEffortExtended) ?? "medium"
-			}
-			providerOptions.poe = {
-				reasoningEffort: effort,
-				reasoningSummary: "auto",
-			}
-			if (this.options.modelMaxTokens) {
-				maxOutputTokens = this.options.modelMaxTokens
+		// Bridge the external abort signal into the per-request controller:
+		// - pre-aborted guard: abort immediately when the signal is already aborted
+		// - { once: true }: the listener removes itself after the first abort
+		// - explicit removal in finally: the listener must not outlive a request that
+		//   completes (or fails) without being aborted
+		const externalAbortSignal = metadata?.abortSignal
+		let removeExternalAbortListener: (() => void) | undefined
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				controller.abort()
+			} else {
+				const onExternalAbort = () => controller.abort()
+				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
 		}
 
-		let result
 		try {
-			result = streamText({
-				model: languageModel,
-				system: systemPrompt,
-				messages: aiSdkMessages,
-				temperature,
-				maxOutputTokens,
-				tools: aiSdkTools,
-				toolChoice: mapToolChoice(metadata?.tool_choice as any),
-				...(Object.keys(providerOptions).length > 0 && { providerOptions }),
-			})
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			TelemetryService.instance.captureException(
-				new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "createMessage"),
-			)
-			throw new Error(`Poe completion error: ${errorMessage}`)
-		}
+			// The request was already aborted before we started: fail fast without calling the API.
+			if (controller.signal.aborted) {
+				throw createAbortError("Poe request aborted")
+			}
 
-		try {
-			for await (const part of result.fullStream) {
-				for (const chunk of processAiSdkStreamPart(part)) {
-					yield chunk
+			const { id, info } = this.getModel()
+			const languageModel = this.poe(id)
+			const aiSdkMessages = convertToAiSdkMessages(messages)
+			const openAiTools = this.convertToolsForOpenAI(metadata?.tools)
+			const aiSdkTools = convertToolsForAiSdk(openAiTools) as ToolSet | undefined
+
+			const useBudget = shouldUseReasoningBudget({ model: info, settings: this.options })
+			const useEffort = !useBudget && shouldUseReasoningEffort({ model: info, settings: this.options })
+
+			// Only pass temperature when the user explicitly configured it.
+			let temperature: number | undefined = this.options.modelTemperature ?? undefined
+			let maxOutputTokens: number | undefined
+			const providerOptions: NonNullable<Parameters<typeof streamText>[0]["providerOptions"]> & {
+				poe?: PoeScopedProviderOptions
+			} = {}
+
+			if (useBudget) {
+				const requestedBudget = this.options.modelMaxThinkingTokens ?? DEFAULT_THINKING_BUDGET
+				// maxOutputTokens is the text-only budget; reasoningBudgetTokens is
+				// separate, so total output = maxOutputTokens + reasoningBudgetTokens.
+				maxOutputTokens = this.options.modelMaxTokens ?? Math.max(0, (info.maxTokens ?? 0) - requestedBudget)
+				providerOptions.poe = {
+					reasoningBudgetTokens: requestedBudget,
+				}
+				temperature = 1.0
+			} else if (useEffort) {
+				let effort = (this.options.reasoningEffort ??
+					info.reasoningEffort ??
+					"medium") as ReasoningEffortExtended
+				// Validate that the effort level is actually supported by the current model
+				const supportedEfforts = info.supportsReasoningEffort
+				if (Array.isArray(supportedEfforts) && !supportedEfforts.includes(effort as any)) {
+					effort = (info.reasoningEffort as ReasoningEffortExtended) ?? "medium"
+				}
+				providerOptions.poe = {
+					reasoningEffort: effort,
+					reasoningSummary: "auto",
+				}
+				if (this.options.modelMaxTokens) {
+					maxOutputTokens = this.options.modelMaxTokens
 				}
 			}
 
-			const usage = await result.usage
-			if (usage) {
-				const metrics = extractUsageMetrics(usage as any)
-				yield {
-					type: "usage" as const,
-					inputTokens: metrics.inputTokens,
-					outputTokens: metrics.outputTokens,
-					cacheReadTokens: metrics.cacheReadTokens,
-					cacheWriteTokens: metrics.cacheWriteTokens,
-					reasoningTokens: metrics.reasoningTokens,
+			let result
+			try {
+				result = streamText({
+					model: languageModel,
+					system: systemPrompt,
+					messages: aiSdkMessages,
+					temperature,
+					maxOutputTokens,
+					tools: aiSdkTools,
+					toolChoice: mapToolChoice(metadata?.tool_choice as any),
+					...(Object.keys(providerOptions).length > 0 && { providerOptions }),
+					abortSignal: controller.signal,
+				})
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError instead of
+				// a completion error.
+				if (controller.signal.aborted) {
+					throw createAbortError("Poe request aborted")
 				}
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				TelemetryService.instance.captureException(
+					new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "createMessage"),
+				)
+				throw new Error(`Poe completion error: ${errorMessage}`)
 			}
-		} catch (error) {
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			TelemetryService.instance.captureException(
-				new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "createMessage"),
-			)
-			throw new Error(`Poe streaming error: ${errorMessage}`)
+
+			try {
+				for await (const part of result.fullStream) {
+					for (const chunk of processAiSdkStreamPart(part)) {
+						yield chunk
+					}
+				}
+
+				const usage = await result.usage
+				if (usage) {
+					const metrics = extractUsageMetrics(usage as any)
+					yield {
+						type: "usage" as const,
+						inputTokens: metrics.inputTokens,
+						outputTokens: metrics.outputTokens,
+						cacheReadTokens: metrics.cacheReadTokens,
+						cacheWriteTokens: metrics.cacheWriteTokens,
+						reasoningTokens: metrics.reasoningTokens,
+					}
+				}
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError instead of
+				// a completion error.
+				if (controller.signal.aborted) {
+					throw createAbortError("Poe request aborted")
+				}
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				TelemetryService.instance.captureException(
+					new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "createMessage"),
+				)
+				throw new Error(`Poe streaming error: ${errorMessage}`)
+			}
+		} finally {
+			removeExternalAbortListener?.()
 		}
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id } = this.getModel()
+		// Merge the caller's abort signal with the per-request timeout (timeoutMs <= 0 disables it).
+		const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		try {
 			const { text } = await generateText({
 				model: this.poe(id),
 				prompt,
+				...(mergedAbortSignal && { abortSignal: mergedAbortSignal }),
 			})
+
+			if (mergedAbortSignal?.aborted) {
+				// The response resolved after the request was aborted: do not return the late result.
+				throw createAbortError("Poe completion aborted")
+			}
 			return text
 		} catch (error) {
+			// Aborted requests are user-initiated: surface them as AbortError (this also covers
+			// timeouts, which abort the same signal) instead of a completion error.
+			if (mergedAbortSignal?.aborted) {
+				throw createAbortError("Poe completion aborted")
+			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			TelemetryService.instance.captureException(
 				new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "completePrompt"),

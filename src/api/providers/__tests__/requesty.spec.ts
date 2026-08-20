@@ -12,7 +12,7 @@ import OpenAI from "openai"
 import { RequestyHandler } from "../requesty"
 import { Package } from "../../../shared/package"
 import { ApiHandlerCreateMessageMetadata } from "../../index"
-import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -241,6 +241,7 @@ describe("RequestyHandler", () => {
 					stream_options: { include_usage: true },
 					temperature: 0,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -274,6 +275,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -307,6 +309,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -340,6 +343,7 @@ describe("RequestyHandler", () => {
 					thinking: { type: "adaptive" },
 					temperature: undefined,
 				}),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
 
@@ -478,6 +482,7 @@ describe("RequestyHandler", () => {
 						]),
 						tool_choice: "auto",
 					}),
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
 				)
 			})
 
@@ -559,6 +564,62 @@ describe("RequestyHandler", () => {
 				})
 			})
 		})
+		it("rejects with AbortError when the external signal is pre-aborted", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "response" } }] }]))
+
+			const controller = new AbortController()
+			controller.abort()
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			await expect(
+				handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata).next(),
+			).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
+				// Emulate the OpenAI SDK: the first chunk arrives, then the in-flight
+				// response body rejects once the request signal aborts.
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "first" } }] }
+					await new Promise<void>((resolve) => {
+						if (requestSignal?.aborted) {
+							resolve()
+						} else {
+							requestSignal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					const abortError = new Error("The user aborted a request")
+					abortError.name = "AbortError"
+					throw abortError
+				})()
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const chunks: unknown[] = []
+			const iteration = (async () => {
+				for await (const chunk of generator) {
+					chunks.push(chunk)
+					if (chunk.type === "text") {
+						// Abort while the stream is still in flight.
+						controller.abort()
+					}
+				}
+			})()
+
+			await expect(iteration).rejects.toMatchObject({ name: "AbortError" })
+			expect(chunks).toContainEqual({ type: "text", text: "first" })
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -572,12 +633,15 @@ describe("RequestyHandler", () => {
 
 			expect(result).toBe("test completion")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: mockOptions.requestyModelId,
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: 0,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: mockOptions.requestyModelId,
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: 0,
+				},
+				{},
+			)
 		})
 
 		it("omits temperature for Claude Fable 5 in completePrompt", async () => {
@@ -591,12 +655,15 @@ describe("RequestyHandler", () => {
 
 			await handler.completePrompt("test prompt")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "anthropic/claude-fable-5",
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: undefined,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "anthropic/claude-fable-5",
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: undefined,
+				},
+				{},
+			)
 		})
 
 		it("omits temperature for Claude Sonnet 5 in completePrompt", async () => {
@@ -610,12 +677,15 @@ describe("RequestyHandler", () => {
 
 			await handler.completePrompt("test prompt")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "anthropic/claude-sonnet-5",
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: undefined,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "anthropic/claude-sonnet-5",
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: undefined,
+				},
+				{},
+			)
 		})
 
 		it("omits temperature for Claude Opus 5 in completePrompt", async () => {
@@ -629,12 +699,15 @@ describe("RequestyHandler", () => {
 
 			await handler.completePrompt("test prompt")
 
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "anthropic/claude-opus-5",
-				max_tokens: 8192,
-				messages: [{ role: "system", content: "test prompt" }],
-				temperature: undefined,
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "anthropic/claude-opus-5",
+					max_tokens: 8192,
+					messages: [{ role: "system", content: "test prompt" }],
+					temperature: undefined,
+				},
+				{},
+			)
 		})
 
 		it("handles API errors", async () => {
@@ -650,6 +723,72 @@ describe("RequestyHandler", () => {
 			mockCreate.mockRejectedValue(new Error("Unexpected error"))
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
+		})
+		it("should pass abort signal through to client", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should pass timeout through to client", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
+				timeout: 5000,
+			})
+		})
+
+		it("should work without options (backward compatible)", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			const result = await handler.completePrompt("test prompt")
+			expect(result).toBe("response")
+		})
+
+		it("rejects with AbortError when the signal is pre-aborted", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+			})
+		})
+
+		it("rejects with AbortError when aborted mid-flight", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				// Emulate the OpenAI SDK: the in-flight request rejects when the signal aborts.
+				await new Promise<void>((resolve) => {
+					if (options?.signal?.aborted) {
+						resolve()
+					} else {
+						options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+					}
+				})
+				const abortError = new Error("The user aborted a request")
+				abortError.name = "AbortError"
+				throw abortError
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			controller.abort()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
 	})
 })
