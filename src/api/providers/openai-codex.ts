@@ -42,6 +42,13 @@ const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
 
+/**
+ * A refusal is streamed as text so the chat still shows why the model declined, but it is not part
+ * of the answer: the Responses API keeps refusals out of `output_text`. `completePrompt` relies on
+ * this prefix to tell the two apart, so both refusal branches must emit it.
+ */
+const REFUSAL_TEXT_PREFIX = "[Refusal] "
+
 const getOpenAiCodexServiceTier = (options: ApiHandlerOptions): OpenAiCodexRequestServiceTier | undefined =>
 	options[OPEN_AI_CODEX_SERVICE_TIER_KEY] === OpenAiCodexServiceTier.Priority
 		? OpenAiCodexServiceTier.Priority
@@ -867,7 +874,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 								if (parsed.delta) {
 									hasContent = true
 									this.sawTextOutputInCurrentResponse = true
-									yield { type: "text", text: `[Refusal] ${parsed.delta}` }
+									yield { type: "text", text: `${REFUSAL_TEXT_PREFIX}${parsed.delta}` }
 								}
 							} else if (parsed.type === "response.output_item.added") {
 								if (parsed.item) {
@@ -1059,7 +1066,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		if (event?.type === "response.refusal.delta") {
 			if (event?.delta) {
 				this.sawTextOutputInCurrentResponse = true
-				yield { type: "text", text: `[Refusal] ${event.delta}` }
+				yield { type: "text", text: `${REFUSAL_TEXT_PREFIX}${event.delta}` }
 			}
 			return
 		}
@@ -1308,7 +1315,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			const model = this.getModel()
 
 			// Only the answer is wanted. Reasoning is deliberately dropped rather than concatenated:
-			// callers such as commit-message generation write this straight into the editor.
+			// the prompt enhancer writes this straight into the input box.
 			let text = ""
 
 			for await (const chunk of this.handleResponsesApiMessage(
@@ -1320,7 +1327,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				{ taskId: this.sessionId },
 				options?.abortSignal,
 			)) {
-				if (chunk.type === "text") {
+				// Refusals are streamed as text for the chat, but they are not output: the
+				// non-streaming request this replaced read `output_text`, which never carries them.
+				// Keeping them would paste "[Refusal] ..." into the input box as if it were an answer.
+				if (chunk.type === "text" && !chunk.text.startsWith(REFUSAL_TEXT_PREFIX)) {
 					text += chunk.text
 				}
 			}

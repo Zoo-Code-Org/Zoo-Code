@@ -305,8 +305,8 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		await expect(handler.completePrompt("Hello")).resolves.toBe("feat: add commit messages")
 	})
 
-	// A commit message is written straight into the Source Control box, so reasoning must never
-	// become part of it.
+	// The enhanced prompt is written straight into the input box, so reasoning must never become
+	// part of it.
 	it("omits reasoning from the completion", async () => {
 		const handler = createHandler()
 		injectStream(handler, [
@@ -341,6 +341,70 @@ describe("OpenAiCodexHandler.completePrompt streaming", () => {
 		])
 
 		await expect(handler.completePrompt("Hello")).resolves.toBe("chore: tidy")
+	})
+
+	// A refusal is streamed as text so the chat can show it, but the non-streaming request this
+	// replaced read `output_text`, which never carries refusals. Keeping them would paste
+	// "[Refusal] ..." into the prompt enhancer's input box as if the model had answered.
+	it("omits refusals from the completion", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.refusal.delta", delta: "I cannot help " },
+			{ type: "response.refusal.delta", delta: "with that request." },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("")
+	})
+
+	it("keeps the answer when a refusal arrives alongside output text", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "docs: update the readme" },
+			{ type: "response.refusal.delta", delta: "I cannot help with the rest." },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("docs: update the readme")
+	})
+
+	// The SSE transport parses its own events, so it has a second refusal branch to keep aligned.
+	it("omits refusals streamed over the SSE fallback", async () => {
+		const handler = createHandler()
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
+		vitest.stubGlobal(
+			"fetch",
+			vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.refusal.delta","delta":"I cannot help with that."}\n\n',
+							),
+						)
+						controller.close()
+					},
+				}),
+			}),
+		)
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("")
+	})
+
+	// Dropping the refusal is specific to the one-shot completion: a chat still has to show it.
+	it("still surfaces refusals to the chat stream", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.refusal.delta", delta: "I cannot help with that." },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		const chunks = await collectStream(handler.createMessage("system", [{ role: "user", content: "Hello" }]))
+
+		expect(chunks).toContainEqual({ type: "text", text: "[Refusal] I cannot help with that." })
 	})
 
 	// The SDK path swallows its own errors into the SSE fallback, so an auth failure only reaches
