@@ -188,6 +188,78 @@ describe("UnboundHandler", () => {
 		)
 	})
 
+	it("wraps non-abort pre-stream failures via handleOpenAIError", async () => {
+		// A non-abort rejection from create() (e.g. an upstream 500) must be
+		// routed through handleOpenAIError, not the AbortError normalization
+		// path: assert the wrapped identity and the preserved message.
+		sharedMockCreate.mockRejectedValue(new Error("upstream 500"))
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const stream = handler.createMessage("system", [{ role: "user", content: "hi" }], {
+			taskId: "t",
+			tools: [],
+		})
+
+		const error = await collectStream(stream).then(
+			() => undefined,
+			(e: unknown) => e,
+		)
+		expect(error).toBeInstanceOf(Error)
+		expect((error as Error).message).toBe("Unbound completion error: upstream 500")
+		expect((error as Error).name).not.toBe("AbortError")
+	})
+
+	it("emits tool_call_partial chunks for native tool calls in the stream", async () => {
+		// Native tool calls arrive on delta.tool_calls and must be re-emitted
+		// as raw tool_call_partial chunks for NativeToolCallParser to assemble.
+		sharedMockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_1",
+										type: "function",
+										function: { name: "get_weather", arguments: '{"city": "NYC"}' },
+									},
+								],
+							},
+						},
+					],
+				},
+				{ choices: [{ delta: { content: "done" } }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+			]),
+		)
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const chunks = await collectStream(
+			handler.createMessage("system", [{ role: "user", content: "hi" }], {
+				taskId: "t",
+				tools: [],
+			}),
+		)
+
+		expect(chunks).toContainEqual({
+			type: "tool_call_partial",
+			index: 0,
+			id: "call_1",
+			name: "get_weather",
+			arguments: '{"city": "NYC"}',
+		})
+		expect(chunks).toContainEqual({ type: "text", text: "done" })
+	})
+
 	it("completePrompt returns the response text", async () => {
 		const mockCreate = (OpenAI as unknown as any)().chat.completions.create
 		mockCreate.mockResolvedValue({

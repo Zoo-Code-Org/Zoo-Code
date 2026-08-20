@@ -371,6 +371,28 @@ describe("OpencodeGoHandler", () => {
 				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
 		})
+
+		it("rethrows non-abort errors from the OpenAI stream unchanged", async () => {
+			// A mid-stream failure that is not an abort (e.g. a connection
+			// reset) must propagate unchanged — the catch only normalizes
+			// aborts to a DOM-standard AbortError.
+			const streamError = new Error("connection reset")
+			mockCreate.mockImplementation(async () =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
+					throw streamError
+				})(),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+
+			const error = await collectStream(handler.createMessage("sys", [{ role: "user", content: "hi" }])).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+
+			expect(error).toBe(streamError)
+		})
 	})
 
 	describe("createMessage abort signal bridging", () => {
@@ -1134,6 +1156,21 @@ describe("OpencodeGoHandler", () => {
 			await expect(async () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: rate limited")
+		})
+
+		it("preserves abort identity for aborted Anthropic requests from createMessage", async () => {
+			// A cancelled /v1/messages request (the SDK rejects with
+			// APIUserAbortError) must surface as a DOM-standard AbortError, not
+			// the wrapped "completion error" reserved for other failures.
+			mockAnthropicCreate.mockRejectedValue(new AnthropicAbortError())
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			await expect(async () => {
+				await collectStream(handler.createMessage("sys", messages))
+			}).rejects.toMatchObject({
+				name: "AbortError",
+				message: "Opencode Go request aborted",
+			})
 		})
 	})
 
