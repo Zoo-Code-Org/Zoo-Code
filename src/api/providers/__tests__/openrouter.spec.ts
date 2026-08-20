@@ -618,6 +618,7 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest
 				.fn()
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -640,6 +641,7 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest
 				.fn()
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -661,6 +663,7 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest
 				.fn()
 				.mockResolvedValue(asyncStreamFrom([{ id: "1", choices: [{ delta: { content: "ok" } }] }]))
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -757,6 +760,7 @@ describe("OpenRouterHandler", () => {
 					},
 				]),
 			)
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -795,6 +799,7 @@ describe("OpenRouterHandler", () => {
 					abortError.name = "AbortError"
 					throw abortError
 				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -818,6 +823,7 @@ describe("OpenRouterHandler", () => {
 					metadata: { raw: '{"message":"upstream: model not found"}' },
 				},
 			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -1101,6 +1107,7 @@ describe("OpenRouterHandler", () => {
 					timeoutError.name = "TimeoutError"
 					throw timeoutError
 				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 
@@ -1129,6 +1136,7 @@ describe("OpenRouterHandler", () => {
 					abortError.name = "AbortError"
 					throw abortError
 				})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
 			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
 			client.chat = { completions: { create: mockCreate } }
 

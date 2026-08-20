@@ -624,7 +624,14 @@ describe("RequestyHandler", () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
 
+			// Synchronize on request startup (instead of a fixed sleep) so the abort
+			// deterministically lands while the request is in flight.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
 			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
 				// Emulate the OpenAI SDK: the pending request rejects when the signal aborts.
 				await new Promise<void>((resolve) => {
 					if (options?.signal?.aborted) {
@@ -642,8 +649,7 @@ describe("RequestyHandler", () => {
 			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
 
 			const nextPromise = generator.next()
-			// Let the generator reach the pending create() call, then abort.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await createStarted
 			controller.abort()
 
 			await expect(nextPromise).rejects.toMatchObject({ name: "AbortError" })

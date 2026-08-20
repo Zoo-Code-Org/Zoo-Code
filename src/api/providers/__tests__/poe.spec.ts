@@ -659,7 +659,7 @@ describe("PoeHandler", () => {
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
 
-		it("completePrompt should pass reasoning effort for effort-capable models", async () => {
+		it("passes reasoning effort to streamText via createMessage", async () => {
 			const handler = new PoeHandler({
 				poeApiKey: "key",
 				apiModelId: "openai/o3",
