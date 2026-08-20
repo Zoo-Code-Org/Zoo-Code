@@ -1,6 +1,10 @@
-import { Anthropic } from "@anthropic-ai/sdk"
+import {
+	Anthropic,
+	APIConnectionTimeoutError as AnthropicTimeoutError,
+	APIUserAbortError as AnthropicAbortError,
+} from "@anthropic-ai/sdk"
 import { CacheControlEphemeral } from "@anthropic-ai/sdk/resources"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	type ModelInfo,
@@ -28,6 +32,17 @@ import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
+
+/**
+ * Create a DOM-standard AbortError so callers can detect aborted requests
+ * (the message ends in "aborted", which is how task-level abort detection
+ * recognizes cancelled completions).
+ */
+function createAbortError(message: string): Error {
+	const error = new Error(message)
+	error.name = "AbortError"
+	return error
+}
 
 /**
  * API handler for the Opencode "Go" subscription plan.
@@ -268,6 +283,14 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					}
 				}
 			}
+		} catch (error) {
+			// Preserve abort identity (series standard): surface a cancelled
+			// request as a DOM-standard AbortError rather than leaking the
+			// raw SDK abort error.
+			if (controller.signal.aborted) {
+				throw createAbortError("Opencode Go request aborted")
+			}
+			throw error
 		} finally {
 			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
@@ -345,6 +368,16 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		try {
 			stream = await this.anthropicClient.messages.create(requestParams, { signal: abortSignal })
 		} catch (error) {
+			// Preserve abort identity (series standard): a cancelled request
+			// must surface as a DOM-standard AbortError, not a wrapped
+			// completion error.
+			if (
+				abortSignal.aborted ||
+				error instanceof AnthropicAbortError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Opencode Go request aborted")
+			}
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
 			}
@@ -561,6 +594,20 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				const content = message.content.find(({ type }) => type === "text")
 				return content?.type === "text" ? content.text : ""
 			} catch (error) {
+				// Preserve abort identity (series standard): caller-initiated
+				// cancellations and request timeouts must surface as a
+				// DOM-standard AbortError, not a wrapped completion error. The
+				// Anthropic SDK reports both with messages ending in a period
+				// ("Request was aborted.", "Request timed out."), which would not
+				// match task-level abort detection (message ending in "aborted").
+				if (
+					options?.abortSignal?.aborted ||
+					error instanceof AnthropicAbortError ||
+					error instanceof AnthropicTimeoutError ||
+					(error instanceof Error && error.name === "AbortError")
+				) {
+					throw createAbortError("Opencode Go request aborted")
+				}
 				if (error instanceof Error) {
 					throw new Error(`Opencode Go completion error: ${error.message}`)
 				}
@@ -602,6 +649,20 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			const response = await this.client.chat.completions.create(requestOptions, createOptions)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			if (
+				options?.abortSignal?.aborted ||
+				error instanceof APIUserAbortError ||
+				error instanceof APIConnectionTimeoutError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Opencode Go request aborted")
+			}
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
 			}

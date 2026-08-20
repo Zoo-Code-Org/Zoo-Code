@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	type ModelInfo,
@@ -24,6 +24,17 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+
+/**
+ * Create a DOM-standard AbortError so callers can detect aborted requests
+ * (the message ends in "aborted", which is how task-level abort detection
+ * recognizes cancelled completions).
+ */
+function createAbortError(message: string): Error {
+	const error = new Error(message)
+	error.name = "AbortError"
+	return error
+}
 
 // Unbound usage includes extra fields for Anthropic cache tokens.
 interface UnboundUsage extends OpenAI.CompletionUsage {
@@ -182,6 +193,16 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 			try {
 				stream = await this.client.chat.completions.create(completionParams, { signal: controller.signal })
 			} catch (error) {
+				// Preserve abort identity (series standard): a cancelled request
+				// must surface as a DOM-standard AbortError, not a wrapped
+				// completion error.
+				if (
+					controller.signal.aborted ||
+					error instanceof APIUserAbortError ||
+					(error instanceof Error && error.name === "AbortError")
+				) {
+					throw createAbortError("Unbound request aborted")
+				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			let lastUsage: any = undefined
@@ -251,6 +272,20 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 		try {
 			response = await this.client.chat.completions.create(completionParams, createOptions)
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			if (
+				options?.abortSignal?.aborted ||
+				error instanceof APIUserAbortError ||
+				error instanceof APIConnectionTimeoutError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Unbound request aborted")
+			}
 			throw handleOpenAIError(error, this.providerName)
 		}
 		return response.choices[0]?.message.content || ""

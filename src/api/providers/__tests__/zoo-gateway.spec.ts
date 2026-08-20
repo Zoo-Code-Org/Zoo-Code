@@ -26,7 +26,7 @@ vitest.mock("../../../i18n", () => ({
 	t: (key: string) => key,
 }))
 
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
 
@@ -502,6 +502,49 @@ describe("ZooGatewayHandler", () => {
 			expect(requestOptions).not.toHaveProperty("timeout")
 		})
 
+		it("should preserve abort identity when the caller aborts", async () => {
+			// Emulate the OpenAI SDK: an aborted request signal rejects with
+			// APIUserAbortError ("Request was aborted." — the trailing period would
+			// fail task-level abort detection, so the provider must normalize it).
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					throw new APIUserAbortError()
+				}
+				throw new Error("boom")
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message.endsWith("aborted")).toBe(true)
+			expect((error as Error).message).not.toContain("completion error")
+		})
+
+		it("should surface request timeouts as an AbortError", async () => {
+			// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+			// are exhausted — verified against openai v5.23.2 against a hung server.
+			mockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+				throw new APIConnectionTimeoutError()
+			})
+
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 50 }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message.endsWith("aborted")).toBe(true)
+			expect((error as Error).message).not.toContain("completion error")
+		})
 		it("should work without options (backward compatible)", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			mockCreate.mockImplementation(async () => ({

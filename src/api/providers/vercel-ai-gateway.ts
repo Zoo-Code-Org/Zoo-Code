@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import {
 	vercelAiGatewayDefaultModelId,
@@ -17,6 +17,17 @@ import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
+
+/**
+ * Create a DOM-standard AbortError so callers can detect aborted requests
+ * (the message ends in "aborted", which is how task-level abort detection
+ * recognizes cancelled completions).
+ */
+function createAbortError(message: string): Error {
+	const error = new Error(message)
+	error.name = "AbortError"
+	return error
+}
 
 // Extend OpenAI's CompletionUsage to include Vercel AI Gateway specific fields
 interface VercelAiGatewayUsage extends OpenAI.CompletionUsage {
@@ -136,6 +147,14 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 					}
 				}
 			}
+		} catch (error) {
+			// Preserve abort identity (series standard): surface a cancelled
+			// request as a DOM-standard AbortError rather than leaking the
+			// raw SDK abort error.
+			if (controller.signal.aborted) {
+				throw createAbortError("Vercel AI Gateway request aborted")
+			}
+			throw error
 		} finally {
 			externalAbortSignal?.removeEventListener("abort", abortListener)
 		}
@@ -174,6 +193,20 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			)
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Preserve abort identity (series standard): caller-initiated
+			// cancellations and request timeouts must surface as a
+			// DOM-standard AbortError, not a wrapped completion error. The
+			// OpenAI SDK reports both with messages ending in a period
+			// ("Request was aborted.", "Request timed out."), which would not
+			// match task-level abort detection (message ending in "aborted").
+			if (
+				options?.abortSignal?.aborted ||
+				error instanceof APIUserAbortError ||
+				error instanceof APIConnectionTimeoutError ||
+				(error instanceof Error && error.name === "AbortError")
+			) {
+				throw createAbortError("Vercel AI Gateway request aborted")
+			}
 			if (error instanceof Error) {
 				throw new Error(`Vercel AI Gateway completion error: ${error.message}`)
 			}

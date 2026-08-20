@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import { UnboundHandler } from "../unbound"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -10,8 +10,13 @@ import { makeCreateMessageMetadata } from "../../../test-utils/api"
 // can configure the SDK `create` call without untyped access casts.
 const sharedMockCreate = vi.hoisted(() => vi.fn())
 
-vi.mock("openai", () => {
+// The real SDK error classes are re-exported alongside the mocked client so
+// tests can emulate the SDK's abort/timeout rejections (APIUserAbortError,
+// APIConnectionTimeoutError) and the provider's instanceof checks resolve.
+vi.mock("openai", async () => {
+	const actual = await vi.importActual<typeof import("openai")>("openai")
 	return {
+		...actual,
 		default: vi.fn(function () {
 			return {
 				chat: {
@@ -257,6 +262,56 @@ describe("UnboundHandler", () => {
 		const requestOptions = call[1] as { timeout?: number } | undefined
 		expect(requestOptions).not.toHaveProperty("timeout")
 	})
+
+	it("completePrompt should preserve abort identity when the caller aborts", async () => {
+		// Emulate the OpenAI SDK: an aborted request signal rejects with
+		// APIUserAbortError ("Request was aborted." — the trailing period would
+		// fail task-level abort detection, so the provider must normalize it).
+		sharedMockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+			if (options?.signal?.aborted) {
+				throw new APIUserAbortError()
+			}
+			throw new Error("boom")
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+		const controller = new AbortController()
+		controller.abort()
+
+		const error = await handler.completePrompt("Write a haiku", { abortSignal: controller.signal }).then(
+			() => undefined,
+			(e: unknown) => e,
+		)
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect((error as Error).message.endsWith("aborted")).toBe(true)
+		expect((error as Error).message).not.toContain("completion error")
+	})
+
+	it("completePrompt should surface request timeouts as an AbortError", async () => {
+		// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+		// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+		// are exhausted — verified against openai v5.23.2 against a hung server.
+		sharedMockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+			await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+			throw new APIConnectionTimeoutError()
+		})
+
+		const handler = new UnboundHandler({
+			unboundApiKey: "test-key",
+			unboundModelId: "openai/gpt-4o",
+		})
+
+		const error = await handler.completePrompt("Write a haiku", { timeoutMs: 50 }).then(
+			() => undefined,
+			(e: unknown) => e,
+		)
+		expect(error).toMatchObject({ name: "AbortError" })
+		expect((error as Error).message.endsWith("aborted")).toBe(true)
+		expect((error as Error).message).not.toContain("completion error")
+	})
 	it("completePrompt should work without options (backward compatible)", async () => {
 		sharedMockCreate.mockResolvedValue({
 			choices: [{ message: { content: "completed text" } }],
@@ -294,7 +349,12 @@ describe("UnboundHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
 
-			await expect(collectStream(stream)).rejects.toThrow("Unbound completion error: The operation was aborted.")
+			// The bridge surfaces a DOM-standard AbortError (series standard)
+			// instead of the wrapped completion error.
+			await expect(collectStream(stream)).rejects.toMatchObject({
+				name: "AbortError",
+				message: "Unbound request aborted",
+			})
 			expect(requestError).toMatchObject({ name: "AbortError" })
 		})
 

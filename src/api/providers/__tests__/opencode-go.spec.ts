@@ -9,8 +9,12 @@ vitest.mock("vscode", () => ({
 	},
 }))
 
-import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import {
+	Anthropic,
+	APIConnectionTimeoutError as AnthropicTimeoutError,
+	APIUserAbortError as AnthropicAbortError,
+} from "@anthropic-ai/sdk"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import { opencodeGoDefaultModelId, opencodeGoModels, isOpencodeGoAnthropicFormatModel } from "@roo-code/types"
 
@@ -49,15 +53,22 @@ const mockAnthropicCreate = vitest.fn()
 	}
 })
 
-vitest.mock("@anthropic-ai/sdk", () => ({
-	Anthropic: vitest.fn(function () {
-		return {
-			messages: {
-				create: mockAnthropicCreate,
-			},
-		}
-	}),
-}))
+// The real SDK error classes are re-exported alongside the mocked client so
+// tests can emulate the SDK's abort/timeout rejections and the provider's
+// instanceof checks resolve against the same class identity.
+vitest.mock("@anthropic-ai/sdk", async () => {
+	const actual = await vi.importActual<typeof import("@anthropic-ai/sdk")>("@anthropic-ai/sdk")
+	return {
+		...actual,
+		Anthropic: vitest.fn(function () {
+			return {
+				messages: {
+					create: mockAnthropicCreate,
+				},
+			}
+		}),
+	}
+})
 
 describe("OpencodeGoHandler", () => {
 	const mockOptions: ApiHandlerOptions = {
@@ -709,6 +720,48 @@ describe("OpencodeGoHandler", () => {
 			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
 		})
 
+		it("completePrompt preserves abort identity when the caller aborts (Anthropic path)", async () => {
+			// Emulate the Anthropic SDK: an aborted request signal rejects with
+			// APIUserAbortError ("Request was aborted." — the trailing period would
+			// fail task-level abort detection, so the provider must normalize it).
+			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					throw new AnthropicAbortError()
+				}
+				throw new Error("boom")
+			})
+			const handler = new OpencodeGoHandler(anthropicOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message.endsWith("aborted")).toBe(true)
+			expect((error as Error).message).not.toContain("completion error")
+		})
+
+		it("completePrompt surfaces request timeouts as an AbortError (Anthropic path)", async () => {
+			// Emulate the Anthropic SDK: when the request timeout fires, the SDK
+			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+			// are exhausted — verified against @anthropic-ai/sdk against a hung server.
+			mockAnthropicCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+				throw new AnthropicTimeoutError()
+			})
+			const handler = new OpencodeGoHandler(anthropicOptions)
+
+			const error = await handler.completePrompt("ping", { timeoutMs: 50 }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message.endsWith("aborted")).toBe(true)
+			expect((error as Error).message).not.toContain("completion error")
+		})
+
 		it("completePrompt works without options (backward compatible, Anthropic path)", async () => {
 			mockAnthropicCreate.mockResolvedValue({ content: [{ type: "text", text: "response" }] })
 			const handler = new OpencodeGoHandler(anthropicOptions)
@@ -796,6 +849,48 @@ describe("OpencodeGoHandler", () => {
 				const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]
 				const requestOptions = call[1] as { timeout?: number } | undefined
 				expect(requestOptions).not.toHaveProperty("timeout")
+			})
+
+			it("completePrompt preserves abort identity when the caller aborts (OpenAI path)", async () => {
+				// Emulate the OpenAI SDK: an aborted request signal rejects with
+				// APIUserAbortError ("Request was aborted." — the trailing period would
+				// fail task-level abort detection, so the provider must normalize it).
+				mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+					if (options?.signal?.aborted) {
+						throw new APIUserAbortError()
+					}
+					throw new Error("boom")
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+				const controller = new AbortController()
+				controller.abort()
+
+				const error = await handler.completePrompt("ping", { abortSignal: controller.signal }).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect((error as Error).message.endsWith("aborted")).toBe(true)
+				expect((error as Error).message).not.toContain("completion error")
+			})
+
+			it("completePrompt surfaces request timeouts as an AbortError (OpenAI path)", async () => {
+				// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+				// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+				// are exhausted — verified against openai v5.23.2 against a hung server.
+				mockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+					await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+					throw new APIConnectionTimeoutError()
+				})
+				const handler = new OpencodeGoHandler(openaiOptions)
+
+				const error = await handler.completePrompt("ping", { timeoutMs: 50 }).then(
+					() => undefined,
+					(e: unknown) => e,
+				)
+				expect(error).toMatchObject({ name: "AbortError" })
+				expect((error as Error).message.endsWith("aborted")).toBe(true)
+				expect((error as Error).message).not.toContain("completion error")
 			})
 
 			it("completePrompt works without options (backward compatible, OpenAI path)", async () => {

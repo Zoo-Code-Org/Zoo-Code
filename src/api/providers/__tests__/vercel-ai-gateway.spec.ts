@@ -10,7 +10,7 @@ vitest.mock("vscode", () => ({
 }))
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError, APIUserAbortError } from "openai"
 
 import { VercelAiGatewayHandler } from "../vercel-ai-gateway"
 import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
@@ -776,6 +776,50 @@ describe("VercelAiGatewayHandler", () => {
 			// argument entirely, so absence means: undefined arg OR an arg
 			// without a timeout key.
 			expect(Object.keys(requestOptions ?? {})).not.toContain("timeout")
+		})
+
+		it("should preserve abort identity when the caller aborts", async () => {
+			// Emulate the OpenAI SDK: an aborted request signal rejects with
+			// APIUserAbortError ("Request was aborted." — the trailing period would
+			// fail task-level abort detection, so the provider must normalize it).
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				if (options?.signal?.aborted) {
+					throw new APIUserAbortError()
+				}
+				throw new Error("boom")
+			})
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message.endsWith("aborted")).toBe(true)
+			expect((error as Error).message).not.toContain("completion error")
+		})
+
+		it("should surface request timeouts as an AbortError", async () => {
+			// Emulate the OpenAI SDK: when the request timeout fires, the SDK
+			// surfaces APIConnectionTimeoutError ("Request timed out.") once retries
+			// are exhausted — verified against openai v5.23.2 against a hung server.
+			mockCreate.mockImplementation(async (_params: unknown, options: { timeout?: number }) => {
+				await new Promise((resolve) => setTimeout(resolve, options?.timeout ?? 50))
+				throw new APIConnectionTimeoutError()
+			})
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { timeoutMs: 50 }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message.endsWith("aborted")).toBe(true)
+			expect((error as Error).message).not.toContain("completion error")
 		})
 		it("should work without options (backward compatible)", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
