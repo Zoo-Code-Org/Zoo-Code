@@ -430,6 +430,19 @@ describe("GeminiHandler", () => {
 				},
 			})
 		})
+
+		it("should surface a standard AbortError when the signal was aborted and the request fails", async () => {
+			const controller = new AbortController()
+			controller.abort()
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(new Error("Gemini API error"))
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(DOMException)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("Gemini completion aborted")
+		})
 	})
 
 	describe("getModel", () => {

@@ -53,7 +53,12 @@ import type OpenAI from "openai"
 import { MistralHandler } from "../mistral"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
-import type { ApiStreamTextChunk, ApiStreamReasoningChunk, ApiStreamToolCallPartialChunk } from "../../transform/stream"
+import type {
+	ApiStreamTextChunk,
+	ApiStreamReasoningChunk,
+	ApiStreamToolCallPartialChunk,
+	ApiStreamUsageChunk,
+} from "../../transform/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 describe("MistralHandler", () => {
@@ -233,6 +238,42 @@ describe("MistralHandler", () => {
 			expect(results[0]).toEqual({ type: "text", text: "First text" })
 			expect(results[1]).toEqual({ type: "reasoning", text: "Some reasoning" })
 			expect(results[2]).toEqual({ type: "text", text: "Second text" })
+		})
+
+		it("should yield a usage chunk when the stream event carries usage data", async () => {
+			// The final event carries usage without any delta content; the handler
+			// must translate it into a usage chunk with the reported token counts.
+			mockCreate.mockImplementationOnce(async (_options) =>
+				asyncStreamFrom([
+					{
+						data: {
+							choices: [
+								{
+									delta: { content: "Test response" },
+									index: 0,
+								},
+							],
+						},
+					},
+					{
+						data: {
+							choices: [],
+							usage: { promptTokens: 12, completionTokens: 34 },
+						},
+					},
+				]),
+			)
+
+			const iterator = handler.createMessage(systemPrompt, messages)
+			const results: (ApiStreamTextChunk | ApiStreamUsageChunk)[] = []
+
+			for await (const chunk of iterator) {
+				results.push(chunk as ApiStreamTextChunk | ApiStreamUsageChunk)
+			}
+
+			expect(results).toHaveLength(2)
+			expect(results[0]).toEqual({ type: "text", text: "Test response" })
+			expect(results[1]).toEqual({ type: "usage", inputTokens: 12, outputTokens: 34 })
 		})
 	})
 
@@ -536,6 +577,19 @@ describe("MistralHandler", () => {
 			})
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
 			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
+
+		it("should surface a standard AbortError when the signal was aborted and the request fails", async () => {
+			mockComplete.mockRejectedValueOnce(new Error("API Error"))
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("Test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(DOMException)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("Mistral completion aborted")
 		})
 	})
 

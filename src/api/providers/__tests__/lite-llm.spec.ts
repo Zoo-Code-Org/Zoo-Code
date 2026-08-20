@@ -1278,6 +1278,19 @@ describe("LiteLLMHandler", () => {
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
 			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
 		})
+
+		it("should surface a standard AbortError when the signal was aborted and the request fails", async () => {
+			mockCreate.mockRejectedValueOnce(new Error("LiteLLM API error"))
+			const controller = new AbortController()
+			controller.abort()
+
+			const error = await handler
+				.completePrompt("test prompt", { abortSignal: controller.signal })
+				.catch((e: unknown) => e)
+			expect(error).toBeInstanceOf(DOMException)
+			expect((error as Error).name).toBe("AbortError")
+			expect((error as Error).message).toBe("LiteLLM completion aborted")
+		})
 	})
 
 	describe("createMessage abort signal (bridging)", () => {
