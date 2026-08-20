@@ -345,6 +345,29 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("should normalize an abort error raised during stream iteration into the abort contract", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// The iterator rejects after the first chunk; the provider must normalize
+			// it to the Task.ts contract shape (name + message ending in "aborted").
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
 		it("should still wrap non-abort request errors with the provider prefix", async () => {
 			mockCreate.mockImplementationOnce(() => {
 				throw new Error("boom")

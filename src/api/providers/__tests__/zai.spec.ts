@@ -650,6 +650,34 @@ describe("ZAiHandler", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("createMessage should normalize an abort error raised during stream iteration on the thinking path", async () => {
+			const thinkingHandler = new ZAiHandler({
+				apiModelId: "glm-4.7",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of thinkingHandler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// The thinking path inherits stream iteration from the base provider; a
+			// mid-stream abort must normalize to the Task.ts contract shape.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
 		it("completePrompt should pass the abort signal through to the client", async () => {
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })

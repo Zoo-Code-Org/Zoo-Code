@@ -1021,6 +1021,30 @@ describe("OpenAiHandler", () => {
 			expect(result.message.endsWith("aborted")).toBe(true)
 		})
 
+		it("should normalize an abort error raised during stream iteration into the abort contract", async () => {
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+			const metadata = { taskId: "test-task", abortSignal: controller.signal }
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [], metadata)) {
+						// consume
+					}
+				})(),
+			)
+
+			// The iterator rejects after the first chunk; the provider must normalize
+			// it to the Task.ts contract shape instead of leaking the raw SDK error.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
 		it("should normalize the SDK APIUserAbortError from completePrompt without an external signal", async () => {
 			mockCreate.mockImplementationOnce(() => {
 				throw new APIUserAbortError()
@@ -1070,6 +1094,28 @@ describe("OpenAiHandler", () => {
 					}
 				})(),
 			)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("OpenAI request aborted")
+		})
+
+		it("should normalize an abort error raised during o3-family stream iteration into the abort contract", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new APIUserAbortError()
+				})(),
+			)
+			const o3Handler = new OpenAiHandler({ ...mockOptions, openAiModelId: "o3-mini" })
+			const result = await captureError(
+				(async () => {
+					for await (const _ of o3Handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// handleStreamResponse consumes the iterator; a mid-stream abort must be
+			// normalized to the Task.ts contract shape, not leak as the raw SDK error.
 			expect(result.name).toBe("AbortError")
 			expect(result.message).toBe("OpenAI request aborted")
 		})

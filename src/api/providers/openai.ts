@@ -228,26 +228,32 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			let lastUsage
 			const activeToolCallIds = new Set<string>()
 
-			for await (const chunk of stream) {
-				const delta = chunk.choices?.[0]?.delta ?? {}
-				const finishReason = chunk.choices?.[0]?.finish_reason
+			try {
+				for await (const chunk of stream) {
+					const delta = chunk.choices?.[0]?.delta ?? {}
+					const finishReason = chunk.choices?.[0]?.finish_reason
 
-				if (delta.content) {
-					for (const chunk of matcher.update(delta.content)) {
-						yield chunk
+					if (delta.content) {
+						for (const chunk of matcher.update(delta.content)) {
+							yield chunk
+						}
+					}
+
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
+
+					yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
-
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
-				}
-
-				yield* this.processToolCalls(delta, finishReason, activeToolCallIds)
-
-				if (chunk.usage) {
-					lastUsage = chunk.usage
-				}
+			} catch (error) {
+				// The creation-site catch does not cover errors raised by the async
+				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			for (const chunk of matcher.final()) {
@@ -455,7 +461,13 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
-			yield* this.handleStreamResponse(stream)
+			try {
+				yield* this.handleStreamResponse(stream)
+			} catch (error) {
+				// The creation-site catch does not cover errors raised by the async
+				// iterator itself (e.g. a mid-stream abort); normalize them the same way.
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
+			}
 		} else {
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
 				model: modelId,
