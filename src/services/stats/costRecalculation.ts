@@ -169,10 +169,26 @@ const PROVIDER_MODEL_REGISTRIES: Record<string, Record<string, ModelInfo>> = {
  * `inputTokens` does NOT include cached tokens (cache reads + cache writes
  * are reported separately and added to the total).
  *
+ * For providers that serve multiple model families (e.g. Vertex AI serves
+ * both Claude and Gemini), the semantics depend on the specific model.
+ * Gemini models on Vertex use OpenAI semantics (inputTokens includes
+ * cached tokens), while Claude models use Anthropic semantics.
+ *
  * All other providers follow the OpenAI convention where `inputTokens`
  * already includes cached tokens.
  */
-const ANTHROPIC_SEMANTIC_PROVIDERS = new Set(["anthropic", "bedrock", "vertex"])
+const ANTHROPIC_SEMANTIC_PROVIDERS = new Set(["anthropic", "bedrock"])
+
+function isAnthropicSemantic(provider: string, model: string): boolean {
+	if (ANTHROPIC_SEMANTIC_PROVIDERS.has(provider)) return true
+	if (provider === "vertex") {
+		// Vertex AI serves both Gemini and Claude models.
+		// Gemini models use OpenAI semantics (inputTokens includes cached tokens).
+		// Claude models use Anthropic semantics (inputTokens excludes cached tokens).
+		return !model.toLowerCase().startsWith("gemini")
+	}
+	return false
+}
 
 // ── Model Info Lookup ────────────────────────────────────────────────────────
 
@@ -284,10 +300,10 @@ export function computeEventCost(event: UsageEventV1, customPricing?: CustomMode
 		return 0
 	}
 
-	const isAnthropicSemantic = ANTHROPIC_SEMANTIC_PROVIDERS.has(event.provider)
+	const useAnthropicSemantic = isAnthropicSemantic(event.provider, event.model)
 
 	let result
-	if (isAnthropicSemantic) {
+	if (useAnthropicSemantic) {
 		result = calculateApiCostAnthropic(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
 	} else {
 		result = calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
@@ -447,10 +463,10 @@ export function computeCostFromAggregated(
 		return 0
 	}
 
-	const isAnthropicSemantic = ANTHROPIC_SEMANTIC_PROVIDERS.has(provider)
+	const useAnthropicSemantic = isAnthropicSemantic(provider, model)
 
 	let result
-	if (isAnthropicSemantic) {
+	if (useAnthropicSemantic) {
 		result = calculateApiCostAnthropic(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)
 	} else {
 		result = calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)

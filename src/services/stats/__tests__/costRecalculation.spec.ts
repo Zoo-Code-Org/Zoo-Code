@@ -14,6 +14,7 @@ import {
 	computeCacheDiscountBase,
 	applyCacheDiscount,
 	customPricingKey,
+	computeCostFromAggregated,
 } from "../costRecalculation"
 
 // ── Test Helpers ────────────────────────────────────────────────────────────
@@ -260,6 +261,45 @@ describe("costRecalculation", () => {
 			const cost = computeEventCost(event)
 			expect(cost).toBeGreaterThan(0)
 			expect(cost).toBeCloseTo(1.8, 5)
+		})
+
+		it("should use OpenAI semantics for Vertex Gemini models (inputTokens includes cached tokens)", () => {
+			// Vertex Gemini uses OpenAI semantics: inputTokens includes cacheReadTokens and cacheWriteTokens.
+			// gemini-3.7-flash: inputPrice=$0.75/1M, outputPrice=$3.75/1M, cacheReadsPrice=$0.075/1M, cacheWritesPrice=$0.5/1M
+			const event = makeEvent({
+				provider: "vertex",
+				model: "gemini-3.7-flash",
+				usage: {
+					inputTokens: { value: 1_000_000, source: "provider" },
+					outputTokens: { value: 100_000, source: "provider" },
+					cacheWriteTokens: { value: 100_000, source: "provider" },
+					cacheReadTokens: { value: 200_000, source: "provider" },
+				},
+			})
+			// nonCachedInputTokens = 1,000,000 - 200,000 - 100,000 = 700,000
+			// cost = 0.7M * $0.75 + 0.1M * $0.5 + 0.2M * $0.075 + 0.1M * $3.75
+			//      = 0.525 + 0.05 + 0.015 + 0.375 = 0.965
+			const cost = computeEventCost(event)
+			expect(cost).toBeCloseTo(0.965, 5)
+		})
+
+		it("should use Anthropic semantics for Vertex Claude models (inputTokens excludes cached tokens)", () => {
+			// Vertex Claude uses Anthropic semantics: inputTokens does NOT include cached tokens.
+			// claude-sonnet-4-5@20250929: inputPrice=$3.0/1M, outputPrice=$15.0/1M, cacheReadsPrice=$0.30/1M, cacheWritesPrice=$3.75/1M
+			const event = makeEvent({
+				provider: "vertex",
+				model: "claude-sonnet-4-5@20250929",
+				usage: {
+					inputTokens: { value: 100_000, source: "provider" },
+					outputTokens: { value: 10_000, source: "provider" },
+					cacheWriteTokens: { value: 10_000, source: "provider" },
+					cacheReadTokens: { value: 20_000, source: "provider" },
+				},
+			})
+			// cost = 0.1M * $3.0 + 0.01M * $3.75 + 0.02M * $0.30 + 0.01M * $15.0
+			//      = 0.30 + 0.0375 + 0.006 + 0.15 = 0.4935
+			const cost = computeEventCost(event)
+			expect(cost).toBeCloseTo(0.4935, 5)
 		})
 	})
 
@@ -746,6 +786,42 @@ describe("costRecalculation", () => {
 			// With cacheRatio=0.5: discounted = 3.0 − 0.5 × 2.7 = 1.65
 			const discounted = applyCacheDiscount(cost, discountBase, 0.5)
 			expect(discounted).toBeCloseTo(1.65, 10)
+		})
+	})
+
+	describe("computeCostFromAggregated", () => {
+		it("should use OpenAI semantics for Vertex Gemini models", () => {
+			// gemini-3.7-flash: inputPrice=$0.75/1M, outputPrice=$3.75/1M, cacheReadsPrice=$0.075/1M, cacheWritesPrice=$0.5/1M
+			// inputTokens = 1,000,000, outputTokens = 100,000, cacheWriteTokens = 100,000, cacheReadTokens = 200,000
+			// nonCachedInputTokens = 1,000,000 - 200,000 - 100,000 = 700,000
+			// cost = 0.7M * $0.75 + 0.1M * $0.5 + 0.2M * $0.075 + 0.1M * $3.75 = 0.965
+			const cost = computeCostFromAggregated("vertex", "gemini-3.7-flash", 1_000_000, 100_000, 100_000, 200_000)
+			expect(cost).toBeCloseTo(0.965, 5)
+		})
+
+		it("should use Anthropic semantics for Vertex Claude models", () => {
+			// claude-sonnet-4-5@20250929: inputPrice=$3.0/1M, outputPrice=$15.0/1M, cacheReadsPrice=$0.30/1M, cacheWritesPrice=$3.75/1M
+			// inputTokens = 100,000, outputTokens = 10,000, cacheWriteTokens = 10,000, cacheReadTokens = 20,000
+			// cost = 0.1M * $3.0 + 0.01M * $3.75 + 0.02M * $0.30 + 0.01M * $15.0 = 0.4935
+			const cost = computeCostFromAggregated(
+				"vertex",
+				"claude-sonnet-4-5@20250929",
+				100_000,
+				10_000,
+				10_000,
+				20_000,
+			)
+			expect(cost).toBeCloseTo(0.4935, 5)
+		})
+
+		it("should return 0 when all token counts are zero", () => {
+			const cost = computeCostFromAggregated("vertex", "gemini-3.7-flash", 0, 0, 0, 0)
+			expect(cost).toBe(0)
+		})
+
+		it("should return 0 for unknown provider", () => {
+			const cost = computeCostFromAggregated("unknown-provider", "unknown-model", 1000, 1000, 0, 0)
+			expect(cost).toBe(0)
 		})
 	})
 })
