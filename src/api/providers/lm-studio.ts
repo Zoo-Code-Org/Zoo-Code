@@ -38,8 +38,10 @@ type OpenAiRequestOptions = {
 
 /**
  * Whether a failure indicates an aborted request: the caller's signal fired,
- * the SDK raised a native abort error, or the error message mentions an
- * aborted request.
+ * the SDK raised a native abort error, or the error carries the OpenAI SDK
+ * abort error message (exactly "Request was aborted."). The message check
+ * is an exact match on purpose: a substring match would misclassify
+ * unrelated errors that merely mention aborting.
  */
 function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
 	const candidate = error as { name?: string; message?: string }
@@ -47,7 +49,7 @@ function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
 		Boolean(signal?.aborted) ||
 		candidate?.name === "AbortError" ||
 		candidate?.name === "APIUserAbortError" ||
-		(typeof candidate?.message === "string" && candidate.message.includes("abort"))
+		candidate?.message === "Request was aborted."
 	)
 }
 
@@ -252,6 +254,10 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		} finally {
+			// Cancel the in-flight SDK request if the consumer stopped iterating
+			// early (break or return): the external signal may never fire in that
+			// case, and only the request-local signal reaches the SDK.
+			requestController.abort()
 			if (externalSignal) {
 				externalSignal.removeEventListener("abort", onExternalAbort)
 			}
