@@ -18,7 +18,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 /**
  * Configuration options for creating an OpenAI-compatible provider.
@@ -214,7 +214,10 @@ export abstract class OpenAICompatibleHandler extends BaseProvider implements Si
 			temperature: this.config.temperature ?? 0,
 		}
 
-		const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		const mergedAbortSignal = RequestConfigBuilder.mergeAbortSignalAndTimeout(
+			options?.abortSignal,
+			options?.timeoutMs,
+		)
 		if (mergedAbortSignal) {
 			generateOptions.abortSignal = mergedAbortSignal
 		}

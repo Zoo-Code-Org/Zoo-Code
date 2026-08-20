@@ -32,7 +32,7 @@ import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
@@ -1552,7 +1552,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Request-local abort signal: merges the external abort signal with an optional
 		// timeout without touching this.abortController (owned by streaming requests).
 		const requestSignal =
-			mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs) ?? new AbortController().signal
+			RequestConfigBuilder.mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs) ??
+			new AbortController().signal
 
 		try {
 			const model = this.getModel()
