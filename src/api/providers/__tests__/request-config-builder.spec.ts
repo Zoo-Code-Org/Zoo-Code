@@ -535,5 +535,14 @@ describe("RequestConfigBuilder", () => {
 			b.abort()
 			expect(merged.aborted).toBe(true)
 		})
+
+		it("aborts the merged signal when the primary signal aborts", () => {
+			const a = new AbortController()
+			const b = new AbortController()
+			const merged = RequestConfigBuilder.mergeAbortSignals(a.signal, b.signal)
+			expect(merged.aborted).toBe(false)
+			a.abort()
+			expect(merged.aborted).toBe(true)
+		})
 	})
 })
