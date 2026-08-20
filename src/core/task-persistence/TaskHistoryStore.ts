@@ -42,7 +42,24 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 		if (!existing || typeof existing !== "object" || !("id" in existing)) {
 			return incoming
 		}
-		return { ...existing, ...delta }
+		const disk = existing as HistoryItem
+		if (delta.status !== undefined) {
+			const diskStatus: HistoryItemStatus = disk.status ?? "active"
+			if (delta.status !== diskStatus) {
+				const validTargets = VALID_TRANSITIONS[diskStatus]
+				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
+					console.warn(
+						`[TaskHistoryStore] Dropped stale delta for task ${disk.id}: disk status ${diskStatus} rejects transition to ${delta.status}`,
+					)
+					return disk
+				}
+			}
+		}
+		const merged = { ...disk, ...delta }
+		if (delta.childIds && disk.childIds) {
+			merged.childIds = [...new Set([...disk.childIds, ...delta.childIds])]
+		}
+		return merged
 	}
 }
 
@@ -131,7 +148,7 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Lifecycle ──────────────────────────────
 
 	/**
-	 * Load index, reconcile if needed, start watchers.
+	 * Scan task files, reconcile delegation state, start watchers.
 	 */
 	async initialize(): Promise<void> {
 		try {
@@ -211,8 +228,8 @@ export class TaskHistoryStore {
 	/**
 	 * Insert or update a history item.
 	 *
-	 * Writes the per-task file immediately (source of truth),
-	 * updates the in-memory Map, and schedules a debounced index write.
+	 * Writes the per-task file immediately (source of truth)
+	 * and updates the in-memory cache.
 	 */
 	async upsert(item: HistoryItem): Promise<HistoryItem[]> {
 		return this.withLock(() => this.upsertCore(item))
@@ -239,18 +256,25 @@ export class TaskHistoryStore {
 		if (!options.skipTransitionCheck && existing && item.status !== undefined) {
 			const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
 			if (item.status !== normalizedExisting) {
-				assertValidTransition(existing.status, item.status)
+				try {
+					assertValidTransition(existing.status, item.status)
+				} catch {
+					// Cache may be stale from a peer write. Re-read disk
+					// under the store lock before rejecting the transition.
+					const diskItem = await this.readTaskFile(item.id)
+					assertValidTransition(diskItem?.status, item.status)
+				}
 			}
 		}
 
 		// Merge: preserve existing metadata unless explicitly overwritten
 		const merged = existing ? { ...existing, ...item } : item
 
-		const delta = existing ? ({ id: item.id, ...this.computeDelta(existing, item) } as HistoryItem) : undefined
-		await this.writeTaskFile(merged, delta)
+		const delta = existing ? this.buildDelta(item.id, existing, item) : undefined
+		const written = await this.writeTaskFile(merged, delta)
 
-		// Update in-memory cache
-		this.cache.set(merged.id, merged)
+		// Update in-memory cache with what was actually persisted
+		this.cache.set(written.id, written)
 
 		const all = this.getAll()
 
@@ -312,7 +336,7 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Reconciliation ──────────────────────────────
 
 	/**
-	 * Scan task directories vs index and fix any drift.
+	 * Scan task directories and fix any drift between disk and cache.
 	 *
 	 * - Tasks on disk but missing from cache: read and add
 	 * - Tasks in cache but missing from disk: remove
@@ -350,7 +374,7 @@ export class TaskHistoryStore {
 					}
 
 					const item = await this.readTaskFile(taskId)
-					if (item) {
+					if (item?.id === taskId) {
 						const previous = this.cache.get(taskId)
 						this.taskFileMtimes.set(taskId, mtimeMs)
 						if (!deepEqual(previous, item)) {
@@ -358,7 +382,17 @@ export class TaskHistoryStore {
 						}
 					}
 				} catch {
-					// history_item.json missing or corrupt — not live
+					// File may be temporarily absent during a peer's atomic
+					// rename window in safeWriteJson. The advisory lock is
+					// held for the entire write, so its presence means a
+					// write is in progress — keep the task live.
+					try {
+						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
+						await fs.access(lockPath)
+						liveIds.add(taskId)
+					} catch {
+						// No lock file — file is genuinely absent
+					}
 				}
 			}
 
@@ -403,7 +437,7 @@ export class TaskHistoryStore {
 	 * Reconcile delegation state while the store lock is already held.
 	 *
 	 * Callers that do not hold the lock must use `reconcileDelegationState()`.
-	 * Migration uses this core method so its cache/file/index updates and the
+	 * Migration uses this core method so its cache/file updates and the
 	 * follow-up repair remain one serialized operation without re-entering the
 	 * non-reentrant lock.
 	 */
@@ -828,6 +862,10 @@ export class TaskHistoryStore {
 		) as Partial<HistoryItem>
 	}
 
+	private buildDelta(id: string, cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
+		return { id, ...this.computeDelta(cached, incoming) }
+	}
+
 	/**
 	 * Write a HistoryItem to its per-task `history_item.json` file.
 	 *
@@ -836,12 +874,22 @@ export class TaskHistoryStore {
 	 * process are preserved. Without a delta the full item is written
 	 * as-is (used by administrative repair paths that are authoritative).
 	 */
-	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<void> {
+	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
 		if (delta) {
-			await safeWriteJson(filePath, item, { merge: mergeWithDisk(delta) })
+			let written: HistoryItem = item
+			const mergeFn = mergeWithDisk(delta)
+			await safeWriteJson(filePath, item, {
+				merge: (existing, incoming) => {
+					const result = mergeFn(existing, incoming)
+					written = result as HistoryItem
+					return result
+				},
+			})
+			return written
 		} else {
 			await safeWriteJson(filePath, item)
+			return item
 		}
 	}
 
@@ -963,10 +1011,11 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Atomically update two related HistoryItems within a single lock acquisition.
-	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes are
-	 * committed before the lock releases — no concurrent writer can observe an
-	 * intermediate state.
+	 * Update two related HistoryItems within a single in-process lock acquisition.
+	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes
+	 * complete before the lock releases, so no in-process reader can observe an
+	 * intermediate state. Cross-process atomicity is NOT guaranteed — each
+	 * writeTaskFile call acquires and releases its own advisory file lock.
 	 *
 	 * @throws If either task ID is not present in the cache.
 	 */
@@ -1013,18 +1062,15 @@ export class TaskHistoryStore {
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
 
-			await this.writeTaskFile(mergedFirst, {
-				id: firstId,
-				...this.computeDelta(first, updatedFirst),
-			} as HistoryItem)
-			await this.writeTaskFile(mergedSecond, {
-				id: secondId,
-				...this.computeDelta(second, updatedSecond),
-			} as HistoryItem)
+			const writtenFirst = await this.writeTaskFile(mergedFirst, this.buildDelta(firstId, first, updatedFirst))
+			const writtenSecond = await this.writeTaskFile(
+				mergedSecond,
+				this.buildDelta(secondId, second, updatedSecond),
+			)
 
 			// Both disk writes succeeded — now update the cache atomically.
-			this.cache.set(firstId, mergedFirst)
-			this.cache.set(secondId, mergedSecond)
+			this.cache.set(firstId, writtenFirst)
+			this.cache.set(secondId, writtenSecond)
 
 			const all = this.getAll()
 			if (this.onWrite) {

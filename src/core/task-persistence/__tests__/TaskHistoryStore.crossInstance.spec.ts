@@ -240,6 +240,47 @@ describe("TaskHistoryStore cross-instance safety", () => {
 	})
 
 	/**
+	 * Regression: a stale host whose cache says "active" tries to write
+	 * status: "delegated" after a peer already wrote "completed" to disk.
+	 * The merge must reject the entire delta (including companion fields)
+	 * to prevent an internally-inconsistent record.
+	 */
+	it("merge rejects an invalid status transition against disk and drops the entire delta", async () => {
+		await storeA.initialize()
+
+		const base = makeHistoryItem({ id: "guarded-task", status: "active", totalCost: 0.01, ts: 1000 })
+		await storeA.upsert(base)
+
+		// Peer writes terminal "completed" directly to disk.
+		const filePath = path.join(tmpDir, "tasks", "guarded-task", GlobalFileNames.historyItem)
+		const onDisk = JSON.parse(await fs.readFile(filePath, "utf8"))
+		onDisk.status = "completed"
+		onDisk.completionResultSummary = "done by peer"
+		await fs.writeFile(filePath, JSON.stringify(onDisk), "utf8")
+
+		// Host A's cache still has "active". It tries to delegate (active → delegated
+		// passes the cache check, but completed → delegated is invalid on disk).
+		const staleItem = storeA.get("guarded-task")!
+		await storeA.upsert({
+			...staleItem,
+			status: "delegated",
+			awaitingChildId: "child-99",
+			delegatedToId: "child-99",
+		})
+
+		const final = JSON.parse(await fs.readFile(filePath, "utf8")) as HistoryItem
+		// Terminal status must survive.
+		expect(final.status).toBe("completed")
+		expect(final.completionResultSummary).toBe("done by peer")
+		// Companion fields from the rejected delta must NOT be applied.
+		expect(final.awaitingChildId).toBeUndefined()
+		expect(final.delegatedToId).toBeUndefined()
+
+		// Cache must reflect the disk state, not the stale delta.
+		expect(storeA.get("guarded-task")!.status).toBe("completed")
+	})
+
+	/**
 	 * When both hosts change the same field, the last writer wins.
 	 * This is expected — true conflict resolution requires application
 	 * semantics that a generic merge cannot provide.
