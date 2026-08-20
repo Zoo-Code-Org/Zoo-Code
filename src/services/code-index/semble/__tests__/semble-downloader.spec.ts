@@ -97,6 +97,7 @@ import {
 	downloadSemble,
 	getSembleBinaryPath,
 	SEMBLE_SHA256,
+	SEMBLE_MAX_ARCHIVE_BYTES,
 } from "../semble-downloader"
 import * as https from "https"
 import { spawn } from "child_process"
@@ -108,6 +109,12 @@ import { spawn } from "child_process"
 describe("SEMBLE_SHA256 checksum fixture", () => {
 	it("the local CHECKSUMS table matches the exported SEMBLE_SHA256 constant", () => {
 		expect(CHECKSUMS).toEqual(SEMBLE_SHA256)
+	})
+})
+
+describe("Semble archive download limit", () => {
+	it("allows 100 MiB for future release growth", () => {
+		expect(SEMBLE_MAX_ARCHIVE_BYTES).toBe(100 * 1024 * 1024)
 	})
 })
 
