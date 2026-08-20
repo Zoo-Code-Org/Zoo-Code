@@ -53,6 +53,13 @@ for (const theme of themes) {
 			</div>,
 		)
 
+		await component.evaluate(async () => {
+			await document.fonts.ready
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+		})
+
+		await expect(component).toHaveScreenshot(`chat-controls-resting-${theme.name}.png`)
+
 		const trigger = component.getByTestId("dropdown-trigger")
 		await expect(trigger).toHaveCSS("border-color", theme.expected.dropdownBorder)
 		await trigger.hover()
@@ -63,6 +70,8 @@ for (const theme of themes) {
 		await expect
 			.poll(() => trigger.evaluate((element) => getComputedStyle(element).boxShadow))
 			.toContain(theme.expected.focusBorder)
+
+		await expect(component).toHaveScreenshot(`chat-controls-focus-${theme.name}.png`)
 
 		await component.getByRole("button", { name: "Edit" }).click()
 		await component.getByTitle("Remove").click()
@@ -75,5 +84,7 @@ for (const theme of themes) {
 			theme.expected.description,
 		)
 		await expect(page.getByRole("button", { name: "Delete" })).toHaveCSS("color", theme.expected.error)
+
+		await expect(dialog).toHaveScreenshot(`chat-controls-delete-dialog-${theme.name}.png`)
 	})
 }
