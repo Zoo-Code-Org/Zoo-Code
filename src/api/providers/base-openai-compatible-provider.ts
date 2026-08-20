@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIUserAbortError } from "openai"
 
 import type { ModelInfo } from "@roo-code/types"
 
@@ -14,6 +14,8 @@ import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -21,6 +23,32 @@ type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerO
 	defaultProviderModelId: ModelName
 	providerModels: Record<ModelName, ModelInfo>
 	defaultTemperature?: number
+}
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	signal?: AbortSignal
+}
+
+/**
+ * Handles errors from OpenAI Node SDK request sites with abort awareness.
+ *
+ * An abort failure (the external signal already aborted, the SDK's
+ * APIUserAbortError, or a fetch-level AbortError) is normalized to a fresh
+ * Error with name "AbortError" and a message ending in "aborted" (the Task.ts
+ * contract) instead of being wrapped as a regular completion error, which a
+ * plain rethrow of the SDK abort error would produce.
+ */
+export function handleOpenAIRequestError(error: unknown, providerName: string, abortSignal?: AbortSignal): Error {
+	if (
+		abortSignal?.aborted ||
+		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
+	) {
+		const aborted = new Error(`${providerName} request aborted`, { cause: error })
+		aborted.name = "AbortError"
+		return aborted
+	}
+	return handleOpenAIError(error, providerName)
 }
 
 export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
@@ -67,7 +95,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		})
 	}
 
-	protected createStream(
+	protected async createStream(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
@@ -104,9 +132,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 
 		try {
-			return this.client.chat.completions.create(params, requestOptions)
+			return await this.client.chat.completions.create(params, requestOptions)
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 		}
 	}
 
@@ -115,7 +143,12 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const stream = await this.createStream(systemPrompt, messages, metadata)
+		throwIfAborted(metadata?.abortSignal)
+
+		// Per-request abort wiring (RequestConfigBuilder adoption): subclasses inherit
+		// it by receiving the built config as createStream's requestOptions.
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>().setAbortSignal(metadata).build()
+		const stream = await this.createStream(systemPrompt, messages, metadata, requestConfig)
 
 		const matcher = new TagMatcher(
 			["think", "thought"],
@@ -213,6 +246,8 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+
 		const { id: modelId, info: modelInfo } = this.getModel()
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
@@ -225,8 +260,15 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			;(params as any).thinking = { type: "enabled" }
 		}
 
+		// CompletePromptOptions is not ApiHandlerCreateMessageMetadata (required taskId),
+		// so the abort/timeout merge goes through setOption; the helper treats
+		// timeoutMs <= 0 as "no explicit timeout".
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
+			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.build()
+
 		try {
-			const response = await this.client.chat.completions.create(params)
+			const response = await this.client.chat.completions.create(params, requestConfig)
 
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const responseAny = response as any
@@ -238,7 +280,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
 		}
 	}
 

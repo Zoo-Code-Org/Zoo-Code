@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI, { AzureOpenAI } from "openai"
+import OpenAI, { AzureOpenAI, APIUserAbortError } from "openai"
 import axios from "axios"
 
 import {
@@ -26,6 +26,35 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	path?: string
+	signal?: AbortSignal
+}
+
+/**
+ * Handles errors from OpenAI Node SDK request sites with abort awareness.
+ *
+ * An abort failure (the external signal already aborted, the SDK's
+ * APIUserAbortError, or a fetch-level AbortError) is normalized to a fresh
+ * Error with name "AbortError" and a message ending in "aborted" (the Task.ts
+ * contract) instead of being wrapped as a regular completion error, which a
+ * plain rethrow of the SDK abort error would produce.
+ */
+function handleOpenAIRequestError(error: unknown, providerName: string, abortSignal?: AbortSignal): Error {
+	if (
+		abortSignal?.aborted ||
+		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
+	) {
+		const aborted = new Error(`${providerName} request aborted`, { cause: error })
+		aborted.name = "AbortError"
+		return aborted
+	}
+	return handleOpenAIError(error, providerName)
+}
 
 // TODO: Rename this to OpenAICompatibleHandler. Also, I think the
 // `OpenAINativeHandler` can subclass from this, since it's obviously
@@ -84,6 +113,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		throwIfAborted(metadata?.abortSignal)
+
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
 		const modelId = this.options.openAiModelId ?? ""
@@ -179,10 +210,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				stream = await this.client.chat.completions.create(
 					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(isAzureAiInference, metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const matcher = new TagMatcher(
@@ -245,10 +276,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(
 					requestOptions,
-					this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(this._isAzureAiInference(modelUrl), metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const message = response.choices?.[0]?.message
@@ -299,6 +330,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+
 		try {
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
@@ -316,14 +349,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(
 					requestOptions,
-					isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildCompletePromptRequestConfig(isAzureAiInference, options),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
 			}
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				// Preserve the normalized abort error (name + message contract) as-is.
+				throw error
+			}
 			if (error instanceof Error) {
 				const wrapped = new Error(`${this.providerName} completion error: ${error.message}`, { cause: error })
 				const source = error as Error & { status?: number; errorDetails?: unknown; code?: unknown }
@@ -336,6 +373,40 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			throw error
 		}
+	}
+
+	/**
+	 * Builds the per-request OpenAI SDK options for a chat completions create
+	 * (createMessage paths): the Azure AI Inference path when applicable, plus
+	 * the caller's abort signal, via RequestConfigBuilder adoption.
+	 */
+	private buildChatRequestConfig(
+		isAzureAiInference: boolean,
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): OpenAI.RequestOptions {
+		return (
+			new RequestConfigBuilder<OpenAiRequestConfig>()
+				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
+				.setAbortSignal(metadata)
+				.build() ?? {}
+		)
+	}
+
+	/**
+	 * Builds the per-request options for completePrompt. CompletePromptOptions
+	 * is not ApiHandlerCreateMessageMetadata (required taskId), so the merged
+	 * abort/timeout signal goes through setOption instead of setAbortSignal.
+	 */
+	private buildCompletePromptRequestConfig(
+		isAzureAiInference: boolean,
+		options?: CompletePromptOptions,
+	): OpenAI.RequestOptions {
+		return (
+			new RequestConfigBuilder<OpenAiRequestConfig>()
+				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
+				.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+				.build() ?? {}
+		)
 	}
 
 	private async *handleO3FamilyMessage(
@@ -378,10 +449,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				stream = await this.client.chat.completions.create(
 					requestOptions,
-					methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(methodIsAzureAiInference, metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			yield* this.handleStreamResponse(stream)
@@ -412,10 +483,10 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(
 					requestOptions,
-					methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {},
+					this.buildChatRequestConfig(methodIsAzureAiInference, metadata),
 				)
 			} catch (error) {
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
 			const message = response.choices?.[0]?.message

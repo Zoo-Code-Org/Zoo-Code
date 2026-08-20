@@ -1,7 +1,7 @@
 // npx vitest run api/providers/__tests__/base-openai-compatible-provider.spec.ts
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIUserAbortError } from "openai"
 
 import type { ModelInfo } from "@roo-code/types"
 
@@ -14,6 +14,8 @@ const mockCreate = vi.fn()
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
+	// Named export consumed by the provider for abort-error normalization
+	APIUserAbortError: class extends Error {},
 	default: vi.fn(function () {
 		return {
 			chat: {
@@ -47,6 +49,20 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 			apiKey,
 		})
 	}
+}
+
+/**
+ * Captures the rejection of an operation as an Error. The abort contract always
+ * throws an Error; the guard keeps strict typing without a cast. Fails the test
+ * if the operation resolves.
+ */
+async function captureError(operation: Promise<unknown>): Promise<Error> {
+	try {
+		await operation
+	} catch (error) {
+		return error instanceof Error ? error : new Error(String(error))
+	}
+	throw new Error("Expected the operation to reject")
 }
 
 describe("BaseOpenAiCompatibleProvider", () => {
@@ -275,6 +291,128 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			expect(firstChunk.done).toBe(false)
 			expect(firstChunk.value).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 50 })
+		})
+	})
+
+	describe("abort signal wiring", () => {
+		it("should pass the metadata abort signal to the client request", async () => {
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const stream = handler.createMessage("system prompt", [], {
+				taskId: "test-task",
+				abortSignal: controller.signal,
+			})
+			await stream.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "test-model" }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should reject before issuing any request when the abort signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(async () => {
+				for await (const _ of handler.createMessage("system prompt", [], {
+					taskId: "test-task",
+					abortSignal: controller.signal,
+				})) {
+					// consume
+				}
+			}).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should normalize the SDK APIUserAbortError from the stream path into the abort contract", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// The SDK error has name "Error" and a message ending in a period; the
+			// provider must rethrow the Task.ts contract shape instead.
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
+			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should still wrap non-abort request errors with the provider prefix", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new Error("boom")
+			})
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.message).toBe("TestProvider completion error: boom")
+		})
+
+		it("should pass the completePrompt abort signal to the client request", async () => {
+			const controller = new AbortController()
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			const result = await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+			expect(result).toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "test-model" }), {
+				signal: controller.signal,
+			})
+		})
+
+		it("should merge completePrompt timeoutMs into the request signal", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+
+			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
+			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(requestOptions?.signal.aborted).toBe(false)
+		})
+
+		it("should not set a request signal for zero completePrompt timeoutMs", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: "test-model" }), undefined)
+		})
+
+		it("should reject before any request when the completePrompt signal is already aborted", async () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "This operation was aborted",
+			})
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("should normalize the SDK APIUserAbortError from completePrompt", async () => {
+			mockCreate.mockImplementationOnce(() => {
+				throw new APIUserAbortError()
+			})
+
+			const result = await captureError(handler.completePrompt("test prompt"))
+
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
 		})
 	})
 

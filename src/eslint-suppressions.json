@@ -164,11 +164,6 @@
 			"count": 1
 		}
 	},
-	"api/providers/__tests__/kimi-code.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/lite-llm.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 36

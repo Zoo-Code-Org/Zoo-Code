@@ -14,9 +14,10 @@ import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/ap
 import { convertToZAiFormat } from "../transform/zai-format"
 
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
+import { BaseOpenAiCompatibleProvider, handleOpenAIRequestError } from "./base-openai-compatible-provider"
 import { NOT_PROVIDED } from "./constants"
-import { handleOpenAIError } from "./utils/error-handler"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
 // Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
@@ -25,6 +26,11 @@ import { handleOpenAIError } from "./utils/error-handler"
 type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParams, "reasoning_effort"> & {
 	thinking?: { type: "enabled" | "disabled"; clear_thinking?: boolean }
 	reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+}
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	signal?: AbortSignal
 }
 
 export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
@@ -62,8 +68,10 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		const isThinkingModel = Array.isArray(info.supportsReasoningEffort)
 
 		if (isThinkingModel) {
-			// Create the stream with our custom thinking parameter
-			return this.createStreamWithThinking(systemPrompt, messages, metadata)
+			// Create the stream with our custom thinking parameter.
+			// Forward the per-request options (abort signal) so the thinking path
+			// keeps them instead of dropping requestOptions.
+			return this.createStreamWithThinking(systemPrompt, messages, metadata, requestOptions)
 		}
 
 		// For non-thinking models, use the default behavior
@@ -73,10 +81,11 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 	/**
 	 * Creates a stream with explicit thinking control for GLM thinking-capable models.
 	 */
-	private createStreamWithThinking(
+	private async createStreamWithThinking(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
+		requestOptions?: OpenAI.RequestOptions,
 	) {
 		const { id: model, info } = this.getModel()
 		const { reasoningEffort, useReasoning } = this.getReasoningSettings(info)
@@ -114,11 +123,12 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		}
 
 		try {
-			return this.client.chat.completions.create(
+			return await this.client.chat.completions.create(
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+				requestOptions,
 			)
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 		}
 	}
 
@@ -147,6 +157,8 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			return super.completePrompt(prompt, options)
 		}
 
+		throwIfAborted(options?.abortSignal)
+
 		const { reasoningEffort } = this.getReasoningSettings(info)
 		const params: ZAiChatCompletionParams = {
 			model,
@@ -156,13 +168,21 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			reasoning_effort: reasoningEffort,
 		}
 
+		// CompletePromptOptions is not ApiHandlerCreateMessageMetadata (required
+		// taskId), so the abort/timeout merge goes through setOption; the helper
+		// treats timeoutMs <= 0 as "no explicit timeout".
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
+			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.build()
+
 		try {
 			const response = await this.client.chat.completions.create(
 				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
+				requestConfig,
 			)
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal)
 		}
 	}
 }
