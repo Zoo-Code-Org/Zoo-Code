@@ -16,6 +16,7 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 /**
  * LiteLLM provider handler
@@ -376,15 +377,17 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				requestOptions.max_tokens = info.maxTokens
 			}
 
-			// Build request options with abortSignal and/or timeout. The OpenAI SDK
-			// treats a timeout of 0 as an immediate timeout, so non-positive timeoutMs
-			// values disable the timeout instead of being forwarded.
+			// Build request options with abortSignal and/or timeout. Per the
+			// abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely, because the OpenAI SDK treats
+			// a timeout of 0 as an immediate timeout.
 			const createOptions: OpenAI.RequestOptions = {}
 			if (options?.abortSignal) {
 				createOptions.signal = options.abortSignal
 			}
-			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
-				createOptions.timeout = options.timeoutMs
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				createOptions.timeout = timeoutMs
 			}
 
 			const response = await this.client.chat.completions.create(

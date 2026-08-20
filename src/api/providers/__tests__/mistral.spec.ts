@@ -530,14 +530,12 @@ describe("MistralHandler", () => {
 			})
 		})
 
-		it("should still forward timeoutMs=0 (uses !== undefined check, not truthy check)", async () => {
+		it("should omit the timeout option for timeoutMs=0 (0 disables the timeout)", async () => {
 			mockComplete.mockResolvedValueOnce({
 				choices: [{ message: { content: "response" } }],
 			})
 			await handler.completePrompt("test prompt", { timeoutMs: 0 })
-			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				timeoutMs: 0,
-			})
+			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
 		})
 	})
 

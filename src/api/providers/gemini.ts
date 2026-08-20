@@ -27,6 +27,7 @@ import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, Complete
 import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
 	isVertex?: boolean
@@ -618,8 +619,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 				: info.defaultTemperature
 			const httpOpts: { timeout?: number; baseUrl?: string } = {}
-			if (options?.timeoutMs !== undefined) {
-				httpOpts.timeout = options.timeoutMs
+			// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely (some SDKs treat 0 as an
+			// immediate timeout).
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				httpOpts.timeout = timeoutMs
 			}
 			if (this.options.googleGeminiBaseUrl) {
 				httpOpts.baseUrl = this.options.googleGeminiBaseUrl

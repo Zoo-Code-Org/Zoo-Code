@@ -55,7 +55,7 @@ describe("GeminiHandler backend support", () => {
 		expect(promptConfig.tools).toBeUndefined()
 	})
 
-	it("completePrompt should pass abort signal through to client via httpOptions", async () => {
+	it("completePrompt should pass abort signal through to client via config.abortSignal", async () => {
 		const options = {
 			apiProvider: "gemini",
 			enableUrlContext: false,

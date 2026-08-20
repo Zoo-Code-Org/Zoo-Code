@@ -1272,6 +1272,12 @@ describe("LiteLLMHandler", () => {
 			const result = await handler.completePrompt("test prompt")
 			expect(result).toBe("response")
 		})
+
+		it("should omit the timeout option for timeoutMs=0 (0 would abort immediately in the OpenAI SDK)", async () => {
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
+		})
 	})
 
 	describe("createMessage abort signal (bridging)", () => {

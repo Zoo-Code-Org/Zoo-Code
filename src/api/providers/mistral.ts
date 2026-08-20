@@ -16,6 +16,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
 import { handleProviderError } from "./utils/error-handler"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -233,8 +234,11 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 			if (options?.abortSignal) {
 				requestOptions.fetchOptions = { signal: options.abortSignal }
 			}
-			if (options?.timeoutMs !== undefined) {
-				requestOptions.timeoutMs = options.timeoutMs
+			// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely.
+			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+			if (timeoutMs !== undefined) {
+				requestOptions.timeoutMs = timeoutMs
 			}
 
 			const response = await this.client.chat.complete(

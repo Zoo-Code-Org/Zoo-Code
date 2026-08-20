@@ -415,6 +415,21 @@ describe("GeminiHandler", () => {
 				},
 			})
 		})
+
+		it("should omit httpOptions entirely for timeoutMs=0 (0 disables the timeout)", async () => {
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("response"),
+			)
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			expect(handler["client"].models.generateContent).toHaveBeenCalledWith({
+				model: GEMINI_MODEL_NAME,
+				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
+				config: {
+					httpOptions: undefined,
+					temperature: 1,
+				},
+			})
+		})
 	})
 
 	describe("getModel", () => {
