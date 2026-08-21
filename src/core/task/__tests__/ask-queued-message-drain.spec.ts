@@ -1,5 +1,12 @@
 import { Task } from "../Task"
 
+type QueueTaskTestAccess = {
+	say: Task["say"]
+	saveClineMessages: () => Promise<boolean>
+}
+
+const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
+
 // Keep this test focused: if a queued message arrives while Task.ask() is blocked,
 // it should be consumed and used to fulfill the ask.
 
@@ -85,6 +92,33 @@ describe("Task.ask queued message drain", () => {
 		const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
 
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Use this context" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it.each([
+		["command", "npm test"],
+		["use_mcp_server", "{}"],
+		["tool", "not-json"],
+	] as const)("preserves approve-with-feedback behavior for %s asks", async (type, text) => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Approval context")
+
+		const result = await task.ask(type, text, false)
+
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("claims lifecycle feedback that arrives while an ask is waiting", async () => {
+		const task = await createTask()
+		const ask = task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
+		task.messageQueueService.addMessage("Late feedback")
+
+		const result = await ask
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "Late feedback" })
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+		expect(task.messageQueueService.peekMessage()).toBeUndefined()
 	})
 
 	it("uses queued feedback instead of accepting a completion result", async () => {
@@ -104,8 +138,9 @@ describe("Task.ask queued message drain", () => {
 		task.messageQueueService.addMessage("Keep this message")
 		const result = await task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
 		const saveClineMessages = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
-		;(task as any).say = vi.fn().mockResolvedValue(undefined)
-		;(task as any).saveClineMessages = saveClineMessages
+		const taskAccess = getQueueTaskTestAccess(task)
+		taskAccess.say = vi.fn().mockResolvedValue(undefined)
+		taskAccess.saveClineMessages = saveClineMessages
 
 		expect(
 			await task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
@@ -122,5 +157,28 @@ describe("Task.ask queued message drain", () => {
 			await task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
 		).toBe(true)
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("retries a failed feedback write without duplicating the history row", async () => {
+		vi.useFakeTimers()
+		try {
+			const task = await createTask()
+			task.messageQueueService.addMessage("Retry feedback")
+			const result = await task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
+			const saveClineMessages = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+			const say = vi.fn().mockResolvedValue(undefined)
+			const taskAccess = getQueueTaskTestAccess(task)
+			taskAccess.say = say
+			taskAccess.saveClineMessages = saveClineMessages
+
+			await task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images)
+			await vi.advanceTimersByTimeAsync(250)
+
+			expect(say).toHaveBeenCalledTimes(1)
+			expect(saveClineMessages).toHaveBeenCalledTimes(2)
+			expect(task.messageQueueService.isEmpty()).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })

@@ -75,6 +75,7 @@ describe("attemptCompletionTool", () => {
 			api: { getModel: vi.fn().mockReturnValue({ id: "test-model", info: {} }) } as any,
 			flushTelemetryInstallment: vi.fn(),
 			setPendingTaskAction: vi.fn(),
+			persistQueuedFeedbackAndAcknowledge: vi.fn().mockResolvedValue(true),
 		}
 	})
 
@@ -559,6 +560,8 @@ describe("attemptCompletionTool", () => {
 						}
 						throw new Error(`unexpected task id ${id}`)
 					}),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					clearPendingTaskAction: vi.fn().mockResolvedValue(true),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(false),
 				}
 
@@ -576,6 +579,7 @@ describe("attemptCompletionTool", () => {
 					pushToolResult: mockPushToolResult,
 					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
 					toolDescription: mockToolDescription,
+					toolCallId: "call-stale-completion",
 				}
 
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
@@ -584,7 +588,9 @@ describe("attemptCompletionTool", () => {
 					parentTaskId: "parent-1",
 					childTaskId: "child-1",
 					completionResultSummary: "9",
+					pendingActionId: "call-stale-completion",
 				})
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "call-stale-completion")
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 				expect(mockPushToolResult).not.toHaveBeenCalledWith("")
 				// Flush once per validated attempt_completion call, before delegation is
@@ -813,6 +819,36 @@ describe("attemptCompletionTool", () => {
 					expect.anything(),
 				)
 				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("<user_message>"))
+			})
+
+			it("durably persists queued completion feedback before continuing", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "One more change",
+					queuedMessageId: "queued-1",
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+					"queued-1",
+					"One more change",
+					undefined,
+				)
+				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("One more change"))
 			})
 		})
 	})

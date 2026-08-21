@@ -214,7 +214,7 @@ export async function presentAssistantMessage(cline: Task) {
 				progressStatus?: ToolProgressStatus,
 				isProtected?: boolean,
 			) => {
-				const { response, text, images, queuedMessageId } = await cline.ask(
+				const { response, text, images } = await cline.ask(
 					type,
 					partialMessage,
 					false,
@@ -223,12 +223,8 @@ export async function presentAssistantMessage(cline: Task) {
 				)
 
 				if (response !== "yesButtonClicked") {
-					if (text || images?.length) {
-						if (queuedMessageId) {
-							await cline.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
-						} else {
-							await cline.say("user_feedback", text ?? "", images)
-						}
+					if (text) {
+						await cline.say("user_feedback", text, images)
 						pushToolResult(formatResponse.toolResult(formatResponse.toolDeniedWithFeedback(text), images))
 					} else {
 						pushToolResult(formatResponse.toolDenied())
@@ -240,13 +236,9 @@ export async function presentAssistantMessage(cline: Task) {
 				// Store approval feedback to be merged into tool result (GitHub #10465)
 				// Don't push it as a separate tool_result here - that would create duplicates.
 				// The tool will call pushToolResult, which will merge the feedback into the actual result.
-				if (text || images?.length) {
-					if (queuedMessageId) {
-						await cline.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
-					} else {
-						await cline.say("user_feedback", text ?? "", images)
-					}
-					approvalFeedback = { text: text ?? "", images }
+				if (text) {
+					await cline.say("user_feedback", text, images)
+					approvalFeedback = { text, images }
 				}
 
 				return true

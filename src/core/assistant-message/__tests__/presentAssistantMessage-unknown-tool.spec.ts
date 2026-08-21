@@ -287,4 +287,44 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 			undefined,
 		)
 	})
+
+	it("merges ordinary approval feedback into a native tool result", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_approval_feedback",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "Approved context" })
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: {
+					askApproval: (type: "tool", text: string) => Promise<boolean>
+					pushToolResult: (content: string) => void
+				},
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(true)
+				callbacks.pushToolResult("Delegated")
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "Approved context", undefined)
+		expect(mockTask.userMessageContent).toContainEqual(
+			expect.objectContaining({
+				type: "tool_result",
+				content: expect.stringContaining('"status":"approved"'),
+			}),
+		)
+	})
 })

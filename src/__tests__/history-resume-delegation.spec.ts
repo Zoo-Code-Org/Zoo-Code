@@ -155,7 +155,20 @@ describe("History resume delegation - parent metadata transitions", () => {
 		}
 		const getTaskWithId = vi.fn().mockResolvedValue({ historyItem: parentHistoryItem })
 
-		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-1", status: "active" }, parentHistoryItem)
+		const taskHistoryStore = makeTaskHistoryStoreStub(
+			{
+				id: "child-1",
+				status: "active",
+				pendingAction: {
+					kind: "finish_subtask",
+					actionId: "finish-action",
+					approvalText: JSON.stringify({ tool: "finishTask" }),
+					parentTaskId: "parent-1",
+					result: "Child done",
+				},
+			},
+			parentHistoryItem,
+		)
 		const removeClineFromStack = vi.fn().mockResolvedValue(undefined)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue({
 			taskId: "parent-1",
@@ -180,6 +193,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 			parentTaskId: "parent-1",
 			childTaskId: "child-1",
 			completionResultSummary: "Child done",
+			pendingActionId: "finish-action",
 		})
 
 		// atomicUpdatePair called with child first, parent second
@@ -190,9 +204,20 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		// Verify child updater produces completed status and persists completionResultSummary
 		// so startup reconciliation has the real result if the parent write fails.
-		const updatedChild = firstUpdater({ id: "child-1", status: "active" } as HistoryItem)
+		const updatedChild = firstUpdater({
+			id: "child-1",
+			status: "active",
+			pendingAction: {
+				kind: "finish_subtask",
+				actionId: "finish-action",
+				approvalText: "{}",
+				parentTaskId: "parent-1",
+				result: "Child done",
+			},
+		} as HistoryItem)
 		expect(updatedChild.status).toBe("completed")
 		expect(updatedChild.completionResultSummary).toBe("Child done")
+		expect(updatedChild.pendingAction).toBeUndefined()
 
 		// Verify parent updater produces active status with correct fields
 		const updatedParent = secondUpdater(parentHistoryItem as HistoryItem)
