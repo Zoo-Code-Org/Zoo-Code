@@ -164,7 +164,7 @@ export const geminiModels = {
 		contextWindow: 1_048_576,
 		supportsImages: true,
 		supportsPromptCache: true,
-		supportsReasoningEffort: ["low", "medium", "high"],
+		supportsReasoningEffort: ["minimal", "low", "medium", "high"],
 		reasoningEffort: "medium",
 		inputPrice: 0.25,
 		outputPrice: 1.5,

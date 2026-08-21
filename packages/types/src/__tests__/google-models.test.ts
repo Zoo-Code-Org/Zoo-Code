@@ -35,7 +35,9 @@ it("exposes the documented thinking levels and pricing for Gemini 3.5 Flash Lite
 
 it("exposes the documented thinking levels and pricing for Gemini 3.1 Flash Lite", () => {
 	const model = geminiModels["gemini-3.1-flash-lite"]
-	expect(model.supportsReasoningEffort).toEqual(["low", "medium", "high"])
+	// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-flash-lite
+	// "choosing from minimal, low, medium, or high thinking levels"
+	expect(model.supportsReasoningEffort).toEqual(["minimal", "low", "medium", "high"])
 	expect(model.inputPrice).toBe(0.25)
 	expect(model.outputPrice).toBe(1.5)
 	expect(model.cacheReadsPrice).toBe(0.025)
