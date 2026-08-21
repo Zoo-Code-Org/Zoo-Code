@@ -13,6 +13,7 @@ test("serializeThemeFixture sorts variables and emits stable metadata", () => {
 		variables: {
 			"--vscode-z-last": "rgb(2, 2, 2)",
 			"--vscode-a-first": "#010101",
+			"--vscode-font-family": "platform-dependent",
 		},
 	}
 

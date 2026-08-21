@@ -132,9 +132,6 @@
 	--vscode-editor-focusedStackFrameHighlightBackground: rgba(122, 189, 122, 0.3);
 	--vscode-editor-foldBackground: rgba(38, 79, 120, 0.3);
 	--vscode-editor-foldPlaceholderForeground: #808080;
-	--vscode-editor-font-family: "Droid Sans Mono", "monospace", monospace;
-	--vscode-editor-font-size: 14px;
-	--vscode-editor-font-weight: normal;
 	--vscode-editor-foreground: #cccccc;
 	--vscode-editor-hoverHighlightBackground: rgba(38, 79, 120, 0.25);
 	--vscode-editor-inactiveSelectionBackground: #3a3d41;
@@ -310,9 +307,6 @@
 	--vscode-extensionIcon-starForeground: #ff8e00;
 	--vscode-extensionIcon-verifiedForeground: #4daafc;
 	--vscode-focusBorder: #0078d4;
-	--vscode-font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
-	--vscode-font-size: 13px;
-	--vscode-font-weight: normal;
 	--vscode-foreground: #cccccc;
 	--vscode-gauge-background: #007acc;
 	--vscode-gauge-errorBackground: #be1100;
