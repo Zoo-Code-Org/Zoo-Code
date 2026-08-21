@@ -14,6 +14,11 @@ describe("API#getSkillsState", () => {
 	let mockGetSkillsManager: ReturnType<typeof vi.fn>
 
 	beforeEach(() => {
+		// mockOutputChannel and mockProvider are intentionally partial
+		// doubles: they implement only the members API touches (appendLine;
+		// context, getSkillsManager, on). The as-unknown-as casts are the
+		// last resort because the partial shapes are not subtypes of the full
+		// vscode.OutputChannel / ClineProvider types.
 		mockOutputChannel = {
 			appendLine: vi.fn(),
 		} as unknown as vscode.OutputChannel

@@ -426,6 +426,41 @@ describe("skillsMessageHandler", () => {
 			expect(mockUpdateSkillModes).toHaveBeenCalledWith("project-skill", "project", [])
 		})
 
+		it("passes undefined mode slugs and refreshes state when newSkillModeSlugs is omitted", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockResolvedValue(undefined)
+			mockGetSkillsMetadata.mockReturnValue([mockSkills[0]])
+			// Forward a concrete (non-empty) diagnostic so the assertion proves the
+			// handler relays the diagnostics list rather than always posting []
+			// (which would pass even if the field were dropped or hard-coded).
+			const diagnostics = [
+				{
+					path: "/global/.roo/skills/broken/SKILL.md",
+					source: "global" as const,
+					message: "can not read a block mapping entry",
+					line: 3,
+					column: 10,
+				},
+			]
+			mockGetSkillDiagnostics.mockReturnValue(diagnostics)
+
+			const message: WebviewMessage = {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				// newSkillModeSlugs omitted
+			}
+			const result = await handleUpdateSkillModes(provider, message)
+
+			expect(result).toEqual([mockSkills[0]])
+			expect(mockUpdateSkillModes).toHaveBeenCalledWith("test-skill", "global", undefined)
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[0]],
+				skillDiagnostics: diagnostics,
+			})
+		})
+
 		it("returns undefined when required fields are missing", async () => {
 			const provider = createMockProvider(true)
 

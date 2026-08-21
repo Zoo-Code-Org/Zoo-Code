@@ -244,24 +244,63 @@ describe("ExtensionStateContext", () => {
 		])
 	})
 
-	it("defaults skill diagnostics to an empty array when the skills message omits them", () => {
+	it("clears stored skills and diagnostics when later skills messages omit them", () => {
 		render(
 			<ExtensionStateContextProvider>
 				<SkillsTestComponent />
 			</ExtensionStateContextProvider>,
 		)
 
+		// A message with both skills and a diagnostic populates the state...
 		act(() => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
 					data: {
 						type: "skills",
-						skills: [],
+						skills: [
+							{
+								name: "good-skill",
+								description: "A healthy skill",
+								path: "/workspace/.roo/skills/good-skill/SKILL.md",
+								source: "project",
+							},
+						],
+						skillDiagnostics: [
+							{
+								path: "/workspace/.roo/skills/bad-skill/SKILL.md",
+								source: "project",
+								message: "bad indentation of a mapping entry",
+								line: 3,
+							},
+						],
 					},
 				}),
 			)
 		})
 
+		expect(JSON.parse(screen.getByTestId("skills").textContent!)).toEqual([
+			expect.objectContaining({ name: "good-skill" }),
+		])
+		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([
+			expect.objectContaining({ path: "/workspace/.roo/skills/bad-skill/SKILL.md", line: 3 }),
+		])
+
+		// ...and a later message that omits skillDiagnostics must clear the
+		// stored diagnostics instead of leaving them stale.
+		act(() => {
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "skills", skills: [] } }))
+		})
+
+		expect(JSON.parse(screen.getByTestId("skills").textContent!)).toEqual([])
+		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([])
+
+		// A message that omits skills entirely defaults the skills state the
+		// same way.
+		act(() => {
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "skills" } }))
+		})
+
+		expect(JSON.parse(screen.getByTestId("skills").textContent!)).toEqual([])
 		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([])
 	})
 

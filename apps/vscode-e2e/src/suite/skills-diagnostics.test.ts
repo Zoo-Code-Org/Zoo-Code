@@ -10,11 +10,12 @@ import { waitFor } from "./utils"
 const GOOD_SKILL = "e2e-skill-good"
 const BAD_SKILL = "e2e-skill-bad"
 
-// Issue #859 reproduction content: unescaped double quotes in the description
-// make the YAML frontmatter unparseable.
+// Issue #859 reproduction content: the description is a double-quoted YAML
+// scalar whose inner double quotes are left unescaped, which makes the
+// frontmatter unparseable.
 const MALFORMED_SKILL_MD = `---
 name: ${BAD_SKILL}
-description: Use when implementing features. Triggers on: "TDD", "test-driven development"
+description: "Use when implementing features. Triggers on: "TDD", "test-driven development"
 ---
 
 # E2E Skill Bad
@@ -42,6 +43,17 @@ description: A healthy skill used by the skill diagnostics e2e smoke test.
 Instructions here.
 `
 
+// Write a skill file atomically (write to a sidecar, then rename over the
+// target) so the extension host's file watcher only ever observes complete
+// content. An in-place fs.writeFile is visible mid-write, the watcher can
+// fire for that moment, and - because discovery scans are serialized - a
+// mid-write event could be the last one, leaving a stale scan result.
+const writeSkillFileAtomic = async (finalPath: string, content: string): Promise<void> => {
+	const tmpPath = `${finalPath}.tmp`
+	await fs.writeFile(tmpPath, content, "utf8")
+	await fs.rename(tmpPath, finalPath)
+}
+
 suite("Roo Code Skill Diagnostics", function () {
 	setDefaultSuiteTimeout(this)
 
@@ -54,18 +66,24 @@ suite("Roo Code Skill Diagnostics", function () {
 	})
 
 	teardown(async function () {
-		await fs.rm(skillsRoot, { recursive: true, force: true })
+		// Remove only the skill directories this suite created so pre-existing
+		// or other suites' fixtures under .roo/skills are left intact.
+		await Promise.all(
+			[GOOD_SKILL, BAD_SKILL].map((name) => fs.rm(path.join(skillsRoot, name), { recursive: true, force: true })),
+		)
 	})
 
 	test("should surface a malformed SKILL.md as a diagnostic without hiding healthy skills", async function () {
 		this.timeout(180_000)
 
 		// Arrange: one healthy skill and one malformed skill on real disk in the
-		// workspace's .roo/skills directory.
+		// workspace's .roo/skills directory, written atomically so the watcher
+		// only observes complete files.
 		await fs.mkdir(path.join(skillsRoot, GOOD_SKILL), { recursive: true })
-		await fs.writeFile(path.join(skillsRoot, GOOD_SKILL, "SKILL.md"), GOOD_SKILL_MD, "utf8")
+		await writeSkillFileAtomic(path.join(skillsRoot, GOOD_SKILL, "SKILL.md"), GOOD_SKILL_MD)
 		await fs.mkdir(path.join(skillsRoot, BAD_SKILL), { recursive: true })
-		await fs.writeFile(path.join(skillsRoot, BAD_SKILL, "SKILL.md"), MALFORMED_SKILL_MD, "utf8")
+		const badSkillMd = path.join(skillsRoot, BAD_SKILL, "SKILL.md")
+		await writeSkillFileAtomic(badSkillMd, MALFORMED_SKILL_MD)
 
 		// Act: the extension host's file watcher re-discovers skills; wait until
 		// the real SkillsManager reports the healthy skill and a diagnostic for
@@ -96,9 +114,9 @@ suite("Roo Code Skill Diagnostics", function () {
 			"malformed skill should be omitted from skills",
 		)
 
-		// Act: repair the frontmatter in place; the watcher re-discovers and the
-		// diagnostic clears.
-		await fs.writeFile(path.join(skillsRoot, BAD_SKILL, "SKILL.md"), FIXED_SKILL_MD, "utf8")
+		// Act: repair the frontmatter in place (atomically); the watcher
+		// re-discovers and the diagnostic clears.
+		await writeSkillFileAtomic(badSkillMd, FIXED_SKILL_MD)
 
 		await waitFor(
 			async () => {

@@ -20,17 +20,24 @@ export type { SkillMetadata, SkillContent, SkillDiagnostic }
 
 /**
  * Extract the raw top-level `key: ...` line from the frontmatter block of a
- * SKILL.md file. Used to point users at the exact line when YAML parsing
- * fails (see issue #859). Returns undefined when the file has no
- * frontmatter block or no matching top-level line.
+ * SKILL.md file, along with its 1-based line number in the file. Used to
+ * point users at the exact line when YAML parsing fails (see issue #859).
+ * Returns undefined when the file has no frontmatter block or no matching
+ * top-level line.
  */
-function getRawFrontmatterLine(fileContent: string, key: string): string | undefined {
+function getFrontmatterLine(fileContent: string, key: string): { line: string; lineNumber: number } | undefined {
 	const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---/)
 	if (!match) {
 		return undefined
 	}
 	const linePattern = new RegExp(`^${key}\\s*:`)
-	return match[1].split(/\r?\n/).find((line) => linePattern.test(line))
+	const frontmatterLines = match[1].split(/\r?\n/)
+	const index = frontmatterLines.findIndex((line) => linePattern.test(line))
+	if (index === -1) {
+		return undefined
+	}
+	// The opening `---` occupies file line 1, so frontmatter index 0 is file line 2.
+	return { line: frontmatterLines[index], lineNumber: index + 2 }
 }
 
 // gray-matter's bundled typings predate its options passthrough: `stringify`
@@ -51,6 +58,7 @@ export class SkillsManager {
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
 	private isDisposed = false
+	private discoveryChain: Promise<void> = Promise.resolve()
 
 	constructor(provider: ClineProvider) {
 		this.providerRef = new WeakRef(provider)
@@ -67,8 +75,19 @@ export class SkillsManager {
 	 * Also supports symlinks:
 	 * - .roo/skills can be a symlink to a directory containing skill subdirectories
 	 * - .roo/skills/[dirname] can be a symlink to a skill directory
+	 *
+	 * Scans are serialized so overlapping watcher-triggered runs never
+	 * interleave: an older scan must not commit state after a newer scan has
+	 * already observed the (possibly repaired) files.
 	 */
-	async discoverSkills(): Promise<void> {
+	discoverSkills(): Promise<void> {
+		const run = this.discoveryChain.then(() => this.performDiscovery())
+		// Keep the chain alive even if a scan rejects so later scans still run.
+		this.discoveryChain = run.catch(() => undefined)
+		return run
+	}
+
+	private async performDiscovery(): Promise<void> {
 		this.skills.clear()
 		this.diagnostics = []
 		const skillsDirs = await this.getSkillsDirectories()
@@ -135,15 +154,30 @@ export class SkillsManager {
 			// YAML syntax problems (e.g. unescaped double quotes in the
 			// description) report the actual cause instead of a misleading
 			// "missing required field" message (see issue #859).
+			//
+			// The `{}` options argument is deliberate: gray-matter keeps a global
+			// content-keyed cache and populates it *before* parsing, so a
+			// frontmatter that throws on first parse is cached with an empty data
+			// object and every later parse of the same content silently returns
+			// that empty object instead of re-throwing. Passing options disables
+			// the cache for this call, keeping the parse deterministic.
 			try {
-				parsed = matter(fileContent)
+				parsed = matter(fileContent, {})
 			} catch (error) {
 				this.recordDiagnostic(skillMdPath, source, error)
 				console.error(`Failed to parse skill at ${skillDir}:`, error)
 				// The most common cause is unescaped double quotes in the
-				// description value - point the user at the exact line.
-				const descriptionLine = getRawFrontmatterLine(fileContent, "description")
-				if (descriptionLine?.includes('"')) {
+				// description value. Only hint at that when the parser error is
+				// located on the description line itself, so a valid quoted
+				// description plus an unrelated YAML error elsewhere does not
+				// produce a misleading hint (see issue #859).
+				const description = getFrontmatterLine(fileContent, "description")
+				const errorMark = (error as { mark?: { line?: unknown } }).mark
+				if (
+					description?.line.includes('"') &&
+					typeof errorMark?.line === "number" &&
+					errorMark.line + 1 === description.lineNumber
+				) {
 					console.error(
 						`Hint: the "description" value in ${skillMdPath} contains unescaped double quotes. ` +
 							"Wrap the value in single quotes (or escape the double quotes) and save.",
