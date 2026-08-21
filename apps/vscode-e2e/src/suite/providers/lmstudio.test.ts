@@ -23,10 +23,12 @@ type CapturedLmStudioRequest = {
 	lastUserMessage: string
 }
 
+/** Returns the URL string for a fetch request input (string, URL, or Request). */
 function getRequestUrl(input: RequestInfo | URL): string {
 	return typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url
 }
 
+/** True if the raw URL parses and its origin equals the expected origin. */
 function isUrlWithOrigin(rawUrl: string, expectedOrigin: string): boolean {
 	try {
 		return new URL(rawUrl).origin === expectedOrigin
@@ -35,6 +37,7 @@ function isUrlWithOrigin(rawUrl: string, expectedOrigin: string): boolean {
 	}
 }
 
+/** True if the raw URL points at an OpenAI-compatible /chat/completions endpoint. */
 function isChatCompletionsUrl(rawUrl: string): boolean {
 	try {
 		return new URL(rawUrl).pathname.endsWith("/chat/completions")
@@ -43,6 +46,11 @@ function isChatCompletionsUrl(rawUrl: string): boolean {
 	}
 }
 
+/**
+ * Installs a global fetch capture that records the model and last user message of every
+ * chat completions request sent to the given base URL. Returns a function that restores
+ * the original fetch.
+ */
 function installLmStudioRequestCapture(capture: CapturedLmStudioRequest[], baseUrl: string): () => void {
 	const originalFetch = globalThis.fetch
 	const targetOrigin = new URL(baseUrl).origin
@@ -74,6 +82,7 @@ suite("LM Studio provider", function () {
 	let restoreFetch: (() => void) | undefined
 	const requests: CapturedLmStudioRequest[] = []
 
+	/** Skips the suite when aimock replay mode is not active (no fixture source). */
 	setup(function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		// Only replay mode can serve the reasoning fixture: record mode has no
@@ -85,10 +94,12 @@ suite("LM Studio provider", function () {
 		}
 	})
 
+	/** Captures chat completions requests sent to the aimock origin for later assertions. */
 	suiteSetup(() => {
 		restoreFetch = installLmStudioRequestCapture(requests, process.env.AIMOCK_URL || "http://localhost:1234")
 	})
 
+	/** Restores the original fetch and the default OpenRouter provider configuration. */
 	suiteTeardown(async () => {
 		restoreFetch?.()
 		restoreFetch = undefined
@@ -105,6 +116,10 @@ suite("LM Studio provider", function () {
 		})
 	})
 
+	/**
+	 * Runs an ask-mode task against the aimock LM Studio fixture and asserts the reasoning
+	 * stream surfaces as a separate finalized reasoning message ahead of the completion.
+	 */
 	test("should surface the LM Studio thinking stream as a separate reasoning message", async () => {
 		requests.length = 0
 
