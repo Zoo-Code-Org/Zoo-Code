@@ -92,6 +92,51 @@ describe("History resume delegation - parent metadata transitions", () => {
 		vi.clearAllMocks()
 	})
 
+	it("rejects a stale restored completion action before changing parent or child state", async () => {
+		const parentHistoryItem = {
+			id: "parent-1",
+			status: "delegated",
+			awaitingChildId: "child-1",
+			ts: Date.now(),
+			task: "Parent task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const childHistoryItem = {
+			id: "child-1",
+			status: "interrupted",
+			pendingAction: {
+				kind: "finish_subtask",
+				actionId: "current-action",
+				approvalText: JSON.stringify({ tool: "finishTask" }),
+				parentTaskId: "parent-1",
+				result: "Done",
+			},
+		}
+		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
+		const removeClineFromStack = vi.fn()
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-1" })),
+			removeClineFromStack,
+			taskHistoryStore,
+			log: vi.fn(),
+		})
+
+		const result = await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "parent-1",
+			childTaskId: "child-1",
+			completionResultSummary: "Done",
+			pendingActionId: "stale-action",
+		})
+
+		expect(result).toBe(false)
+		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
+		expect(removeClineFromStack).not.toHaveBeenCalled()
+	})
+
 	it("reopenParentFromDelegation accepts an active parent awaiting the returning child", async () => {
 		const providerEmit = vi.fn()
 		const parentHistoryItem = {

@@ -43,6 +43,49 @@ const makeParentTask = () =>
 	}) as any
 
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
+	it("rejects a stale restored action before delegation side effects", async () => {
+		const parentTask = makeParentTask()
+		const removeClineFromStack = vi.fn()
+		const createTask = vi.fn()
+		const handleModeSwitch = vi.fn()
+		const taskHistoryStore = makeStoreStub({
+			get: vi.fn().mockReturnValue({
+				...parentHistoryItem,
+				pendingAction: {
+					kind: "create_subtask",
+					actionId: "current-action",
+					approvalText: "{}",
+					mode: "code",
+					message: "Do something",
+					todos: [],
+				},
+			}),
+		})
+		const provider = {
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack,
+			createTask,
+			handleModeSwitch,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+				parentTaskId: "parent-1",
+				message: "Do something",
+				initialTodos: [],
+				mode: "code",
+				pendingActionId: "stale-action",
+			}),
+		).rejects.toThrow("Pending action mismatch")
+
+		expect(parentTask.flushPendingToolResultsToHistory).not.toHaveBeenCalled()
+		expect(removeClineFromStack).not.toHaveBeenCalled()
+		expect(handleModeSwitch).not.toHaveBeenCalled()
+		expect(createTask).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicReadAndUpdate).not.toHaveBeenCalled()
+	})
+
 	it("persists parent delegation metadata via atomicReadAndUpdate and emits TaskDelegated", async () => {
 		const providerEmit = vi.fn()
 		const parentTask = makeParentTask()

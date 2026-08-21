@@ -16,6 +16,7 @@ export interface QueueEvents {
 
 export class MessageQueueService extends EventEmitter<QueueEvents> {
 	private _messages: QueuedMessage[]
+	private claimedMessageIds = new Set<string>()
 
 	constructor() {
 		super()
@@ -59,6 +60,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		}
 
 		this._messages.splice(index, 1)
+		this.claimedMessageIds.delete(id)
 		this.emit("stateChanged", this._messages)
 		return true
 	}
@@ -78,9 +80,25 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	}
 
 	public dequeueMessage(): QueuedMessage | undefined {
-		const message = this._messages.shift()
+		const index = this._messages.findIndex((message) => !this.claimedMessageIds.has(message.id))
+		if (index === -1) {
+			return undefined
+		}
+		const [message] = this._messages.splice(index, 1)
 		this.emit("stateChanged", this._messages)
 		return message
+	}
+
+	public peekMessage(): QueuedMessage | undefined {
+		return this._messages.find((message) => !this.claimedMessageIds.has(message.id))
+	}
+
+	public claimMessage(id: string): boolean {
+		if (!this._messages.some((message) => message.id === id) || this.claimedMessageIds.has(id)) {
+			return false
+		}
+		this.claimedMessageIds.add(id)
+		return true
 	}
 
 	public get messages(): QueuedMessage[] {
@@ -93,6 +111,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 
 	public dispose(): void {
 		this._messages = []
+		this.claimedMessageIds.clear()
 		this.removeAllListeners()
 	}
 }

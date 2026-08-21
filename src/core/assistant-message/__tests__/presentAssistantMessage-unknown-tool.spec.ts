@@ -2,12 +2,18 @@
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
+import { isValidToolName } from "../../tools/validateToolUse"
+
+const mockNewTaskHandle = vi.hoisted(() => vi.fn())
 
 // Mock dependencies
 vi.mock("../../task/Task")
 vi.mock("../../tools/validateToolUse", () => ({
 	validateToolUse: vi.fn(),
 	isValidToolName: vi.fn(() => false),
+}))
+vi.mock("../../tools/NewTaskTool", () => ({
+	newTaskTool: { handle: mockNewTaskHandle },
 }))
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -22,6 +28,7 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 	let mockTask: any
 
 	beforeEach(() => {
+		mockNewTaskHandle.mockReset()
 		// Create a mock Task with minimal properties needed for testing
 		mockTask = {
 			taskId: "test-task-id",
@@ -240,5 +247,44 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 		expect(toolResult).toBeDefined()
 		expect(toolResult.is_error).toBe(true)
 		expect(toolResult.content).toContain("due to user rejecting a previous tool")
+	})
+
+	it("persists and acknowledges queued feedback through the native approval path", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_queued_feedback",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "messageResponse",
+			text: "Handle this first",
+			queuedMessageId: "queued-message-1",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(true)
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+			"queued-message-1",
+			"Handle this first",
+			undefined,
+		)
 	})
 })

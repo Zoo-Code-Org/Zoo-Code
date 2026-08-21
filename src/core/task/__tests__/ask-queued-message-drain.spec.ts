@@ -4,7 +4,7 @@ import { Task } from "../Task"
 // it should be consumed and used to fulfill the ask.
 
 describe("Task.ask queued message drain", () => {
-	it("consumes queued message while blocked on followup ask", async () => {
+	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
 		const task = Object.create(Task.prototype) as Task
 		;(task as any).abort = false
 		;(task as any).clineMessages = []
@@ -12,19 +12,24 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).askResponseText = undefined
 		;(task as any).askResponseImages = undefined
 		;(task as any).lastMessageTs = undefined
+		;(task as any).queuedFeedbackRows = new Set<string>()
+		;(task as any).queuedFeedbackRetryTimers = new Map<string, NodeJS.Timeout>()
 
-		// Message queue service exists in constructor; for unit test we can attach a real one.
-		const { MessageQueueService } = await import("../../message-queue/MessageQueueService")
-		;(task as any).messageQueueService = new MessageQueueService()
+		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
+			;(task as any).messageQueueService = new MessageQueueService()
+			;(task as any).addToClineMessages = vi.fn(async () => {})
+			;(task as any).saveClineMessages = vi.fn(async () => {})
+			;(task as any).updateClineMessage = vi.fn(async () => {})
+			;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
+			;(task as any).checkpointSave = vi.fn(async () => {})
+			;(task as any).emit = vi.fn()
+			;(task as any).providerRef = { deref: () => provider }
+			return task
+		})
+	}
 
-		// Minimal stubs used by ask()
-		;(task as any).addToClineMessages = vi.fn(async () => {})
-		;(task as any).saveClineMessages = vi.fn(async () => {})
-		;(task as any).updateClineMessage = vi.fn(async () => {})
-		;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
-		;(task as any).checkpointSave = vi.fn(async () => {})
-		;(task as any).emit = vi.fn()
-		;(task as any).providerRef = { deref: () => undefined }
+	it("consumes queued message while blocked on followup ask", async () => {
+		const task = await createTask()
 
 		const askPromise = task.ask("followup", "Q?", false)
 
@@ -37,23 +42,7 @@ describe("Task.ask queued message drain", () => {
 	})
 
 	it("does not consume queued messages for command_output asks", async () => {
-		const task = Object.create(Task.prototype) as Task
-		;(task as any).abort = false
-		;(task as any).clineMessages = []
-		;(task as any).askResponse = undefined
-		;(task as any).askResponseText = undefined
-		;(task as any).askResponseImages = undefined
-		;(task as any).lastMessageTs = undefined
-
-		const { MessageQueueService } = await import("../../message-queue/MessageQueueService")
-		;(task as any).messageQueueService = new MessageQueueService()
-		;(task as any).addToClineMessages = vi.fn(async () => {})
-		;(task as any).saveClineMessages = vi.fn(async () => {})
-		;(task as any).updateClineMessage = vi.fn(async () => {})
-		;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
-		;(task as any).checkpointSave = vi.fn(async () => {})
-		;(task as any).emit = vi.fn()
-		;(task as any).providerRef = { deref: () => undefined }
+		const task = await createTask()
 
 		const askPromise = task.ask("command_output", "command is still running...", false)
 		;(task as any).messageQueueService.addMessage("1+1=?")
@@ -68,5 +57,70 @@ describe("Task.ask queued message drain", () => {
 		expect(result.text).toBeUndefined()
 		expect((task as any).messageQueueService.isEmpty()).toBe(false)
 		expect((task as any).messageQueueService.messages[0]?.text).toBe("1+1=?")
+	})
+
+	it.each(["finishTask", "newTask"])("queued feedback overrides auto-approval for %s", async (tool) => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowSubtasks: true }),
+		})
+		task.messageQueueService.addMessage("Please revise this first")
+
+		const result = await task.ask("tool", JSON.stringify({ tool }), false)
+
+		expect(result).toMatchObject({
+			response: "messageResponse",
+			text: "Please revise this first",
+			images: undefined,
+		})
+		expect(result.queuedMessageId).toBe(task.messageQueueService.messages[0]?.id)
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+		expect(task.acknowledgeQueuedMessage(result.queuedMessageId!)).toBe(true)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("preserves approve-with-feedback behavior for ordinary tool asks", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Use this context")
+
+		const result = await task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Use this context" })
+	})
+
+	it("uses queued feedback instead of accepting a completion result", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("One more change")
+
+		const result = await task.ask("completion_result", "Done", false)
+
+		expect(result).toMatchObject({ response: "messageResponse", text: "One more change" })
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+		task.acknowledgeQueuedMessage(result.queuedMessageId!)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("retains lifecycle feedback until its history write succeeds", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("Keep this message")
+		const result = await task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
+		const saveClineMessages = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true)
+		;(task as any).say = vi.fn().mockResolvedValue(undefined)
+		;(task as any).saveClineMessages = saveClineMessages
+
+		expect(
+			await task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).toBe(false)
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		const ordinaryAsk = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
+		setTimeout(() => task.approveAsk(), 0)
+		const ordinaryResult = await ordinaryAsk
+		expect(ordinaryResult.text).toBeUndefined()
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		expect(
+			await task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
+		).toBe(true)
+		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 })
