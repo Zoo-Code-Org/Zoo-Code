@@ -1,12 +1,18 @@
-import { useState, useCallback, useMemo, useEffect } from "react"
-import { useEvent } from "react-use"
+import { useState, useCallback, useMemo, useEffect, useRef } from "react"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import { Checkbox } from "vscrui"
 
-import { type ProviderSettings, type ExtensionMessage, type ModelRecord, ollamaDefaultModelInfo } from "@roo-code/types"
+import {
+	type ProviderSettings,
+	type ExtensionMessage,
+	type ModelRecord,
+	ollamaDefaultModelInfo,
+	OllamaModelsMessageType,
+} from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+import { Button } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
 
 import { inputEventTransform } from "../transforms"
@@ -18,10 +24,20 @@ type OllamaProps = {
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 }
 
+enum RefreshStatus {
+	Idle = "idle",
+	Loading = "loading",
+	Success = "success",
+	Error = "error",
+}
+
 export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaProps) => {
 	const { t } = useAppTranslation()
 
 	const [ollamaModels, setOllamaModels] = useState<ModelRecord>({})
+	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
+	const [refreshError, setRefreshError] = useState<string | undefined>()
+	const refreshStatusRef = useRef(refreshStatus)
 	const routerModels = useRouterModels()
 
 	const handleInputChange = useCallback(
@@ -35,25 +51,47 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 		[setApiConfigurationField],
 	)
 
-	const onMessage = useCallback((event: MessageEvent) => {
-		const message: ExtensionMessage = event.data
+	useEffect(() => {
+		const handleMessage = (event: MessageEvent) => {
+			const message: ExtensionMessage = event.data
 
-		switch (message.type) {
-			case "ollamaModels":
-				{
-					const newModels = message.ollamaModels ?? {}
-					setOllamaModels(newModels)
+			if (message.type === OllamaModelsMessageType.ollamaModels) {
+				if (!message.error) {
+					setOllamaModels(message.ollamaModels ?? {})
 				}
-				break
+
+				if (refreshStatusRef.current === RefreshStatus.Loading) {
+					const nextStatus = message.error ? RefreshStatus.Error : RefreshStatus.Success
+					refreshStatusRef.current = nextStatus
+					setRefreshStatus(nextStatus)
+					setRefreshError(message.error)
+				}
+			}
+		}
+
+		window.addEventListener("message", handleMessage)
+		return () => {
+			window.removeEventListener("message", handleMessage)
 		}
 	}, [])
 
-	useEvent("message", onMessage)
+	const handleRefreshModels = useCallback(() => {
+		refreshStatusRef.current = RefreshStatus.Loading
+		setRefreshStatus(RefreshStatus.Loading)
+		setRefreshError(undefined)
+		vscode.postMessage({
+			type: OllamaModelsMessageType.requestOllamaModels,
+			values: {
+				baseUrl: apiConfiguration?.ollamaBaseUrl,
+				apiKey: apiConfiguration?.ollamaApiKey,
+			},
+		})
+	}, [apiConfiguration?.ollamaBaseUrl, apiConfiguration?.ollamaApiKey])
 
 	// Refresh models on mount
 	useEffect(() => {
 		// Request fresh models - the handler now flushes cache automatically
-		vscode.postMessage({ type: "requestOllamaModels" })
+		vscode.postMessage({ type: OllamaModelsMessageType.requestOllamaModels })
 	}, [])
 
 	// Check if the selected model exists in the fetched models
@@ -101,6 +139,33 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 						{t("settings:providers.ollama.apiKeyHelp")}
 					</div>
 				</VSCodeTextField>
+			)}
+			<Button
+				variant="outline"
+				onClick={handleRefreshModels}
+				disabled={refreshStatus === RefreshStatus.Loading}
+				className="w-full">
+				<div className="flex items-center gap-2">
+					{refreshStatus === RefreshStatus.Loading ? (
+						<span className="codicon codicon-loading codicon-modifier-spin" />
+					) : (
+						<span className="codicon codicon-refresh" />
+					)}
+					{t("settings:providers.refreshModels.label")}
+				</div>
+			</Button>
+			{refreshStatus === RefreshStatus.Loading && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.refreshModels.loading")}
+				</div>
+			)}
+			{refreshStatus === RefreshStatus.Success && (
+				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
+			)}
+			{refreshStatus === RefreshStatus.Error && (
+				<div className="text-sm text-vscode-errorForeground">
+					{refreshError || t("settings:providers.refreshModels.error")}
+				</div>
 			)}
 			<ModelPicker
 				apiConfiguration={apiConfiguration}

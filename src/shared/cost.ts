@@ -1,5 +1,4 @@
-import type { ModelInfo } from "@roo-code/types"
-import type { ServiceTier } from "@roo-code/types"
+import { OpenAiServiceTier, type ModelInfo, type ServiceTier } from "@roo-code/types"
 
 export interface ApiCostResult {
 	totalInputTokens: number
@@ -13,7 +12,7 @@ function applyLongContextPricing(modelInfo: ModelInfo, totalInputTokens: number,
 		return modelInfo
 	}
 
-	const effectiveServiceTier = serviceTier ?? "default"
+	const effectiveServiceTier = serviceTier ?? OpenAiServiceTier.Default
 	if (pricing.appliesToServiceTiers && !pricing.appliesToServiceTiers.includes(effectiveServiceTier)) {
 		return modelInfo
 	}

@@ -10,6 +10,8 @@ vitest.mock("../utils/timeout-config", () => ({
 
 import { getApiRequestTimeout } from "../utils/timeout-config"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 // Mock OpenAI
 const mockOpenAIConstructor = vitest.fn()
 vitest.mock("openai", () => {
@@ -30,7 +32,7 @@ vitest.mock("openai", () => {
 
 describe("LmStudioHandler timeout configuration", () => {
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 	})
 
 	it("should use default timeout of 600 seconds when no configuration is set", () => {

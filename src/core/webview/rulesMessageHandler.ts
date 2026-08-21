@@ -38,7 +38,7 @@ export async function handleCreateRule(
 	try {
 		const input = parseCreateRuleInput(message)
 		const createdPath = await createRule(cwd, input)
-		openFile(createdPath)
+		await openFile(createdPath)
 	} catch (error) {
 		const errorMessage = getErrorMessage(error)
 		provider.log(`Error creating rule: ${errorMessage}`)
@@ -89,7 +89,7 @@ export async function handleOpenRuleFile(provider: ClineProvider, cwd: string, m
 			throw new Error("Rule file not found")
 		}
 
-		openFile(filePath)
+		await openFile(filePath)
 	} catch (error) {
 		const errorMessage = getErrorMessage(error)
 		provider.log(`Error opening rule file: ${errorMessage}`)
@@ -109,7 +109,7 @@ export async function handleOpenRulesDirectory(
 			kind: values.kind,
 			modeSlug: values.modeSlug,
 		} as CreateRuleInput)
-		openFile(directoryPath)
+		await openFile(directoryPath)
 	} catch (error) {
 		const errorMessage = getErrorMessage(error)
 		provider.log(`Error opening rules directory: ${errorMessage}`)

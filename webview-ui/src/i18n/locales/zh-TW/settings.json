@@ -353,6 +353,10 @@
 		"execute": {
 			"label": "執行命令",
 			"description": "無需核准即可自動執行允許的終端機命令",
+			"destructiveCommandGuard": {
+				"label": "啟用破壞性命令防護",
+				"description": "下載並使用適用於此平台的 Destructive Command Guard（DCG）。DCG 允許的命令會自動執行。被 DCG 阻擋的命令需要你核准後才能執行。啟用後，Zoo 的命令清單將停用。關閉此選項時，已下載的執行檔會保留。"
+			},
 			"allowedCommands": "允許自動執行的命令",
 			"allowedCommandsDescription": "啟用「始終核准執行」時，可自動執行的命令前綴。新增 * 可允許所有命令（請謹慎使用）。",
 			"deniedCommands": "拒絕的命令",
@@ -411,6 +415,25 @@
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"kenariApiKey": "Kenari API 金鑰",
 		"getKenariApiKey": "取得 Kenari API 金鑰",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API 金鑰",
+			"getApiKey": "取得 NanoGPT API 金鑰",
+			"model": "模型",
+			"routingPreference": "路由偏好",
+			"routingOptions": {
+				"automatic": "自動",
+				"fastest": "最快",
+				"cheapest": "最便宜",
+				"lowestLatency": "最低延遲",
+				"highestThroughput": "最高吞吐量",
+				"toolCapable": "支援工具",
+				"cacheCapable": "支援快取"
+			},
+			"automaticExplanation": "自動模式不套用路由後綴。",
+			"billingWarning": "進階路由偏好可能使用隨用隨付路由，並且根據 NanoGPT 目前的計費規則，可能不在訂閱涵蓋範圍內。",
+			"routingDocs": "查看 NanoGPT 路由與計費詳細資訊"
+		},
 		"apiKeyStorageNotice": "API 金鑰會安全地儲存在 VS Code 的 Secret Storage 中",
 		"openAiCodexRateLimits": {
 			"title": "Codex 用量限制{{planLabel}}",
@@ -486,6 +509,17 @@
 		"moonshotApiKey": "Moonshot API 金鑰",
 		"getMoonshotApiKey": "取得 Moonshot API 金鑰",
 		"moonshotBaseUrl": "Moonshot 服務端點",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"minimaxApiKey": "MiniMax API 金鑰",
 		"getMiniMaxApiKey": "取得 MiniMax API 金鑰",
 		"minimaxBaseUrl": "MiniMax 服務端點",
@@ -507,6 +541,9 @@
 		"openAiApiKey": "OpenAI API 金鑰",
 		"apiKey": "API 金鑰",
 		"openAiBaseUrl": "基礎 URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure 部署名稱",
+		"azureOpenAiDeploymentNameDescription": "請輸入 Azure AI Studio 中的部署名稱，而不是底層模型名稱。",
 		"getOpenAiApiKey": "取得 OpenAI API 金鑰",
 		"mistralApiKey": "Mistral API 金鑰",
 		"getMistralApiKey": "取得 Mistral/Codestral API 金鑰",
@@ -1062,6 +1099,12 @@
 	"limitMaxTokensDescription": "限制回應中的最大 Token 數量",
 	"maxOutputTokensLabel": "最大輸出 Token 數",
 	"maxTokensGenerateDescription": "回應中產生的最大 Token 數",
+	"openAiCodexSpeed": {
+		"label": "速度",
+		"tooltip": "快速模式使用 Codex 優先處理，速度約為 1.5 倍，但會消耗更多訂閱配額。",
+		"standard": "標準",
+		"fast": "快速（1.5 倍速度，用量增加）"
+	},
 	"serviceTier": {
 		"label": "服務層級",
 		"tooltip": "若需更快的 API 請求處理，請嘗試優先處理服務層級。若需較低價格但延遲較高，請嘗試彈性處理層級。",

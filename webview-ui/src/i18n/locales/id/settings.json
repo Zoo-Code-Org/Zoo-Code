@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Anda dapat mengonfigurasi pintasan global untuk pengaturan ini <SettingsLink>di preferensi IDE Anda</SettingsLink>.",
-		"description": "Izinkan Roo untuk secara otomatis melakukan operasi tanpa memerlukan persetujuan. Aktifkan pengaturan ini hanya jika kamu sepenuhnya mempercayai AI dan memahami risiko keamanan yang terkait.",
+		"description": "Izinkan Zoo untuk secara otomatis melakukan operasi tanpa memerlukan persetujuan. Aktifkan pengaturan ini hanya jika kamu sepenuhnya mempercayai AI dan memahami risiko keamanan yang terkait.",
 		"enabled": "Auto-Approve Diaktifkan",
 		"toggleAriaLabel": "Beralih persetujuan otomatis",
 		"disabledAriaLabel": "Persetujuan otomatis dinonaktifkan - pilih opsi terlebih dahulu",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Eksekusi",
 			"description": "Secara otomatis mengeksekusi perintah terminal yang diizinkan tanpa memerlukan persetujuan",
+			"destructiveCommandGuard": {
+				"label": "Aktifkan perlindungan perintah destruktif",
+				"description": "Unduh dan gunakan Destructive Command Guard (DCG) untuk platform ini. Perintah yang diizinkan DCG dijalankan secara otomatis. Perintah yang diblokir DCG memerlukan persetujuanmu. Daftar perintah Zoo dinonaktifkan selama opsi ini aktif. File executable yang diunduh tetap disimpan jika kamu menonaktifkannya."
+			},
 			"allowedCommands": "Perintah Auto-Execute yang Diizinkan",
 			"allowedCommandsDescription": "Prefix perintah yang dapat di-auto-execute ketika \"Selalu setujui operasi eksekusi\" diaktifkan. Tambahkan * untuk mengizinkan semua perintah (gunakan dengan hati-hati).",
 			"deniedCommands": "Perintah yang ditolak",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Dapatkan Kenari API Key",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Key",
+			"getApiKey": "Dapatkan NanoGPT API Key",
+			"model": "Model",
+			"routingPreference": "Preferensi Routing",
+			"routingOptions": {
+				"automatic": "Otomatis",
+				"fastest": "Tercepat",
+				"cheapest": "Termurah",
+				"lowestLatency": "Latensi terendah",
+				"highestThroughput": "Throughput tertinggi",
+				"toolCapable": "Mendukung tool",
+				"cacheCapable": "Mendukung cache"
+			},
+			"automaticExplanation": "Otomatis tidak menerapkan akhiran routing.",
+			"billingWarning": "Preferensi routing lanjutan dapat menggunakan routing bayar sesuai pemakaian dan dapat melewati cakupan langganan, tergantung aturan penagihan NanoGPT saat ini.",
+			"routingDocs": "Lihat detail routing dan penagihan NanoGPT"
+		},
 		"apiKeyStorageNotice": "API key disimpan dengan aman di Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Kunci API Moonshot",
 		"getMoonshotApiKey": "Dapatkan Kunci API Moonshot",
 		"moonshotBaseUrl": "Titik Masuk Moonshot",
+		"kimiCode": {
+			"authMethod": "Metode autentikasi",
+			"oauth": "Langganan Kimi Code (OAuth)",
+			"apiKey": "Kunci API Kimi Code",
+			"apiKeyLabel": "Kunci API Kimi Code",
+			"signIn": "Masuk ke Kimi Code",
+			"signOut": "Keluar",
+			"authenticated": "Masuk ke Kimi Code",
+			"deviceCodeHelp": "Masukkan kode perangkat ini di halaman otorisasi Kimi:",
+			"docs": "Dokumentasi Kimi Code"
+		},
 		"zaiApiKey": "Kunci API Z AI",
 		"getZaiApiKey": "Dapatkan Kunci API Z AI",
 		"zaiEntrypoint": "Titik Masuk Z AI",
@@ -480,6 +514,9 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nama deployment Azure",
+		"azureOpenAiDeploymentNameDescription": "Masukkan nama deployment dari Azure AI Studio, bukan nama model dasarnya.",
 		"getOpenAiApiKey": "Dapatkan OpenAI API Key",
 		"mistralApiKey": "Mistral API Key",
 		"getMistralApiKey": "Dapatkan Mistral / Codestral API Key",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Batasi jumlah maksimum token dalam respons",
 	"maxOutputTokensLabel": "Token output maksimum",
 	"maxTokensGenerateDescription": "Token maksimum untuk dihasilkan dalam respons",
+	"openAiCodexSpeed": {
+		"label": "Kecepatan",
+		"tooltip": "Mode Cepat menggunakan pemrosesan prioritas Codex untuk kecepatan sekitar 1,5x dan memakai lebih banyak kuota langganan.",
+		"standard": "Standar",
+		"fast": "Cepat (kecepatan 1,5x, penggunaan meningkat)"
+	},
 	"serviceTier": {
 		"label": "Tingkat layanan",
 		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih rendah dengan latensi lebih tinggi, coba tingkat pemrosesan fleksibel.",

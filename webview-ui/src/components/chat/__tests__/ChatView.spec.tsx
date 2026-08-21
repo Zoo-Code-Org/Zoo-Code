@@ -1,10 +1,15 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/ChatView.spec.tsx
 
 import React from "react"
-import { render, waitFor, act, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+	makeExtensionState,
+	mockVscodePostMessage,
+	renderWithExtensionState,
+	waitFor,
+	act,
+	fireEvent,
+} from "@/utils/test-utils"
 
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 import { vscode } from "@src/utils/vscode"
 import type { SuggestionItem } from "@roo-code/types"
 
@@ -16,6 +21,7 @@ const mockVirtuosoState = vi.hoisted(() => ({
 		defaultItemHeight?: number
 		increaseViewportBy?: number | { top?: number; bottom?: number }
 	} | null,
+	lastData: [] as ClineMessage[],
 }))
 
 // Define minimal types needed for testing
@@ -26,16 +32,6 @@ interface ClineMessage {
 	ts: number
 	text?: string
 	partial?: boolean
-}
-
-interface ExtensionState {
-	version: string
-	clineMessages: ClineMessage[]
-	taskHistory: any[]
-	shouldShowAnnouncement: boolean
-	allowedCommands: string[]
-	alwaysAllowExecute: boolean
-	[key: string]: any
 }
 
 // Mock vscode API
@@ -86,6 +82,25 @@ vi.mock("../ChatRow", () => ({
 	},
 }))
 
+const mockTaskHeaderState = vi.hoisted(() => ({
+	renders: [] as Array<{ taskId?: string; aggregatedCost?: number }>,
+}))
+
+vi.mock("../TaskHeader", () => ({
+	default: function MockTaskHeader({ task, aggregatedCost }: { task: ClineMessage; aggregatedCost?: number }) {
+		mockTaskHeaderState.renders.push({ taskId: task.text, aggregatedCost })
+
+		return (
+			<div
+				data-aggregated-cost={aggregatedCost ?? ""}
+				data-task-id={task.text}
+				data-task-ts={task.ts}
+				data-testid="task-header"
+			/>
+		)
+	},
+}))
+
 vi.mock("../AutoApproveMenu", () => ({
 	default: () => null,
 }))
@@ -111,6 +126,7 @@ vi.mock("react-virtuoso", () => ({
 			defaultItemHeight,
 			increaseViewportBy,
 		}
+		mockVirtuosoState.lastData = data
 
 		return (
 			<div data-testid="virtuoso-item-list">
@@ -287,6 +303,22 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			</button>
 		)
 	},
+	VSCodeCheckbox: function MockVSCodeCheckbox({
+		children,
+		checked,
+		onChange,
+	}: {
+		children: React.ReactNode
+		checked?: boolean
+		onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
+	}) {
+		return (
+			<label>
+				<input type="checkbox" checked={checked} onChange={onChange} />
+				{children}
+			</label>
+		)
+	},
 	VSCodeTextField: function MockVSCodeTextField({
 		value,
 		onInput,
@@ -308,27 +340,67 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeLink: function MockVSCodeLink({ children, href }: { children: React.ReactNode; href?: string }) {
 		return <a href={href}>{children}</a>
 	},
+	VSCodeProgressRing: function MockVSCodeProgressRing() {
+		return <div data-testid="vscode-progress-ring" />
+	},
 }))
 
 // Mock window.postMessage to trigger state hydration
-const mockPostMessage = (state: Partial<ExtensionState>) => {
+const vscodePostMessageMock = mockVscodePostMessage(vi.mocked(vscode.postMessage))
+
+const mockPostMessage = (state: Record<string, unknown>) => {
 	window.postMessage(
 		{
 			type: "state",
-			state: {
-				version: "1.0.0",
-				clineMessages: [],
-				taskHistory: [],
-				shouldShowAnnouncement: false,
-				allowedCommands: [],
-				alwaysAllowExecute: false,
-				cloudIsAuthenticated: false,
-				telemetrySetting: "enabled",
-				...state,
-			},
+			state: makeExtensionState(state),
 		},
 		"*",
 	)
+}
+
+const dispatchExtensionMessage = async (data: Record<string, unknown>) => {
+	await act(async () => {
+		window.dispatchEvent(new MessageEvent("message", { data }))
+	})
+}
+
+const dispatchTaskState = async (id: string, taskTs: number, childIds: string[] = []) => {
+	await dispatchExtensionMessage({
+		type: "state",
+		state: makeExtensionState({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: taskTs,
+					text: id,
+				},
+			],
+			currentTaskId: id,
+			currentTaskItem: {
+				id,
+				number: 1,
+				ts: taskTs,
+				task: id,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				childIds,
+			},
+		}),
+	})
+}
+
+const dispatchAggregatedCosts = async (taskId: string, totalCost: number) => {
+	await dispatchExtensionMessage({
+		type: "taskWithAggregatedCosts",
+		text: taskId,
+		aggregatedCosts: {
+			totalCost,
+			ownCost: 1,
+			childrenCost: totalCost - 1,
+		},
+	})
 }
 
 const defaultProps: ChatViewProps = {
@@ -337,17 +409,117 @@ const defaultProps: ChatViewProps = {
 	hideAnnouncement: () => {},
 }
 
-const queryClient = new QueryClient()
-
 const renderChatView = (props: Partial<ChatViewProps> = {}) => {
-	return render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={queryClient}>
-				<ChatView {...defaultProps} {...props} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+	return renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 }
+
+describe("ChatView - Tool Batching Tests", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it("batches readFile asks separated by an API request row", async () => {
+		renderChatView()
+
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: 1,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 2,
+					text: JSON.stringify({ tool: "readFile", path: "a.ts" }),
+				},
+				{
+					type: "say",
+					say: "api_req_started",
+					ts: 3,
+					text: JSON.stringify({ apiProtocol: "anthropic" }),
+				},
+				{
+					type: "ask",
+					ask: "tool",
+					ts: 4,
+					text: JSON.stringify({ tool: "readFile", path: "b.ts" }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			const toolRows = mockVirtuosoState.lastData.filter(
+				(message) => message.type === "ask" && message.ask === "tool",
+			)
+			const [toolRow] = toolRows
+
+			expect(toolRows).toHaveLength(1)
+			expect(toolRow?.text).toContain('"batchFiles"')
+			expect(toolRow?.text).toContain('"path":"a.ts"')
+			expect(toolRow?.text).toContain('"path":"b.ts"')
+		})
+	})
+})
+
+describe("ChatView - Aggregated Costs Lifecycle", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockTaskHeaderState.renders.length = 0
+	})
+
+	it("clears cached aggregated costs when switching tasks", async () => {
+		const { getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 1_000, ["child-a"])
+		await dispatchAggregatedCosts("task-a", 9)
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "9")
+		})
+
+		// Use the same message timestamp to prove task identity, rather than task.ts,
+		// drives the reset.
+		await dispatchTaskState("task-b", 1_000)
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-b")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		await dispatchTaskState("task-a", 1_000, ["child-a"])
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+	})
+
+	it("rejects a delayed aggregated-cost response from the previous task", async () => {
+		const { getByTestId } = renderChatView()
+
+		await dispatchTaskState("task-a", 1_001, ["child-a"])
+		await dispatchTaskState("task-b", 2_001)
+		await dispatchAggregatedCosts("task-a", 13)
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-b")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		mockTaskHeaderState.renders.length = 0
+		await dispatchTaskState("task-a", 1_001, ["child-a"])
+
+		await waitFor(() => {
+			expect(getByTestId("task-header")).toHaveAttribute("data-task-id", "task-a")
+			expect(getByTestId("task-header")).toHaveAttribute("data-aggregated-cost", "")
+		})
+
+		expect(
+			mockTaskHeaderState.renders.some(
+				({ taskId, aggregatedCost }) => taskId === "task-a" && aggregatedCost === 13,
+			),
+		).toBe(false)
+	})
+})
 
 describe("ChatView - Sound Playing Tests", () => {
 	beforeEach(() => vi.clearAllMocks())
@@ -808,7 +980,7 @@ describe("ChatView - Message Queueing Tests", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		// Reset the mock to clear any initial calls
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 	})
 
 	it("shows sending is disabled when task is active", async () => {
@@ -884,7 +1056,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear any initial calls
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Add api_req_started without cost (spinner state - API request in progress)
 		mockPostMessage({
@@ -910,7 +1082,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user typing and sending a message during the spinner
 		const chatTextArea = getByTestId("chat-textarea")
@@ -981,7 +1153,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user sending a message when API is done
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1044,7 +1216,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user sending a new message while queue has items
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1107,7 +1279,7 @@ describe("ChatView - Message Queueing Tests", () => {
 		})
 
 		// Clear message calls before simulating user input
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		// Simulate user typing and sending a message during command execution
 		const chatTextArea = getByTestId("chat-textarea")
@@ -1134,12 +1306,75 @@ describe("ChatView - Message Queueing Tests", () => {
 			}),
 		)
 	})
+
+	it("clears the command_output controls when the final output arrives", async () => {
+		const { getByTestId, getByRole, queryByRole } = renderChatView()
+
+		// Hydrate state with a command_output ask (Proceed/Kill controls visible)
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "command_output",
+					ts: Date.now() - 1000,
+					text: "",
+					partial: false,
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(getByTestId("chat-textarea")).toBeInTheDocument()
+		})
+
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 50))
+		})
+
+		expect(getByRole("button", { name: "chat:proceedWhileRunning.title" })).toBeInTheDocument()
+
+		// The command completes: the final non-partial command_output say arrives.
+		mockPostMessage({
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 2000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "command_output",
+					ts: Date.now() - 1000,
+					text: "",
+					partial: false,
+				},
+				{
+					type: "say",
+					say: "command_output",
+					ts: Date.now(),
+					text: "done\n",
+					partial: false,
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(queryByRole("button", { name: "chat:proceedWhileRunning.title" })).not.toBeInTheDocument()
+		})
+	})
 })
 
 describe("ChatView - Follow-up Suggestions", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 	})
 
 	it("switches to a known mode from a malformed object mode suggestion", async () => {
@@ -1169,7 +1404,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 		})
 
 		const suggestion = await waitFor(() => getByRole("button", { name: "Use code mode" }))
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		fireEvent.click(suggestion)
 
@@ -1211,7 +1446,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 		})
 
 		const suggestion = await waitFor(() => getByRole("button", { name: "Use invalid mode" }))
-		vi.mocked(vscode.postMessage).mockClear()
+		vscodePostMessageMock.cleanup()
 
 		fireEvent.click(suggestion)
 

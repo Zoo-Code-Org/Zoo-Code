@@ -12,14 +12,14 @@ vi.mock("vscode", () => {
 		constructor(
 			public callId: string,
 			public name: string,
-			public input: any,
+			public input: object,
 		) {}
 	}
 
 	return {
 		workspace: {
 			getConfiguration: vi.fn(() => ({
-				get: vi.fn((key: string, defaultValue: any) => defaultValue),
+				get: vi.fn((key: string, defaultValue: unknown) => defaultValue),
 			})),
 			onDidChangeConfiguration: vi.fn((_callback) => ({
 				dispose: vi.fn(),
@@ -65,6 +65,8 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
 
+import { clearAllMocks } from "../../../test-utils/reset"
+
 const mockLanguageModelChat = {
 	id: "test-model",
 	name: "Test Model",
@@ -86,7 +88,10 @@ describe("VsCodeLmHandler", () => {
 	}
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
+		// Set up a default successful mock for selectChatModels before creating the handler
+		const mockModels = [{ ...mockLanguageModelChat }]
+		;(vscode.lm.selectChatModels as Mock).mockResolvedValue(mockModels)
 		handler = new VsCodeLmHandler(defaultOptions)
 	})
 
@@ -105,6 +110,14 @@ describe("VsCodeLmHandler", () => {
 			callback({ affectsConfiguration: () => true })
 			// Should reset client when config changes
 			expect(handler["client"]).toBeNull()
+		})
+
+		it("should call initializeClient during construction", () => {
+			// Constructor calls initializeClient() without await, so it starts async initialization.
+			// Verify the handler is created and initializeClient was triggered.
+			expect(handler).toBeDefined()
+			// The constructor triggers initializeClient which calls selectChatModels
+			expect(vscode.lm.selectChatModels).toHaveBeenCalled()
 		})
 	})
 
@@ -134,6 +147,14 @@ describe("VsCodeLmHandler", () => {
 			expect(client).toBeDefined()
 			expect(client.id).toBe("default-lm")
 			expect(client.vendor).toBe("vscode")
+		})
+
+		it("should throw a Zoo Code branded error when selectChatModels fails", async () => {
+			;(vscode.lm.selectChatModels as Mock).mockRejectedValueOnce(new Error("network down"))
+
+			await expect(handler["createClient"]({ vendor: "test" })).rejects.toThrow(
+				"Zoo Code <Language Model API>: Failed to select model: network down",
+			)
 		})
 	})
 
@@ -397,6 +418,338 @@ describe("VsCodeLmHandler", () => {
 
 			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow("API Error")
 		})
+
+		it("should brand the LM authorization justification as Zoo Code", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user" as const,
+					content: "Hello",
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield new vscode.LanguageModelTextPart("Hi")
+					return
+				})(),
+				text: (async function* () {
+					yield "Hi"
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledWith(
+				expect.any(Array),
+				expect.objectContaining({
+					justification:
+						"Zoo Code would like to use 'Test Model' from 'test-vendor', Click 'Allow' to proceed.",
+				}),
+				expect.anything(),
+			)
+		})
+
+		it("should throw a Zoo Code branded error when request is cancelled", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user" as const,
+					content: "Hello",
+				},
+			]
+
+			mockLanguageModelChat.sendRequest.mockRejectedValueOnce(new vscode.CancellationError())
+
+			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow(
+				"Zoo Code <Language Model API>: Request cancelled by user",
+			)
+		})
+
+		it("should throw a Zoo Code branded error on stream error with error-like object", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user" as const,
+					content: "Hello",
+				},
+			]
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			mockLanguageModelChat.sendRequest.mockRejectedValueOnce({ code: "STREAM_ERROR", details: "broken" })
+
+			await expect(handler.createMessage(systemPrompt, messages).next()).rejects.toThrow(
+				"Zoo Code <Language Model API>: Response stream error:",
+			)
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Stream error object:",
+				expect.stringContaining("STREAM_ERROR"),
+			)
+
+			consoleErrorSpy.mockRestore()
+		})
+		it("should log Zoo Code branded warning for unknown chunk type in stream", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					// Yield an unknown chunk type (not TextPart, not ToolCallPart)
+					yield { type: "unknown", foo: "bar" } as unknown as vscode.LanguageModelTextPart
+					return
+				})(),
+				text: (async function* () {
+					yield ""
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Unknown chunk type received:",
+				expect.objectContaining({ type: "unknown" }),
+			)
+
+			consoleWarnSpy.mockRestore()
+		})
+
+		it("should log Zoo Code branded warning for invalid text part value", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			// Create a TextPart with a non-string value (number)
+			const badTextPart = new vscode.LanguageModelTextPart(42 as unknown as string)
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield badTextPart
+					return
+				})(),
+				text: (async function* () {
+					yield ""
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Invalid text part value received:",
+				42,
+			)
+
+			consoleWarnSpy.mockRestore()
+		})
+
+		it("should log Zoo Code branded warning for invalid tool callId", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			// Create a ToolCallPart with a non-string callId
+			const badToolCall = new vscode.LanguageModelToolCallPart(123 as unknown as string, "valid-name", {})
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield badToolCall
+					return
+				})(),
+				text: (async function* () {
+					yield ""
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Invalid tool callId received:",
+				123,
+			)
+
+			consoleWarnSpy.mockRestore()
+		})
+
+		it("should log Zoo Code branded warning for invalid tool input", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			// Create a ToolCallPart with a string input (not an object)
+			const badToolCall = new vscode.LanguageModelToolCallPart(
+				"call-1",
+				"valid-name",
+				"not-an-object" as unknown as object,
+			)
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield badToolCall
+					return
+				})(),
+				text: (async function* () {
+					yield ""
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Invalid tool input received:",
+				"not-an-object",
+			)
+
+			consoleWarnSpy.mockRestore()
+		})
+
+		it("should log Zoo Code branded error when tool call processing fails", async () => {
+			const systemPrompt = "You are a helpful assistant"
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "Hello" }]
+
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// Create a ToolCallPart with circular input that will throw on JSON.stringify
+			const circularInput: Record<string, unknown> = { name: "circular" }
+			circularInput.self = circularInput
+
+			const badToolCall = new vscode.LanguageModelToolCallPart("call-1", "valid-name", circularInput)
+			mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+				stream: (async function* () {
+					yield badToolCall
+					return
+				})(),
+				text: (async function* () {
+					yield ""
+					return
+				})(),
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: [
+					{
+						type: "function" as const,
+						function: { name: "test", description: "", parameters: { type: "object", properties: {} } },
+					},
+				],
+			})
+			for await (const _chunk of stream) {
+				// drain
+			}
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Failed to process tool call:",
+				expect.any(Error),
+			)
+
+			consoleErrorSpy.mockRestore()
+		})
+	})
+
+	describe("getClient", () => {
+		it("should log Zoo Code branded debug when creating client with selector", async () => {
+			const consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+
+			// @ts-ignore – access private method for coverage
+			await handler["getClient"]()
+
+			expect(consoleDebugSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Creating client with selector:",
+				expect.any(Object),
+			)
+
+			consoleDebugSpy.mockRestore()
+		})
+
+		it("should throw a Zoo Code branded error when getClient fails to create client", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			;(vscode.lm.selectChatModels as Mock).mockRejectedValueOnce(new Error("network error"))
+			handler["client"] = null
+
+			// @ts-ignore – access private method for coverage
+			await expect(handler["getClient"]()).rejects.toThrow(
+				"Zoo Code <Language Model API>: Failed to create client:",
+			)
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Client creation failed:",
+				expect.stringContaining("network error"),
+			)
+
+			consoleErrorSpy.mockRestore()
+		})
+	})
+
+	describe("initializeClient", () => {
+		it("should log when client is already initialized", async () => {
+			const consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+			handler["client"] = mockLanguageModelChat
+			await handler.initializeClient()
+
+			expect(consoleDebugSpy).toHaveBeenCalledWith("Zoo Code <Language Model API>: Client already initialized")
+
+			consoleDebugSpy.mockRestore()
+		})
+
+		it("should log success when client is initialized", async () => {
+			const consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+			const mockModel = { ...mockLanguageModelChat }
+			;(vscode.lm.selectChatModels as Mock).mockResolvedValue([mockModel])
+			handler["client"] = null
+
+			await handler.initializeClient()
+
+			expect(consoleDebugSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Client initialized successfully",
+			)
+
+			consoleDebugSpy.mockRestore()
+		})
+
+		it("should throw a Zoo Code branded error when client initialization fails", async () => {
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			;(vscode.lm.selectChatModels as Mock).mockRejectedValue(new Error("select failed"))
+			handler["client"] = null
+
+			// Catch the unhandled rejection that may occur from the constructor's async call
+			const initPromise = handler.initializeClient()
+
+			await expect(initPromise).rejects.toThrow("Zoo Code <Language Model API>: Failed to initialize client:")
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Client initialization failed:",
+				expect.stringContaining("select failed"),
+			)
+
+			consoleErrorSpy.mockRestore()
+		})
 	})
 
 	describe("getModel", () => {
@@ -415,11 +768,18 @@ describe("VsCodeLmHandler", () => {
 		})
 
 		it("should return fallback model info when no client exists", () => {
+			const consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
 			// Clear the client first
 			handler["client"] = null
 			const model = handler.getModel()
 			expect(model.id).toBe("test-vendor/test-family")
 			expect(model.info).toBeDefined()
+			expect(consoleDebugSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: No client available, using fallback model info",
+			)
+
+			consoleDebugSpy.mockRestore()
 		})
 
 		it("should return basic model info when client exists", async () => {
@@ -548,7 +908,7 @@ describe("VsCodeLmHandler", () => {
 				cancel: vi.fn(),
 				dispose: vi.fn(),
 			}
-			handler["currentRequestCancellation"] = mockCancellation as any
+			handler["currentRequestCancellation"] = mockCancellation as unknown as vscode.CancellationTokenSource
 
 			mockLanguageModelChat.countTokens.mockResolvedValueOnce(50)
 
@@ -563,10 +923,17 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = null
 			handler["currentRequestCancellation"] = null
 
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
 			const content: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: "Hello" }]
 			const result = await handler.countTokens(content)
 
 			expect(result).toBe(0)
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: No client available for token counting",
+			)
+
+			consoleWarnSpy.mockRestore()
 		})
 
 		it("should handle image blocks with placeholder", async () => {
@@ -580,6 +947,57 @@ describe("VsCodeLmHandler", () => {
 
 			expect(result).toBe(5)
 			expect(mockLanguageModelChat.countTokens).toHaveBeenCalledWith("[IMAGE]", expect.any(Object))
+		})
+
+		it("should return 0 and log when empty text is provided to internalCountTokens", async () => {
+			handler["currentRequestCancellation"] = null
+			const consoleDebugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
+
+			// @ts-ignore – access private method for coverage of line 234
+			const result = await handler["internalCountTokens"]("")
+
+			expect(result).toBe(0)
+			expect(consoleDebugSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Empty text provided for token counting",
+			)
+
+			consoleDebugSpy.mockRestore()
+		})
+
+		it("should return 0 and log when non-numeric token count is received", async () => {
+			handler["currentRequestCancellation"] = null
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			mockLanguageModelChat.countTokens.mockResolvedValueOnce("not-a-number" as unknown as number)
+
+			const content: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: "test" }]
+			const result = await handler.countTokens(content)
+
+			expect(result).toBe(0)
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Non-numeric token count received:",
+				"not-a-number",
+			)
+
+			consoleWarnSpy.mockRestore()
+		})
+
+		it("should return 0 and log when negative token count is received", async () => {
+			handler["currentRequestCancellation"] = null
+			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			mockLanguageModelChat.countTokens.mockResolvedValueOnce(-5)
+
+			const content: Anthropic.Messages.ContentBlockParam[] = [{ type: "text", text: "test" }]
+			const result = await handler.countTokens(content)
+
+			expect(result).toBe(0)
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Zoo Code <Language Model API>: Negative token count received:",
+				-5,
+			)
+
+			consoleWarnSpy.mockRestore()
 		})
 	})
 
@@ -620,6 +1038,42 @@ describe("VsCodeLmHandler", () => {
 
 			const promise = handler.completePrompt("Test prompt")
 			await expect(promise).rejects.toThrow("VSCode LM completion error: Completion failed")
+		})
+	})
+
+	describe("cleanMessageContent / deepClean", () => {
+		it("passes through string content unchanged", () => {
+			const result = handler["cleanMessageContent"]("hello")
+			expect(result).toBe("hello")
+		})
+
+		it("returns falsy values as-is", () => {
+			expect(handler["cleanMessageContent"]("")).toBe("")
+		})
+
+		it("recursively cleans array content", () => {
+			const input: Anthropic.Messages.MessageParam["content"] = [{ type: "text", text: "hi" }]
+			const result = handler["cleanMessageContent"](input)
+			expect(result).toEqual([{ type: "text", text: "hi" }])
+		})
+
+		it("recursively cleans nested objects within array items", () => {
+			const input: Anthropic.Messages.MessageParam["content"] = [
+				{ type: "text", text: "hello" },
+				{ type: "text", text: "world" },
+			]
+			const result = handler["cleanMessageContent"](input)
+			expect(result).toEqual(input)
+		})
+
+		it("preserves primitive values other than strings inside objects", () => {
+			// deepClean hits the final `return value` branch for non-string primitives
+			// Exercise via a nested object whose property value is a number
+			const input = [
+				{ type: "text", text: "x", extra: 42 },
+			] as unknown as Anthropic.Messages.MessageParam["content"]
+			const result = handler["cleanMessageContent"](input) as unknown as Array<Record<string, unknown>>
+			expect(result[0].extra).toBe(42)
 		})
 	})
 })

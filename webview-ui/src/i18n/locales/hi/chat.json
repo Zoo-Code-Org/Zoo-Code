@@ -17,7 +17,9 @@
 		"condenseContext": "संदर्भ को बुद्धिमानी से संघनित करें",
 		"openApiHistory": "API इतिहास खोलें",
 		"openUiHistory": "UI इतिहास खोलें",
-		"backToParentTask": "मूल कार्य"
+		"backToParentTask": "मूल कार्य",
+		"waitingOnSubtask": "उपकार्य की प्रतीक्षा",
+		"goToSubtask": "उपकार्य पर जाएं"
 	},
 	"unpin": "पिन करें",
 	"pin": "अवपिन करें",
@@ -185,7 +187,7 @@
 		"current": "वर्तमान"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
+		"wantsToFetch": "Zoo को वर्तमान कार्य में सहायता के लिए विस्तृत निर्देश प्राप्त करना है"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo इस फ़ाइल को पढ़ना चाहता है",
@@ -195,12 +197,12 @@
 		"wantsToEditOutsideWorkspace": "Zoo कार्यक्षेत्र के बाहर इस फ़ाइल को संपादित करना चाहता है",
 		"wantsToEditProtected": "Zoo एक सुरक्षित कॉन्फ़िगरेशन फ़ाइल को संपादित करना चाहता है",
 		"wantsToCreate": "Zoo एक नई फ़ाइल बनाना चाहता है",
-		"wantsToSearchReplace": "Roo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
-		"didSearchReplace": "Roo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
+		"wantsToSearchReplace": "Zoo इस फ़ाइल में खोज और प्रतिस्थापन करना चाहता है",
+		"didSearchReplace": "Zoo ने इस फ़ाइल में खोज और प्रतिस्थापन किया",
 		"wantsToInsert": "Zoo इस फ़ाइल में सामग्री डालना चाहता है",
 		"wantsToInsertWithLineNumber": "Zoo इस फ़ाइल की {{lineNumber}} लाइन पर सामग्री डालना चाहता है",
 		"wantsToInsertAtEnd": "Zoo इस फ़ाइल के अंत में सामग्री जोड़ना चाहता है",
-		"wantsToReadAndXMore": "रू इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
+		"wantsToReadAndXMore": "Zoo इस फ़ाइल को और {{count}} अन्य को पढ़ना चाहता है",
 		"wantsToReadMultiple": "Zoo कई फ़ाइलें पढ़ना चाहता है",
 		"wantsToApplyBatchChanges": "Zoo कई फ़ाइलों में परिवर्तन लागू करना चाहता है",
 		"wantsToGenerateImage": "Zoo एक छवि बनाना चाहता है",
@@ -231,6 +233,7 @@
 		"exitStatus": "{{exitCode}} स्थिति के साथ बाहर निकल गया",
 		"malformedCommand": "गलत कमांड: shell सिंटैक्स त्रुटि",
 		"manageCommands": "स्वतः-अनुमोदित कमांड",
+		"denied": "कमांड अस्वीकृत",
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",
 		"addToDenied": "अस्वीकृत सूची में जोड़ें",
@@ -244,7 +247,7 @@
 	"response": "प्रतिक्रिया",
 	"arguments": "आर्ग्युमेंट्स",
 	"text": {
-		"rooSaid": "रू ने कहा"
+		"rooSaid": "Zoo ने कहा"
 	},
 	"feedback": {
 		"youSaid": "आपने कहा"
@@ -341,9 +344,9 @@
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
 			"heading": "नया क्या है:",
-			"highlight1": "OpenAI GPT-5.6 परिवार (Sol, Terra, Luna) — OpenAI Codex और OpenAI Native दोनों में उपलब्ध।",
-			"highlight2": "Grok 4.5 समर्थन — xAI का नया flagship model, साथ ही reasoning effort की एक फिक्स जिसका फायदा Grok 4 Mini को भी मिलता है।",
-			"highlight3": "Kenari provider — एक first-class OpenAI-compatible AI gateway जो Rupiah में बिल होता है और Claude, GPT, DeepSeek, GLM, Kimi और अधिक को cover करता है।"
+			"highlight1": "तीन बड़े नए models आ गए हैं — बिल्कुल नए Gemini 3.7 Flash, GLM 5.3 और Qwen3.8 Max models का उपयोग करें, साथ ही DeepSeek V4 के updated reasoning, pricing और provider coverage का लाभ लें।",
+			"highlight2": "NanoGPT से connect करें — dynamic model discovery, streaming और prompt completions के साथ speed, price, latency, throughput, tool support और caching के लिए routing preferences का उपयोग करें।",
+			"highlight3": "अधिक reliable providers और tasks — fixes Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation और Zoo settings import/export को बेहतर बनाते हैं।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",

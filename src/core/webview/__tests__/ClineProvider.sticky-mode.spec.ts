@@ -6,6 +6,7 @@ import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import type { HistoryItem, ProviderName } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
@@ -318,7 +319,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a mock task
 			const mockTask = new Task({
 				provider,
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			})
 
 			// Get the actual taskId from the mock
@@ -411,7 +412,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a mock task with history
 			const mockTask = new Task({
 				provider,
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			})
 
 			// Get the actual taskId from the mock
@@ -534,7 +535,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a mock task
 			const mockTask = new Task({
 				provider,
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			})
 
 			// Get the actual taskId from the mock
@@ -587,7 +588,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create parent task
 			const parentTask = new Task({
 				provider,
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			})
 
 			// Get the actual taskId from the mock
@@ -636,7 +637,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a subtask (simulating new_task tool behavior)
 			const subtask = new Task({
 				provider,
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 				parentTask: parentTask,
 			})
 			const subtaskId = (subtask as any).taskId || "subtask-id"
@@ -672,7 +673,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a mock task that throws on save
 			const mockTask = new Task({
 				provider,
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			})
 			vi.spyOn(mockTask as any, "saveClineMessages").mockRejectedValue(new Error("Save failed"))
 
@@ -724,8 +725,8 @@ describe("ClineProvider - Sticky Mode", () => {
 
 		it("should restore API configuration when restoring task from history with mode", async () => {
 			// Setup: Configure different API configs for different modes
-			const codeApiConfig = { apiProvider: "anthropic" as ProviderName, anthropicApiKey: "code-key" }
-			const architectApiConfig = { apiProvider: "openai" as ProviderName, openAiApiKey: "architect-key" }
+			const codeApiConfig = { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "code-key" }
+			const architectApiConfig = { apiProvider: providerIdentifiers.openai, openAiApiKey: "architect-key" }
 
 			// Save API configs
 			await provider.upsertProviderProfile("code-config", codeApiConfig)
@@ -1155,18 +1156,11 @@ describe("ClineProvider - Sticky Mode", () => {
 				return Promise.resolve([])
 			})
 
-			// Mock getCurrentTask to return different tasks
-			const getCurrentTaskSpy = vi.spyOn(provider, "getCurrentTask")
-
-			// Simulate simultaneous mode switches for different tasks
-			getCurrentTaskSpy.mockReturnValue(task1 as any)
-			const switch1 = provider.handleModeSwitch("architect")
-
-			getCurrentTaskSpy.mockReturnValue(task2 as any)
-			const switch2 = provider.handleModeSwitch("debug")
-
-			getCurrentTaskSpy.mockReturnValue(task3 as any)
-			const switch3 = provider.handleModeSwitch("code")
+			// Simulate simultaneous mode switches for distinct, explicitly targeted tasks.
+			// These lightweight task doubles only implement the members exercised by this test.
+			const switch1 = provider.handleModeSwitch("architect", task1 as unknown as Task)
+			const switch2 = provider.handleModeSwitch("debug", task2 as unknown as Task)
+			const switch3 = provider.handleModeSwitch("code", task3 as unknown as Task)
 
 			await Promise.all([switch1, switch2, switch3])
 

@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Vous pouvez configurer un raccourci global pour ce paramètre <SettingsLink>dans les préférences de votre IDE</SettingsLink>.",
-		"description": "Permettre à Roo d'effectuer automatiquement des opérations sans requérir d'approbation. Activez ces paramètres uniquement si vous faites entièrement confiance à l'IA et que vous comprenez les risques de sécurité associés.",
+		"description": "Permettre à Zoo d'effectuer automatiquement des opérations sans requérir d'approbation. Activez ces paramètres uniquement si vous faites entièrement confiance à l'IA et que vous comprenez les risques de sécurité associés.",
 		"enabled": "Auto-approbation activée",
 		"toggleAriaLabel": "Activer/désactiver l'approbation automatique",
 		"disabledAriaLabel": "Approbation automatique désactivée - sélectionnez d'abord les options",
@@ -329,6 +329,10 @@
 		"execute": {
 			"label": "Exécuter",
 			"description": "Exécuter automatiquement les commandes de terminal autorisées sans nécessiter d'approbation",
+			"destructiveCommandGuard": {
+				"label": "Activer la protection contre les commandes destructrices",
+				"description": "Télécharge et utilise Destructive Command Guard (DCG) pour cette plateforme. Les commandes autorisées par DCG s'exécutent automatiquement. Les commandes bloquées par DCG nécessitent votre approbation. Les listes de commandes de Zoo sont désactivées tant que cette option est active. L'exécutable téléchargé est conservé si vous la désactivez."
+			},
 			"allowedCommands": "Commandes auto-exécutables autorisées",
 			"allowedCommandsDescription": "Préfixes de commandes qui peuvent être auto-exécutés lorsque \"Toujours approuver les opérations d'exécution\" est activé. Ajoutez * pour autoriser toutes les commandes (à utiliser avec précaution).",
 			"deniedCommands": "Commandes refusées",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Obtenir la clé API Opencode Go",
 		"kenariApiKey": "Clé API Kenari",
 		"getKenariApiKey": "Obtenir la clé API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Clé API NanoGPT",
+			"getApiKey": "Obtenir une clé API NanoGPT",
+			"model": "Modèle",
+			"routingPreference": "Préférence de routage",
+			"routingOptions": {
+				"automatic": "Automatique",
+				"fastest": "Le plus rapide",
+				"cheapest": "Le moins cher",
+				"lowestLatency": "Latence la plus faible",
+				"highestThroughput": "Débit le plus élevé",
+				"toolCapable": "Compatible avec les outils",
+				"cacheCapable": "Compatible avec le cache"
+			},
+			"automaticExplanation": "Automatique n'applique aucun suffixe de routage.",
+			"billingWarning": "Les préférences de routage avancées peuvent utiliser une facturation à l'usage et peuvent contourner la couverture de l'abonnement, selon les règles de facturation actuelles de NanoGPT.",
+			"routingDocs": "Voir les détails de routage et de facturation de NanoGPT"
+		},
 		"apiKeyStorageNotice": "Les clés API sont stockées en toute sécurité dans le stockage sécurisé de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Clé API Moonshot",
 		"getMoonshotApiKey": "Obtenir la clé API Moonshot",
 		"moonshotBaseUrl": "Point d'entrée Moonshot",
+		"kimiCode": {
+			"authMethod": "Méthode d'authentification",
+			"oauth": "Abonnement Kimi Code (OAuth)",
+			"apiKey": "Clé API Kimi Code",
+			"apiKeyLabel": "Clé API Kimi Code",
+			"signIn": "Se connecter à Kimi Code",
+			"signOut": "Se déconnecter",
+			"authenticated": "Connecté à Kimi Code",
+			"deviceCodeHelp": "Saisissez ce code d'appareil sur la page d'autorisation Kimi :",
+			"docs": "Documentation Kimi Code"
+		},
 		"zaiApiKey": "Clé API Z AI",
 		"getZaiApiKey": "Obtenir la clé API Z AI",
 		"zaiEntrypoint": "Point d'entrée Z AI",
@@ -480,6 +514,9 @@
 		"openAiApiKey": "Clé API OpenAI",
 		"apiKey": "Clé API",
 		"openAiBaseUrl": "URL de base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nom du déploiement Azure",
+		"azureOpenAiDeploymentNameDescription": "Saisissez le nom du déploiement défini dans Azure AI Studio, et non le nom du modèle sous-jacent.",
 		"getOpenAiApiKey": "Obtenir la clé API OpenAI",
 		"mistralApiKey": "Clé API Mistral",
 		"getMistralApiKey": "Obtenir la clé API Mistral / Codestral",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Limiter le nombre maximum de tokens dans la réponse",
 	"maxOutputTokensLabel": "Tokens de sortie maximum",
 	"maxTokensGenerateDescription": "Tokens maximum à générer dans la réponse",
+	"openAiCodexSpeed": {
+		"label": "Vitesse",
+		"tooltip": "Le mode rapide utilise le traitement prioritaire de Codex pour une vitesse environ 1,5 fois supérieure et consomme davantage de quota d'abonnement.",
+		"standard": "Standard",
+		"fast": "Rapide (vitesse 1,5 fois supérieure, utilisation accrue)"
+	},
 	"serviceTier": {
 		"label": "Niveau de service",
 		"tooltip": "Pour un traitement plus rapide des demandes d'API, essayez le niveau de service de traitement prioritaire. Pour des prix plus bas avec une latence plus élevée, essayez le niveau de traitement flexible.",

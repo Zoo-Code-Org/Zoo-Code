@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "您可以<SettingsLink>在 IDE 首选项中</SettingsLink>为此设置配置全局快捷方式。",
-		"description": "允许 Roo 自动执行操作而无需批准。只有在您完全信任 AI 并了解相关安全风险的情况下才启用这些设置。",
+		"description": "允许 Zoo 自动执行操作而无需批准。只有在您完全信任 AI 并了解相关安全风险的情况下才启用这些设置。",
 		"enabled": "自动批准已启用",
 		"toggleAriaLabel": "切换自动批准",
 		"disabledAriaLabel": "自动批准已禁用 - 请先选择选项",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "执行",
 			"description": "自动执行白名单中的命令而无需批准",
+			"destructiveCommandGuard": {
+				"label": "启用破坏性命令防护",
+				"description": "下载并使用适用于此平台的 Destructive Command Guard（DCG）。DCG 允许的命令会自动执行。被 DCG 拦截的命令需要你批准后才能执行。启用后，Zoo 的命令列表将被禁用。关闭此选项时，已下载的可执行文件会保留。"
+			},
 			"allowedCommands": "命令白名单",
 			"allowedCommandsDescription": "当\"自动批准命令行操作\"启用时可以自动执行的命令前缀。添加 * 以允许所有命令（谨慎使用）。",
 			"deniedCommands": "拒绝的命令",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"kenariApiKey": "Kenari API 密钥",
 		"getKenariApiKey": "获取 Kenari API 密钥",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API 密钥",
+			"getApiKey": "获取 NanoGPT API 密钥",
+			"model": "模型",
+			"routingPreference": "路由偏好",
+			"routingOptions": {
+				"automatic": "自动",
+				"fastest": "最快",
+				"cheapest": "最便宜",
+				"lowestLatency": "最低延迟",
+				"highestThroughput": "最高吞吐量",
+				"toolCapable": "支持工具",
+				"cacheCapable": "支持缓存"
+			},
+			"automaticExplanation": "自动模式不应用路由后缀。",
+			"billingWarning": "高级路由偏好可能使用按用量付费路由，并且根据 NanoGPT 当前的计费规则，可能不在订阅范围内。",
+			"routingDocs": "查看 NanoGPT 路由和计费详情"
+		},
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Moonshot API 密钥",
 		"getMoonshotApiKey": "获取 Moonshot API 密钥",
 		"moonshotBaseUrl": "Moonshot 服务站点",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"minimaxApiKey": "MiniMax API 密钥",
 		"getMiniMaxApiKey": "获取 MiniMax API 密钥",
 		"minimaxBaseUrl": "MiniMax 服务站点",
@@ -480,6 +514,9 @@
 		"openAiApiKey": "OpenAI API 密钥",
 		"apiKey": "API 密钥",
 		"openAiBaseUrl": "OpenAI 基础 URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure 部署名称",
+		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",
 		"getOpenAiApiKey": "获取 OpenAI API 密钥",
 		"mistralApiKey": "Mistral API 密钥",
 		"getMistralApiKey": "获取 Mistral / Codestral API 密钥",
@@ -605,7 +642,7 @@
 		},
 		"consecutiveMistakeLimit": {
 			"label": "错误和重复限制",
-			"description": "在显示“Roo遇到问题”对话框前允许的连续错误或重复操作次数。设置为 0 可禁用此安全机制（它将永远不会触发）。",
+			"description": "在显示“Zoo遇到问题”对话框前允许的连续错误或重复操作次数。设置为 0 可禁用此安全机制（它将永远不会触发）。",
 			"unlimitedDescription": "已启用无限重试（自动继续）。对话框将永远不会出现。",
 			"warning": "⚠️ 设置为 0 允许无限重试，这可能会消耗大量 API 使用量"
 		},
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "限制响应中的最大 Token 数量",
 	"maxOutputTokensLabel": "最大输出 Token 数",
 	"maxTokensGenerateDescription": "响应中生成的最大 Token 数",
+	"openAiCodexSpeed": {
+		"label": "速度",
+		"tooltip": "快速模式使用 Codex 优先处理，速度约为 1.5 倍，但会消耗更多订阅配额。",
+		"standard": "标准",
+		"fast": "快速（1.5 倍速度，用量增加）"
+	},
 	"serviceTier": {
 		"label": "服务等级",
 		"tooltip": "为加快API请求处理速度，请尝试优先处理服务等级。为获得更低价格但延迟较高，请尝试灵活处理等级。",

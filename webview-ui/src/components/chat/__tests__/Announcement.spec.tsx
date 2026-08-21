@@ -13,7 +13,7 @@ vi.mock("@src/utils/vscode", () => ({
 
 vi.mock("@roo/package", () => ({
 	Package: {
-		version: "3.55.0",
+		version: "3.78.0",
 	},
 }))
 
@@ -41,11 +41,11 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What's New:",
 				"chat:announcement.release.highlight1":
-					"Xiaomi MiMo provider: Added Xiaomi MiMo as a first-class API provider so you can configure MiMo models directly in Zoo Code.",
+					"Three major new models have arrived — use the brand-new Gemini 3.7 Flash, GLM 5.3, and Qwen3.8 Max models, plus updated DeepSeek V4 reasoning, pricing, and provider coverage.",
 				"chat:announcement.release.highlight2":
-					"Upstream Zoo Code handoff: Pulled in the latest upstream sunset merge and related platform updates to keep Zoo Code aligned with the community handoff work.",
+					"Connect to NanoGPT — use dynamic model discovery, streaming and prompt completions, and routing preferences for speed, price, latency, throughput, tool support, and caching.",
 				"chat:announcement.release.highlight3":
-					"Stability fixes across chat and providers: Fixed MCP sign-in copy, Gemini full-tool requests, OpenAI temperature handling, and Markdown single-tilde rendering.",
+					"More reliable providers and tasks — fixes improve Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation, and Zoo settings import/export.",
 				"chat:announcement.handoff.heading": "The Roo Code plugin is not going away.",
 			}
 
@@ -62,20 +62,20 @@ describe("Announcement", () => {
 	it("renders the announcement title and highlights", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getByText("Zoo Code 3.55.0 Released")).toBeInTheDocument()
+		expect(screen.getByText("Zoo Code 3.78.0 Released")).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Xiaomi MiMo provider: Added Xiaomi MiMo as a first-class API provider so you can configure MiMo models directly in Zoo Code.",
+				"Three major new models have arrived — use the brand-new Gemini 3.7 Flash, GLM 5.3, and Qwen3.8 Max models, plus updated DeepSeek V4 reasoning, pricing, and provider coverage.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Upstream Zoo Code handoff: Pulled in the latest upstream sunset merge and related platform updates to keep Zoo Code aligned with the community handoff work.",
+				"Connect to NanoGPT — use dynamic model discovery, streaming and prompt completions, and routing preferences for speed, price, latency, throughput, tool support, and caching.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"Stability fixes across chat and providers: Fixed MCP sign-in copy, Gemini full-tool requests, OpenAI temperature handling, and Markdown single-tilde rendering.",
+				"More reliable providers and tasks — fixes improve Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation, and Zoo settings import/export.",
 			),
 		).toBeInTheDocument()
 	})

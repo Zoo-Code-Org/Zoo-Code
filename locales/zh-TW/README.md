@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -32,15 +31,25 @@
 
 你可以在 [Roo→Zoo 遷移指南](https://docs.zoocode.dev/roo-to-zoo-migration) 中找到從 Roo Code 遷移到 Zoo Code 的快速說明。我們希望在大家轉移過程中盡可能提供協助，這也是我們設立 [Reddit](https://www.reddit.com/r/ZooCode) 和 [Discord](https://discord.gg/VxfP4Vx3gX) 社群的原因。如果你遇到問題或有任何疑問，歡迎加入後直接提問。
 
-## v3.70.0 新功能
+## Zoo Code 在 Roo Code 之後新增的功能
 
-- **OpenAI GPT-5.6 系列** — `Sol`、`Terra` 和 `Luna` 現已在 OpenAI Codex 與 OpenAI Native 兩條供應商路徑上提供。
-- **Grok 4.5 支援** — xAI 全新的旗艦模型，以及一項同樣使 Grok 4 Mini 受惠的 reasoning-effort 格式修正。
-- **Kenari 供應商支援** — 一個一流的、相容 OpenAI 的 AI 閘道，以印尼盾計費，涵蓋 Claude、GPT、DeepSeek、GLM、Kimi 等更多模型。
-- 在摺疊的任務標頭中顯示內容壓縮按鈕與內容視窗進度條。
-- 修正：冷終端機上發生的終端機輸出遺失與任務過早完成問題。
-- 修正：Zoo Gateway 與 Vercel AI Gateway 模型的圖片附加功能現在會依循即時的 vision 能力標籤，而非靜態的白名單。
-- 相依套件與工具更新。
+Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
+
+- **Semble 程式碼庫智慧** — 快速、隨選的語意程式碼搜尋，可自動設定，無需另外執行索引工作流程。
+- **更強大的 Orchestrator 工作流程** — 更安全的工作委派、平行工作協調、可靠的父子工作復原，以及更完善的子工作與供應商設定檔隔離。
+- **透過 Destructive Command Guard (DCG) 延長自主執行時間** — 自動封鎖危險命令，同時讓可信任的工作繼續執行，不必反覆核准。
+- **最新模型** — 持續支援新的 Claude、GPT、Gemini、Kimi、GLM、Grok、MiniMax 及其他模型系列。
+- **更多連線方式** — 新增並擴充 Zoo Gateway、Moonshot、Kimi Code、Kenari、Friendli、OpenCode Go 等眾多供應商。
+- **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
+- **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
+
+## v3.78.0 新功能
+
+- **三款重磅新模型現已推出** — 使用全新的 Gemini 3.7 Flash、GLM 5.3 和 Qwen3.8 Max 模型，以及更新後的 DeepSeek V4 推理、定價與供應商支援。
+- **連接 NanoGPT** — 使用動態模型探索、串流與 Prompt 補全，並依速度、價格、延遲、吞吐量、工具支援和快取設定路由偏好。
+- **更可靠的供應商與任務** — 修正改善了 Azure OpenAI endpoint 設定、Kimi Code 輸出限制、任務歷史標題保留，以及 Zoo 設定的匯入/匯出。
+- Destructive Command Guard 現在支援 Intel 架構的 Mac。
+- 安全性更新修正了 `undici` 與 Mermaid 中的漏洞。
 
 ## Zoo Code 能為您做什麼？
 
@@ -64,24 +73,9 @@ Zoo Code 會配合您的工作方式，而非要您配合它：
 
 更多資訊：[使用模式](https://docs.zoocode.dev/basic-usage/using-modes) • [自訂模式](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## 教學和功能影片
-
-<div align="center">
-
-|                                                                                                                                                                     |                                                                                                                                                                  |                                                                                                                                                                    |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------------------------------------------------------------------------------------------------------------------------------: | :----------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>安裝 Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>設定設定檔</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>程式碼庫索引</b> |
-|   <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>自訂模式</b>    |   <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>檢查點</b>   |  <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>上下文管理</b>  |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">更多快速教學和功能影片...</a>
-</p>
-
 ## 資源
 
 - **[文件](https://docs.zoocode.dev):** 安裝、設定和掌握 Zoo Code 的官方指南。
-- **[YouTube 頻道](https://youtube.com/@roocodeyt?feature=shared):** 觀看教學和功能實際操作。
 - **[Discord 伺服器](https://discord.gg/VxfP4Vx3gX):** 加入社群以獲得即時協助和討論。
 - **[Reddit 社群](https://www.reddit.com/r/ZooCode):** 分享您的經驗，看看其他人正在建立什麼。
 - **[GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** 回報問題並追蹤開發進度。

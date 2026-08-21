@@ -1,8 +1,7 @@
 // npx vitest src/components/chat/__tests__/TaskHeader.spec.tsx
 
 import React from "react"
-import { render, screen, fireEvent } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { renderWithExtensionState, screen, fireEvent } from "@/utils/test-utils"
 
 import type { ProviderSettings } from "@roo-code/types"
 
@@ -40,6 +39,7 @@ const mockExtensionState: {
 	apiConfiguration: ProviderSettings
 	currentTaskItem: { id: string } | null
 	clineMessages: any[]
+	taskHistory: any[]
 } = {
 	apiConfiguration: {
 		apiProvider: "anthropic",
@@ -48,10 +48,12 @@ const mockExtensionState: {
 	} as ProviderSettings,
 	currentTaskItem: { id: "test-task-id" },
 	clineMessages: [],
+	taskHistory: [],
 }
 
 // Mock the ExtensionStateContext
 vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: () => mockExtensionState,
 }))
 
@@ -98,14 +100,8 @@ describe("TaskHeader", () => {
 		handleCondenseContext: vi.fn(),
 	}
 
-	const queryClient = new QueryClient()
-
 	const renderTaskHeader = (props: Partial<TaskHeaderProps> = {}) => {
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<TaskHeader {...defaultProps} {...props} />
-			</QueryClientProvider>,
-		)
+		return renderWithExtensionState(<TaskHeader {...defaultProps} {...props} />)
 	}
 
 	it("should display cost when totalCost is greater than 0", () => {
@@ -220,6 +216,58 @@ describe("TaskHeader", () => {
 			const backButton = screen.getByText("chat:task.backToParentTask").closest("button")
 			expect(backButton).toBeInTheDocument()
 			expect(backButton?.querySelector("svg.lucide-arrow-left")).toBeInTheDocument()
+		})
+	})
+
+	describe("Delegated parent waiting-on-subtask banner", () => {
+		beforeEach(() => {
+			mockPostMessage.mockClear()
+		})
+
+		afterEach(() => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id" }
+			mockExtensionState.taskHistory = []
+		})
+
+		it("does not show the banner when currentTaskItem is not delegated", () => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", status: "active" } as any
+			renderTaskHeader()
+			expect(screen.queryByText("chat:task.waitingOnSubtask")).not.toBeInTheDocument()
+		})
+
+		it("shows the banner when currentTaskItem is delegated with an awaitingChildId", () => {
+			mockExtensionState.currentTaskItem = {
+				id: "parent-1",
+				status: "delegated",
+				awaitingChildId: "child-1",
+			} as any
+			renderTaskHeader()
+			expect(screen.getByText("chat:task.waitingOnSubtask")).toBeInTheDocument()
+		})
+
+		it("navigates to the awaited child when the banner is clicked", () => {
+			mockExtensionState.currentTaskItem = {
+				id: "parent-1",
+				status: "delegated",
+				awaitingChildId: "child-1",
+			} as any
+			renderTaskHeader()
+
+			fireEvent.click(screen.getByText("chat:task.waitingOnSubtask"))
+
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "showTaskWithId", text: "child-1" })
+		})
+
+		it("does not show an Abandon button (removed: implicit sever on re-delegation)", () => {
+			mockExtensionState.currentTaskItem = {
+				id: "parent-1",
+				status: "delegated",
+				awaitingChildId: "child-1",
+			} as any
+			renderTaskHeader()
+
+			expect(screen.getByText("chat:task.waitingOnSubtask")).toBeInTheDocument()
+			expect(screen.queryByText("history:abandonSubtask")).not.toBeInTheDocument()
 		})
 	})
 

@@ -6,11 +6,13 @@ import { VSCodeButton, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 import {
 	type ProviderSettings,
 	type ModelInfo,
-	type ReasoningEffort,
+	type ReasoningEffortExtended,
 	type OrganizationAllowList,
 	type ExtensionMessage,
 	azureOpenAiDefaultApiVersion,
+	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
+	OpenAiModelsMessageType,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -42,6 +44,7 @@ export const OpenAICompatible = ({
 	simplifySettings,
 }: OpenAICompatibleProps) => {
 	const { t } = useAppTranslation()
+	const isAzureOpenAi = isAzureOpenAiBaseUrl(apiConfiguration?.openAiBaseUrl, apiConfiguration?.openAiUseAzure)
 
 	const [azureApiVersionSelected, setAzureApiVersionSelected] = useState(!!apiConfiguration?.azureApiVersion)
 
@@ -113,7 +116,7 @@ export const OpenAICompatible = ({
 		const message: ExtensionMessage = event.data
 
 		switch (message.type) {
-			case "openAiModels": {
+			case OpenAiModelsMessageType.openAiModels: {
 				const updatedModels = message.openAiModels ?? []
 				setOpenAiModels(Object.fromEntries(updatedModels.map((item) => [item, openAiModelInfoSaneDefaults])))
 				break
@@ -129,7 +132,11 @@ export const OpenAICompatible = ({
 				value={apiConfiguration?.openAiBaseUrl || ""}
 				type="url"
 				onInput={handleInputChange("openAiBaseUrl")}
-				placeholder={t("settings:placeholders.baseUrl")}
+				placeholder={
+					isAzureOpenAi
+						? t("settings:providers.azureOpenAiBaseUrlPlaceholder")
+						: t("settings:placeholders.baseUrl")
+				}
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.openAiBaseUrl")}</label>
 			</VSCodeTextField>
@@ -147,12 +154,18 @@ export const OpenAICompatible = ({
 				defaultModelId="gpt-4o"
 				models={openAiModels}
 				modelIdKey="openAiModelId"
+				label={isAzureOpenAi ? t("settings:providers.azureOpenAiDeploymentName") : undefined}
 				serviceName="OpenAI"
 				serviceUrl="https://platform.openai.com"
 				organizationAllowList={organizationAllowList}
 				errorMessage={modelValidationError}
 				simplifySettings={simplifySettings}
 			/>
+			{isAzureOpenAi && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.azureOpenAiDeploymentNameDescription")}
+				</div>
+			)}
 			<R1FormatSetting
 				onChange={handleInputChange("openAiR1FormatEnabled", noTransform)}
 				openAiR1FormatEnabled={apiConfiguration?.openAiR1FormatEnabled ?? false}
@@ -266,13 +279,13 @@ export const OpenAICompatible = ({
 
 								setApiConfigurationField("openAiCustomModelInfo", {
 									...openAiCustomModelInfo,
-									reasoningEffort: value as ReasoningEffort,
+									reasoningEffort: value as ReasoningEffortExtended,
 								})
 							}
 						}}
 						modelInfo={{
 							...(apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults),
-							supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+							supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 						}}
 					/>
 				)}

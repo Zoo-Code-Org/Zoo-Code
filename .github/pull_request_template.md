@@ -38,14 +38,35 @@ Detail the steps to test your changes. This helps reviewers verify your work.
 - [ ] **Scope**: My changes are focused on the linked issue (one major feature/fix per PR).
 - [ ] **Self-Review**: I have performed a thorough self-review of my code.
 - [ ] **Testing**: New and/or updated tests have been added to cover my changes (if applicable).
+- [ ] **Visual Snapshot** (UI changes only): If a user would notice this change at a glance (layout, theme tokens, brand elements, empty/error states), I've added or updated a `*.visual.tsx` snapshot in `webview-ui/`. See `webview-ui/AGENTS.md` → "When a UI change needs a snapshot".
 - [ ] **Documentation Impact**: I have considered if my changes require documentation updates (see "Documentation Updates" section below).
 - [ ] **Contribution Guidelines**: I have read and agree to the [Contributor Guidelines](/CONTRIBUTING.md).
 
-### Screenshots / Videos
+### Visual Snapshots
 
 <!--
-For UI changes, please provide before-and-after screenshots or a short video of the *actual results*.
-This greatly helps in understanding the visual impact of your changes.
+For UI changes to static rendered state, the primary artifact is a committed
+Playwright CT snapshot (`*.visual.tsx` in `webview-ui/`) — that baseline
+becomes durable regression coverage for the surface. See
+`webview-ui/AGENTS.md` for what deserves a snapshot.
+
+Before/after screenshots pasted here are welcome as a review aid but are not a
+substitute for the committed baseline. If a snapshot is possible, prefer the
+snapshot.
+-->
+
+### Videos (interaction / animation only)
+
+<!--
+Snapshots cannot capture motion or multi-step flows. Attach a short screen
+recording here when reviewers need to see:
+  - A new interactive flow (dropdown, form, dialog progression)
+  - Animation, transition, or timing behavior
+  - A regression that only manifests during interaction
+
+Videos are a review aid, not regression coverage. If the *result* of the
+interaction has a distinct rendered state worth protecting, still commit a
+`*.visual.tsx` snapshot of that end-state alongside the video.
 -->
 
 ### Documentation Updates

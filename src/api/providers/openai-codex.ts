@@ -5,9 +5,12 @@ import OpenAI from "openai"
 
 import {
 	type ModelInfo,
+	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	OpenAiCodexServiceTier,
 	openAiCodexDefaultModelId,
 	OpenAiCodexModelId,
 	openAiCodexModels,
+	SERVICE_TIER_KEY,
 	type ReasoningEffort,
 	type ReasoningEffortExtended,
 	ApiProviderError,
@@ -29,11 +32,80 @@ import { t } from "../../i18n"
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
+type OpenAiCodexRequestServiceTier = typeof OpenAiCodexServiceTier.Priority
+
 /**
  * OpenAI Codex base URL for API requests
  * Per the implementation guide: requests are routed to chatgpt.com/backend-api/codex
  */
 const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
+const LUNA_MODEL_ID = "gpt-5.6-luna"
+const LUNA_CODEX_VERSION = "0.144.0"
+
+const getOpenAiCodexServiceTier = (options: ApiHandlerOptions): OpenAiCodexRequestServiceTier | undefined =>
+	options[OPEN_AI_CODEX_SERVICE_TIER_KEY] === OpenAiCodexServiceTier.Priority
+		? OpenAiCodexServiceTier.Priority
+		: undefined
+
+function stripInputImageDetail(value: any): any {
+	if (Array.isArray(value)) {
+		return value.map(stripInputImageDetail)
+	}
+
+	if (!value || typeof value !== "object") {
+		return value
+	}
+
+	return Object.fromEntries(
+		Object.entries(value)
+			.filter(([key]) => value.type !== "input_image" || key !== "detail")
+			.map(([key, child]) => [key, stripInputImageDetail(child)]),
+	)
+}
+
+export function transformLunaResponsesLiteBody(requestBody: any, effectiveSessionId: string): any {
+	if (!Array.isArray(requestBody.input)) {
+		throw new Error("Invalid gpt-5.6-luna Responses Lite request: input must be an array.")
+	}
+	if (requestBody.tools !== undefined && !Array.isArray(requestBody.tools)) {
+		throw new Error("Invalid gpt-5.6-luna Responses Lite request: tools must be an array when provided.")
+	}
+	if (requestBody.instructions !== undefined && typeof requestBody.instructions !== "string") {
+		throw new Error("Invalid gpt-5.6-luna Responses Lite request: instructions must be a string when provided.")
+	}
+
+	const { tools, instructions, ...rest } = requestBody
+	const transformedInput = stripInputImageDetail(requestBody.input)
+	const reasoning =
+		requestBody.reasoning && typeof requestBody.reasoning === "object" && !Array.isArray(requestBody.reasoning)
+			? requestBody.reasoning
+			: {}
+
+	return {
+		...rest,
+		input: [
+			{ type: "additional_tools", role: "developer", tools: tools ?? [] },
+			...(typeof instructions === "string" && instructions.length > 0
+				? [
+						{
+							type: "message",
+							role: "developer",
+							content: [{ type: "input_text", text: instructions }],
+						},
+					]
+				: []),
+			...transformedInput,
+		],
+		// Luna Responses Lite requires these exact values, so they intentionally
+		// override any caller-supplied tool_choice or parallel_tool_calls.
+		tool_choice: "auto",
+		parallel_tool_calls: false,
+		prompt_cache_key: effectiveSessionId,
+		// Luna Responses Lite requires reasoning context "all_turns"; this intentionally
+		// overwrites any context value already present in the incoming reasoning config.
+		reasoning: { ...reasoning, context: "all_turns" },
+	}
+}
 
 /**
  * OpenAiCodexHandler - Uses OpenAI Responses API with OAuth authentication
@@ -183,12 +255,26 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		// Build request body
 		// Per the implementation guide: Codex backend may reject some parameters
 		// Notably: max_output_tokens and prompt_cache_retention may be rejected
-		const requestBody = this.buildRequestBody(model, formattedInput, systemPrompt, reasoningEffort, metadata)
+		const effectiveSessionId = metadata?.taskId || this.sessionId
+		const baseRequestBody = this.buildRequestBody(model, formattedInput, systemPrompt, reasoningEffort, metadata)
+		let requestBody: any
+		try {
+			requestBody =
+				model.id === LUNA_MODEL_ID
+					? this.buildLunaRequestBody(baseRequestBody, effectiveSessionId)
+					: baseRequestBody
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error)
+			TelemetryService.instance.captureException(
+				new ApiProviderError(message, this.providerName, model.id, "createMessage"),
+			)
+			throw error
+		}
 
 		// Make the request with retry on auth failure
 		for (let attempt = 0; attempt < 2; attempt++) {
 			try {
-				yield* this.executeRequest(requestBody, model, accessToken, metadata?.taskId)
+				yield* this.executeRequest(requestBody, model, accessToken, effectiveSessionId)
 				return
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error)
@@ -211,6 +297,10 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				throw error
 			}
 		}
+	}
+
+	private buildLunaRequestBody(baseRequestBody: any, effectiveSessionId: string): any {
+		return transformLunaResponsesLiteBody(baseRequestBody, effectiveSessionId)
 	}
 
 	private buildRequestBody(
@@ -285,6 +375,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			model: string
 			input: Array<{ role: "user" | "assistant"; content: any[] } | { type: string; content: string }>
 			stream: boolean
+			[SERVICE_TIER_KEY]?: OpenAiCodexRequestServiceTier
 			reasoning?: { effort?: ReasoningEffortExtended; summary?: "auto" }
 			temperature?: number
 			store?: boolean
@@ -303,12 +394,14 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 		// Per the implementation guide: Codex backend may reject max_output_tokens
 		// and prompt_cache_retention, so we omit them
+		const serviceTier = getOpenAiCodexServiceTier(this.options)
 		const body: ResponsesRequestBody = {
 			model: model.id,
 			input: formattedInput,
 			stream: true,
 			store: false,
 			instructions: systemPrompt,
+			...(serviceTier ? { [SERVICE_TIER_KEY]: serviceTier } : {}),
 			// Only include encrypted reasoning content when reasoning effort is set
 			...(reasoningEffort ? { include: ["reasoning.encrypted_content"] } : {}),
 			...(reasoningEffort
@@ -344,7 +437,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		requestBody: any,
 		model: OpenAiCodexModel,
 		accessToken: string,
-		taskId?: string,
+		effectiveSessionId: string,
 	): ApiStream {
 		// Create AbortController for cancellation
 		this.abortController = new AbortController()
@@ -357,12 +450,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				const accountId = await openAiCodexOAuthManager.getAccountId()
 
 				// Build Codex-specific headers. Authorization is provided by the SDK apiKey.
-				const codexHeaders: Record<string, string> = {
-					originator: "zoo-code",
-					session_id: taskId || this.sessionId,
-					"User-Agent": `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
-					...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
-				}
+				const codexHeaders = this.buildCodexHeaders(model, effectiveSessionId, accountId)
 
 				// Allow tests to inject a client. If none is injected, create one for this request.
 				const client =
@@ -400,7 +488,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				}
 			} catch (_sdkErr) {
 				// Fallback to manual SSE via fetch (Codex backend).
-				yield* this.makeCodexRequest(requestBody, model, accessToken, taskId)
+				yield* this.makeCodexRequest(requestBody, model, accessToken, effectiveSessionId)
 			}
 		} finally {
 			this.abortController = undefined
@@ -494,7 +582,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		requestBody: any,
 		model: OpenAiCodexModel,
 		accessToken: string,
-		taskId?: string,
+		effectiveSessionId: string,
 	): ApiStream {
 		// Per the implementation guide: route to Codex backend with Bearer token
 		const url = `${CODEX_API_BASE_URL}/responses`
@@ -504,16 +592,9 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 		// Build headers with required Codex-specific fields
 		const headers: Record<string, string> = {
+			...this.buildCodexHeaders(model, effectiveSessionId, accountId),
 			"Content-Type": "application/json",
 			Authorization: `Bearer ${accessToken}`,
-			originator: "zoo-code",
-			session_id: taskId || this.sessionId,
-			"User-Agent": `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
-		}
-
-		// Add ChatGPT-Account-Id if available (required for organization subscriptions)
-		if (accountId) {
-			headers["ChatGPT-Account-Id"] = accountId
 		}
 
 		try {
@@ -1117,6 +1198,27 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		return selected && selected !== "disable" && selected !== "none" ? (selected as any) : undefined
 	}
 
+	private buildCodexHeaders(
+		model: OpenAiCodexModel,
+		effectiveSessionId: string,
+		accountId?: string | null,
+	): Record<string, string> {
+		return {
+			originator: "zoo-code",
+			session_id: effectiveSessionId,
+			"User-Agent": `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
+			...(accountId ? { "ChatGPT-Account-Id": accountId } : {}),
+			...(model.id === LUNA_MODEL_ID
+				? {
+						"session-id": effectiveSessionId,
+						"x-session-affinity": effectiveSessionId,
+						version: LUNA_CODEX_VERSION,
+						"x-openai-internal-codex-responses-lite": "true",
+					}
+				: {}),
+		}
+	}
+
 	override getModel() {
 		const modelId = this.options.apiModelId
 
@@ -1172,8 +1274,9 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}
 
 			const reasoningEffort = this.getReasoningEffort(model)
+			const serviceTier = getOpenAiCodexServiceTier(this.options)
 
-			const requestBody: any = {
+			const baseRequestBody: any = {
 				model: model.id,
 				input: [
 					{
@@ -1183,15 +1286,21 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				],
 				stream: false,
 				store: false,
+				...(serviceTier ? { [SERVICE_TIER_KEY]: serviceTier } : {}),
 				...(reasoningEffort ? { include: ["reasoning.encrypted_content"] } : {}),
 			}
 
 			if (reasoningEffort) {
-				requestBody.reasoning = {
+				baseRequestBody.reasoning = {
 					effort: reasoningEffort,
 					summary: "auto" as const,
 				}
 			}
+
+			const requestBody =
+				model.id === LUNA_MODEL_ID
+					? this.buildLunaRequestBody(baseRequestBody, this.sessionId)
+					: baseRequestBody
 
 			const url = `${CODEX_API_BASE_URL}/responses`
 
@@ -1200,16 +1309,9 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 
 			// Build headers with required Codex-specific fields
 			const headers: Record<string, string> = {
+				...this.buildCodexHeaders(model, this.sessionId, accountId),
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${accessToken}`,
-				originator: "zoo-code",
-				session_id: this.sessionId,
-				"User-Agent": `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`,
-			}
-
-			// Add ChatGPT-Account-Id if available
-			if (accountId) {
-				headers["ChatGPT-Account-Id"] = accountId
 			}
 
 			const response = await fetch(url, {

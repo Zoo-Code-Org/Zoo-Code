@@ -2,7 +2,7 @@ import { useCallback, useState } from "react"
 import { Checkbox } from "vscrui"
 import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
-import type { ModelInfo, ProviderSettings } from "@roo-code/types"
+import { OpenAiServiceTier, type ModelInfo, type ProviderSettings } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButtonLink } from "@src/components/common/VSCodeButtonLink"
@@ -78,7 +78,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 
 			{(() => {
 				const allowedTiers = (selectedModelInfo?.tiers?.map((t) => t.name).filter(Boolean) || []).filter(
-					(t) => t === "flex" || t === "priority",
+					(t) => t === OpenAiServiceTier.Flex || t === OpenAiServiceTier.Priority,
 				)
 				if (allowedTiers.length === 0) return null
 
@@ -92,7 +92,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 						</div>
 
 						<Select
-							value={apiConfiguration.openAiNativeServiceTier || "default"}
+							value={apiConfiguration.openAiNativeServiceTier || OpenAiServiceTier.Default}
 							onValueChange={(value) =>
 								setApiConfigurationField(
 									"openAiNativeServiceTier",
@@ -103,10 +103,12 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 								<SelectValue placeholder={t("settings:common.select")} />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value="default">Standard</SelectItem>
-								{allowedTiers.includes("flex") && <SelectItem value="flex">Flex</SelectItem>}
-								{allowedTiers.includes("priority") && (
-									<SelectItem value="priority">Priority</SelectItem>
+								<SelectItem value={OpenAiServiceTier.Default}>Standard</SelectItem>
+								{allowedTiers.includes(OpenAiServiceTier.Flex) && (
+									<SelectItem value={OpenAiServiceTier.Flex}>Flex</SelectItem>
+								)}
+								{allowedTiers.includes(OpenAiServiceTier.Priority) && (
+									<SelectItem value={OpenAiServiceTier.Priority}>Priority</SelectItem>
 								)}
 							</SelectContent>
 						</Select>

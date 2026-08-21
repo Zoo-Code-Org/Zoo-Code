@@ -17,7 +17,9 @@
 		"condenseContext": "Condensar contexto de forma inteligente",
 		"openApiHistory": "Abrir historial de API",
 		"openUiHistory": "Abrir historial de UI",
-		"backToParentTask": "Tarea principal"
+		"backToParentTask": "Tarea principal",
+		"waitingOnSubtask": "Esperando subtarea",
+		"goToSubtask": "Ir a la subtarea"
 	},
 	"unpin": "Desfijar",
 	"pin": "Fijar",
@@ -185,7 +187,7 @@
 		"current": "Actual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo quiere obtener instrucciones detalladas para ayudar con la tarea actual"
+		"wantsToFetch": "Zoo quiere obtener instrucciones detalladas para ayudar con la tarea actual"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo quiere leer este archivo",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo quiere editar este archivo fuera del espacio de trabajo",
 		"wantsToEditProtected": "Zoo quiere editar un archivo de configuración protegido",
 		"wantsToCreate": "Zoo quiere crear un nuevo archivo",
-		"wantsToSearchReplace": "Roo quiere realizar búsqueda y reemplazo en este archivo",
-		"didSearchReplace": "Roo realizó búsqueda y reemplazo en este archivo",
+		"wantsToSearchReplace": "Zoo quiere realizar búsqueda y reemplazo en este archivo",
+		"didSearchReplace": "Zoo realizó búsqueda y reemplazo en este archivo",
 		"wantsToInsert": "Zoo quiere insertar contenido en este archivo",
 		"wantsToInsertWithLineNumber": "Zoo quiere insertar contenido en este archivo en la línea {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo quiere añadir contenido al final de este archivo",
@@ -231,6 +233,7 @@
 		"exitStatus": "Salió con el estado {{exitCode}}",
 		"malformedCommand": "Comando mal formado: error de sintaxis del shell",
 		"manageCommands": "Comandos aprobados automáticamente",
+		"denied": "Comando denegado",
 		"addToAllowed": "Agregar a la lista de permitidos",
 		"removeFromAllowed": "Eliminar de la lista de permitidos",
 		"addToDenied": "Agregar a la lista de denegados",
@@ -341,9 +344,9 @@
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novedades:",
-			"highlight1": "Familia OpenAI GPT-5.6 (Sol, Terra, Luna) — disponible tanto en OpenAI Codex como en OpenAI Native.",
-			"highlight2": "Compatibilidad con Grok 4.5 — el nuevo modelo insignia de xAI, además de una corrección del reasoning effort que también beneficia a Grok 4 Mini.",
-			"highlight3": "Proveedor Kenari — un gateway de IA de primera línea compatible con OpenAI, facturado en rupias, que cubre Claude, GPT, DeepSeek, GLM, Kimi y más."
+			"highlight1": "Han llegado tres importantes modelos nuevos — usa los flamantes Gemini 3.7 Flash, GLM 5.3 y Qwen3.8 Max, además de mejoras en el razonamiento, los precios y la cobertura de proveedores de DeepSeek V4.",
+			"highlight2": "Conéctate a NanoGPT — usa descubrimiento dinámico de modelos, streaming y completado de prompts, y preferencias de enrutamiento por velocidad, precio, latencia, rendimiento, compatibilidad con herramientas y caché.",
+			"highlight3": "Proveedores y tareas más fiables — las correcciones mejoran la configuración de endpoints de Azure OpenAI, los límites de salida de Kimi Code, la conservación de títulos del historial de tareas y la importación/exportación de ajustes de Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Novedades en la Nube:",

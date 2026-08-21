@@ -7,7 +7,7 @@ import { ApiHandlerOptions, RouterName } from "../../shared/api"
 import { BaseProvider } from "./base-provider"
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 
 type RouterProviderOptions = {
 	name: RouterName
@@ -26,17 +26,10 @@ export abstract class RouterProvider extends BaseProvider {
 	protected readonly modelId?: string
 	protected readonly defaultModelId: string
 	protected readonly defaultModelInfo: ModelInfo
+	protected readonly apiKey?: string
 	protected readonly client: OpenAI
 
-	constructor({
-		options,
-		name,
-		baseURL,
-		apiKey = "not-provided",
-		modelId,
-		defaultModelId,
-		defaultModelInfo,
-	}: RouterProviderOptions) {
+	constructor({ options, name, baseURL, apiKey, modelId, defaultModelId, defaultModelInfo }: RouterProviderOptions) {
 		super()
 
 		this.options = options
@@ -44,10 +37,11 @@ export abstract class RouterProvider extends BaseProvider {
 		this.modelId = modelId
 		this.defaultModelId = defaultModelId
 		this.defaultModelInfo = defaultModelInfo
+		this.apiKey = apiKey
 
 		this.client = new OpenAI({
 			baseURL,
-			apiKey,
+			apiKey: apiKey ?? NOT_PROVIDED,
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
@@ -56,9 +50,33 @@ export abstract class RouterProvider extends BaseProvider {
 		})
 	}
 
+	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
+
 	public async fetchModel() {
-		this.models = await getModels({ provider: this.name, apiKey: this.client.apiKey, baseUrl: this.client.baseURL })
-		return this.getModel()
+		if (Object.keys(this.models).length > 0) {
+			return this.getModel()
+		}
+
+		if (!this.modelFetchPromise) {
+			this.modelFetchPromise = getModels({
+				provider: this.name,
+				apiKey: this.apiKey,
+				baseUrl: this.client.baseURL,
+			})
+				.then((models) => {
+					this.models = models
+					return this.getModel()
+				})
+				.finally(() => {
+					this.modelFetchPromise = undefined
+				})
+		}
+
+		return this.modelFetchPromise
+	}
+
+	async ensureModelFetched(): Promise<void> {
+		await this.fetchModel()
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
@@ -81,7 +99,7 @@ export abstract class RouterProvider extends BaseProvider {
 		const cachedModels = getModelsFromCache({
 			provider: this.name,
 			baseUrl: this.client.baseURL,
-			apiKey: this.client.apiKey,
+			apiKey: this.apiKey,
 		})
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls

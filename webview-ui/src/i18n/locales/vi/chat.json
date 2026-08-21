@@ -17,7 +17,9 @@
 		"condenseContext": "Cô đọng ngữ cảnh thông minh",
 		"openApiHistory": "Mở lịch sử API",
 		"openUiHistory": "Mở lịch sử UI",
-		"backToParentTask": "Nhiệm vụ cha"
+		"backToParentTask": "Nhiệm vụ cha",
+		"waitingOnSubtask": "Đang chờ nhiệm vụ con",
+		"goToSubtask": "Đến nhiệm vụ con"
 	},
 	"unpin": "Bỏ ghim khỏi đầu",
 	"pin": "Ghim lên đầu",
@@ -185,7 +187,7 @@
 		"current": "Hiện tại"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
+		"wantsToFetch": "Zoo muốn lấy hướng dẫn chi tiết để hỗ trợ nhiệm vụ hiện tại"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo muốn đọc tệp này",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo muốn chỉnh sửa tệp này bên ngoài không gian làm việc",
 		"wantsToEditProtected": "Zoo muốn chỉnh sửa tệp cấu hình được bảo vệ",
 		"wantsToCreate": "Zoo muốn tạo một tệp mới",
-		"wantsToSearchReplace": "Roo muốn thực hiện tìm kiếm và thay thế trong tệp này",
-		"didSearchReplace": "Roo đã thực hiện tìm kiếm và thay thế trong tệp này",
+		"wantsToSearchReplace": "Zoo muốn thực hiện tìm kiếm và thay thế trong tệp này",
+		"didSearchReplace": "Zoo đã thực hiện tìm kiếm và thay thế trong tệp này",
 		"wantsToInsert": "Zoo muốn chèn nội dung vào tệp này",
 		"wantsToInsertWithLineNumber": "Zoo muốn chèn nội dung vào dòng {{lineNumber}} của tệp này",
 		"wantsToInsertAtEnd": "Zoo muốn thêm nội dung vào cuối tệp này",
@@ -231,6 +233,7 @@
 		"exitStatus": "Đã thoát với trạng thái {{exitCode}}",
 		"malformedCommand": "Lệnh không hợp lệ: lỗi cú pháp shell",
 		"manageCommands": "Quản lý quyền lệnh",
+		"denied": "Lệnh bị từ chối",
 		"commandManagementDescription": "Quản lý quyền lệnh: Nhấp vào ✓ để cho phép tự động thực thi, ✗ để từ chối thực thi. Các mẫu có thể được bật/tắt hoặc xóa khỏi danh sách. <settingsLink>Xem tất cả cài đặt</settingsLink>",
 		"addToAllowed": "Thêm vào danh sách cho phép",
 		"removeFromAllowed": "Xóa khỏi danh sách cho phép",
@@ -342,9 +345,9 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới:",
-			"highlight1": "Dòng OpenAI GPT-5.6 (Sol, Terra, Luna) — có sẵn trên cả OpenAI Codex và OpenAI Native.",
-			"highlight2": "Hỗ trợ Grok 4.5 — mẫu chủ lực mới của xAI, cùng với bản sửa lỗi reasoning effort cũng có lợi cho Grok 4 Mini.",
-			"highlight3": "Provider Kenari — gateway AI hạng nhất tương thích OpenAI, tính phí bằng Rupiah, hỗ trợ Claude, GPT, DeepSeek, GLM, Kimi và nhiều hơn nữa."
+			"highlight1": "Ba model mới quan trọng đã xuất hiện — sử dụng các model hoàn toàn mới Gemini 3.7 Flash, GLM 5.3 và Qwen3.8 Max, cùng reasoning, giá và phạm vi provider được cập nhật cho DeepSeek V4.",
+			"highlight2": "Kết nối với NanoGPT — sử dụng khám phá model động, streaming và hoàn thành Prompt, cùng tùy chọn định tuyến theo tốc độ, giá, độ trễ, throughput, hỗ trợ tool và caching.",
+			"highlight3": "Provider và task đáng tin cậy hơn — các bản sửa lỗi cải thiện thiết lập endpoint Azure OpenAI, giới hạn đầu ra Kimi Code, giữ nguyên tiêu đề lịch sử task và nhập/xuất cài đặt Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Mới trên Cloud:",

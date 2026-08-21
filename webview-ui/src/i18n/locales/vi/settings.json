@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Bạn có thể định cấu hình một phím tắt chung cho cài đặt này <SettingsLink>trong tùy chọn IDE của bạn</SettingsLink>.",
-		"description": "Cho phép Roo tự động thực hiện các hoạt động mà không cần phê duyệt. Chỉ bật những cài đặt này nếu bạn hoàn toàn tin tưởng AI và hiểu rõ các rủi ro bảo mật liên quan.",
+		"description": "Cho phép Zoo tự động thực hiện các hoạt động mà không cần phê duyệt. Chỉ bật những cài đặt này nếu bạn hoàn toàn tin tưởng AI và hiểu rõ các rủi ro bảo mật liên quan.",
 		"enabled": "Phê duyệt tự động đã bật",
 		"toggleAriaLabel": "Chuyển đổi tự động phê duyệt",
 		"disabledAriaLabel": "Tự động phê duyệt bị vô hiệu hóa - hãy chọn các tùy chọn trước",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Thực thi",
 			"description": "Tự động thực thi các lệnh terminal được phép mà không cần phê duyệt",
+			"destructiveCommandGuard": {
+				"label": "Bật bảo vệ khỏi lệnh phá hoại",
+				"description": "Tải xuống và sử dụng Destructive Command Guard (DCG) cho nền tảng này. Các lệnh được DCG cho phép sẽ tự động chạy. Các lệnh bị DCG chặn cần bạn phê duyệt. Danh sách lệnh của Zoo sẽ bị vô hiệu hóa khi tùy chọn này được bật. Tệp thực thi đã tải xuống vẫn được giữ lại nếu bạn tắt tùy chọn."
+			},
 			"allowedCommands": "Các lệnh tự động thực thi được phép",
 			"allowedCommandsDescription": "Tiền tố lệnh có thể được tự động thực thi khi \"Luôn phê duyệt các hoạt động thực thi\" được bật. Thêm * để cho phép tất cả các lệnh (sử dụng cẩn thận).",
 			"deniedCommands": "Lệnh bị từ chối",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"kenariApiKey": "Khóa API Kenari",
 		"getKenariApiKey": "Lấy khóa API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Khóa API NanoGPT",
+			"getApiKey": "Lấy khóa API NanoGPT",
+			"model": "Mô hình",
+			"routingPreference": "Tùy chọn định tuyến",
+			"routingOptions": {
+				"automatic": "Tự động",
+				"fastest": "Nhanh nhất",
+				"cheapest": "Rẻ nhất",
+				"lowestLatency": "Độ trễ thấp nhất",
+				"highestThroughput": "Thông lượng cao nhất",
+				"toolCapable": "Hỗ trợ công cụ",
+				"cacheCapable": "Hỗ trợ bộ nhớ đệm"
+			},
+			"automaticExplanation": "Tự động không áp dụng hậu tố định tuyến.",
+			"billingWarning": "Tùy chọn định tuyến nâng cao có thể sử dụng định tuyến trả theo mức dùng và có thể không thuộc phạm vi gói đăng ký, tùy theo quy tắc thanh toán hiện tại của NanoGPT.",
+			"routingDocs": "Xem chi tiết định tuyến và thanh toán NanoGPT"
+		},
 		"apiKeyStorageNotice": "Khóa API được lưu trữ an toàn trong Bộ lưu trữ bí mật của VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Khóa API Moonshot",
 		"getMoonshotApiKey": "Lấy khóa API Moonshot",
 		"moonshotBaseUrl": "Điểm vào Moonshot",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"zaiApiKey": "Khóa API Z AI",
 		"getZaiApiKey": "Lấy khóa API Z AI",
 		"zaiEntrypoint": "Điểm vào Z AI",
@@ -480,6 +514,9 @@
 		"openAiApiKey": "Khóa API OpenAI",
 		"apiKey": "Khóa API",
 		"openAiBaseUrl": "URL cơ sở",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Tên triển khai Azure",
+		"azureOpenAiDeploymentNameDescription": "Nhập tên triển khai trong Azure AI Studio, không phải tên mô hình cơ sở.",
 		"getOpenAiApiKey": "Lấy khóa API OpenAI",
 		"mistralApiKey": "Khóa API Mistral",
 		"getMistralApiKey": "Lấy khóa API Mistral / Codestral",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Giới hạn số lượng token tối đa trong phản hồi",
 	"maxOutputTokensLabel": "Token đầu ra tối đa",
 	"maxTokensGenerateDescription": "Token tối đa để tạo trong phản hồi",
+	"openAiCodexSpeed": {
+		"label": "Tốc độ",
+		"tooltip": "Chế độ Nhanh sử dụng xử lý ưu tiên của Codex để đạt tốc độ nhanh hơn khoảng 1,5 lần và tiêu tốn nhiều hạn mức đăng ký hơn.",
+		"standard": "Tiêu chuẩn",
+		"fast": "Nhanh (tốc độ 1,5 lần, mức sử dụng cao hơn)"
+	},
 	"serviceTier": {
 		"label": "Cấp độ dịch vụ",
 		"tooltip": "Để xử lý các yêu cầu API nhanh hơn, hãy thử cấp độ dịch vụ xử lý ưu tiên. Để có giá thấp hơn với độ trễ cao hơn, hãy thử cấp độ xử lý linh hoạt.",

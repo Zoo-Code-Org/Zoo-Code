@@ -23,6 +23,7 @@ import {
 import { IpcServer } from "@roo-code/ipc"
 
 import { Package } from "../shared/package"
+import type { Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
@@ -192,7 +193,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			provider = this.sidebarProvider
 		}
 
-		await provider.removeClineFromStack()
+		await provider.evictCurrentTask()
 		await provider.postStateToWebview()
 		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
 		await provider.postMessageToWebview({ type: "invoke", invoke: "newChat", text, images })
@@ -255,12 +256,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	public async clearCurrentTask(_lastMessage?: string) {
 		// Legacy finishSubTask removed; clear current by closing active task instance.
-		await this.sidebarProvider.removeClineFromStack()
+		await this.sidebarProvider.evictCurrentTask()
 		await this.sidebarProvider.postStateToWebview()
 	}
 
 	public async cancelCurrentTask() {
 		await this.sidebarProvider.cancelTask()
+	}
+
+	public async abandonSubtask(childTaskId: string): Promise<boolean> {
+		return this.sidebarProvider.abandonSubtask(childTaskId)
 	}
 
 	public async sendMessage(text?: string, images?: string[]) {
@@ -501,6 +506,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	public async setConfiguration(values: RooCodeSettings) {
 		await this.sidebarProvider.contextProxy.setValues(values)
 		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		if (values.modeApiConfigs) {
+			await Promise.all(
+				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+				),
+			)
+		}
 		await this.sidebarProvider.postStateToWebview()
 	}
 

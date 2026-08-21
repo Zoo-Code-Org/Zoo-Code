@@ -56,7 +56,7 @@ export async function handleCreateSkill(
 		const createdPath = await skillsManager.createSkill(skillName, source, skillDescription, modeSlugs)
 
 		// Open the created file in the editor
-		openFile(createdPath)
+		await openFile(createdPath)
 
 		// Send updated skills list
 		const skills = skillsManager.getSkillsMetadata()
@@ -204,7 +204,7 @@ export async function handleOpenSkillFile(provider: ClineProvider, message: Webv
 			throw new Error(t("skills:errors.skill_not_found", { name: skillName }))
 		}
 
-		openFile(skill.path)
+		await openFile(skill.path)
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
 		provider.log(`Error opening skill file: ${errorMessage}`)

@@ -410,6 +410,10 @@
 		"execute": {
 			"label": "Execute",
 			"description": "Automatically execute allowed terminal commands without requiring approval",
+			"destructiveCommandGuard": {
+				"label": "Enable destructive command guard",
+				"description": "Download and use Destructive Command Guard (DCG) for this platform. Commands allowed by DCG run automatically. Commands blocked by DCG require your approval. Zoo's command lists are disabled while this is enabled. The downloaded executable is retained if you turn this off."
+			},
 			"allowedCommands": "Allowed Auto-Execute Commands",
 			"allowedCommandsDescription": "Command prefixes that can be auto-executed when \"Always approve execute operations\" is enabled. Add * to allow all commands (use with caution).",
 			"deniedCommands": "Denied Commands",
@@ -468,6 +472,25 @@
 		"getOpencodeGoApiKey": "Get Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Get Kenari API Key",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Key",
+			"getApiKey": "Get NanoGPT API Key",
+			"model": "Model",
+			"routingPreference": "Routing Preference",
+			"routingOptions": {
+				"automatic": "Automatic",
+				"fastest": "Fastest",
+				"cheapest": "Cheapest",
+				"lowestLatency": "Lowest latency",
+				"highestThroughput": "Highest throughput",
+				"toolCapable": "Tool-capable",
+				"cacheCapable": "Cache-capable"
+			},
+			"automaticExplanation": "Automatic applies no routing suffix.",
+			"billingWarning": "Advanced routing preferences may use pay-as-you-go routing and may bypass subscription coverage, depending on NanoGPT's current billing rules.",
+			"routingDocs": "View NanoGPT routing and billing details"
+		},
 		"apiKeyStorageNotice": "API keys are stored securely in VSCode's Secret Storage",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -543,6 +566,17 @@
 		"moonshotApiKey": "Moonshot API Key",
 		"getMoonshotApiKey": "Get Moonshot API Key",
 		"moonshotBaseUrl": "Moonshot Entrypoint",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"minimaxApiKey": "MiniMax API Key",
 		"getMiniMaxApiKey": "Get MiniMax API Key",
 		"minimaxBaseUrl": "MiniMax Entrypoint",
@@ -564,6 +598,9 @@
 		"openAiApiKey": "OpenAI API Key",
 		"apiKey": "API Key",
 		"openAiBaseUrl": "Base URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure deployment name",
+		"azureOpenAiDeploymentNameDescription": "Enter the deployment name from Azure AI Studio, not the underlying model name.",
 		"getOpenAiApiKey": "Get OpenAI API Key",
 		"mistralApiKey": "Mistral API Key",
 		"getMistralApiKey": "Get Mistral / Codestral API Key",
@@ -1119,6 +1156,12 @@
 	"limitMaxTokensDescription": "Limit the maximum number of tokens in the response",
 	"maxOutputTokensLabel": "Max output tokens",
 	"maxTokensGenerateDescription": "Maximum tokens to generate in response",
+	"openAiCodexSpeed": {
+		"label": "Speed",
+		"tooltip": "Fast uses Codex priority processing for about 1.5x speed and consumes more subscription quota.",
+		"standard": "Standard",
+		"fast": "Fast (1.5x speed, increased usage)"
+	},
 	"serviceTier": {
 		"label": "Service tier",
 		"tooltip": "For faster processing of API requests, try the priority processing service tier. For lower prices with higher latency, try the flex processing tier.",

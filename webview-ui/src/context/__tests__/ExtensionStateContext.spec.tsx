@@ -6,6 +6,9 @@ import {
 	type ExperimentId,
 	type ExtensionState,
 	type ClineMessage,
+	type MarketplaceItem,
+	type MarketplaceInstalledMetadata,
+	type RouterModels,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 } from "@roo-code/types"
@@ -67,6 +70,34 @@ const ApiConfigTestComponent = () => {
 			<button data-testid="partial-update-button" onClick={() => setApiConfiguration({ modelTemperature: 0.7 })}>
 				Partial Update
 			</button>
+		</div>
+	)
+}
+
+const InitialStateTestComponent = () => {
+	const {
+		alwaysAllowFollowupQuestions,
+		followupAutoApproveTimeoutMs,
+		includeTaskHistoryInEnhance,
+		includeCurrentTime,
+		includeCurrentCost,
+		routerModels,
+		marketplaceItems,
+		marketplaceInstalledMetadata,
+	} = useExtensionState()
+
+	return (
+		<div data-testid="initial-state">
+			{JSON.stringify({
+				alwaysAllowFollowupQuestions,
+				followupAutoApproveTimeoutMs,
+				includeTaskHistoryInEnhance,
+				includeCurrentTime,
+				includeCurrentCost,
+				routerModels,
+				marketplaceItems,
+				marketplaceInstalledMetadata,
+			})}
 		</div>
 	)
 }
@@ -179,6 +210,50 @@ describe("ExtensionStateContext", () => {
 		)
 
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
+	})
+
+	it("initializes shadowed context fields from initialState", () => {
+		const routerModels = {} as RouterModels
+		const marketplaceItems: MarketplaceItem[] = [
+			{
+				id: "mode-item",
+				name: "Test mode",
+				description: "A test mode",
+				type: "mode",
+				content: "custom mode content",
+			},
+		]
+		const marketplaceInstalledMetadata: MarketplaceInstalledMetadata = {
+			project: { "mode-item": { type: "mode" } },
+			global: {},
+		}
+
+		render(
+			<ExtensionStateContextProvider
+				initialState={{
+					alwaysAllowFollowupQuestions: true,
+					followupAutoApproveTimeoutMs: 1500,
+					includeTaskHistoryInEnhance: false,
+					includeCurrentTime: false,
+					includeCurrentCost: false,
+					routerModels,
+					marketplaceItems,
+					marketplaceInstalledMetadata,
+				}}>
+				<InitialStateTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		expect(JSON.parse(screen.getByTestId("initial-state").textContent!)).toEqual({
+			alwaysAllowFollowupQuestions: true,
+			followupAutoApproveTimeoutMs: 1500,
+			includeTaskHistoryInEnhance: false,
+			includeCurrentTime: false,
+			includeCurrentCost: false,
+			routerModels: {},
+			marketplaceItems,
+			marketplaceInstalledMetadata,
+		})
 	})
 
 	it("updates showRooIgnoredFiles through setShowRooIgnoredFiles", () => {

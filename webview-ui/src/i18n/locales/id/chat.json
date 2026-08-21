@@ -17,7 +17,9 @@
 		"delete": "Hapus Tugas (Shift + Klik untuk lewati konfirmasi)",
 		"openApiHistory": "Buka Riwayat API",
 		"openUiHistory": "Buka Riwayat UI",
-		"backToParentTask": "Tugas Induk"
+		"backToParentTask": "Tugas Induk",
+		"waitingOnSubtask": "Menunggu subtugas",
+		"goToSubtask": "Pergi ke subtugas"
 	},
 	"history": {
 		"title": "Riwayat"
@@ -229,7 +231,7 @@
 		"didLoad": "Zoo telah memuat keterampilan"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo ingin mengambil instruksi detail untuk membantu tugas saat ini"
+		"wantsToFetch": "Zoo ingin mengambil instruksi detail untuk membantu tugas saat ini"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo ingin membaca file ini",
@@ -246,8 +248,8 @@
 		"wantsToGenerateImageProtected": "Zoo ingin menghasilkan gambar di lokasi yang dilindungi",
 		"didGenerateImage": "Zoo telah menghasilkan gambar",
 		"wantsToCreate": "Zoo ingin membuat file baru",
-		"wantsToSearchReplace": "Roo ingin mencari dan mengganti di file ini",
-		"didSearchReplace": "Roo melakukan pencarian dan penggantian pada file ini",
+		"wantsToSearchReplace": "Zoo ingin mencari dan mengganti di file ini",
+		"didSearchReplace": "Zoo melakukan pencarian dan penggantian pada file ini",
 		"wantsToInsert": "Zoo ingin menyisipkan konten ke file ini",
 		"wantsToInsertWithLineNumber": "Zoo ingin menyisipkan konten ke file ini di baris {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo ingin menambahkan konten ke akhir file ini"
@@ -282,6 +284,7 @@
 		"exitStatus": "Keluar dengan status {{exitCode}}",
 		"malformedCommand": "Perintah tidak valid: kesalahan sintaks shell",
 		"manageCommands": "Perintah yang disetujui secara otomatis",
+		"denied": "Perintah ditolak",
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
@@ -370,9 +373,9 @@
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Yang Baru:",
-			"highlight1": "Keluarga OpenAI GPT-5.6 (Sol, Terra, Luna) — tersedia di OpenAI Codex maupun OpenAI Native.",
-			"highlight2": "Dukungan Grok 4.5 — model andalan baru xAI, plus perbaikan reasoning effort yang juga menguntungkan Grok 4 Mini.",
-			"highlight3": "Provider Kenari — gateway AI kelas utama yang kompatibel dengan OpenAI, ditagih dalam Rupiah, mencakup Claude, GPT, DeepSeek, GLM, Kimi, dan lainnya."
+			"highlight1": "Tiga model baru utama telah hadir — gunakan model terbaru Gemini 3.7 Flash, GLM 5.3, dan Qwen3.8 Max, ditambah pembaruan reasoning, harga, dan cakupan provider DeepSeek V4.",
+			"highlight2": "Hubungkan ke NanoGPT — gunakan penemuan model dinamis, streaming dan penyelesaian prompt, serta preferensi routing untuk kecepatan, harga, latensi, throughput, dukungan tool, dan caching.",
+			"highlight3": "Provider dan task yang lebih andal — perbaikan meningkatkan pengaturan endpoint Azure OpenAI, batas output Kimi Code, penyimpanan judul riwayat task, serta impor/ekspor pengaturan Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Baru di Cloud:",

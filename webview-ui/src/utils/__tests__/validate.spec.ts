@@ -1,4 +1,9 @@
-import type { ProviderSettings, OrganizationAllowList, RouterModels } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	type ProviderSettings,
+	type OrganizationAllowList,
+	type RouterModels,
+} from "@roo-code/types"
 
 // Mock i18next to return translation keys with interpolated values
 vi.mock("i18next", () => ({
@@ -53,7 +58,10 @@ describe("Model Validation Functions", () => {
 		deepseek: {},
 		"opencode-go": {},
 		kenari: {},
+		nanogpt: {},
 		"zoo-gateway": {},
+		"kimi-code": {},
+		moonshot: {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {
@@ -110,6 +118,42 @@ describe("Model Validation Functions", () => {
 
 			const result = getModelValidationError(config, undefined, allowAllOrganization)
 			expect(result).toBeUndefined()
+		})
+
+		it.each([
+			{
+				name: "OpenAI Native",
+				config: {
+					apiProvider: providerIdentifiers.openaiNative,
+					apiModelId: "blocked-model",
+				} satisfies ProviderSettings,
+			},
+			{
+				name: "OpenAI Compatible",
+				config: {
+					apiProvider: providerIdentifiers.openai,
+					openAiModelId: "blocked-model",
+				} satisfies ProviderSettings,
+			},
+			{
+				name: "VS Code LM",
+				config: {
+					apiProvider: providerIdentifiers.vscodeLm,
+					vsCodeLmModelSelector: { id: "blocked-model" },
+				} satisfies ProviderSettings,
+			},
+		])("uses the provider-specific model field for $name organization validation", ({ config }) => {
+			const organizationAllowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[config.apiProvider!]: { allowAll: false, models: ["allowed-model"] },
+				},
+			}
+
+			const result = getModelValidationError(config, undefined, organizationAllowList)
+
+			expect(result).toContain("settings:validation.modelNotAllowed")
+			expect(result).toContain("model=blocked-model")
 		})
 
 		it("handles empty model IDs gracefully", () => {
@@ -252,6 +296,36 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("NanoGPT validation", () => {
+		it("returns an apiKey error when the NanoGPT API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptModelId: "openai/model",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("returns a modelId error when the NanoGPT model is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "valid-key",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.modelId")
+		})
+
+		it("accepts a NanoGPT API key and selected model", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.nanogpt,
+				nanoGptApiKey: "valid-key",
+				nanoGptModelId: "openai/model",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
+		})
+	})
+
 	describe("Friendli validation", () => {
 		it("returns an apiKey error when the Friendli API key is missing", () => {
 			const config: ProviderSettings = {
@@ -363,6 +437,48 @@ describe("Model Validation Functions", () => {
 				)
 				expect(result).toContain("settings:validation.providerNotAllowed")
 			})
+		})
+	})
+
+	describe("Kimi Code validation", () => {
+		it("returns undefined when using OAuth auth method", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+				kimiCodeAuthMethod: "oauth",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns undefined when auth method is not specified (defaults to OAuth)", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+
+		it("returns apiKey error when using api-key auth method without key", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+				kimiCodeAuthMethod: "api-key",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined when using api-key auth method with key", () => {
+			const config: ProviderSettings = {
+				apiProvider: "kimi-code",
+				kimiCodeAuthMethod: "api-key",
+				kimiCodeApiKey: "valid-key",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
 		})
 	})
 })

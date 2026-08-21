@@ -11,9 +11,12 @@ import {
 	internationalZAiModels,
 	mainlandZAiModels,
 	ZAI_DEFAULT_TEMPERATURE,
+	getZAiModels,
 } from "@roo-code/types"
 
 import { ZAiHandler } from "../zai"
+import { asyncStreamFrom } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -29,7 +32,7 @@ describe("ZAiHandler", () => {
 	let mockCreate: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate = (OpenAI as unknown as any)().chat.completions.create
 	})
 
@@ -134,6 +137,31 @@ describe("ZAiHandler", () => {
 			expect(model.info.reasoningEffort).toBe("high")
 			expect(model.info.preserveReasoning).toBe(true)
 			expect(model.info.supportsMaxTokens).toBe(true)
+			expect(model.info.inputPrice).toBe(1.4)
+			expect(model.info.outputPrice).toBe(4.4)
+			expect(model.info.cacheReadsPrice).toBe(0.26)
+		})
+
+		it("should expose GLM-5.3 for the international Coding Plan with official pricing", () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe("glm-5.3")
+			expect(model.info).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 131_072,
+				supportsImages: false,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["low", "high", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "max",
+				preserveReasoning: true,
+				defaultTemperature: 1,
+			})
 			expect(model.info.inputPrice).toBe(1.4)
 			expect(model.info.outputPrice).toBe(4.4)
 			expect(model.info.cacheReadsPrice).toBe(0.26)
@@ -275,6 +303,22 @@ describe("ZAiHandler", () => {
 			expect(model.info.cacheReadsPrice).toBe(0.13)
 		})
 
+		it("should expose GLM-5.3 for the China Coding Plan", () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "china_coding",
+			})
+			const model = handlerWithModel.getModel()
+			expect(model.id).toBe("glm-5.3")
+			expect(model.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(model.info.requiredReasoningEffort).toBe(true)
+			expect(model.info.reasoningEffort).toBe("max")
+			expect(model.info.inputPrice).toBe(0.68)
+			expect(model.info.outputPrice).toBe(2.28)
+			expect(model.info.cacheReadsPrice).toBe(0.13)
+		})
+
 		it("should return GLM-4.7 China model with thinking support", () => {
 			const testModelId: MainlandZAiModelId = "glm-4.7"
 			const handlerWithModel = new ZAiHandler({
@@ -346,6 +390,16 @@ describe("ZAiHandler", () => {
 			expect(model.id).toBe(testModelId)
 			expect(model.info).toEqual(internationalZAiModels[testModelId])
 		})
+
+		it("should expose GLM-5.3 on the international API", () => {
+			expect(getZAiModels("international_api")).toHaveProperty("glm-5.3")
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_api",
+			})
+			expect(handlerWithModel.getModel().id).toBe("glm-5.3")
+		})
 	})
 
 	describe("China API", () => {
@@ -384,6 +438,10 @@ describe("ZAiHandler", () => {
 			const model = handlerWithModel.getModel()
 			expect(model.id).toBe(testModelId)
 			expect(model.info).toEqual(mainlandZAiModels[testModelId])
+		})
+
+		it("should not expose Coding Plan-only models", () => {
+			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.3")
 		})
 	})
 
@@ -430,19 +488,9 @@ describe("ZAiHandler", () => {
 		it("createMessage should yield text content from stream", async () => {
 			const testContent = "This is test content from Z AI stream"
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vitest
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: testContent } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [{ delta: { content: testContent } }] }]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -452,22 +500,14 @@ describe("ZAiHandler", () => {
 		})
 
 		it("createMessage should yield usage data from stream", async () => {
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						next: vitest
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [{ delta: {} }],
-									usage: { prompt_tokens: 10, completion_tokens: 20 },
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 20 },
+					},
+				]),
+			)
 
 			const stream = handler.createMessage("system prompt", [])
 			const firstChunk = await stream.next()
@@ -485,15 +525,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const systemPrompt = "Test system prompt for Z AI"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for Z AI" }]
@@ -526,15 +558,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -566,15 +590,7 @@ describe("ZAiHandler", () => {
 				modelMaxTokens: 100_000,
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -595,15 +611,7 @@ describe("ZAiHandler", () => {
 				// No reasoningEffort setting - should use model default (medium)
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -625,15 +633,7 @@ describe("ZAiHandler", () => {
 				// No reasoningEffort setting - should use model default (high)
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -655,15 +655,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "max",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -677,6 +669,71 @@ describe("ZAiHandler", () => {
 			)
 		})
 
+		it("should use the official GLM-5.3 thinking and sampling defaults", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "disable",
+			})
+
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.3",
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "max",
+					temperature: 1,
+				}),
+			)
+		})
+
+		it("should keep GLM-5.3 reasoning enabled when the master reasoning setting is disabled", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				enableReasoningEffort: false,
+			})
+
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.3",
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "max",
+				}),
+			)
+		})
+
+		it("should use the official GLM-5.3 parameters for completePrompt", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_api",
+				reasoningEffort: "low",
+			})
+
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await expect(handlerWithModel.completePrompt("prompt")).resolves.toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith({
+				model: "glm-5.3",
+				messages: [{ role: "user", content: "prompt" }],
+				temperature: 1,
+				thinking: { type: "enabled", clear_thinking: false },
+				reasoning_effort: "low",
+			})
+		})
+
 		it("should omit reasoning_effort for GLM-5.2 when reasoningEffort is set to disable", async () => {
 			const handlerWithModel = new ZAiHandler({
 				apiModelId: "glm-5.2",
@@ -685,15 +742,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "disable",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -711,15 +760,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "medium",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -742,15 +783,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "disable",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -773,15 +806,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "medium",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -802,15 +827,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -827,15 +844,7 @@ describe("ZAiHandler", () => {
 				zaiApiLine: "international_coding",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()
@@ -857,15 +866,7 @@ describe("ZAiHandler", () => {
 				reasoningEffort: "disable",
 			})
 
-			mockCreate.mockImplementationOnce(() => {
-				return {
-					[Symbol.asyncIterator]: () => ({
-						async next() {
-							return { done: true }
-						},
-					}),
-				}
-			})
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
 			await messageGenerator.next()

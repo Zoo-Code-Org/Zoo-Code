@@ -17,7 +17,9 @@
 		"condenseContext": "Bağlamı akıllıca yoğunlaştır",
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
-		"backToParentTask": "Üst görev"
+		"backToParentTask": "Üst görev",
+		"waitingOnSubtask": "Alt görev bekleniyor",
+		"goToSubtask": "Alt göreve git"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
@@ -185,7 +187,7 @@
 		"current": "Mevcut"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
+		"wantsToFetch": "Zoo mevcut göreve yardımcı olmak için ayrıntılı talimatlar almak istiyor"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo bu dosyayı okumak istiyor",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
 		"wantsToEditProtected": "Zoo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
 		"wantsToCreate": "Zoo yeni bir dosya oluşturmak istiyor",
-		"wantsToSearchReplace": "Roo bu dosyada arama ve değiştirme yapmak istiyor",
-		"didSearchReplace": "Roo bu dosyada arama ve değiştirme yaptı",
+		"wantsToSearchReplace": "Zoo bu dosyada arama ve değiştirme yapmak istiyor",
+		"didSearchReplace": "Zoo bu dosyada arama ve değiştirme yaptı",
 		"wantsToInsert": "Zoo bu dosyaya içerik eklemek istiyor",
 		"wantsToInsertWithLineNumber": "Zoo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
 		"wantsToInsertAtEnd": "Zoo bu dosyanın sonuna içerik eklemek istiyor",
@@ -231,6 +233,7 @@
 		"exitStatus": "{{exitCode}} durumuyla çıkıldı",
 		"malformedCommand": "Hatalı komut: shell sozdizimi hatasi",
 		"manageCommands": "Komut İzinlerini Yönet",
+		"denied": "Komut reddedildi",
 		"commandManagementDescription": "Komut izinlerini yönetin: Otomatik yürütmeye izin vermek için ✓'e, yürütmeyi reddetmek için ✗'e tıklayın. Desenler açılıp kapatılabilir veya listelerden kaldırılabilir. <settingsLink>Tüm ayarları görüntüle</settingsLink>",
 		"addToAllowed": "İzin verilenler listesine ekle",
 		"removeFromAllowed": "İzin verilenler listesinden kaldır",
@@ -342,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "OpenAI GPT-5.6 ailesi (Sol, Terra, Luna) — hem OpenAI Codex hem de OpenAI Native üzerinde kullanılabilir.",
-			"highlight2": "Grok 4.5 desteği — xAI'nin yeni amiral gemisi modeli, ayrıca Grok 4 Mini'ye de fayda sağlayan bir reasoning effort düzeltmesi.",
-			"highlight3": "Kenari provider — Rupiah üzerinden faturalandırılan, Claude, GPT, DeepSeek, GLM, Kimi ve daha fazlasını kapsayan, OpenAI uyumlu birinci sınıf bir AI ağ geçidi."
+			"highlight1": "Üç önemli yeni model geldi — yepyeni Gemini 3.7 Flash, GLM 5.3 ve Qwen3.8 Max modellerini, ayrıca güncellenmiş DeepSeek V4 reasoning, fiyatlandırma ve provider kapsamını kullan.",
+			"highlight2": "NanoGPT'ye bağlan — dinamik model keşfi, streaming ve Prompt tamamlama ile hız, fiyat, gecikme, throughput, araç desteği ve caching için yönlendirme tercihlerini kullan.",
+			"highlight3": "Daha güvenilir provider'lar ve görevler — düzeltmeler Azure OpenAI endpoint kurulumunu, Kimi Code çıktı sınırlarını, görev geçmişi başlıklarının korunmasını ve Zoo ayarlarının içe/dışa aktarımını iyileştiriyor."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

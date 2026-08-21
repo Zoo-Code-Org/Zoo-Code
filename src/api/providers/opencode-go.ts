@@ -8,6 +8,7 @@ import {
 	opencodeGoDefaultModelInfo,
 	OPENCODE_GO_DEFAULT_TEMPERATURE,
 	isOpencodeGoAnthropicFormatModel,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -54,9 +55,9 @@ import {
  *
  *   - OpenAI-compatible chat completions (`/v1/chat/completions`, "oa-compat")
  *     — used by GLM, Kimi, DeepSeek, and MiMo models.
- *   - Anthropic Messages (`/v1/messages`) — used by Qwen (qwen3.7-max,
- *     qwen3.7-plus, qwen3.6-plus) and MiniMax (minimax-m3, minimax-m2.7,
- *     minimax-m2.5) models.
+ *   - Anthropic Messages (`/v1/messages`) — used by Qwen (qwen3.8-max,
+ *     qwen3.7-max, qwen3.7-plus, qwen3.6-plus) and MiniMax (minimax-m3,
+ *     minimax-m2.7, minimax-m2.5) models.
  *
  * Sending an Anthropic-format model to the chat completions endpoint is
  * rejected with `401 Model <id> is not supported for format oa-compat`, so this
@@ -81,7 +82,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "opencode-go",
+			name: providerIdentifiers.opencodeGo,
 			baseURL: "https://opencode.ai/zen/go/v1",
 			apiKey: options.opencodeGoApiKey,
 			modelId: options.opencodeGoModelId,

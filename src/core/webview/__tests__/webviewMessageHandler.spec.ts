@@ -26,6 +26,10 @@ vi.mock("../../../services/command/commands", () => ({
 	getCommands: vi.fn(),
 }))
 
+vi.mock("../../../services/destructive-command-guard", () => ({
+	ensureDcgInstalled: vi.fn(),
+}))
+
 vi.mock("@anthropic-ai/vertex-sdk", () => ({
 	AnthropicVertex: vi.fn(),
 }))
@@ -58,6 +62,7 @@ import type { ClineProvider } from "../ClineProvider"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
+import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
 import {
 	handleCreateRule,
 	handleDeleteRule,
@@ -192,6 +197,7 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -227,7 +233,10 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			type: "requestLmStudioModels",
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "lmstudio", baseUrl: "http://localhost:1234" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.lmstudio,
+			baseUrl: "http://localhost:1234",
+		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "lmStudioModels",
@@ -294,6 +303,9 @@ describe("webviewMessageHandler - image mentions", () => {
 describe("webviewMessageHandler - requestOllamaModels", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockFlushModels.mockReset()
+		mockFlushModels.mockResolvedValue(undefined)
+		mockGetModels.mockReset()
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
 				ollamaModelId: "model-1",
@@ -324,7 +336,101 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 			type: "requestOllamaModels",
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "ollama", baseUrl: "http://localhost:1234" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.ollama,
+			baseUrl: "http://localhost:1234",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "ollamaModels",
+			ollamaModels: mockModels,
+		})
+	})
+
+	it("posts empty models response when no models are found", async () => {
+		mockGetModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOllamaModels",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "ollamaModels",
+			ollamaModels: {},
+		})
+	})
+
+	it("posts empty models response with error message and logs to output on fetch failure", async () => {
+		mockGetModels.mockRejectedValue(new Error("Connection refused"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOllamaModels",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "ollamaModels",
+			ollamaModels: {},
+			error: "Connection refused",
+		})
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			"[requestOllamaModels] Failed to read models for http://localhost:1234: Connection refused",
+		)
+	})
+
+	it("distinguishes a model cache refresh failure from a model read failure", async () => {
+		mockFlushModels.mockRejectedValue(new Error("Cache write failed"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOllamaModels",
+			values: { baseUrl: "https://ollama.example.com" },
+		})
+
+		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			"[requestOllamaModels] Failed to refresh model cache for https://ollama.example.com: Cache write failed",
+		)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "ollamaModels",
+			ollamaModels: {},
+			error: "Cache write failed",
+		})
+	})
+
+	it("uses baseUrl from message values over saved state", async () => {
+		const mockModels: ModelRecord = {
+			"remote-model": {
+				maxTokens: 4096,
+				contextWindow: 8192,
+				supportsPromptCache: false,
+				description: "Remote model",
+			},
+		}
+
+		mockGetModels.mockResolvedValue(mockModels)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOllamaModels",
+			values: {
+				baseUrl: "https://ollama.example.com",
+				apiKey: "secret-key",
+			},
+		})
+
+		// Should use the URL from message values, not the saved state
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.ollama,
+				baseUrl: "https://ollama.example.com",
+				apiKey: "secret-key",
+			},
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.ollama,
+			baseUrl: "https://ollama.example.com",
+			apiKey: "secret-key",
+		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
@@ -369,23 +475,27 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 
 		// Verify getModels was called for each provider
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "openrouter" })
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
 		expect(mockGetModels).toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "unbound",
+				provider: providerIdentifiers.unbound,
 			}),
 		)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		expect(mockGetModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.opencodeGo }),
+		)
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
+		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -401,8 +511,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -429,7 +542,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
 
 		// Must be fetched despite no configured key, forwarding apiKey: undefined.
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.opencodeGo, apiKey: undefined })
 
 		const routerModelsCall = (mockClineProvider.postMessageToWebview as any).mock.calls.find(
 			([msg]: [{ type: string }]) => msg.type === "routerModels",
@@ -453,13 +566,16 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 			values: {
-				provider: "opencode-go",
+				provider: providerIdentifiers.opencodeGo,
 				opencodeGoApiKey: "fresh-key",
 			},
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: "fresh-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: "fresh-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.opencodeGo, apiKey: "fresh-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.opencodeGo, apiKey: "fresh-key" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {
@@ -467,7 +583,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 					"opencode/model": expect.objectContaining({ description: "Opencode model" }),
 				},
 			},
-			values: { provider: "opencode-go" },
+			values: { provider: providerIdentifiers.opencodeGo },
 		})
 	})
 
@@ -487,13 +603,16 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 			values: {
-				provider: "kenari",
+				provider: providerIdentifiers.kenari,
 				kenariApiKey: "fresh-kenari-key",
 			},
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.kenari, apiKey: "fresh-kenari-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.kenari, apiKey: "fresh-kenari-key" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {
@@ -501,8 +620,61 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 					"glm-5-2": expect.objectContaining({ description: "Kenari model" }),
 				},
 			},
-			values: { provider: "kenari" },
+			values: { provider: providerIdentifiers.kenari },
 		})
+	})
+
+	it("fetches NanoGPT publicly without an API key", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: {} })
+		mockGetModels.mockResolvedValue({
+			"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.nanogpt },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
+		expect(mockFlushModels).not.toHaveBeenCalled()
+	})
+
+	it("prefers an unsaved NanoGPT key and refreshes the matching key-scoped cache", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: { nanoGptApiKey: "saved-key" },
+		})
+		mockGetModels.mockResolvedValue({
+			"openai/gpt-5.6-sol": { maxTokens: 128000, contextWindow: 1050000, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.nanogpt, nanoGptApiKey: "unsaved-key" },
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: "unsaved-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: "unsaved-key" })
+	})
+
+	it("uses the saved NanoGPT key for manual refresh", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({
+			apiConfiguration: { nanoGptApiKey: "saved-key" },
+		})
+		mockGetModels.mockResolvedValue({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.nanogpt, refresh: true },
+		})
+
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: "saved-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: "saved-key" })
 	})
 
 	it("handles LiteLLM models with values from message when config is missing", async () => {
@@ -535,7 +707,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify LiteLLM was called with values from message
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-litellm-key",
 			baseUrl: "http://message-url:4000",
 		})
@@ -569,7 +741,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Verify LiteLLM was NOT called
 		expect(mockGetModels).not.toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "litellm",
+				provider: providerIdentifiers.litellm,
 			}),
 		)
 
@@ -587,8 +759,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -613,6 +788,8 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockResolvedValueOnce(mockModels) // zoo-gateway
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
+			.mockResolvedValueOnce(mockModels) // kenari
+			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
@@ -623,14 +800,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 
 		// Verify final routerModels response includes successful providers and empty objects for failed ones
@@ -647,8 +824,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				lmstudio: {},
 				poe: {},
 				deepseek: {},
+				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				nanogpt: mockModels,
+				"kimi-code": {},
 			},
 			values: undefined,
 		})
@@ -673,35 +853,35 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Structured error message",
-			values: { provider: "openrouter" },
+			values: { provider: providerIdentifiers.openrouter },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Unbound error",
-			values: { provider: "unbound" },
+			values: { provider: providerIdentifiers.unbound },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Vercel AI Gateway error",
-			values: { provider: "vercel-ai-gateway" },
+			values: { provider: providerIdentifiers.vercelAiGateway },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 	})
 
@@ -714,7 +894,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Roo Code Router has been removed. Please select and configure a different provider.",
-			values: { provider: "roo" },
+			values: { provider: retiredProviderIdentifiers.roo },
 		})
 	})
 
@@ -732,7 +912,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify message values take precedence over saved config (current unsaved field state wins)
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-key", // From message.values
 			baseUrl: "http://message-url", // From message.values
 		})
@@ -995,6 +1175,76 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 
 		expect((mockClineProvider as any).getMcpHub).toHaveBeenCalledTimes(1)
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(ensureDcgInstalled).mockResolvedValue("/mock/global/storage/dcg")
+	})
+
+	it("installs and persists destructive command guard when enabled", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(ensureDcgInstalled).toHaveBeenCalledWith("/mock/global/storage")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", true)
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+	})
+
+	it("disables the setting and reports an installation failure", async () => {
+		vi.mocked(ensureDcgInstalled).mockRejectedValue(new Error("checksum mismatch"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"common:errors.destructiveCommandGuard.enableFailed",
+		)
+	})
+
+	it("disables the setting when DCG is unavailable for the current platform", async () => {
+		vi.mocked(ensureDcgInstalled).mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(t).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.unavailable")
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.unavailable")
+		expect(t).not.toHaveBeenCalledWith("common:errors.destructiveCommandGuard.enableFailed", expect.anything())
+	})
+
+	it("reports non-Error installation failures", async () => {
+		vi.mocked(ensureDcgInstalled).mockRejectedValue("download unavailable")
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: true },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+		expect(t).toHaveBeenCalledWith("common:errors.destructiveCommandGuard.enableFailed", {
+			error: "download unavailable",
+		})
+	})
+
+	it("persists disabled state without trying to install", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { destructiveCommandGuardEnabled: false },
+		})
+
+		expect(ensureDcgInstalled).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
 	})
 })
 
@@ -1395,30 +1645,30 @@ describe("zooCodeSignOut", () => {
 		vi.clearAllMocks()
 	})
 
-	it("disconnects Zoo Code and clears tokens from all zoo-gateway profiles", async () => {
+	it("disconnects Zoo Code and clears tokens from all Zoo Gateway profiles", async () => {
 		const { disconnectZooCode } = await import("../../../services/zoo-code-auth")
 		const upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue(undefined)
 
 		;(mockClineProvider as any).contextProxy = {
 			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([
-				{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
-				{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
 			]),
 			getProfile: vi
 				.fn()
 				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: "token-active",
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				})
 				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: "token-backup",
 				}),
 			saveConfig,
@@ -1445,13 +1695,15 @@ describe("zooCodeSignOut", () => {
 
 		;(mockClineProvider as any).contextProxy = {
 			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 			getProfile: vi.fn().mockResolvedValue({
-				apiProvider: "zoo-gateway",
+				apiProvider: providerIdentifiers.zooGateway,
 				zooGatewayModelId: "anthropic/claude-sonnet-4",
 			}),
 			saveConfig: vi.fn(),
@@ -1465,5 +1717,150 @@ describe("zooCodeSignOut", () => {
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
 		)
+	})
+})
+
+describe("webviewMessageHandler - kimiCodeSignIn", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.resetModules()
+	})
+
+	it("starts OAuth authorization and opens browser", async () => {
+		const mockStartAuthorization = vi.fn().mockResolvedValue({
+			userCode: "TEST-CODE",
+			verificationUri: "https://auth.kimi.com/device",
+			expiresAt: Date.now() + 600000,
+		})
+		const mockWaitForAuthorization = vi.fn().mockResolvedValue({
+			type: "kimi-code",
+			accessToken: "token",
+			refreshToken: "refresh",
+			expiresAt: Date.now() + 3600000,
+		})
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+				waitForAuthorization: mockWaitForAuthorization,
+			},
+		}))
+
+		const mockOpenExternal = vi.fn().mockResolvedValue(true)
+		;(vscode as any).env = { openExternal: mockOpenExternal }
+		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+
+		expect(mockStartAuthorization).toHaveBeenCalled()
+		expect(mockOpenExternal).toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("shows success message after successful authorization", async () => {
+		const mockStartAuthorization = vi.fn().mockResolvedValue({
+			userCode: "TEST-CODE",
+			verificationUri: "https://auth.kimi.com/device",
+			expiresAt: Date.now() + 600000,
+		})
+		const mockWaitForAuthorization = vi.fn().mockResolvedValue({
+			type: "kimi-code",
+			accessToken: "token",
+			refreshToken: "refresh",
+			expiresAt: Date.now() + 3600000,
+		})
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+				waitForAuthorization: mockWaitForAuthorization,
+			},
+		}))
+
+		const mockOpenExternal = vi.fn().mockResolvedValue(true)
+		;(vscode as any).env = { openExternal: mockOpenExternal }
+		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+		await new Promise((resolve) => setTimeout(resolve, 10))
+
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("Successfully signed in to Kimi Code")
+	})
+
+	it("handles authorization failure", async () => {
+		const mockStartAuthorization = vi.fn().mockResolvedValue({
+			userCode: "TEST-CODE",
+			verificationUri: "https://auth.kimi.com/device",
+			expiresAt: Date.now() + 600000,
+		})
+		const mockWaitForAuthorization = vi.fn().mockRejectedValue(new Error("Authorization cancelled"))
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+				waitForAuthorization: mockWaitForAuthorization,
+			},
+		}))
+
+		const mockOpenExternal = vi.fn().mockResolvedValue(true)
+		;(vscode as any).env = { openExternal: mockOpenExternal }
+		;(vscode as any).Uri = { parse: vi.fn((url: string) => url) }
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+		await new Promise((resolve) => setTimeout(resolve, 10))
+
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("handles startAuthorization error", async () => {
+		const mockStartAuthorization = vi.fn().mockRejectedValue(new Error("Network error"))
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				startAuthorization: mockStartAuthorization,
+			},
+		}))
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignIn" })
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("Kimi Code sign in failed"))
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - kimiCodeSignOut", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.resetModules()
+	})
+
+	it("clears credentials and shows success message", async () => {
+		const mockClearCredentials = vi.fn().mockResolvedValue(undefined)
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				clearCredentials: mockClearCredentials,
+			},
+		}))
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignOut" })
+
+		expect(mockClearCredentials).toHaveBeenCalled()
+		expect(vscode.window.showInformationMessage).toHaveBeenCalledWith("Signed out from Kimi Code")
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("handles sign out error", async () => {
+		const mockClearCredentials = vi.fn().mockRejectedValue(new Error("Clear failed"))
+
+		vi.doMock("../../../integrations/kimi-code/oauth", () => ({
+			kimiCodeOAuthManager: {
+				clearCredentials: mockClearCredentials,
+			},
+		}))
+
+		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignOut" })
+
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Kimi Code sign out failed.")
 	})
 })

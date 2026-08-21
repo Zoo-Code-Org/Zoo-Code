@@ -1,10 +1,7 @@
 import React, { useEffect, useImperativeHandle, useRef } from "react"
-import { act, fireEvent, render } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
 
 import type { ClineMessage } from "@roo-code/types"
-
-import { ExtensionStateContextProvider } from "@src/context/ExtensionStateContext"
 
 import ChatView, { type ChatViewProps } from "../ChatView"
 
@@ -258,14 +255,7 @@ const postState = (clineMessages: ClineMessage[]) => {
 	)
 }
 
-const renderView = () =>
-	render(
-		<ExtensionStateContextProvider>
-			<QueryClientProvider client={new QueryClient()}>
-				<ChatView {...props} />
-			</QueryClientProvider>
-		</ExtensionStateContextProvider>,
-	)
+const renderView = () => renderWithExtensionState(<ChatView {...props} />)
 
 const flushEffects = async () => {
 	await act(async () => {

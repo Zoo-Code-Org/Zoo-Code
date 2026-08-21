@@ -17,7 +17,9 @@
 		"condenseContext": "Inteligentnie skondensuj kontekst",
 		"openApiHistory": "Otwórz historię API",
 		"openUiHistory": "Otwórz historię UI",
-		"backToParentTask": "Zadanie nadrzędne"
+		"backToParentTask": "Zadanie nadrzędne",
+		"waitingOnSubtask": "Oczekuje na podzadanie",
+		"goToSubtask": "Przejdź do podzadania"
 	},
 	"unpin": "Odepnij",
 	"pin": "Przypnij",
@@ -185,7 +187,7 @@
 		"current": "Bieżący"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
+		"wantsToFetch": "Zoo chce pobrać szczegółowe instrukcje, aby pomóc w bieżącym zadaniu"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo chce przeczytać ten plik",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo chce edytować ten plik poza obszarem roboczym",
 		"wantsToEditProtected": "Zoo chce edytować chroniony plik konfiguracyjny",
 		"wantsToCreate": "Zoo chce utworzyć nowy plik",
-		"wantsToSearchReplace": "Roo chce wykonać wyszukiwanie i zamianę w tym pliku",
-		"didSearchReplace": "Roo wykonał wyszukiwanie i zamianę w tym pliku",
+		"wantsToSearchReplace": "Zoo chce wykonać wyszukiwanie i zamianę w tym pliku",
+		"didSearchReplace": "Zoo wykonał wyszukiwanie i zamianę w tym pliku",
 		"wantsToInsert": "Zoo chce wstawić zawartość do tego pliku",
 		"wantsToInsertWithLineNumber": "Zoo chce wstawić zawartość do tego pliku w linii {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo chce dodać zawartość na końcu tego pliku",
@@ -231,6 +233,7 @@
 		"exitStatus": "Zakończono ze statusem {{exitCode}}",
 		"malformedCommand": "Nieprawidlowe polecenie: blad skladni shell",
 		"manageCommands": "Polecenia zatwierdzone automatycznie",
+		"denied": "Polecenie odrzucone",
 		"addToAllowed": "Dodaj do listy dozwolonych",
 		"removeFromAllowed": "Usuń z listy dozwolonych",
 		"addToDenied": "Dodaj do listy odrzuconych",
@@ -341,9 +344,9 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego:",
-			"highlight1": "Rodzina OpenAI GPT-5.6 (Sol, Terra, Luna) — dostępna zarówno w OpenAI Codex, jak i OpenAI Native.",
-			"highlight2": "Obsługa Grok 4.5 — nowy flagowy model xAI, a także poprawka reasoning effort, z której korzysta również Grok 4 Mini.",
-			"highlight3": "Provider Kenari — wysokiej klasy gateway AI kompatybilny z OpenAI, rozliczany w rupii, obsługujący Claude, GPT, DeepSeek, GLM, Kimi i więcej."
+			"highlight1": "Pojawiły się trzy ważne nowe modele — korzystaj z zupełnie nowych Gemini 3.7 Flash, GLM 5.3 i Qwen3.8 Max oraz zaktualizowanego reasoning, cen i obsługi providerów dla DeepSeek V4.",
+			"highlight2": "Połącz się z NanoGPT — korzystaj z dynamicznego wykrywania modeli, streamingu i uzupełniania promptów oraz preferencji routingu według szybkości, ceny, opóźnienia, przepustowości, obsługi narzędzi i cache.",
+			"highlight3": "Bardziej niezawodni providerzy i zadania — poprawki usprawniają konfigurację endpointów Azure OpenAI, limity wyjścia Kimi Code, zachowywanie tytułów historii zadań oraz import/eksport ustawień Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Nowości w chmurze:",

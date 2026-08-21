@@ -3,9 +3,15 @@
 import { OpenAiHandler, getOpenAiModels } from "../openai"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
-import { openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import OpenAI, { AzureOpenAI } from "openai"
+import {
+	openAiModelInfoSaneDefaults,
+	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	azureOpenAiDefaultApiVersion,
+} from "@roo-code/types"
 import { Package } from "../../../shared/package"
+import { makeApiHandlerOptions } from "../../../test-utils/api"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import axios from "axios"
 
 vitest.mock("../utils/timeout-config", () => ({
@@ -18,6 +24,7 @@ const mockCreate = vitest.fn()
 
 vitest.mock("openai", () => {
 	const mockConstructor = vitest.fn()
+	const mockAzureConstructor = vitest.fn()
 	return {
 		__esModule: true,
 		default: mockConstructor.mockImplementation(function () {
@@ -43,37 +50,36 @@ vitest.mock("openai", () => {
 								}
 							}
 
-							return {
-								[Symbol.asyncIterator]: async function* () {
-									yield {
-										choices: [
-											{
-												delta: { content: "Test response" },
-												index: 0,
-											},
-										],
-										usage: null,
-									}
-									yield {
-										choices: [
-											{
-												delta: {},
-												index: 0,
-											},
-										],
-										usage: {
-											prompt_tokens: 10,
-											completion_tokens: 5,
-											total_tokens: 15,
+							return asyncStreamFrom([
+								{
+									choices: [
+										{
+											delta: { content: "Test response" },
+											index: 0,
 										},
-									}
+									],
+									usage: null,
 								},
-							}
+								{
+									choices: [
+										{
+											delta: {},
+											index: 0,
+										},
+									],
+									usage: {
+										prompt_tokens: 10,
+										completion_tokens: 5,
+										total_tokens: 15,
+									},
+								},
+							])
 						}),
 					},
 				},
 			}
 		}),
+		AzureOpenAI: mockAzureConstructor,
 	}
 })
 
@@ -89,11 +95,11 @@ describe("OpenAiHandler", () => {
 	let mockOptions: ApiHandlerOptions
 
 	beforeEach(() => {
-		mockOptions = {
+		mockOptions = makeApiHandlerOptions({
 			openAiApiKey: "test-api-key",
 			openAiModelId: "gpt-4",
 			openAiBaseUrl: "https://api.openai.com/v1",
-		}
+		})
 		handler = new OpenAiHandler(mockOptions)
 		mockCreate.mockClear()
 	})
@@ -126,6 +132,43 @@ describe("OpenAiHandler", () => {
 				timeout: MOCK_TIMEOUT_MS,
 			})
 		})
+
+		it.each([
+			["https://resource.openai.azure.com", "https://resource.openai.azure.com/openai"],
+			["https://resource.openai.azure.com/", "https://resource.openai.azure.com/openai"],
+			["https://resource.openai.azure.com/openai", "https://resource.openai.azure.com/openai"],
+			["https://resource.openai.azure.com/openai/", "https://resource.openai.azure.com/openai"],
+		])("normalizes Azure OpenAI base URL %s", (openAiBaseUrl, expectedBaseUrl) => {
+			new OpenAiHandler({ ...mockOptions, openAiBaseUrl })
+
+			expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					baseURL: expectedBaseUrl,
+					apiKey: mockOptions.openAiApiKey,
+					apiVersion: azureOpenAiDefaultApiVersion,
+					defaultHeaders: expect.any(Object),
+					timeout: MOCK_TIMEOUT_MS,
+				}),
+			)
+		})
+
+		it("normalizes reverse-proxy URLs when Azure mode is enabled", () => {
+			new OpenAiHandler({
+				...mockOptions,
+				openAiBaseUrl: "https://models.example.com/azure/",
+				openAiUseAzure: true,
+			})
+
+			expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					baseURL: "https://models.example.com/azure/openai",
+					apiKey: mockOptions.openAiApiKey,
+					apiVersion: azureOpenAiDefaultApiVersion,
+					defaultHeaders: expect.any(Object),
+					timeout: MOCK_TIMEOUT_MS,
+				}),
+			)
+		})
 	})
 
 	describe("createMessage", () => {
@@ -149,10 +192,7 @@ describe("OpenAiHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunk = chunks.find((chunk) => chunk.type === "text")
@@ -199,10 +239,7 @@ describe("OpenAiHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call")
 			expect(toolCallChunks).toHaveLength(1)
@@ -216,10 +253,7 @@ describe("OpenAiHandler", () => {
 
 		it("should handle streaming responses", async () => {
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -228,48 +262,42 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] }
-					yield { choices: [{ delta: { content: "answer" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning_content: "thinking..." }, index: 0 }] },
+					{ choices: [{ delta: { content: "answer" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
 
 		it("falls back to delta.reasoning when reasoning_content is absent", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield { choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] }
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { reasoning: "router-style thought" }, index: 0 }] },
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
-			mockCreate.mockImplementationOnce(async () => ({
-				[Symbol.asyncIterator]: async function* () {
-					yield {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
 						choices: [
 							{
 								delta: {
@@ -279,19 +307,15 @@ describe("OpenAiHandler", () => {
 								index: 0,
 							},
 						],
-					}
-					yield {
+					},
+					{
 						choices: [{ delta: {}, index: 0 }],
 						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
-					}
-				},
-			}))
+					},
+				]),
+			)
 
-			const chunks: any[] = []
-
-			for await (const chunk of handler.createMessage(systemPrompt, messages)) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 
@@ -299,54 +323,49 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should handle tool calls in streaming responses", async () => {
-			mockCreate.mockImplementation(async (options) => {
-				return {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												id: "call_1",
-												function: { name: "test_tool", arguments: "" },
-											},
-										],
-									},
-									finish_reason: null,
+			mockCreate.mockImplementation(async (options) =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_1",
+											function: { name: "test_tool", arguments: "" },
+										},
+									],
 								},
-							],
-						}
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [{ index: 0, function: { arguments: '{"arg":' } }],
-									},
-									finish_reason: null,
-								},
-							],
-						}
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [{ index: 0, function: { arguments: '"value"}' } }],
-									},
-									finish_reason: "tool_calls",
-								},
-							],
-						}
+								finish_reason: null,
+							},
+						],
 					},
-				}
-			})
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [{ index: 0, function: { arguments: '{"arg":' } }],
+								},
+								finish_reason: null,
+							},
+						],
+					},
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [{ index: 0, function: { arguments: '"value"}' } }],
+								},
+								finish_reason: "tool_calls",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Provider now yields tool_call_partial chunks, NativeToolCallParser handles reassembly
 			const toolCallPartialChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
@@ -381,43 +400,37 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should yield tool calls even when finish_reason is not set (fallback behavior)", async () => {
-			mockCreate.mockImplementation(async (options) => {
-				return {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												id: "call_fallback",
-												function: { name: "fallback_tool", arguments: '{"test":"fallback"}' },
-											},
-										],
-									},
-									finish_reason: null,
+			mockCreate.mockImplementation(async (options) =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_fallback",
+											function: { name: "fallback_tool", arguments: '{"test":"fallback"}' },
+										},
+									],
 								},
-							],
-						}
-						// Stream ends without finish_reason being set to "tool_calls"
-						yield {
-							choices: [
-								{
-									delta: {},
-									finish_reason: "stop", // Different finish reason
-								},
-							],
-						}
+								finish_reason: null,
+							},
+						],
 					},
-				}
-			})
+					{
+						choices: [
+							{
+								delta: {},
+								finish_reason: "stop",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Provider now yields tool_call_partial chunks, NativeToolCallParser handles reassembly
 			const toolCallPartialChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
@@ -445,12 +458,31 @@ describe("OpenAiHandler", () => {
 			const reasoningHandler = new OpenAiHandler(reasoningOptions)
 			const stream = reasoningHandler.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called with reasoning_effort
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.reasoning_effort).toBe("high")
+		})
+
+		it("should pass through max reasoning_effort when configured by an OpenAI-compatible model", async () => {
+			const reasoningOptions: ApiHandlerOptions = {
+				...mockOptions,
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+					reasoningEffort: "max",
+				},
+			}
+			const reasoningHandler = new OpenAiHandler(reasoningOptions)
+			const stream = reasoningHandler.createMessage(systemPrompt, messages)
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalled()
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs.reasoning_effort).toBe("max")
 		})
 
 		it("should not include reasoning_effort when reasoning effort is disabled", async () => {
@@ -462,8 +494,7 @@ describe("OpenAiHandler", () => {
 			const noReasoningHandler = new OpenAiHandler(noReasoningOptions)
 			const stream = noReasoningHandler.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called without reasoning_effort
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -481,8 +512,7 @@ describe("OpenAiHandler", () => {
 			}
 			const noTempHandler = new OpenAiHandler(noTempOptions)
 			const stream = noTempHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs).not.toHaveProperty("temperature")
@@ -492,8 +522,7 @@ describe("OpenAiHandler", () => {
 			// Option A: when "use custom temperature" is off (modelTemperature unset) and the model has no
 			// required default, omit `temperature` so the server's own default applies instead of forcing 0.
 			const stream = handler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs).not.toHaveProperty("temperature")
@@ -502,8 +531,7 @@ describe("OpenAiHandler", () => {
 		it("should use the configured modelTemperature when supportsTemperature is not false", async () => {
 			const customTempHandler = new OpenAiHandler({ ...mockOptions, modelTemperature: 0.5 })
 			const stream = customTempHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.temperature).toBe(0.5)
@@ -512,8 +540,7 @@ describe("OpenAiHandler", () => {
 		it("should default to DEEP_SEEK_DEFAULT_TEMPERATURE for deepseek-reasoner models", async () => {
 			const deepseekHandler = new OpenAiHandler({ ...mockOptions, openAiModelId: "deepseek-reasoner" })
 			const stream = deepseekHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.temperature).toBe(DEEP_SEEK_DEFAULT_TEMPERATURE)
@@ -523,8 +550,7 @@ describe("OpenAiHandler", () => {
 			// A deliberate 0 must be distinguished from "unset" — it is sent, not omitted.
 			const zeroTempHandler = new OpenAiHandler({ ...mockOptions, modelTemperature: 0 })
 			const stream = zeroTempHandler.createMessage(systemPrompt, messages)
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.temperature).toBe(0)
@@ -543,8 +569,7 @@ describe("OpenAiHandler", () => {
 			const handlerWithMaxTokens = new OpenAiHandler(optionsWithMaxTokens)
 			const stream = handlerWithMaxTokens.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called with max_tokens
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -564,8 +589,7 @@ describe("OpenAiHandler", () => {
 			const handlerWithoutMaxTokens = new OpenAiHandler(optionsWithoutMaxTokens)
 			const stream = handlerWithoutMaxTokens.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called without max_tokens
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -585,8 +609,7 @@ describe("OpenAiHandler", () => {
 			const handlerWithDefaultMaxTokens = new OpenAiHandler(optionsWithUndefinedMaxTokens)
 			const stream = handlerWithDefaultMaxTokens.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called without max_tokens
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -607,8 +630,7 @@ describe("OpenAiHandler", () => {
 			const handlerWithUserMaxTokens = new OpenAiHandler(optionsWithUserMaxTokens)
 			const stream = handlerWithUserMaxTokens.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called with user-configured modelMaxTokens (32000), not model default maxTokens (4096)
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -629,8 +651,7 @@ describe("OpenAiHandler", () => {
 			const handlerWithoutUserMaxTokens = new OpenAiHandler(optionsWithoutUserMaxTokens)
 			const stream = handlerWithoutUserMaxTokens.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 			// Assert the mockCreate was called with model default maxTokens (4096) as fallback
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
@@ -639,47 +660,25 @@ describe("OpenAiHandler", () => {
 
 		describe("TagMatcher reasoning tags", () => {
 			it("should treat stray closing tag as plain text when no tag is open", async () => {
-				mockCreate.mockImplementationOnce(() => ({
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "final</think>text" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}))
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([{ choices: [{ delta: { content: "final</think>text" } }] }]),
+				)
 
 				const stream = handler.createMessage(systemPrompt, messages)
-				const chunks: any[] = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(stream)
 
 				expect(chunks).toEqual([{ type: "text", text: "final</think>text" }])
 			})
 
 			it("should treat extra closing tag after a closed block as plain text", async () => {
-				mockCreate.mockImplementationOnce(() => ({
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: {
-									choices: [{ delta: { content: "<think>thinking</think>final</think>text" } }],
-								},
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}))
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{ choices: [{ delta: { content: "<think>thinking</think>final</think>text" } }] },
+					]),
+				)
 
 				const stream = handler.createMessage(systemPrompt, messages)
-				const chunks: any[] = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(stream)
 
 				expect(chunks).toEqual([
 					{ type: "reasoning", text: "thinking" },
@@ -688,35 +687,17 @@ describe("OpenAiHandler", () => {
 			})
 
 			it("should handle nested mixed tags with correct closure matching", async () => {
-				mockCreate.mockImplementationOnce(() => ({
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>outer" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<thought>inner</thought>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " middle</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "final text" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}))
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{ choices: [{ delta: { content: "<think>outer" } }] },
+						{ choices: [{ delta: { content: "<thought>inner</thought>" } }] },
+						{ choices: [{ delta: { content: " middle</think>" } }] },
+						{ choices: [{ delta: { content: "final text" } }] },
+					]),
+				)
 
 				const stream = handler.createMessage(systemPrompt, messages)
-				const chunks: any[] = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(stream)
 
 				// With the tag stack fix, </thought> closes <thought> inner tag,
 				// and </think> correctly closes the outer <think> tag.
@@ -730,35 +711,17 @@ describe("OpenAiHandler", () => {
 			})
 
 			it("should handle nested <think> tags with correct stack unwinding", async () => {
-				mockCreate.mockImplementationOnce(() => ({
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>outer" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>inner</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " middle</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "final text" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}))
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{ choices: [{ delta: { content: "<think>outer" } }] },
+						{ choices: [{ delta: { content: "<think>inner</think>" } }] },
+						{ choices: [{ delta: { content: " middle</think>" } }] },
+						{ choices: [{ delta: { content: "final text" } }] },
+					]),
+				)
 
 				const stream = handler.createMessage(systemPrompt, messages)
-				const chunks: any[] = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(stream)
 
 				// With the tag stack fix, </thought> closes <thought> inner tag,
 				// and </think> correctly closes the outer <think> tag.
@@ -772,31 +735,16 @@ describe("OpenAiHandler", () => {
 			})
 
 			it("should handle reasoning_content alongside tag matching", async () => {
-				mockCreate.mockImplementationOnce(() => ({
-					[Symbol.asyncIterator]: () => ({
-						next: vi
-							.fn()
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { reasoning_content: "native reasoning" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: "<think>tag based</think>" } }] },
-							})
-							.mockResolvedValueOnce({
-								done: false,
-								value: { choices: [{ delta: { content: " final output" } }] },
-							})
-							.mockResolvedValueOnce({ done: true }),
-					}),
-				}))
+				mockCreate.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						{ choices: [{ delta: { reasoning_content: "native reasoning" } }] },
+						{ choices: [{ delta: { content: "<think>tag based</think>" } }] },
+						{ choices: [{ delta: { content: " final output" } }] },
+					]),
+				)
 
 				const stream = handler.createMessage(systemPrompt, messages)
-				const chunks: any[] = []
-				for await (const chunk of stream) {
-					chunks.push(chunk)
-				}
+				const chunks = await collectStream(stream)
 
 				expect(chunks).toEqual([
 					{ type: "reasoning", text: "native reasoning" },
@@ -835,8 +783,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = thinkingHandler.createMessage(systemPrompt, messagesWithReasoning)
-			for await (const _chunk of stream) {
-			}
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalled()
 			const sentMessages: any[] = mockCreate.mock.calls[0][0].messages
@@ -865,9 +812,7 @@ describe("OpenAiHandler", () => {
 			const stream = handler.createMessage("system prompt", testMessages)
 
 			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should not reach here
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("API Error")
 		})
 
@@ -880,9 +825,7 @@ describe("OpenAiHandler", () => {
 			const stream = handler.createMessage("system prompt", testMessages)
 
 			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should not reach here
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Rate limit exceeded")
 		})
 	})
@@ -903,6 +846,12 @@ describe("OpenAiHandler", () => {
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error: API Error")
+		})
+
+		it("should preserve HTTP status when wrapping completion errors", async () => {
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("Unauthorized"), { status: 401 }))
+
+			await expect(handler.completePrompt("Test prompt")).rejects.toMatchObject({ status: 401 })
 		})
 
 		it("should handle empty response", async () => {
@@ -948,6 +897,16 @@ describe("OpenAiHandler", () => {
 			expect(azureHandler.getModel().id).toBe(azureOptions.openAiModelId)
 		})
 
+		it("should keep Azure AI Inference precedence when Azure mode is enabled", () => {
+			vi.mocked(OpenAI).mockClear()
+			vi.mocked(AzureOpenAI).mockClear()
+
+			new OpenAiHandler({ ...azureOptions, openAiUseAzure: true })
+
+			expect(vi.mocked(OpenAI)).toHaveBeenCalled()
+			expect(vi.mocked(AzureOpenAI)).not.toHaveBeenCalled()
+		})
+
 		it("should handle streaming responses with Azure AI Inference Service", async () => {
 			const azureHandler = new OpenAiHandler(azureOptions)
 			const systemPrompt = "You are a helpful assistant."
@@ -959,10 +918,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = azureHandler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -1006,10 +962,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = azureHandler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunk = chunks.find((chunk) => chunk.type === "text")
@@ -1127,10 +1080,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1156,44 +1106,39 @@ describe("OpenAiHandler", () => {
 		it("should handle tool calls with O3 model in streaming mode", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) => {
-				return {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												id: "call_1",
-												function: { name: "test_tool", arguments: "" },
-											},
-										],
-									},
-									finish_reason: null,
+			mockCreate.mockImplementation(async (options) =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_1",
+											function: { name: "test_tool", arguments: "" },
+										},
+									],
 								},
-							],
-						}
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [{ index: 0, function: { arguments: "{}" } }],
-									},
-									finish_reason: "tool_calls",
-								},
-							],
-						}
+								finish_reason: null,
+							},
+						],
 					},
-				}
-			})
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [{ index: 0, function: { arguments: "{}" } }],
+								},
+								finish_reason: "tool_calls",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = o3Handler.createMessage("system", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Provider now yields tool_call_partial chunks, NativeToolCallParser handles reassembly
 			const toolCallPartialChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
@@ -1221,43 +1166,37 @@ describe("OpenAiHandler", () => {
 		it("should yield tool calls for O3 model even when finish_reason is not set (fallback behavior)", async () => {
 			const o3Handler = new OpenAiHandler(o3Options)
 
-			mockCreate.mockImplementation(async (options) => {
-				return {
-					[Symbol.asyncIterator]: async function* () {
-						yield {
-							choices: [
-								{
-									delta: {
-										tool_calls: [
-											{
-												index: 0,
-												id: "call_o3_fallback",
-												function: { name: "o3_fallback_tool", arguments: '{"o3":"test"}' },
-											},
-										],
-									},
-									finish_reason: null,
+			mockCreate.mockImplementation(async (options) =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: "call_o3_fallback",
+											function: { name: "o3_fallback_tool", arguments: '{"o3":"test"}' },
+										},
+									],
 								},
-							],
-						}
-						// Stream ends with different finish reason
-						yield {
-							choices: [
-								{
-									delta: {},
-									finish_reason: "length", // Different finish reason
-								},
-							],
-						}
+								finish_reason: null,
+							},
+						],
 					},
-				}
-			})
+					{
+						choices: [
+							{
+								delta: {},
+								finish_reason: "length",
+							},
+						],
+					},
+				]),
+			)
 
 			const stream = o3Handler.createMessage("system", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Provider now yields tool_call_partial chunks, NativeToolCallParser handles reassembly
 			const toolCallPartialChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")
@@ -1286,10 +1225,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1330,10 +1266,7 @@ describe("OpenAiHandler", () => {
 			]
 
 			const stream = o3Handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1392,10 +1325,7 @@ describe("OpenAiHandler", () => {
 			})
 
 			const stream = o3Handler.createMessage("system", [])
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call")
 			expect(toolCallChunks).toHaveLength(1)

@@ -186,8 +186,11 @@ const dynamicProviderExtras = {
 	lmstudio: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	poe: {} as { apiKey?: string; baseUrl?: string },
 	deepseek: {} as { apiKey?: string; baseUrl?: string },
+	moonshot: {} as { apiKey?: string; baseUrl?: string },
 	"opencode-go": {} as { apiKey?: string },
 	kenari: {} as { apiKey?: string },
+	nanogpt: {} as { apiKey?: string },
+	"kimi-code": {} as { apiKey?: string },
 } as const satisfies Record<RouterName, object>
 
 // Build the dynamic options union from the map, intersected with CommonFetchParams

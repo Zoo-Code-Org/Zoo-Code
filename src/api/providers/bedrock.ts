@@ -10,9 +10,12 @@ import {
 	ToolConfiguration,
 	ToolChoice,
 } from "@aws-sdk/client-bedrock-runtime"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
 import OpenAI from "openai"
 import { fromIni } from "@aws-sdk/credential-providers"
 import { Anthropic } from "@anthropic-ai/sdk"
+import { HttpProxyAgent } from "http-proxy-agent"
+import { HttpsProxyAgent } from "https-proxy-agent"
 
 import {
 	type ModelInfo,
@@ -30,6 +33,7 @@ import {
 	BEDROCK_GLOBAL_INFERENCE_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_PRICING,
+	SERVICE_TIER_KEY,
 	ApiProviderError,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -44,6 +48,7 @@ import { convertToBedrockConverseMessages as sharedConverter } from "../transfor
 import { getModelParams } from "../transform/model-params"
 import { shouldUseReasoningBudget } from "../../shared/api"
 import { normalizeToolSchema } from "../../utils/json-schema"
+import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /************************************************************************************
@@ -95,7 +100,7 @@ interface BedrockPayload {
 // AWS Bedrock service tiers (STANDARD, FLEX, PRIORITY) are specified at the top level
 // https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html
 type BedrockPayloadWithServiceTier = BedrockPayload & {
-	service_tier?: BedrockServiceTier
+	[SERVICE_TIER_KEY]?: BedrockServiceTier
 }
 
 // Define specific types for content block events to avoid 'as any' usage
@@ -294,6 +299,25 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 		}
 
+		// When a corporate proxy is configured, Node resolves DNS locally before tunneling,
+		// causing ENOTFOUND for endpoints that only the proxy can reach. HttpProxyAgent and
+		// HttpsProxyAgent use CONNECT tunneling so the proxy handles DNS resolution instead.
+		//
+		// A custom endpoint (e.g. a VPC endpoint) is passed so NO_PROXY can bypass the proxy
+		// for directly-reachable hosts. For the default managed endpoint we don't reconstruct
+		// the hostname (the AWS SDK resolves it internally, and it varies by partition), so the
+		// proxy always applies there.
+		const proxyUrl = getSystemProxyUrl(
+			typeof clientConfig.endpoint === "string" ? clientConfig.endpoint : undefined,
+		)
+		if (proxyUrl) {
+			clientConfig.requestHandler = new NodeHttpHandler({
+				httpAgent: new HttpProxyAgent(proxyUrl),
+				httpsAgent: new HttpsProxyAgent(proxyUrl),
+				requestTimeout: 0,
+			})
+		}
+
 		this.client = new BedrockRuntimeClient(clientConfig)
 	}
 
@@ -301,12 +325,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 	 * Detect models that require the adaptive-thinking API contract.
 	 *
 	 * Starting with Claude Opus 4.7 (and the matching Sonnet 4.7), and continuing
-	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5, and Claude Sonnet 5, Anthropic
-	 * removed sampling parameters (temperature/top_p/top_k) and replaced
+	 * in Opus 4.8 / Sonnet 4.8, Claude Fable 5, Claude Sonnet 5, and Claude Opus 5,
+	 * Anthropic removed sampling parameters (temperature/top_p/top_k) and replaced
 	 * budget_tokens-based thinking with `thinking.type: "adaptive"` plus
 	 * `output_config.effort`. The migration guide from 4.7 → 4.8 confirms there
-	 * are no further breaking API changes, and Fable 5 / Sonnet 5 keep the same
-	 * adaptive-thinking contract, so a single guard matches all generations.
+	 * are no further breaking API changes, and Fable 5 / Sonnet 5 / Opus 5 keep the
+	 * same adaptive-thinking contract, so a single guard matches all generations.
 	 * Shared by createMessage and completePrompt so both request paths omit
 	 * temperature for these models (sending it causes a 400).
 	 *
@@ -318,6 +342,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		return (
 			baseModelId.includes("opus-4-7") ||
 			baseModelId.includes("opus-4-8") ||
+			baseModelId.includes("opus-5") ||
 			baseModelId.includes("fable-5") ||
 			baseModelId.includes("sonnet-4-7") ||
 			baseModelId.includes("sonnet-4-8") ||
@@ -529,7 +554,7 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(thinkingEnabled && { anthropic_version: "bedrock-2023-05-31" }),
 			toolConfig,
 			// Add service_tier as a top-level parameter (not inside additionalModelRequestFields)
-			...(useServiceTier && { service_tier: this.options.awsBedrockServiceTier }),
+			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
 		}
 
 		// Create AbortController with 10 minute timeout

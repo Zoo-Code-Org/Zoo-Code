@@ -11,6 +11,14 @@
 				"types": "./dist/index.d.cts",
 				"default": "./dist/index.cjs"
 			}
+		},
+		"./model": {
+			"types": "./src/model.ts",
+			"import": "./src/model.ts"
+		},
+		"./provider-identifiers": {
+			"types": "./src/provider-identifiers.ts",
+			"import": "./src/provider-identifiers.ts"
 		}
 	},
 	"scripts": {
@@ -30,7 +38,7 @@
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "20.19.43",
+		"@types/node": "22.20.1",
 		"globals": "16.3.0",
 		"tsup": "8.5.1",
 		"ajv": "8.20.0",

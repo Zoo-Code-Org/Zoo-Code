@@ -17,7 +17,9 @@
 		"condenseContext": "Condensar context de forma intel·ligent",
 		"openApiHistory": "Obrir historial d'API",
 		"openUiHistory": "Obrir historial d'UI",
-		"backToParentTask": "Tasca principal"
+		"backToParentTask": "Tasca principal",
+		"waitingOnSubtask": "Esperant subtasca",
+		"goToSubtask": "Anar a la subtasca"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",
@@ -185,7 +187,7 @@
 		"current": "Actual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo vol obtenir instruccions detallades per ajudar amb la tasca actual."
+		"wantsToFetch": "Zoo vol obtenir instruccions detallades per ajudar amb la tasca actual."
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo vol llegir aquest fitxer",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo vol editar aquest fitxer fora de l'espai de treball",
 		"wantsToEditProtected": "Zoo vol editar un fitxer de configuració protegit",
 		"wantsToCreate": "Zoo vol crear un nou fitxer",
-		"wantsToSearchReplace": "Roo vol realitzar cerca i substitució en aquest fitxer",
-		"didSearchReplace": "Roo ha realitzat cerca i substitució en aquest fitxer",
+		"wantsToSearchReplace": "Zoo vol realitzar cerca i substitució en aquest fitxer",
+		"didSearchReplace": "Zoo ha realitzat cerca i substitució en aquest fitxer",
 		"wantsToInsert": "Zoo vol inserir contingut en aquest fitxer",
 		"wantsToInsertWithLineNumber": "Zoo vol inserir contingut a la línia {{lineNumber}} d'aquest fitxer",
 		"wantsToInsertAtEnd": "Zoo vol afegir contingut al final d'aquest fitxer",
@@ -231,6 +233,7 @@
 		"exitStatus": "S'ha sortit amb l'estat {{exitCode}}",
 		"malformedCommand": "Ordre mal formada: error de sintaxi del shell",
 		"manageCommands": "Comandes aprovades automàticament",
+		"denied": "Ordre denegada",
 		"addToAllowed": "Afegeix a la llista permesa",
 		"removeFromAllowed": "Elimina de la llista permesa",
 		"addToDenied": "Afegeix a la llista denegada",
@@ -341,9 +344,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Família OpenAI GPT-5.6 (Sol, Terra, Luna) — disponible tant a OpenAI Codex com a OpenAI Native.",
-			"highlight2": "Suport per a Grok 4.5 — el nou model insígnia de xAI, més una correcció del reasoning effort que també beneficia Grok 4 Mini.",
-			"highlight3": "Proveïdor Kenari — un gateway d'IA de primera classe compatible amb OpenAI, facturat en rupies, que cobreix Claude, GPT, DeepSeek, GLM, Kimi i més."
+			"highlight1": "Han arribat tres grans models nous — utilitza els nous Gemini 3.7 Flash, GLM 5.3 i Qwen3.8 Max, a més de millores en el raonament, els preus i la cobertura de proveïdors de DeepSeek V4.",
+			"highlight2": "Connecta't a NanoGPT — utilitza el descobriment dinàmic de models, streaming i completions de prompts, i preferències d'encaminament per velocitat, preu, latència, rendiment, compatibilitat amb eines i memòria cau.",
+			"highlight3": "Proveïdors i tasques més fiables — les correccions milloren la configuració dels endpoints d'Azure OpenAI, els límits de sortida de Kimi Code, la conservació dels títols de l'historial de tasques i la importació/exportació de configuració de Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

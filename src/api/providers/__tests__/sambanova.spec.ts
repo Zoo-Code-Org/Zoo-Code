@@ -6,6 +6,8 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import { type SambaNovaModelId, sambaNovaDefaultModelId, sambaNovaModels } from "@roo-code/types"
 
 import { SambaNovaHandler } from "../sambanova"
+import { asyncStreamFrom } from "../../../test-utils/stream"
+import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -21,7 +23,7 @@ describe("SambaNovaHandler", () => {
 	let mockCreate: any
 
 	beforeEach(() => {
-		vitest.clearAllMocks()
+		clearAllMocks()
 		mockCreate = (OpenAI as unknown as any)().chat.completions.create
 		handler = new SambaNovaHandler({ sambaNovaApiKey: "test-sambanova-api-key" })
 	})
@@ -72,19 +74,7 @@ describe("SambaNovaHandler", () => {
 	it("createMessage should yield text content from stream", async () => {
 		const testContent = "This is test content from SambaNova stream"
 
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					next: vitest
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: { choices: [{ delta: { content: testContent } }] },
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([{ choices: [{ delta: { content: testContent } }] }]))
 
 		const stream = handler.createMessage("system prompt", [])
 		const firstChunk = await stream.next()
@@ -94,19 +84,9 @@ describe("SambaNovaHandler", () => {
 	})
 
 	it("createMessage should yield usage data from stream", async () => {
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					next: vitest
-						.fn()
-						.mockResolvedValueOnce({
-							done: false,
-							value: { choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } },
-						})
-						.mockResolvedValueOnce({ done: true }),
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() =>
+			asyncStreamFrom([{ choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } }]),
+		)
 
 		const stream = handler.createMessage("system prompt", [])
 		const firstChunk = await stream.next()
@@ -123,15 +103,7 @@ describe("SambaNovaHandler", () => {
 			sambaNovaApiKey: "test-sambanova-api-key",
 		})
 
-		mockCreate.mockImplementationOnce(() => {
-			return {
-				[Symbol.asyncIterator]: () => ({
-					async next() {
-						return { done: true }
-					},
-				}),
-			}
-		})
+		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
 
 		const systemPrompt = "Test system prompt for SambaNova"
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Test message for SambaNova" }]

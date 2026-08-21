@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Pots configurar una drecera global per a aquesta configuració <SettingsLink>a les preferències del teu IDE</SettingsLink>.",
-		"description": "Permet que Roo realitzi operacions automàticament sense requerir aprovació. Activeu aquesta configuració només si confieu plenament en la IA i enteneu els riscos de seguretat associats.",
+		"description": "Permet que Zoo realitzi operacions automàticament sense requerir aprovació. Activeu aquesta configuració només si confieu plenament en la IA i enteneu els riscos de seguretat associats.",
 		"enabled": "Auto-aprovació activada",
 		"toggleAriaLabel": "Commuta l'aprovació automàtica",
 		"disabledAriaLabel": "Aprovació automàtica desactivada: seleccioneu primer les opcions",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Executar",
 			"description": "Executar automàticament comandes de terminal permeses sense requerir aprovació",
+			"destructiveCommandGuard": {
+				"label": "Activa la protecció contra ordres destructives",
+				"description": "Baixa i utilitza Destructive Command Guard (DCG) per a aquesta plataforma. Les ordres permeses per DCG s'executen automàticament. Les ordres bloquejades per DCG requereixen la teva aprovació. Les llistes d'ordres de Zoo es desactiven mentre aquesta opció està activa. L'executable baixat es conserva si la desactives."
+			},
 			"allowedCommands": "Comandes d'auto-execució permeses",
 			"allowedCommandsDescription": "Prefixos de comandes que poden ser executats automàticament quan \"Aprovar sempre operacions d'execució\" està habilitat. Afegeix * per permetre totes les comandes (usar amb precaució).",
 			"deniedCommands": "Comandes denegades",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Obtenir clau API de Opencode Go",
 		"kenariApiKey": "Clau API de Kenari",
 		"getKenariApiKey": "Obtenir clau API de Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Clau API de NanoGPT",
+			"getApiKey": "Obtenir clau API de NanoGPT",
+			"model": "Model",
+			"routingPreference": "Preferència d'encaminament",
+			"routingOptions": {
+				"automatic": "Automàtica",
+				"fastest": "Més ràpida",
+				"cheapest": "Més econòmica",
+				"lowestLatency": "Latència més baixa",
+				"highestThroughput": "Rendiment més alt",
+				"toolCapable": "Compatible amb eines",
+				"cacheCapable": "Compatible amb memòria cau"
+			},
+			"automaticExplanation": "L'opció Automàtica no aplica cap sufix d'encaminament.",
+			"billingWarning": "Les preferències d'encaminament avançades poden utilitzar encaminament de pagament per ús i poden quedar fora de la cobertura de la subscripció, segons les regles de facturació actuals de NanoGPT.",
+			"routingDocs": "Consulta els detalls d'encaminament i facturació de NanoGPT"
+		},
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Clau API de Moonshot",
 		"getMoonshotApiKey": "Obtenir clau API de Moonshot",
 		"moonshotBaseUrl": "Punt d'entrada de Moonshot",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"zaiApiKey": "Clau API de Z AI",
 		"getZaiApiKey": "Obtenir clau API de Z AI",
 		"zaiEntrypoint": "Punt d'entrada de Z AI",
@@ -480,6 +514,9 @@
 		"openAiApiKey": "Clau API d'OpenAI",
 		"apiKey": "Clau API",
 		"openAiBaseUrl": "URL base",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nom de desplegament d'Azure",
+		"azureOpenAiDeploymentNameDescription": "Introduïu el nom del desplegament d'Azure AI Studio, no el nom del model subjacent.",
 		"getOpenAiApiKey": "Obtenir clau API d'OpenAI",
 		"mistralApiKey": "Clau API de Mistral",
 		"getMistralApiKey": "Obtenir clau API de Mistral / Codestral",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Limitar el nombre màxim de tokens en la resposta",
 	"maxOutputTokensLabel": "Tokens màxims de sortida",
 	"maxTokensGenerateDescription": "Tokens màxims a generar en la resposta",
+	"openAiCodexSpeed": {
+		"label": "Velocitat",
+		"tooltip": "El mode ràpid utilitza el processament prioritari de Codex per oferir aproximadament 1,5 vegades més velocitat i consumeix més quota de subscripció.",
+		"standard": "Estàndard",
+		"fast": "Ràpid (1,5 vegades més velocitat, més consum)"
+	},
 	"serviceTier": {
 		"label": "Nivell de servei",
 		"tooltip": "Per a un processament més ràpid de les sol·licituds de l'API, proveu el nivell de servei de processament prioritari. Per a preus més baixos amb una latència més alta, proveu el nivell de processament flexible.",

@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "Możesz skonfigurować globalny skrót dla tego ustawienia <SettingsLink>w preferencjach swojego IDE</SettingsLink>.",
-		"description": "Pozwól Roo na automatyczne wykonywanie operacji bez wymagania zatwierdzenia. Włącz te ustawienia tylko jeśli w pełni ufasz AI i rozumiesz związane z tym zagrożenia bezpieczeństwa.",
+		"description": "Pozwól Zoo na automatyczne wykonywanie operacji bez wymagania zatwierdzenia. Włącz te ustawienia tylko jeśli w pełni ufasz AI i rozumiesz związane z tym zagrożenia bezpieczeństwa.",
 		"enabled": "Auto-zatwierdzanie włączone",
 		"toggleAriaLabel": "Przełącz automatyczne zatwierdzanie",
 		"disabledAriaLabel": "Automatyczne zatwierdzanie wyłączone - najpierw wybierz opcje",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Wykonaj",
 			"description": "Automatycznie wykonuj dozwolone polecenia terminala bez konieczności zatwierdzania",
+			"destructiveCommandGuard": {
+				"label": "Włącz ochronę przed destrukcyjnymi poleceniami",
+				"description": "Pobiera i używa Destructive Command Guard (DCG) dla tej platformy. Polecenia dozwolone przez DCG są wykonywane automatycznie. Polecenia zablokowane przez DCG wymagają twojej zgody. Listy poleceń Zoo są wyłączone, gdy ta opcja jest aktywna. Pobrany plik wykonywalny pozostaje na dysku po wyłączeniu opcji."
+			},
 			"allowedCommands": "Dozwolone polecenia auto-wykonania",
 			"allowedCommandsDescription": "Prefiksy poleceń, które mogą być automatycznie wykonywane, gdy \"Zawsze zatwierdzaj operacje wykonania\" jest włączone. Dodaj * aby zezwolić na wszystkie polecenia (używaj z ostrożnością).",
 			"deniedCommands": "Odrzucone polecenia",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "Klucz API NanoGPT",
+			"getApiKey": "Uzyskaj klucz API NanoGPT",
+			"model": "Model",
+			"routingPreference": "Preferencja routingu",
+			"routingOptions": {
+				"automatic": "Automatyczny",
+				"fastest": "Najszybszy",
+				"cheapest": "Najtańszy",
+				"lowestLatency": "Najniższe opóźnienie",
+				"highestThroughput": "Najwyższa przepustowość",
+				"toolCapable": "Obsługa narzędzi",
+				"cacheCapable": "Obsługa pamięci podręcznej"
+			},
+			"automaticExplanation": "Automatyczny nie dodaje sufiksu routingu.",
+			"billingWarning": "Zaawansowane preferencje routingu mogą używać rozliczeń za użycie i mogą omijać zakres subskrypcji, zależnie od aktualnych zasad rozliczeń NanoGPT.",
+			"routingDocs": "Zobacz szczegóły routingu i rozliczeń NanoGPT"
+		},
 		"apiKeyStorageNotice": "Klucze API są bezpiecznie przechowywane w Tajnym Magazynie VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Klucz API Moonshot",
 		"getMoonshotApiKey": "Uzyskaj klucz API Moonshot",
 		"moonshotBaseUrl": "Punkt wejścia Moonshot",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"zaiApiKey": "Klucz API Z AI",
 		"getZaiApiKey": "Uzyskaj klucz API Z AI",
 		"zaiEntrypoint": "Punkt wejścia Z AI",
@@ -480,6 +514,9 @@
 		"apiKey": "Klucz API",
 		"openAiApiKey": "Klucz API OpenAI",
 		"openAiBaseUrl": "URL bazowy",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
+		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",
 		"getOpenAiApiKey": "Uzyskaj klucz API OpenAI",
 		"mistralApiKey": "Klucz API Mistral",
 		"getMistralApiKey": "Uzyskaj klucz API Mistral / Codestral",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Ogranicz maksymalną liczbę tokenów w odpowiedzi",
 	"maxOutputTokensLabel": "Maksymalne tokeny wyjściowe",
 	"maxTokensGenerateDescription": "Maksymalne tokeny do wygenerowania w odpowiedzi",
+	"openAiCodexSpeed": {
+		"label": "Szybkość",
+		"tooltip": "Tryb szybki korzysta z priorytetowego przetwarzania Codex, zapewniając około 1,5 raza większą szybkość i zużywając więcej limitu subskrypcji.",
+		"standard": "Standardowy",
+		"fast": "Szybki (1,5 raza szybciej, większe użycie)"
+	},
 	"serviceTier": {
 		"label": "Poziom usług",
 		"tooltip": "Aby szybciej przetwarzać żądania API, wypróbuj priorytetowy poziom usług. Aby uzyskać niższe ceny przy wyższej latencji, wypróbuj elastyczny poziom usług.",

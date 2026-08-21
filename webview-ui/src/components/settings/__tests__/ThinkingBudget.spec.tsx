@@ -289,6 +289,26 @@ describe("ThinkingBudget", () => {
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
 		})
 
+		it("should normalize an invalid disabled value to the default for required reasoning", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable" }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high", "max"],
+						requiredReasoningEffort: true,
+						reasoningEffort: "max",
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "max")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max", false)
+		})
+
 		it("should fall back to rawReasoningEffort when availableOptions is empty", () => {
 			// Covers the ?? rawReasoningEffort branch when availableOptions[0] is undefined
 			render(

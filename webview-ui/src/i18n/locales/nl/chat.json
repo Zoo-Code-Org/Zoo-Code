@@ -17,7 +17,9 @@
 		"condenseContext": "Context intelligent samenvatten",
 		"openApiHistory": "API-geschiedenis openen",
 		"openUiHistory": "UI-geschiedenis openen",
-		"backToParentTask": "Bovenliggende taak"
+		"backToParentTask": "Bovenliggende taak",
+		"waitingOnSubtask": "Wacht op subtaak",
+		"goToSubtask": "Ga naar subtaak"
 	},
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",
@@ -180,7 +182,7 @@
 		"current": "Huidig"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
+		"wantsToFetch": "Zoo wil gedetailleerde instructies ophalen om te helpen met de huidige taak"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo wil dit bestand lezen",
@@ -190,8 +192,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo wil dit bestand buiten de werkruimte bewerken",
 		"wantsToEditProtected": "Zoo wil een beveiligd configuratiebestand bewerken",
 		"wantsToCreate": "Zoo wil een nieuw bestand aanmaken",
-		"wantsToSearchReplace": "Roo wil zoeken en vervangen in dit bestand",
-		"didSearchReplace": "Roo heeft zoeken en vervangen uitgevoerd op dit bestand",
+		"wantsToSearchReplace": "Zoo wil zoeken en vervangen in dit bestand",
+		"didSearchReplace": "Zoo heeft zoeken en vervangen uitgevoerd op dit bestand",
 		"wantsToInsert": "Zoo wil inhoud invoegen in dit bestand",
 		"wantsToInsertWithLineNumber": "Zoo wil inhoud invoegen in dit bestand op regel {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo wil inhoud toevoegen aan het einde van dit bestand",
@@ -226,6 +228,7 @@
 		"exitStatus": "Afgesloten met status {{exitCode}}",
 		"malformedCommand": "Ongeldig commando: shell syntaxisfout",
 		"manageCommands": "Automatisch goedgekeurde commando's",
+		"denied": "Commando geweigerd",
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
 		"addToDenied": "Toevoegen aan geweigerde lijst",
@@ -314,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "OpenAI GPT-5.6-familie (Sol, Terra, Luna) — beschikbaar via zowel OpenAI Codex als OpenAI Native.",
-			"highlight2": "Ondersteuning voor Grok 4.5 — xAI's nieuwe vlaggenschipmodel, plus een fix voor reasoning effort waar ook Grok 4 Mini baat bij heeft.",
-			"highlight3": "Kenari-provider — een eersteklas OpenAI-compatibele AI-gateway die in Rupiah wordt gefactureerd en Claude, GPT, DeepSeek, GLM, Kimi en meer ondersteunt."
+			"highlight1": "Drie belangrijke nieuwe modellen zijn gearriveerd — gebruik de gloednieuwe Gemini 3.7 Flash-, GLM 5.3- en Qwen3.8 Max-modellen, plus bijgewerkte reasoning, prijzen en providerondersteuning voor DeepSeek V4.",
+			"highlight2": "Maak verbinding met NanoGPT — gebruik dynamische modeldetectie, streaming en promptaanvulling, plus routeringsvoorkeuren voor snelheid, prijs, latentie, doorvoer, toolondersteuning en caching.",
+			"highlight3": "Betrouwbaardere providers en taken — oplossingen verbeteren de instelling van Azure OpenAI-endpoints, Kimi Code-uitvoerlimieten, het behouden van titels in de taakgeschiedenis en het importeren/exporteren van Zoo-instellingen."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",

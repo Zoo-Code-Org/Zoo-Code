@@ -17,7 +17,9 @@
 		"condenseContext": "Condensar contexto de forma inteligente",
 		"openApiHistory": "Abrir histórico da API",
 		"openUiHistory": "Abrir histórico da UI",
-		"backToParentTask": "Tarefa pai"
+		"backToParentTask": "Tarefa pai",
+		"waitingOnSubtask": "Aguardando subtarefa",
+		"goToSubtask": "Ir para subtarefa"
 	},
 	"unpin": "Desfixar",
 	"pin": "Fixar",
@@ -185,7 +187,7 @@
 		"current": "Atual"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo quer buscar instruções detalhadas para ajudar com a tarefa atual"
+		"wantsToFetch": "Zoo quer buscar instruções detalhadas para ajudar com a tarefa atual"
 	},
 	"fileOperations": {
 		"wantsToRead": "Zoo quer ler este arquivo",
@@ -195,8 +197,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo quer editar este arquivo fora do espaço de trabalho",
 		"wantsToEditProtected": "Zoo quer editar um arquivo de configuração protegido",
 		"wantsToCreate": "Zoo quer criar um novo arquivo",
-		"wantsToSearchReplace": "Roo quer realizar busca e substituição neste arquivo",
-		"didSearchReplace": "Roo realizou busca e substituição neste arquivo",
+		"wantsToSearchReplace": "Zoo quer realizar busca e substituição neste arquivo",
+		"didSearchReplace": "Zoo realizou busca e substituição neste arquivo",
 		"wantsToInsert": "Zoo quer inserir conteúdo neste arquivo",
 		"wantsToInsertWithLineNumber": "Zoo quer inserir conteúdo neste arquivo na linha {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo quer adicionar conteúdo ao final deste arquivo",
@@ -231,6 +233,7 @@
 		"exitStatus": "Saiu com o status {{exitCode}}",
 		"malformedCommand": "Comando malformado: erro de sintaxe do shell",
 		"manageCommands": "Comandos aprovados automaticamente",
+		"denied": "Comando negado",
 		"addToAllowed": "Adicionar à lista de permitidos",
 		"removeFromAllowed": "Remover da lista de permitidos",
 		"addToDenied": "Adicionar à lista de negados",
@@ -341,9 +344,9 @@
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novidades:",
-			"highlight1": "Família OpenAI GPT-5.6 (Sol, Terra, Luna) — disponível tanto no OpenAI Codex quanto no OpenAI Native.",
-			"highlight2": "Suporte ao Grok 4.5 — o novo modelo principal da xAI, além de uma correção no reasoning effort que também beneficia o Grok 4 Mini.",
-			"highlight3": "Provider Kenari — um gateway de IA de primeira classe compatível com OpenAI, cobrado em rúpias, cobrindo Claude, GPT, DeepSeek, GLM, Kimi e mais."
+			"highlight1": "Três novos modelos importantes chegaram — use os novíssimos Gemini 3.7 Flash, GLM 5.3 e Qwen3.8 Max, além das atualizações de reasoning, preços e cobertura de providers do DeepSeek V4.",
+			"highlight2": "Conecte-se ao NanoGPT — use descoberta dinâmica de modelos, streaming e conclusão de prompts, com preferências de roteamento por velocidade, preço, latência, throughput, suporte a ferramentas e cache.",
+			"highlight3": "Providers e tarefas mais confiáveis — as correções melhoram a configuração de endpoints do Azure OpenAI, os limites de saída do Kimi Code, a preservação de títulos no histórico de tarefas e a importação/exportação das configurações do Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Novidades na Nuvem:",

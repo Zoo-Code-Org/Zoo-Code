@@ -18,6 +18,22 @@ vi.mock("@aws-sdk/credential-providers", () => {
 	return { fromIni: mockFromIni }
 })
 
+vi.mock("../../../utils/networkProxy", () => ({
+	getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
+}))
+
+vi.mock("@smithy/node-http-handler", () => ({
+	NodeHttpHandler: vi.fn(),
+}))
+
+vi.mock("http-proxy-agent", () => ({
+	HttpProxyAgent: vi.fn(),
+}))
+
+vi.mock("https-proxy-agent", () => ({
+	HttpsProxyAgent: vi.fn(),
+}))
+
 // Mock BedrockRuntimeClient and ConverseStreamCommand
 vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 	const mockSend = vi.fn().mockResolvedValue({
@@ -42,21 +58,32 @@ import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
 	bedrockModels,
+	SERVICE_TIER_KEY,
 	ApiProviderError,
 } from "@roo-code/types"
 
 import type { Anthropic } from "@anthropic-ai/sdk"
+import { getSystemProxyUrl } from "../../../utils/networkProxy"
+import { NodeHttpHandler } from "@smithy/node-http-handler"
+import { HttpProxyAgent } from "http-proxy-agent"
+import { HttpsProxyAgent } from "https-proxy-agent"
+
+import { clearAllMocks } from "../../../test-utils/reset"
 
 // Get access to the mocked functions
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
 const mockBedrockRuntimeClient = vi.mocked(BedrockRuntimeClient)
+const mockGetSystemProxyUrl = vi.mocked(getSystemProxyUrl)
+const mockNodeHttpHandler = vi.mocked(NodeHttpHandler)
+const mockHttpProxyAgent = vi.mocked(HttpProxyAgent)
+const mockHttpsProxyAgent = vi.mocked(HttpsProxyAgent)
 
 describe("AwsBedrockHandler", () => {
 	let handler: AwsBedrockHandler
 
 	beforeEach(() => {
 		// Clear all mocks before each test
-		vi.clearAllMocks()
+		clearAllMocks()
 
 		handler = new AwsBedrockHandler({
 			apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -115,6 +142,95 @@ describe("AwsBedrockHandler", () => {
 			)
 			expect(modelInfo.info).toBeDefined()
 			expect(modelInfo.info.maxTokens).toBe(4096)
+		})
+	})
+
+	describe("proxy configuration", () => {
+		afterEach(() => {
+			mockGetSystemProxyUrl.mockReturnValue(undefined)
+		})
+
+		it("should configure NodeHttpHandler with HttpProxyAgent and HttpsProxyAgent when proxy URL is set", () => {
+			mockGetSystemProxyUrl.mockReturnValue("http://proxy.corp.local:3128")
+
+			new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			// Verify both proxy agents were created with the correct URL
+			expect(mockHttpProxyAgent).toHaveBeenCalledWith("http://proxy.corp.local:3128")
+			expect(mockHttpsProxyAgent).toHaveBeenCalledWith("http://proxy.corp.local:3128")
+
+			// Verify NodeHttpHandler was created with both agents
+			expect(mockNodeHttpHandler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					httpAgent: expect.anything(),
+					httpsAgent: expect.anything(),
+					requestTimeout: 0,
+				}),
+			)
+
+			// Verify requestHandler was set on BedrockRuntimeClient config
+			expect(mockBedrockRuntimeClient).toHaveBeenLastCalledWith(
+				expect.objectContaining({ requestHandler: expect.anything() }),
+			)
+		})
+
+		it("should not create a proxy requestHandler when no proxy is configured", () => {
+			new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			expect(mockNodeHttpHandler).not.toHaveBeenCalled()
+			expect(mockBedrockRuntimeClient.mock.lastCall?.[0]?.requestHandler).toBeUndefined()
+		})
+
+		it("should apply proxy for API key authentication", () => {
+			mockGetSystemProxyUrl.mockReturnValue("http://proxy.corp.local:3128")
+
+			new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsUseApiKey: true,
+				awsApiKey: "test-api-key",
+				awsRegion: "us-east-1",
+			})
+
+			expect(mockNodeHttpHandler).toHaveBeenCalledWith(
+				expect.objectContaining({
+					httpsAgent: expect.anything(),
+					requestTimeout: 0,
+				}),
+			)
+		})
+
+		it("should pass a custom endpoint to getSystemProxyUrl for NO_PROXY matching", () => {
+			new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				awsBedrockEndpoint: "https://bedrock.vpce.internal",
+				awsBedrockEndpointEnabled: true,
+			})
+
+			expect(mockGetSystemProxyUrl).toHaveBeenCalledWith("https://bedrock.vpce.internal")
+		})
+
+		it("should pass undefined to getSystemProxyUrl when no custom endpoint is set", () => {
+			new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+			})
+
+			expect(mockGetSystemProxyUrl).toHaveBeenCalledWith(undefined)
 		})
 	})
 
@@ -755,6 +871,37 @@ describe("AwsBedrockHandler", () => {
 			const model = handler.getModel()
 			expect(model.id).toBe("global.anthropic.claude-sonnet-5")
 		})
+
+		it("should return Claude Opus 5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-opus-5")
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Opus 5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-opus-5")
+		})
 	})
 
 	describe("1M context beta feature", () => {
@@ -1089,10 +1236,10 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// service_tier should be at the top level of the payload
-				expect(commandArg.service_tier).toBe("PRIORITY")
+				expect(commandArg[SERVICE_TIER_KEY]).toBe("PRIORITY")
 				// service_tier should NOT be in additionalModelRequestFields
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 
@@ -1119,10 +1266,10 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// service_tier should be at the top level of the payload
-				expect(commandArg.service_tier).toBe("FLEX")
+				expect(commandArg[SERVICE_TIER_KEY]).toBe("FLEX")
 				// service_tier should NOT be in additionalModelRequestFields
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 
@@ -1150,9 +1297,9 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// Service tier should NOT be included for unsupported models (at top level or in additionalModelRequestFields)
-				expect(commandArg.service_tier).toBeUndefined()
+				expect(commandArg[SERVICE_TIER_KEY]).toBeUndefined()
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 
@@ -1179,9 +1326,9 @@ describe("AwsBedrockHandler", () => {
 				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
 
 				// Service tier should NOT be included when not specified (at top level or in additionalModelRequestFields)
-				expect(commandArg.service_tier).toBeUndefined()
+				expect(commandArg[SERVICE_TIER_KEY]).toBeUndefined()
 				if (commandArg.additionalModelRequestFields) {
-					expect(commandArg.additionalModelRequestFields.service_tier).toBeUndefined()
+					expect(commandArg.additionalModelRequestFields[SERVICE_TIER_KEY]).toBeUndefined()
 				}
 			})
 		})
@@ -1487,6 +1634,36 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
+		it("should send adaptive thinking with effort xhigh for Claude Opus 5 when reasoning is enabled", async () => {
+			// End-to-end regression guard for the Opus 5 handler branch. The
+			// isAdaptiveThinkingModel predicate is unit-covered, but a regression in
+			// the createMessage adaptive-thinking branch for this specific model
+			// wouldn't be caught without a request-level test.
+			const opus5Handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-opus-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			const generator = opus5Handler.createMessage("System prompt", messages)
+			await generator.next()
+
+			expect(mockConverseStreamCommand).toHaveBeenCalled()
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+
+			// Opus 5 uses the same adaptive-thinking contract as Opus 4.7/4.8 —
+			// budget_tokens causes a 400, so thinking.type is "adaptive" with effort.
+			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
+				type: "adaptive",
+				display: "summarized",
+			})
+			expect(commandArg.additionalModelRequestFields?.output_config).toEqual({ effort: "xhigh" })
+			// Opus 5 rejects sampling parameters: temperature must be omitted entirely.
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		it("should omit thinking and temperature for Claude Opus 4.8 when reasoning is disabled", async () => {
 			const opus48Handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-4-8",
@@ -1620,6 +1797,7 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-8")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-5")).toBe(true)
 				// Future-proof Sonnet patterns — guarded even before a registry entry exists.
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-8")).toBe(true)
@@ -1629,12 +1807,14 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("us.anthropic.claude-opus-4-8")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-fable-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-sonnet-5")).toBe(true)
+				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-5")).toBe(true)
 				expect(isAdaptiveThinkingModel("eu.anthropic.claude-sonnet-4-7")).toBe(true)
 				expect(isAdaptiveThinkingModel("global.anthropic.claude-opus-4-8")).toBe(true)
 			})
 
 			it("returns false for older / non-adaptive models", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-6-v1")).toBe(false)
+				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-5-20251101-v1:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-sonnet-4-6")).toBe(false)
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)

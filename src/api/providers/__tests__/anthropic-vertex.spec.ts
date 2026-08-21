@@ -6,9 +6,8 @@ import { GoogleAuth } from "google-auth-library"
 
 import { VERTEX_1M_CONTEXT_MODEL_IDS } from "@roo-code/types"
 
-import { ApiStreamChunk } from "../../transform/stream"
-
 import { AnthropicVertexHandler } from "../anthropic-vertex"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
@@ -39,26 +38,24 @@ vitest.mock("@anthropic-ai/vertex-sdk", () => ({
 							},
 						}
 					}
-					return {
-						async *[Symbol.asyncIterator]() {
-							yield {
-								type: "message_start",
-								message: {
-									usage: {
-										input_tokens: 10,
-										output_tokens: 5,
-									},
+					return asyncStreamFrom([
+						{
+							type: "message_start",
+							message: {
+								usage: {
+									input_tokens: 10,
+									output_tokens: 5,
 								},
-							}
-							yield {
-								type: "content_block_start",
-								content_block: {
-									type: "text",
-									text: "Test response",
-								},
-							}
+							},
 						},
-					}
+						{
+							type: "content_block_start",
+							content_block: {
+								type: "text",
+								text: "Test response",
+							},
+						},
+					])
 				}),
 			},
 		}
@@ -194,23 +191,13 @@ describe("VertexHandler", () => {
 			]
 
 			// Setup async iterator for mock stream
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBe(4)
 			expect(chunks[0]).toEqual({
@@ -296,23 +283,13 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBe(3)
 			expect(chunks[0]).toEqual({
@@ -343,9 +320,7 @@ describe("VertexHandler", () => {
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
 			await expect(async () => {
-				for await (const _chunk of stream) {
-					// Should throw before yielding any chunks
-				}
+				await collectStream(stream)
 			}).rejects.toThrow("Vertex API error")
 		})
 
@@ -391,13 +366,7 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
@@ -417,10 +386,7 @@ describe("VertexHandler", () => {
 				},
 			])
 
-			const chunks: ApiStreamChunk[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Verify usage information
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
@@ -514,23 +480,13 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Check for cache-related metrics in usage chunk
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
@@ -593,23 +549,13 @@ describe("VertexHandler", () => {
 			]
 
 			// Setup async iterator for mock stream
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Verify thinking content is processed correctly
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
@@ -650,23 +596,13 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(chunks.length).toBe(3)
 			expect(chunks[0]).toEqual({
@@ -690,29 +626,27 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) => {
-				return {
-					async *[Symbol.asyncIterator]() {
-						yield {
-							type: "message_start",
-							message: {
-								usage: {
-									input_tokens: 10,
-									output_tokens: 0,
-								},
+			const mockCreate = vitest.fn().mockImplementation(async (options) =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
 							},
-						}
-						yield {
-							type: "content_block_start",
-							index: 0,
-							content_block: {
-								type: "text",
-								text: "Response",
-							},
-						}
+						},
 					},
-				}
-			})
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Response",
+						},
+					},
+				]),
+			)
 			;(handler["client"].messages as any).create = mockCreate
 
 			// Messages with internal reasoning blocks (from stored conversation history)
@@ -741,11 +675,7 @@ describe("VertexHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithReasoning)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Verify the API was called with filtered messages (no reasoning blocks)
 			const calledMessages = mockCreate.mock.calls[0][0].messages
@@ -772,21 +702,19 @@ describe("VertexHandler", () => {
 				vertexRegion: "us-central1",
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async (options) => {
-				return {
-					async *[Symbol.asyncIterator]() {
-						yield {
-							type: "message_start",
-							message: {
-								usage: {
-									input_tokens: 10,
-									output_tokens: 0,
-								},
+			const mockCreate = vitest.fn().mockImplementation(async (options) =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 0,
 							},
-						}
+						},
 					},
-				}
-			})
+				]),
+			)
 			;(handler["client"].messages as any).create = mockCreate
 
 			// Message with only reasoning content (should be completely filtered)
@@ -811,11 +739,7 @@ describe("VertexHandler", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messagesWithOnlyReasoning)
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Verify empty message was filtered out
 			const calledMessages = mockCreate.mock.calls[0][0].messages
@@ -1085,6 +1009,23 @@ describe("VertexHandler", () => {
 			expect(model.info.supportsTemperature).toBe(false)
 		})
 
+		it("should return Claude Opus 5 model info", () => {
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-opus-5")
+			expect(model.info.maxTokens).toBe(8192)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+		})
+
 		it("should not enable 1M context when flag is disabled", () => {
 			const handler = new AnthropicVertexHandler({
 				apiModelId: VERTEX_1M_CONTEXT_MODEL_IDS[0],
@@ -1144,22 +1085,14 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
-			for await (const _chunk of stream) {
-				// Just consume
-			}
+			await collectStream(stream)
 
 			// Verify the API was called with the beta header
 			expect(mockCreate).toHaveBeenCalledWith(
@@ -1190,22 +1123,14 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
-			for await (const _chunk of stream) {
-				// Just consume
-			}
+			await collectStream(stream)
 
 			// Verify the API was called without the beta header
 			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), undefined)
@@ -1281,11 +1206,9 @@ describe("VertexHandler", () => {
 						usage: { input_tokens: 10, output_tokens: 5 },
 					}
 				}
-				return {
-					async *[Symbol.asyncIterator]() {
-						yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
-					},
-				}
+				return asyncStreamFrom([
+					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+				])
 			})
 			;(thinkingHandler["client"].messages as any).create = mockCreate
 
@@ -1310,11 +1233,13 @@ describe("VertexHandler", () => {
 				enableReasoningEffort: true,
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async () => ({
-				async *[Symbol.asyncIterator]() {
-					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
-				},
-			}))
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
 			;(opus48Handler["client"].messages as any).create = mockCreate
 
 			await opus48Handler
@@ -1341,11 +1266,13 @@ describe("VertexHandler", () => {
 				enableReasoningEffort: true,
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async () => ({
-				async *[Symbol.asyncIterator]() {
-					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
-				},
-			}))
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
 			;(fableHandler["client"].messages as any).create = mockCreate
 
 			await fableHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
@@ -1370,16 +1297,49 @@ describe("VertexHandler", () => {
 				enableReasoningEffort: true,
 			})
 
-			const mockCreate = vitest.fn().mockImplementation(async () => ({
-				async *[Symbol.asyncIterator]() {
-					yield { type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } }
-				},
-			}))
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
 			;(sonnetHandler["client"].messages as any).create = mockCreate
 
 			await sonnetHandler
 				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
 				.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					thinking: { type: "adaptive" },
+				}),
+				undefined,
+			)
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.thinking).not.toHaveProperty("budget_tokens")
+			expect(request.temperature).toBeUndefined()
+		})
+
+		it("should use adaptive thinking for Claude Opus 5", async () => {
+			const opusHandler = new AnthropicVertexHandler({
+				apiModelId: "claude-opus-5",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				enableReasoningEffort: true,
+			})
+
+			const mockCreate = vitest
+				.fn()
+				.mockImplementation(async () =>
+					asyncStreamFrom([
+						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
+					]),
+				)
+			;(opusHandler["client"].messages as any).create = mockCreate
+
+			await opusHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1439,13 +1399,7 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
@@ -1456,9 +1410,7 @@ describe("VertexHandler", () => {
 			})
 
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-				// Just consume
-			}
+			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -1499,13 +1451,7 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
@@ -1516,9 +1462,7 @@ describe("VertexHandler", () => {
 			})
 
 			// Consume the stream to trigger the API call
-			for await (const _chunk of stream) {
-				// Just consume
-			}
+			await collectStream(stream)
 
 			// Tool calling is request-driven: if tools are provided, we should include them.
 			expect(mockCreate).toHaveBeenCalledWith(
@@ -1561,13 +1505,7 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
@@ -1577,10 +1515,7 @@ describe("VertexHandler", () => {
 				tools: mockTools,
 			})
 
-			const chunks: ApiStreamChunk[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Find the tool_call_partial chunk
 			const toolCallChunk = chunks.find((chunk) => chunk.type === "tool_call_partial")
@@ -1642,13 +1577,7 @@ describe("VertexHandler", () => {
 				},
 			]
 
-			const asyncIterator = {
-				async *[Symbol.asyncIterator]() {
-					for (const chunk of mockStream) {
-						yield chunk
-					}
-				},
-			}
+			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
 			;(handler["client"].messages as any).create = mockCreate
@@ -1658,10 +1587,7 @@ describe("VertexHandler", () => {
 				tools: mockTools,
 			})
 
-			const chunks: ApiStreamChunk[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Find the tool_call_partial chunks
 			const toolCallChunks = chunks.filter((chunk) => chunk.type === "tool_call_partial")

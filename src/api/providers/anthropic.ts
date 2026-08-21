@@ -106,6 +106,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			case "claude-opus-4-6":
 			case "claude-opus-4-7":
 			case "claude-opus-4-8":
+			case "claude-opus-5":
 			case "claude-fable-5":
 			case "claude-opus-4-5-20251101":
 			case "claude-opus-4-1-20250805":
@@ -177,6 +178,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 								case "claude-opus-4-6":
 								case "claude-opus-4-7":
 								case "claude-opus-4-8":
+								case "claude-opus-5":
 								case "claude-fable-5":
 								case "claude-opus-4-5-20251101":
 								case "claude-opus-4-1-20250805":

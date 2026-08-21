@@ -3,14 +3,10 @@ import i18next from "i18next"
 import {
 	type ProviderSettings,
 	type OrganizationAllowList,
-	type ProviderName,
 	type RouterModels,
-	modelIdKeysByProvider,
-	isProviderName,
-	isRetiredProvider,
+	getModelId,
 	isDynamicProvider,
-	isFauxProvider,
-	isCustomProvider,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 export function validateApiConfiguration(
@@ -42,112 +38,122 @@ function validateModelsAndKeysProvided(
 	zooCodeIsAuthenticated?: boolean,
 ): string | undefined {
 	switch (apiConfiguration.apiProvider) {
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			if (!apiConfiguration.openRouterApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "requesty":
+		case providerIdentifiers.requesty:
 			if (!apiConfiguration.requestyApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "unbound":
+		case providerIdentifiers.unbound:
 			if (!apiConfiguration.unboundApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "litellm":
+		case providerIdentifiers.litellm:
 			if (!apiConfiguration.litellmApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "anthropic":
+		case providerIdentifiers.anthropic:
 			if (!apiConfiguration.apiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "bedrock":
+		case providerIdentifiers.bedrock:
 			if (!apiConfiguration.awsRegion) {
 				return i18next.t("settings:validation.awsRegion")
 			}
 			break
-		case "vertex":
+		case providerIdentifiers.vertex:
 			if (!apiConfiguration.vertexProjectId || !apiConfiguration.vertexRegion) {
 				return i18next.t("settings:validation.googleCloud")
 			}
 			break
-		case "gemini":
+		case providerIdentifiers.gemini:
 			if (!apiConfiguration.geminiApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "openai-native":
+		case providerIdentifiers.openaiNative:
 			if (!apiConfiguration.openAiNativeApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "mistral":
+		case providerIdentifiers.mistral:
 			if (!apiConfiguration.mistralApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "openai":
+		case providerIdentifiers.openai:
 			if (!apiConfiguration.openAiBaseUrl || !apiConfiguration.openAiApiKey || !apiConfiguration.openAiModelId) {
 				return i18next.t("settings:validation.openAi")
 			}
 			break
-		case "ollama":
+		case providerIdentifiers.ollama:
 			if (!apiConfiguration.ollamaModelId) {
 				return i18next.t("settings:validation.modelId")
 			}
 			break
-		case "lmstudio":
+		case providerIdentifiers.lmstudio:
 			if (!apiConfiguration.lmStudioModelId) {
 				return i18next.t("settings:validation.modelId")
 			}
 			break
-		case "vscode-lm":
+		case providerIdentifiers.vscodeLm:
 			if (!apiConfiguration.vsCodeLmModelSelector) {
 				return i18next.t("settings:validation.modelSelector")
 			}
 			break
-		case "fireworks":
+		case providerIdentifiers.fireworks:
 			if (!apiConfiguration.fireworksApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "friendli":
+		case providerIdentifiers.friendli:
 			if (!apiConfiguration.friendliApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "qwen-code":
+		case providerIdentifiers.qwenCode:
 			if (!apiConfiguration.qwenCodeOauthPath) {
 				return i18next.t("settings:validation.qwenCodeOauthPath")
 			}
 			break
-		case "vercel-ai-gateway":
+		case providerIdentifiers.kimiCode:
+			if ((apiConfiguration.kimiCodeAuthMethod ?? "oauth") === "api-key" && !apiConfiguration.kimiCodeApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
+		case providerIdentifiers.vercelAiGateway:
 			if (!apiConfiguration.vercelAiGatewayApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "opencode-go":
+		case providerIdentifiers.opencodeGo:
 			if (!apiConfiguration.opencodeGoApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "kenari":
+		case providerIdentifiers.kenari:
 			if (!apiConfiguration.kenariApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
-		case "zoo-gateway":
+		case providerIdentifiers.nanogpt:
+			if (!apiConfiguration.nanoGptApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
+		case providerIdentifiers.zooGateway:
 			if (!apiConfiguration.zooSessionToken && !zooCodeIsAuthenticated) {
 				return i18next.t("settings:validation.zooGatewaySignIn")
 			}
 			break
-		case "baseten":
+		case providerIdentifiers.baseten:
 			if (!apiConfiguration.basetenApiKey) {
 				return i18next.t("settings:validation.apiKey")
 			}
@@ -183,8 +189,7 @@ function validateProviderAgainstOrganizationSettings(
 		}
 
 		if (!providerConfig.allowAll) {
-			const activeProvider = isRetiredProvider(provider) ? undefined : provider
-			const modelId = activeProvider ? getModelIdForProvider(apiConfiguration, activeProvider) : undefined
+			const modelId = getModelId(apiConfiguration)
 			const allowedModels = providerConfig.models || []
 
 			if (modelId && !allowedModels.includes(modelId)) {
@@ -198,18 +203,6 @@ function validateProviderAgainstOrganizationSettings(
 			}
 		}
 	}
-}
-
-function getModelIdForProvider(apiConfiguration: ProviderSettings, provider: ProviderName): string | undefined {
-	if (provider === "vscode-lm") {
-		return apiConfiguration.vsCodeLmModelSelector?.id
-	}
-
-	if (isCustomProvider(provider) || isFauxProvider(provider)) {
-		return apiConfiguration.apiModelId
-	}
-
-	return apiConfiguration[modelIdKeysByProvider[provider]]
 }
 
 /**
@@ -255,7 +248,7 @@ function validateDynamicProviderModelId(
 		return undefined
 	}
 
-	const modelId = getModelIdForProvider(apiConfiguration, provider)
+	const modelId = getModelId(apiConfiguration)
 
 	if (!modelId) {
 		return i18next.t("settings:validation.modelId")
@@ -279,9 +272,7 @@ export function getModelValidationError(
 	routerModels?: RouterModels,
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {
-	const modelId = isProviderName(apiConfiguration.apiProvider)
-		? getModelIdForProvider(apiConfiguration, apiConfiguration.apiProvider)
-		: apiConfiguration.apiModelId
+	const modelId = getModelId(apiConfiguration) ?? apiConfiguration.apiModelId
 
 	const configWithModelId = {
 		...apiConfiguration,
@@ -312,7 +303,7 @@ export function validateApiConfigurationExcludingModelErrors(
 	_routerModels?: RouterModels, // Keeping this for compatibility with the old function.
 	organizationAllowList?: OrganizationAllowList,
 ): string | undefined {
-	if (apiConfiguration.apiProvider !== "zoo-gateway") {
+	if (apiConfiguration.apiProvider !== providerIdentifiers.zooGateway) {
 		const keysAndIdsPresentErrorMessage = validateModelsAndKeysProvided(apiConfiguration)
 
 		if (keysAndIdsPresentErrorMessage) {

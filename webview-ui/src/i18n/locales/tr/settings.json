@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDE tercihlerinizde</SettingsLink> bu ayar için genel bir kısayol yapılandırabilirsiniz.",
-		"description": "Roo'nun onay gerektirmeden otomatik olarak işlemler gerçekleştirmesine izin verin. Bu ayarları yalnızca yapay zekaya tamamen güveniyorsanız ve ilgili güvenlik risklerini anlıyorsanız etkinleştirin.",
+		"description": "Zoo'nun onay gerektirmeden otomatik olarak işlemler gerçekleştirmesine izin verin. Bu ayarları yalnızca yapay zekaya tamamen güveniyorsanız ve ilgili güvenlik risklerini anlıyorsanız etkinleştirin.",
 		"enabled": "Oto-onay etkinleştirildi",
 		"toggleAriaLabel": "Otomatik onayı değiştir",
 		"disabledAriaLabel": "Otomatik onay devre dışı - önce seçenekleri belirleyin",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Yürüt",
 			"description": "Onay gerektirmeden otomatik olarak izin verilen terminal komutlarını yürüt",
+			"destructiveCommandGuard": {
+				"label": "Yıkıcı komut korumasını etkinleştir",
+				"description": "Bu platform için Destructive Command Guard'ı (DCG) indirir ve kullanır. DCG'nin izin verdiği komutlar otomatik olarak çalıştırılır. DCG tarafından engellenen komutlar onayını gerektirir. Bu seçenek etkinken Zoo'nun komut listeleri devre dışı bırakılır. Seçeneği kapatsan da indirilen çalıştırılabilir dosya korunur."
+			},
 			"allowedCommands": "İzin Verilen Otomatik Yürütme Komutları",
 			"allowedCommandsDescription": "\"Yürütme işlemlerini her zaman onayla\" etkinleştirildiğinde otomatik olarak yürütülebilen komut önekleri. Tüm komutlara izin vermek için * ekleyin (dikkatli kullanın).",
 			"deniedCommands": "Reddedilen komutlar",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Opencode Go API Anahtarı Al",
 		"kenariApiKey": "Kenari API Anahtarı",
 		"getKenariApiKey": "Kenari API Anahtarı Al",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API Anahtarı",
+			"getApiKey": "NanoGPT API Anahtarı Al",
+			"model": "Model",
+			"routingPreference": "Yönlendirme Tercihi",
+			"routingOptions": {
+				"automatic": "Otomatik",
+				"fastest": "En hızlı",
+				"cheapest": "En ucuz",
+				"lowestLatency": "En düşük gecikme",
+				"highestThroughput": "En yüksek verim",
+				"toolCapable": "Araç destekli",
+				"cacheCapable": "Önbellek destekli"
+			},
+			"automaticExplanation": "Otomatik, yönlendirme son eki uygulamaz.",
+			"billingWarning": "Gelişmiş yönlendirme tercihleri kullanıma göre ödeme yönlendirmesini kullanabilir ve NanoGPT'nin güncel faturalandırma kurallarına bağlı olarak abonelik kapsamını atlayabilir.",
+			"routingDocs": "NanoGPT yönlendirme ve faturalandırma ayrıntılarını görüntüle"
+		},
 		"apiKeyStorageNotice": "API anahtarları VSCode'un Gizli Depolamasında güvenli bir şekilde saklanır",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Moonshot API Anahtarı",
 		"getMoonshotApiKey": "Moonshot API Anahtarı Al",
 		"moonshotBaseUrl": "Moonshot Giriş Noktası",
+		"kimiCode": {
+			"authMethod": "Authentication method",
+			"oauth": "Kimi Code subscription (OAuth)",
+			"apiKey": "Kimi Code API key",
+			"apiKeyLabel": "Kimi Code API Key",
+			"signIn": "Sign in to Kimi Code",
+			"signOut": "Sign out",
+			"authenticated": "Signed in to Kimi Code",
+			"deviceCodeHelp": "Enter this device code in the Kimi authorization page:",
+			"docs": "Kimi Code documentation"
+		},
 		"zaiApiKey": "Z AI API Anahtarı",
 		"getZaiApiKey": "Z AI API Anahtarı Al",
 		"zaiEntrypoint": "Z AI Giriş Noktası",
@@ -480,6 +514,9 @@
 		"openAiApiKey": "OpenAI API Anahtarı",
 		"apiKey": "API Anahtarı",
 		"openAiBaseUrl": "Temel URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Azure dağıtım adı",
+		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
 		"getOpenAiApiKey": "OpenAI API Anahtarı Al",
 		"mistralApiKey": "Mistral API Anahtarı",
 		"getMistralApiKey": "Mistral / Codestral API Anahtarı Al",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Yanıttaki maksimum token sayısını sınırla",
 	"maxOutputTokensLabel": "Maksimum çıktı tokenları",
 	"maxTokensGenerateDescription": "Yanıtta oluşturulacak maksimum token sayısı",
+	"openAiCodexSpeed": {
+		"label": "Hız",
+		"tooltip": "Hızlı mod, yaklaşık 1,5 kat hız için Codex öncelikli işlemeyi kullanır ve daha fazla abonelik kotası tüketir.",
+		"standard": "Standart",
+		"fast": "Hızlı (1,5 kat hız, daha fazla kullanım)"
+	},
 	"serviceTier": {
 		"label": "Hizmet seviyesi",
 		"tooltip": "Daha hızlı API isteği işleme için öncelikli işleme hizmeti seviyesini deneyin. Daha düşük gecikme süresiyle daha düşük fiyatlar için esnek işleme seviyesini deneyin.",

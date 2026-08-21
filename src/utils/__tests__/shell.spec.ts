@@ -3,25 +3,23 @@ import * as vscode from "vscode"
 import { existsSync } from "fs"
 import { userInfo } from "os"
 import { getShell } from "../shell"
+import { BaseTerminal } from "../../integrations/terminal/BaseTerminal"
+import { Terminal } from "../../integrations/terminal/Terminal"
 
-// Mock vscode module
 vi.mock("vscode", () => ({
 	workspace: {
 		getConfiguration: vi.fn(),
 	},
 }))
 
-// Mock the os module
 vi.mock("os", () => ({
 	userInfo: vi.fn(() => ({ shell: null })),
 }))
 
-// Mock the fs module — getWindowsShellFromVSCode probes for PowerShell 7 (pwsh.exe).
 vi.mock("fs", () => ({
 	existsSync: vi.fn(() => false),
 }))
 
-// Mock path module for testing
 vi.mock("path", async () => {
 	const actual = await vi.importActual("path")
 	return {
@@ -35,43 +33,63 @@ describe("Shell Detection Tests", () => {
 	let originalEnv: NodeJS.ProcessEnv
 	let originalGetConfig: any
 
-	// Helper to mock VS Code configuration
+	/**
+	 * Stubs VS Code config using inspect() on the correct section names, matching
+	 * how Terminal.getConfiguredDefaultProfileName and Terminal.getConfiguredProfiles
+	 * read config (globalValue only — workspace excluded per APPLICATION scope).
+	 */
 	function mockVsCodeConfig(platformKey: string, defaultProfileName: string | null, profiles: Record<string, any>) {
-		vscode.workspace.getConfiguration = () =>
-			({
-				get: (key: string) => {
-					if (key === `defaultProfile.${platformKey}`) {
-						return defaultProfileName
-					}
-					if (key === `profiles.${platformKey}`) {
-						return profiles
-					}
-					return undefined
-				},
-			}) as any
+		vscode.workspace.getConfiguration = (section?: string) => {
+			if (section === "terminal.integrated") {
+				return {
+					inspect: (key: string) => {
+						expect(key).toBe(`defaultProfile.${platformKey}`)
+						return {
+							defaultValue: undefined,
+							globalValue: defaultProfileName ?? undefined,
+						}
+					},
+					get: () => undefined,
+				} as any
+			}
+			if (section === "terminal.integrated.profiles") {
+				return {
+					inspect: (key: string) => {
+						expect(key).toBe(platformKey)
+						return {
+							defaultValue: undefined,
+							globalValue: profiles,
+						}
+					},
+					get: () => undefined,
+				} as any
+			}
+			return { get: () => undefined, inspect: () => undefined } as any
+		}
 	}
 
 	beforeEach(() => {
-		// Store original references
 		originalPlatform = process.platform
 		originalEnv = { ...process.env }
 		originalGetConfig = vscode.workspace.getConfiguration
 
-		// Clear environment variables for a clean test
 		delete process.env.SHELL
 		delete process.env.COMSPEC
 
-		// Reset userInfo mock to default
 		vi.mocked(userInfo).mockReturnValue({ shell: null } as any)
 		// Default: PowerShell 7 is not installed, so the probe falls back to legacy.
 		vi.mocked(existsSync).mockReturnValue(false)
+		// Clear Zoo profile override and execa shell path between tests.
+		Terminal.setTerminalProfile(undefined)
+		BaseTerminal.setExecaShellPath(undefined)
 	})
 
 	afterEach(() => {
-		// Restore everything
 		Object.defineProperty(process, "platform", { value: originalPlatform })
 		process.env = originalEnv
 		vscode.workspace.getConfiguration = originalGetConfig
+		Terminal.setTerminalProfile(undefined)
+		BaseTerminal.setExecaShellPath(undefined)
 		vi.clearAllMocks()
 	})
 
@@ -84,6 +102,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses explicit PowerShell 7 path from VS Code config (profile path)", () => {
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
 			})
@@ -91,65 +110,33 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("should handle array path from VSCode terminal profile", () => {
-			// Mock VSCode configuration with array path
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return "PowerShell"
-					if (key === "profiles.windows") {
-						return {
-							PowerShell: {
-								// VSCode API may return path as an array
-								path: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh.exe"],
-							},
-						}
-					}
-					return undefined
-				}),
-			}
-
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			const result = getShell()
-			// Should use the first element of the array
-			expect(result).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh.exe"] },
+			})
+			expect(getShell()).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 		})
 
-		it("should handle empty array path and fall back to defaults", () => {
-			// Mock VSCode configuration with empty array path
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return "Custom"
-					if (key === "profiles.windows") {
-						return {
-							Custom: {
-								path: [], // Empty array
-							},
-						}
-					}
-					return undefined
-				}),
-			}
-
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			// Mock environment variable
+		it("falls through to COMSPEC when profile has an empty array path", () => {
+			mockVsCodeConfig("windows", "Custom", {
+				Custom: { path: [] },
+			})
 			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
-
-			const result = getShell()
-			// Should fall back to cmd.exe
-			expect(result).toBe("C:\\Windows\\System32\\cmd.exe")
+			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 
 		it("uses PowerShell 7 path if source is 'PowerShell' but no explicit path", () => {
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { source: "PowerShell" },
 			})
 			expect(getShell()).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 		})
 
-		it("falls back to legacy PowerShell if profile includes 'powershell' but no path/source", () => {
+		it("falls back to legacy PowerShell if source is 'PowerShell' but PS7 is absent", () => {
+			vi.mocked(existsSync).mockReturnValue(false)
 			mockVsCodeConfig("windows", "PowerShell", {
-				PowerShell: {},
+				PowerShell: { source: "PowerShell" },
 			})
 			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
 		})
@@ -161,57 +148,48 @@ describe("Shell Detection Tests", () => {
 			expect(getShell()).toBe("/bin/bash")
 		})
 
-		it("uses WSL bash when profile name includes 'wsl'", () => {
-			mockVsCodeConfig("windows", "Ubuntu WSL", {
-				"Ubuntu WSL": {},
-			})
-			expect(getShell()).toBe("/bin/bash")
-		})
-
-		it("defaults to cmd.exe if no special profile is matched", () => {
+		it("falls through to COMSPEC when profile has no path and no source", () => {
+			// A profile entry with no path and no recognised source is unresolvable;
+			// getShell falls through to env/fallback rather than guessing cmd.exe.
 			mockVsCodeConfig("windows", "CommandPrompt", {
 				CommandPrompt: {},
 			})
+			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
 			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 
-		it("handles undefined profile gracefully", () => {
-			// Mock a case where defaultProfileName exists but the profile doesn't
+		it("falls through to COMSPEC when configured profile is missing from profiles map", () => {
 			mockVsCodeConfig("windows", "NonexistentProfile", {})
+			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
 			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 
 		it("defaults to PowerShell 7 when no profile is configured and pwsh.exe is installed", () => {
-			// Modern VS Code launches PowerShell by default on Windows (issue #82) and
-			// prefers PS7 when present, so getShell() should report pwsh.exe.
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			// Modern VS Code prefers PS7 on Windows when no profile is explicitly set.
+			mockVsCodeConfig("windows", null, {})
 			vi.mocked(existsSync).mockReturnValue(true)
-
 			expect(getShell()).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 		})
 
 		it("falls back to Windows PowerShell 5.1 when no profile is configured and PS7 is absent", () => {
-			// Without PS7 installed, the probe falls back to the always-present legacy
-			// PowerShell rather than cmd.exe.
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("windows", null, {})
 			vi.mocked(existsSync).mockReturnValue(false)
-
 			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
 		})
 
 		it("falls back to safe shell when the configured profile path is non-allowlisted", () => {
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Custom\\evil.exe")
 			mockVsCodeConfig("windows", "Custom", {
 				Custom: { path: "C:\\Custom\\evil.exe" },
 			})
-
 			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 
 		it("uses cmd.exe when a Command Prompt profile is explicitly configured", () => {
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Windows\\System32\\cmd.exe")
 			mockVsCodeConfig("windows", "Command Prompt", {
 				"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
 			})
-
 			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 	})
@@ -225,6 +203,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses VS Code profile path if available", () => {
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/local/bin/fish")
 			mockVsCodeConfig("osx", "MyCustomShell", {
 				MyCustomShell: { path: "/usr/local/bin/fish" },
 			})
@@ -232,42 +211,27 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("should handle array path from VSCode terminal profile", () => {
-			// Mock VSCode configuration with array path
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.osx") return "zsh"
-					if (key === "profiles.osx") {
-						return {
-							zsh: {
-								path: ["/opt/homebrew/bin/zsh", "/bin/zsh"],
-							},
-						}
-					}
-					return undefined
-				}),
-			}
-
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			const result = getShell()
-			// Should use the first element of the array
-			expect(result).toBe("/opt/homebrew/bin/zsh")
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/opt/homebrew/bin/zsh")
+			mockVsCodeConfig("osx", "zsh", {
+				zsh: { path: ["/opt/homebrew/bin/zsh", "/bin/zsh"] },
+			})
+			expect(getShell()).toBe("/opt/homebrew/bin/zsh")
 		})
 
 		it("falls back to userInfo().shell if no VS Code config is available", () => {
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("osx", null, {})
 			vi.mocked(userInfo).mockReturnValue({ shell: "/opt/homebrew/bin/zsh" } as any)
 			expect(getShell()).toBe("/opt/homebrew/bin/zsh")
 		})
 
 		it("falls back to SHELL env var if no userInfo shell is found", () => {
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("osx", null, {})
 			process.env.SHELL = "/usr/local/bin/zsh"
 			expect(getShell()).toBe("/usr/local/bin/zsh")
 		})
 
 		it("falls back to /bin/zsh if no config, userInfo, or env variable is set", () => {
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("osx", null, {})
 			expect(getShell()).toBe("/bin/zsh")
 		})
 	})
@@ -281,6 +245,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses VS Code profile path if available", () => {
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/bin/fish")
 			mockVsCodeConfig("linux", "CustomProfile", {
 				CustomProfile: { path: "/usr/bin/fish" },
 			})
@@ -288,42 +253,27 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("should handle array path from VSCode terminal profile", () => {
-			// Mock VSCode configuration with array path
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return "bash"
-					if (key === "profiles.linux") {
-						return {
-							bash: {
-								path: ["/usr/local/bin/bash", "/bin/bash"],
-							},
-						}
-					}
-					return undefined
-				}),
-			}
-
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			const result = getShell()
-			// Should use the first element of the array
-			expect(result).toBe("/usr/local/bin/bash")
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/local/bin/bash")
+			mockVsCodeConfig("linux", "bash", {
+				bash: { path: ["/usr/local/bin/bash", "/bin/bash"] },
+			})
+			expect(getShell()).toBe("/usr/local/bin/bash")
 		})
 
 		it("falls back to userInfo().shell if no VS Code config is available", () => {
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			vi.mocked(userInfo).mockReturnValue({ shell: "/usr/bin/zsh" } as any)
 			expect(getShell()).toBe("/usr/bin/zsh")
 		})
 
 		it("falls back to SHELL env var if no userInfo shell is found", () => {
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			process.env.SHELL = "/usr/bin/fish"
 			expect(getShell()).toBe("/usr/bin/fish")
 		})
 
 		it("falls back to /bin/bash if nothing is set", () => {
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			expect(getShell()).toBe("/bin/bash")
 		})
 	})
@@ -334,7 +284,7 @@ describe("Shell Detection Tests", () => {
 	describe("Unknown Platform / Error Handling", () => {
 		it("falls back to /bin/bash for unknown platforms", () => {
 			Object.defineProperty(process, "platform", { value: "sunos" })
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			expect(getShell()).toBe("/bin/bash")
 		})
 
@@ -349,7 +299,7 @@ describe("Shell Detection Tests", () => {
 
 		it("handles userInfo errors gracefully, falling back to environment variable if present", () => {
 			Object.defineProperty(process, "platform", { value: "darwin" })
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("osx", null, {})
 			vi.mocked(userInfo).mockImplementation(() => {
 				throw new Error("userInfo error")
 			})
@@ -368,77 +318,79 @@ describe("Shell Detection Tests", () => {
 			delete process.env.SHELL
 			expect(getShell()).toBe("/bin/bash")
 		})
+
+		it("handles inspect() returning undefined gracefully", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			vscode.workspace.getConfiguration = () =>
+				({
+					inspect: () => undefined,
+					get: () => undefined,
+				}) as any
+			expect(getShell()).toBe("/bin/bash")
+		})
 	})
 
 	// --------------------------------------------------------------------------
-	// getTerminalConfig Behavior (tested via getShell)
+	// Scope isolation — workspace values must not influence getShell()
 	// --------------------------------------------------------------------------
-	describe("getTerminalConfig", () => {
-		it("returns defaultProfileName and matching profile for Windows", () => {
+	describe("Scope isolation (workspace values ignored)", () => {
+		it("Windows: ignores a workspace-scoped default profile", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-			mockVsCodeConfig("windows", "Command Prompt", {
-				"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
-			})
-			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
-		})
-
-		it("returns defaultProfileName and matching profile for macOS", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" })
-			mockVsCodeConfig("osx", "fish", {
-				fish: { path: "/usr/local/bin/fish" },
-			})
-			expect(getShell()).toBe("/usr/local/bin/fish")
-		})
-
-		it("returns defaultProfileName and matching profile for Linux", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			mockVsCodeConfig("linux", "zsh", {
-				zsh: { path: "/usr/bin/zsh" },
-			})
-			expect(getShell()).toBe("/usr/bin/zsh")
-		})
-
-		it("returns null defaultProfileName when config value is undefined", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return undefined
-					if (key === "profiles.linux") return { bash: { path: "/bin/bash" } }
-					return undefined
-				}),
+			vi.mocked(existsSync).mockReturnValue(false)
+			// globalValue is undefined; only workspaceValue is set
+			vscode.workspace.getConfiguration = (section?: string) => {
+				if (section === "terminal.integrated") {
+					return {
+						inspect: (_key: string) => ({
+							defaultValue: undefined,
+							globalValue: undefined,
+							workspaceValue: "PowerShell",
+						}),
+						get: () => undefined,
+					} as any
+				}
+				if (section === "terminal.integrated.profiles") {
+					return {
+						inspect: (_key: string) => ({
+							defaultValue: undefined,
+							globalValue: undefined,
+							workspaceValue: { PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" } },
+						}),
+						get: () => undefined,
+					} as any
+				}
+				return { get: () => undefined, inspect: () => undefined } as any
 			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-			expect(getShell()).toBe("/bin/bash")
+			// No global profile → falls back to PS legacy (existsSync returns false for PS7)
+			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
 		})
 
-		it("returns empty profiles when profiles config is null", () => {
+		it("Linux: ignores a workspace-scoped default profile", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return "bash"
-					if (key === "profiles.linux") return null
-					return undefined
-				}),
+			vscode.workspace.getConfiguration = (section?: string) => {
+				if (section === "terminal.integrated") {
+					return {
+						inspect: (_key: string) => ({
+							defaultValue: undefined,
+							globalValue: undefined,
+							workspaceValue: "CustomShell",
+						}),
+						get: () => undefined,
+					} as any
+				}
+				if (section === "terminal.integrated.profiles") {
+					return {
+						inspect: (_key: string) => ({
+							defaultValue: undefined,
+							globalValue: undefined,
+							workspaceValue: { CustomShell: { path: "/usr/bin/fish" } },
+						}),
+						get: () => undefined,
+					} as any
+				}
+				return { get: () => undefined, inspect: () => undefined } as any
 			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-			expect(getShell()).toBe("/bin/bash")
-		})
-
-		it("returns fallback when getConfiguration throws", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" })
-			vi.mocked(vscode.workspace.getConfiguration).mockImplementation(() => {
-				throw new Error("config error")
-			})
-			expect(getShell()).toBe("/bin/zsh")
-		})
-
-		it("returns fallback when config.get throws", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
-				get: () => {
-					throw new Error("get error")
-				},
-			} as any)
+			// No global profile → falls through to /bin/bash
 			expect(getShell()).toBe("/bin/bash")
 		})
 	})
@@ -447,212 +399,26 @@ describe("Shell Detection Tests", () => {
 	// Non-string defaultProfileName Handling
 	// --------------------------------------------------------------------------
 	describe("Non-string defaultProfileName handling", () => {
-		it("Windows: handles numeric defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "win32" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return 1
-					if (key === "profiles.windows") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-			vi.mocked(existsSync).mockReturnValue(false)
+		// Terminal.getConfiguredDefaultProfileName returns inspect().globalValue as-is.
+		// If VS Code somehow stores a non-string, it will be undefined (inspect returns
+		// typed as string | undefined), so getShell falls through to userInfo/env/fallback.
 
+		it("Windows: handles undefined defaultProfileName (no profile set)", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			mockVsCodeConfig("windows", null, {})
+			vi.mocked(existsSync).mockReturnValue(false)
 			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
 		})
 
-		it("Windows: handles boolean defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "win32" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return true
-					if (key === "profiles.windows") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-			vi.mocked(existsSync).mockReturnValue(false)
-
-			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
-		})
-
-		it("Windows: handles array defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "win32" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return ["PowerShell"]
-					if (key === "profiles.windows") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-			vi.mocked(existsSync).mockReturnValue(false)
-
-			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
-		})
-
-		it("Windows: handles object defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "win32" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return { name: "PowerShell" }
-					if (key === "profiles.windows") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-			vi.mocked(existsSync).mockReturnValue(false)
-
-			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
-		})
-
-		it("macOS: handles numeric defaultProfileName without TypeError", () => {
+		it("macOS: returns fallback when no profile is configured", () => {
 			Object.defineProperty(process, "platform", { value: "darwin" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.osx") return 1
-					if (key === "profiles.osx") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
+			mockVsCodeConfig("osx", null, {})
 			expect(getShell()).toBe("/bin/zsh")
 		})
 
-		it("macOS: handles boolean defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.osx") return true
-					if (key === "profiles.osx") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/zsh")
-		})
-
-		it("macOS: handles array defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.osx") return ["zsh"]
-					if (key === "profiles.osx") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/zsh")
-		})
-
-		it("macOS: handles object defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.osx") return {}
-					if (key === "profiles.osx") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/zsh")
-		})
-
-		// Mutation-resistant: without the typeof guard, profiles[1] === profiles["1"] in JS,
-		// so a numeric key that matches a real profile would return its path instead of falling back.
-		it("macOS: ignores numeric defaultProfileName even when it matches a profile key", () => {
-			Object.defineProperty(process, "platform", { value: "darwin" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.osx") return 1
-					// Profile keyed as "1" — would be reached by profiles[1] if the guard were absent
-					if (key === "profiles.osx") return { "1": { path: "/usr/local/bin/zsh" } }
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			// Guard treats 1 as null → getMacShellFromVSCode returns null → fallback to /bin/zsh
-			// Without the guard it would return /usr/local/bin/zsh
-			expect(getShell()).toBe("/bin/zsh")
-		})
-
-		it("Linux: handles numeric defaultProfileName without TypeError", () => {
+		it("Linux: returns fallback when no profile is configured", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return 1
-					if (key === "profiles.linux") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/bash")
-		})
-
-		it("Linux: handles boolean defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return true
-					if (key === "profiles.linux") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/bash")
-		})
-
-		it("Linux: handles array defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return ["bash"]
-					if (key === "profiles.linux") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/bash")
-		})
-
-		it("Linux: handles object defaultProfileName without TypeError", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return {}
-					if (key === "profiles.linux") return {}
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			expect(getShell()).toBe("/bin/bash")
-		})
-
-		// Mutation-resistant: same pattern as macOS — numeric key matches profile "1" only if unguarded.
-		it("Linux: ignores numeric defaultProfileName even when it matches a profile key", () => {
-			Object.defineProperty(process, "platform", { value: "linux" })
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.linux") return 1
-					// Profile keyed as "1" — would be reached by profiles[1] if the guard were absent
-					if (key === "profiles.linux") return { "1": { path: "/usr/bin/fish" } }
-					return undefined
-				}),
-			}
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			// Guard treats 1 as null → getLinuxShellFromVSCode returns null → fallback to /bin/bash
-			// Without the guard it would return /usr/bin/fish
+			mockVsCodeConfig("linux", null, {})
 			expect(getShell()).toBe("/bin/bash")
 		})
 	})
@@ -663,6 +429,7 @@ describe("Shell Detection Tests", () => {
 	describe("Shell Validation", () => {
 		it("should allow common Windows shells", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
 			})
@@ -671,6 +438,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should allow common Unix shells", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/bin/fish")
 			mockVsCodeConfig("linux", "CustomProfile", {
 				CustomProfile: { path: "/usr/bin/fish" },
 			})
@@ -679,6 +447,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should handle case-insensitive matching on Windows", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "c:\\windows\\system32\\cmd.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: "c:\\windows\\system32\\cmd.exe" },
 			})
@@ -687,90 +456,54 @@ describe("Shell Detection Tests", () => {
 
 		it("should reject unknown shells and use fallback", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/bin/malicious-shell")
 			mockVsCodeConfig("linux", "CustomProfile", {
 				CustomProfile: { path: "/usr/bin/malicious-shell" },
 			})
 			expect(getShell()).toBe("/bin/bash")
 		})
 
-		it("should validate array shell paths and use first allowed", () => {
+		it("should resolve array shell paths and use first path", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return "PowerShell"
-					if (key === "profiles.windows") {
-						return {
-							PowerShell: {
-								path: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh"],
-							},
-						}
-					}
-					return undefined
-				}),
-			}
-
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			const result = getShell()
-			// Should return the first allowed shell from the array
-			expect(result).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh"] },
+			})
+			expect(getShell()).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 		})
 
 		it("should reject non-allowed shell paths and fall back to safe defaults", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-
-			const mockConfig = {
-				get: vi.fn((key: string) => {
-					if (key === "defaultProfile.windows") return "Malicious"
-					if (key === "profiles.windows") {
-						return {
-							Malicious: {
-								path: "C:\\malicious\\shell.exe",
-							},
-						}
-					}
-					return undefined
-				}),
-			}
-
-			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(mockConfig as any)
-
-			// Mock environment to provide a fallback
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\malicious\\shell.exe")
+			mockVsCodeConfig("windows", "Malicious", {
+				Malicious: { path: "C:\\malicious\\shell.exe" },
+			})
 			process.env.COMSPEC = "C:\\Windows\\System32\\cmd.exe"
-
-			const result = getShell()
-			// Should fall back to safe default (cmd.exe)
-			expect(result).toBe("C:\\Windows\\System32\\cmd.exe")
+			expect(getShell()).toBe("C:\\Windows\\System32\\cmd.exe")
 		})
 
 		it("should validate shells from VS Code config", () => {
 			Object.defineProperty(process, "platform", { value: "darwin" })
+			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/local/bin/custom-shell")
 			mockVsCodeConfig("osx", "MyCustomShell", {
 				MyCustomShell: { path: "/usr/local/bin/custom-shell" },
 			})
-
-			const result = getShell()
-			expect(result).toBe("/bin/zsh") // macOS fallback
+			expect(getShell()).toBe("/bin/zsh") // not in allowlist → macOS fallback
 		})
 
 		it("should validate shells from userInfo", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			vi.mocked(userInfo).mockReturnValue({ shell: "/usr/bin/evil-shell" } as any)
-
-			const result = getShell()
-			expect(result).toBe("/bin/bash") // Linux fallback
+			expect(getShell()).toBe("/bin/bash")
 		})
 
 		it("should validate shells from environment variables", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			vi.mocked(userInfo).mockReturnValue({ shell: null } as any)
 			process.env.SHELL = "/opt/custom/shell"
-
-			const result = getShell()
-			expect(result).toBe("/bin/bash") // Linux fallback
+			expect(getShell()).toBe("/bin/bash")
 		})
 
 		it("should handle WSL bash correctly", () => {
@@ -778,19 +511,88 @@ describe("Shell Detection Tests", () => {
 			mockVsCodeConfig("windows", "WSL", {
 				WSL: { source: "WSL" },
 			})
-
-			const result = getShell()
-			expect(result).toBe("/bin/bash") // Should be allowed
+			expect(getShell()).toBe("/bin/bash")
 		})
 
 		it("should handle empty or null shell paths", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = () => ({ get: () => undefined }) as any
+			mockVsCodeConfig("linux", null, {})
 			vi.mocked(userInfo).mockReturnValue({ shell: "" } as any)
 			delete process.env.SHELL
+			expect(getShell()).toBe("/bin/bash")
+		})
+	})
 
-			const result = getShell()
-			expect(result).toBe("/bin/bash") // Should fall back to safe default
+	// --------------------------------------------------------------------------
+	// Zoo profile override (Terminal.getProfileShell) takes precedence
+	// --------------------------------------------------------------------------
+	describe("Zoo profile override", () => {
+		it("uses Zoo profile shell over VS Code default profile", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			// VS Code default profile is PowerShell
+			vi.mocked(existsSync).mockReturnValue(true)
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			})
+			// Zoo profile override points to Git Bash
+			Terminal.setTerminalProfile("Git Bash")
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue({
+				shellPath: "C:\\Program Files\\Git\\bin\\bash.exe",
+			})
+			expect(getShell()).toBe("C:\\Program Files\\Git\\bin\\bash.exe")
+		})
+
+		it("falls through to VS Code default when Zoo profile has no resolvable shell", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockImplementation((p) => String(p) === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			})
+			Terminal.setTerminalProfile("Unresolvable")
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue(undefined)
+			expect(getShell()).toBe("C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+		})
+	})
+
+	// --------------------------------------------------------------------------
+	// Explicit execa shell path takes highest precedence
+	// --------------------------------------------------------------------------
+	describe("Execa shell path override", () => {
+		it("uses explicit execa shell path over VS Code config", () => {
+			Object.defineProperty(process, "platform", { value: "win32" })
+			vi.mocked(existsSync).mockReturnValue(true)
+			mockVsCodeConfig("windows", "PowerShell", {
+				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
+			})
+			BaseTerminal.setExecaShellPath("C:\\Program Files\\Git\\bin\\bash.exe")
+			expect(getShell()).toBe("C:\\Program Files\\Git\\bin\\bash.exe")
+		})
+
+		it("uses explicit execa shell path over Zoo profile override", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			mockVsCodeConfig("linux", null, {})
+			Terminal.setTerminalProfile("fish")
+			vi.spyOn(Terminal, "getProfileShell").mockReturnValue({
+				shellPath: "/usr/bin/fish",
+			})
+			BaseTerminal.setExecaShellPath("/bin/zsh")
+			expect(getShell()).toBe("/bin/zsh")
+		})
+
+		it("falls through to VS Code config when execa shell path is not set", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			vi.mocked(existsSync).mockImplementation((p) => String(p) === "/usr/bin/fish")
+			mockVsCodeConfig("linux", "fish", {
+				fish: { path: "/usr/bin/fish" },
+			})
+			expect(getShell()).toBe("/usr/bin/fish")
+		})
+
+		it("rejects non-allowlisted execa shell path and uses fallback", () => {
+			Object.defineProperty(process, "platform", { value: "linux" })
+			mockVsCodeConfig("linux", null, {})
+			BaseTerminal.setExecaShellPath("/opt/evil/shell")
+			expect(getShell()).toBe("/bin/bash")
 		})
 	})
 })

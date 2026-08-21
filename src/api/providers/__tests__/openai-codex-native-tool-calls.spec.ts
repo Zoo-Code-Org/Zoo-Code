@@ -7,6 +7,7 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { NativeToolCallParser } from "../../../core/assistant-message/NativeToolCallParser"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { Package } from "../../../shared/package"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 
 describe("OpenAiCodexHandler native tool calls", () => {
 	let handler: OpenAiCodexHandler
@@ -31,9 +32,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		// Mock OpenAI SDK streaming (preferred path).
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.output_item.added",
 							item: {
 								type: "function_call",
@@ -42,15 +43,14 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								arguments: "",
 							},
 							output_index: 0,
-						}
-						yield {
+						},
+						{
 							type: "response.function_call_arguments.delta",
 							delta: '{"result":"hi"}',
-							// Note: intentionally omit call_id + name to simulate tool-call-only streams.
 							item_id: "fc_1",
 							output_index: 0,
-						}
-						yield {
+						},
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_1",
@@ -65,9 +65,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								],
 								usage: { input_tokens: 1, output_tokens: 1 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -104,9 +104,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.output_item.done",
 							item: {
 								type: "message",
@@ -114,8 +114,8 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								content: [{ type: "output_text", text: "hello from spark" }],
 							},
 							output_index: 0,
-						}
-						yield {
+						},
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_done_only",
@@ -129,9 +129,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -140,10 +140,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.length).toBeGreaterThan(0)
@@ -155,9 +152,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_completed_only",
@@ -171,9 +168,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -182,10 +179,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.length).toBeGreaterThan(0)
@@ -197,13 +191,13 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.output_text.done",
 							text: "done-event text only",
-						}
-						yield {
+						},
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_done_text_only",
@@ -211,9 +205,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								output: [],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -222,10 +216,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.length).toBeGreaterThan(0)
@@ -237,9 +228,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.output_item.done",
 							item: {
 								type: "function_call",
@@ -248,8 +239,8 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								arguments: '{"result":"ok"}',
 							},
 							output_index: 0,
-						}
-						yield {
+						},
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_done_tool_only",
@@ -257,9 +248,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								output: [],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -268,10 +259,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const toolCalls = chunks.filter((c) => c.type === "tool_call")
 		expect(toolCalls.length).toBeGreaterThan(0)
@@ -287,9 +275,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{
 							type: "response.content_part.added",
 							part: {
 								type: "output_text",
@@ -297,8 +285,8 @@ describe("OpenAiCodexHandler native tool calls", () => {
 							},
 							output_index: 0,
 							content_index: 0,
-						}
-						yield {
+						},
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_content_part",
@@ -306,9 +294,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								output: [],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -317,10 +305,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.length).toBeGreaterThan(0)
@@ -332,12 +317,12 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield { type: "response.output_text.delta", delta: "hello " }
-						yield { type: "response.output_text.delta", delta: "world" }
-						yield { type: "response.output_text.done", text: "hello world" }
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{ type: "response.output_text.delta", delta: "hello " },
+						{ type: "response.output_text.delta", delta: "world" },
+						{ type: "response.output_text.done", text: "hello world" },
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_delta_done",
@@ -345,9 +330,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								output: [],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -356,10 +341,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.map((c) => c.text).join("")).toBe("hello world")
@@ -370,16 +352,16 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		;(handler as any).client = {
 			responses: {
-				create: vi.fn().mockResolvedValue({
-					async *[Symbol.asyncIterator]() {
-						yield { type: "response.output_text.delta", delta: "hello world" }
-						yield {
+				create: vi.fn().mockResolvedValue(
+					asyncStreamFrom([
+						{ type: "response.output_text.delta", delta: "hello world" },
+						{
 							type: "response.content_part.added",
 							part: { type: "output_text", text: "hello world" },
 							output_index: 0,
 							content_index: 0,
-						}
-						yield {
+						},
+						{
 							type: "response.completed",
 							response: {
 								id: "resp_delta_content_part",
@@ -387,9 +369,9 @@ describe("OpenAiCodexHandler native tool calls", () => {
 								output: [],
 								usage: { input_tokens: 1, output_tokens: 2 },
 							},
-						}
-					},
-				}),
+						},
+					]),
+				),
 			},
 		}
 
@@ -398,10 +380,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks.map((c) => c.text).join("")).toBe("hello world")
@@ -411,10 +390,10 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
-		const mockCreate = vi.fn().mockResolvedValue({
-			async *[Symbol.asyncIterator]() {
-				yield { type: "response.output_text.delta", delta: "ok" }
-				yield {
+		const mockCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "ok" },
+				{
 					type: "response.completed",
 					response: {
 						id: "resp_sdk_headers",
@@ -422,18 +401,16 @@ describe("OpenAiCodexHandler native tool calls", () => {
 						output: [],
 						usage: { input_tokens: 1, output_tokens: 1 },
 					},
-				}
-			},
-		})
+				},
+			]),
+		)
 		;(handler as any).client = { responses: { create: mockCreate } }
 
 		const stream = handler.createMessage("system", [{ role: "user", content: "headers" } as any], {
 			taskId: "task-123",
 			tools: [],
 		})
-		for await (const _chunk of stream) {
-			// drain stream
-		}
+		await collectStream(stream)
 
 		expect(mockCreate).toHaveBeenCalledWith(
 			expect.anything(),
@@ -479,9 +456,7 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			taskId: "task-456",
 			tools: [],
 		})
-		for await (const _chunk of stream) {
-			// drain stream
-		}
+		await collectStream(stream)
 
 		expect(mockFetch).toHaveBeenCalledWith(
 			expect.stringContaining("/responses"),
@@ -515,6 +490,22 @@ describe("OpenAiCodexHandler native tool calls", () => {
 
 		await expect(handler.completePrompt("Test prompt")).resolves.toBe("done")
 
+		const fetchOptions = mockFetch.mock.calls[0][1]
+		const body = JSON.parse(fetchOptions.body)
+		expect(body.input).toEqual([
+			{
+				role: "user",
+				content: [{ type: "input_text", text: "Test prompt" }],
+			},
+		])
+		expect(body).not.toHaveProperty("prompt_cache_key")
+		expect(body.reasoning?.context).toBeUndefined()
+		expect(body.input).not.toContainEqual(expect.objectContaining({ type: "additional_tools" }))
+		expect(body.input).not.toContainEqual(expect.objectContaining({ role: "developer" }))
+		expect(fetchOptions.headers).not.toHaveProperty("session-id")
+		expect(fetchOptions.headers).not.toHaveProperty("x-session-affinity")
+		expect(fetchOptions.headers).not.toHaveProperty("version")
+		expect(fetchOptions.headers).not.toHaveProperty("x-openai-internal-codex-responses-lite")
 		expect(mockFetch).toHaveBeenCalledWith(
 			expect.stringContaining("/responses"),
 			expect.objectContaining({

@@ -1,6 +1,8 @@
+import { retiredProviderIdentifiers } from "@roo-code/types"
+
 import { t } from "../../i18n"
 
-export const LEGACY_ROO_PROVIDER = "roo"
+export const LEGACY_ROO_PROVIDER = retiredProviderIdentifiers.roo
 
 const ROUTER_REMOVAL_I18N_KEY = "common:errors.roo.routerRemoved"
 const ROUTER_REMOVAL_DEFAULT_MESSAGE =

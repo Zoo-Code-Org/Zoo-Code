@@ -1,15 +1,28 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
+import crypto from "crypto"
 
+import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 
 /** Valid status values for a task's HistoryItem. */
 export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
+
+export class DeltaRejectedError extends Error {
+	constructor(
+		public readonly taskId: string,
+		public readonly diskStatus: HistoryItemStatus,
+		public readonly attemptedStatus: HistoryItemStatus,
+	) {
+		super(`Delta rejected for task ${taskId}: disk status ${diskStatus} rejects transition to ${attemptedStatus}`)
+		this.name = "DeltaRejectedError"
+	}
+}
 
 const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
 	active: ["delegated", "completed", "interrupted"],
@@ -32,12 +45,58 @@ export function assertValidTransition(from: HistoryItemStatus | undefined, to: H
 }
 
 /**
- * Index file format for fast startup reads.
+ * Build a `safeWriteJson` merge callback that applies only `delta` to the
+ * current disk state, preserving fields written by another process.
  */
-interface HistoryIndex {
-	version: number
-	updatedAt: number
-	entries: HistoryItem[]
+function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
+	return (existing, incoming) => {
+		if (!existing || typeof existing !== "object" || !("id" in existing)) {
+			return incoming
+		}
+		const disk = existing as HistoryItem
+		if (delta.status !== undefined) {
+			const diskStatus: HistoryItemStatus = disk.status ?? "active"
+			if (delta.status !== diskStatus) {
+				const validTargets = VALID_TRANSITIONS[diskStatus]
+				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
+					throw new DeltaRejectedError(disk.id, diskStatus, delta.status as HistoryItemStatus)
+				}
+			}
+		}
+		const merged = { ...disk, ...delta }
+		if (delta.childIds && disk.childIds) {
+			merged.childIds = [...new Set([...disk.childIds, ...delta.childIds])]
+		}
+		return merged
+	}
+}
+
+/**
+ * Durable intent for the one repair that spans an active delegated child and
+ * its parent. Task files remain authoritative; this file only records the
+ * guarded target transition that must be completed after a crash.
+ */
+interface DelegationRepairIntent {
+	version: 1
+	operationId: string
+	parentTaskId: string
+	childTaskId: string
+	expected: {
+		parent: {
+			status: "delegated"
+			awaitingChildId: string
+			delegatedToId?: string
+		}
+		child: {
+			status: "active"
+			parentTaskId?: string
+			rootTaskId?: string
+		}
+	}
+	target: {
+		childStatus: "interrupted"
+		parentStatus: "active"
+	}
 }
 
 /**
@@ -45,12 +104,14 @@ interface HistoryIndex {
  *
  * Each task's HistoryItem is stored as an individual JSON file in its
  * existing task directory (`globalStorage/tasks/<taskId>/history_item.json`).
- * A single index file (`globalStorage/tasks/_index.json`) is maintained
- * as a cache for fast list reads at startup.
+ * There is no shared index file. Reads scan the task directories.
  *
- * Cross-process safety comes from `safeWriteJson`'s `proper-lockfile`
- * on per-task file writes. Within a single extension host process,
- * an in-process write lock serializes mutations.
+ * Cross-process safety for per-task files comes from `safeWriteJson`'s
+ * `proper-lockfile` with a `merge` callback: each write reads the
+ * current file under the advisory lock and merges incoming fields, so
+ * a concurrent writer's changes are preserved rather than silently
+ * dropped. Within a single extension host process, an in-process write
+ * lock serializes mutations.
  */
 /**
  * Options for TaskHistoryStore constructor.
@@ -68,8 +129,8 @@ export class TaskHistoryStore {
 	private readonly globalStoragePath: string
 	private readonly onWrite?: (items: HistoryItem[]) => Promise<void>
 	private cache: Map<string, HistoryItem> = new Map()
+	private taskFileMtimes: Map<string, number> = new Map()
 	private writeLock: Promise<void> = Promise.resolve()
-	private indexWriteTimer: ReturnType<typeof setTimeout> | null = null
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
 	private disposed = false
@@ -80,9 +141,6 @@ export class TaskHistoryStore {
 	 */
 	public readonly initialized: Promise<void>
 	private resolveInitialized!: () => void
-
-	/** Debounce window for index writes in milliseconds. */
-	private static readonly INDEX_WRITE_DEBOUNCE_MS = 2000
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
@@ -98,21 +156,29 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Lifecycle ──────────────────────────────
 
 	/**
-	 * Load index, reconcile if needed, start watchers.
+	 * Scan task files, reconcile delegation state, start watchers.
 	 */
 	async initialize(): Promise<void> {
 		try {
 			const tasksDir = await this.getTasksDir()
 			await fs.mkdir(tasksDir, { recursive: true })
 
-			// 1. Load existing index into the cache
-			await this.loadIndex()
+			// 1. Scan task directories to populate the cache
+			await this.reconcile({ forceRefresh: true })
+			// Capture which active tasks were present in persisted state before replay can
+			// change any statuses. Reconciliation must not treat a replay-repaired parent
+			// as an orphaned active child in the same startup pass.
+			const persistedActiveIds = this.getPersistedActiveIds()
 
-			// 2. Reconcile cache against actual task directories on disk
-			await this.reconcile()
+			// 2. Complete any two-record repair interrupted after its intent was durable.
+			try {
+				await this.replayDelegationRepairIntent()
+			} catch (error) {
+				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
+			}
 
 			// 3. Repair delegation inconsistencies left by a previous crash
-			await this.reconcileDelegationState()
+			await this.reconcileDelegationState(persistedActiveIds)
 
 			// 4. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
@@ -131,11 +197,6 @@ export class TaskHistoryStore {
 	dispose(): void {
 		this.disposed = true
 
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-			this.indexWriteTimer = null
-		}
-
 		if (this.reconcileTimer) {
 			clearTimeout(this.reconcileTimer)
 			this.reconcileTimer = null
@@ -145,11 +206,6 @@ export class TaskHistoryStore {
 			this.fsWatcher.close()
 			this.fsWatcher = null
 		}
-
-		// Synchronously flush the index (best-effort)
-		this.flushIndex().catch((err) => {
-			console.error("[TaskHistoryStore] Error flushing index on dispose:", err)
-		})
 	}
 
 	// ────────────────────────────── Reads ──────────────────────────────
@@ -180,8 +236,8 @@ export class TaskHistoryStore {
 	/**
 	 * Insert or update a history item.
 	 *
-	 * Writes the per-task file immediately (source of truth),
-	 * updates the in-memory Map, and schedules a debounced index write.
+	 * Writes the per-task file immediately (source of truth)
+	 * and updates the in-memory cache.
 	 */
 	async upsert(item: HistoryItem): Promise<HistoryItem[]> {
 		return this.withLock(() => this.upsertCore(item))
@@ -208,20 +264,40 @@ export class TaskHistoryStore {
 		if (!options.skipTransitionCheck && existing && item.status !== undefined) {
 			const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
 			if (item.status !== normalizedExisting) {
-				assertValidTransition(existing.status, item.status)
+				try {
+					assertValidTransition(existing.status, item.status)
+				} catch (cacheError) {
+					// Cache may be stale from a peer write. Re-read disk
+					// under the store lock before rejecting the transition.
+					const diskItem = await this.readTaskFile(item.id)
+					if (!diskItem) {
+						throw cacheError
+					}
+					assertValidTransition(diskItem.status, item.status)
+				}
 			}
 		}
 
 		// Merge: preserve existing metadata unless explicitly overwritten
 		const merged = existing ? { ...existing, ...item } : item
 
-		// Write per-task file (source of truth)
-		await this.writeTaskFile(merged)
+		const delta = existing ? this.buildDelta(item.id, existing, item) : { ...item }
+		let written: HistoryItem
+		try {
+			written = await this.writeTaskFile(merged, delta)
+		} catch (error) {
+			if (error instanceof DeltaRejectedError) {
+				const diskItem = await this.readTaskFile(item.id)
+				if (diskItem) {
+					this.cache.set(item.id, diskItem)
+				}
+				throw error
+			}
+			throw error
+		}
 
-		// Update in-memory cache
-		this.cache.set(merged.id, merged)
-		// Schedule debounced index write
-		this.scheduleIndexWrite()
+		// Update in-memory cache with what was actually persisted
+		this.cache.set(written.id, written)
 
 		const all = this.getAll()
 
@@ -239,6 +315,7 @@ export class TaskHistoryStore {
 	async delete(taskId: string): Promise<void> {
 		return this.withLock(async () => {
 			this.cache.delete(taskId)
+			this.taskFileMtimes.delete(taskId)
 
 			// Remove per-task file (best-effort)
 			try {
@@ -247,8 +324,6 @@ export class TaskHistoryStore {
 			} catch {
 				// File may already be deleted
 			}
-
-			this.scheduleIndexWrite()
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -264,6 +339,7 @@ export class TaskHistoryStore {
 		return this.withLock(async () => {
 			for (const taskId of taskIds) {
 				this.cache.delete(taskId)
+				this.taskFileMtimes.delete(taskId)
 
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
@@ -272,8 +348,6 @@ export class TaskHistoryStore {
 					// File may already be deleted
 				}
 			}
-
-			this.scheduleIndexWrite()
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -285,12 +359,12 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Reconciliation ──────────────────────────────
 
 	/**
-	 * Scan task directories vs index and fix any drift.
+	 * Scan task directories and fix any drift between disk and cache.
 	 *
 	 * - Tasks on disk but missing from cache: read and add
 	 * - Tasks in cache but missing from disk: remove
 	 */
-	async reconcile(): Promise<void> {
+	async reconcile(options: { forceRefresh?: boolean } = {}): Promise<void> {
 		// Run through the write lock to prevent interleaving with upsert/delete
 		return this.withLock(async () => {
 			const tasksDir = await this.getTasksDir()
@@ -302,38 +376,57 @@ export class TaskHistoryStore {
 				return // tasks dir doesn't exist yet
 			}
 
-			// Filter out the index file and hidden files
+			// Filter out hidden and reserved names
 			const taskDirNames = dirEntries.filter((name) => !name.startsWith("_") && !name.startsWith("."))
 
 			const onDiskIds = new Set(taskDirNames)
 			const cacheIds = new Set(this.cache.keys())
-			let changed = false
+			const liveIds = new Set<string>()
 
-			// Tasks on disk but not in cache: read their history_item.json
 			for (const taskId of onDiskIds) {
-				if (!cacheIds.has(taskId)) {
-					try {
-						const item = await this.readTaskFile(taskId)
-						if (item) {
+				try {
+					const taskFilePath = await this.getTaskFilePath(taskId)
+					const { mtimeMs } = await fs.stat(taskFilePath)
+					liveIds.add(taskId)
+					if (
+						!options.forceRefresh &&
+						this.cache.has(taskId) &&
+						this.taskFileMtimes.get(taskId) === mtimeMs
+					) {
+						continue
+					}
+
+					const item = await this.readTaskFile(taskId)
+					if (item?.id === taskId) {
+						const previous = this.cache.get(taskId)
+						this.taskFileMtimes.set(taskId, mtimeMs)
+						if (!deepEqual(previous, item)) {
 							this.cache.set(taskId, item)
-							changed = true
+						}
+					}
+				} catch {
+					// File may be temporarily absent during a peer's atomic
+					// rename window in safeWriteJson. The advisory lock is
+					// held for the entire write, so its presence means a
+					// write is in progress — keep the task live.
+					try {
+						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
+						const lockStat = await fs.stat(lockPath)
+						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
+							liveIds.add(taskId)
 						}
 					} catch {
-						// Corrupted or missing file, skip
+						// No lock file — file is genuinely absent
 					}
 				}
 			}
 
-			// Tasks in cache but not on disk: remove from cache
+			// Evict tasks whose history_item.json no longer exists
 			for (const taskId of cacheIds) {
-				if (!onDiskIds.has(taskId)) {
+				if (!liveIds.has(taskId)) {
 					this.cache.delete(taskId)
-					changed = true
+					this.taskFileMtimes.delete(taskId)
 				}
-			}
-
-			if (changed) {
-				this.scheduleIndexWrite()
 			}
 		})
 	}
@@ -355,23 +448,43 @@ export class TaskHistoryStore {
 	 * - Parent `delegated` with no `awaitingChildId` → parent → `active` (invalid state)
 	 * - Parent `delegated`, child not found → parent → `active` (orphaned delegation)
 	 * - Parent `delegated`, child `completed` → parent → `active` (interrupted handoff)
+	 * - Parent `delegated`, child `active` → child → `interrupted`, parent → `active`
 	 *
-	 * A parent awaiting an `active`, `interrupted`, or `delegated` child is left as-is — the child is resumable.
+	 * A parent awaiting an `interrupted` or `delegated` child is left as-is — the child is
+	 * resumable. An `active` child is treated as orphaned during startup recovery because
+	 * no live task session exists to own it.
 	 */
-	private async reconcileDelegationState(): Promise<void> {
-		return this.withLock(async () => {
-			let repairsInThisPass: number
-			do {
-				repairsInThisPass = 0
-				// Rebuild the lookup map each pass so repairs from the previous pass
-				// are visible when evaluating chained delegations.
-				const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
+	private async reconcileDelegationState(persistedActiveIds: ReadonlySet<string>): Promise<void> {
+		return this.withLock(() => this.reconcileDelegationStateCore(persistedActiveIds))
+	}
 
-				for (const [, item] of byId) {
-					if (item.status !== "delegated") {
-						continue
-					}
+	/**
+	 * Reconcile delegation state while the store lock is already held.
+	 *
+	 * Callers that do not hold the lock must use `reconcileDelegationState()`.
+	 * Migration uses this core method so its cache/file updates and the
+	 * follow-up repair remain one serialized operation without re-entering the
+	 * non-reentrant lock.
+	 */
+	private async reconcileDelegationStateCore(persistedActiveIds: ReadonlySet<string>): Promise<void> {
+		// Only statuses loaded from persistence represent sessions that could have
+		// been orphaned by a crash. A delegated parent repaired to active earlier in
+		// this pass remains resumable and must not be mistaken for a second orphaned
+		// child in a delegation chain. The snapshot is intentionally captured before
+		// repair-intent replay and remains unchanged for the entire reconciliation.
+		let repairsInThisPass: number
+		do {
+			repairsInThisPass = 0
+			// Rebuild the lookup map each pass so repairs from the previous pass
+			// are visible when evaluating chained delegations.
+			const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
 
+			for (const [, item] of byId) {
+				if (item.status !== "delegated") {
+					continue
+				}
+
+				try {
 					if (!item.awaitingChildId) {
 						await this.upsertCore(
 							{ ...item, status: "active", awaitingChildId: undefined, delegatedToId: undefined },
@@ -400,6 +513,16 @@ export class TaskHistoryStore {
 							`[TaskHistoryStore] Reconciled orphaned delegation: task ${item.id} → active (child ${item.awaitingChildId} not found)`,
 						)
 						repairsInThisPass++
+					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
+						// An active child persisted across startup cannot have a live task session
+						// behind it. Mark it interrupted before releasing the parent's delegation
+						// link so the normal resume/re-delegate flow can take over. This is an
+						// administrative recovery, not a runtime delegation transition.
+						await this.repairActiveDelegation(item, child)
+						console.warn(
+							`[TaskHistoryStore] Reconciled orphaned active child: child ${child.id} → interrupted, task ${item.id} → active`,
+						)
+						repairsInThisPass++
 					} else if (child.status === "completed") {
 						await this.upsertCore(
 							{
@@ -418,10 +541,260 @@ export class TaskHistoryStore {
 						)
 						repairsInThisPass++
 					}
-					// child.status === "active", "interrupted", or "delegated" → leave as-is this pass
+				} catch (error) {
+					console.error(`[TaskHistoryStore] Failed to reconcile delegation for task ${item.id}:`, error)
 				}
-			} while (repairsInThisPass > 0)
+				// child.status === "interrupted" or "delegated" → leave as-is this pass
+			}
+		} while (repairsInThisPass > 0)
+	}
+
+	private getPersistedActiveIds(): ReadonlySet<string> {
+		return new Set(
+			Array.from(this.cache.values())
+				.filter((item) => (item.status ?? "active") === "active")
+				.map((item) => item.id),
+		)
+	}
+
+	/**
+	 * Replay the durable active-child repair intent, if one was left by a crash.
+	 * The expected fields are guards: an intent may update only the missing side
+	 * when the other side is already at its target, or when both records still
+	 * describe the original delegated handoff.
+	 *
+	 * This method acquires the store's non-reentrant promise-chain lock. It must be
+	 * called outside an existing `withLock` callback; locked callers must use the
+	 * corresponding core methods directly instead of awaiting this method.
+	 */
+	private async replayDelegationRepairIntent(): Promise<void> {
+		return this.withLock(async () => {
+			const intent = await this.readDelegationRepairIntent()
+			if (!intent) {
+				return
+			}
+
+			const child = this.cache.get(intent.childTaskId)
+			const parent = this.cache.get(intent.parentTaskId)
+			if (!child || !parent) {
+				await this.quarantineDelegationRepairIntent(
+					intent,
+					`missing ${!child ? "child" : "parent"} task record`,
+				)
+				return
+			}
+
+			const childAtTarget = child.status === intent.target.childStatus
+			const parentMatchesTargetState =
+				parent.status === intent.target.parentStatus &&
+				parent.awaitingChildId === undefined &&
+				parent.delegatedToId === undefined
+			const childMatchesExpected = this.matchesDelegationRepairChildPreconditions(intent, child)
+			const parentMatchesExpected = this.matchesDelegationRepairParentPreconditions(intent, parent)
+
+			if ((!childAtTarget && !childMatchesExpected) || (!parentMatchesTargetState && !parentMatchesExpected)) {
+				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
+				return
+			}
+
+			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
+			const repairedParent = parentMatchesTargetState
+				? parent
+				: {
+						...parent,
+						status: intent.target.parentStatus,
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+					}
+
+			if (!childAtTarget) await this.writeTaskFile(repairedChild)
+			if (!parentMatchesTargetState) await this.writeTaskFile(repairedParent)
+
+			this.cache.set(repairedChild.id, repairedChild)
+			this.cache.set(repairedParent.id, repairedParent)
+
+			// The journal is retained until the write-through callback succeeds.
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			await this.removeDelegationRepairIntent()
 		})
+	}
+
+	/**
+	 * Start and complete a guarded active-child repair while already holding the
+	 * store lock. The intent is durable before either task file is touched.
+	 */
+	private async repairActiveDelegation(parent: HistoryItem, child: HistoryItem): Promise<void> {
+		const intent: DelegationRepairIntent = {
+			version: 1,
+			operationId: crypto.randomUUID(),
+			parentTaskId: parent.id,
+			childTaskId: child.id,
+			expected: {
+				parent: {
+					status: "delegated",
+					awaitingChildId: child.id,
+					delegatedToId: parent.delegatedToId,
+				},
+				child: {
+					status: "active",
+					parentTaskId: child.parentTaskId,
+					rootTaskId: child.rootTaskId,
+				},
+			},
+			target: { childStatus: "interrupted", parentStatus: "active" },
+		}
+
+		await this.writeDelegationRepairIntent(intent)
+		await this.applyDelegationRepairIntent(intent, child, parent)
+	}
+
+	private async applyDelegationRepairIntent(
+		intent: DelegationRepairIntent,
+		child: HistoryItem,
+		parent: HistoryItem,
+	): Promise<void> {
+		const repairedChild = { ...child, status: intent.target.childStatus }
+		const repairedParent = {
+			...parent,
+			status: intent.target.parentStatus,
+			awaitingChildId: undefined,
+			delegatedToId: undefined,
+		}
+
+		await this.writeTaskFile(repairedChild)
+		await this.writeTaskFile(repairedParent)
+
+		this.cache.set(repairedChild.id, repairedChild)
+		this.cache.set(repairedParent.id, repairedParent)
+
+		if (this.onWrite) {
+			await this.onWrite(this.getAll())
+		}
+		await this.removeDelegationRepairIntent()
+	}
+
+	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
+		return (
+			parent.status === intent.expected.parent.status &&
+			parent.awaitingChildId === intent.expected.parent.awaitingChildId &&
+			parent.delegatedToId === intent.expected.parent.delegatedToId
+		)
+	}
+
+	private matchesDelegationRepairChildPreconditions(intent: DelegationRepairIntent, child: HistoryItem): boolean {
+		return (
+			(child.status ?? "active") === intent.expected.child.status &&
+			child.parentTaskId === intent.expected.child.parentTaskId &&
+			child.rootTaskId === intent.expected.child.rootTaskId
+		)
+	}
+
+	private async readDelegationRepairIntent(): Promise<DelegationRepairIntent | null> {
+		const intentPath = await this.getDelegationRepairIntentPath()
+		let parsed: unknown
+		try {
+			parsed = JSON.parse(await fs.readFile(intentPath, "utf8")) as unknown
+		} catch (error) {
+			if (this.isFileNotFoundError(error)) {
+				return null
+			}
+			await this.quarantineDelegationRepairIntent(null, "malformed JSON")
+			return null
+		}
+
+		if (!this.isDelegationRepairIntent(parsed)) {
+			await this.quarantineDelegationRepairIntent(null, "malformed intent")
+			return null
+		}
+		return parsed
+	}
+
+	private isDelegationRepairIntent(value: unknown): value is DelegationRepairIntent {
+		if (!value || typeof value !== "object") {
+			return false
+		}
+		const candidate = value as Record<string, unknown>
+		const expected = candidate.expected
+		const expectedRecord = expected && typeof expected === "object" ? (expected as Record<string, unknown>) : null
+		const expectedParent =
+			expectedRecord?.parent && typeof expectedRecord.parent === "object"
+				? (expectedRecord.parent as Record<string, unknown>)
+				: null
+		const expectedChild =
+			expectedRecord?.child && typeof expectedRecord.child === "object"
+				? (expectedRecord.child as Record<string, unknown>)
+				: null
+		const target = candidate.target
+		const targetRecord = target && typeof target === "object" ? (target as Record<string, unknown>) : null
+		return (
+			candidate.version === 1 &&
+			typeof candidate.operationId === "string" &&
+			this.isSafeTaskId(candidate.parentTaskId) &&
+			this.isSafeTaskId(candidate.childTaskId) &&
+			candidate.parentTaskId !== candidate.childTaskId &&
+			!!expectedParent &&
+			expectedParent.status === "delegated" &&
+			typeof expectedParent.awaitingChildId === "string" &&
+			expectedParent.awaitingChildId === candidate.childTaskId &&
+			(expectedParent.delegatedToId === undefined || typeof expectedParent.delegatedToId === "string") &&
+			!!expectedChild &&
+			expectedChild.status === "active" &&
+			(expectedChild.parentTaskId === undefined || typeof expectedChild.parentTaskId === "string") &&
+			(expectedChild.rootTaskId === undefined || typeof expectedChild.rootTaskId === "string") &&
+			!!targetRecord &&
+			targetRecord.childStatus === "interrupted" &&
+			targetRecord.parentStatus === "active"
+		)
+	}
+
+	private async writeDelegationRepairIntent(intent: DelegationRepairIntent): Promise<void> {
+		await safeWriteJson(await this.getDelegationRepairIntentPath(), intent)
+	}
+
+	private async removeDelegationRepairIntent(): Promise<void> {
+		try {
+			await fs.unlink(await this.getDelegationRepairIntentPath())
+		} catch (error) {
+			console.warn("[TaskHistoryStore] Failed to remove completed delegation repair intent:", error)
+		}
+	}
+
+	private async quarantineDelegationRepairIntent(
+		intent: DelegationRepairIntent | null,
+		reason: string,
+	): Promise<void> {
+		const intentPath = await this.getDelegationRepairIntentPath()
+		const quarantinePath = `${intentPath}.quarantine-${Date.now()}-${Math.random().toString(36).slice(2)}`
+		try {
+			await fs.rename(intentPath, quarantinePath)
+		} catch (error) {
+			console.warn("[TaskHistoryStore] Failed to quarantine delegation repair intent:", error)
+		}
+		console.warn(
+			`[TaskHistoryStore] Ignored ${intent ? `stale delegation repair intent ${intent.operationId}` : "malformed delegation repair intent"}: ${reason}`,
+		)
+	}
+
+	private isSafeTaskId(value: unknown): value is string {
+		return (
+			typeof value === "string" &&
+			value.length > 0 &&
+			value !== "." &&
+			value !== ".." &&
+			!value.includes("/") &&
+			!value.includes("\\")
+		)
+	}
+
+	private isFileNotFoundError(error: unknown): boolean {
+		return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
+	}
+
+	private async getDelegationRepairIntentPath(): Promise<string> {
+		const tasksDir = await this.getTasksDir()
+		return path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
 	}
 
 	// ────────────────────────────── Cache invalidation ──────────────────────────────
@@ -438,6 +811,7 @@ export class TaskHistoryStore {
 				} else {
 					this.cache.delete(taskId)
 				}
+				this.taskFileMtimes.delete(taskId)
 			} catch {
 				this.cache.delete(taskId)
 			}
@@ -466,123 +840,82 @@ export class TaskHistoryStore {
 			return
 		}
 
-		for (const item of taskHistoryEntries) {
-			if (!item.id) {
-				continue
-			}
-
-			// Check if task directory exists on disk
+		await this.withLock(async () => {
 			const tasksDir = await this.getTasksDir()
-			const taskDir = path.join(tasksDir, item.id)
 
-			try {
-				await fs.access(taskDir)
-			} catch {
-				// Task directory doesn't exist; skip this entry as it's orphaned in globalState
-				continue
-			}
+			for (const item of taskHistoryEntries) {
+				if (!item.id) {
+					continue
+				}
 
-			// Write history_item.json if it doesn't exist yet
-			const filePath = path.join(taskDir, GlobalFileNames.historyItem)
-			try {
-				await fs.access(filePath)
-				// File already exists, skip (don't overwrite existing per-task files)
-			} catch {
-				// File doesn't exist, write it
-				await safeWriteJson(filePath, item)
-				this.cache.set(item.id, item)
-			}
-		}
+				// Check if task directory exists on disk
+				const taskDir = path.join(tasksDir, item.id)
 
-		// Write the index
-		await this.writeIndex()
+				try {
+					await fs.access(taskDir)
+				} catch {
+					// Task directory doesn't exist; skip this entry as it's orphaned in globalState
+					continue
+				}
 
-		// Repair any delegation inconsistencies introduced by the migrated entries.
-		// reconcileDelegationState() is idempotent so running it again is safe.
-		await this.reconcileDelegationState()
-	}
-
-	// ────────────────────────────── Private: Index management ──────────────────────────────
-
-	/**
-	 * Load the `_index.json` file into the in-memory cache.
-	 */
-	private async loadIndex(): Promise<void> {
-		const indexPath = await this.getIndexPath()
-
-		try {
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index: HistoryIndex = JSON.parse(raw)
-
-			if (index.version === 1 && Array.isArray(index.entries)) {
-				for (const entry of index.entries) {
-					if (entry.id) {
-						this.cache.set(entry.id, entry)
-					}
+				// Write history_item.json if it doesn't exist yet
+				const filePath = path.join(taskDir, GlobalFileNames.historyItem)
+				try {
+					await fs.access(filePath)
+					// File already exists, skip (don't overwrite existing per-task files)
+				} catch {
+					// File doesn't exist, write it
+					await safeWriteJson(filePath, item)
+					this.cache.set(item.id, item)
 				}
 			}
-		} catch {
-			// Index doesn't exist or is corrupted; cache stays empty.
-			// Reconciliation will rebuild it from per-task files.
-		}
-	}
 
-	/**
-	 * Write the full index to disk.
-	 */
-	private async writeIndex(): Promise<void> {
-		const indexPath = await this.getIndexPath()
-		const index: HistoryIndex = {
-			version: 1,
-			updatedAt: Date.now(),
-			entries: this.getAll(),
-		}
-
-		await safeWriteJson(indexPath, index)
-	}
-
-	/**
-	 * Schedule a debounced index write.
-	 */
-	private scheduleIndexWrite(): void {
-		if (this.disposed) {
-			return
-		}
-
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-		}
-
-		this.indexWriteTimer = setTimeout(async () => {
-			this.indexWriteTimer = null
-			try {
-				await this.writeIndex()
-			} catch (err) {
-				console.error("[TaskHistoryStore] Failed to write index:", err)
-			}
-		}, TaskHistoryStore.INDEX_WRITE_DEBOUNCE_MS)
-	}
-
-	/**
-	 * Force an immediate index write (called on dispose/shutdown).
-	 */
-	async flushIndex(): Promise<void> {
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-			this.indexWriteTimer = null
-		}
-
-		await this.writeIndex()
+			// Repair any delegation inconsistencies introduced by the migrated entries.
+			// Run the lock-free core because migration already holds the store lock.
+			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
+		})
 	}
 
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
 
 	/**
-	 * Write a HistoryItem to its per-task `history_item.json` file.
+	 * Return only the fields in `incoming` that differ from `cached`.
 	 */
-	private async writeTaskFile(item: HistoryItem): Promise<void> {
+	private computeDelta(cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
+		return Object.fromEntries(
+			Object.entries(incoming).filter(([k, v]) => !deepEqual(v, (cached as Record<string, unknown>)[k])),
+		) as Partial<HistoryItem>
+	}
+
+	private buildDelta(id: string, cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
+		return { id, ...this.computeDelta(cached, incoming) }
+	}
+
+	/**
+	 * Write a HistoryItem to its per-task `history_item.json` file.
+	 *
+	 * When `delta` is provided, the merge callback applies only the
+	 * delta to the current disk state, so fields written by another
+	 * process are preserved. Without a delta the full item is written
+	 * as-is (used by administrative repair paths that are authoritative).
+	 */
+	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
-		await safeWriteJson(filePath, item)
+		if (delta) {
+			let written: HistoryItem = item
+			const mergeFn = mergeWithDisk(delta)
+			await safeWriteJson(filePath, item, {
+				merge: (existing, incoming) => {
+					const result = mergeFn(existing, incoming)
+					written = result as HistoryItem
+					return result
+				},
+			})
+			return written
+		} else {
+			await safeWriteJson(filePath, item)
+			return item
+		}
 	}
 
 	/**
@@ -703,10 +1036,11 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Atomically update two related HistoryItems within a single lock acquisition.
-	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes are
-	 * committed before the lock releases — no concurrent writer can observe an
-	 * intermediate state.
+	 * Update two related HistoryItems within a single in-process lock acquisition.
+	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes
+	 * complete before the lock releases, so no in-process reader can observe an
+	 * intermediate state. Cross-process atomicity is NOT guaranteed — each
+	 * writeTaskFile call acquires and releases its own advisory file lock.
 	 *
 	 * @throws If either task ID is not present in the cache.
 	 */
@@ -753,16 +1087,21 @@ export class TaskHistoryStore {
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
 
-			// Write both files before touching the cache so readers never observe a
-			// half-updated in-memory state between the two await points.
-			await this.writeTaskFile(mergedFirst)
-			await this.writeTaskFile(mergedSecond)
+			const writtenFirst = await this.writeTaskFile(mergedFirst, this.buildDelta(firstId, first, updatedFirst))
+			let writtenSecond: HistoryItem
+			try {
+				writtenSecond = await this.writeTaskFile(mergedSecond, this.buildDelta(secondId, second, updatedSecond))
+			} catch (error) {
+				// First record is committed on disk. Update cache so it
+				// reflects disk state before propagating the error.
+				this.cache.set(firstId, writtenFirst)
+				throw error
+			}
 
-			// Both disk writes succeeded — now update the cache atomically.
-			this.cache.set(firstId, mergedFirst)
-			this.cache.set(secondId, mergedSecond)
+			// Both disk writes succeeded — now update the cache.
+			this.cache.set(firstId, writtenFirst)
+			this.cache.set(secondId, writtenSecond)
 
-			this.scheduleIndexWrite()
 			const all = this.getAll()
 			if (this.onWrite) {
 				await this.onWrite(all)
@@ -802,13 +1141,5 @@ export class TaskHistoryStore {
 	private async getTaskFilePath(taskId: string): Promise<string> {
 		const tasksDir = await this.getTasksDir()
 		return path.join(tasksDir, taskId, GlobalFileNames.historyItem)
-	}
-
-	/**
-	 * Get the path to the `_index.json` file.
-	 */
-	private async getIndexPath(): Promise<string> {
-		const tasksDir = await this.getTasksDir()
-		return path.join(tasksDir, GlobalFileNames.historyIndex)
 	}
 }

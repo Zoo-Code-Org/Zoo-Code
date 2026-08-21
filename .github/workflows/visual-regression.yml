@@ -1,0 +1,57 @@
+name: Webview Visual Regression
+
+on:
+    workflow_dispatch:
+    pull_request:
+        types: [opened, reopened, ready_for_review, synchronize]
+        paths:
+            - "webview-ui/**"
+            - "src/shared/**"
+            - "package.json"
+            - "pnpm-lock.yaml"
+            - ".github/workflows/visual-regression.yml"
+    merge_group:
+        types: [checks_requested]
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    webview-visual:
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        container:
+            image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+            options: --ipc=host
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  persist-credentials: false
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+            - name: Run webview visual tests
+              run: pnpm --filter @roo-code/vscode-webview test:visual
+            - name: Upload visual test coverage to Codecov
+              if: always()
+              uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+              with:
+                  files: webview-ui/coverage-ct/lcov.info
+                  disable_search: true
+                  flags: webview-ui-ct
+                  token: ${{ secrets.CODECOV_TOKEN }}
+            - name: Upload visual test artifacts
+              if: failure()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: webview-visual-regression
+                  path: |
+                      webview-ui/playwright-report
+                      webview-ui/test-results
+                  if-no-files-found: ignore

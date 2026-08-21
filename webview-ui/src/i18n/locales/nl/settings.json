@@ -283,7 +283,7 @@
 	},
 	"autoApprove": {
 		"toggleShortcut": "U kunt een globale sneltoets voor deze instelling configureren <SettingsLink>in de voorkeuren van uw IDE</SettingsLink>.",
-		"description": "Sta Roo toe om automatisch handelingen uit te voeren zonder goedkeuring. Schakel deze instellingen alleen in als je de AI volledig vertrouwt en de bijbehorende beveiligingsrisico's begrijpt.",
+		"description": "Sta Zoo toe om automatisch handelingen uit te voeren zonder goedkeuring. Schakel deze instellingen alleen in als je de AI volledig vertrouwt en de bijbehorende beveiligingsrisico's begrijpt.",
 		"enabled": "Auto-goedkeuren ingeschakeld",
 		"toggleAriaLabel": "Automatisch goedkeuren in-/uitschakelen",
 		"disabledAriaLabel": "Automatisch goedkeuren uitgeschakeld - selecteer eerst opties",
@@ -328,6 +328,10 @@
 		"execute": {
 			"label": "Uitvoeren",
 			"description": "Automatisch toegestane terminalcommando's uitvoeren zonder goedkeuring",
+			"destructiveCommandGuard": {
+				"label": "Beveiliging tegen destructieve opdrachten inschakelen",
+				"description": "Download en gebruik Destructive Command Guard (DCG) voor dit platform. Opdrachten die DCG toestaat, worden automatisch uitgevoerd. Voor opdrachten die DCG blokkeert, is jouw goedkeuring nodig. De opdrachtenlijsten van Zoo zijn uitgeschakeld zolang deze optie actief is. Het gedownloade uitvoerbare bestand blijft bewaard als je de optie uitschakelt."
+			},
 			"allowedCommands": "Toegestane automatisch uit te voeren commando's",
 			"allowedCommandsDescription": "Commando-prefixen die automatisch kunnen worden uitgevoerd als 'Altijd goedkeuren voor uitvoeren' is ingeschakeld. Voeg * toe om alle commando's toe te staan (gebruik met voorzichtigheid).",
 			"deniedCommands": "Geweigerde commando's",
@@ -384,6 +388,25 @@
 		"getOpencodeGoApiKey": "Opencode Go API-sleutel ophalen",
 		"kenariApiKey": "Kenari API-sleutel",
 		"getKenariApiKey": "Kenari API-sleutel ophalen",
+		"nanoGpt": {
+			"provider": "NanoGPT",
+			"apiKey": "NanoGPT API-sleutel",
+			"getApiKey": "NanoGPT API-sleutel ophalen",
+			"model": "Model",
+			"routingPreference": "Routeringsvoorkeur",
+			"routingOptions": {
+				"automatic": "Automatisch",
+				"fastest": "Snelste",
+				"cheapest": "Goedkoopste",
+				"lowestLatency": "Laagste latentie",
+				"highestThroughput": "Hoogste doorvoer",
+				"toolCapable": "Geschikt voor tools",
+				"cacheCapable": "Geschikt voor cache"
+			},
+			"automaticExplanation": "Automatisch past geen routeringsachtervoegsel toe.",
+			"billingWarning": "Geavanceerde routeringsvoorkeuren kunnen betalen-per-gebruik-routering gebruiken en kunnen, afhankelijk van de huidige factureringsregels van NanoGPT, buiten je abonnement vallen.",
+			"routingDocs": "Routerings- en factureringsdetails van NanoGPT bekijken"
+		},
 		"apiKeyStorageNotice": "API-sleutels worden veilig opgeslagen in de geheime opslag van VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",
@@ -459,6 +482,17 @@
 		"moonshotApiKey": "Moonshot API-sleutel",
 		"getMoonshotApiKey": "Moonshot API-sleutel ophalen",
 		"moonshotBaseUrl": "Moonshot-ingangspunt",
+		"kimiCode": {
+			"authMethod": "Authenticatiemethode",
+			"oauth": "Kimi Code-abonnement (OAuth)",
+			"apiKey": "Kimi Code API-sleutel",
+			"apiKeyLabel": "Kimi Code API-sleutel",
+			"signIn": "Inloggen bij Kimi Code",
+			"signOut": "Uitloggen",
+			"authenticated": "Ingelogd bij Kimi Code",
+			"deviceCodeHelp": "Voer deze apparaatcode in op de Kimi-autorisatiepagina:",
+			"docs": "Kimi Code-documentatie"
+		},
 		"zaiApiKey": "Z AI API-sleutel",
 		"getZaiApiKey": "Z AI API-sleutel ophalen",
 		"zaiEntrypoint": "Z AI-ingangspunt",
@@ -480,6 +514,9 @@
 		"apiKey": "API-sleutel",
 		"openAiApiKey": "OpenAI API-sleutel",
 		"openAiBaseUrl": "Basis-URL",
+		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
+		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
+		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",
 		"getOpenAiApiKey": "OpenAI API-sleutel ophalen",
 		"mistralApiKey": "Mistral API-sleutel",
 		"getMistralApiKey": "Mistral / Codestral API-sleutel ophalen",
@@ -1035,6 +1072,12 @@
 	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
 	"maxOutputTokensLabel": "Maximale output tokens",
 	"maxTokensGenerateDescription": "Maximale tokens om te genereren in het antwoord",
+	"openAiCodexSpeed": {
+		"label": "Snelheid",
+		"tooltip": "De snelle modus gebruikt prioriteitsverwerking van Codex voor ongeveer 1,5 keer hogere snelheid en verbruikt meer abonnementquotum.",
+		"standard": "Standaard",
+		"fast": "Snel (1,5 keer hogere snelheid, meer verbruik)"
+	},
 	"serviceTier": {
 		"label": "Serviceniveau",
 		"tooltip": "Voor snellere verwerking van API-verzoeken, probeer het prioriteitsverwerkingsniveau. Voor lagere prijzen met hogere latentie, probeer het flexverwerkingsniveau.",

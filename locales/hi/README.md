@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -35,15 +34,25 @@
 
 Roo Code से Zoo Code में आने के लिए एक quick guide तुम्हें [Roo→Zoo migration guide](https://docs.zoocode.dev/roo-to-zoo-migration) में मिल जाएगी। We plan to help users as much as possible during the transition, और उसी support के लिए हमारा [Reddit](https://www.reddit.com/r/ZooCode) और [Discord](https://discord.gg/VxfP4Vx3gX) है। अगर तुम्हें कोई problem हो या कोई question हो, आकर पूछो।
 
-## v3.70.0 में नया क्या है
+## Roo Code के बाद Zoo Code ने क्या जोड़ा है
 
-- **OpenAI GPT-5.6 family** — `Sol`, `Terra`, और `Luna` अब OpenAI Codex और OpenAI Native दोनों provider paths पर उपलब्ध हैं।
-- **Grok 4.5 समर्थन** — xAI का नया flagship model, साथ ही एक reasoning-effort format fix जिसका फायदा Grok 4 Mini को भी मिलता है।
-- **Kenari provider समर्थन** — एक first-class, OpenAI-compatible AI gateway जो Rupiah में बिल होता है और Claude, GPT, DeepSeek, GLM, Kimi और अधिक को cover करता है।
-- Collapsed task header में context-compaction button और context window progress bar दिखाएं।
-- फिक्स: cold terminals पर terminal output loss और समय से पहले task completion।
-- फिक्स: Zoo Gateway और Vercel AI Gateway models के लिए image attach अब static allowlist के बजाय live vision-capability tags को follow करता है।
-- Dependency और tooling अपडेट्स।
+Zoo Code, Roo Code की बनाई नींव पर आगे बढ़ता है और इसे इन सुविधाओं के साथ लगातार विस्तार देता है:
+
+- **Semble codebase intelligence** — तेज़, on-demand semantic code search, automatic setup के साथ और बिना किसी अलग indexing workflow के।
+- **ज़्यादा मज़बूत Orchestrator workflows** — अधिक सुरक्षित delegation, parallel task coordination, parent/child tasks की भरोसेमंद recovery और subtasks व provider profiles के बीच बेहतर isolation।
+- **Destructive Command Guard (DCG) के साथ लंबे autonomous runs** — भरोसेमंद काम को बिना बार-बार approval मांगे जारी रखते हुए खतरनाक commands को अपने-आप block करता है।
+- **नवीनतम models** — नए Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax और अन्य model families के लिए लगातार support।
+- **Connect करने के और तरीके** — Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go और कई अन्य नए व विस्तारित providers।
+- **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
+- **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
+
+## v3.78.0 में नया क्या है
+
+- **तीन बड़े नए models आ गए हैं** — बिल्कुल नए Gemini 3.7 Flash, GLM 5.3 और Qwen3.8 Max models का उपयोग करो, साथ ही DeepSeek V4 के updated reasoning, pricing और provider coverage का लाभ लो।
+- **NanoGPT से connect करो** — dynamic model discovery, streaming और prompt completions के साथ speed, price, latency, throughput, tool support और caching के लिए routing preferences का उपयोग करो।
+- **अधिक reliable providers और tasks** — fixes Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation और Zoo settings import/export को बेहतर बनाते हैं।
+- Destructive Command Guard अब Intel-आधारित Macs को support करता है।
+- Security updates `undici` और Mermaid की vulnerabilities को ठीक करते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 
@@ -67,24 +76,9 @@ Roo Code से Zoo Code में आने के लिए एक quick guide
 
 और जानो: [मोड्स का इस्तेमाल](https://docs.zoocode.dev/basic-usage/using-modes) • [कस्टम मोड्स](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## ट्यूटोरियल और फ़ीचर वीडियो
-
-<div align="center">
-
-|                                                                                                                                                                           |                                                                                                                                                                               |                                                                                                                                                                         |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>रू कोड इंस्टॉल करना</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>प्रोफाइल कॉन्फ़िगर करना</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>कोडबेस इंडेक्सिंग</b> |
-|      <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>कस्टम मोड</b>      |       <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>चेकपॉइंट्स</b>        |  <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>संदर्भ प्रबंधन</b>   |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">अधिक त्वरित ट्यूटोरियल और फ़ीचर वीडियो...</a>
-</p>
-
 ## संसाधन
 
 - **[दस्तावेज़ीकरण](https://docs.zoocode.dev):** Zoo Code को स्थापित करने, कॉन्फ़िगर करने और उसमें महारत हासिल करने के लिए आधिकारिक गाइड।
-- **[यूट्यूब चैनल](https://youtube.com/@roocodeyt?feature=shared):** ट्यूटोरियल देखें और सुविधाओं को एक्शन में देखें।
 - **[डिस्कॉर्ड सर्वर](https://discord.gg/VxfP4Vx3gX):** रीयल-टाइम सहायता और चर्चा के लिए समुदाय में शामिल हों।
 - **[रेडिट समुदाय](https://www.reddit.com/r/ZooCode):** अपने अनुभव साझा करें और देखें कि दूसरे क्या बना रहे हैं।
 - **[गिटहब मुद्दे](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** बग की रिपोर्ट करें और विकास को ट्रैक करें।

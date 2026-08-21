@@ -6,6 +6,8 @@ import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
 import { Node } from "web-tree-sitter"
 
+import { clearAllMocks } from "../../../../test-utils/reset"
+
 // Mock TelemetryService
 vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 	TelemetryService: {
@@ -58,7 +60,7 @@ describe("CodeParser", () => {
 	let parser: CodeParser
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		parser = new CodeParser()
 		;(loadRequiredLanguageParsers as any).mockResolvedValue(mockLanguageParser as any)
 		// Set up default fs.readFile mock return value
@@ -267,6 +269,31 @@ describe("CodeParser", () => {
 	})
 
 	describe("_chunkTextByLines", () => {
+		it("should not emit a chunk whose segment hash has already been seen", () => {
+			const lines = ["Fallback content long enough to produce a chunk without being filtered out."]
+			const seenSegmentHashes = new Set<string>()
+
+			const firstResult = parser["_chunkTextByLines"](
+				lines,
+				"manual.txt",
+				"hash",
+				"fallback_chunk",
+				seenSegmentHashes,
+			)
+			const duplicateResult = parser["_chunkTextByLines"](
+				lines,
+				"manual.txt",
+				"hash",
+				"fallback_chunk",
+				seenSegmentHashes,
+			)
+
+			expect(firstResult).toHaveLength(1)
+			expect(firstResult[0].segmentHash).toMatch(/^[a-f0-9]{64}$/)
+			expect(seenSegmentHashes).toEqual(new Set([firstResult[0].segmentHash]))
+			expect(duplicateResult).toEqual([])
+		})
+
 		it("should handle oversized lines by splitting them", async () => {
 			const longLine = "a".repeat(2000)
 			const lines = ["normal", longLine, "normal"]
@@ -300,7 +327,7 @@ describe("CodeParser", () => {
 
 	describe("Markdown Support", () => {
 		beforeEach(() => {
-			vi.clearAllMocks()
+			clearAllMocks()
 		})
 
 		it("should generate unique segment hashes for each markdown block", async () => {
@@ -892,7 +919,7 @@ This content verifies that processing continues after multiple oversized lines.`
 
 	describe("Edge case: Single oversized line in markdown", () => {
 		beforeEach(() => {
-			vi.clearAllMocks()
+			clearAllMocks()
 		})
 
 		it("should properly chunk a markdown file with a single very long line", async () => {

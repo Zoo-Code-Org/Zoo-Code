@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -35,15 +34,25 @@
 
 Kamu bisa menemukan panduan singkat untuk berpindah dari Roo Code ke Zoo Code di [panduan migrasi Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Kami ingin membantu pengguna semaksimal mungkin selama masa transisi, dan itulah gunanya [Reddit](https://www.reddit.com/r/ZooCode) dan [Discord](https://discord.gg/VxfP4Vx3gX) kami. Kalau kamu mengalami masalah atau punya pertanyaan, langsung mampir dan tanya.
 
-## Yang Baru di v3.70.0
+## Yang Ditambahkan Zoo Code Sejak Roo Code
 
-- **Keluarga OpenAI GPT-5.6** — `Sol`, `Terra`, dan `Luna` kini tersedia lewat jalur provider OpenAI Codex maupun OpenAI Native.
-- **Dukungan Grok 4.5** — model unggulan baru dari xAI, plus perbaikan format reasoning-effort yang juga bermanfaat untuk Grok 4 Mini.
-- **Dukungan provider Kenari** — AI gateway kelas satu yang kompatibel dengan OpenAI, ditagih dalam Rupiah, mencakup Claude, GPT, DeepSeek, GLM, Kimi, dan lainnya.
-- Menampilkan tombol pemadatan konteks dan progress bar jendela konteks di header tugas yang diciutkan.
-- Perbaikan: hilangnya output terminal dan penyelesaian tugas prematur pada terminal yang dingin (cold terminal).
-- Perbaikan: attach gambar untuk model Zoo Gateway dan Vercel AI Gateway kini mengikuti tag kemampuan vision secara langsung, bukan allowlist statis.
-- Pembaruan dependensi dan tooling.
+Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memperluasnya dengan:
+
+- **Kecerdasan codebase Semble** — pencarian kode semantik yang cepat dan sesuai permintaan, dengan penyiapan otomatis dan tanpa workflow pengindeksan terpisah.
+- **Workflow Orchestrator yang lebih kuat** — delegasi yang lebih aman, koordinasi task paralel, pemulihan task induk/anak yang andal, serta isolasi yang lebih baik antara subtask dan profil provider.
+- **Proses otonom yang lebih panjang dengan Destructive Command Guard (DCG)** — memblokir perintah berbahaya secara otomatis sementara pekerjaan tepercaya terus berjalan tanpa permintaan persetujuan berulang.
+- **Model terbaru** — dukungan berkelanjutan untuk keluarga model Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax, dan lainnya.
+- **Lebih banyak cara untuk terhubung** — provider baru dan yang diperluas, termasuk Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go, dan banyak lagi.
+- **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
+- **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
+
+## Yang Baru di v3.78.0
+
+- **Tiga model baru utama telah hadir** — gunakan model terbaru Gemini 3.7 Flash, GLM 5.3, dan Qwen3.8 Max, ditambah pembaruan reasoning, harga, dan cakupan provider DeepSeek V4.
+- **Hubungkan ke NanoGPT** — gunakan penemuan model dinamis, streaming dan penyelesaian prompt, serta preferensi routing untuk kecepatan, harga, latensi, throughput, dukungan tool, dan caching.
+- **Provider dan task yang lebih andal** — perbaikan meningkatkan pengaturan endpoint Azure OpenAI, batas output Kimi Code, penyimpanan judul riwayat task, serta impor/ekspor pengaturan Zoo.
+- Destructive Command Guard kini mendukung Mac berbasis Intel.
+- Pembaruan keamanan mengatasi kerentanan di `undici` dan Mermaid.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
@@ -67,24 +76,9 @@ Zoo Code beradaptasi dengan cara Anda bekerja, bukan sebaliknya:
 
 Pelajari lebih lanjut: [Menggunakan Mode](https://docs.zoocode.dev/basic-usage/using-modes) • [Mode Kustom](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Video Tutorial & Fitur
-
-<div align="center">
-
-|                                                                                                                                                                           |                                                                                                                                                                             |                                                                                                                                                                               |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Menginstal Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Mengonfigurasi Profil</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Pengindeksan Basis Kode</b> |
-|     <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Mode Kustom</b>     |    <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Pos Pemeriksaan</b>    |    <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Manajemen Konteks</b>    |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Video tutorial dan fitur cepat lainnya...</a>
-</p>
-
 ## Sumber daya
 
 - **[Dokumentasi](https://docs.zoocode.dev):** Panduan resmi untuk menginstal, mengonfigurasi, dan menguasai Zoo Code.
-- **[Saluran YouTube](https://youtube.com/@roocodeyt?feature=shared):** Tonton tutorial dan lihat fitur-fitur dalam aksi.
 - **[Server Discord](https://discord.gg/VxfP4Vx3gX):** Bergabunglah dengan komunitas untuk bantuan dan diskusi real-time.
 - **[Komunitas Reddit](https://www.reddit.com/r/ZooCode):** Bagikan pengalaman Anda dan lihat apa yang sedang dibangun orang lain.
 - **[Masalah GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Laporkan bug dan lacak pengembangan.

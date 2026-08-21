@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 
-import { type ModelRecord, type ExtensionMessage } from "@roo-code/types"
+import { type ModelRecord, type ExtensionMessage, OllamaModelsMessageType } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 
@@ -18,7 +18,7 @@ const getOllamaModels = async () =>
 		const handler = (event: MessageEvent) => {
 			const message: ExtensionMessage = event.data
 
-			if (message.type === "ollamaModels") {
+			if (message.type === OllamaModelsMessageType.ollamaModels) {
 				clearTimeout(timeout)
 				cleanup()
 
@@ -31,7 +31,7 @@ const getOllamaModels = async () =>
 		}
 
 		window.addEventListener("message", handler)
-		vscode.postMessage({ type: "requestOllamaModels" })
+		vscode.postMessage({ type: OllamaModelsMessageType.requestOllamaModels })
 	})
 
 export const useOllamaModels = (modelId?: string) =>

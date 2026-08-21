@@ -1,7 +1,6 @@
 <p align="center">
           <a href="https://marketplace.visualstudio.com/items?itemName=ZooCodeOrganization.zoo-code"><img src="https://img.shields.io/badge/VS_Code_Marketplace-007ACC?style=flat&logo=visualstudiocode&logoColor=white" alt="VS Code Marketplace"></a>
           <a href="https://x.com/ZooCodeDev"><img src="https://img.shields.io/badge/ZooCode-000000?style=flat&logo=x&logoColor=white" alt="X"></a>
-          <a href="https://youtube.com/@roocodeyt?feature=shared"><img src="https://img.shields.io/badge/YouTube-FF0000?style=flat&logo=youtube&logoColor=white" alt="YouTube"></a>
           <a href="https://discord.gg/VxfP4Vx3gX"><img src="https://img.shields.io/badge/Join%20Discord-5865F2?style=flat&logo=discord&logoColor=white" alt="Join Discord"></a>
           <a href="https://www.reddit.com/r/ZooCode/"><img src="https://img.shields.io/badge/Join%20r%2FZooCode-FF4500?style=flat&logo=reddit&logoColor=white" alt="Join r/ZooCode"></a>
           <a href="https://github.com/Zoo-Code-Org/Zoo-Code/issues"><img src="https://img.shields.io/badge/GitHub-Issues-181717?style=flat&logo=github&logoColor=white" alt="GitHub Issues"></a>
@@ -36,15 +35,25 @@
 
 Puoi trovare una guida rapida per passare da Roo Code a Zoo Code nella [guida alla migrazione Roo→Zoo](https://docs.zoocode.dev/roo-to-zoo-migration). Vogliamo aiutare gli utenti il più possibile durante la transizione, e per questo abbiamo il nostro [Reddit](https://www.reddit.com/r/ZooCode) e il nostro [Discord](https://discord.gg/VxfP4Vx3gX). Se hai problemi o domande, passa pure e chiedi.
 
-## Novità in v3.70.0
+## Cosa ha aggiunto Zoo Code rispetto a Roo Code
 
-- **Famiglia OpenAI GPT-5.6** — `Sol`, `Terra` e `Luna` sono ora disponibili sia tramite OpenAI Codex sia tramite OpenAI Native.
-- **Supporto Grok 4.5** — il nuovo modello di punta di xAI, oltre a una correzione del formato reasoning-effort che avvantaggia anche Grok 4 Mini.
-- **Supporto provider Kenari** — un AI gateway di prim'ordine, compatibile con OpenAI, fatturato in Rupie, che copre Claude, GPT, DeepSeek, GLM, Kimi e altro ancora.
-- Mostra il pulsante di condensazione del contesto e la barra di avanzamento della finestra di contesto nell'intestazione dell'attività compressa.
-- Correzione: perdita di output del terminale e completamento prematuro delle attività su terminali freddi.
-- Correzione: l'allegato di immagini per i modelli Zoo Gateway e Vercel AI Gateway ora segue i tag di capacità di visione in tempo reale invece di una allowlist statica.
-- Aggiornamenti di dipendenze e tooling.
+Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
+
+- **Intelligenza della codebase Semble** — ricerca semantica del codice rapida e on demand, con configurazione automatica e senza un workflow di indicizzazione separato.
+- **Workflow Orchestrator più solidi** — delega più sicura, coordinamento parallelo delle attività, recupero affidabile delle attività principali e secondarie e migliore isolamento tra attività secondarie e profili provider.
+- **Esecuzioni autonome più lunghe con Destructive Command Guard (DCG)** — blocca automaticamente i comandi pericolosi mentre il lavoro attendibile prosegue senza ripetute richieste di approvazione.
+- **I modelli più recenti** — supporto continuo per le nuove famiglie di modelli Claude, GPT, Gemini, Kimi, GLM, Grok, MiniMax e altre.
+- **Più modi per connettersi** — provider nuovi e ampliati, tra cui Zoo Gateway, Moonshot, Kimi Code, Kenari, Friendli, OpenCode Go e molti altri.
+- **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
+- **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
+
+## Novità in v3.78.0
+
+- **Sono arrivati tre importanti nuovi modelli** — usa i nuovissimi Gemini 3.7 Flash, GLM 5.3 e Qwen3.8 Max, oltre agli aggiornamenti di reasoning, prezzi e copertura dei provider per DeepSeek V4.
+- **Connettiti a NanoGPT** — usa la scoperta dinamica dei modelli, streaming e completamenti dei prompt, con preferenze di routing per velocità, prezzo, latenza, throughput, supporto agli strumenti e caching.
+- **Provider e task più affidabili** — le correzioni migliorano la configurazione degli endpoint Azure OpenAI, i limiti di output di Kimi Code, la conservazione dei titoli nella cronologia dei task e l'importazione/esportazione delle impostazioni Zoo.
+- Destructive Command Guard ora supporta i Mac basati su Intel.
+- Gli aggiornamenti di sicurezza risolvono vulnerabilità in `undici` e Mermaid.
 
 ## Cosa può fare Zoo Code per TE?
 
@@ -68,24 +77,9 @@ Zoo Code si adatta al tuo modo di lavorare, non il contrario:
 
 Scopri di più: [Usare le Modalità](https://docs.zoocode.dev/basic-usage/using-modes) • [Modalità personalizzate](https://docs.zoocode.dev/advanced-usage/custom-modes)
 
-## Tutorial e video sulle funzionalità
-
-<div align="center">
-
-|                                                                                                                                                                                 |                                                                                                                                                                                  |                                                                                                                                                                                     |
-| :-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-| <a href="https://www.youtube.com/watch?v=Mcq3r1EPZ-4"><img src="https://img.youtube.com/vi/Mcq3r1EPZ-4/maxresdefault.jpg" width="100%"></a><br><b>Installazione di Zoo Code</b> | <a href="https://www.youtube.com/watch?v=ZBML8h5cCgo"><img src="https://img.youtube.com/vi/ZBML8h5cCgo/maxresdefault.jpg" width="100%"></a><br><b>Configurazione dei profili</b> | <a href="https://www.youtube.com/watch?v=r1bpod1VWhg"><img src="https://img.youtube.com/vi/r1bpod1VWhg/maxresdefault.jpg" width="100%"></a><br><b>Indicizzazione della codebase</b> |
-|  <a href="https://www.youtube.com/watch?v=iiAv1eKOaxk"><img src="https://img.youtube.com/vi/iiAv1eKOaxk/maxresdefault.jpg" width="100%"></a><br><b>Modalità personalizzate</b>  |         <a href="https://www.youtube.com/watch?v=Ho30nyY332E"><img src="https://img.youtube.com/vi/Ho30nyY332E/maxresdefault.jpg" width="100%"></a><br><b>Checkpoint</b>         |     <a href="https://www.youtube.com/watch?v=HmnNSasv7T8"><img src="https://img.youtube.com/vi/HmnNSasv7T8/maxresdefault.jpg" width="100%"></a><br><b>Gestione del Contesto</b>     |
-
-</div>
-<p align="center">
-<a href="https://docs.zoocode.dev/tutorial-videos">Altri video tutorial e funzionalità rapide...</a>
-</p>
-
 ## Risorse
 
 - **[Documentazione](https://docs.zoocode.dev):** La guida ufficiale per installare, configurare e padroneggiare Zoo Code.
-- **[Canale YouTube](https://youtube.com/@roocodeyt?feature=shared):** Guarda i tutorial e le funzionalità in azione.
 - **[Server Discord](https://discord.gg/VxfP4Vx3gX):** Unisciti alla community per aiuto e discussioni in tempo reale.
 - **[Comunità Reddit](https://www.reddit.com/r/ZooCode):** Condividi le tue esperienze e guarda cosa stanno costruendo gli altri.
 - **[Problemi GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues):** Segnala bug e tieni traccia dello sviluppo.

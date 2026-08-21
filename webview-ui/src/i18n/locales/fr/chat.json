@@ -17,7 +17,9 @@
 		"condenseContext": "Condenser intelligemment le contexte",
 		"openApiHistory": "Ouvrir l'historique de l'API",
 		"openUiHistory": "Ouvrir l'historique de l'UI",
-		"backToParentTask": "Tâche parente"
+		"backToParentTask": "Tâche parente",
+		"waitingOnSubtask": "En attente de sous-tâche",
+		"goToSubtask": "Aller à la sous-tâche"
 	},
 	"unpin": "Désépingler",
 	"pin": "Épingler",
@@ -192,8 +194,8 @@
 		"wantsToEditOutsideWorkspace": "Zoo veut éditer ce fichier en dehors de l'espace de travail",
 		"wantsToEditProtected": "Zoo veut éditer un fichier de configuration protégé",
 		"wantsToCreate": "Zoo veut créer un nouveau fichier",
-		"wantsToSearchReplace": "Roo veut effectuer une recherche et remplacement sur ce fichier",
-		"didSearchReplace": "Roo a effectué une recherche et remplacement sur ce fichier",
+		"wantsToSearchReplace": "Zoo veut effectuer une recherche et remplacement sur ce fichier",
+		"didSearchReplace": "Zoo a effectué une recherche et remplacement sur ce fichier",
 		"wantsToInsert": "Zoo veut insérer du contenu dans ce fichier",
 		"wantsToInsertWithLineNumber": "Zoo veut insérer du contenu dans ce fichier à la ligne {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo veut ajouter du contenu à la fin de ce fichier",
@@ -206,7 +208,7 @@
 		"didGenerateImage": "Zoo a généré une image"
 	},
 	"instructions": {
-		"wantsToFetch": "Roo veut récupérer des instructions détaillées pour aider à la tâche actuelle"
+		"wantsToFetch": "Zoo veut récupérer des instructions détaillées pour aider à la tâche actuelle"
 	},
 	"directoryOperations": {
 		"wantsToViewTopLevel": "Zoo veut voir les fichiers de premier niveau dans ce répertoire",
@@ -231,6 +233,7 @@
 		"exitStatus": "Terminé avec le statut {{exitCode}}",
 		"malformedCommand": "Commande mal formée : erreur de syntaxe shell",
 		"manageCommands": "Commandes approuvées automatiquement",
+		"denied": "Commande refusée",
 		"addToAllowed": "Ajouter à la liste autorisée",
 		"removeFromAllowed": "Retirer de la liste autorisée",
 		"addToDenied": "Ajouter à la liste refusée",
@@ -341,9 +344,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Famille OpenAI GPT-5.6 (Sol, Terra, Luna) — disponible à la fois sur OpenAI Codex et OpenAI Native.",
-			"highlight2": "Prise en charge de Grok 4.5 — le nouveau modèle phare de xAI, avec une correction du reasoning effort qui profite aussi à Grok 4 Mini.",
-			"highlight3": "Provider Kenari — un gateway IA de premier ordre compatible OpenAI, facturé en roupies, couvrant Claude, GPT, DeepSeek, GLM, Kimi et plus."
+			"highlight1": "Trois nouveaux modèles majeurs sont arrivés — utilise les tout nouveaux Gemini 3.7 Flash, GLM 5.3 et Qwen3.8 Max, ainsi que les améliorations du raisonnement, des tarifs et de la couverture des providers de DeepSeek V4.",
+			"highlight2": "Connecte-toi à NanoGPT — profite de la découverte dynamique des modèles, du streaming et de la complétion des prompts, avec des préférences de routage pour la vitesse, le prix, la latence, le débit, la prise en charge des outils et le cache.",
+			"highlight3": "Providers et tâches plus fiables — les correctifs améliorent la configuration des endpoints Azure OpenAI, les limites de sortie de Kimi Code, la conservation des titres dans l'historique des tâches et l'import/export des paramètres Zoo."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",
