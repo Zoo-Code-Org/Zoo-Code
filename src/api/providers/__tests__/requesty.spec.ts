@@ -271,7 +271,7 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-fable-5",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
@@ -304,7 +304,7 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-sonnet-5",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
@@ -337,7 +337,7 @@ describe("RequestyHandler", () => {
 				expect.objectContaining({
 					model: "anthropic/claude-opus-5",
 					max_tokens: 32768,
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 					temperature: undefined,
 				}),
 			)
