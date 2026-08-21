@@ -46,6 +46,13 @@ for (const theme of themes) {
 			</div>,
 		)
 
+		await component.evaluate(async () => {
+			await document.fonts.ready
+			await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+		})
+
+		await expect(component).toHaveScreenshot(`remaining-controls-resting-${theme.name}.png`)
+
 		const iconButton = component.getByRole("button", { name: "Settings" })
 		await iconButton.hover()
 		await expect(iconButton).toHaveCSS("background-color", theme.expected.hover)
@@ -53,6 +60,8 @@ for (const theme of themes) {
 		await page.mouse.down()
 		await expect(iconButton).toHaveCSS("background-color", theme.expected.active)
 		await page.mouse.up()
+
+		await expect(component).toHaveScreenshot(`remaining-controls-active-${theme.name}.png`)
 
 		const checkbox = component.getByRole("checkbox", { name: "Include optional context" })
 		await expect(checkbox).toHaveCSS("background-color", theme.expected.description)

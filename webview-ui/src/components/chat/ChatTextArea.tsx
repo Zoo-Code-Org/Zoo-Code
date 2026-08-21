@@ -1137,7 +1137,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 											"transition-all duration-1000",
 											"cursor-pointer",
 											!shouldDisableImages
-												? "opacity-50 hover:opacity-100 delay-750 pointer-events-auto"
+												? "opacity-50 delay-750 pointer-events-auto"
 												: "opacity-0 pointer-events-none duration-200 delay-0",
 											!shouldDisableImages && enabledChatControlClassName,
 											"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
@@ -1156,7 +1156,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 												"relative inline-flex items-center justify-center",
 												"bg-transparent border-none p-1.5",
 												"rounded-md min-w-[28px] min-h-[28px]",
-												"opacity-60 hover:opacity-100 text-vscode-descriptionForeground hover:text-vscode-foreground",
+												"opacity-60 text-vscode-descriptionForeground hover:text-vscode-foreground",
 												"transition-all duration-150",
 												enabledChatControlClassName,
 												"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
@@ -1179,7 +1179,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 												"transition-all duration-1000",
 												"cursor-pointer",
 												hasInputContent
-													? "opacity-50 hover:opacity-100 delay-750 pointer-events-auto"
+													? "opacity-50 delay-750 pointer-events-auto"
 													: "opacity-0 pointer-events-none duration-200 delay-0",
 												hasInputContent && enabledChatControlClassName,
 												"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
@@ -1203,7 +1203,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 												"rounded-md min-w-[28px] min-h-[28px]",
 												"text-vscode-descriptionForeground hover:text-vscode-foreground",
 												"transition-all duration-200",
-												"opacity-100 hover:opacity-100 pointer-events-auto",
+												"opacity-100 pointer-events-auto",
 												enabledChatControlClassName,
 												"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
 												"cursor-pointer",
@@ -1238,7 +1238,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 											"text-vscode-descriptionForeground hover:text-vscode-foreground",
 											"transition-all duration-200",
 											isEditMode || isStreaming || hasInputContent
-												? "opacity-100 hover:opacity-100 pointer-events-auto"
+												? "opacity-100 pointer-events-auto"
 												: "opacity-0 pointer-events-none",
 											(isEditMode || isStreaming || hasInputContent) &&
 												enabledChatControlClassName,
