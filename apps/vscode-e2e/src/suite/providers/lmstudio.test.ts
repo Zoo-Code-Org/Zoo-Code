@@ -1,0 +1,195 @@
+import * as assert from "assert"
+
+import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
+
+import { setDefaultSuiteTimeout } from "../test-utils"
+import { waitUntilCompleted } from "../utils"
+
+// LM Studio streams Qwen3.x thinking as reasoning_content deltas on the
+// OpenAI-compatible endpoint (verified against a live local LM Studio server),
+// not as think tags inside content. Regression #1175 made LmStudioHandler
+// forward those deltas as reasoning chunks. This suite proves the full path
+// through the real extension host: real SSE wire format -> OpenAI SDK parsing
+// -> provider reasoning extraction -> Task say("reasoning") -> webview message,
+// which is exactly the boundary the provider unit tests (which mock the OpenAI
+// client) do not exercise.
+const LMSTUDIO_MODEL_ID = "qwen3.8-27b"
+const PROMPT_TAG = "LMSTUDIO_E2E_THINK_BLOCK"
+const REASONING_PROBE = "LMSTUDIO_E2E_REASONING_PROBE"
+const EXPECTED_ANSWER = "Paris"
+
+type CapturedLmStudioRequest = {
+	model?: string
+	lastUserMessage: string
+}
+
+function getRequestUrl(input: RequestInfo | URL): string {
+	return typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url
+}
+
+function isUrlWithOrigin(rawUrl: string, expectedOrigin: string): boolean {
+	try {
+		return new URL(rawUrl).origin === expectedOrigin
+	} catch {
+		return false
+	}
+}
+
+function isChatCompletionsUrl(rawUrl: string): boolean {
+	try {
+		return new URL(rawUrl).pathname.endsWith("/chat/completions")
+	} catch {
+		return false
+	}
+}
+
+function installLmStudioRequestCapture(capture: CapturedLmStudioRequest[], baseUrl: string): () => void {
+	const originalFetch = globalThis.fetch
+	const targetOrigin = new URL(baseUrl).origin
+
+	globalThis.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+		const url = getRequestUrl(input)
+
+		if (isUrlWithOrigin(url, targetOrigin) && isChatCompletionsUrl(url)) {
+			const body = init?.body && typeof init.body === "string" ? JSON.parse(init.body) : {}
+			const messages = Array.isArray(body.messages) ? body.messages : []
+			const lastUser = [...messages].reverse().find((message: { role?: string }) => message.role === "user")
+			const lastUserMessage =
+				typeof lastUser?.content === "string" ? lastUser.content : JSON.stringify(lastUser?.content ?? "")
+
+			capture.push({ model: body.model, lastUserMessage })
+		}
+
+		return originalFetch.call(globalThis, input, init as RequestInit)
+	} as typeof globalThis.fetch
+
+	return () => {
+		globalThis.fetch = originalFetch
+	}
+}
+
+suite("LM Studio provider", function () {
+	setDefaultSuiteTimeout(this)
+
+	let restoreFetch: (() => void) | undefined
+	const requests: CapturedLmStudioRequest[] = []
+
+	setup(function () {
+		const aimockUrl = process.env.AIMOCK_URL
+		// Only replay mode can serve the reasoning fixture: record mode has no
+		// real LM Studio upstream to proxy to, and live runs have no aimock.
+		const isReplay = !!aimockUrl && process.env.AIMOCK_RECORD !== "true"
+
+		if (!isReplay) {
+			this.skip()
+		}
+	})
+
+	suiteSetup(() => {
+		restoreFetch = installLmStudioRequestCapture(requests, process.env.AIMOCK_URL || "http://localhost:1234")
+	})
+
+	suiteTeardown(async () => {
+		restoreFetch?.()
+		restoreFetch = undefined
+
+		// Restore the default OpenRouter config so subsequent suites are unaffected.
+		await globalThis.api.setConfiguration({
+			apiProvider: "openrouter" as const,
+			openRouterApiKey:
+				process.env.AIMOCK_URL && process.env.AIMOCK_RECORD !== "true"
+					? "mock-key"
+					: process.env.OPENROUTER_API_KEY!,
+			openRouterModelId: "openai/gpt-4.1",
+			...(process.env.AIMOCK_URL && { openRouterBaseUrl: `${process.env.AIMOCK_URL}/v1` }),
+		})
+	})
+
+	test("should surface the LM Studio thinking stream as a separate reasoning message", async () => {
+		requests.length = 0
+
+		const api = globalThis.api
+		const aimockUrl = process.env.AIMOCK_URL!
+
+		// LmStudioHandler appends /v1 itself, so the base URL is aimock's origin only.
+		await api.setConfiguration({
+			apiProvider: "lmstudio" as const,
+			lmStudioBaseUrl: aimockUrl,
+			lmStudioModelId: LMSTUDIO_MODEL_ID,
+		})
+
+		const messages: ClineMessage[] = []
+		const messageHandler = ({ message }: { message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				messages.push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		let taskId: string | undefined
+		try {
+			taskId = await api.startNewTask({
+				configuration: { mode: "ask", autoApprovalEnabled: true, alwaysAllowModeSwitch: true },
+				text: `${PROMPT_TAG}: What is the capital of France? Reply with only the city name.`,
+			})
+
+			await waitUntilCompleted({ api, taskId, timeout: 120_000 })
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+		}
+
+		// The request must have gone to aimock carrying the LM Studio model id.
+		const request = requests.find((entry) => entry.lastUserMessage.includes(PROMPT_TAG))
+		assert.ok(
+			request,
+			`LM Studio provider should issue a chat completions request for the task prompt (saw ${requests.length} request(s))`,
+		)
+		assert.strictEqual(request.model, LMSTUDIO_MODEL_ID)
+
+		// The thinking stream must surface as a finalized reasoning message.
+		const reasoningMessages = messages.filter((message) => message.say === "reasoning")
+		assert.ok(
+			reasoningMessages.length > 0,
+			`Task should surface the LM Studio thinking stream as a reasoning message. Observed says: ${messages
+				.map((message) => message.say)
+				.join(", ")}`,
+		)
+
+		const reasoningText = reasoningMessages.map((message) => message.text ?? "").join("")
+		assert.ok(
+			reasoningText.includes(REASONING_PROBE),
+			`Reasoning message should contain the streamed thinking text. Got: ${reasoningText.slice(0, 300)}`,
+		)
+
+		// The visible answer must be the plain completion result.
+		const completionMessage = messages.find(
+			({ say, text }) => (say === "completion_result" || say === "text") && text?.trim() === EXPECTED_ANSWER,
+		)
+		assert.ok(
+			completionMessage,
+			`Task should complete with the expected answer "${EXPECTED_ANSWER}". Observed: ${messages
+				.map((message) => `${message.say}:${message.text?.slice(0, 80)}`)
+				.join(" | ")}`,
+		)
+
+		// Channel separation: thinking must not leak into the visible answer,
+		// and the final answer must not appear inside the reasoning message.
+		const visibleText = messages
+			.filter(({ say }) => say === "completion_result" || say === "text")
+			.map((message) => message.text ?? "")
+			.join("")
+		assert.ok(!visibleText.includes(REASONING_PROBE), "Thinking text must not leak into the visible answer")
+		assert.ok(!reasoningText.includes(EXPECTED_ANSWER), "Final answer must not appear inside the reasoning message")
+
+		// Thinking streams before the answer.
+		const reasoningIndex = messages.findIndex((message) => message.say === "reasoning")
+		const completionIndex = messages.findIndex(
+			({ say, text }) => (say === "completion_result" || say === "text") && text?.trim() === EXPECTED_ANSWER,
+		)
+		assert.ok(
+			reasoningIndex !== -1 && completionIndex !== -1 && reasoningIndex < completionIndex,
+			"Reasoning message should precede the completion message",
+		)
+	})
+})
