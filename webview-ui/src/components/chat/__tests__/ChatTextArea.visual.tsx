@@ -7,6 +7,8 @@ import { ChatTextAreaStory } from "./ChatTextArea.visual.fixture"
 for (const theme of visualThemes) {
 	test(`renders the production chat composer in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
 		await applyVisualTheme(page, theme)
+		// The full provider bundle leaves a bare Zod reference after CT tree-shaking.
+		await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
 		const component = await mount(<ChatTextAreaStory />)
 		const story = component.getByTestId("chat-text-area-story")
 		const editor = story.getByRole("textbox")

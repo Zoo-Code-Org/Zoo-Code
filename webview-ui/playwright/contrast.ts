@@ -33,6 +33,12 @@ export function parseCssColor(value: string): RgbaColor {
 		return { r: Number(match[1]), g: Number(match[2]), b: Number(match[3]), a: alpha }
 	}
 
+	const srgb = value.match(/^color\(\s*srgb\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)(?:\s*\/\s*([\d.]+%?))?\s*\)$/i)
+	if (srgb) {
+		const alpha = srgb[4]?.endsWith("%") ? Number.parseFloat(srgb[4]) / 100 : Number.parseFloat(srgb[4] ?? "1")
+		return { r: Number(srgb[1]) * 255, g: Number(srgb[2]) * 255, b: Number(srgb[3]) * 255, a: alpha }
+	}
+
 	const oklab = value.match(/^oklab\(\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)(?:\s*\/\s*([\d.]+%?))?\s*\)$/i)
 	if (!oklab) throw new Error(`Unsupported CSS color: ${value}`)
 	const [lightness, axisA, axisB] = oklab.slice(1, 4).map(Number)

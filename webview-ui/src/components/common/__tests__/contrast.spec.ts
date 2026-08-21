@@ -4,6 +4,7 @@ describe("contrast utilities", () => {
 	it("parses opaque and translucent browser colors", () => {
 		expect(parseCssColor("rgb(30, 30, 30)")).toEqual({ r: 30, g: 30, b: 30, a: 1 })
 		expect(parseCssColor("rgba(255, 255, 255, 0.5)")).toEqual({ r: 255, g: 255, b: 255, a: 0.5 })
+		expect(parseCssColor("color(srgb 1 0.5 0 / 25%)")).toEqual({ r: 255, g: 127.5, b: 0, a: 0.25 })
 		const oklab = parseCssColor("oklab(1 0 0 / 60%)")
 		expect(oklab.r).toBeCloseTo(255)
 		expect(oklab.g).toBeCloseTo(255)
