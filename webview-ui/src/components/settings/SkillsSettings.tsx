@@ -35,8 +35,9 @@ import { CreateSkillDialog } from "./CreateSkillDialog"
 
 export const SkillsSettings: React.FC = () => {
 	const { t } = useAppTranslation()
-	const { cwd, skills: rawSkills, skillDiagnostics, customModes } = useExtensionState()
+	const { cwd, skills: rawSkills, skillDiagnostics: rawSkillDiagnostics, customModes } = useExtensionState()
 	const skills = useMemo(() => rawSkills ?? [], [rawSkills])
+	const skillDiagnostics = useMemo(() => rawSkillDiagnostics ?? [], [rawSkillDiagnostics])
 
 	const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 	const [skillToDelete, setSkillToDelete] = useState<SkillMetadata | null>(null)
