@@ -217,6 +217,42 @@ describe("SkillsSettings", () => {
 		expect(screen.getByText("global-skill")).toBeInTheDocument()
 	})
 
+	it("does not show the malformed-skill warning when skillDiagnostics is absent from state", () => {
+		mockExtensionState = {
+			skills: mockSkills,
+			cwd: "/workspace",
+			customModes: [],
+		}
+
+		renderWithExtensionState(<SkillsSettings />)
+
+		expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+		expect(screen.getByText("settings:sections.skills")).toBeInTheDocument()
+		expect(screen.getByText("project-skill")).toBeInTheDocument()
+	})
+
+	it("renders diagnostics with and without line/column locations", () => {
+		renderSkillsSettings(mockSkills, undefined, [
+			{
+				path: "/workspace/.roo/skills/broken-2/SKILL.md",
+				source: "project",
+				message: "unexpected end of the stream",
+			},
+			{
+				path: "/workspace/.roo/skills/broken-3/SKILL.md",
+				source: "project",
+				message: "bad indentation of a mapping entry",
+				line: 7,
+			},
+		])
+
+		const warning = screen.getByRole("alert")
+		expect(warning).toHaveTextContent("/workspace/.roo/skills/broken-2/SKILL.md")
+		expect(warning).toHaveTextContent("unexpected end of the stream")
+		expect(warning).toHaveTextContent("/workspace/.roo/skills/broken-3/SKILL.md:7")
+		expect(warning).toHaveTextContent("bad indentation of a mapping entry")
+	})
+
 	it("displays project skills section when in a workspace", () => {
 		renderSkillsSettings()
 

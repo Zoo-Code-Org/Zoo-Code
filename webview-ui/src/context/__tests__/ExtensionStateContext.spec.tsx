@@ -40,6 +40,17 @@ const RulesTestComponent = () => {
 	return <div data-testid="rules">{JSON.stringify(rules)}</div>
 }
 
+const SkillsTestComponent = () => {
+	const { skills, skillDiagnostics } = useExtensionState()
+
+	return (
+		<div>
+			<div data-testid="skills">{JSON.stringify(skills)}</div>
+			<div data-testid="skill-diagnostics">{JSON.stringify(skillDiagnostics)}</div>
+		</div>
+	)
+}
+
 const ChatFontSizeTestComponent = () => {
 	const { chatFontSize, setChatFontSize } = useExtensionState()
 
@@ -190,6 +201,68 @@ describe("ExtensionStateContext", () => {
 		})
 
 		expect(JSON.parse(screen.getByTestId("rules").textContent!)).toEqual([])
+	})
+
+	it("updates skills and skill diagnostics from incoming skills message", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<SkillsTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "skills",
+						skills: [
+							{
+								name: "good-skill",
+								description: "A healthy skill",
+								path: "/workspace/.roo/skills/good-skill/SKILL.md",
+								source: "project",
+							},
+						],
+						skillDiagnostics: [
+							{
+								path: "/workspace/.roo/skills/bad-skill/SKILL.md",
+								source: "project",
+								message: "bad indentation of a mapping entry",
+								line: 3,
+							},
+						],
+					},
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("skills").textContent!)).toEqual([
+			expect.objectContaining({ name: "good-skill" }),
+		])
+		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([
+			expect.objectContaining({ path: "/workspace/.roo/skills/bad-skill/SKILL.md", line: 3 }),
+		])
+	})
+
+	it("defaults skill diagnostics to an empty array when the skills message omits them", () => {
+		render(
+			<ExtensionStateContextProvider>
+				<SkillsTestComponent />
+			</ExtensionStateContextProvider>,
+		)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "skills",
+						skills: [],
+					},
+				}),
+			)
+		})
+
+		expect(JSON.parse(screen.getByTestId("skill-diagnostics").textContent!)).toEqual([])
 	})
 
 	it("initializes with soundEnabled set to false", () => {
