@@ -1025,8 +1025,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "允许匿名数据收集",
-			"description": "通过发送匿名使用数据和错误报告来帮助改进 Zoo Code。此遥测不会收集代码、提示 或个人信息。详细信息请参阅我们的<privacyLink>隐私政策</privacyLink>。您可以随时关闭此功能。"
+			"label": "允许发送错误和使用情况报告",
+			"description": "通过发送与安装标识符（而非您的姓名或帐户）关联的使用数据和错误报告来帮助改进 Zoo Code。此遥测不会收集您的代码或提示词。详细信息请参阅我们的<privacyLink>隐私政策</privacyLink>。您可以随时关闭此功能。"
 		},
 		"settings": {
 			"import": "导入",

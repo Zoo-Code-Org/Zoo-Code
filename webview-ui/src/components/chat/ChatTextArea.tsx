@@ -33,6 +33,7 @@ import ContextMenu from "./ContextMenu"
 import { IndexingStatusBadge } from "./IndexingStatusBadge"
 import { ZooCodeAuthBadge } from "./ZooCodeAuthBadge"
 import { usePromptHistory } from "./hooks/usePromptHistory"
+import { disabledChatControlClassName, enabledChatControlClassName } from "./chatControlStyles"
 
 interface ChatTextAreaProps {
 	inputValue: string
@@ -1136,14 +1137,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 											"transition-all duration-1000",
 											"cursor-pointer",
 											!shouldDisableImages
-												? "opacity-50 hover:opacity-100 delay-750 pointer-events-auto"
+												? "opacity-50 delay-750 pointer-events-auto"
 												: "opacity-0 pointer-events-none duration-200 delay-0",
-											!shouldDisableImages &&
-												"hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)]",
+											!shouldDisableImages && enabledChatControlClassName,
 											"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-											!shouldDisableImages && "active:bg-[rgba(255,255,255,0.1)]",
-											shouldDisableImages &&
-												"opacity-40 cursor-not-allowed grayscale-[30%] hover:bg-transparent hover:border-[rgba(255,255,255,0.08)] active:bg-transparent",
+											shouldDisableImages && disabledChatControlClassName,
 										)}>
 										<Image className="w-4 h-4" />
 									</button>
@@ -1158,11 +1156,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 												"relative inline-flex items-center justify-center",
 												"bg-transparent border-none p-1.5",
 												"rounded-md min-w-[28px] min-h-[28px]",
-												"opacity-60 hover:opacity-100 text-vscode-descriptionForeground hover:text-vscode-foreground",
+												"opacity-60 text-vscode-descriptionForeground hover:text-vscode-foreground",
 												"transition-all duration-150",
-												"hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)]",
+												enabledChatControlClassName,
 												"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-												"active:bg-[rgba(255,255,255,0.1)]",
 												"cursor-pointer",
 											)}>
 											<X className="w-4 h-4" />
@@ -1182,12 +1179,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 												"transition-all duration-1000",
 												"cursor-pointer",
 												hasInputContent
-													? "opacity-50 hover:opacity-100 delay-750 pointer-events-auto"
+													? "opacity-50 delay-750 pointer-events-auto"
 													: "opacity-0 pointer-events-none duration-200 delay-0",
-												hasInputContent &&
-													"hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)]",
+												hasInputContent && enabledChatControlClassName,
 												"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-												hasInputContent && "active:bg-[rgba(255,255,255,0.1)]",
 											)}>
 											<WandSparkles
 												className={cn("w-4 h-4", isEnhancingPrompt && "animate-spin")}
@@ -1208,10 +1203,9 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 												"rounded-md min-w-[28px] min-h-[28px]",
 												"text-vscode-descriptionForeground hover:text-vscode-foreground",
 												"transition-all duration-200",
-												"opacity-100 hover:opacity-100 pointer-events-auto",
-												"hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)]",
+												"opacity-100 pointer-events-auto",
+												enabledChatControlClassName,
 												"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-												"active:bg-[rgba(255,255,255,0.1)]",
 												"cursor-pointer",
 											)}>
 											<ListEnd className="w-4 h-4" />
@@ -1244,16 +1238,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 											"text-vscode-descriptionForeground hover:text-vscode-foreground",
 											"transition-all duration-200",
 											isEditMode || isStreaming || hasInputContent
-												? "opacity-100 hover:opacity-100 pointer-events-auto"
+												? "opacity-100 pointer-events-auto"
 												: "opacity-0 pointer-events-none",
 											(isEditMode || isStreaming || hasInputContent) &&
-												"hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)]",
+												enabledChatControlClassName,
 											"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-											(isEditMode || isStreaming || hasInputContent) &&
-												"active:bg-[rgba(255,255,255,0.1)]",
 											(isEditMode || isStreaming || hasInputContent) && "cursor-pointer",
 											isStreaming &&
-												"bg-vscode-button-background hover:bg-vscode-button-background",
+												"bg-vscode-button-background hover:bg-vscode-button-background active:bg-vscode-button-background",
 										)}>
 										{isStreaming ? (
 											<Square className="size-4 stroke-none fill-vscode-button-foreground" />
@@ -1333,9 +1325,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 										"rounded-md min-w-[28px] min-h-[28px]",
 										"text-vscode-foreground opacity-85",
 										"transition-all duration-150",
-										"hover:opacity-100 hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)]",
+										enabledChatControlClassName,
 										"focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder",
-										"active:bg-[rgba(255,255,255,0.1)]",
 										"cursor-pointer",
 									)}>
 									<VolumeX className="w-4 h-4" />

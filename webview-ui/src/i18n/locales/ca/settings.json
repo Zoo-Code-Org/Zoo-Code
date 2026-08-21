@@ -1025,8 +1025,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Permetre informes anònims d'errors i ús",
-			"description": "Ajuda a millorar Zoo Code enviant dades d'ús anònimes i informes d'error. Aquesta telemetria no recull codi, prompts o informació personal. Consulta la nostra <privacyLink>política de privacitat</privacyLink> per a més detalls. Pots desactivar-ho en qualsevol moment."
+			"label": "Permetre informes d'errors i ús",
+			"description": "Ajuda a millorar Zoo Code enviant dades d'ús i informes d'error, vinculades a un identificador d'instal·lació en lloc del teu nom o compte. Aquesta telemetria no recull el teu codi ni les teves indicacions. Consulta la nostra <privacyLink>política de privacitat</privacyLink> per a més detalls. Pots desactivar-ho en qualsevol moment."
 		},
 		"settings": {
 			"import": "Importar",
