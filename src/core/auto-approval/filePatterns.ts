@@ -71,7 +71,8 @@ import ignore from "ignore"
  *
  * Both the configured patterns and the path being checked are therefore
  * rewritten into a single form the library accepts: a path relative to the
- * filesystem root (`/`), with any Windows drive as its first segment.
+ * filesystem root (`/`), with any Windows drive as its first segment, in the
+ * spelling `toPosixAbsolutePath` gives it.
  *
  * An alternative implementation would be to remember for each pattern whether
  * it's a workspace-scoped pattern or an absolute-filesystem pattern, and then
@@ -153,31 +154,65 @@ function pathsepsToPosix(value: string, isWindows: boolean): string {
 	return isWindows ? value.replace(/\\/g, "/") : value
 }
 
-/** A Windows drive prefix, as the first thing in a path: `C:` in `C:/tmp/x`. */
-const DRIVE_PREFIX = /^([a-zA-Z]:)(\/.*)?$/
+/**
+ * A Windows drive at the root of a path: the `C:` in `C:/tmp/x`, or `C:` alone.
+ *
+ * The lookahead is what limits this to a drive *root*. Windows also reads `C:tmp`
+ * as naming a drive, but relative to the current directory on it, which is not a
+ * place this module can resolve.
+ */
+const DRIVE_PREFIX = /^([a-zA-Z]):(?=\/|$)/
 
 /**
- * Split a leading Windows drive off a path, leaving a POSIX-absolute remainder.
+ * Rewrite an absolute path into the plain POSIX form the rest of this module
+ * works in, where a Windows drive is an ordinary first path segment.
  *
- * Only when reading paths as Windows does. Elsewhere `C:` is an ordinary
- * directory name (`mkdir 'C:'` succeeds on Linux), so `C:/notes.md` is a
- * *relative* path naming a file in it, and taking it for a drive would anchor it
- * to the filesystem root instead of the workspace.
+ * - `"C:/tmp/x"` -> `"/C/tmp/x"`
+ * - `"/tmp/x"` with `workspaceDrive = "/D"` -> `"/D/tmp/x"`, since Windows reads a
+ *   path written without a drive as being on the current one
+ * - `"/tmp/x"` off Windows -> `"/tmp/x"`, where there are no drives to place it on
  *
- * - `"C:/tmp/x"` -> `{ drive: "C:", rest: "/tmp/x" }`
- * - `"C:"` -> `{ drive: "C:", rest: "/" }`
- * - `"/tmp/x"` -> `{ drive: undefined, rest: "/tmp/x" }`
- * - `"C:/tmp/x"` off Windows -> `{ drive: undefined, rest: "C:/tmp/x" }`
+ * The colon has to go, working around `ignore` behaviour:
+ * On Windows, `ignore` rejects any path that looks drive-rooted
+ * (it tests `/^[a-z]:\//i` and throws `RangeError`,
+ * "path should be a `path.relative()`d string").
+ *
+ * The bare letter cannot be mistaken for a directory of the same name, because it
+ * only ever goes where Windows puts the drive, at the very root of the path: a
+ * directory called `C` always sits in a later segment.
+ *
+ * Its case is left as typed, since a drive only occurs on Windows, where the
+ * matcher ignores case anyway (see the case-sensitivity note at the top), so
+ * `C:/x` and `c:/x` already agree.
+ *
+ * A drive is only read as one when reading paths as Windows does. Elsewhere `C:`
+ * is an ordinary directory name (`mkdir 'C:'` succeeds on Linux), so `C:/notes.md`
+ * is a *relative* path naming a file in it, and taking it for a drive would anchor
+ * it to the filesystem root instead of the workspace.
  */
-function splitDrive(value: string, isWindows: boolean): { drive?: string; rest: string } {
-	const drive = isWindows ? DRIVE_PREFIX.exec(value) : null
+function toPosixAbsolutePath(absolutePath: string, workspaceDrive: string, isWindows: boolean): string {
+	const drive = isWindows ? DRIVE_PREFIX.exec(absolutePath) : null
 
-	return drive ? { drive: drive[1], rest: drive[2] || "/" } : { rest: value }
+	return drive ? `/${drive[1]}${absolutePath.slice(drive[0].length)}` : `${workspaceDrive}${absolutePath}`
 }
 
-function isAbsolutePosixPath(value: string, isWindows: boolean): boolean {
-	// Posix ("/tmp/x"), or on Windows also a drive letter ("C:/tmp/x").
-	return value.startsWith("/") || splitDrive(value, isWindows).drive !== undefined
+/**
+ * The drive a path is on, spelled as the path segment that `toPosixAbsolutePath`
+ * gives it: `"/C"` for `"C:/tmp/x"`. Empty when the path names no drive, as is
+ * always the case off Windows.
+ */
+function driveSegmentOf(absolutePath: string, isWindows: boolean): string {
+	const drive = isWindows ? DRIVE_PREFIX.exec(absolutePath) : null
+
+	return drive ? `/${drive[1]}` : ""
+}
+
+/**
+ * Whether a path names a place on the filesystem rather than one relative to the
+ * workspace: it starts with `/`, or on Windows with a drive.
+ */
+function isAbsolutePath(value: string, isWindows: boolean): boolean {
+	return value.startsWith("/") || (isWindows && DRIVE_PREFIX.test(value))
 }
 
 function escapesWorkspace(posixPath: string): boolean {
@@ -185,28 +220,15 @@ function escapesWorkspace(posixPath: string): boolean {
 }
 
 /**
- * Rewrite a path into the single form the matcher works in: relative to the
- * filesystem root, since the `ignore` library rejects paths starting with `/`.
- *
- * `absolutePath` is absolute in one of the two senses of `isAbsolutePosixPath`.
- * A POSIX path loses its leading slash. A Windows path keeps its drive as the
- * first path segment, which is what holds drives apart.
- *
- * On Windows a path naming no drive takes the workspace's, as the OS would read
- * it, so that a `/tmp/notes.md` pattern and a `C:/tmp/notes.md` path still
- * describe the same file. The drive's case is left as typed: a drive only occurs
- * on Windows, where the matcher ignores case anyway (see the case-sensitivity
- * note at the top), so `C:/x` and `c:/x` already agree.
+ * Drop the leading `/`, which is the last step for the path being checked: the
+ * `ignore` library only matches paths relative to its base directory, which here
+ * is the filesystem root.
  *
  * - `"/tmp/notes.md"` -> `"tmp/notes.md"`
- * - `"C:/tmp/notes.md"` -> `"C:/tmp/notes.md"`
- * - `"/tmp/notes.md"` with `workspaceDrive` `"C:"` -> `"C:/tmp/notes.md"`
+ * - `"/C/tmp/notes.md"` -> `"C/tmp/notes.md"`
  */
-function toRootRelativePath(absolutePath: string, isWindows: boolean, workspaceDrive?: string): string {
-	const { drive, rest } = splitDrive(absolutePath, isWindows)
-	const effectiveDrive = drive ?? workspaceDrive
-
-	return effectiveDrive ? `${effectiveDrive}${rest}` : rest.slice(1)
+function toRootRelativePath(posixAbsolutePath: string): string {
+	return posixAbsolutePath.slice(1)
 }
 
 /**
@@ -248,7 +270,7 @@ function toRootRelativePath(absolutePath: string, isWindows: boolean, workspaceD
  *   - `"../shared/notes.md"` -> `"/path/to/shared/notes.md"`
  *     resolved against the workspace root, so it lands outside the workspace
  *   - `"~/notes.md"` -> `"/home/me/notes.md"`
- *   - `"C:/tmp/notes.md"` -> `"/c:/tmp/notes.md"`
+ *   - `"C:/tmp/notes.md"` on Windows -> `"/C/tmp/notes.md"`, see `toPosixAbsolutePath()`
  *   - `"!docs/secret.md"` -> `"!/path/to/repo/docs/secret.md"`
  *   - `"mydir/"` -> `undefined` (because it names a dir)
  *   - `"~"` -> `undefined` (because it names a dir)
@@ -289,24 +311,33 @@ export function toMatcherPattern(
 		return undefined
 	}
 
-	const workspace = splitDrive(pathsepsToPosix(cwd ?? "", isWindows), isWindows)
-	const workspaceDrive = workspace.drive
+	const workspacePosix = pathsepsToPosix(cwd ?? "", isWindows)
+	// A path written without a drive is read as being on the workspace's, which is
+	// the drive the tool call it came from would resolve it against.
+	const workspaceDrive = driveSegmentOf(workspacePosix, isWindows)
 
 	if (normalized.startsWith("~/")) {
-		const home = splitDrive(pathsepsToPosix(homeDir, isWindows), isWindows)
-		normalized = `${home.drive ?? ""}${path.posix.join(home.rest, normalized.slice(2))}`
+		// Left in the user's own spelling, drive and all, for the absolute branch
+		// just below to rewrite once.
+		normalized = path.posix.join(pathsepsToPosix(homeDir, isWindows), normalized.slice(2))
 	}
 
-	if (!isAbsolutePosixPath(normalized, isWindows) && escapesWorkspace(normalized)) {
-		if (!cwd) {
-			return undefined
-		}
-
-		normalized = `${workspaceDrive ?? ""}${path.posix.resolve(workspace.rest, normalized)}`
+	if (isAbsolutePath(normalized, isWindows)) {
+		return `${negation}${toPosixAbsolutePath(normalized, workspaceDrive, isWindows)}`
 	}
 
-	if (isAbsolutePosixPath(normalized, isWindows)) {
-		return `${negation}/${toRootRelativePath(normalized, isWindows, workspaceDrive)}`
+	if (!cwd) {
+		// No workspace for a relative pattern to be relative to; see the note above
+		// on why this is not matched loosely instead.
+		return undefined
+	}
+
+	// `resolve` also normalises, so that a `cwd` with a trailing slash or a `..`
+	// segment does not reach the patterns below.
+	const workspaceRoot = path.posix.resolve(toPosixAbsolutePath(workspacePosix, workspaceDrive, isWindows))
+
+	if (escapesWorkspace(normalized)) {
+		return `${negation}${path.posix.resolve(workspaceRoot, normalized)}`
 	}
 
 	// "./notes.md" names the workspace root explicitly.
@@ -316,14 +347,6 @@ export function toMatcherPattern(
 		normalized = normalized.slice(2)
 	}
 
-	if (!cwd) {
-		// No workspace to be relative to; see the note above on why this is not
-		// matched loosely instead.
-		return undefined
-	}
-
-	const workspaceBase = toRootRelativePath(path.posix.resolve(workspace.rest), isWindows, workspaceDrive)
-
 	// gitignore anchors a pattern to the base directory as soon as it has a
 	// separator "at the beginning or middle (or both)" (gitignore(5)), and only a
 	// pattern with no separator at all matches at any level below. Prefixing the
@@ -332,7 +355,7 @@ export function toMatcherPattern(
 	// number of directories including none, restores its reach.
 	const matchesInAnyDirectory = !isWorkspaceRootAnchored && !normalized.includes("/")
 
-	return `${negation}/${workspaceBase}/${matchesInAnyDirectory ? "**/" : ""}${normalized}`
+	return `${negation}${workspaceRoot}/${matchesInAnyDirectory ? "**/" : ""}${normalized}`
 }
 
 /**
@@ -350,10 +373,11 @@ function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boo
 		return undefined
 	}
 
-	const workspace = splitDrive(pathsepsToPosix(cwd ?? "", isWindows), isWindows)
+	const workspacePosix = pathsepsToPosix(cwd ?? "", isWindows)
+	const workspaceDrive = driveSegmentOf(workspacePosix, isWindows)
 
-	if (isAbsolutePosixPath(normalized, isWindows)) {
-		return toRootRelativePath(normalized, isWindows, workspace.drive)
+	if (isAbsolutePath(normalized, isWindows)) {
+		return toRootRelativePath(toPosixAbsolutePath(normalized, workspaceDrive, isWindows))
 	}
 
 	if (!cwd) {
@@ -363,9 +387,9 @@ function toMatcherPath(filePath: string, cwd: string | undefined, isWindows: boo
 		return undefined
 	}
 
-	const { drive, rest } = splitDrive(normalized, isWindows)
+	const workspaceRoot = toPosixAbsolutePath(workspacePosix, workspaceDrive, isWindows)
 
-	return toRootRelativePath(`${drive ?? ""}${path.posix.resolve(workspace.rest, rest)}`, isWindows, workspace.drive)
+	return toRootRelativePath(path.posix.resolve(workspaceRoot, normalized))
 }
 
 /**

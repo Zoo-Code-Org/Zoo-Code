@@ -1,24 +1,35 @@
 // npx vitest run core/auto-approval/__tests__/windowsPaths.spec.ts
 
-import { isFileMatchedByPatterns } from "../filePatterns"
-
-// On Windows the workspace lives on a drive, so every path the matcher sees
-// carries one. That used to break matching outright: patterns went through
-// `path.resolve`, which stamps the *current* drive onto a drive-less path, while
-// an absolute path reported by a tool kept whatever drive it already had. A
-// pattern and a path could therefore end up on different drives and never match,
-// which is what made the whole allowlist inert on Windows.
+// Windows path handling for the allowlists, exercised on every platform.
 //
-// These tests fix the platform explicitly, so they assert Windows behaviour on
-// every CI runner rather than only on the Windows one.
+// This spec exists because two rounds of Windows-only CI failures were invisible
+// here: the `ignore` library installs extra path checks at import time when
+// `process.platform === "win32"`, and one of them rejects any path that looks
+// drive-rooted. A candidate such as "C:/repo/notes.md" therefore threw
+// `RangeError`, which `isFileMatchedByPatterns` turns into "no match", so the
+// allowlists silently granted nothing on Windows while every test passed on Linux.
+//
+// Nothing here passes `isWindows`, unlike filePatterns.spec.ts, which injects it
+// to exercise both platforms' rules from anywhere. Letting it default is the point
+// of this spec: the default is what the extension uses, and what both rounds of CI
+// failures came in through, so injecting a value would test around the bug.
+//
+// See posixPaths.spec.ts for the same matcher held to the other platform's rules,
+// and matcherForPlatform.ts for why that has to be a separate file.
+
+import { matcherForPlatform } from "./matcherForPlatform"
 
 const WINDOWS_CWD = "C:\\path\\to\\repo"
 const WINDOWS_HOME = "C:\\Users\\me"
 
-const matches = (filePath: string, patterns: string[], cwd: string | undefined = WINDOWS_CWD) =>
-	isFileMatchedByPatterns({ filePath, cwd, patterns, isWindows: true, homeDir: WINDOWS_HOME })
-
 describe("matching on Windows", () => {
+	const matcher = matcherForPlatform("win32")
+
+	// `homeDir` is the one thing still injected, because `os.homedir()` reports the
+	// host's home directory, which off Windows carries no drive.
+	const matches = (filePath: string, patterns: string[], cwd: string | undefined = WINDOWS_CWD) =>
+		matcher().isFileMatchedByPatterns({ filePath, cwd, patterns, homeDir: WINDOWS_HOME })
+
 	it("matches a workspace-relative path against a bare pattern", () => {
 		expect(matches("notes.md", ["notes.md"])).toBe(true)
 		expect(matches("docs\\notes.md", ["notes.md"])).toBe(true)
@@ -53,6 +64,13 @@ describe("matching on Windows", () => {
 		expect(matches("D:\\tmp\\notes.md", ["/tmp/notes.md"], "D:\\repo")).toBe(true)
 	})
 
+	// The drive becomes a plain path segment for matching, so a directory that
+	// happens to share the drive letter's name must not be confused with it.
+	it("does not confuse a directory named like a drive with that drive", () => {
+		expect(matches("C:\\C\\notes.md", ["C:/notes.md"])).toBe(false)
+		expect(matches("C:\\C\\notes.md", ["C:/C/notes.md"])).toBe(true)
+	})
+
 	it("expands ~ to a home directory that carries a drive", () => {
 		expect(matches("C:\\Users\\me\\notes.md", ["~/notes.md"])).toBe(true)
 		expect(matches("C:\\Users\\other\\notes.md", ["~/notes.md"])).toBe(false)
@@ -72,30 +90,13 @@ describe("matching on Windows", () => {
 		expect(matches("C:\\path\\to\\repo\\docs\\notes.md", ["docs/**", "!docs/secret.md"])).toBe(true)
 	})
 
-	// The tests above pass `isWindows` explicitly, which leaves the production
-	// default untested. These reproduce the cases the Windows CI run reported as
-	// failing, with nothing passed but a workspace on a drive, so that the defaults
-	// are what decides them.
-	describe("with the platform reported as Windows", () => {
-		const realPlatform = process.platform
+	// These are the shapes the Windows CI runs reported as failing.
+	it("matches a directory glob", () => {
+		expect(matches("docs/scratch/a.md", ["docs/scratch/**"])).toBe(true)
+	})
 
-		beforeAll(() => Object.defineProperty(process, "platform", { value: "win32" }))
-		afterAll(() => Object.defineProperty(process, "platform", { value: realPlatform }))
-
-		const matchesByDefault = (filePath: string, patterns: string[]) =>
-			isFileMatchedByPatterns({ filePath, cwd: WINDOWS_CWD, patterns })
-
-		it("matches a bare pattern against a workspace-relative path", () => {
-			expect(matchesByDefault("notes.md", ["notes.md"])).toBe(true)
-		})
-
-		it("matches a directory glob", () => {
-			expect(matchesByDefault("docs/scratch/a.md", ["docs/scratch/**"])).toBe(true)
-		})
-
-		it("confines a bare pattern to the workspace", () => {
-			expect(matchesByDefault("C:/path/to/repo/etc/passwd", ["passwd"])).toBe(true)
-			expect(matchesByDefault("C:/etc/passwd", ["passwd"])).toBe(false)
-		})
+	it("confines a bare pattern to the workspace", () => {
+		expect(matches("C:/path/to/repo/etc/passwd", ["passwd"])).toBe(true)
+		expect(matches("C:/etc/passwd", ["passwd"])).toBe(false)
 	})
 })

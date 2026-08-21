@@ -85,28 +85,34 @@ describe("toMatcherPattern", () => {
 	// A drive letter is a Windows concept. Elsewhere `C:` is an ordinary directory
 	// name, so `C:/tmp/notes.md` names a file inside it, relative to the workspace.
 	describe("on Windows", () => {
+		// The colon is dropped, leaving the drive as an ordinary leading path
+		// segment; see `toPosixAbsolutePath` for why it cannot stay.
 		it("keeps the drive of an absolute pattern as its first path segment", () => {
-			expect(toWindowsPattern("D:/tmp/notes.md")).toBe("/D:/tmp/notes.md")
+			expect(toWindowsPattern("D:/tmp/notes.md")).toBe("/D/tmp/notes.md")
 		})
 
 		it("gives a drive-less absolute pattern the workspace's drive", () => {
 			// The OS reads `/tmp/notes.md` as being on the current drive, so a
 			// pattern and a path spelled that way have to end up on one drive;
 			// otherwise they could never match.
-			expect(toWindowsPattern("/tmp/notes.md")).toBe("/C:/tmp/notes.md")
+			expect(toWindowsPattern("/tmp/notes.md")).toBe("/C/tmp/notes.md")
 		})
 
 		it("prefixes the workspace root, drive included", () => {
-			expect(toWindowsPattern("notes.md")).toBe("/C:/path/to/repo/**/notes.md")
-			expect(toWindowsPattern("docs/notes.md")).toBe("/C:/path/to/repo/docs/notes.md")
+			expect(toWindowsPattern("notes.md")).toBe("/C/path/to/repo/**/notes.md")
+			expect(toWindowsPattern("docs/notes.md")).toBe("/C/path/to/repo/docs/notes.md")
 		})
 
 		it("expands ~ to a home directory that has a drive", () => {
-			expect(toWindowsPattern("~/notes.md")).toBe("/C:/Users/me/notes.md")
+			expect(toWindowsPattern("~/notes.md")).toBe("/C/Users/me/notes.md")
 		})
 
 		it("reads a backslash as a directory separator", () => {
-			expect(toWindowsPattern("docs\\notes.md")).toBe("/C:/path/to/repo/docs/notes.md")
+			expect(toWindowsPattern("docs\\notes.md")).toBe("/C/path/to/repo/docs/notes.md")
+		})
+
+		it("resolves a workspace-escaping pattern on the workspace drive", () => {
+			expect(toWindowsPattern("../shared/notes.md")).toBe("/C/path/to/shared/notes.md")
 		})
 
 		it("treats a drive-looking pattern as a directory off Windows", () => {
