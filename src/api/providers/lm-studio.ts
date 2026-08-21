@@ -21,50 +21,15 @@ import { BaseProvider } from "./base-provider"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
-import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import {
+	mergeAbortSignalAndTimeout,
+	throwIfAborted,
+	createAbortError,
+	isRequestAborted,
+	type OpenAiRequestOptions,
+} from "./utils/abort-signal"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-
-/**
- * Minimal request-options shape for the generic RequestConfigBuilder. The
- * SDK's `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
- * which does not satisfy the builder's base constraint, so the builder is typed
- * with only the options this provider sets. The built config is still
- * assignable to the SDK's `RequestOptions`.
- */
-type OpenAiRequestOptions = {
-	signal?: AbortSignal
-}
-
-/**
- * Whether a failure indicates an aborted request: the caller's signal fired,
- * the SDK raised a native abort error, or the error carries the OpenAI SDK
- * abort error message (exactly "Request was aborted."). The message check
- * is an exact match on purpose: a substring match would misclassify
- * unrelated errors that merely mention aborting.
- */
-function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
-	const candidate = error as { name?: string; message?: string }
-	return (
-		Boolean(signal?.aborted) ||
-		candidate?.name === "AbortError" ||
-		candidate?.name === "APIUserAbortError" ||
-		candidate?.message === "Request was aborted."
-	)
-}
-
-/**
- * Fresh error satisfying the Task.ts abort contract: `name ===
- * "AbortError"` and a message ending in "aborted" (no trailing period). The
- * OpenAI SDK's own abort error does not satisfy this contract (name "Error",
- * message "Request was aborted."), so raw SDK abort errors must be
- * normalized instead of rethrown.
- */
-function createAbortError(): Error {
-	const abortError = new Error("The LM Studio request was aborted")
-	abortError.name = "AbortError"
-	return abortError
-}
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -171,7 +136,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				results = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, externalSignal)) {
-					throw createAbortError()
+					throw createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -248,7 +213,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			} as const
 		} catch (error) {
 			if (isRequestAborted(error, externalSignal)) {
-				throw createAbortError()
+				throw createAbortError("LM Studio")
 			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
@@ -317,14 +282,14 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, requestSignal)) {
-					throw createAbortError()
+					throw createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
 			if (isRequestAborted(error, requestSignal)) {
-				throw createAbortError()
+				throw createAbortError("LM Studio")
 			}
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",

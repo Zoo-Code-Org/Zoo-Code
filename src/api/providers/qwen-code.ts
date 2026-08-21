@@ -16,7 +16,13 @@ import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import {
+	mergeAbortSignalAndTimeout,
+	throwIfAborted,
+	createAbortError,
+	isRequestAborted,
+	type OpenAiRequestOptions,
+} from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 const QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
@@ -52,47 +58,6 @@ function objectToUrlEncoded(data: Record<string, string>): string {
 	return Object.keys(data)
 		.map((key) => `${encodeURIComponent(key)}=${encodeURIComponent(data[key])}`)
 		.join("&")
-}
-
-/**
- * Minimal request-options shape for the generic RequestConfigBuilder. The
- * SDK’s `RequestOptions` declares `signal` as `AbortSignal | null | undefined`,
- * which does not satisfy the builder’s base constraint, so the builder is typed
- * with only the options this provider sets. The built config is still
- * assignable to the SDK’s `RequestOptions`.
- */
-type OpenAiRequestOptions = {
-	signal?: AbortSignal
-}
-
-/**
- * Whether a failure indicates an aborted request: the caller’s signal fired,
- * the SDK raised a native abort error, or the error carries the OpenAI SDK
- * abort error message (exactly "Request was aborted."). The message check
- * is an exact match on purpose: a substring match would misclassify
- * unrelated errors that merely mention aborting.
- */
-function isRequestAborted(error: unknown, signal?: AbortSignal): boolean {
-	const candidate = error as { name?: string; message?: string }
-	return (
-		Boolean(signal?.aborted) ||
-		candidate?.name === "AbortError" ||
-		candidate?.name === "APIUserAbortError" ||
-		candidate?.message === "Request was aborted."
-	)
-}
-
-/**
- * Fresh error satisfying the Task.ts abort contract: `name ===
- * "AbortError"` and a message ending in "aborted" (no trailing period). The
- * OpenAI SDK’s own abort error does not satisfy this contract (name "Error",
- * message "Request was aborted."), so raw SDK abort errors must be
- * normalized instead of rethrown.
- */
-function createAbortError(): Error {
-	const abortError = new Error("The Qwen Code request was aborted")
-	abortError.name = "AbortError"
-	return abortError
 }
 
 export class QwenCodeHandler extends BaseProvider implements SingleCompletionHandler {
@@ -245,7 +210,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			// Task.ts abort contract (name "AbortError", message ending in
 			// "aborted") instead of rethrowing the raw SDK abort error.
 			if (isRequestAborted(error, externalSignal)) {
-				throw createAbortError()
+				throw createAbortError("Qwen Code")
 			}
 			if (error.status === 401) {
 				// Token expired, refresh and retry. The retry reuses apiCall’s
@@ -256,7 +221,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 				// A stop can land while the refresh await is in flight — re-check
 				// before the retried request goes out so it is not sent.
 				if (externalSignal?.aborted) {
-					throw createAbortError()
+					throw createAbortError("Qwen Code")
 				}
 				const client = this.ensureClient()
 				client.apiKey = this.credentials.access_token
@@ -402,7 +367,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			}
 		} catch (error) {
 			if (isRequestAborted(error, externalSignal)) {
-				throw createAbortError()
+				throw createAbortError("Qwen Code")
 			}
 			throw error
 		} finally {
