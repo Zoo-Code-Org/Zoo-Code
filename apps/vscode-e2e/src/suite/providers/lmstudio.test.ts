@@ -79,16 +79,17 @@ function installLmStudioRequestCapture(capture: CapturedLmStudioRequest[], baseU
 suite("LM Studio provider", function () {
 	setDefaultSuiteTimeout(this)
 
+	// Only replay mode can serve the reasoning fixture: record mode has no
+	// real LM Studio upstream to proxy to, and live runs have no aimock.
+	// Computed once at suite scope so the suite hooks can be guarded as well:
+	// a skipped suite must not touch shared fetch or provider configuration.
+	const isReplay = !!process.env.AIMOCK_URL && process.env.AIMOCK_RECORD !== "true"
+
 	let restoreFetch: (() => void) | undefined
 	const requests: CapturedLmStudioRequest[] = []
 
 	/** Skips the suite when aimock replay mode is not active (no fixture source). */
 	setup(function () {
-		const aimockUrl = process.env.AIMOCK_URL
-		// Only replay mode can serve the reasoning fixture: record mode has no
-		// real LM Studio upstream to proxy to, and live runs have no aimock.
-		const isReplay = !!aimockUrl && process.env.AIMOCK_RECORD !== "true"
-
 		if (!isReplay) {
 			this.skip()
 		}
@@ -96,23 +97,32 @@ suite("LM Studio provider", function () {
 
 	/** Captures chat completions requests sent to the aimock origin for later assertions. */
 	suiteSetup(() => {
-		restoreFetch = installLmStudioRequestCapture(requests, process.env.AIMOCK_URL || "http://localhost:1234")
+		if (!isReplay) {
+			return
+		}
+
+		restoreFetch = installLmStudioRequestCapture(requests, process.env.AIMOCK_URL!)
 	})
 
 	/** Restores the original fetch and the default OpenRouter provider configuration. */
 	suiteTeardown(async () => {
+		if (!isReplay) {
+			return
+		}
+
 		restoreFetch?.()
 		restoreFetch = undefined
 
 		// Restore the default OpenRouter config so subsequent suites are unaffected.
+		// Explicitly clear the LM Studio fields: setConfiguration only updates
+		// supplied keys, so omitting them would leave them set for later suites.
 		await globalThis.api.setConfiguration({
 			apiProvider: "openrouter" as const,
-			openRouterApiKey:
-				process.env.AIMOCK_URL && process.env.AIMOCK_RECORD !== "true"
-					? "mock-key"
-					: process.env.OPENROUTER_API_KEY!,
+			lmStudioBaseUrl: undefined,
+			lmStudioModelId: undefined,
+			openRouterApiKey: "mock-key",
 			openRouterModelId: "openai/gpt-4.1",
-			...(process.env.AIMOCK_URL && { openRouterBaseUrl: `${process.env.AIMOCK_URL}/v1` }),
+			openRouterBaseUrl: `${process.env.AIMOCK_URL}/v1`,
 		})
 	})
 
