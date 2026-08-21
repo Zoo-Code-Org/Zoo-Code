@@ -1,6 +1,7 @@
 import React from "react"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
+import { expectContrast } from "../../../../playwright/contrast"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
 import { UISettingsStory } from "./UISettings.visual.fixture"
 
@@ -11,7 +12,12 @@ for (const theme of visualThemes) {
 		await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
 		const component = await mount(<UISettingsStory />)
 		const story = component.getByTestId("ui-settings-story")
-		await expect(story.getByRole("heading", { name: "UI" })).toBeVisible()
+		const heading = story.getByRole("heading", { name: "UI" })
+		await expect(heading).toBeVisible()
+		await expectContrast(heading, {
+			background: heading.locator(".."),
+			label: `${theme.name} UI settings heading`,
+		})
 		await expect(story).toHaveScreenshot(`ui-settings-${theme.name}.png`)
 	})
 }

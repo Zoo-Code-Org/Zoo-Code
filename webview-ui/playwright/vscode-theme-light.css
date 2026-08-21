@@ -27,6 +27,12 @@
 	--vscode-list-activeSelectionForeground: #000000;
 	--vscode-toolbar-hoverBackground: #e8e8e8;
 	--vscode-panel-border: #e5e5e5;
+	--vscode-sideBar-foreground: #3b3b3b;
+	--vscode-sideBar-background: #f8f8f8;
+	--vscode-sideBar-border: #e5e5e5;
+	--vscode-sideBarSectionHeader-foreground: #3b3b3b;
+	--vscode-sideBarSectionHeader-background: #f8f8f8;
+	--vscode-sideBarSectionHeader-border: #e5e5e5;
 	--vscode-widget-border: #e5e5e5;
 	--vscode-widget-shadow: #00000029;
 	--vscode-textLink-foreground: #005fb8;
