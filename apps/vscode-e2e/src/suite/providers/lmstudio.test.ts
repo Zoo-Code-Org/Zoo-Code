@@ -93,6 +93,10 @@ suite("LM Studio provider", function () {
 		if (!isReplay) {
 			this.skip()
 		}
+
+		// Fresh per-test buffer: late requests from prior tasks must not satisfy
+		// this test's assertions, which are scoped by PROMPT_TAG.
+		requests.length = 0
 	})
 
 	/** Captures chat completions requests sent to the aimock origin for later assertions. */
@@ -131,8 +135,6 @@ suite("LM Studio provider", function () {
 	 * stream surfaces as a separate finalized reasoning message ahead of the completion.
 	 */
 	test("should surface the LM Studio thinking stream as a separate reasoning message", async () => {
-		requests.length = 0
-
 		const api = globalThis.api
 		const aimockUrl = process.env.AIMOCK_URL!
 
