@@ -959,6 +959,10 @@
 			"refreshSuccess": "도구가 성공적으로 새로고침되었습니다",
 			"refreshError": "도구 새로고침에 실패했습니다",
 			"toolParameters": "매개변수"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamic thinking effort",
+			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
 		}
 	},
 	"promptCaching": {

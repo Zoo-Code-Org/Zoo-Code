@@ -959,6 +959,10 @@
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
 			"toolParameters": "パラメーター"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamic thinking effort",
+			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
 		}
 	},
 	"promptCaching": {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 
 import { experimentDefault } from "@roo/experiments"
 
@@ -31,5 +31,32 @@ describe("ExperimentalSettings", () => {
 		expect(screen.getByText("settings:experimental.IMAGE_GENERATION.name")).toBeInTheDocument()
 		expect(screen.getByText("settings:experimental.CUSTOM_TOOLS.name")).toBeInTheDocument()
 		expect(screen.queryByText("settings:experimental.PARALLEL_TOOL_EXECUTION.name")).not.toBeInTheDocument()
+	})
+
+	it("renders the dynamic thinking effort toggle", () => {
+		render(<ExperimentalSettings {...defaultProps} />)
+
+		expect(screen.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name")).toBeInTheDocument()
+	})
+
+	it("binds the dynamic thinking effort toggle to setExperimentEnabled", () => {
+		const setExperimentEnabled = vi.fn()
+		render(
+			<ExperimentalSettings
+				{...defaultProps}
+				experiments={{ ...experimentDefault, dynamicThinkingEffort: true }}
+				setExperimentEnabled={setExperimentEnabled}
+			/>,
+		)
+
+		const label = screen.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")
+		const checkbox = label?.querySelector("input[type='checkbox']")
+		expect(checkbox).not.toBeNull()
+		expect(checkbox).toBeChecked()
+
+		fireEvent.click(checkbox!)
+
+		expect(setExperimentEnabled).toHaveBeenCalledTimes(1)
+		expect(setExperimentEnabled).toHaveBeenCalledWith("dynamicThinkingEffort", false)
 	})
 })
