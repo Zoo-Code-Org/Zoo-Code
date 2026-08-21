@@ -22,6 +22,7 @@ import {
 	type TaskMetadata,
 	type TaskEvents,
 	type ProviderSettings,
+	type ReasoningEffortExtended,
 	type TokenUsage,
 	type ToolUsage,
 	type ToolName,
@@ -289,6 +290,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// API
 	apiConfiguration: ProviderSettings
 	api: ApiHandler
+	// DTE series 2/5: task-local thinking effort override. Transient per-task state —
+	// never persisted to settings; cleared on dispose (see dispose()).
+	private runtimeThinkingEffort?: ReasoningEffortExtended
+	private runtimeThinkingEffortSource?: string
+	// Settings-derived effort captured when the override activates, so clearing
+	// (undefined) restores it in the in-memory apiConfiguration copy.
+	private preOverrideReasoningEffort?: ProviderSettings["reasoningEffort"]
 	private rateLimitClock: RateLimitClock
 	private autoApprovalHandler: AutoApprovalHandler
 
@@ -1521,6 +1529,66 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.api = buildApiHandler(this.apiConfiguration)
 	}
 
+	/**
+	 * DTE series 2/5: sets — or clears with `undefined` — the task-local thinking
+	 * effort override.
+	 *
+	 * Resolution order for the affected requests (strongest first): this
+	 * task-local override → settings `reasoningEffort` → model default. The
+	 * override applies to the NEXT API request only (no mid-stream effect): it is
+	 * passed per request as `metadata.reasoningEffort` and, while active, is
+	 * merged into the in-memory `apiConfiguration` copy (profile-switch /
+	 * `updateApiConfiguration` precedent) so the rebuilt handler reflects it too.
+	 * `undefined` clears the override and restores the settings-derived value in
+	 * the copy. Nothing is ever written to persisted settings.
+	 *
+	 * @param effort - The task-local effort, or `undefined` to clear.
+	 * @param source - Optional provenance label (UI wiring lands in a later PR).
+	 */
+	public setRuntimeThinkingEffort(effort: ReasoningEffortExtended | undefined, source?: string): void {
+		const wasActive = this.runtimeThinkingEffort !== undefined
+		this.runtimeThinkingEffort = effort
+		this.runtimeThinkingEffortSource = effort === undefined ? undefined : source
+
+		if (effort !== undefined) {
+			// Capture the settings-derived value once so clearing can restore it.
+			if (!wasActive) {
+				this.preOverrideReasoningEffort = this.apiConfiguration.reasoningEffort
+			}
+			// Merge into the in-memory copy (never the persisted settings object).
+			this.apiConfiguration = { ...this.apiConfiguration, reasoningEffort: effort }
+		} else if (wasActive) {
+			// Restore the settings-derived value captured when the override activated.
+			this.apiConfiguration = { ...this.apiConfiguration, reasoningEffort: this.preOverrideReasoningEffort }
+			this.preOverrideReasoningEffort = undefined
+		} else {
+			// Already inactive: nothing to clear.
+			return
+		}
+
+		// Rebuild the handler from the updated copy so the next request uses it.
+		this.api = buildApiHandler(this.apiConfiguration)
+	}
+
+	/**
+	 * DTE series 2/5: reads the current task-local thinking effort override.
+	 */
+	public getRuntimeThinkingEffort(): { effort?: ReasoningEffortExtended; source?: string } {
+		return {
+			effort: this.runtimeThinkingEffort,
+			source: this.runtimeThinkingEffortSource,
+		}
+	}
+
+	/**
+	 * DTE series 2/5: metadata fragment carrying the active task-local effort
+	 * override on a single request. Empty when no override is active, so the
+	 * existing settings resolution applies unchanged.
+	 */
+	private getRuntimeThinkingEffortMetadata(): Pick<ApiHandlerCreateMessageMetadata, "reasoningEffort"> {
+		return this.runtimeThinkingEffort !== undefined ? { reasoningEffort: this.runtimeThinkingEffort } : {}
+	}
+
 	public async submitUserMessage(
 		text: string,
 		images?: string[],
@@ -1637,6 +1705,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
+			// DTE series 2/5: carry the active task-local effort override.
+			...this.getRuntimeThinkingEffortMetadata(),
 		}
 		// Generate environment details to include in the condensed summary
 		const environmentDetails = await getEnvironmentDetails(this, true)
@@ -2294,6 +2364,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+
+		// DTE series 2/5: the task-local effort override is transient — clear it on
+		// task end so a disposed task never carries it forward.
+		this.runtimeThinkingEffort = undefined
+		this.runtimeThinkingEffortSource = undefined
+		this.preOverrideReasoningEffort = undefined
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -3955,6 +4031,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						parallelToolCalls: true,
 					}
 				: {}),
+			// DTE series 2/5: carry the active task-local effort override.
+			...this.getRuntimeThinkingEffortMetadata(),
 		}
 
 		try {
@@ -4181,6 +4259,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							parallelToolCalls: true,
 						}
 					: {}),
+				// DTE series 2/5: carry the active task-local effort override.
+				...this.getRuntimeThinkingEffortMetadata(),
 			}
 
 			// Only generate environment details when context management will actually run.
@@ -4346,6 +4426,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			taskId: this.taskId,
 			suppressPreviousResponseId: this.skipPrevResponseIdOnce,
 			abortSignal,
+			// DTE series 2/5: carry the active task-local effort override for this request.
+			...this.getRuntimeThinkingEffortMetadata(),
 			// Include tools whenever they are present.
 			...(shouldIncludeTools
 				? {
