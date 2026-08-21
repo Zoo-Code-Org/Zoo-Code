@@ -141,6 +141,7 @@ const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
+const MAX_AUTO_APPROVAL_RETRIES = 3 // Bounds the auto-approval retry loop (persistent API errors, e.g. HTTP 429)
 
 export interface TaskOptions extends CreateTaskOptions {
 	provider: ClineProvider
@@ -4425,6 +4426,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// note that this api_req_failed ask is unique in that we only present this option if the api hasn't streamed any content yet (ie it fails on the first chunk due), as it would allow them to hit a retry button. However if the api failed mid-stream, it could be in any arbitrary state where some tools may have executed, so that error is handled differently and requires cancelling the task entirely.
 			if (autoApprovalEnabled) {
+				// Bound the retry loop before backoff: a persistent API error (e.g. HTTP 429 fair usage,
+				// a rate limit on the whole account) is not going to resolve by retrying harder — each
+				// attempt is charged against the account and postpones recovery. Stop loudly instead of
+				// recursing until abort.
+				if (retryAttempt >= MAX_AUTO_APPROVAL_RETRIES) {
+					throw new Error(
+						`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted after ` +
+							`${MAX_AUTO_APPROVAL_RETRIES} auto-approval retries — persistent API error ` +
+							`(last: ${error.message ?? JSON.stringify(serializeError(error))}). Retry loop capped (roo-extensions#3195).`,
+					)
+				}
+
 				// Apply shared exponential backoff and countdown UX
 				await this.backoffAndAnnounce(retryAttempt, error)
 
