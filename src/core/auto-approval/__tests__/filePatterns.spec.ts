@@ -192,12 +192,13 @@ describe("isFileMatchedByPatterns", () => {
 		expect(matchesOnWindows("docs\\notes.md", ["docs/notes.md"])).toBe(true)
 	})
 
-	// A backslash is a legal character in a filename on other platforms, where
-	// `my\file` is one file rather than `file` inside `my`, so it must not be read
-	// as a separator there.
-	it("treats a backslash in a path as part of the filename off Windows", () => {
-		expect(matches("docs\\notes.md", ["docs/notes.md"])).toBe(false)
-	})
+	// The opposite case, that on non-Windows a backslash is part of the filename, is
+	// in posixPaths.spec.ts and cannot be tested here. Injecting `isWindows: false`
+	// is not enough, because on a Windows host `ignore` rewrites the backslashes of
+	// every path handed to it before any pattern is tested (`checkPath.convert`,
+	// installed process-wide at import time), so the candidate arrives as
+	// `docs/notes.md` and matches whatever we ask for. Only forcing the platform
+	// keeps that conversion uninstalled.
 
 	it("honours an escaped glob character in a pattern", () => {
 		expect(matches("docs/a*b.md", ["docs/a\\*b.md"])).toBe(true)
