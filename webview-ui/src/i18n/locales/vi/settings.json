@@ -1131,6 +1131,10 @@
 		"configureModes": "Tính khả dụng của chế độ",
 		"modeAny": "Bất kỳ chế độ nào",
 		"modeCount": "{{count}} chế độ",
+		"diagnostics": {
+			"title": "Không thể tải một số skill",
+			"description": "Sửa frontmatter YAML trong các tệp SKILL.md được liệt kê, sau đó mở lại hoặc làm mới trang này."
+		},
 		"deleteDialog": {
 			"title": "Xóa Skill",
 			"description": "Bạn có chắc chắn muốn xóa skill \"{{name}}\" không? Hành động này không thể hoàn tác.",

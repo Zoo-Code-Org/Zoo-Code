@@ -1131,6 +1131,10 @@
 		"configureModes": "Modebeschikbaarheid",
 		"modeAny": "Elke modus",
 		"modeCount": "{{count}} modus",
+		"diagnostics": {
+			"title": "Sommige skills konden niet worden geladen",
+			"description": "Corrigeer de YAML-frontmatter in de opgesomde SKILL.md-bestanden en open daarna deze pagina opnieuw of vernieuw deze."
+		},
 		"deleteDialog": {
 			"title": "Skill verwijderen",
 			"description": "Weet u zeker dat u de skill \"{{name}}\" wilt verwijderen? Deze actie kan niet ongedaan worden gemaakt.",

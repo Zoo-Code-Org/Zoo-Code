@@ -1131,6 +1131,10 @@
 		"configureModes": "Mod Kullanılabilirliği",
 		"modeAny": "Herhangi bir mod",
 		"modeCount": "{{count}} mod",
+		"diagnostics": {
+			"title": "Bazı skill'ler yüklenemedi",
+			"description": "Listelenen SKILL.md dosyalarındaki YAML frontmatter'ını düzeltin, ardından bu sayfayı yeniden açın veya yenileyin."
+		},
 		"deleteDialog": {
 			"title": "Beceriyi Sil",
 			"description": "\"{{name}}\" becerisini silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",

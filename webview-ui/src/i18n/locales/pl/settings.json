@@ -1131,6 +1131,10 @@
 		"configureModes": "Dostępność trybu",
 		"modeAny": "Dowolny tryb",
 		"modeCount": "{{count}} tryby",
+		"diagnostics": {
+			"title": "Nie udało się załadować niektórych skills",
+			"description": "Popraw frontmatter YAML w wymienionych plikach SKILL.md, a następnie otwórz ponownie lub odśwież tę stronę."
+		},
 		"deleteDialog": {
 			"title": "Usuń Umiejętność",
 			"description": "Czy na pewno chcesz usunąć umiejętność \"{{name}}\"? Tej akcji nie można cofnąć.",

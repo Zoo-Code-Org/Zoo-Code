@@ -1131,6 +1131,10 @@
 		"configureModes": "Disponibilité du mode",
 		"modeAny": "N'importe quel mode",
 		"modeCount": "{{count}} modes",
+		"diagnostics": {
+			"title": "Certaines skills n'ont pas pu être chargées",
+			"description": "Corrigez le frontmatter YAML des fichiers SKILL.md listés, puis rouvrez ou actualisez cette page."
+		},
 		"deleteDialog": {
 			"title": "Supprimer la Skill",
 			"description": "Êtes-vous sûr de vouloir supprimer la skill \"{{name}}\" ? Cette action ne peut pas être annulée.",

@@ -1503,6 +1503,61 @@ Instructions`)
 			expect(parsed.data.description).toBe("yes")
 		})
 
+		it("should rewrite modeSlugs via gray-matter serialization without reflowing the description", async () => {
+			const skillDir = p(globalSkillsDir, "modes-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+			const description = 'Use when implementing features. Triggers on: "TDD", "test-driven development"'
+			const originalContent = `---
+name: modes-skill
+description: '${description}'
+---
+
+# Modes Skill
+
+## Instructions
+
+Body here.`
+
+			// Initial discovery so the skill is registered.
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["modes-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue(originalContent)
+			mockWriteFile.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getAllSkills()).toHaveLength(1)
+
+			// Apply a mode restriction; the file is rewritten with the new slugs.
+			await skillsManager.updateSkillModes("modes-skill", "global", ["code"])
+
+			expect(mockWriteFile).toHaveBeenCalledTimes(1)
+			const rewritten = String(mockWriteFile.mock.calls[0][1])
+			const parsed = matter(rewritten)
+			// The description survives the round-trip exactly and stays quoted.
+			expect(parsed.data.description).toBe(description)
+			expect(rewritten).toContain(`description: '${description}'`)
+			// The new modeSlugs were written and the body is preserved.
+			expect(parsed.data.modeSlugs).toEqual(["code"])
+			expect(rewritten).toContain("Body here.")
+			// lineWidth: -1 keeps the value on a single line (no folded block scalar).
+			expect(rewritten).not.toContain("> ")
+
+			// Clearing the restriction removes modeSlugs from the frontmatter.
+			await skillsManager.updateSkillModes("modes-skill", "global", [])
+
+			const rewritten2 = String(mockWriteFile.mock.calls[1][1])
+			const parsed2 = matter(rewritten2)
+			expect(parsed2.data.modeSlugs).toBeUndefined()
+			expect(parsed2.data.description).toBe(description)
+		})
+
 		it("should throw error for invalid skill name", async () => {
 			await expect(skillsManager.createSkill("Invalid-Name", "global", "Description")).rejects.toThrow(
 				"Skill name must be lowercase letters/numbers/hyphens only",

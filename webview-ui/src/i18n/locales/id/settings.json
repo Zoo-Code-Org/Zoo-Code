@@ -1131,6 +1131,10 @@
 		"configureModes": "Ketersediaan mode",
 		"modeAny": "Mode apa saja",
 		"modeCount": "{{count}} mode",
+		"diagnostics": {
+			"title": "Beberapa skill tidak dapat dimuat",
+			"description": "Perbaiki frontmatter YAML di file SKILL.md yang tercantum, lalu buka ulang atau muat ulang halaman ini."
+		},
 		"deleteDialog": {
 			"title": "Hapus Skill",
 			"description": "Apakah Anda yakin ingin menghapus skill \"{{name}}\"? Tindakan ini tidak dapat dibatalkan.",

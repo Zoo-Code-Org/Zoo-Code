@@ -1131,6 +1131,10 @@
 		"configureModes": "Disponibilitat del mode",
 		"modeAny": "Qualsevol mode",
 		"modeCount": "{{count}} modes",
+		"diagnostics": {
+			"title": "No s'han pogut carregar algunes skills",
+			"description": "Corrigeu el frontmatter YAML dels fitxers SKILL.md esmentats i, a continuació, torneu a obrir o actualitzar aquesta pàgina."
+		},
 		"deleteDialog": {
 			"title": "Eliminar Skill",
 			"description": "Estàs segur que vols eliminar la skill \"{{name}}\"? Aquesta acció no es pot desfer.",
