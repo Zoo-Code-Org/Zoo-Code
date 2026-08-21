@@ -1,4 +1,10 @@
-import { mergeAbortSignalAndTimeout, mergeAbortSignals, throwIfAborted } from "../abort-signal"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	mergeAbortSignals,
+	throwIfAborted,
+} from "../abort-signal"
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {
@@ -124,6 +130,59 @@ describe("abort-signal utilities", () => {
 
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("AbortError")
+		})
+	})
+
+	describe("isRequestAborted", () => {
+		it("returns true when the caller signal is aborted", () => {
+			const controller = new AbortController()
+			controller.abort()
+
+			expect(isRequestAborted(new Error("boom"), controller.signal)).toBe(true)
+			expect(isRequestAborted(undefined, controller.signal)).toBe(true)
+		})
+
+		it("returns true for a native AbortError or the OpenAI SDK APIUserAbortError", () => {
+			const native = new Error("This operation was aborted")
+			native.name = "AbortError"
+			expect(isRequestAborted(native)).toBe(true)
+
+			const sdk = new Error("whatever")
+			sdk.name = "APIUserAbortError"
+			expect(isRequestAborted(sdk)).toBe(true)
+		})
+
+		it("matches the OpenAI SDK abort message exactly, not as a substring", () => {
+			expect(isRequestAborted(new Error("Request was aborted."))).toBe(true)
+			expect(isRequestAborted(new Error("Request was aborted"))).toBe(false)
+			expect(isRequestAborted(new Error("Request was aborted. Please retry"))).toBe(false)
+		})
+
+		it("returns false for unrelated errors, nullish errors, and live signals", () => {
+			expect(isRequestAborted(new Error("the abort failed"))).toBe(false)
+			expect(isRequestAborted(undefined)).toBe(false)
+			expect(isRequestAborted(null)).toBe(false)
+
+			const controller = new AbortController()
+			expect(isRequestAborted(new Error("boom"), controller.signal)).toBe(false)
+		})
+	})
+
+	describe("createAbortError", () => {
+		it("builds an error satisfying the Task.ts abort contract", () => {
+			const error = createAbortError("LM Studio")
+
+			expect(error).toBeInstanceOf(Error)
+			expect(error.name).toBe("AbortError")
+			expect(error.message).toBe("The LM Studio request was aborted")
+		})
+
+		it("interpolates the provider name", () => {
+			expect(createAbortError("Qwen Code").message).toBe("The Qwen Code request was aborted")
+		})
+
+		it("returns a fresh error on each call", () => {
+			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})
 	})
 })
