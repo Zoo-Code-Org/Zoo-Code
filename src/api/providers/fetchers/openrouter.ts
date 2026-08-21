@@ -181,6 +181,40 @@ export async function getOpenRouterModelEndpoints(
 }
 
 /**
+ * Moonshot K3 model ids hosted on OpenRouter.
+ *
+ * OpenRouter reports `max_completion_tokens: null` for these models, so the
+ * generic 0.2 context-window fallback would fabricate an inflated max_tokens
+ * value (e.g. 209,716 for a 1M context window). K3 also always reasons with a
+ * low/high/max effort ladder (default "high") and ignores temperature
+ * (fixed at 1.0), so its wire-safe capability flags are profiled here instead
+ * of being derived from the catalogue.
+ */
+export const OPENROUTER_MOONSHOT_K3_MODELS = new Set<string>(["moonshotai/kimi-k3", "moonshotai/kimi-latest"])
+
+const MOONSHOT_K3_OPENROUTER_PROFILE: Partial<ModelInfo> = {
+	maxTokens: 32_768,
+	supportsReasoningEffort: ["low", "high", "max"],
+	reasoningEffort: "high",
+	supportsTemperature: false,
+}
+
+/**
+ * Apply the Moonshot K3 profile to an OpenRouter model record.
+ *
+ * Exported so OpenRouterHandler can re-apply the profile at consumption time:
+ * parsed records are persisted in the model cache, and records cached before
+ * this profile existed still carry the fabricated max_tokens value and a
+ * boolean supportsReasoningEffort with no default effort.
+ */
+export const applyOpenRouterMoonshotK3Profile = (modelId: string, modelInfo: ModelInfo): ModelInfo => {
+	if (!OPENROUTER_MOONSHOT_K3_MODELS.has(modelId)) {
+		return modelInfo
+	}
+	return { ...modelInfo, ...MOONSHOT_K3_OPENROUTER_PROFILE }
+}
+
+/**
  * parseOpenRouterModel
  */
 
@@ -301,5 +335,7 @@ export const parseOpenRouterModel = ({
 		modelInfo.maxTokens = 32768
 	}
 
-	return modelInfo
+	// Profile Moonshot K3 ids so fetched (and later cached) records carry the
+	// correct max tokens, reasoning effort ladder, and temperature handling.
+	return applyOpenRouterMoonshotK3Profile(id, modelInfo)
 }

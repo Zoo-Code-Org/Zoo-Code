@@ -705,4 +705,31 @@ describe("shouldUseReasoningEffort", () => {
 		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "none" as any } })).toBe(true)
 		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: "minimal" as any } })).toBe(true)
 	})
+
+	test("array capability with model default effort and no settings -> true when default is in the ladder", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			reasoningEffort: "high",
+		}
+
+		expect(shouldUseReasoningEffort({ model })).toBe(true)
+		expect(shouldUseReasoningEffort({ model, settings: {} })).toBe(true)
+		expect(shouldUseReasoningEffort({ model, settings: { reasoningEffort: undefined } })).toBe(true)
+	})
+
+	test("array capability with model default effort returns false when enableReasoningEffort is false", () => {
+		const model: ModelInfo = {
+			contextWindow: 1_000_000,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "high", "max"],
+			reasoningEffort: "high",
+		}
+
+		expect(shouldUseReasoningEffort({ model, settings: { enableReasoningEffort: false } })).toBe(false)
+		expect(
+			shouldUseReasoningEffort({ model, settings: { enableReasoningEffort: false, reasoningEffort: "high" } }),
+		).toBe(false)
+	})
 })
