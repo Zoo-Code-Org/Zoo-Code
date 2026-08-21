@@ -58,6 +58,12 @@ export default defineConfig({
 			],
 			resolve: {
 				alias: {
+					"@roo-code/types": path.resolve(dirname, "./playwright/roo-code-types.ts"),
+					"@/context/ExtensionStateContext": path.resolve(dirname, "./playwright/ExtensionStateContext.tsx"),
+					"@src/context/ExtensionStateContext": path.resolve(
+						dirname,
+						"./playwright/ExtensionStateContext.tsx",
+					),
 					"@src/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
 					"@": path.resolve(dirname, "./src"),
 					"@src": path.resolve(dirname, "./src"),
