@@ -87,5 +87,7 @@ jobs:
               with:
                   path: apps/vscode-e2e/.vscode-test/
                   key: vscode-theme-fixtures-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}-v1
+            - name: Test theme fixture serialization
+              run: pnpm --filter @roo-code/vscode-e2e themes:test
             - name: Check generated VS Code theme fixtures
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e themes:check

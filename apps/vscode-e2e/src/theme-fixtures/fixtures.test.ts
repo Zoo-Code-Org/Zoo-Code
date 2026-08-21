@@ -6,6 +6,20 @@ import type { WebviewThemeFixture } from "@roo-code/types"
 import { themeFixtureDefinitions } from "./definitions"
 import { createSerializedFixtures, findDriftedFixtures, serializeThemeFixture } from "./fixtures"
 
+const validVariables = Object.fromEntries(
+	Array.from({ length: 100 }, (_, index) => [`--vscode-test-${index}`, "#000000"]),
+)
+const validFixture: WebviewThemeFixture = {
+	themeId: "Default Dark Modern",
+	bodyClass: "vscode-dark",
+	variables: {
+		...validVariables,
+		"--vscode-foreground": "#cccccc",
+		"--vscode-editor-background": "#1f1f1f",
+		"--vscode-button-foreground": "#ffffff",
+	},
+}
+
 test("serializeThemeFixture sorts variables and emits stable metadata", () => {
 	const fixture: WebviewThemeFixture = {
 		themeId: "Default Dark Modern",
@@ -43,9 +57,9 @@ test("findDriftedFixtures reports missing and changed files in sorted order", ()
 
 test("createSerializedFixtures rejects incomplete captures", () => {
 	const fixture: WebviewThemeFixture = {
-		themeId: "Default Dark Modern",
-		bodyClass: "vscode-dark",
+		...validFixture,
 		variables: {
+			...validVariables,
 			"--vscode-foreground": "#cccccc",
 			"--vscode-editor-background": "#1f1f1f",
 		},
@@ -54,5 +68,27 @@ test("createSerializedFixtures rejects incomplete captures", () => {
 	assert.throws(
 		() => createSerializedFixtures(new Map([["dark", fixture]]), "1.100.0", [themeFixtureDefinitions[0]]),
 		/--vscode-button-foreground/,
+	)
+})
+
+test("createSerializedFixtures rejects an empty capture", () => {
+	assert.throws(
+		() =>
+			createSerializedFixtures(new Map([["dark", { ...validFixture, variables: {} }]]), "1.100.0", [
+				themeFixtureDefinitions[0],
+			]),
+		/fewer than 100/,
+	)
+})
+
+test("createSerializedFixtures rejects the wrong theme identity", () => {
+	assert.throws(
+		() =>
+			createSerializedFixtures(
+				new Map([["dark", { ...validFixture, themeId: "Default Light Modern" }]]),
+				"1.100.0",
+				[themeFixtureDefinitions[0]],
+			),
+		/Expected Default Dark Modern/,
 	)
 })
