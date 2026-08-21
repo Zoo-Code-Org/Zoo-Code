@@ -39,6 +39,32 @@ describe("ExperimentalSettings", () => {
 		expect(screen.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name")).toBeInTheDocument()
 	})
 
+	it("leaves the dynamic thinking effort toggle unchecked when the value is false or omitted", () => {
+		const getCheckbox = () => {
+			const label = screen.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")
+			return label?.querySelector("input[type='checkbox']")
+		}
+
+		// Explicit false
+		let result = render(
+			<ExperimentalSettings
+				{...defaultProps}
+				experiments={{ ...experimentDefault, dynamicThinkingEffort: false }}
+			/>,
+		)
+		expect(getCheckbox()).not.toBeNull()
+		expect(getCheckbox()).not.toBeChecked()
+		result.unmount()
+
+		// Omitted (absent from the persisted config)
+		const omitted: Record<string, boolean> = { ...experimentDefault }
+		delete omitted.dynamicThinkingEffort
+		result = render(<ExperimentalSettings {...defaultProps} experiments={omitted} />)
+		expect(getCheckbox()).not.toBeNull()
+		expect(getCheckbox()).not.toBeChecked()
+		result.unmount()
+	})
+
 	it("binds the dynamic thinking effort toggle to setExperimentEnabled", () => {
 		const setExperimentEnabled = vi.fn()
 		render(
@@ -58,5 +84,26 @@ describe("ExperimentalSettings", () => {
 
 		expect(setExperimentEnabled).toHaveBeenCalledTimes(1)
 		expect(setExperimentEnabled).toHaveBeenCalledWith("dynamicThinkingEffort", false)
+	})
+
+	it("toggles the dynamic thinking effort on when clicked from the unchecked state", () => {
+		const setExperimentEnabled = vi.fn()
+		render(
+			<ExperimentalSettings
+				{...defaultProps}
+				experiments={{ ...experimentDefault, dynamicThinkingEffort: false }}
+				setExperimentEnabled={setExperimentEnabled}
+			/>,
+		)
+
+		const label = screen.getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")
+		const checkbox = label?.querySelector("input[type='checkbox']")
+		expect(checkbox).not.toBeNull()
+		expect(checkbox).not.toBeChecked()
+
+		fireEvent.click(checkbox!)
+
+		expect(setExperimentEnabled).toHaveBeenCalledTimes(1)
+		expect(setExperimentEnabled).toHaveBeenCalledWith("dynamicThinkingEffort", true)
 	})
 })

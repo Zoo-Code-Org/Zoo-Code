@@ -88,5 +88,9 @@ describe("experiments", () => {
 		it("returns true when enabled", () => {
 			expect(Experiments.isEnabled({ dynamicThinkingEffort: true }, "dynamicThinkingEffort")).toBe(true)
 		})
+
+		it("returns false when explicitly disabled", () => {
+			expect(Experiments.isEnabled({ dynamicThinkingEffort: false }, "dynamicThinkingEffort")).toBe(false)
+		})
 	})
 })
