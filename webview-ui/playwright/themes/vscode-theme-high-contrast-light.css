@@ -124,6 +124,8 @@
 	--vscode-editor-findMatchHighlightBorder: #006bbd;
 	--vscode-editor-findRangeHighlightBorder: rgba(0, 107, 189, 0.4);
 	--vscode-editor-focusedStackFrameHighlightBackground: rgba(206, 231, 206, 0.45);
+	--vscode-editor-font-size: 14px;
+	--vscode-editor-font-weight: normal;
 	--vscode-editor-foreground: #292929;
 	--vscode-editor-inactiveSelectionBackground: rgba(15, 74, 133, 0.5);
 	--vscode-editor-inlineValuesBackground: rgba(255, 200, 0, 0.2);
@@ -287,6 +289,8 @@
 	--vscode-extensionIcon-starForeground: #0f4a85;
 	--vscode-extensionIcon-verifiedForeground: #0f4a85;
 	--vscode-focusBorder: #006bbd;
+	--vscode-font-size: 13px;
+	--vscode-font-weight: normal;
 	--vscode-foreground: #292929;
 	--vscode-gauge-background: #0f4a85;
 	--vscode-gauge-border: #0f4a85;

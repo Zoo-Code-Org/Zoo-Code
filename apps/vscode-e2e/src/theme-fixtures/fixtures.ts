@@ -4,14 +4,7 @@ import { getThemeFixtureFileName, type ThemeFixtureDefinition } from "./definiti
 
 const requiredVariables = ["--vscode-foreground", "--vscode-editor-background", "--vscode-button-foreground"]
 const minimumVariableCount = 100
-const environmentVariables = new Set([
-	"--vscode-font-family",
-	"--vscode-font-size",
-	"--vscode-font-weight",
-	"--vscode-editor-font-family",
-	"--vscode-editor-font-size",
-	"--vscode-editor-font-weight",
-])
+const environmentVariables = new Set(["--vscode-font-family", "--vscode-editor-font-family"])
 
 export function validateThemeFixture(theme: ThemeFixtureDefinition, fixture: WebviewThemeFixture): void {
 	if (fixture.themeId !== theme.themeId) {

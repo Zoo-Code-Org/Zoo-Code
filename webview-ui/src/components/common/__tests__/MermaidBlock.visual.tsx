@@ -18,7 +18,9 @@ for (const theme of visualThemes) {
 		await applyVisualTheme(page, theme)
 
 		const component = await mount(<MermaidBlock code={diagram} />)
-		await expect(component.locator("svg")).toBeVisible({ timeout: 10_000 })
+		const svg = component.locator("svg")
+		await expect(svg).toBeVisible({ timeout: 10_000 })
+		await expect(svg.locator("..")).toHaveCSS("opacity", "1")
 
 		await expectContrast(component.locator(".sectionTitle0"), {
 			background: component.locator(".section0"),
