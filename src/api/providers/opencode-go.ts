@@ -32,17 +32,7 @@ import {
 	convertOpenAIToolsToAnthropic,
 	convertOpenAIToolChoiceToAnthropic,
 } from "../../core/prompts/tools/native-tools/converters"
-
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (the message ends in "aborted", which is how task-level abort detection
- * recognizes cancelled completions).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
-}
+import { createAbortError } from "./utils/abort-signal"
 
 /**
  * API handler for the Opencode "Go" subscription plan.
@@ -288,7 +278,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			// request as a DOM-standard AbortError rather than leaking the
 			// raw SDK abort error.
 			if (controller.signal.aborted) {
-				throw createAbortError("Opencode Go request aborted")
+				throw createAbortError("Opencode Go")
 			}
 			throw error
 		} finally {
@@ -376,7 +366,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				error instanceof AnthropicAbortError ||
 				(error instanceof Error && error.name === "AbortError")
 			) {
-				throw createAbortError("Opencode Go request aborted")
+				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
@@ -606,7 +596,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					error instanceof AnthropicTimeoutError ||
 					(error instanceof Error && error.name === "AbortError")
 				) {
-					throw createAbortError("Opencode Go request aborted")
+					throw createAbortError("Opencode Go")
 				}
 				if (error instanceof Error) {
 					throw new Error(`Opencode Go completion error: ${error.message}`)
@@ -661,7 +651,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				error instanceof APIConnectionTimeoutError ||
 				(error instanceof Error && error.name === "AbortError")
 			) {
-				throw createAbortError("Opencode Go request aborted")
+				throw createAbortError("Opencode Go")
 			}
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)

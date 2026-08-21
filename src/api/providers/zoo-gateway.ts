@@ -22,17 +22,7 @@ import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
-
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (the message ends in "aborted", which is how task-level abort detection
- * recognizes cancelled completions).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
-}
+import { createAbortError } from "./utils/abort-signal"
 
 function getApiErrorStatus(error: unknown): number | undefined {
 	if (typeof error === "object" && error !== null && "status" in error) {
@@ -301,7 +291,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			// request as a DOM-standard AbortError before the gateway error
 			// surfacing/telemetry path.
 			if (controller.signal.aborted) {
-				throw createAbortError("Zoo Gateway request aborted")
+				throw createAbortError("Zoo Gateway")
 			}
 			try {
 				await surfaceGatewayApiError(error)
@@ -361,7 +351,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				error instanceof APIConnectionTimeoutError ||
 				(error instanceof Error && error.name === "AbortError")
 			) {
-				throw createAbortError("Zoo Gateway request aborted")
+				throw createAbortError("Zoo Gateway")
 			}
 			try {
 				await surfaceGatewayApiError(error)

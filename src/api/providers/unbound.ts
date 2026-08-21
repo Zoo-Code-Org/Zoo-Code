@@ -23,18 +23,8 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
+import { createAbortError } from "./utils/abort-signal"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
-
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (the message ends in "aborted", which is how task-level abort detection
- * recognizes cancelled completions).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
-}
 
 // Unbound usage includes extra fields for Anthropic cache tokens.
 interface UnboundUsage extends OpenAI.CompletionUsage {
@@ -201,7 +191,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 					error instanceof APIUserAbortError ||
 					(error instanceof Error && error.name === "AbortError")
 				) {
-					throw createAbortError("Unbound request aborted")
+					throw createAbortError("Unbound")
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -284,7 +274,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 				error instanceof APIConnectionTimeoutError ||
 				(error instanceof Error && error.name === "AbortError")
 			) {
-				throw createAbortError("Unbound request aborted")
+				throw createAbortError("Unbound")
 			}
 			throw handleOpenAIError(error, this.providerName)
 		}

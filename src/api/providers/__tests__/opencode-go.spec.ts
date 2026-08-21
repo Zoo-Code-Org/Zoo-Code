@@ -1169,7 +1169,7 @@ describe("OpencodeGoHandler", () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toMatchObject({
 				name: "AbortError",
-				message: "Opencode Go request aborted",
+				message: "The Opencode Go request was aborted",
 			})
 		})
 	})

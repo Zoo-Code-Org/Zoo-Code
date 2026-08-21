@@ -425,7 +425,7 @@ describe("UnboundHandler", () => {
 			// instead of the wrapped completion error.
 			await expect(collectStream(stream)).rejects.toMatchObject({
 				name: "AbortError",
-				message: "Unbound request aborted",
+				message: "The Unbound request was aborted",
 			})
 			expect(requestError).toMatchObject({ name: "AbortError" })
 		})

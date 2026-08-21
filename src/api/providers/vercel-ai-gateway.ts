@@ -17,17 +17,7 @@ import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
-
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (the message ends in "aborted", which is how task-level abort detection
- * recognizes cancelled completions).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
-}
+import { createAbortError } from "./utils/abort-signal"
 
 // Extend OpenAI's CompletionUsage to include Vercel AI Gateway specific fields
 interface VercelAiGatewayUsage extends OpenAI.CompletionUsage {
@@ -152,7 +142,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 			// request as a DOM-standard AbortError rather than leaking the
 			// raw SDK abort error.
 			if (controller.signal.aborted) {
-				throw createAbortError("Vercel AI Gateway request aborted")
+				throw createAbortError("Vercel AI Gateway")
 			}
 			throw error
 		} finally {
@@ -205,7 +195,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 				error instanceof APIConnectionTimeoutError ||
 				(error instanceof Error && error.name === "AbortError")
 			) {
-				throw createAbortError("Vercel AI Gateway request aborted")
+				throw createAbortError("Vercel AI Gateway")
 			}
 			if (error instanceof Error) {
 				throw new Error(`Vercel AI Gateway completion error: ${error.message}`)
