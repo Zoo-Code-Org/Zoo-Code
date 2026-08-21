@@ -65,12 +65,32 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} selected radio indicator`,
 		})
-		const sliderThumb = component.getByRole("slider")
+		const sliderThumb = component.locator('[data-slot="slider-thumb"]')
+		const sliderTrack = component.locator('[data-slot="slider-track"]')
+		const sliderRange = component.locator('[data-slot="slider-range"]')
 		await expectContrast(sliderThumb, {
 			background: gallery,
 			foregroundProperty: "background-color",
 			minimum: 3,
 			label: `${theme.name} slider thumb`,
+		})
+		await expectContrast(sliderRange, {
+			background: sliderTrack,
+			foregroundProperty: "background-color",
+			minimum: 3,
+			label: `${theme.name} slider range`,
+		})
+		await expectContrast(sliderThumb, {
+			background: sliderRange,
+			foregroundProperty: "border-color",
+			minimum: 3,
+			label: `${theme.name} slider thumb inner edge`,
+		})
+		await expectContrast(sliderThumb, {
+			background: sliderTrack,
+			foregroundProperty: "outline-color",
+			minimum: 3,
+			label: `${theme.name} slider thumb outer edge`,
 		})
 		const progressIndicator = component.getByRole("progressbar").locator("div")
 		await expectContrast(progressIndicator, {
@@ -95,16 +115,34 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} outline button boundary`,
 		})
+		await expect(
+			expectContrast(component.getByTestId("unsupported-gradient"), {
+				label: `${theme.name} unsupported gradient`,
+			}),
+		).rejects.toThrow("Unsupported background image")
 
 		await expect(component).toHaveScreenshot(`accessibility-gallery-resting-${theme.name}.png`)
 
-		await input.focus()
+		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+		for (
+			let index = 0;
+			index < 10 && !(await input.evaluate((element) => element === document.activeElement));
+			index++
+		) {
+			await page.keyboard.press("Tab")
+		}
 		await expect(input).toBeFocused()
 		await expectContrast(input, {
 			background: gallery,
 			foregroundProperty: "border-color",
 			minimum: 3,
 			label: `${theme.name} input focus indicator`,
+		})
+		await expectContrast(input, {
+			background: input,
+			foregroundProperty: "border-color",
+			minimum: 3,
+			label: `${theme.name} input focus indicator against fill`,
 		})
 		await expect(component).toHaveScreenshot(`accessibility-gallery-focus-${theme.name}.png`)
 	})

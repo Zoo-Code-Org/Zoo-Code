@@ -1,4 +1,4 @@
-import { composite, contrastRatio, parseCssColor } from "../../../../playwright/contrast"
+import { composite, contrastRatio, parseCssColor, requiredTextContrast } from "../../../../playwright/contrast"
 
 describe("contrast utilities", () => {
 	it("parses opaque and translucent browser colors", () => {
@@ -26,6 +26,13 @@ describe("contrast utilities", () => {
 			4.48,
 			2,
 		)
+	})
+
+	it("uses exact WCAG large-text thresholds", () => {
+		expect(requiredTextContrast(24, 400)).toBe(3)
+		expect(requiredTextContrast(23.99, 400)).toBe(4.5)
+		expect(requiredTextContrast(56 / 3, 700)).toBe(3)
+		expect(requiredTextContrast(18.66, 700)).toBe(4.5)
 	})
 
 	it("rejects unsupported color formats", () => {

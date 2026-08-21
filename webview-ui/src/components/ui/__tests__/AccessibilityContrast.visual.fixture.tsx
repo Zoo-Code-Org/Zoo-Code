@@ -15,6 +15,11 @@ export function AccessibilityContrastGallery() {
 		<main
 			data-testid="contrast-gallery"
 			className="w-[488px] space-y-4 rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
+			<div
+				data-testid="unsupported-gradient"
+				className="absolute -left-[9999px] h-px w-px"
+				style={{ backgroundImage: "linear-gradient(red, blue)" }}
+			/>
 			<section aria-labelledby="chat-preview-title" className="space-y-3">
 				<div className="flex items-start justify-between gap-3">
 					<div>

@@ -76,6 +76,10 @@ export function contrastRatio(first: RgbaColor, second: RgbaColor): number {
 	return (lighter + 0.05) / (darker + 0.05)
 }
 
+export function requiredTextContrast(fontSize: number, fontWeight: number): number {
+	return fontSize >= 24 || (fontSize >= 56 / 3 && fontWeight >= 700) ? 3 : 4.5
+}
+
 export async function expectContrast(foreground: Locator, options: ContrastOptions) {
 	const backgroundToken = options.background ? `contrast-${Date.now()}-${Math.random()}` : null
 	if (options.background && backgroundToken) {
@@ -84,47 +88,85 @@ export async function expectContrast(foreground: Locator, options: ContrastOptio
 			backgroundToken,
 		)
 	}
-	const styles = await foreground.evaluate(
-		(element, { backgroundToken, foregroundProperty, backgroundProperty }): ContrastStyles => {
-			const styleValue = (styles: CSSStyleDeclaration, property: ContrastProperty) => {
-				if (property === "fill" || property === "stroke") return styles[property]
-				return styles.getPropertyValue(property)
-			}
-			const foregroundStyles = getComputedStyle(element)
-			const backgroundLayers: Array<{ color: string; opacity: number }> = []
-			let current: Element | null = backgroundToken
-				? document.querySelector(`[data-contrast-background="${CSS.escape(backgroundToken)}"]`)
-				: element
-			let first = true
-			while (current) {
-				const styles = getComputedStyle(current)
-				if (styles.backgroundImage !== "none") {
-					throw new Error(`Unsupported background image on ${current.tagName.toLowerCase()}`)
+	let styles: ContrastStyles
+	try {
+		styles = await foreground.evaluate(
+			(element, { backgroundToken, foregroundProperty, backgroundProperty }): ContrastStyles => {
+				const assertSupported = (current: Element, styles: CSSStyleDeclaration, allowLeafOpacity: boolean) => {
+					if (styles.backgroundImage !== "none")
+						throw new Error(`Unsupported background image on ${current.tagName.toLowerCase()}`)
+					if (styles.filter !== "none")
+						throw new Error(`Unsupported filter on ${current.tagName.toLowerCase()}`)
+					if (styles.backdropFilter !== "none")
+						throw new Error(`Unsupported backdrop filter on ${current.tagName.toLowerCase()}`)
+					if (styles.mixBlendMode !== "normal" || styles.backgroundBlendMode !== "normal") {
+						throw new Error(`Unsupported blend mode on ${current.tagName.toLowerCase()}`)
+					}
+					if (styles.maskImage !== "none")
+						throw new Error(`Unsupported mask on ${current.tagName.toLowerCase()}`)
+					if (!allowLeafOpacity && Number(styles.opacity) !== 1) {
+						throw new Error(`Unsupported group opacity on ${current.tagName.toLowerCase()}`)
+					}
 				}
-				const color = first ? styleValue(styles, backgroundProperty) : styles.backgroundColor
-				const propertyOpacity = first && backgroundProperty === "fill" ? Number(styles.fillOpacity) : 1
-				backgroundLayers.push({ color, opacity: Number(styles.opacity) * propertyOpacity })
-				current = current.parentElement
-				first = false
-			}
-			return {
-				foreground: styleValue(foregroundStyles, foregroundProperty),
-				foregroundOpacity:
-					Number(foregroundStyles.opacity) *
-					(foregroundProperty === "fill" ? Number(foregroundStyles.fillOpacity) : 1),
-				backgroundLayers,
-				fontSize: Number.parseFloat(foregroundStyles.fontSize),
-				fontWeight: Number.parseInt(foregroundStyles.fontWeight, 10) || 400,
-			}
-		},
-		{
-			backgroundToken,
-			foregroundProperty: options.foregroundProperty ?? "color",
-			backgroundProperty: options.backgroundProperty ?? "background-color",
-		},
-	)
-	if (options.background && backgroundToken) {
-		await options.background.evaluate((element) => element.removeAttribute("data-contrast-background"))
+				const styleValue = (styles: CSSStyleDeclaration, property: ContrastProperty) => {
+					if (property === "fill" || property === "stroke") return styles[property]
+					return styles.getPropertyValue(property)
+				}
+				const foregroundStyles = getComputedStyle(element)
+				assertSupported(
+					element,
+					foregroundStyles,
+					foregroundStyles.backgroundColor.endsWith(", 0)") ||
+						foregroundStyles.backgroundColor.endsWith("/ 0)"),
+				)
+				let foregroundAncestor = element.parentElement
+				while (foregroundAncestor) {
+					assertSupported(foregroundAncestor, getComputedStyle(foregroundAncestor), false)
+					foregroundAncestor = foregroundAncestor.parentElement
+				}
+				const backgroundLayers: Array<{ color: string; opacity: number }> = []
+				let current: Element | null = backgroundToken
+					? document.querySelector(`[data-contrast-background="${CSS.escape(backgroundToken)}"]`)
+					: element
+				let first = true
+				while (current) {
+					const styles = getComputedStyle(current)
+					assertSupported(current, styles, first && current.childElementCount === 0)
+					const color = first ? styleValue(styles, backgroundProperty) : styles.backgroundColor
+					const propertyOpacity =
+						first && backgroundProperty === "fill"
+							? Number(styles.fillOpacity)
+							: first && backgroundProperty === "stroke"
+								? Number(styles.strokeOpacity)
+								: 1
+					backgroundLayers.push({ color, opacity: Number(styles.opacity) * propertyOpacity })
+					current = current.parentElement
+					first = false
+				}
+				return {
+					foreground: styleValue(foregroundStyles, foregroundProperty),
+					foregroundOpacity:
+						Number(foregroundStyles.opacity) *
+						(foregroundProperty === "fill"
+							? Number(foregroundStyles.fillOpacity)
+							: foregroundProperty === "stroke"
+								? Number(foregroundStyles.strokeOpacity)
+								: 1),
+					backgroundLayers,
+					fontSize: Number.parseFloat(foregroundStyles.fontSize),
+					fontWeight: Number.parseInt(foregroundStyles.fontWeight, 10) || 400,
+				}
+			},
+			{
+				backgroundToken,
+				foregroundProperty: options.foregroundProperty ?? "color",
+				backgroundProperty: options.backgroundProperty ?? "background-color",
+			},
+		)
+	} finally {
+		if (options.background && backgroundToken) {
+			await options.background.evaluate((element) => element.removeAttribute("data-contrast-background"))
+		}
 	}
 
 	let effectiveBackground: RgbaColor = { r: 0, g: 0, b: 0, a: 0 }
@@ -144,9 +186,7 @@ export async function expectContrast(foreground: Locator, options: ContrastOptio
 	const ratio = contrastRatio(effectiveForeground, effectiveBackground)
 	const minimum =
 		options.minimum === "text" || options.minimum === undefined
-			? styles.fontSize >= 24 || (styles.fontSize >= 18.66 && styles.fontWeight >= 700)
-				? 3
-				: 4.5
+			? requiredTextContrast(styles.fontSize, styles.fontWeight)
 			: options.minimum
 	const diagnostic = `${options.label}: ${ratio.toFixed(2)}:1 (required ${minimum}:1; foreground ${styles.foreground}; background rgba(${effectiveBackground.r.toFixed(0)}, ${effectiveBackground.g.toFixed(0)}, ${effectiveBackground.b.toFixed(0)}, ${effectiveBackground.a.toFixed(2)}))`
 	expect(ratio, diagnostic).toBeGreaterThanOrEqual(minimum)
