@@ -14,6 +14,18 @@ export const telemetrySettingsSchema = z.enum(telemetrySettings)
 export type TelemetrySetting = z.infer<typeof telemetrySettingsSchema>
 
 /**
+ * Whether telemetry should be captured for this install.
+ *
+ * Telemetry is on by default (disclosed opt-out): "unset" (no choice made yet) and
+ * "enabled" both mean telemetry may be captured. Only an explicit "disabled" opts out.
+ * The consent banner's dismiss/close action never writes a setting, so it stays neutral --
+ * it just leaves the default in effect rather than recording an affirmative choice either way.
+ */
+export function isTelemetryOptedIn(telemetrySetting: TelemetrySetting | undefined): boolean {
+	return telemetrySetting !== "disabled"
+}
+
+/**
  * TelemetryEventName
  */
 

@@ -1025,8 +1025,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Anonim hata ve kullanım raporlamaya izin ver",
-			"description": "Anonim kullanım verileri ve hata raporları göndererek Zoo Code'u geliştirmeye yardım edin. Bu telemetri kod, prompt veya kişisel bilgi toplamaz. Daha fazla ayrıntı için <privacyLink>gizlilik politikamıza</privacyLink> bakın. Bunu istediğiniz zaman kapatabilirsiniz."
+			"label": "Hata ve kullanım raporlamasına izin ver",
+			"description": "Adınız veya hesabınız yerine kuruluma bağlı bir tanımlayıcıyla ilişkilendirilmiş kullanım verileri ve hata raporları göndererek Zoo Code'u geliştirmeye yardım edin. Bu telemetri kodunuzu veya istemlerinizi toplamaz. Daha fazla ayrıntı için <privacyLink>gizlilik politikamıza</privacyLink> bakın. Bunu istediğiniz zaman kapatabilirsiniz."
 		},
 		"settings": {
 			"import": "İçe Aktar",

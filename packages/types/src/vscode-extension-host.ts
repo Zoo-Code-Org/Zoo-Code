@@ -364,6 +364,11 @@ export type ExtensionState = Pick<
 	telemetrySetting: TelemetrySetting
 	telemetryKey?: string
 	machineId?: string
+	// Live vscode.env.isTelemetryEnabled, so the webview's own PostHog client can respect
+	// the VS Code global telemetry toggle the same way the extension-side gate does --
+	// without this, an explicit user Accept can still send events while VS Code's global
+	// telemetry is disabled.
+	vscodeTelemetryEnabled?: boolean
 
 	renderContext: "sidebar" | "editor"
 	settingsImportedAt?: number

@@ -7,6 +7,7 @@
 	--vscode-focusBorder: #0090f1;
 	--vscode-editor-foreground: #333333;
 	--vscode-editor-background: #ffffff;
+	--vscode-editorGroup-border: #cecece;
 	--vscode-button-foreground: #ffffff;
 	--vscode-button-background: #007acc;
 	--vscode-button-hoverBackground: #0062a3;
@@ -25,6 +26,7 @@
 	--vscode-panel-border: #cecece;
 	--vscode-widget-border: #d4d4d4;
 	--vscode-widget-shadow: #00000029;
+	--vscode-textLink-foreground: #006ab1;
 	--vscode-menu-foreground: #3b3b3b;
 	--vscode-menu-background: #ffffff;
 	--vscode-editorHoverWidget-foreground: #3b3b3b;

@@ -1052,8 +1052,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "允許匿名錯誤與使用情況回報",
-			"description": "透過發送匿名使用資料和錯誤回報來協助改善 Zoo Code。此遙測不會收集程式碼、提示詞或個人資訊。查看我們的 <privacyLink>隱私權政策</privacyLink> 以了解更多資訊。"
+			"label": "允許錯誤與使用情況回報",
+			"description": "透過發送與安裝識別碼（而非您的姓名或帳戶）相關聯的使用資料和錯誤回報來協助改善 Zoo Code。此遙測不會收集您的程式碼或提示詞。查看我們的 <privacyLink>隱私權政策</privacyLink> 以了解更多資訊。您可以隨時關閉此功能。"
 		},
 		"settings": {
 			"import": "匯入",

@@ -1025,8 +1025,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Izinkan pelaporan error dan penggunaan anonim",
-			"description": "Bantu tingkatkan Zoo Code dengan mengirimkan data penggunaan anonim dan laporan error. Telemetri ini tidak mengumpulkan kode, prompt, atau informasi pribadi. Lihat <privacyLink>kebijakan privasi</privacyLink> kami untuk detail lebih lanjut. Anda dapat menonaktifkannya kapan saja."
+			"label": "Izinkan pelaporan error dan penggunaan",
+			"description": "Bantu tingkatkan Zoo Code dengan mengirimkan data penggunaan dan laporan error, yang terkait dengan pengenal instalasi, bukan nama atau akun Anda. Telemetri ini tidak mengumpulkan kode atau prompt Anda. Lihat <privacyLink>kebijakan privasi</privacyLink> kami untuk detail lebih lanjut. Anda dapat menonaktifkannya kapan saja."
 		},
 		"settings": {
 			"import": "Impor",

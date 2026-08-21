@@ -1025,8 +1025,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Anonieme fout- en gebruiksrapportage toestaan",
-			"description": "Help Zoo Code te verbeteren door anonieme gebruiksgegevens en foutmeldingen te versturen. Deze telemetrie verzamelt geen code, prompts of persoonlijke informatie. Zie ons <privacyLink>privacybeleid</privacyLink> voor meer details."
+			"label": "Fout- en gebruiksrapportage toestaan",
+			"description": "Help Zoo Code te verbeteren door gebruiksgegevens en foutmeldingen te versturen, gekoppeld aan een installatie-identifier in plaats van je naam of account. Deze telemetrie verzamelt niet je code of prompts. Zie ons <privacyLink>privacybeleid</privacyLink> voor meer details."
 		},
 		"settings": {
 			"import": "Importeren",
