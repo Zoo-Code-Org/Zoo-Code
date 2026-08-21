@@ -27,6 +27,11 @@ import {
 	SUBTASK_INTERRUPT_PARENT_PROMPT,
 	SUBTASK_INTERRUPT_PARENT_RESULT,
 	SUBTASK_PARENT_PROMPT,
+	SUBTASK_QUEUED_INPUT_CHILD_MARKER,
+	SUBTASK_QUEUED_INPUT_CHILD_RESULT,
+	SUBTASK_QUEUED_INPUT_MESSAGE,
+	SUBTASK_QUEUED_INPUT_PARENT_PROMPT,
+	SUBTASK_QUEUED_INPUT_PARENT_RESULT,
 	SUBTASK_XPROFILE_DIFFERENT_CHILD_RESULT,
 	SUBTASK_XPROFILE_PARENT_PROMPT,
 	SUBTASK_XPROFILE_PARENT_RESULT,
@@ -257,6 +262,73 @@ suite("Roo Code Subtasks", function () {
 			while (api.getCurrentTaskStack().length > 0) {
 				await api.clearCurrentTask()
 			}
+		}
+	})
+
+	test("queued input interrupts child completion before the parent resumes", async () => {
+		const api = globalThis.api
+		const says: Record<string, ClineMessage[]> = {}
+
+		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+			if (message.type === "say" && message.partial === false) {
+				says[taskId] = says[taskId] || []
+				says[taskId].push(message)
+			}
+		}
+
+		api.on(RooCodeEventName.Message, messageHandler)
+
+		try {
+			const parentTaskId = await api.startNewTask({
+				configuration: {
+					mode: "ask",
+					alwaysAllowModeSwitch: true,
+					alwaysAllowSubtasks: true,
+					autoApprovalEnabled: true,
+					enableCheckpoints: false,
+				},
+				text: SUBTASK_QUEUED_INPUT_PARENT_PROMPT,
+			})
+
+			let childTaskId: string | undefined
+			await waitFor(() => {
+				const current = api.getCurrentTaskStack().at(-1)
+				if (current && current !== parentTaskId) {
+					childTaskId = current
+					return true
+				}
+				return false
+			})
+
+			await waitForAimockRequestContaining(SUBTASK_QUEUED_INPUT_CHILD_MARKER)
+
+			const completedParentTaskId = await waitUntilCompleted({
+				api,
+				start: async () => {
+					await api.sendMessage(SUBTASK_QUEUED_INPUT_MESSAGE)
+					return parentTaskId
+				},
+			})
+
+			assert.strictEqual(completedParentTaskId, parentTaskId)
+			assert.ok(
+				says[childTaskId!]?.some(
+					({ say, text }) =>
+						say === "completion_result" && text?.trim() === SUBTASK_QUEUED_INPUT_CHILD_RESULT,
+				),
+				"Child should process the queued instruction before returning to its parent",
+			)
+			assert.strictEqual(
+				says[parentTaskId]?.find(({ say }) => say === "completion_result")?.text?.trim(),
+				SUBTASK_QUEUED_INPUT_PARENT_RESULT,
+				"Parent should resume only after the child processes the queued instruction",
+			)
+		} finally {
+			api.off(RooCodeEventName.Message, messageHandler)
+			while (api.getCurrentTaskStack().length > 0) {
+				await api.clearCurrentTask()
+			}
+			await waitFor(() => api.getCurrentTaskStack().length === 0).catch(() => {})
 		}
 	})
 
