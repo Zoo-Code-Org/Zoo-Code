@@ -696,6 +696,26 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect((caught as Error).message).not.toBe("Request was aborted.") // not the raw SDK error
 				expect(mockCreate).toHaveBeenCalledTimes(2) // first attempt 401, then the aborted retry
 			})
+
+			it("should rethrow a non-abort error from the 401 retry unchanged", async () => {
+				vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tokenResponse()))
+				const apiError = new Error("boom")
+				mockCreate.mockRejectedValueOnce(unauthorizedError()).mockRejectedValueOnce(apiError)
+
+				const stream = handler.createMessage("test prompt", [], {
+					taskId: "t1",
+					abortSignal: new AbortController().signal,
+				})
+				let caught: unknown
+				try {
+					await collectStream(stream)
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBe(apiError)
+				expect(mockCreate).toHaveBeenCalledTimes(2)
+			})
 		})
 
 		describe("completePrompt", () => {
@@ -838,6 +858,22 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect((caught as Error).message).toBe("The Qwen Code request was aborted")
 				expect((caught as Error).message).not.toBe("Request was aborted.") // not the raw SDK error
 				expect(mockCreate).toHaveBeenCalledTimes(2) // first attempt 401, then the aborted retry
+			})
+
+			it("should rethrow a non-abort error from the 401 retry unchanged", async () => {
+				vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tokenResponse()))
+				const apiError = new Error("boom")
+				mockCreate.mockRejectedValueOnce(unauthorizedError()).mockRejectedValueOnce(apiError)
+
+				let caught: unknown
+				try {
+					await handler.completePrompt("hi", { abortSignal: new AbortController().signal })
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBe(apiError)
+				expect(mockCreate).toHaveBeenCalledTimes(2)
 			})
 		})
 	})
