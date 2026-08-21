@@ -27,6 +27,7 @@ vi.mock("../../../i18n", () => ({
 			"skills:errors.manager_unavailable": "Skills manager not available",
 			"skills:errors.missing_delete_fields": "Missing required fields: skillName or source",
 			"skills:errors.missing_move_fields": "Missing required fields: skillName or source",
+			"skills:errors.missing_update_modes_fields": "Missing required fields: skillName or source",
 			"skills:errors.skill_not_found": `Skill "${params?.name}" not found`,
 		}
 		return translations[key] || key
@@ -41,6 +42,7 @@ import {
 	handleDeleteSkill,
 	handleMoveSkill,
 	handleOpenSkillFile,
+	handleUpdateSkillModes,
 } from "../skillsMessageHandler"
 
 describe("skillsMessageHandler", () => {
@@ -51,6 +53,7 @@ describe("skillsMessageHandler", () => {
 	const mockCreateSkill = vi.fn()
 	const mockDeleteSkill = vi.fn()
 	const mockMoveSkill = vi.fn()
+	const mockUpdateSkillModes = vi.fn()
 	const mockGetSkill = vi.fn()
 	const mockFindSkillByNameAndSource = vi.fn()
 
@@ -62,6 +65,7 @@ describe("skillsMessageHandler", () => {
 					createSkill: mockCreateSkill,
 					deleteSkill: mockDeleteSkill,
 					moveSkill: mockMoveSkill,
+					updateSkillModes: mockUpdateSkillModes,
 					getSkill: mockGetSkill,
 					findSkillByNameAndSource: mockFindSkillByNameAndSource,
 				}
@@ -381,6 +385,97 @@ describe("skillsMessageHandler", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
 				"Failed to move skill: Skills manager not available",
 			)
+		})
+	})
+
+	describe("handleUpdateSkillModes", () => {
+		it("updates a skill's mode slugs successfully", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockResolvedValue(undefined)
+			mockGetSkillsMetadata.mockReturnValue([mockSkills[0]])
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				newSkillModeSlugs: ["code"],
+			} as WebviewMessage)
+
+			expect(result).toEqual([mockSkills[0]])
+			expect(mockUpdateSkillModes).toHaveBeenCalledWith("test-skill", "global", ["code"])
+			expect(mockPostMessageToWebview).toHaveBeenCalledWith({
+				type: "skills",
+				skills: [mockSkills[0]],
+				skillDiagnostics: [],
+			})
+		})
+
+		it("clears a skill's mode restriction with empty slugs", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockResolvedValue(undefined)
+			mockGetSkillsMetadata.mockReturnValue([mockSkills[1]])
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "project-skill",
+				source: "project",
+				newSkillModeSlugs: [],
+			} as WebviewMessage)
+
+			expect(result).toEqual([mockSkills[1]])
+			expect(mockUpdateSkillModes).toHaveBeenCalledWith("project-skill", "project", [])
+		})
+
+		it("returns undefined when required fields are missing", async () => {
+			const provider = createMockProvider(true)
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				// missing source
+			} as WebviewMessage)
+
+			expect(result).toBeUndefined()
+			expect(mockUpdateSkillModes).not.toHaveBeenCalled()
+			expect(mockLog).toHaveBeenCalledWith(
+				"Error updating skill modes: Missing required fields: skillName or source",
+			)
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"Failed to update skill modes: Missing required fields: skillName or source",
+			)
+		})
+
+		it("returns undefined when skills manager is not available", async () => {
+			const provider = createMockProvider(false)
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				newSkillModeSlugs: ["code"],
+			} as WebviewMessage)
+
+			expect(result).toBeUndefined()
+			expect(mockLog).toHaveBeenCalledWith("Error updating skill modes: Skills manager not available")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+				"Failed to update skill modes: Skills manager not available",
+			)
+		})
+
+		it("returns undefined and reports the error when updateSkillModes rejects", async () => {
+			const provider = createMockProvider(true)
+			mockUpdateSkillModes.mockRejectedValue(new Error("boom"))
+
+			const result = await handleUpdateSkillModes(provider, {
+				type: "updateSkillModes",
+				skillName: "test-skill",
+				source: "global",
+				newSkillModeSlugs: ["code"],
+			} as WebviewMessage)
+
+			expect(result).toBeUndefined()
+			expect(mockLog).toHaveBeenCalledWith("Error updating skill modes: boom")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to update skill modes: boom")
 		})
 	})
 

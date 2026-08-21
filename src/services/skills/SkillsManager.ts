@@ -18,6 +18,33 @@ import { t } from "../../i18n"
 // Re-export for convenience
 export type { SkillMetadata, SkillContent, SkillDiagnostic }
 
+/**
+ * Extract the raw top-level `key: ...` line from the frontmatter block of a
+ * SKILL.md file. Used to point users at the exact line when YAML parsing
+ * fails (see issue #859). Returns undefined when the file has no
+ * frontmatter block or no matching top-level line.
+ */
+function getRawFrontmatterLine(fileContent: string, key: string): string | undefined {
+	const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+	if (!match) {
+		return undefined
+	}
+	const linePattern = new RegExp(`^${key}\\s*:`)
+	return match[1].split(/\r?\n/).find((line) => linePattern.test(line))
+}
+
+// gray-matter's bundled typings predate its options passthrough: `stringify`
+// forwards its options object to js-yaml's safeDump, so js-yaml dump options
+// such as `lineWidth` are honored at runtime even though the declared
+// `GrayMatterOption` interface does not list them. This type names the
+// supported subset explicitly (see issue #859).
+type SkillYamlDumpOptions = matter.GrayMatterOption<string, SkillYamlDumpOptions> & { lineWidth: number }
+
+// `lineWidth: -1` keeps long plain scalars (e.g. descriptions) on a single
+// line instead of reflowing them into folded block scalars, keeping SKILL.md
+// files stable across edits.
+const SKILL_YAML_DUMP_OPTIONS: SkillYamlDumpOptions = { lineWidth: -1 }
+
 export class SkillsManager {
 	private skills: Map<string, SkillMetadata> = new Map()
 	private diagnostics: SkillDiagnostic[] = []
@@ -104,11 +131,24 @@ export class SkillsManager {
 			const fileContent = await fs.readFile(skillMdPath, "utf-8")
 			let parsed: ReturnType<typeof matter>
 
+			// Parse errors are handled separately from field validation so that
+			// YAML syntax problems (e.g. unescaped double quotes in the
+			// description) report the actual cause instead of a misleading
+			// "missing required field" message (see issue #859).
 			try {
 				parsed = matter(fileContent)
 			} catch (error) {
 				this.recordDiagnostic(skillMdPath, source, error)
 				console.error(`Failed to parse skill at ${skillDir}:`, error)
+				// The most common cause is unescaped double quotes in the
+				// description value - point the user at the exact line.
+				const descriptionLine = getRawFrontmatterLine(fileContent, "description")
+				if (descriptionLine?.includes('"')) {
+					console.error(
+						`Hint: the "description" value in ${skillMdPath} contains unescaped double quotes. ` +
+							"Wrap the value in single quotes (or escape the double quotes) and save.",
+					)
+				}
 				return
 			}
 
@@ -422,6 +462,12 @@ export class SkillsManager {
 			.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
 			.join(" ")
 
+		// Build the frontmatter as data and serialize it with gray-matter so
+		// values containing YAML special characters (e.g. double quotes in the
+		// description) are quoted/escaped automatically. Hand-built frontmatter
+		// produced unparseable SKILL.md files that silently failed to load
+		// (see issue #859). lineWidth: -1 keeps plain values on a single line,
+		// matching the previous output format.
 		const frontmatter = {
 			name,
 			description: trimmedDescription,
@@ -434,7 +480,7 @@ export class SkillsManager {
 
 Add your skill instructions here.
 `
-		const skillContent = matter.stringify(body, frontmatter)
+		const skillContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 
 		// Write the SKILL.md file
 		await fs.writeFile(skillMdPath, skillContent, "utf-8")
@@ -575,8 +621,10 @@ Add your skill instructions here.
 			delete frontmatter.mode
 		}
 
-		// Serialize back to SKILL.md format
-		const newContent = matter.stringify(body, frontmatter)
+		// Serialize back to SKILL.md format. lineWidth: -1 prevents long
+		// values from being reflowed into folded block scalars, keeping the
+		// file stable (see issue #859).
+		const newContent = matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 		await fs.writeFile(skill.path, newContent, "utf-8")
 
 		// Refresh skills list
