@@ -385,9 +385,29 @@ describe("BaseOpenAiCompatibleProvider", () => {
 					}
 				})(),
 			)
-
-			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1041): Invalid token")
 		})
+
+		it("should fall back to an Unknown error when a base_resp stream chunk has no status_msg", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "partial" } }],
+						base_resp: { status_code: 1041 },
+					},
+				]),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1041): Unknown error")
+		})
+
 		it("should still wrap non-abort request errors with the provider prefix", async () => {
 			mockCreate.mockImplementationOnce(() => {
 				throw new Error("boom")

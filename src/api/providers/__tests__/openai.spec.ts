@@ -277,6 +277,22 @@ describe("OpenAiHandler", () => {
 			expect(textChunks[0].text).toBe("Test response")
 		})
 
+		it("should treat a streaming chunk without a delta as an empty delta", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "hello " }, index: 0 }] },
+					// Some providers emit a final chunk with no delta field at all; the
+					// iteration must fall back to an empty object and not throw.
+					{ choices: [{ finish_reason: "stop", index: 0 }] },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const textChunks = chunks.filter((chunk) => chunk.type === "text")
+			expect(textChunks).toEqual([{ type: "text", text: "hello " }])
+		})
+
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([
