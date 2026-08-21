@@ -6,6 +6,7 @@ import type { RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
+import type { WebviewThemeFixture } from "./vscode-extension-host.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
 
@@ -96,6 +97,11 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * Returns true if the API is ready to use.
 	 */
 	isReady(): boolean
+	/**
+	 * Captures the resolved VS Code theme properties from the active webview.
+	 * Available only to the dedicated theme fixture generator.
+	 */
+	captureWebviewThemeFixture(): Promise<WebviewThemeFixture>
 	/**
 	 * Returns the current configuration.
 	 * @returns The current configuration.

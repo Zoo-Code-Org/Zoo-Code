@@ -37,6 +37,7 @@ import {
 	type ToolUsage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type WebviewThemeFixture,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -178,6 +179,15 @@ export class ClineProvider
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
+	private pendingThemeFixtureProbes = new Map<
+		string,
+		{
+			resolve: (fixture: WebviewThemeFixture) => void
+			reject: (error: Error) => void
+			timeout: ReturnType<typeof setTimeout>
+		}
+	>()
+	private nextThemeFixtureProbeId = 0
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
@@ -753,6 +763,7 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -965,7 +976,8 @@ export class ClineProvider
 		}
 
 		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development
+			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
 				? await this.getHMRHtmlContent(webviewView.webview)
 				: await this.getHtmlContent(webviewView.webview)
 
@@ -1406,6 +1418,43 @@ export class ClineProvider
 		} catch {
 			// View disposed, drop message silently
 		}
+	}
+
+	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
+		if (process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1") {
+			return Promise.reject(new Error("Theme fixture probing is disabled"))
+		}
+
+		const requestId = `theme-fixture-${++this.nextThemeFixtureProbeId}`
+
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				this.pendingThemeFixtureProbes.delete(requestId)
+				reject(new Error(`Theme fixture probe timed out after ${timeoutMs}ms`))
+			}, timeoutMs)
+
+			this.pendingThemeFixtureProbes.set(requestId, { resolve, reject, timeout })
+			void this.postMessageToWebview({ type: "themeFixtureProbeRequest", requestId })
+		})
+	}
+
+	public resolveWebviewThemeFixtureProbe(requestId: string, fixture: WebviewThemeFixture): void {
+		const pending = this.pendingThemeFixtureProbes.get(requestId)
+		if (!pending) {
+			return
+		}
+
+		clearTimeout(pending.timeout)
+		this.pendingThemeFixtureProbes.delete(requestId)
+		pending.resolve(fixture)
+	}
+
+	private rejectPendingThemeFixtureProbes(error: Error): void {
+		for (const pending of this.pendingThemeFixtureProbes.values()) {
+			clearTimeout(pending.timeout)
+			pending.reject(error)
+		}
+		this.pendingThemeFixtureProbes.clear()
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {

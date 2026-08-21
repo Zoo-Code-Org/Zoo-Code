@@ -14,6 +14,7 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type CreateTaskOptions,
+	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
 	isSecretStateKey,
@@ -312,6 +313,14 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 	public isReady() {
 		return this.sidebarProvider.viewLaunched
+	}
+
+	public captureWebviewThemeFixture(): Promise<WebviewThemeFixture> {
+		if (process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1") {
+			return Promise.reject(new Error("Theme fixture probing is disabled"))
+		}
+
+		return this.sidebarProvider.requestWebviewThemeFixture()
 	}
 
 	private async waitForWebviewLaunch(timeoutMs: number): Promise<boolean> {
