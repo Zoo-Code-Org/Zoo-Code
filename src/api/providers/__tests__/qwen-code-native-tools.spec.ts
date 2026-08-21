@@ -671,6 +671,31 @@ describe("QwenCodeHandler Native Tools", () => {
 				expect(mockCreate).toHaveBeenCalledTimes(1) // the retried request was never sent
 				expect(fetchMock).toHaveBeenCalledTimes(1)
 			})
+
+			it("should normalize an abort error from the 401 retry instead of exposing the raw SDK error", async () => {
+				vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tokenResponse()))
+				const external = new AbortController()
+				mockCreate
+					.mockRejectedValueOnce(unauthorizedError())
+					.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+						external.abort() // Stop pressed while the retried request is in flight
+						return Promise.reject(sdkAbortError())
+					})
+
+				const stream = handler.createMessage("test prompt", [], { taskId: "t1", abortSignal: external.signal })
+				let caught: unknown
+				try {
+					await collectStream(stream)
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+				expect((caught as Error).message).not.toBe("Request was aborted.") // not the raw SDK error
+				expect(mockCreate).toHaveBeenCalledTimes(2) // first attempt 401, then the aborted retry
+			})
 		})
 
 		describe("completePrompt", () => {
@@ -789,6 +814,30 @@ describe("QwenCodeHandler Native Tools", () => {
 
 				expect((caught as Error).name).toBe("AbortError")
 				expect((caught as Error).message).toMatch(/aborted$/)
+			})
+
+			it("should normalize an abort error from the 401 retry instead of exposing the raw SDK error", async () => {
+				vi.stubGlobal("fetch", vi.fn().mockResolvedValue(tokenResponse()))
+				const external = new AbortController()
+				mockCreate
+					.mockRejectedValueOnce(unauthorizedError())
+					.mockImplementationOnce((_params: unknown, opts?: { signal?: AbortSignal }) => {
+						external.abort() // Stop pressed while the retried request is in flight
+						return Promise.reject(sdkAbortError())
+					})
+
+				let caught: unknown
+				try {
+					await handler.completePrompt("hi", { abortSignal: external.signal })
+				} catch (error) {
+					caught = error
+				}
+
+				expect(caught).toBeInstanceOf(Error)
+				expect((caught as Error).name).toBe("AbortError")
+				expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+				expect((caught as Error).message).not.toBe("Request was aborted.") // not the raw SDK error
+				expect(mockCreate).toHaveBeenCalledTimes(2) // first attempt 401, then the aborted retry
 			})
 		})
 	})

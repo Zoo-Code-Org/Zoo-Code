@@ -108,6 +108,13 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		const externalSignal = metadata?.abortSignal
 		if (externalSignal) {
 			externalSignal.addEventListener("abort", onExternalAbort)
+			// An abort can land while the input token count above is still
+			// pending: a listener registered after the signal already aborted
+			// never fires, so bridge the aborted state into the request-local
+			// controller.
+			if (externalSignal.aborted) {
+				requestController.abort()
+			}
 		}
 
 		try {
@@ -130,6 +137,11 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			const createOptions = new RequestConfigBuilder<OpenAiRequestOptions>()
 				.setOption("signal", requestController.signal)
 				.build()
+
+			// Fast-fail if the caller aborted while countTokens() above was
+			// pending — the request must not be issued once the request-local
+			// signal has aborted.
+			throwIfAborted(requestController.signal)
 
 			let results
 			try {

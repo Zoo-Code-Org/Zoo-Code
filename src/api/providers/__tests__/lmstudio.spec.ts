@@ -204,6 +204,43 @@ describe("LmStudioHandler", () => {
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
 		})
+
+		it("should not issue the request when the caller aborts while input token counting is pending", async () => {
+			const controller = new AbortController()
+			let releaseCount!: () => void
+			const countGate = new Promise<void>((resolve) => {
+				releaseCount = resolve
+			})
+			const countSpy = vi.spyOn(handler, "countTokens").mockImplementation(async () => {
+				await countGate
+				return 10
+			})
+
+			const stream = handler.createMessage(systemPrompt, messages, {
+				taskId: "test-task-id",
+				abortSignal: controller.signal,
+			})
+			const pending = collectStream(stream).catch((error: unknown) => error)
+
+			// Let the generator reach the token count, then abort while it is pending.
+			const start = Date.now()
+			while (countSpy.mock.calls.length === 0) {
+				if (Date.now() - start > 5000) {
+					throw new Error("timed out waiting for the token count")
+				}
+				await new Promise((resolve) => setTimeout(resolve, 5))
+			}
+			controller.abort()
+			releaseCount()
+
+			const caught = (await pending) as Error
+			countSpy.mockRestore()
+
+			expect(caught).toBeInstanceOf(Error)
+			expect(caught.name).toBe("AbortError")
+			expect(caught.message).toBe("The LM Studio request was aborted")
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("completePrompt", () => {

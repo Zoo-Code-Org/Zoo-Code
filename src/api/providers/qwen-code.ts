@@ -226,7 +226,18 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 				const client = this.ensureClient()
 				client.apiKey = this.credentials.access_token
 				client.baseURL = this.getBaseUrl(this.credentials)
-				return await apiCall()
+				// A stop can also land while the retried request itself is in
+				// flight; that rejection must go through the same abort
+				// normalization as the first attempt instead of escaping as the
+				// raw SDK abort error.
+				try {
+					return await apiCall()
+				} catch (retryError) {
+					if (isRequestAborted(retryError, externalSignal)) {
+						throw createAbortError("Qwen Code")
+					}
+					throw retryError
+				}
 			} else {
 				throw error
 			}
