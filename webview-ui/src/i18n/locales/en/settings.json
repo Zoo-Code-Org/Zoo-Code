@@ -1086,8 +1086,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Allow anonymous error and usage reporting",
-			"description": "Help improve Zoo Code by sending anonymous usage data and error reports. This telemetry does not collect code, prompts or personal information. See our <privacyLink>privacy policy</privacyLink> for more details."
+			"label": "Allow error and usage reporting",
+			"description": "Help improve Zoo Code by sending usage data and error reports, linked to a per-install identifier rather than your name or account. This telemetry does not collect your code or prompts. See our <privacyLink>privacy policy</privacyLink> for more details."
 		},
 		"settings": {
 			"import": "Import",

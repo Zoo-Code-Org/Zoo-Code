@@ -1006,8 +1006,8 @@
 	},
 	"footer": {
 		"telemetry": {
-			"label": "Anonyme Fehler- und Nutzungsberichte zulassen",
-			"description": "Hilf mit, Zoo Code zu verbessern, indem du anonyme Nutzungsdaten und Fehlerberichte sendest. Diese Telemetrie sammelt keine Code-, Prompt- oder persönliche Informationen. Weitere Einzelheiten findest du in unserer <privacyLink>Datenschutzrichtlinie</privacyLink>."
+			"label": "Fehler- und Nutzungsberichte zulassen",
+			"description": "Hilf mit, Zoo Code zu verbessern, indem du Nutzungsdaten und Fehlerberichte sendest, die mit einer installationsbezogenen Kennung statt mit deinem Namen oder Konto verknüpft sind. Diese Telemetrie sammelt nicht deinen Code oder deine Prompts. Weitere Einzelheiten findest du in unserer <privacyLink>Datenschutzrichtlinie</privacyLink>."
 		},
 		"settings": {
 			"import": "Importieren",
