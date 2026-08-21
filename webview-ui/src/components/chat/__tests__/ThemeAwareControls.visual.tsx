@@ -14,7 +14,7 @@ const themes = [
 			description: "rgb(157, 157, 157)",
 			dropdownBorder: "rgb(60, 60, 60)",
 			hoverBackground: "rgba(90, 93, 94, 0.31)",
-			focusBorder: "rgb(0, 127, 212)",
+			focusBorder: "rgb(0, 120, 212)",
 			error: "color(srgb 0.912157 0.486471 0.466078)",
 			panelBorder: "rgb(43, 43, 43)",
 		},
