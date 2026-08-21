@@ -41,7 +41,7 @@ describe("Task.ask queued message drain", () => {
 		const askPromise = task.ask("followup", "Q?", false)
 
 		// Simulate webview queuing the user's selection text while the ask is pending.
-		;(task as any).messageQueueService.addMessage("picked answer")
+		task.messageQueueService.addMessage("picked answer")
 
 		const result = await askPromise
 		expect(result.response).toBe("messageResponse")
@@ -52,7 +52,7 @@ describe("Task.ask queued message drain", () => {
 		const task = await createTask()
 
 		const askPromise = task.ask("command_output", "command is still running...", false)
-		;(task as any).messageQueueService.addMessage("1+1=?")
+		task.messageQueueService.addMessage("1+1=?")
 
 		setTimeout(() => {
 			task.approveAsk()
@@ -62,8 +62,8 @@ describe("Task.ask queued message drain", () => {
 
 		expect(result.response).toBe("yesButtonClicked")
 		expect(result.text).toBeUndefined()
-		expect((task as any).messageQueueService.isEmpty()).toBe(false)
-		expect((task as any).messageQueueService.messages[0]?.text).toBe("1+1=?")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+		expect(task.messageQueueService.messages[0]?.text).toBe("1+1=?")
 	})
 
 	it("does not consume a message already queued before a command_output ask", async () => {
