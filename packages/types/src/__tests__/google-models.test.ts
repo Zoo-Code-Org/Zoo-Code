@@ -10,3 +10,34 @@ describe.each([
 		expect(model.cacheWritesPrice).toBe(0.5)
 	})
 })
+
+describe.each([
+	["gemini-3.5-flash-lite", geminiModels["gemini-3.5-flash-lite"]],
+	["gemini-3.1-flash-lite", geminiModels["gemini-3.1-flash-lite"]],
+])("Gemini 3.x Flash Lite model %s", (_modelId, model) => {
+	it("is registered with the documented limits and multimodal support", () => {
+		expect(model.maxTokens).toBe(65_536)
+		expect(model.contextWindow).toBe(1_048_576)
+		expect(model.supportsImages).toBe(true)
+		expect(model.supportsPromptCache).toBe(true)
+		expect(model.supportsReasoningBudget).toBe(false)
+	})
+})
+
+it("exposes the documented thinking levels and pricing for Gemini 3.5 Flash Lite", () => {
+	const model = geminiModels["gemini-3.5-flash-lite"]
+	expect(model.supportsReasoningEffort).toEqual(["minimal", "low", "medium", "high"])
+	expect(model.inputPrice).toBe(0.3)
+	expect(model.outputPrice).toBe(2.5)
+	expect(model.cacheReadsPrice).toBe(0.03)
+	expect(model.cacheWritesPrice).toBe(1.0)
+})
+
+it("exposes the documented thinking levels and pricing for Gemini 3.1 Flash Lite", () => {
+	const model = geminiModels["gemini-3.1-flash-lite"]
+	expect(model.supportsReasoningEffort).toEqual(["low", "medium", "high"])
+	expect(model.inputPrice).toBe(0.25)
+	expect(model.outputPrice).toBe(1.5)
+	expect(model.cacheReadsPrice).toBe(0.025)
+	expect(model.cacheWritesPrice).toBe(1.0)
+})

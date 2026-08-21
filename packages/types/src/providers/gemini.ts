@@ -145,6 +145,34 @@ export const geminiModels = {
 		outputPrice: 3.0,
 		cacheReadsPrice: 0.05,
 	},
+	// 3.x Flash Lite models
+	"gemini-3.5-flash-lite": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high"],
+		reasoningEffort: "medium",
+		inputPrice: 0.3,
+		outputPrice: 2.5,
+		cacheReadsPrice: 0.03,
+		cacheWritesPrice: 1.0,
+		supportsReasoningBudget: false,
+	},
+	"gemini-3.1-flash-lite": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		inputPrice: 0.25,
+		outputPrice: 1.5,
+		cacheReadsPrice: 0.025,
+		cacheWritesPrice: 1.0,
+		supportsReasoningBudget: false,
+	},
+
 	// 2.5 Pro models
 	"gemini-2.5-pro": {
 		maxTokens: 64_000,
