@@ -152,7 +152,8 @@ export const geminiModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high"],
-		reasoningEffort: "medium",
+		// Matches the documented API default thinking level (On (minimal)).
+		reasoningEffort: "minimal",
 		inputPrice: 0.3,
 		outputPrice: 2.5,
 		cacheReadsPrice: 0.03,
@@ -165,7 +166,9 @@ export const geminiModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["minimal", "low", "medium", "high"],
-		reasoningEffort: "medium",
+		// Lowest level of the supported set: keeps the cheap/free tier's
+		// default latency and cost in line with the Flash Lite tier.
+		reasoningEffort: "minimal",
 		inputPrice: 0.25,
 		outputPrice: 1.5,
 		cacheReadsPrice: 0.025,

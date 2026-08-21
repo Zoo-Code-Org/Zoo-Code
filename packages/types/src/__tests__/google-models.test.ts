@@ -27,6 +27,9 @@ describe.each([
 it("exposes the documented thinking levels and pricing for Gemini 3.5 Flash Lite", () => {
 	const model = geminiModels["gemini-3.5-flash-lite"]
 	expect(model.supportsReasoningEffort).toEqual(["minimal", "low", "medium", "high"])
+	// The documented API default is On (minimal):
+	// https://ai.google.dev/gemini-api/docs/thinking
+	expect(model.reasoningEffort).toBe("minimal")
 	expect(model.inputPrice).toBe(0.3)
 	expect(model.outputPrice).toBe(2.5)
 	expect(model.cacheReadsPrice).toBe(0.03)
@@ -38,6 +41,8 @@ it("exposes the documented thinking levels and pricing for Gemini 3.1 Flash Lite
 	// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/gemini/3-1-flash-lite
 	// "choosing from minimal, low, medium, or high thinking levels"
 	expect(model.supportsReasoningEffort).toEqual(["minimal", "low", "medium", "high"])
+	// Lowest supported level, matching the cheap/free Flash Lite tier.
+	expect(model.reasoningEffort).toBe("minimal")
 	expect(model.inputPrice).toBe(0.25)
 	expect(model.outputPrice).toBe(1.5)
 	expect(model.cacheReadsPrice).toBe(0.025)
