@@ -767,13 +767,10 @@ describe("Task persistence", () => {
 
 			expect(replay).toHaveBeenCalledWith(pendingAction)
 			expect(ask).not.toHaveBeenCalled()
-			expect(mockSaveTaskMessages).toHaveBeenCalledWith(
-				expect.objectContaining({
-					messages: expect.not.arrayContaining([
-						expect.objectContaining({ text: pendingAction.approvalText }),
-					]),
-				}),
+			expect(task.clineMessages).not.toEqual(
+				expect.arrayContaining([expect.objectContaining({ text: pendingAction.approvalText })]),
 			)
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
 		it("reconciles an already-persisted tool result before generic resume", async () => {
@@ -1065,6 +1062,87 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).toHaveBeenCalled()
 			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", sanitizedActionId)
 			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiate.mock.invocationCallOrder[0])
+		})
+	})
+
+	describe("resumeTaskFromHistory", () => {
+		it.each(["not_found", "invalid", "io_error"] as const)(
+			"does not persist when hydration fails with %s",
+			async (kind) => {
+				mockReadTaskMessages.mockRejectedValue(Object.assign(new Error(`history ${kind}`), { kind }))
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: `issue-1279-${kind}`,
+						number: 1,
+						ts: 1,
+						task: "Original task",
+						status: "completed",
+						tokensIn: 10,
+						tokensOut: 5,
+						totalCost: 0.001,
+					},
+					initialStatus: "completed",
+					startTask: false,
+				})
+				const askSpy = vi.spyOn(task, "ask")
+
+				await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow(`history ${kind}`)
+				await task.abortTask(true)
+
+				expect(askSpy).not.toHaveBeenCalled()
+				expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+				expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
+			},
+		)
+
+		it("preserves finalized trailing reasoning without rewriting history during hydration", async () => {
+			const messages = [
+				{ ts: 1, type: "say" as const, say: "text" as const, text: "Original task" },
+				{ ts: 2, type: "say" as const, say: "completion_result" as const, text: "Initial result" },
+				{ ts: 3, type: "ask" as const, ask: "resume_completed_task" as const },
+				{ ts: 4, type: "say" as const, say: "user_feedback" as const, text: "Continue investigating" },
+				{
+					ts: 5,
+					type: "say" as const,
+					say: "reasoning" as const,
+					text: "Critical current conclusion",
+					partial: false,
+				},
+			]
+			mockReadTaskMessages.mockResolvedValue(messages)
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Continue investigating" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-current",
+					number: 1,
+					ts: 5,
+					task: "Original task",
+					status: "completed",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				initialStatus: "completed",
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async (type) => {
+				expect(type).toBe("resume_completed_task")
+				expect(task.clineMessages).toContainEqual(
+					expect.objectContaining({ text: "Critical current conclusion", partial: false }),
+				)
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 	})
 

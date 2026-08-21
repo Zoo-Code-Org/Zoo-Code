@@ -1182,14 +1182,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async overwriteClineMessages(newMessages: ClineMessage[]) {
-		this.clineMessages = newMessages
-		restoreTodoListForTask(this)
+		this.hydrateClineMessages(newMessages)
 		await this.saveClineMessages()
+	}
 
-		// When overwriting messages (e.g., during task resume), repopulate the cloud sync tracking Set
+	private hydrateClineMessages(messages: ClineMessage[]) {
+		this.clineMessages = messages
+		restoreTodoListForTask(this)
+
+		// When hydrating or overwriting messages, repopulate the cloud sync tracking Set
 		// with timestamps from all non-partial messages to prevent re-syncing previously synced messages
 		this.cloudSyncedMessageTimestamps.clear()
-		for (const msg of newMessages) {
+		for (const msg of messages) {
 			if (msg.partial !== true) {
 				this.cloudSyncedMessageTimestamps.add(msg.ts)
 			}
@@ -2108,7 +2112,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async resumeTaskFromHistory() {
 		try {
-			const modifiedClineMessages = await this.getSavedClineMessages()
+			const modifiedClineMessages = [...(await this.getSavedClineMessages())]
+
+			if (this.abort || this.abandoned) {
+				return
+			}
 
 			// Remove any resume messages that may have been added before.
 			const lastRelevantMessageIndex = findLastIndex(
@@ -2118,16 +2126,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			if (lastRelevantMessageIndex !== -1) {
 				modifiedClineMessages.splice(lastRelevantMessageIndex + 1)
-			}
-
-			// Remove any trailing reasoning-only UI messages that were not part of the persisted API conversation
-			while (modifiedClineMessages.length > 0) {
-				const last = modifiedClineMessages[modifiedClineMessages.length - 1]
-				if (last.type === "say" && last.say === "reasoning") {
-					modifiedClineMessages.pop()
-				} else {
-					break
-				}
 			}
 
 			if (this.pendingAction) {
@@ -2162,8 +2160,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			await this.overwriteClineMessages(modifiedClineMessages)
-			this.clineMessages = await this.getSavedClineMessages()
+			// Avoid a standalone write during hydration. The resume ask will persist only
+			// after all history reads succeed and the task is still active.
+			this.hydrateClineMessages(modifiedClineMessages)
 
 			// Now present the cline messages to the user and ask if they want to
 			// resume (NOTE: we ran into a bug before where the
@@ -2190,6 +2189,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (this.pendingAction) {
 				this.isInitialized = true
 				await this.resumePendingTaskAction(this.pendingAction)
+				return
+			}
+
+			if (this.abort || this.abandoned) {
 				return
 			}
 

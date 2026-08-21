@@ -68,7 +68,7 @@ describe("taskMessages.saveTaskMessages", () => {
 })
 
 describe("taskMessages.readTaskMessages", () => {
-	it("returns empty array when file contains invalid JSON", async () => {
+	it("rejects invalid JSON without treating it as empty history", async () => {
 		const taskId = "task-corrupt-json"
 		// Manually create the task directory and write corrupted JSON
 		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
@@ -76,26 +76,35 @@ describe("taskMessages.readTaskMessages", () => {
 		const filePath = path.join(taskDir, "ui_messages.json")
 		await fs.writeFile(filePath, "{not valid json!!!", "utf8")
 
-		const result = await readTaskMessages({
-			taskId,
-			globalStoragePath: tmpBaseDir,
+		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).rejects.toMatchObject({
+			kind: "invalid",
 		})
-
-		expect(result).toEqual([])
 	})
 
-	it("returns [] when file contains valid JSON that is not an array", async () => {
+	it("rejects valid non-array JSON without treating it as empty history", async () => {
 		const taskId = "task-non-array-json"
 		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
 		await fs.mkdir(taskDir, { recursive: true })
 		const filePath = path.join(taskDir, "ui_messages.json")
 		await fs.writeFile(filePath, JSON.stringify("hello"), "utf8")
 
-		const result = await readTaskMessages({
-			taskId,
-			globalStoragePath: tmpBaseDir,
+		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).rejects.toMatchObject({
+			kind: "invalid",
 		})
+	})
 
-		expect(result).toEqual([])
+	it("distinguishes a missing history file from an empty history", async () => {
+		await expect(readTaskMessages({ taskId: "task-missing", globalStoragePath: tmpBaseDir })).rejects.toMatchObject(
+			{ kind: "not_found" },
+		)
+	})
+
+	it("returns an explicitly persisted empty history", async () => {
+		const taskId = "task-empty"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		await fs.writeFile(path.join(taskDir, "ui_messages.json"), "[]", "utf8")
+
+		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).resolves.toEqual([])
 	})
 })

@@ -4063,8 +4063,11 @@ export class ClineProvider
 					taskId: parentTaskId,
 					globalStoragePath,
 				})
-			} catch {
-				parentClineMessages = []
+			} catch (error) {
+				this.log(
+					`[reopenParentFromDelegation] Failed to read messages for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+				return false
 			}
 
 			let parentApiMessages: any[] = []
