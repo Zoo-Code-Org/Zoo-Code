@@ -1248,7 +1248,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1279,7 +1279,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1312,7 +1312,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)
@@ -1343,7 +1343,7 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive" },
+					thinking: { type: "adaptive", display: "summarized" },
 				}),
 				undefined,
 			)

@@ -3,6 +3,7 @@
 import { AnthropicHandler } from "../anthropic"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock TelemetryService
@@ -247,7 +248,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(16384)
 		})
 
@@ -290,7 +291,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(32768)
 		})
 
@@ -334,7 +335,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(16384)
 		})
 
@@ -377,7 +378,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.max_tokens).toBe(32768)
 		})
 
@@ -400,7 +401,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -425,7 +426,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -450,7 +451,7 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(32768)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
@@ -474,7 +475,84 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			expect(requestBody?.model).toBe("claude-sonnet-5-bf")
-			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+		})
+
+		it("should surface thinking_tokens from output_tokens_details in usage chunks", async () => {
+			// Adaptive models report reasoning tokens inside
+			// `output_tokens_details.thinking_tokens` (message_start snapshot is
+			// typically absent; message_delta carries the final decomposition).
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 50,
+							},
+						},
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Hello",
+						},
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: {
+							type: "text_delta",
+							text: " world",
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 150,
+							},
+						},
+						delta: {
+							stop_reason: "end_turn",
+							stop_sequence: null,
+						},
+					},
+				]),
+			)
+
+			const adaptiveHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = adaptiveHandler.createMessage("prompt", [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			])
+
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			// message_start snapshot carries no thinking decomposition
+			const usageChunks = chunks.filter(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> => chunk.type === "usage",
+			)
+			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
+			expect(startUsage).toBeDefined()
+			expect(startUsage?.reasoningTokens).toBeUndefined()
+
+			// message_delta surfaces the final reasoning token count
+			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
+			expect(deltaUsage).toBeDefined()
+			expect(deltaUsage?.outputTokens).toBe(200)
+			expect(deltaUsage?.reasoningTokens).toBe(150)
 		})
 	})
 
