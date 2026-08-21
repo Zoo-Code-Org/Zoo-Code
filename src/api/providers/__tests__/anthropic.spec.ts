@@ -554,6 +554,85 @@ describe("AnthropicHandler", () => {
 			expect(deltaUsage?.outputTokens).toBe(200)
 			expect(deltaUsage?.reasoningTokens).toBe(150)
 		})
+
+		it("should surface numeric thinking_tokens from the message_start usage snapshot", async () => {
+			// Some surfaces report the thinking decomposition as early as the
+			// message_start snapshot; assert the snapshot usage chunk surfaces
+			// reasoningTokens, and that a message_delta without
+			// output_tokens_details omits it.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 5,
+								},
+							},
+						},
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Hello",
+						},
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: {
+							type: "text_delta",
+							text: " world",
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+						},
+						delta: {
+							stop_reason: "end_turn",
+							stop_sequence: null,
+						},
+					},
+				]),
+			)
+
+			const adaptiveHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = adaptiveHandler.createMessage("prompt", [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			])
+
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> => chunk.type === "usage",
+			)
+
+			// message_start snapshot surfaces the reported thinking decomposition
+			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
+			expect(startUsage).toBeDefined()
+			expect(startUsage?.reasoningTokens).toBe(5)
+
+			// message_delta without output_tokens_details omits reasoningTokens
+			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
+			expect(deltaUsage).toBeDefined()
+			expect(deltaUsage?.outputTokens).toBe(200)
+			expect(deltaUsage?.reasoningTokens).toBeUndefined()
+		})
 	})
 
 	describe("completePrompt", () => {
