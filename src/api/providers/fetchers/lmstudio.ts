@@ -1,7 +1,7 @@
 import axios from "axios"
 import { LLM, LLMInfo, LLMInstanceInfo, LMStudioClient } from "@lmstudio/sdk"
 
-import { type ModelInfo, lMStudioDefaultModelInfo } from "@roo-code/types"
+import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { flushModels, getModels } from "./modelCache"
 
@@ -19,7 +19,7 @@ export const forceFullModelDetailsLoad = async (baseUrl: string, modelId: string
 		const client = new LMStudioClient({ baseUrl: lmsUrl })
 		await client.llm.model(modelId)
 		// Flush and refresh cache to get updated model details
-		await flushModels({ provider: "lmstudio", baseUrl }, true)
+		await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, true)
 
 		// Mark this model as having full details loaded.
 		modelsWithLoadedDetails.add(modelId)

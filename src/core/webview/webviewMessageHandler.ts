@@ -23,6 +23,7 @@ import {
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	LmStudioModelsMessageType,
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
@@ -1002,7 +1003,6 @@ export const webviewMessageHandler = async (
 				// so a retry after a partial-copy failure still reconciles the store.
 				await provider.taskHistoryStore.invalidateAll()
 				await provider.taskHistoryStore.reconcile()
-				await provider.taskHistoryStore.flushIndex()
 				await provider.postStateToWebview()
 				await provider.postMessageToWebview({
 					type: "rooHistoryImportProgress",
@@ -1068,21 +1068,21 @@ export const webviewMessageHandler = async (
 			const routerModels: Record<RouterName, ModelRecord> = providerFilter
 				? ({} as Record<RouterName, ModelRecord>)
 				: {
-						openrouter: {},
-						"vercel-ai-gateway": {},
-						"zoo-gateway": {},
-						litellm: {},
-						requesty: {},
-						unbound: {},
-						ollama: {},
-						lmstudio: {},
-						poe: {},
-						deepseek: {},
-						moonshot: {},
-						"opencode-go": {},
-						kenari: {},
-						nanogpt: {},
-						"kimi-code": {},
+						[providerIdentifiers.openrouter]: {},
+						[providerIdentifiers.vercelAiGateway]: {},
+						[providerIdentifiers.zooGateway]: {},
+						[providerIdentifiers.litellm]: {},
+						[providerIdentifiers.requesty]: {},
+						[providerIdentifiers.unbound]: {},
+						[providerIdentifiers.ollama]: {},
+						[providerIdentifiers.lmstudio]: {},
+						[providerIdentifiers.poe]: {},
+						[providerIdentifiers.deepseek]: {},
+						[providerIdentifiers.moonshot]: {},
+						[providerIdentifiers.opencodeGo]: {},
+						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.nanogpt]: {},
+						[providerIdentifiers.kimiCode]: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions): Promise<ModelRecord> => {
@@ -1100,27 +1100,33 @@ export const webviewMessageHandler = async (
 
 			// Base candidates (only those handled by this aggregate fetcher)
 			const candidates: { key: RouterName; options: GetModelsOptions }[] = [
-				{ key: "openrouter", options: { provider: "openrouter" } },
 				{
-					key: "requesty",
+					key: providerIdentifiers.openrouter,
+					options: { provider: providerIdentifiers.openrouter },
+				},
+				{
+					key: providerIdentifiers.requesty,
 					options: {
-						provider: "requesty",
+						provider: providerIdentifiers.requesty,
 						apiKey: apiConfiguration.requestyApiKey,
 						baseUrl: apiConfiguration.requestyBaseUrl,
 					},
 				},
 				{
-					key: "unbound",
+					key: providerIdentifiers.unbound,
 					options: {
-						provider: "unbound",
+						provider: providerIdentifiers.unbound,
 						apiKey: apiConfiguration.unboundApiKey,
 					},
 				},
-				{ key: "vercel-ai-gateway", options: { provider: "vercel-ai-gateway" } },
 				{
-					key: "zoo-gateway",
+					key: providerIdentifiers.vercelAiGateway,
+					options: { provider: providerIdentifiers.vercelAiGateway },
+				},
+				{
+					key: providerIdentifiers.zooGateway,
 					options: {
-						provider: "zoo-gateway",
+						provider: providerIdentifiers.zooGateway,
 						apiKey: apiConfiguration.zooSessionToken,
 						baseUrl: apiConfiguration.zooGatewayBaseUrl,
 					},
@@ -1137,12 +1143,15 @@ export const webviewMessageHandler = async (
 				// If explicit credentials are provided in message.values (from Refresh Models button),
 				// flush the cache first to ensure we fetch fresh data with the new credentials
 				if (message?.values?.litellmApiKey || message?.values?.litellmBaseUrl) {
-					await flushModels({ provider: "litellm", apiKey: litellmApiKey, baseUrl: litellmBaseUrl }, true)
+					await flushModels(
+						{ provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+						true,
+					)
 				}
 
 				candidates.push({
-					key: "litellm",
-					options: { provider: "litellm", apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
+					key: providerIdentifiers.litellm,
+					options: { provider: providerIdentifiers.litellm, apiKey: litellmApiKey, baseUrl: litellmBaseUrl },
 				})
 			}
 
@@ -1152,12 +1161,15 @@ export const webviewMessageHandler = async (
 
 			if (poeApiKey) {
 				if (message?.values?.poeApiKey || message?.values?.poeBaseUrl) {
-					await flushModels({ provider: "poe", apiKey: poeApiKey, baseUrl: poeBaseUrl }, true)
+					await flushModels(
+						{ provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
+						true,
+					)
 				}
 
 				candidates.push({
-					key: "poe",
-					options: { provider: "poe", apiKey: poeApiKey, baseUrl: poeBaseUrl },
+					key: providerIdentifiers.poe,
+					options: { provider: providerIdentifiers.poe, apiKey: poeApiKey, baseUrl: poeBaseUrl },
 				})
 			}
 
@@ -1167,12 +1179,19 @@ export const webviewMessageHandler = async (
 
 			if (deepSeekApiKey) {
 				if (message?.values?.deepSeekApiKey || message?.values?.deepSeekBaseUrl) {
-					await flushModels({ provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl }, true)
+					await flushModels(
+						{ provider: providerIdentifiers.deepseek, apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+						true,
+					)
 				}
 
 				candidates.push({
-					key: "deepseek",
-					options: { provider: "deepseek", apiKey: deepSeekApiKey, baseUrl: deepSeekBaseUrl },
+					key: providerIdentifiers.deepseek,
+					options: {
+						provider: providerIdentifiers.deepseek,
+						apiKey: deepSeekApiKey,
+						baseUrl: deepSeekBaseUrl,
+					},
 				})
 			}
 
@@ -1182,12 +1201,19 @@ export const webviewMessageHandler = async (
 
 			if (moonshotApiKey) {
 				if (message?.values?.moonshotApiKey || message?.values?.moonshotBaseUrl) {
-					await flushModels({ provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl }, true)
+					await flushModels(
+						{ provider: providerIdentifiers.moonshot, apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+						true,
+					)
 				}
 
 				candidates.push({
-					key: "moonshot",
-					options: { provider: "moonshot", apiKey: moonshotApiKey, baseUrl: moonshotBaseUrl },
+					key: providerIdentifiers.moonshot,
+					options: {
+						provider: providerIdentifiers.moonshot,
+						apiKey: moonshotApiKey,
+						baseUrl: moonshotBaseUrl,
+					},
 				})
 			}
 
@@ -1200,12 +1226,12 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.opencodeGoApiKey) {
-				await flushModels({ provider: "opencode-go", apiKey: opencodeGoApiKey }, true)
+				await flushModels({ provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey }, true)
 			}
 
 			candidates.push({
-				key: "opencode-go",
-				options: { provider: "opencode-go", apiKey: opencodeGoApiKey },
+				key: providerIdentifiers.opencodeGo,
+				options: { provider: providerIdentifiers.opencodeGo, apiKey: opencodeGoApiKey },
 			})
 
 			// Kenari's /models endpoint is public — it returns the full model list with no
@@ -1217,12 +1243,12 @@ export const webviewMessageHandler = async (
 
 			// Refresh the cache when a new key is explicitly provided (e.g. the Refresh Models button).
 			if (message?.values?.kenariApiKey) {
-				await flushModels({ provider: "kenari", apiKey: kenariApiKey }, true)
+				await flushModels({ provider: providerIdentifiers.kenari, apiKey: kenariApiKey }, true)
 			}
 
 			candidates.push({
-				key: "kenari",
-				options: { provider: "kenari", apiKey: kenariApiKey },
+				key: providerIdentifiers.kenari,
+				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
 			})
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
@@ -1238,7 +1264,7 @@ export const webviewMessageHandler = async (
 				options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
 			})
 
-			if (!providerFilter || providerFilter === "kimi-code") {
+			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
 				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
 				const kimiCodeAuthMethod =
 					message?.values?.kimiCodeAuthMethod ?? apiConfiguration.kimiCodeAuthMethod ?? "oauth"
@@ -1248,8 +1274,8 @@ export const webviewMessageHandler = async (
 						: await kimiCodeOAuthManager.getAccessToken()
 				if (kimiCodeApiKey) {
 					candidates.push({
-						key: "kimi-code",
-						options: { provider: "kimi-code", apiKey: kimiCodeApiKey },
+						key: providerIdentifiers.kimiCode,
+						options: { provider: providerIdentifiers.kimiCode, apiKey: kimiCodeApiKey },
 					})
 				}
 			}
@@ -1313,7 +1339,7 @@ export const webviewMessageHandler = async (
 			const apiKey = message.values?.apiKey ?? ollamaApiConfig.ollamaApiKey
 			const logBaseUrl = baseUrl || "http://localhost:11434"
 			const ollamaOptions = {
-				provider: "ollama" as const,
+				provider: providerIdentifiers.ollama,
 				baseUrl,
 				apiKey,
 			}
@@ -1361,7 +1387,7 @@ export const webviewMessageHandler = async (
 					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
 				} else {
 					const lmStudioOptions = {
-						provider: "lmstudio" as const,
+						provider: providerIdentifiers.lmstudio,
 						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
 					}
 					// Flush cache and refresh to ensure fresh models.
@@ -1386,7 +1412,7 @@ export const webviewMessageHandler = async (
 				type: RouterModelsMessageType.singleRouterModelFetchResponse,
 				success: false,
 				error: getRouterRemovalMessage(),
-				values: { provider: "roo" },
+				values: { provider: retiredProviderIdentifiers.roo },
 			})
 			break
 		}

@@ -779,11 +779,6 @@
 			"count": 4
 		}
 	},
-	"core/task-persistence/__tests__/TaskHistoryStore.crossInstance.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/task-persistence/__tests__/TaskHistoryStore.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4

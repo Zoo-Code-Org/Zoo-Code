@@ -2,6 +2,7 @@ import { CodeIndexManager } from "../manager"
 import { CodeIndexServiceFactory } from "../service-factory"
 import type { MockedClass } from "vitest"
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Helper: create a mock vscode.Uri from an fsPath
 function mockUri(fsPath: string, scheme = "file") {
@@ -181,7 +182,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				isFeatureEnabled: true,
 				getConfig: vi.fn().mockReturnValue({
 					isConfigured: true,
-					embedderProvider: "openai",
+					embedderProvider: providerIdentifiers.openai,
 					modelId: "text-embedding-3-small",
 					openAiOptions: { openAiNativeApiKey: "test-key" },
 					qdrantUrl: "http://localhost:6333",
@@ -250,7 +251,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				isFeatureEnabled: true,
 				getConfig: vi.fn().mockReturnValue({
 					isConfigured: true,
-					embedderProvider: "openai",
+					embedderProvider: providerIdentifiers.openai,
 					modelId: "text-embedding-3-small",
 					openAiOptions: { openAiNativeApiKey: "test-key" },
 					qdrantUrl: "http://localhost:6333",
@@ -380,7 +381,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				isFeatureEnabled: true,
 				getConfig: vitest.fn().mockReturnValue({
 					isConfigured: true,
-					embedderProvider: "openai",
+					embedderProvider: providerIdentifiers.openai,
 					modelId: "text-embedding-3-small",
 					openAiOptions: { openAiNativeApiKey: "test-key" },
 					qdrantUrl: "http://localhost:6333",
@@ -477,7 +478,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				isFeatureEnabled: true,
 				getConfig: vi.fn().mockReturnValue({
 					isConfigured: true,
-					embedderProvider: "openai",
+					embedderProvider: providerIdentifiers.openai,
 					modelId: "text-embedding-3-small",
 					openAiOptions: { openAiNativeApiKey: "test-key" },
 					qdrantUrl: "http://localhost:6333",
@@ -584,7 +585,7 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				getGlobalState: vi.fn().mockReturnValue({
 					codebaseIndexEnabled: true,
 					codebaseIndexQdrantUrl: "http://localhost:6333",
-					codebaseIndexEmbedderProvider: "openai",
+					codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 					codebaseIndexEmbedderModelId: "text-embedding-3-small",
 					codebaseIndexEmbedderModelDimension: 1536,
 					codebaseIndexSearchMaxResults: 10,

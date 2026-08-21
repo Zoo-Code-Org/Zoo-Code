@@ -2,6 +2,7 @@ import { type ProviderSettings, RooCodeEventName } from "@roo-code/types"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock dependencies
 vi.mock("../../webview/ClineProvider")
@@ -67,7 +68,7 @@ describe("Task dispose method", () => {
 
 		// Mock API configuration
 		mockApiConfiguration = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiKey: "test-key",
 		} as ProviderSettings
 
@@ -226,7 +227,7 @@ describe("Task.run() idempotency", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockProvider = buildMockProvider()
-		mockApiConfiguration = { apiProvider: "anthropic", apiKey: "test-key" } as ProviderSettings
+		mockApiConfiguration = { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" } as ProviderSettings
 	})
 
 	test("run() does not invoke startTask when task was already started by constructor", async () => {

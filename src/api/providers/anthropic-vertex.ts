@@ -24,6 +24,7 @@ import {
 } from "../../core/prompts/tools/native-tools/converters"
 
 import { BaseProvider } from "./base-provider"
+import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
@@ -38,7 +39,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 		this.options = options
 
 		// https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude#regions
-		const projectId = this.options.vertexProjectId ?? "not-provided"
+		const projectId = this.options.vertexProjectId ?? NOT_PROVIDED
 		const region = this.options.vertexRegion ?? "us-east5"
 
 		const parsedVertexCredentials = parseVertexJsonCredentials(this.options.vertexJsonCredentials)

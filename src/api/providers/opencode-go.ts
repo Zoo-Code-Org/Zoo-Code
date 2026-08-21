@@ -8,6 +8,7 @@ import {
 	opencodeGoDefaultModelInfo,
 	OPENCODE_GO_DEFAULT_TEMPERATURE,
 	isOpencodeGoAnthropicFormatModel,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -81,7 +82,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "opencode-go",
+			name: providerIdentifiers.opencodeGo,
 			baseURL: "https://opencode.ai/zen/go/v1",
 			apiKey: options.opencodeGoApiKey,
 			modelId: options.opencodeGoModelId,
