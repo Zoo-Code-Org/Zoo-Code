@@ -22,19 +22,9 @@ import { BaseProvider } from "./base-provider"
 import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 const DEFAULT_THINKING_BUDGET = 8192
-
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (matches the error name produced by native abort-based APIs).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
-}
 
 export class PoeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -89,7 +79,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
 			if (controller.signal.aborted) {
-				throw createAbortError("Poe request aborted")
+				throw createAbortError("Poe")
 			}
 
 			const { id, info } = this.getModel()
@@ -152,7 +142,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
 				if (controller.signal.aborted) {
-					throw createAbortError("Poe request aborted")
+					throw createAbortError("Poe")
 				}
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				TelemetryService.instance.captureException(
@@ -184,7 +174,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
 				if (controller.signal.aborted) {
-					throw createAbortError("Poe request aborted")
+					throw createAbortError("Poe")
 				}
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				TelemetryService.instance.captureException(
@@ -210,14 +200,14 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 
 			if (mergedAbortSignal?.aborted) {
 				// The response resolved after the request was aborted: do not return the late result.
-				throw createAbortError("Poe completion aborted")
+				throw createAbortError("Poe")
 			}
 			return text
 		} catch (error) {
 			// Aborted requests are user-initiated: surface them as AbortError (this also covers
 			// timeouts, which abort the same signal) instead of a completion error.
 			if (mergedAbortSignal?.aborted) {
-				throw createAbortError("Poe completion aborted")
+				throw createAbortError("Poe")
 			}
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			TelemetryService.instance.captureException(

@@ -38,7 +38,7 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -140,16 +140,6 @@ interface CompletionUsage {
 	}
 }
 
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (matches the error name produced by native abort-based APIs).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
-}
-
 export class OpenRouterHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
@@ -247,7 +237,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
 			if (controller.signal.aborted) {
-				throw createAbortError("OpenRouter request aborted")
+				throw createAbortError("OpenRouter")
 			}
 
 			const model = await this.fetchModel()
@@ -386,7 +376,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error (and keep them out of exception telemetry).
 				if (controller.signal.aborted) {
-					throw createAbortError("OpenRouter request aborted")
+					throw createAbortError("OpenRouter")
 				}
 				// Try to parse as OpenRouter error structure using Zod
 				const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
@@ -592,7 +582,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
 				// DOM-standard AbortError so callers can detect the aborted request.
 				if (controller.signal.aborted) {
-					throw createAbortError("OpenRouter request aborted")
+					throw createAbortError("OpenRouter")
 				}
 				throw error
 			}
@@ -686,7 +676,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			// Aborted requests are user-initiated: surface them as AbortError (this also covers
 			// timeouts, which abort the same signal) instead of a completion error.
 			if (requestAbortSignal?.aborted) {
-				throw createAbortError("OpenRouter completion aborted")
+				throw createAbortError("OpenRouter")
 			}
 			// Try to parse as OpenRouter error structure using Zod
 			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
@@ -729,7 +719,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 		if (requestAbortSignal?.aborted) {
 			// The response resolved after the request was aborted: do not return the late result.
-			throw createAbortError("OpenRouter completion aborted")
+			throw createAbortError("OpenRouter")
 		}
 
 		if ("error" in response) {

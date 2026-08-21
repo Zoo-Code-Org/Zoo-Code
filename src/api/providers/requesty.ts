@@ -23,7 +23,7 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import { handleOpenAIError } from "./utils/error-handler"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -55,16 +55,6 @@ type RequestyChatCompletionParams = OpenAI.Chat.ChatCompletionCreateParams & {
 		}
 	}
 	thinking?: AnthropicProviderReasoningParams
-}
-
-/**
- * Create a DOM-standard AbortError so callers can detect aborted requests
- * (matches the error name produced by native abort-based APIs).
- */
-function createAbortError(message: string): Error {
-	const error = new Error(message)
-	error.name = "AbortError"
-	return error
 }
 
 export class RequestyHandler extends BaseProvider implements SingleCompletionHandler {
@@ -168,7 +158,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
 			if (controller.signal.aborted) {
-				throw createAbortError("Requesty request aborted")
+				throw createAbortError("Requesty")
 			}
 
 			const {
@@ -212,7 +202,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				// Aborted requests are user-initiated: surface them as AbortError instead of
 				// a completion error.
 				if (controller.signal.aborted) {
-					throw createAbortError("Requesty request aborted")
+					throw createAbortError("Requesty")
 				}
 				throw handleOpenAIError(error, this.providerName)
 			}
@@ -256,7 +246,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
 				// DOM-standard AbortError so callers can detect the aborted request.
 				if (controller.signal.aborted) {
-					throw createAbortError("Requesty request aborted")
+					throw createAbortError("Requesty")
 				}
 				throw error
 			}
@@ -294,14 +284,14 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			// Aborted requests are user-initiated: surface them as AbortError (this also covers
 			// timeouts, which abort the same signal) instead of a completion error.
 			if (requestAbortSignal?.aborted) {
-				throw createAbortError("Requesty completion aborted")
+				throw createAbortError("Requesty")
 			}
 			throw handleOpenAIError(error, this.providerName)
 		}
 
 		if (requestAbortSignal?.aborted) {
 			// The response resolved after the request was aborted: do not return the late result.
-			throw createAbortError("Requesty completion aborted")
+			throw createAbortError("Requesty")
 		}
 		return response.choices[0]?.message.content || ""
 	}
