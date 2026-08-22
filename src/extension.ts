@@ -16,6 +16,7 @@ if (fs.existsSync(envPath)) {
 }
 
 import type { CloudUserInfo, AuthState } from "@roo-code/types"
+import { isTelemetryOptedIn } from "@roo-code/types"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService, PostHogTelemetryClient } from "@roo-code/telemetry"
 import { customToolRegistry } from "@roo-code/core"
@@ -173,6 +174,29 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	const contextProxy = await ContextProxy.getInstance(context)
+	const updateTelemetryState = () => {
+		const telemetrySetting = contextProxy.getGlobalState("telemetrySetting") ?? "unset"
+		TelemetryService.instance.updateTelemetryState(
+			isTelemetryOptedIn(telemetrySetting) && vscode.env.isTelemetryEnabled,
+		)
+	}
+
+	updateTelemetryState()
+
+	// React live to VS Code's global telemetry toggle (recommended over only reading
+	// telemetry.telemetryLevel, which PostHogTelemetryClient still checks as a secondary gate).
+	// vscode.env.isTelemetryEnabled is ANDed in directly because the deprecated
+	// telemetry.telemetryLevel setting the client checks doesn't reflect this live event.
+	context.subscriptions.push(
+		vscode.env.onDidChangeTelemetryEnabled(() => {
+			updateTelemetryState()
+
+			// Push the new vscode.env.isTelemetryEnabled value to the webview too, so its
+			// own PostHog client (gated separately in TelemetryClient.ts) can't keep
+			// sending events after the global toggle flips off mid-session.
+			void ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
+		}),
+	)
 
 	// Initialize code index managers for all workspace folders.
 	const codeIndexManagers: CodeIndexManager[] = []
@@ -389,12 +413,14 @@ export async function deactivate() {
 
 	await McpServerManager.cleanup(extensionContext)
 
-	try {
-		await TelemetryService.instance.shutdown()
-	} catch (error) {
-		outputChannel.appendLine(
-			`Failed to shut down telemetry service: ${error instanceof Error ? error.message : String(error)}`,
-		)
+	if (TelemetryService.hasInstance()) {
+		try {
+			await TelemetryService.instance.shutdown()
+		} catch (error) {
+			outputChannel.appendLine(
+				`Failed to shut down telemetry service: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
 	}
 
 	Terminal.setTerminalProfile(undefined)
