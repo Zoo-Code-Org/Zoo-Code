@@ -219,6 +219,68 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 		})
 	})
 
+	describe("updateApiConfiguration while an override is active", () => {
+		it("re-captures the incoming profile's effort as the restore value and keeps the override applied", () => {
+			task.setRuntimeThinkingEffort("xhigh", "test-source")
+
+			// A profile switch lands a different settings-derived effort while the override is active.
+			const newConfig = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-opus-4-8",
+				apiKey: "test-key-2",
+				reasoningEffort: "medium",
+			} as ProviderSettings
+			task.updateApiConfiguration(newConfig)
+
+			// The override still wins in the in-memory copy...
+			expect(task.apiConfiguration).toEqual(
+				expect.objectContaining({
+					apiModelId: "claude-opus-4-8",
+					apiKey: "test-key-2",
+					reasoningEffort: "xhigh",
+				}),
+			)
+			// ...the override remains active...
+			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "xhigh", source: "test-source" })
+			// ...and the NEW profile's value is now the restore target.
+			expect(getPrivateAccess(task).preOverrideReasoningEffort).toBe("medium")
+			// The handler was rebuilt from the merged new copy.
+			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastCall?.[0]).toEqual(
+				expect.objectContaining({ apiModelId: "claude-opus-4-8", reasoningEffort: "xhigh" }),
+			)
+			expect(lastCall?.[0]).not.toBe(newConfig)
+
+			// Clearing restores the NEW profile's effort, not the stale original one.
+			task.setRuntimeThinkingEffort(undefined)
+			expect(task.apiConfiguration.reasoningEffort).toBe("medium")
+			expect(task.apiConfiguration).toEqual(
+				expect.objectContaining({
+					apiModelId: "claude-opus-4-8",
+					apiKey: "test-key-2",
+				}),
+			)
+			const lastCallAfterClear = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastCallAfterClear?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "medium" }))
+		})
+
+		it("replaces the configuration as usual while inactive", () => {
+			const newConfig = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "claude-opus-4-8",
+				apiKey: "test-key-2",
+				reasoningEffort: "medium",
+			} as ProviderSettings
+
+			task.updateApiConfiguration(newConfig)
+
+			expect(task.apiConfiguration).toBe(newConfig)
+			expect(task.apiConfiguration.reasoningEffort).toBe("medium")
+			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastCall?.[0]).toBe(newConfig)
+		})
+	})
+
 	describe("request metadata fragment", () => {
 		it("is empty while inactive and carries the override while active", () => {
 			expect(getPrivateAccess(task).getRuntimeThinkingEffortMetadata()).toEqual({})

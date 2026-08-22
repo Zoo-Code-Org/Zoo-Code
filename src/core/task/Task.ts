@@ -1525,7 +1525,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
 		// Update the configuration and rebuild the API handler
-		this.apiConfiguration = newApiConfiguration
+		if (this.runtimeThinkingEffort !== undefined) {
+			// DTE series 2/5: a task-local override is active, so re-capture the
+			// incoming profile's value as the restore value and re-apply the
+			// override on top of the new in-memory copy — clearing the override
+			// must restore the NEW profile's value, not the stale one.
+			this.preOverrideReasoningEffort = newApiConfiguration.reasoningEffort
+			this.apiConfiguration = { ...newApiConfiguration, reasoningEffort: this.runtimeThinkingEffort }
+		} else {
+			this.apiConfiguration = newApiConfiguration
+		}
 		this.api = buildApiHandler(this.apiConfiguration)
 	}
 
