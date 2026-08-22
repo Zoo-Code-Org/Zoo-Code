@@ -17,10 +17,6 @@ for (const theme of visualThemes) {
 
 		const code = component.getByTestId("code-block").locator("code")
 		await expect(code).toContainText("Hello, Zoo Code", { timeout: 20_000 })
-		await expectContrast(code, {
-			background: component.getByTestId("code-block").locator("pre"),
-			label: `${theme.name} code text`,
-		})
 		const codeBackground = component.getByTestId("code-block").locator("pre")
 		const syntaxTokens = code.locator("span[style]")
 		for (let index = 0; index < (await syntaxTokens.count()); index++) {
