@@ -358,6 +358,42 @@ describe("MarkdownBlock", () => {
 			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openMention" }))
 		})
 
+		it("keeps the shared regex boundary rules when a mention directly follows a link or inline code", async () => {
+			// Matching must run on the raw string so the shared regex's start boundary
+			// sees the real characters: with no whitespace after a closing `)` or a
+			// backtick, `@problems` is not a mention (the collapsed <Mention>
+			// component rejects it too). Replacing the literal regions with spaces
+			// before matching would make them actionable.
+			const markdown = "[file](/src/a.ts)@problems and `x`@problems"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			// The anchor text is a stable, unique wait target.
+			await screen.findByText("file")
+
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			// The text still renders verbatim (link + plain text, no spans).
+			expect(container.querySelector("p")?.textContent).toBe("file@problems and x@problems")
+		})
+
+		it("keeps a whitespace-separated mention after a link or inline code actionable", async () => {
+			// The space is a legitimate boundary for the shared regex, so these
+			// mentions stay clickable: the masked regions end before the spaces and
+			// the match ranges do not intersect them.
+			const markdown = "[file](/src/a.ts) @problems and `x` @problems"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			// The anchor text is a stable, unique wait target.
+			await screen.findByText("file")
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions).toHaveLength(2)
+			expect(mentions[0].textContent).toBe("@problems")
+			expect(mentions[1].textContent).toBe("@problems")
+
+			fireEvent.click(mentions[0])
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "problems" })
+		})
+
 		it("renders a standalone mention with no surrounding text", async () => {
 			// A mention that both starts and ends the text node exercises the
 			// no-leading-text and no-trailing-text branches of the splitter.
@@ -384,15 +420,20 @@ describe("MarkdownBlock", () => {
 			expect(mention.getAttribute("role")).toBe("button")
 			expect(mention.getAttribute("tabindex")).toBe("0")
 
-			fireEvent.keyDown(mention, { key: "Enter" })
+			// Enter/Space must both post and be default-prevented: dispatching a
+			// cancelable event returns false once preventDefault has run, and Space's
+			// default action would otherwise scroll the expanded task panel while a
+			// mention has focus.
+			expect(fireEvent.keyDown(mention, { key: "Enter" })).toBe(false)
 			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "terminal" })
 
 			mockPostMessage.mockClear()
-			fireEvent.keyDown(mention, { key: " " })
+			expect(fireEvent.keyDown(mention, { key: " " })).toBe(false)
 			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "terminal" })
 
 			mockPostMessage.mockClear()
-			fireEvent.keyDown(mention, { key: "a" })
+			// An unrelated key neither posts nor prevents the default action.
+			expect(fireEvent.keyDown(mention, { key: "a" })).toBe(true)
 			expect(mockPostMessage).not.toHaveBeenCalled()
 		})
 

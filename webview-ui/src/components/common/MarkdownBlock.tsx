@@ -41,9 +41,13 @@ const MENTION_MASK_NODE_TYPES = new Set(["code", "inlineCode", "link", "image", 
  * is also the behavior of the collapsed <Mention> component, so this restores
  * it for the expanded view.
  *
- * Regions that render as literal content (code, links, images, HTML, math) are
- * masked to spaces in a throwaway mdast parse first; using the exact positions
- * remark sees guarantees a mention inside such a region is never rewritten.
+ * Matching runs on the raw string so the shared regex's boundary rules apply
+ * unchanged (replacing literal regions with spaces would turn a preceding `)`
+ * or backtick into whitespace and make non-mentions actionable). Literal / non-
+ * text regions (code, links, images, HTML, math) are marked via a throwaway
+ * mdast parse with the exact positions remark sees, and a match whose range
+ * intersects one of them is discarded so mentions inside such regions stay
+ * inert.
  */
 function prepareMentions(markdown: string): { preparedMarkdown: string; mentions: string[] } {
 	if (!markdown) {
@@ -51,14 +55,14 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 	}
 
 	// A throwaway parse with the same extensions as the render pipeline, so the
-	// reported positions match what remark will tokenize. Mask literal and
-	// non-text regions to spaces (mdast positions carry absolute source
-	// offsets): a mention inside any of them must stay inert, because code and
-	// links render as literal/interactive content, and images, raw HTML, and
-	// math keep their source text unchanged.
+	// reported positions match what remark will tokenize. Mark literal and
+	// non-text regions (mdast positions carry absolute source offsets): a
+	// mention inside any of them must stay inert, because code and links render
+	// as literal/interactive content, and images, raw HTML, and math keep their
+	// source text unchanged.
 	const tree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(markdown)
 
-	const masked = markdown.split("")
+	const isMasked = new Array<boolean>(markdown.length).fill(false)
 	visit(tree, (node: any) => {
 		if (!MENTION_MASK_NODE_TYPES.has(node.type)) {
 			return
@@ -68,20 +72,28 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 		if (typeof start !== "number" || typeof end !== "number") {
 			return
 		}
-		for (let i = start; i < end && i < masked.length; i++) {
-			masked[i] = " "
+		for (let i = start; i < end && i < isMasked.length; i++) {
+			isMasked[i] = true
 		}
 	})
 
 	const mentions: string[] = []
 	let preparedMarkdown = ""
 	let lastIndex = 0
-	for (const match of masked.join("").matchAll(mentionRegexGlobal)) {
+	for (const match of markdown.matchAll(mentionRegexGlobal)) {
 		const start = match.index!
+		const end = start + match[0].length
+		// The raw string (not a masked copy) is what the shared regex's boundary
+		// rules must see: masking would turn a preceding `)` or backtick into a
+		// space and make a non-mention actionable (e.g. `[file](/src/a.ts)`@problems``).
+		// Discard a match only when its range lands inside a masked literal region.
+		if (isMasked.slice(start, end).some(Boolean)) {
+			continue
+		}
 		preparedMarkdown += markdown.slice(lastIndex, start)
-		mentions.push(markdown.slice(start, start + match[0].length))
+		mentions.push(markdown.slice(start, end))
 		preparedMarkdown += `${MENTION_PLACEHOLDER_CHAR}${mentions.length - 1}${MENTION_PLACEHOLDER_CHAR}`
-		lastIndex = start + match[0].length
+		lastIndex = end
 	}
 	preparedMarkdown += markdown.slice(lastIndex)
 
@@ -158,10 +170,14 @@ function rehypeMentions(mentions: string[]) {
 						},
 						// Keyboard parity with the click handler (a role=button span is not a
 						// native button, so Enter/Space must be handled explicitly).
+						// preventDefault keeps Space from also scrolling the expanded task panel,
+						// which otherwise receives the key's default action when a mention has
+						// focus.
 						onKeyDown: (event: React.KeyboardEvent<HTMLSpanElement>) => {
 							if (event.key !== "Enter" && event.key !== " ") {
 								return
 							}
+							event.preventDefault()
 							event.stopPropagation()
 							vscode.postMessage({ type: "openMention", text: mentionValue })
 						},
