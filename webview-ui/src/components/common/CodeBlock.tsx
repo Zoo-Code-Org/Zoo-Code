@@ -228,12 +228,13 @@ const CodeBlock = memo(
 					transformers: [
 						{
 							pre(node) {
-								node.properties.style = "padding: 0; margin: 0;"
+								node.properties.style = `padding: 0; margin: 0; background-color: ${CODE_BLOCK_BG_COLOR}; background-image: none;`
 								return node
 							},
 							code(node) {
 								// Add hljs classes for consistent styling
 								node.properties.class = `hljs language-${currentLanguage}`
+								node.properties.style = "background-color: transparent; background-image: none;"
 								return node
 							},
 							line(node) {
