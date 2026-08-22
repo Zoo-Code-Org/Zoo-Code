@@ -47,13 +47,11 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.78.0
+## Novità in v3.80.0
 
-- **Sono arrivati tre importanti nuovi modelli** — usa i nuovissimi Gemini 3.7 Flash, GLM 5.3 e Qwen3.8 Max, oltre agli aggiornamenti di reasoning, prezzi e copertura dei provider per DeepSeek V4.
-- **Connettiti a NanoGPT** — usa la scoperta dinamica dei modelli, streaming e completamenti dei prompt, con preferenze di routing per velocità, prezzo, latenza, throughput, supporto agli strumenti e caching.
-- **Provider e task più affidabili** — le correzioni migliorano la configurazione degli endpoint Azure OpenAI, i limiti di output di Kimi Code, la conservazione dei titoli nella cronologia dei task e l'importazione/esportazione delle impostazioni Zoo.
-- Destructive Command Guard ora supporta i Mac basati su Intel.
-- Gli aggiornamenti di sicurezza risolvono vulnerabilità in `undici` e Mermaid.
+- **Accesso ai file più sicuro** — usa allowlist separate per lettura e scrittura per controllare i percorsi a cui Zoo Code può accedere.
+- **Più modelli tra cui scegliere** — GLM 5.3 è ora disponibile tramite Z.ai, mentre Gemini 3.5 Flash Lite e Gemini 3.1 Flash Lite sono stati aggiunti al provider Gemini.
+- **Workflow quotidiani più affidabili** — i miglioramenti rafforzano il recupero e la cronologia dei task, lo streaming e l'uso degli strumenti dei provider, l'importazione delle impostazioni e la leggibilità nei vari temi dell'IDE.
 
 ## Cosa può fare Zoo Code per TE?
 

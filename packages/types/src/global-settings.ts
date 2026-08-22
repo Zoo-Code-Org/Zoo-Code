@@ -123,9 +123,23 @@ export const globalSettingsSchema = z.object({
 	autoApprovalEnabled: z.boolean().optional(),
 	alwaysAllowReadOnly: z.boolean().optional(),
 	alwaysAllowReadOnlyOutsideWorkspace: z.boolean().optional(),
+	/**
+	 * Gitignore-style patterns naming the files that may be read without
+	 * approval, even when `alwaysAllowReadOnly` is off. Resolved relative to the
+	 * workspace root; absolute patterns are also accepted.
+	 */
+	allowedReadFiles: z.array(z.string()).optional(),
 	alwaysAllowWrite: z.boolean().optional(),
 	alwaysAllowWriteOutsideWorkspace: z.boolean().optional(),
 	alwaysAllowWriteProtected: z.boolean().optional(),
+	/**
+	 * Gitignore-style path patterns, relative to the workspace root, whose files
+	 * may be created/edited without approval even when `alwaysAllowWrite` is off.
+	 *
+	 * Lets a user grant a narrow, path-scoped write permission (for example a
+	 * scratchpad file) without auto-approving writes to the whole workspace.
+	 */
+	allowedWriteFiles: z.array(z.string()).optional(),
 	writeDelayMs: z.number().min(0).optional(),
 	/**
 	 * Fuzzy matching threshold for the multi-search-replace diff strategy.

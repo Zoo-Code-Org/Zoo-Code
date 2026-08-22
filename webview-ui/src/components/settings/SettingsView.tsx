@@ -159,6 +159,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const {
 		alwaysAllowReadOnly,
 		alwaysAllowReadOnlyOutsideWorkspace,
+		allowedReadFiles,
 		allowedCommands,
 		deniedCommands,
 		allowedMaxRequests,
@@ -172,6 +173,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		alwaysAllowWrite,
 		alwaysAllowWriteOutsideWorkspace,
 		alwaysAllowWriteProtected,
+		allowedWriteFiles,
 		autoCondenseContext,
 		autoCondenseContextPercent,
 		enableCheckpoints,
@@ -389,9 +391,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					language,
 					alwaysAllowReadOnly: alwaysAllowReadOnly ?? undefined,
 					alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? undefined,
+					allowedReadFiles: allowedReadFiles ?? [],
 					alwaysAllowWrite: alwaysAllowWrite ?? undefined,
 					alwaysAllowWriteOutsideWorkspace: alwaysAllowWriteOutsideWorkspace ?? undefined,
 					alwaysAllowWriteProtected: alwaysAllowWriteProtected ?? undefined,
+					allowedWriteFiles: allowedWriteFiles ?? [],
 					alwaysAllowExecute: alwaysAllowExecute ?? undefined,
 					destructiveCommandGuardEnabled: destructiveCommandGuardEnabled ?? false,
 					alwaysAllowMcp,
@@ -836,9 +840,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 							<AutoApproveSettings
 								alwaysAllowReadOnly={alwaysAllowReadOnly}
 								alwaysAllowReadOnlyOutsideWorkspace={alwaysAllowReadOnlyOutsideWorkspace}
+								allowedReadFiles={allowedReadFiles}
 								alwaysAllowWrite={alwaysAllowWrite}
 								alwaysAllowWriteOutsideWorkspace={alwaysAllowWriteOutsideWorkspace}
 								alwaysAllowWriteProtected={alwaysAllowWriteProtected}
+								allowedWriteFiles={allowedWriteFiles}
 								alwaysAllowMcp={alwaysAllowMcp}
 								alwaysAllowModeSwitch={alwaysAllowModeSwitch}
 								alwaysAllowSubtasks={alwaysAllowSubtasks}

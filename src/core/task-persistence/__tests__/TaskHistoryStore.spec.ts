@@ -57,28 +57,18 @@ describe("TaskHistoryStore", () => {
 			expect(store.getAll()).toEqual([])
 		})
 
-		it("initializes from existing index file", async () => {
+		it("initializes from existing per-task files", async () => {
 			const tasksDir = path.join(tmpDir, "tasks")
 			await fs.mkdir(tasksDir, { recursive: true })
 
 			const item1 = makeHistoryItem({ id: "task-1", ts: 1000 })
 			const item2 = makeHistoryItem({ id: "task-2", ts: 2000 })
 
-			// Create task directories so reconciliation doesn't remove them
 			await fs.mkdir(path.join(tasksDir, "task-1"), { recursive: true })
 			await fs.mkdir(path.join(tasksDir, "task-2"), { recursive: true })
 
-			// Write per-task files
 			await fs.writeFile(path.join(tasksDir, "task-1", GlobalFileNames.historyItem), JSON.stringify(item1))
 			await fs.writeFile(path.join(tasksDir, "task-2", GlobalFileNames.historyItem), JSON.stringify(item2))
-
-			// Write index
-			const index = {
-				version: 1,
-				updatedAt: Date.now(),
-				entries: [item1, item2],
-			}
-			await fs.writeFile(path.join(tasksDir, GlobalFileNames.historyIndex), JSON.stringify(index))
 
 			await store.initialize()
 
@@ -374,7 +364,7 @@ describe("TaskHistoryStore", () => {
 			expect(store.get("idem-task")).toBeDefined()
 		})
 
-		it("serializes migration cache and index updates behind the store lock", async () => {
+		it("serializes migration cache updates behind the store lock", async () => {
 			const tasksDir = path.join(tmpDir, "tasks")
 			const migrated = makeHistoryItem({ id: "migration-locked" })
 			const concurrent = makeHistoryItem({ id: "migration-concurrent" })
@@ -389,12 +379,17 @@ describe("TaskHistoryStore", () => {
 			const migrationWriteStarted = new Promise<void>((resolve) => {
 				signalMigrationWriteStarted = resolve
 			})
-			const storeInternals = store as unknown as { writeIndex: () => Promise<void> }
-			const originalWriteIndex = storeInternals.writeIndex.bind(store)
-			vi.spyOn(storeInternals, "writeIndex").mockImplementation(async () => {
-				signalMigrationWriteStarted()
-				await migrationWriteCanFinish
-				return originalWriteIndex()
+
+			const { safeWriteJson: mockSafeWriteJson } = await import("../../../utils/safeWriteJson")
+			const originalImpl = vi.mocked(mockSafeWriteJson).getMockImplementation()!
+			let firstCall = true
+			vi.mocked(mockSafeWriteJson).mockImplementation(async (...args) => {
+				if (firstCall) {
+					firstCall = false
+					signalMigrationWriteStarted()
+					await migrationWriteCanFinish
+				}
+				return originalImpl(...args)
 			})
 
 			const migration = store.migrateFromGlobalState([migrated])
@@ -407,45 +402,6 @@ describe("TaskHistoryStore", () => {
 
 			expect(store.get(migrated.id)).toEqual(migrated)
 			expect(store.get(concurrent.id)).toEqual(concurrent)
-			await store.flushIndex()
-			const index = JSON.parse(await fs.readFile(path.join(tasksDir, GlobalFileNames.historyIndex), "utf8")) as {
-				entries: HistoryItem[]
-			}
-			expect(index.entries.map((entry) => entry.id)).toEqual(expect.arrayContaining([migrated.id, concurrent.id]))
-		})
-	})
-
-	describe("flushIndex()", () => {
-		it("writes index to disk on flush", async () => {
-			await store.initialize()
-
-			await store.upsert(makeHistoryItem({ id: "flush-task" }))
-			await store.flushIndex()
-
-			const indexPath = path.join(tmpDir, "tasks", GlobalFileNames.historyIndex)
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index = JSON.parse(raw)
-
-			expect(index.version).toBe(1)
-			expect(index.entries).toHaveLength(1)
-			expect(index.entries[0].id).toBe("flush-task")
-		})
-	})
-
-	describe("dispose()", () => {
-		it("flushes index on dispose", async () => {
-			await store.initialize()
-
-			await store.upsert(makeHistoryItem({ id: "dispose-task" }))
-			store.dispose()
-
-			// Give the flush a moment to complete
-			await new Promise((resolve) => setTimeout(resolve, 100))
-
-			const indexPath = path.join(tmpDir, "tasks", GlobalFileNames.historyIndex)
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index = JSON.parse(raw)
-			expect(index.entries).toHaveLength(1)
 		})
 	})
 
@@ -748,8 +704,9 @@ describe("TaskHistoryStore", () => {
 			const parentDisk = JSON.parse(await fs.readFile(parentFile, "utf8"))
 			expect(parentDisk.status).toBe("delegated")
 
-			// Cache was NOT updated (cache set is deferred until after both writes succeed)
-			expect(store.get("child-partial")?.status).toBe("active")
+			// First record's cache IS updated (it was committed to disk).
+			// Second record's cache is unchanged (write never completed).
+			expect(store.get("child-partial")?.status).toBe("completed")
 			expect(store.get("parent-partial")?.status).toBe("delegated")
 		})
 
