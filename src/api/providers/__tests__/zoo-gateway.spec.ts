@@ -819,6 +819,24 @@ describe("ZooGatewayHandler", () => {
 			expect(handler.getModel().info.inputPrice).toBe(0)
 		})
 
+		it("negative-caches an empty catalog response for a missing model", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValue({})
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "alibaba/qwen3.8-max",
+			})
+
+			await handler.ensureModelFetched()
+			vitest.mocked(getModels).mockClear()
+
+			await handler.ensureModelFetched()
+
+			expect(getModels).not.toHaveBeenCalled()
+			expect(handler.getModel().info.inputPrice).toBe(0)
+		})
+
 		it("deduplicates concurrent calls into a single fetch", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const { getModels } = await import("../fetchers/modelCache")

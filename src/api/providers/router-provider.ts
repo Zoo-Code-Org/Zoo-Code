@@ -68,8 +68,7 @@ export abstract class RouterProvider extends BaseProvider {
 		const lastMissingAttempt = this.missingModelRefreshAt.get(id)
 		if (
 			lastMissingAttempt !== undefined &&
-			Date.now() - lastMissingAttempt < RouterProvider.MISSING_MODEL_RETRY_MS &&
-			Object.keys(this.models).length > 0
+			Date.now() - lastMissingAttempt < RouterProvider.MISSING_MODEL_RETRY_MS
 		) {
 			return this.getModel()
 		}
