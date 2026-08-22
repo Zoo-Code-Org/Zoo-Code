@@ -16,3 +16,26 @@ body {
 #root {
 	padding: 16px;
 }
+
+/* @vscode/webview-ui-toolkit/react renders VSCodeButton as a bare
+   <button appearance="primary|secondary"> outside VS Code's web-component
+   runtime. Style it here so button screenshots match the real appearance. */
+button[appearance="primary"],
+button[appearance="secondary"] {
+	border: none;
+	border-radius: 2px;
+	padding: 4px 14px;
+	font-family: var(--vscode-font-family);
+	font-size: var(--vscode-font-size);
+	cursor: pointer;
+}
+
+button[appearance="primary"] {
+	color: var(--vscode-button-foreground);
+	background: var(--vscode-button-background);
+}
+
+button[appearance="secondary"] {
+	color: var(--vscode-button-secondaryForeground);
+	background: var(--vscode-button-secondaryBackground);
+}
