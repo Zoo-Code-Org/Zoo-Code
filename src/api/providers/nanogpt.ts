@@ -39,8 +39,25 @@ function getReasoningEffort(options: ApiHandlerOptions, info: ModelInfo): Reason
 		configured === "disable" || configured === "none" || options.enableReasoningEffort === false
 	const supported = info.supportsReasoningEffort
 
-	if (!reasoningDisabled && configured && configured !== "minimal") {
-		if (supported === true || (Array.isArray(supported) && supported.includes(configured))) return configured
+	if (reasoningDisabled && (supported === true || (Array.isArray(supported) && supported.includes("disable")))) {
+		return undefined
+	}
+
+	const candidates = [reasoningDisabled ? undefined : configured, info.reasoningEffort]
+	if (Array.isArray(supported) && !supported.includes("disable")) {
+		candidates.push(supported.find((effort) => effort !== "none" && effort !== "minimal"))
+	}
+
+	for (const effort of candidates) {
+		if (
+			effort &&
+			effort !== "disable" &&
+			effort !== "none" &&
+			effort !== "minimal" &&
+			(supported === true || (Array.isArray(supported) && supported.includes(effort)))
+		) {
+			return effort
+		}
 	}
 
 	const fallback = info.reasoningEffort

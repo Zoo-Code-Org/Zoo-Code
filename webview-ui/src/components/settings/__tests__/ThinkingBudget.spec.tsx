@@ -274,11 +274,13 @@ describe("ThinkingBudget", () => {
 		})
 
 		it("should fall back to first available option when stored value is not in the explicit array", () => {
+			const setApiConfigurationField = vi.fn()
 			// Covers the clamp branch: defaultReasoningEffort="disable" but array omits "disable"
 			render(
 				<ThinkingBudget
 					{...defaultProps}
 					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
 					modelInfo={{
 						...reasoningEffortModelInfo,
 						supportsReasoningEffort: ["low", "high"],
@@ -288,6 +290,47 @@ describe("ThinkingBudget", () => {
 
 			// The select value should be "low" (first item), not "disable"
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+
+		it("should use and persist an optional model's advertised reasoning default", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["disable", "high", "max"],
+						reasoningEffort: "high",
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "high")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "high", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+
+		it("should preserve an explicit disable selection for optional reasoning", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{ reasoningEffort: "disable", enableReasoningEffort: false }}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["disable", "high", "max"],
+						reasoningEffort: "high",
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "disable")
+			expect(setApiConfigurationField).not.toHaveBeenCalled()
 		})
 
 		it("should normalize an invalid disabled value to the default for required reasoning", () => {

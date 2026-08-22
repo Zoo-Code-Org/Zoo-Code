@@ -102,9 +102,8 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	// Default reasoning effort - use model's default if available
 	// GPT-5 models have "medium" as their default in the model configuration
 	const modelDefaultReasoningEffort = modelInfo?.reasoningEffort as ReasoningEffortExtended | undefined
-	const defaultReasoningEffort: ReasoningEffortOption = modelInfo?.requiredReasoningEffort
-		? modelDefaultReasoningEffort || "medium"
-		: "disable"
+	const defaultReasoningEffort: ReasoningEffortOption =
+		modelDefaultReasoningEffort ?? (modelInfo?.requiredReasoningEffort ? "medium" : "disable")
 	// Current reasoning effort from settings, or fall back to default.
 	// Clamp to availableOptions so the Select trigger always renders a valid option.
 	const storedReasoningEffort = apiConfiguration.reasoningEffort as ReasoningEffortOption | undefined
@@ -120,19 +119,12 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	useEffect(() => {
 		if (
 			isReasoningEffortSupported &&
-			modelInfo?.requiredReasoningEffort &&
 			storedReasoningEffort !== currentReasoningEffort &&
 			currentReasoningEffort !== "disable"
 		) {
 			setApiConfigurationField("reasoningEffort", currentReasoningEffort as ReasoningEffortExtended, false)
 		}
-	}, [
-		isReasoningEffortSupported,
-		storedReasoningEffort,
-		currentReasoningEffort,
-		modelInfo?.requiredReasoningEffort,
-		setApiConfigurationField,
-	])
+	}, [isReasoningEffortSupported, storedReasoningEffort, currentReasoningEffort, setApiConfigurationField])
 
 	// Sync enableReasoningEffort based on selection
 	// "disable" turns off reasoning; "none" is a valid level (reasoning enabled)

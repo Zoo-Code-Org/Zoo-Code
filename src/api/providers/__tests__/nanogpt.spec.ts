@@ -204,6 +204,40 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
+	it("uses the model's advertised reasoning effort when settings are unset", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["disable", "low", "high"],
+				reasoningEffort: "high",
+			},
+		})
+
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "high" })
+	})
+
+	it("uses the first supported effort when the model cannot disable reasoning", async () => {
+		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it("omits reasoning effort when reasoning is explicitly disabled", async () => {
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: false,
+				reasoningEffort: "high",
+			}).createMessage("sys", messages),
+		)
+
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+	})
+
 	it("keeps Muse Spark tool-result history contiguous across turns", async () => {
 		const modelId = "meta/muse-spark-1.2-contributor"
 		vi.mocked(getModels).mockResolvedValue({
@@ -370,6 +404,14 @@ describe("NanoGptHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		it("uses the same default reasoning effort as streaming requests", async () => {
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
+
+			await new NanoGptHandler({ nanoGptModelId: "model:thinking" }).completePrompt("prompt")
+
+			expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+		})
+
 		it("requests cache-capable routing without changing the completion model ID", async () => {
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "response" } }] })
 			const handler = new NanoGptHandler({
