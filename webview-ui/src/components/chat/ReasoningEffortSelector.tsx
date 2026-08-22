@@ -16,7 +16,7 @@ for models that don't, e.g. gpt-oss); the fallback synthesizes
 [disable, low, medium, high] when no model info has loaded yet.
 */
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type { ModelInfo } from "@roo-code/types/model"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -31,6 +31,7 @@ import {
 	getOllamaReasoningModelInfo,
 	getReasoningEffortSelection,
 	getReasoningEffortTranslationKey,
+	normalizeReasoningEffortOnModelChange,
 	type ReasoningEffortOption,
 } from "@src/utils/reasoning-effort"
 import { vscode } from "@src/utils/vscode"
@@ -61,10 +62,36 @@ export const ReasoningEffortSelector = ({ disabled = false, triggerClassName = "
 		return selectedModelInfo
 	}, [provider, selectedModelInfo])
 
-	const { isReasoningEffortSupported, availableOptions, currentReasoningEffort } = getReasoningEffortSelection(
-		apiConfiguration,
-		modelInfo,
-	)
+	const { isReasoningEffortSupported, availableOptions, currentReasoningEffort, storedReasoningEffort } =
+		getReasoningEffortSelection(apiConfiguration, modelInfo)
+
+	// Normalize the stored reasoning effort at the model-switch boundary. When
+	// the user switches from a disable-capable model (e.g. qwen3, with
+	// reasoningEffort: "disable") to one that omits "disable" (gpt-oss →
+	// ["low","medium","high"]), the stored value falls out of the new capability
+	// array. getReasoningEffortSelection already clamps the *displayed* effort to
+	// the fallback, but the *stored* value stays "disable" — so the native
+	// request mapper would send think: false while the UI shows "Low". This
+	// effect persists the clamped value so the stored effort, the displayed
+	// effort, and the request stay in sync. It only writes reasoningEffort (never
+	// enableReasoningEffort), mirroring the chat selector's soft-toggle contract.
+	useEffect(() => {
+		if (!currentApiConfigName || !apiConfiguration) {
+			return
+		}
+		const persisted = normalizeReasoningEffortOnModelChange({ storedReasoningEffort, currentReasoningEffort })
+		if (persisted === undefined) {
+			return
+		}
+		vscode.postMessage({
+			type: "upsertApiConfiguration",
+			text: currentApiConfigName,
+			apiConfiguration: {
+				...apiConfiguration,
+				reasoningEffort: persisted,
+			},
+		})
+	}, [apiConfiguration, currentApiConfigName, storedReasoningEffort, currentReasoningEffort])
 
 	const handleSelect = useCallback(
 		(option: ReasoningEffortOption) => {

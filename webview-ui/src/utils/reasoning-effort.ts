@@ -83,6 +83,39 @@ export function getReasoningEffortSelection(
 }
 
 /**
+ * Returns the reasoning-effort value a consumer should persist after the
+ * selected model's capability array changes, or `undefined` when the stored
+ * value is still valid for the new capability set (no write needed).
+ *
+ * This closes the model-switch gap: when a user saves e.g. "disable" on a
+ * disable-capable model (qwen3 → ["disable","low","medium","high","max"]) and
+ * then switches to a model that omits "disable" (gpt-oss →
+ * ["low","medium","high"]), `getReasoningEffortSelection` clamps the *displayed*
+ * effort to the fallback ("low") but the *stored* value stays "disable". The
+ * native request mapper reads the stored value, so it would send `think: false`
+ * while the UI shows "Low". Persisting the clamped value at the model-switch
+ * boundary keeps the stored value, the displayed effort, and the request in
+ * sync. Callers gate the write behind `enableReasoningEffort` / their own
+ * persistence path so they do not silently flip a user's thinking-off state.
+ */
+export function normalizeReasoningEffortOnModelChange(
+	selection: Pick<ReasoningEffortSelection, "storedReasoningEffort" | "currentReasoningEffort">,
+): ReasoningEffortOption | undefined {
+	const { storedReasoningEffort, currentReasoningEffort } = selection
+	// No stored value (fresh profile) → nothing to normalize.
+	if (storedReasoningEffort === undefined) {
+		return undefined
+	}
+	// Stored value is still a valid option → keep it (no write).
+	if (storedReasoningEffort === currentReasoningEffort) {
+		return undefined
+	}
+	// Stored value fell out of the new capability array → persist the clamped
+	// fallback the UI is already displaying.
+	return currentReasoningEffort
+}
+
+/**
  * Builds the `ModelInfo` the Ollama settings page and chat selector feed into
  * `getReasoningEffortSelection`. This is the single shared Ollama normalization
  * so both surfaces advertise the same options and can't drift.

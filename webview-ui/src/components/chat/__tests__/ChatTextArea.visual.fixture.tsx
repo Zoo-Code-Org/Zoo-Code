@@ -32,14 +32,13 @@ const TRIGGER_BASE =
 	"transition-all duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-vscode-focusBorder focus-visible:ring-inset " +
 	"opacity-90 hover:opacity-100 hover:bg-[rgba(255,255,255,0.03)] hover:border-[rgba(255,255,255,0.15)] cursor-pointer"
 
-// The same triggerClassName ChatTextArea passes to each control, tuned for the
-// compact toolbar (min-width + ellipsis + flex-shrink so the row overflows
-// gracefully at narrow widths). ModeSelector uses flex-shrink-0 in production,
-// but the narrow-width snapshot needs to show truncation across the whole row
-// (mode truncated, then bits of api-config and reasoning peeking through) — so
-// the fixture gives the mode trigger the same shrinkable treatment as its
-// siblings to exercise the overflow layout meaningfully.
-const MODE_TRIGGER = `${TRIGGER_BASE} min-w-0 text-ellipsis overflow-hidden flex-shrink`
+// The same triggerClassName ChatTextArea passes to each control in production.
+// ModeSelector gets `text-ellipsis overflow-hidden flex-shrink-0` (no min-w-0),
+// so it keeps its full width and does not shrink — matching the production
+// layout the narrow-width snapshot must validate. ApiConfigSelector and
+// ReasoningEffortSelector get `min-w-[28px] text-ellipsis overflow-hidden
+// flex-shrink`, so they shrink/ellipsis first when the row overflows.
+const MODE_TRIGGER = `${TRIGGER_BASE} text-ellipsis overflow-hidden flex-shrink-0`
 const SHRINK_TRIGGER = `${TRIGGER_BASE} min-w-0 text-ellipsis overflow-hidden flex-shrink`
 const AUTO_APPROVE_TRIGGER =
 	"inline-flex items-center gap-1.5 relative whitespace-nowrap px-1.5 py-1 text-xs " +
@@ -85,6 +84,15 @@ interface ChatToolbarFixtureProps {
  * right cluster with `gap-0.5`.
  */
 export const ChatToolbarFixture = ({ width }: ChatToolbarFixtureProps) => (
+	// `i18n` is the production TranslationContext's `typeof i18next`, which we
+	// cannot satisfy with a real instance in a Playwright CT fixture without
+	// importing and initializing i18next. The CT config aliases
+	// `@src/i18n/TranslationContext` to a shim whose `i18n` is `unknown`, but
+	// `tsc` type-checks against the real module, so the double assertion through
+	// `unknown` is required to bridge `null` to `typeof i18next`. This is the
+	// "last resort" double assertion the coding guidelines allow for
+	// unavoidable casts; the `t` function (the only field the fixture actually
+	// uses) is provided directly.
 	<TranslationContext.Provider
 		value={{
 			t: (key: string) => translations[key] ?? key,
@@ -96,7 +104,7 @@ export const ChatToolbarFixture = ({ width }: ChatToolbarFixtureProps) => (
 				style={{ width: `${width}px` }}>
 				<div className="flex items-center gap-2 min-w-0 overflow-clip flex-1">
 					<button type="button" data-testid="mode-selector-trigger" className={MODE_TRIGGER}>
-						<span className="truncate">🛡️ Security Reviewer</span>
+						<span className="truncate">Security Reviewer</span>
 					</button>
 					<button type="button" data-testid="dropdown-trigger" className={SHRINK_TRIGGER}>
 						<span className="truncate">Ollama-glm</span>

@@ -248,6 +248,64 @@ describe("ReasoningEffortSelector", () => {
 		)
 	})
 
+	it("normalizes a stale 'disable' to the clamped fallback on switch from a disable-capable model to gpt-oss", () => {
+		// Regression: the user saved "disable" on qwen3 (which honors think:
+		// false) and then selected gpt-oss (which omits "disable" from its
+		// capability array). The selector's useEffect must persist the clamped
+		// fallback (gpt-oss's first option "low") so the stored effort matches
+		// what the UI shows and what the native request mapper sends, instead of
+		// leaving reasoningEffort: "disable" to map to think: false.
+		selectedModel.provider = "ollama"
+		selectedModel.id = "gpt-oss:20b"
+		selectedModel.info = {
+			contextWindow: 131072,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "medium", "high"],
+		}
+		extensionState.apiConfiguration = {
+			apiProvider: "ollama",
+			ollamaModelId: "gpt-oss:20b",
+			reasoningEffort: "disable",
+			enableReasoningEffort: true,
+		}
+
+		render(<ReasoningEffortSelector />)
+
+		expect(postMessageMock).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				text: "default",
+				apiConfiguration: expect.objectContaining({
+					reasoningEffort: "low",
+					// enableReasoningEffort is untouched (chat selector is a soft toggle)
+					enableReasoningEffort: true,
+				}),
+			}),
+		)
+	})
+
+	it("does not persist when the stored effort is still valid for the selected model", () => {
+		// "low" is valid for gpt-oss, so switching to gpt-oss with a stored "low"
+		// must not fire a normalization write.
+		selectedModel.provider = "ollama"
+		selectedModel.id = "gpt-oss:20b"
+		selectedModel.info = {
+			contextWindow: 131072,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "medium", "high"],
+		}
+		extensionState.apiConfiguration = {
+			apiProvider: "ollama",
+			ollamaModelId: "gpt-oss:20b",
+			reasoningEffort: "low",
+			enableReasoningEffort: true,
+		}
+
+		render(<ReasoningEffortSelector />)
+
+		expect(postMessageMock).not.toHaveBeenCalled()
+	})
+
 	it("renders for ollama even when no model info has loaded", () => {
 		// The user expects the chat bar to show a reasoning selector for ollama
 		// no matter what — this is the primary use case for the chat selector.
