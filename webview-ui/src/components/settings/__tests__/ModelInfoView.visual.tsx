@@ -11,7 +11,5 @@ test("renders OpenAI service tier pricing in the VS Code dark theme", async ({ m
 		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 	})
 
-	await expect(component).toHaveScreenshot("model-info-service-tier-pricing-dark.png", {
-		maxDiffPixelRatio: 0.05,
-	})
+	await expect(component).toHaveScreenshot("model-info-service-tier-pricing-dark.png")
 })
