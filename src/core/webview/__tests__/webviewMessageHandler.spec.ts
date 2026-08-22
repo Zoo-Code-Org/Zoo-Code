@@ -117,12 +117,57 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
+	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
+
+describe("webviewMessageHandler - theme fixture probes", () => {
+	const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+	const themeFixture = {
+		themeId: "Default Dark Modern",
+		bodyClass: "vscode-dark",
+		variables: { "--vscode-foreground": "#cccccc" },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		process.env.ROO_CODE_THEME_FIXTURE_PROBE = "1"
+	})
+
+	afterEach(() => {
+		if (originalProbeSetting === undefined) {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		} else {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalProbeSetting
+		}
+	})
+
+	it("resolves a complete response when probing is enabled", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "themeFixtureProbeResponse",
+			requestId: "request-1",
+			themeFixture,
+		})
+
+		expect(mockClineProvider.resolveWebviewThemeFixtureProbe).toHaveBeenCalledWith("request-1", themeFixture)
+	})
+
+	it("ignores incomplete or disabled responses", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "themeFixtureProbeResponse" })
+		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		await webviewMessageHandler(mockClineProvider, {
+			type: "themeFixtureProbeResponse",
+			requestId: "request-1",
+			themeFixture,
+		})
+
+		expect(mockClineProvider.resolveWebviewThemeFixtureProbe).not.toHaveBeenCalled()
+	})
+})
 
 import { t } from "../../../i18n"
 
