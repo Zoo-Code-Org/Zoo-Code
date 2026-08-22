@@ -5,7 +5,7 @@ import React from "react"
 
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
-import type { ModelInfo } from "@roo-code/types"
+import type { ModelInfo, ProviderSettings } from "@roo-code/types"
 
 import { ThinkingBudget } from "../ThinkingBudget"
 
@@ -351,6 +351,81 @@ describe("ThinkingBudget", () => {
 
 			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "max")
 			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "max", false)
+		})
+
+		it("should use the first supported effort when required reasoning has no advertised default", () => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={{}}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={{
+						...reasoningEffortModelInfo,
+						supportsReasoningEffort: ["low", "high"],
+						requiredReasoningEffort: true,
+					}}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", "low")
+			expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", "low", false)
+			expect(setApiConfigurationField).toHaveBeenCalledWith("enableReasoningEffort", true, false)
+		})
+
+		it.each<{
+			name: string
+			apiConfiguration: ProviderSettings
+			modelInfo: ModelInfo
+			expected: string
+			expectedWrite?: string
+		}>([
+			{
+				name: "keeps a supported stored effort over the model default",
+				apiConfiguration: { reasoningEffort: "low", enableReasoningEffort: true },
+				modelInfo: {
+					...reasoningEffortModelInfo,
+					supportsReasoningEffort: ["disable", "low", "high"],
+					reasoningEffort: "high",
+				},
+				expected: "low",
+				expectedWrite: undefined,
+			},
+			{
+				name: "normalizes an unsupported stored effort to the model default",
+				apiConfiguration: { reasoningEffort: "max", enableReasoningEffort: true },
+				modelInfo: {
+					...reasoningEffortModelInfo,
+					supportsReasoningEffort: ["disable", "low", "high"],
+					reasoningEffort: "high",
+				},
+				expected: "high",
+				expectedWrite: "high",
+			},
+			{
+				name: "defaults optional boolean reasoning support to disabled",
+				apiConfiguration: {},
+				modelInfo: reasoningEffortModelInfo,
+				expected: "disable",
+				expectedWrite: undefined,
+			},
+		])("$name", ({ apiConfiguration, modelInfo, expected, expectedWrite }) => {
+			const setApiConfigurationField = vi.fn()
+			render(
+				<ThinkingBudget
+					{...defaultProps}
+					apiConfiguration={apiConfiguration}
+					setApiConfigurationField={setApiConfigurationField}
+					modelInfo={modelInfo}
+				/>,
+			)
+
+			expect(screen.getByTestId("select")).toHaveAttribute("data-value", expected)
+			if (expectedWrite) {
+				expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", expectedWrite, false)
+			} else {
+				expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything(), false)
+			}
 		})
 
 		it("should fall back to rawReasoningEffort when availableOptions is empty", () => {
