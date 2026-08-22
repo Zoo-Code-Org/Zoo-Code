@@ -53,7 +53,10 @@ export abstract class RouterProvider extends BaseProvider {
 	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
 
 	public async fetchModel() {
-		if (Object.keys(this.models).length > 0) {
+		// Refetch when the selected model is missing — a stale non-empty map
+		// would otherwise keep serving defaultModelInfo prices for cost estimates.
+		const id = this.modelId || this.defaultModelId
+		if (this.models[id]) {
 			return this.getModel()
 		}
 
@@ -107,10 +110,21 @@ export abstract class RouterProvider extends BaseProvider {
 			return { id, info: cachedModels[id] }
 		}
 
-		// Last resort: preserve the configured model ID (falling back to the default
-		// only when none is configured) so an as-yet-unfetched model isn't silently
-		// swapped for the hardcoded default. info still comes from defaults since we
-		// have no fetched or cached metadata for the configured model at this point.
+		// Last resort: keep the configured id so we don't swap models, but zero
+		// prices so we don't bill the UI with defaultModelInfo's $/token rates.
+		if (id !== this.defaultModelId) {
+			return {
+				id,
+				info: {
+					...this.defaultModelInfo,
+					inputPrice: 0,
+					outputPrice: 0,
+					cacheWritesPrice: 0,
+					cacheReadsPrice: 0,
+				},
+			}
+		}
+
 		return { id, info: this.defaultModelInfo }
 	}
 
