@@ -19,7 +19,7 @@ export function RenderedContentContrastFixture() {
 	return (
 		<main
 			data-virtuoso-scroller="true"
-			className="w-[620px] space-y-4 overflow-y-auto rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
+			className="w-[480px] max-w-full space-y-4 overflow-y-auto rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
 			<section aria-labelledby="code-title" className="space-y-2">
 				<h2 id="code-title" className="m-0 text-base font-semibold">
 					Code response

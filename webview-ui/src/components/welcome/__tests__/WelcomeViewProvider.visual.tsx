@@ -8,16 +8,15 @@ import { WelcomeLanding } from "../WelcomeLanding"
 
 for (const theme of visualThemes) {
 	test(`renders the full welcome screen in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		await page.setViewportSize({ width: 480, height: 640 })
 		await applyVisualTheme(page, theme)
 		const component = await mount(
 			<AppProviders initialState={{ apiConfiguration: {} }}>
-				<div className="h-[640px] w-[480px] bg-vscode-editor-background">
-					<WelcomeLanding onGetStarted={() => undefined} onImportSettings={() => undefined} />
-				</div>
+				<WelcomeLanding onGetStarted={() => undefined} onImportSettings={() => undefined} />
 			</AppProviders>,
 		)
 
-		const screen = component.locator(".bg-vscode-editor-background").first()
+		const screen = component.locator(".fixed.inset-0")
 		const heading = component.getByRole("heading", { level: 2 })
 		await expect(heading).toBeVisible()
 		await expectContrast(heading, { background: screen, label: `${theme.name} welcome heading` })
@@ -26,6 +25,6 @@ for (const theme of visualThemes) {
 			label: `${theme.name} welcome action`,
 		})
 
-		await expect(component).toHaveScreenshot(`welcome-screen-${theme.name}.png`)
+		await expect(screen).toHaveScreenshot(`welcome-screen-${theme.name}.png`)
 	})
 }
