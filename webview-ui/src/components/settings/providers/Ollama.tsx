@@ -12,6 +12,7 @@ import {
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import { Button } from "@src/components/ui"
 import { vscode } from "@src/utils/vscode"
 
@@ -39,6 +40,32 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 	const [refreshError, setRefreshError] = useState<string | undefined>()
 	const refreshStatusRef = useRef(refreshStatus)
 	const routerModels = useRouterModels()
+	// Use the same modelInfo source as the chat bar / top-of-tab selector so the
+	// reasoning-effort dropdown advertises the model's real levels (e.g. cloud
+	// ollama models expose ["low","medium","high","max"]). When the model info
+	// is unavailable, synthesize a fallback that exposes the effort levels the
+	// ollama native `think` parameter supports so the dropdown still works.
+	// "none" is always prepended for Ollama because ollama's native `think`
+	// parameter accepts it as an explicit reasoning level alongside low/med/
+	// high/max, and users want to disable reasoning without removing the
+	// enableReasoningEffort flag.
+	const { info: selectedModelInfo } = useSelectedModel(apiConfiguration)
+	const reasoningModelInfo = selectedModelInfo?.supportsReasoningEffort
+		? ({
+				...selectedModelInfo,
+				supportsReasoningEffort: Array.isArray(selectedModelInfo.supportsReasoningEffort)
+					? selectedModelInfo.supportsReasoningEffort.includes("none")
+						? selectedModelInfo.supportsReasoningEffort
+						: ([
+								"none",
+								...selectedModelInfo.supportsReasoningEffort,
+							] as typeof selectedModelInfo.supportsReasoningEffort)
+					: selectedModelInfo.supportsReasoningEffort,
+			} as typeof selectedModelInfo)
+		: ({
+				...ollamaDefaultModelInfo,
+				supportsReasoningEffort: ["none", "low", "medium", "high"],
+			} as typeof selectedModelInfo)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -224,21 +251,28 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 					}}>
 					{t("settings:providers.ollama.thinking")}
 				</Checkbox>
-				<div className="text-xs text-vscode-descriptionForeground mt-1">
-					{t("settings:providers.ollama.thinkingHelp")}
-				</div>
-				{!!apiConfiguration.enableReasoningEffort && (
-					<ThinkingBudget
-						apiConfiguration={apiConfiguration}
-						setApiConfigurationField={setApiConfigurationField}
-						// Ollama models don't advertise reasoning capabilities, so
-						// synthesize a model info that exposes the effort levels
-						// Ollama's native `think` parameter supports (low/medium/high).
-						modelInfo={{
-							...ollamaDefaultModelInfo,
-							supportsReasoningEffort: true,
-						}}
-					/>
+				{/* Help text and the effort dropdown only appear when thinking is
+					enabled. The chat bar selector (in ChatTextArea) reads the same
+					enableReasoningEffort flag via useExtensionState, so unticking
+					the checkbox and saving collapses both surfaces together. */}
+				{apiConfiguration.enableReasoningEffort && (
+					<>
+						<div className="text-xs text-vscode-descriptionForeground mt-1">
+							{t("settings:providers.ollama.thinkingHelp")}
+						</div>
+						<ThinkingBudget
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							// Use the same modelInfo source as the chat bar and the
+							// top-of-tab selector so the dropdown advertises the model's
+							// real levels (e.g. cloud ollama models expose
+							// ["low","medium","high","max"]). The fallback synthesizes the
+							// effort levels the ollama native `think` parameter supports
+							// so the dropdown still works for models that do not advertise
+							// the capability.
+							modelInfo={reasoningModelInfo}
+						/>
+					</>
 				)}
 			</div>
 			<div className="text-sm text-vscode-descriptionForeground">

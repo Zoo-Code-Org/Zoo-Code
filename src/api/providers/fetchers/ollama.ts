@@ -59,6 +59,16 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 		// Inherit the sane default (4096) from ollamaDefaultModelInfo instead.
 	})
 
+	// Models that advertise the "thinking" capability expose a native
+	// reasoning-effort control. Ollama Cloud accepts low/medium/high/max and
+	// rejects "xhigh", so advertise exactly those values (matching the user's
+	// API verification) so the reasoning selector shows the model's real options
+	// instead of falling back to the generic low/medium/high defaults.
+	if (rawModel.capabilities?.includes("thinking")) {
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "max"]
+		modelInfo.reasoningEffort = "medium"
+	}
+
 	return modelInfo
 }
 

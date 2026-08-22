@@ -14,6 +14,14 @@ interface OllamaChatOptions {
 	num_ctx?: number
 }
 
+// The installed ollama SDK (v0.6.x) types the `think` request field as
+// `boolean | "high" | "medium" | "low"`, but the Ollama API also accepts
+// `"max"` (see https://docs.ollama.com/capabilities/thinking). The runtime
+// serializes the field verbatim, so `getOllamaThinkParam` returns the wider
+// union and the `client.chat` call sites cast down to the SDK's narrower
+// type. Remove those casts once the SDK types catch up.
+export type OllamaThinkParam = boolean | "high" | "medium" | "low" | "max" | undefined
+
 // Narrow local types for non-Anthropic content blocks that may be carried in
 // the conversation history. The Anthropic SDK union does not include the
 // custom `reasoning` block (used by non-Anthropic protocols) or the
@@ -311,7 +319,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 	/**
 	 * Maps the configured reasoning effort setting to Ollama's native `think`
-	 * request parameter (boolean | "high" | "medium" | "low").
+	 * request parameter (boolean | "high" | "medium" | "low" | "max").
 	 *
 	 * Requires an explicit Ollama opt-in (`enableReasoningEffort === true`)
 	 * before translating `reasoningEffort`. This prevents inherited
@@ -323,19 +331,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * the model/Modelfile in control (preserving prior behavior where models
 	 * that emit think/thought tags in content are still handled by TagMatcher).
 	 *
-	 * Note: The Ollama API itself also accepts `"max"` (see
-	 * https://docs.ollama.com/capabilities/thinking), but the installed
-	 * `ollama` SDK (v0.6.x) only types `think` as
-	 * `boolean | "high" | "medium" | "low"`. Until the SDK types catch up,
-	 * "xhigh"/"max" efforts are clamped to "high".
-	 *
 	 * - enableReasoningEffort !== true -> undefined (no think param sent)
 	 * - "disable" -> false (thinking off)
-	 * - "none" / "minimal" -> true (enable thinking with default budget)
-	 * - "low" / "medium" / "high" -> the matching effort level
-	 * - "xhigh" / "max" -> "high" (highest level the SDK currently supports)
+	 * - "none" -> false (thinking off; Ollama has no native "none" level, and
+	 *   the "None" selector label means thinking disabled)
+	 * - "minimal" -> true (enable thinking with default budget)
+	 * - "low" / "medium" / "high" / "max" -> the matching effort level
+	 * - "xhigh" -> "high" (highest level the Ollama API accepts; see
+	 *   https://docs.ollama.com/capabilities/thinking)
 	 */
-	private getOllamaThinkParam(): boolean | "high" | "medium" | "low" | undefined {
+	private getOllamaThinkParam(): OllamaThinkParam {
 		// Require an explicit Ollama opt-in before mapping reasoningEffort.
 		// Without this guard, a stale reasoningEffort inherited from another
 		// provider config could still emit a think param when the UI checkbox
@@ -351,8 +356,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 		switch (effort) {
 			case "disable":
-				return false
 			case "none":
+				return false
 			case "minimal":
 				return true
 			case "low":
@@ -362,7 +367,9 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			case "high":
 			case "xhigh":
 			case "max":
-				return "high"
+				// "max" is accepted verbatim by the Ollama API; "xhigh" (used by
+				// some third-party model catalogs) clamps to "high".
+				return effort === "max" ? "max" : "high"
 			default:
 				return undefined
 		}
@@ -377,9 +384,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * Returns a tuple of `[chatOptions, thinkParam]` where `thinkParam` is
 	 * `undefined` when no `think` field should be sent to Ollama.
 	 */
-	private buildChatRequestOptions(
-		useR1Format: boolean,
-	): [OllamaChatOptions, boolean | "high" | "medium" | "low" | undefined] {
+	private buildChatRequestOptions(useR1Format: boolean): [OllamaChatOptions, OllamaThinkParam] {
 		const chatOptions: OllamaChatOptions = {
 			temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
 		}
@@ -427,14 +432,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// Create the actual API request promise. The `stream: true` literal
 			// is kept inline so TypeScript selects the streaming overload of
 			// client.chat. The `think` parameter is spread conditionally to
-			// avoid sending an explicit `think: undefined` to the runtime.
+			// avoid sending an explicit `think: undefined` to the runtime. The
+			// cast narrows our wider OllamaThinkParam (which includes "max",
+			// accepted by the API) to the SDK's stale union type.
 			const stream = await client.chat({
 				model: modelId,
 				messages: ollamaMessages,
 				stream: true,
 				options: chatOptions,
 				tools: this.convertToolsToOllama(metadata?.tools),
-				...(thinkParam !== undefined ? { think: thinkParam } : {}),
+				...(thinkParam !== undefined ? { think: thinkParam as boolean | "high" | "medium" | "low" } : {}),
 			})
 
 			let totalInputTokens = 0
@@ -566,7 +573,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				messages: [{ role: "user", content: prompt }],
 				stream: false,
 				options: chatOptions,
-				...(thinkParam !== undefined ? { think: thinkParam } : {}),
+				...(thinkParam !== undefined ? { think: thinkParam as boolean | "high" | "medium" | "low" } : {}),
 			})
 
 			return response.message?.content || ""

@@ -764,7 +764,10 @@ const ApiOptions = ({
 						</>
 					)}
 
-					{!fromWelcomeView && (
+					{/* Ollama renders its own reasoning control inside the provider
+						component (gated by its "Enable thinking" checkbox), so skip the
+						generic ThinkingBudget for it to avoid a duplicate selector. */}
+					{!fromWelcomeView && selectedProvider !== providerIdentifiers.ollama && (
 						<ThinkingBudget
 							key={`${selectedProvider}-${selectedModelId}`}
 							apiConfiguration={apiConfiguration}

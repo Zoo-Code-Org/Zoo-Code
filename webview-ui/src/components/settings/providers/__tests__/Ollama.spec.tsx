@@ -62,6 +62,14 @@ vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
 	useRouterModels: () => ({ data: {}, isLoading: false, error: null }),
 }))
 
+const { useSelectedModelMock } = vi.hoisted(() => ({
+	useSelectedModelMock: vi.fn(),
+}))
+
+vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
+	useSelectedModel: useSelectedModelMock,
+}))
+
 const { postMessageMock } = vi.hoisted(() => ({
 	postMessageMock: vi.fn(),
 }))
@@ -89,6 +97,9 @@ describe("Ollama Component - thinking setting", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Default: no model info surfaced through useSelectedModel so the
+		// synthesized fallback (low/medium/high) is what we observe.
+		useSelectedModelMock.mockReturnValue({ provider: "ollama", id: "qwen3", info: undefined })
 	})
 
 	it("should render the thinking checkbox unchecked by default", () => {
@@ -124,10 +135,28 @@ describe("Ollama Component - thinking setting", () => {
 		expect(input.checked).toBe(true)
 	})
 
-	it("should render the thinking help text", () => {
+	it("should not render the thinking help text when thinking is disabled", () => {
+		// The help text only appears alongside the reasoning-effort dropdown,
+		// both of which are gated on `enableReasoningEffort`. Untick -> collapse.
 		render(
 			<Ollama
 				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		expect(screen.queryByText("settings:providers.ollama.thinkingHelp")).not.toBeInTheDocument()
+	})
+
+	it("should render the thinking help text when thinking is enabled", () => {
+		render(
+			<Ollama
+				apiConfiguration={
+					{
+						enableReasoningEffort: true,
+						reasoningEffort: "medium",
+					} as ProviderSettings
+				}
 				setApiConfigurationField={mockSetApiConfigurationField}
 			/>,
 		)
@@ -201,9 +230,13 @@ describe("Ollama Component - thinking setting", () => {
 		expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
 	})
 
-	it("should render ThinkingBudget with supportsReasoningEffort when thinking is enabled", () => {
+	it("should render ThinkingBudget with a synthesized low/medium/high fallback when no model info is loaded", () => {
+		// Default mock above returns info: undefined, so the fallback synthesis
+		// kicks in. The dropdown is also gated by enableReasoningEffort so we set
+		// that explicitly to make it render.
 		const apiConfiguration: Partial<ProviderSettings> = {
 			enableReasoningEffort: true,
+			reasoningEffort: "medium",
 		}
 
 		render(
@@ -215,7 +248,9 @@ describe("Ollama Component - thinking setting", () => {
 
 		const thinkingBudget = screen.getByTestId("thinking-budget")
 		expect(thinkingBudget).toBeInTheDocument()
-		expect(thinkingBudget.getAttribute("data-supports")).toBe("true")
+		// The fallback is `["none","low","medium","high"]` so users get None in
+		// the list alongside the model's effort levels.
+		expect(thinkingBudget.getAttribute("data-supports")).toBe("none,low,medium,high")
 	})
 
 	it("should not render ThinkingBudget when thinking is disabled", () => {
@@ -231,6 +266,62 @@ describe("Ollama Component - thinking setting", () => {
 		)
 
 		expect(screen.queryByTestId("thinking-budget")).toBeNull()
+	})
+
+	it("should pass the model's real supportsReasoningEffort array (with 'none' prepended) to ThinkingBudget when advertised", () => {
+		// When the selected model advertises effort levels (e.g. qwen3 on Ollama
+		// Cloud includes "max"), the settings selector surfaces those native
+		// levels with "none" prepended so users get the full None/low/med/high/
+		// max list.
+		useSelectedModelMock.mockReturnValue({
+			provider: "ollama",
+			id: "qwen3",
+			info: { supportsReasoningEffort: ["low", "medium", "high", "max"] },
+		})
+
+		render(
+			<Ollama
+				apiConfiguration={
+					{
+						apiProvider: "ollama",
+						ollamaModelId: "qwen3",
+						enableReasoningEffort: true,
+						reasoningEffort: "max",
+					} as ProviderSettings
+				}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		const thinkingBudget = screen.getByTestId("thinking-budget")
+		expect(thinkingBudget.getAttribute("data-supports")).toBe("none,low,medium,high,max")
+	})
+
+	it("should not duplicate 'none' when the model already advertises it", () => {
+		// Idempotent: re-prepending "none" must not create a duplicate entry in
+		// the option list shown to the user.
+		useSelectedModelMock.mockReturnValue({
+			provider: "ollama",
+			id: "qwen3",
+			info: { supportsReasoningEffort: ["none", "low", "medium", "high", "max"] },
+		})
+
+		render(
+			<Ollama
+				apiConfiguration={
+					{
+						apiProvider: "ollama",
+						ollamaModelId: "qwen3",
+						enableReasoningEffort: true,
+						reasoningEffort: "max",
+					} as ProviderSettings
+				}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		const thinkingBudget = screen.getByTestId("thinking-budget")
+		expect(thinkingBudget.getAttribute("data-supports")).toBe("none,low,medium,high,max")
 	})
 })
 

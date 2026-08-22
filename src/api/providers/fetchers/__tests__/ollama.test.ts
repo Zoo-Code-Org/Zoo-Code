@@ -114,6 +114,34 @@ describe("Ollama Fetcher", () => {
 			expect(parsedModel!.supportsImages).toBe(true)
 			expect(parsedModel!.contextWindow).toBeGreaterThan(0)
 		})
+
+		it("should advertise native reasoning effort for models with the 'thinking' capability", () => {
+			const modelDataWithThinking = {
+				...ollamaModelsData["qwen3-2to16:latest"],
+				capabilities: ["completion", "tools", "thinking"],
+			}
+
+			const parsedModel = parseOllamaModel(modelDataWithThinking as Parameters<typeof parseOllamaModel>[0])
+
+			expect(parsedModel).not.toBeNull()
+			// Ollama Cloud accepts low/medium/high/max and rejects "xhigh", so the
+			// selector must surface exactly those native effort levels.
+			expect(parsedModel!.supportsReasoningEffort).toEqual(["low", "medium", "high", "max"])
+			expect(parsedModel!.reasoningEffort).toBe("medium")
+		})
+
+		it("should not advertise reasoning effort when the 'thinking' capability is absent", () => {
+			const modelDataWithoutThinking = {
+				...ollamaModelsData["qwen3-2to16:latest"],
+				capabilities: ["completion", "tools"],
+			}
+
+			const parsedModel = parseOllamaModel(modelDataWithoutThinking as Parameters<typeof parseOllamaModel>[0])
+
+			expect(parsedModel).not.toBeNull()
+			expect(parsedModel!.supportsReasoningEffort).toBeUndefined()
+			expect(parsedModel!.reasoningEffort).toBeUndefined()
+		})
 	})
 
 	describe("getOllamaModels", () => {

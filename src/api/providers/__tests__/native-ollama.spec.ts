@@ -319,14 +319,13 @@ describe("NativeOllamaHandler", () => {
 
 		it("should map reasoningEffort levels to Ollama think values", async () => {
 			const cases: Array<
-				[NonNullable<ApiHandlerOptions["reasoningEffort"]>, boolean | "high" | "medium" | "low"]
+				[NonNullable<ApiHandlerOptions["reasoningEffort"]>, boolean | "high" | "medium" | "low" | "max"]
 			> = [
 				["low", "low"],
 				["medium", "medium"],
 				["high", "high"],
 				["xhigh", "high"],
-				["max", "high"],
-				["none", true],
+				["max", "max"],
 				["minimal", true],
 				["disable", false],
 			]
@@ -360,6 +359,36 @@ describe("NativeOllamaHandler", () => {
 					}),
 				)
 			}
+		})
+
+		it("should send think: false when reasoningEffort is 'none'", async () => {
+			// Ollama has no native "none" thinking level; the "None" option in
+			// the selector means thinking disabled, so it maps to think: false
+			// rather than enabling thinking with the default budget.
+			const options: ApiHandlerOptions = {
+				apiModelId: "qwen3",
+				ollamaModelId: "qwen3",
+				ollamaBaseUrl: "http://localhost:11434",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }])
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					think: false,
+				}),
+			)
 		})
 
 		it("should not send think parameter when reasoningEffort is undefined", async () => {
@@ -778,6 +807,34 @@ describe("NativeOllamaHandler", () => {
 		expect(mockChat).toHaveBeenCalledWith(
 			expect.objectContaining({
 				think: "high",
+			}),
+		)
+	})
+
+	it("should send think: max in completePrompt when reasoningEffort is max", async () => {
+		// The Ollama API accepts "max" as the highest thinking level; the SDK
+		// passes it through verbatim. Selectors surface "max" for models that
+		// advertise it (e.g. qwen3 on Ollama Cloud), so the single-shot path
+		// must honor it rather than clamping to "high".
+		const options: ApiHandlerOptions = {
+			apiModelId: "qwen3",
+			ollamaModelId: "qwen3",
+			ollamaBaseUrl: "http://localhost:11434",
+			enableReasoningEffort: true,
+			reasoningEffort: "max",
+		}
+
+		handler = new NativeOllamaHandler(options)
+
+		mockChat.mockResolvedValue({
+			message: { content: "Response" },
+		})
+
+		await handler.completePrompt("Test prompt")
+
+		expect(mockChat).toHaveBeenCalledWith(
+			expect.objectContaining({
+				think: "max",
 			}),
 		)
 	})
