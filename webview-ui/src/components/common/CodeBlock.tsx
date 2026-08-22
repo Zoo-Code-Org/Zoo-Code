@@ -189,6 +189,7 @@ const CodeBlock = memo(
 		const currentLanguage = normalizeLanguage(language)
 		const [highlightedCode, setHighlightedCode] = useState<React.ReactNode>(null)
 		const [showCollapseButton, setShowCollapseButton] = useState(true)
+		const [codeTheme, setCodeTheme] = useState(() => getCodeBlockTheme(document.body.className))
 		const codeBlockRef = useRef<HTMLDivElement>(null)
 		const preRef = useRef<HTMLDivElement>(null)
 		const copyButtonWrapperRef = useRef<HTMLDivElement>(null)
@@ -198,6 +199,19 @@ const CodeBlock = memo(
 		const buttonPositionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 		const collapseTimeout1Ref = useRef<NodeJS.Timeout | null>(null)
 		const collapseTimeout2Ref = useRef<NodeJS.Timeout | null>(null)
+
+		useEffect(() => {
+			const updateTheme = () => setCodeTheme(getCodeBlockTheme(document.body.className))
+			const observer = new MutationObserver(updateTheme)
+			const options: MutationObserverInit = {
+				attributes: true,
+				attributeFilter: ["class", "data-vscode-theme-id", "data-vscode-theme-kind"],
+			}
+
+			observer.observe(document.documentElement, options)
+			observer.observe(document.body, options)
+			return () => observer.disconnect()
+		}, [])
 
 		// Syntax highlighting with cached Shiki instance and mounted state management
 		useEffect(() => {
@@ -224,7 +238,7 @@ const CodeBlock = memo(
 
 				const hast = await highlighter.codeToHast(source || "", {
 					lang: currentLanguage || "txt",
-					theme: getCodeBlockTheme(document.body.className),
+					theme: codeTheme,
 					transformers: [
 						{
 							pre(node) {
@@ -292,7 +306,7 @@ const CodeBlock = memo(
 					collapseTimeout2Ref.current = null
 				}
 			}
-		}, [source, currentLanguage, collapsedHeight])
+		}, [source, currentLanguage, collapsedHeight, codeTheme])
 
 		// Check if content height exceeds collapsed height whenever content changes
 		useEffect(() => {

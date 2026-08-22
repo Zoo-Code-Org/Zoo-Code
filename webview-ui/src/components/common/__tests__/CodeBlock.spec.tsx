@@ -1,6 +1,6 @@
 // npx vitest run src/components/common/__tests__/CodeBlock.spec.tsx
 
-import { render, screen, fireEvent, act } from "@/utils/test-utils"
+import { render, screen, fireEvent, act, waitFor } from "@/utils/test-utils"
 
 import CodeBlock, { getCodeBlockTheme } from "../CodeBlock"
 
@@ -122,6 +122,7 @@ describe("CodeBlock", () => {
 		if (scrollContainer) {
 			document.body.removeChild(scrollContainer)
 		}
+		document.body.removeAttribute("class")
 		window.getComputedStyle = originalGetComputedStyle
 	})
 
@@ -137,23 +138,19 @@ describe("CodeBlock", () => {
 
 	it("handles theme switching", async () => {
 		const code = "const x = 1;"
+		document.body.className = "light"
 
 		await act(async () => {
-			const { rerender } = render(<CodeBlock source={code} language="typescript" />)
-
-			// Simulate light theme
-			document.body.className = "light"
-			rerender(<CodeBlock source={code} language="typescript" />)
-		})
-
-		expect(screen.getByText(/\[light-theme\]/)).toBeInTheDocument()
-
-		await act(async () => {
-			document.body.className = "dark"
 			render(<CodeBlock source={code} language="typescript" />)
 		})
 
-		expect(screen.getByText(/\[dark-theme\]/)).toBeInTheDocument()
+		await waitFor(() => expect(screen.getByText(/\[light-theme\]/)).toBeInTheDocument())
+
+		await act(async () => {
+			document.body.className = "dark"
+		})
+
+		await waitFor(() => expect(screen.getByText(/\[dark-theme\]/)).toBeInTheDocument())
 	})
 
 	it("handles invalid language gracefully", async () => {
