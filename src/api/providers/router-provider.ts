@@ -5,7 +5,7 @@ import { type ModelInfo, type ModelRecord } from "@roo-code/types"
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
 import { BaseProvider } from "./base-provider"
-import { getModels, getModelsFromCache } from "./fetchers/modelCache"
+import { getModels, getModelsFromCache, refreshModels } from "./fetchers/modelCache"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 
@@ -74,23 +74,35 @@ export abstract class RouterProvider extends BaseProvider {
 		}
 
 		if (!this.modelFetchPromise) {
-			this.modelFetchPromise = getModels({
+			const fetchOptions = {
 				provider: this.name,
 				apiKey: this.apiKey,
 				baseUrl: this.client.baseURL,
-			})
-				.then((models) => {
+			}
+
+			this.modelFetchPromise = (async () => {
+				let models = await getModels(fetchOptions)
+				this.models = models
+
+				// getModels may return a shared cached catalog that predates this
+				// model. Force a provider refresh before recording a miss so
+				// newly listed models are not blocked for MISSING_MODEL_RETRY_MS.
+				// Auth-scoped providers already bypass that cache in getModels;
+				// refreshModels is then a no-op extra live fetch only on true misses.
+				if (!models[id]) {
+					models = await refreshModels(fetchOptions)
 					this.models = models
-					if (models[id]) {
-						this.missingModelRefreshAt.delete(id)
-					} else {
-						this.missingModelRefreshAt.set(id, Date.now())
-					}
-					return this.getModel()
-				})
-				.finally(() => {
-					this.modelFetchPromise = undefined
-				})
+				}
+
+				if (models[id]) {
+					this.missingModelRefreshAt.delete(id)
+				} else {
+					this.missingModelRefreshAt.set(id, Date.now())
+				}
+				return this.getModel()
+			})().finally(() => {
+				this.modelFetchPromise = undefined
+			})
 		}
 
 		return this.modelFetchPromise
