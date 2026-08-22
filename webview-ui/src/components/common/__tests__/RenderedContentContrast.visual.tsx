@@ -44,6 +44,23 @@ for (const theme of visualThemes) {
 		const removed = component.getByTestId("diff-view").locator(".diff-content-removed").first()
 		await expectContrast(inserted, { background: inserted, label: `${theme.name} inserted diff text` })
 		await expectContrast(removed, { background: removed, label: `${theme.name} removed diff text` })
+		const contextRow = component.getByTestId("diff-view").locator('tr[data-line-type="context"]').first()
+		const contextGutter = contextRow.locator("td").first()
+		const contextContent = contextRow.locator("td").last()
+		await expectContrast(contextGutter, {
+			background: contextGutter,
+			label: `${theme.name} unchanged diff line number`,
+		})
+		await expectContrast(contextContent, {
+			background: contextContent,
+			label: `${theme.name} unchanged diff text`,
+		})
+		for (let index = 0; index < (await contextContent.locator("span[style]").count()); index++) {
+			await expectContrast(contextContent.locator("span[style]").nth(index), {
+				background: contextContent,
+				label: `${theme.name} unchanged diff syntax token ${index + 1}`,
+			})
+		}
 
 		const terminal = component.getByTestId("terminal-output").locator("pre")
 		await expectContrast(terminal, { background: terminal, label: `${theme.name} terminal text` })

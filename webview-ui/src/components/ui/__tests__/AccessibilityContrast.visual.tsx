@@ -115,6 +115,25 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} outline button boundary`,
 		})
+		const galleryContentRight = await gallery.evaluate((element) => {
+			const styles = getComputedStyle(element)
+			return element.getBoundingClientRect().right - Number.parseFloat(styles.paddingRight)
+		})
+		for (const button of await gallery.getByRole("button").all()) {
+			const geometry = await button.evaluate((element) => {
+				const styles = getComputedStyle(element)
+				return {
+					clientWidth: element.clientWidth,
+					scrollWidth: element.scrollWidth,
+					leftPadding: Number.parseFloat(styles.paddingLeft),
+					rightPadding: Number.parseFloat(styles.paddingRight),
+					right: element.getBoundingClientRect().right,
+				}
+			})
+			expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
+			expect(Math.abs(geometry.leftPadding - geometry.rightPadding)).toBeLessThanOrEqual(0.5)
+			expect(geometry.right).toBeLessThanOrEqual(galleryContentRight + 0.5)
+		}
 		await expect(
 			expectContrast(component.getByTestId("unsupported-gradient"), {
 				label: `${theme.name} unsupported gradient`,

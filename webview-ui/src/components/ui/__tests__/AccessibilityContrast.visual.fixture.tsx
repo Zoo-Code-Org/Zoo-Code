@@ -79,7 +79,7 @@ export function AccessibilityContrastGallery() {
 				<p data-testid="error-message" className="m-0 text-sm text-vscode-errorForeground">
 					API key is required before this provider can be used.
 				</p>
-				<div className="flex justify-end gap-2">
+				<div className="flex flex-wrap justify-end gap-2">
 					<Button variant="outline">Reset</Button>
 					<Button variant="primary">Save settings</Button>
 					<Button disabled>Unavailable</Button>
