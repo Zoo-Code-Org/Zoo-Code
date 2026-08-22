@@ -23,6 +23,15 @@ vi.mock("../fetchers/modelCache", () => ({
 			supportsReasoningEffort: ["low", "medium", "high"],
 		},
 	}),
+	refreshModels: vi.fn().mockResolvedValue({
+		"model:thinking": {
+			maxTokens: 128000,
+			contextWindow: 1050000,
+			supportsImages: true,
+			supportsPromptCache: false,
+			supportsReasoningEffort: ["low", "medium", "high"],
+		},
+	}),
 	getModelsFromCache: vi.fn(),
 }))
 
