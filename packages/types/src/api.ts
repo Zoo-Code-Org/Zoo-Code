@@ -98,11 +98,6 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	isReady(): boolean
 	/**
-	 * Captures the resolved VS Code theme properties from the active webview.
-	 * Available only to the dedicated theme fixture generator.
-	 */
-	captureWebviewThemeFixture(): Promise<WebviewThemeFixture>
-	/**
 	 * Returns the current configuration.
 	 * @returns The current configuration.
 	 */
@@ -173,6 +168,10 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+}
+
+export interface RooCodeTestAPI extends RooCodeAPI {
+	captureWebviewThemeFixture(): Promise<WebviewThemeFixture>
 }
 
 export interface RooCodeIpcServer extends EventEmitter<IpcServerEvents> {

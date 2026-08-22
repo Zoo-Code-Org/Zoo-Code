@@ -2,7 +2,7 @@ import fs from "fs/promises"
 
 import * as vscode from "vscode"
 
-import type { RooCodeAPI, WebviewThemeFixture } from "@roo-code/types"
+import type { RooCodeTestAPI, WebviewThemeFixture } from "@roo-code/types"
 
 import { themeFixtureDefinitions, type ThemeFixtureDefinition } from "./definitions"
 
@@ -49,7 +49,7 @@ export async function run(): Promise<void> {
 		throw new Error(`Expected VS Code ${expectedVersion}, launched ${vscode.version}`)
 	}
 
-	const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
+	const extension = vscode.extensions.getExtension<RooCodeTestAPI>("ZooCodeOrganization.zoo-code")
 	if (!extension) {
 		throw new Error("Zoo Code extension not found")
 	}

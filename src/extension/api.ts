@@ -316,10 +316,6 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	public captureWebviewThemeFixture(): Promise<WebviewThemeFixture> {
-		if (process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1") {
-			return Promise.reject(new Error("Theme fixture probing is disabled"))
-		}
-
 		return this.sidebarProvider.requestWebviewThemeFixture()
 	}
 
