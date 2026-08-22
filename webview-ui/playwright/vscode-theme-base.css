@@ -17,6 +17,20 @@ body {
 	padding: 16px;
 }
 
+.vscode-text-field-mock {
+	box-sizing: border-box;
+	background: var(--vscode-input-background);
+	border: 1px solid var(--vscode-input-border, transparent);
+	color: var(--vscode-input-foreground);
+	font: inherit;
+	padding: 4px 6px;
+}
+
+.vscode-text-field-mock::placeholder {
+	color: var(--vscode-input-placeholderForeground, var(--vscode-descriptionForeground));
+	opacity: 1;
+}
+
 /* @vscode/webview-ui-toolkit/react renders VSCodeButton as a bare
    <button appearance="primary|secondary"> outside VS Code's web-component
    runtime. Style it here so button screenshots match the real appearance. */

@@ -7,7 +7,7 @@ export function ThemeSensitiveStatusFixture() {
 	return (
 		<main
 			data-testid="status-surface"
-			className="w-[520px] space-y-5 rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
+			className="w-[480px] space-y-5 rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
 			<section aria-labelledby="commands-title" className="space-y-2">
 				<h2 id="commands-title" className="m-0 text-base font-semibold">
 					Command permissions
