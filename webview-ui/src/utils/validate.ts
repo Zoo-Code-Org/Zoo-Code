@@ -6,6 +6,7 @@ import {
 	type RouterModels,
 	getModelId,
 	isDynamicProvider,
+	parseOpenAiExtraBody,
 	providerIdentifiers,
 } from "@roo-code/types"
 
@@ -308,6 +309,19 @@ export function validateApiConfigurationExcludingModelErrors(
 
 		if (keysAndIdsPresentErrorMessage) {
 			return keysAndIdsPresentErrorMessage
+		}
+	}
+
+	if (apiConfiguration.apiProvider === providerIdentifiers.openai) {
+		const extraBodyResult = parseOpenAiExtraBody(apiConfiguration.openAiExtraBody)
+		if (!extraBodyResult.success) {
+			if (extraBodyResult.reason === "reservedKeys") {
+				return i18next.t("settings:validation.openAiExtraBody.reservedKeys", {
+					keys: extraBodyResult.reservedKeys?.join(", ") ?? "",
+				})
+			}
+
+			return i18next.t(`settings:validation.openAiExtraBody.${extraBodyResult.reason}`)
 		}
 	}
 

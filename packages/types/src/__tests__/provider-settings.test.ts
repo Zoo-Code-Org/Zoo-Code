@@ -22,6 +22,39 @@ describe("provider settings discriminated union", () => {
 	})
 })
 
+describe("OpenAI-compatible extra body settings", () => {
+	it("accepts a JSON object with provider-specific nested fields", () => {
+		const settings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" }, store: false }),
+		}
+
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+		expect(PROVIDER_SETTINGS_KEYS).toContain("openAiExtraBody")
+	})
+
+	it.each(["not json", "[]", "null", '"value"'])("rejects non-object JSON: %s", (openAiExtraBody) => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openai,
+				openAiExtraBody,
+			}).success,
+		).toBe(false)
+	})
+
+	it.each(["model", "messages", "stream", "tools", "max_tokens", "__proto__"])(
+		"rejects the reserved request key %s",
+		(reservedKey) => {
+			expect(
+				providerSettingsSchemaDiscriminated.safeParse({
+					apiProvider: providerIdentifiers.openai,
+					openAiExtraBody: JSON.stringify({ [reservedKey]: "override" }),
+				}).success,
+			).toBe(false)
+		},
+	)
+})
+
 describe("OpenAI Codex provider settings", () => {
 	it("preserves the Fast preference in general and provider-specific schemas", () => {
 		const settings = {

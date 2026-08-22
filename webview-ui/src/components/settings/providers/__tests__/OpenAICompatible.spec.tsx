@@ -18,7 +18,7 @@ vi.mock("vscrui", () => ({
 	),
 }))
 
-// Mock the VSCodeTextField and VSCodeButton components
+// Mock the VS Code form components
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeTextField: ({
 		children,
@@ -51,6 +51,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		<button onClick={onClick} title={title} data-testid={`vscode-button-${appearance}`}>
 			{children}
 		</button>
+	),
+	VSCodeTextArea: ({ value, onInput, children, ...rest }: any) => (
+		<label>
+			{children}
+			<textarea value={value} onChange={(event) => onInput?.(event)} {...rest} />
+		</label>
 	),
 }))
 
@@ -427,6 +433,41 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 				...apiConfiguration.openAiCustomModelInfo,
 				reasoningEffort: "max",
 			})
+		})
+	})
+
+	describe("Extra Body", () => {
+		it("renders the saved JSON and updates the cached provider field", () => {
+			const openAiExtraBody = JSON.stringify({ metadata: { completion_window: "balanced" } }, null, 2)
+
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveValue(openAiExtraBody)
+
+			fireEvent.change(input, { target: { value: '{"store":false}' } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiExtraBody", '{"store":false}')
+		})
+
+		it("marks invalid JSON and describes the validation error", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody: "not json" } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveAttribute("aria-invalid", "true")
+			expect(screen.getByText("settings:validation.openAiExtraBody.invalidJson")).toBeInTheDocument()
 		})
 	})
 })

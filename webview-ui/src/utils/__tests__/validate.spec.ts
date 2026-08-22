@@ -225,6 +225,38 @@ describe("Model Validation Functions", () => {
 			)
 			expect(result).toBeUndefined() // Should exclude model-specific org errors
 		})
+
+		it("accepts a valid OpenAI-compatible Extra Body object", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				openAiBaseUrl: "https://api.sailresearch.com/v1",
+				openAiApiKey: "valid-key",
+				openAiModelId: "zai-org/GLM-5.2-FP8",
+				openAiExtraBody: JSON.stringify({ metadata: { completion_window: "balanced" } }),
+			}
+
+			expect(
+				validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization),
+			).toBeUndefined()
+		})
+
+		it.each([
+			["not json", "settings:validation.openAiExtraBody.invalidJson"],
+			["[]", "settings:validation.openAiExtraBody.objectRequired"],
+			[JSON.stringify({ model: "override" }), "settings:validation.openAiExtraBody.reservedKeys keys=model"],
+		])("rejects invalid OpenAI-compatible Extra Body input", (openAiExtraBody, expectedError) => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				openAiBaseUrl: "https://api.sailresearch.com/v1",
+				openAiApiKey: "valid-key",
+				openAiModelId: "zai-org/GLM-5.2-FP8",
+				openAiExtraBody,
+			}
+
+			expect(validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)).toBe(
+				expectedError,
+			)
+		})
 	})
 
 	describe("Opencode Go validation", () => {

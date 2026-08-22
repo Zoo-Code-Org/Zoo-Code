@@ -4,6 +4,8 @@ import { providerDefinitionList, type ProviderDefinition } from "./provider-sett
 import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./provider-settings/common.js"
 export {
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	OPENAI_EXTRA_BODY_RESERVED_KEYS,
+	parseOpenAiExtraBody,
 	kimiCodeAuthMethodSchema,
 	type KimiCodeAuthMethod,
 	nanoGptDefaultRoutingPreference,
