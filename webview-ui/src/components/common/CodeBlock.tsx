@@ -2,7 +2,7 @@ import { memo, useEffect, useRef, useCallback, useState } from "react"
 import styled from "styled-components"
 import { useCopyToClipboard } from "@src/utils/clipboard"
 import { getHighlighter, isLanguageLoaded, normalizeLanguage } from "@src/utils/highlighter"
-import type { ShikiTransformer } from "shiki"
+import type { BundledTheme, ShikiTransformer } from "shiki"
 import { toJsxRuntime } from "hast-util-to-jsx-runtime"
 import { Fragment, jsx, jsxs } from "react/jsx-runtime"
 import { ChevronDown, ChevronUp, Copy, Check } from "lucide-react"
@@ -13,6 +13,12 @@ export const CODE_BLOCK_BG_COLOR =
 	"var(--vscode-textCodeBlock-background, var(--vscode-editor-background, var(--vscode-sideBar-background, rgb(30 30 30))))"
 export const CODE_BLOCK_TOOLBAR_BG_COLOR =
 	"color-mix(in srgb, var(--vscode-editor-background, var(--vscode-sideBar-background, rgb(30 30 30))) 90%, transparent)"
+
+export function getCodeBlockTheme(bodyClass: string): BundledTheme {
+	if (bodyClass.toLowerCase().includes("high-contrast-light")) return "github-light-high-contrast"
+	if (bodyClass.toLowerCase().includes("high-contrast")) return "github-dark-high-contrast"
+	return bodyClass.toLowerCase().includes("light") ? "github-light-high-contrast" : "github-dark-high-contrast"
+}
 
 // Configuration constants
 export const WINDOW_SHADE_SETTINGS = {
@@ -218,7 +224,7 @@ const CodeBlock = memo(
 
 				const hast = await highlighter.codeToHast(source || "", {
 					lang: currentLanguage || "txt",
-					theme: document.body.className.toLowerCase().includes("light") ? "github-light" : "github-dark",
+					theme: getCodeBlockTheme(document.body.className),
 					transformers: [
 						{
 							pre(node) {
@@ -293,9 +299,9 @@ const CodeBlock = memo(
 
 			if (codeBlock) {
 				const actualHeight = codeBlock.scrollHeight
-				setShowCollapseButton(actualHeight >= WINDOW_SHADE_SETTINGS.collapsedHeight)
+				setShowCollapseButton(actualHeight >= (collapsedHeight || WINDOW_SHADE_SETTINGS.collapsedHeight))
 			}
-		}, [highlightedCode])
+		}, [highlightedCode, collapsedHeight])
 
 		// Ref to track if user was scrolled up *before* the source update
 		// potentially changes scrollHeight
@@ -624,6 +630,7 @@ const CodeBlock = memo(
 								content={t(`chat:codeblock.tooltips.${windowShade ? "expand" : "collapse"}`)}
 								side="top">
 								<CodeBlockButton
+									aria-label={t(`chat:codeblock.tooltips.${windowShade ? "expand" : "collapse"}`)}
 									onClick={() => {
 										// Get the current code block element
 										const codeBlock = codeBlockRef.current // Capture ref early
@@ -658,7 +665,7 @@ const CodeBlock = memo(
 							</StandardTooltip>
 						)}
 						<StandardTooltip content={t("chat:codeblock.tooltips.copy_code")} side="top">
-							<CodeBlockButton onClick={handleCopy}>
+							<CodeBlockButton aria-label={t("chat:codeblock.tooltips.copy_code")} onClick={handleCopy}>
 								{showCopyFeedback ? <Check size={16} /> : <Copy size={16} />}
 							</CodeBlockButton>
 						</StandardTooltip>

@@ -1,7 +1,7 @@
 import React from "react"
 
 import { TerminalOutput } from "../../chat/TerminalOutput"
-import { StyledPre } from "../CodeBlock"
+import CodeBlock from "../CodeBlock"
 import DiffView from "../DiffView"
 
 const diff = `@@ -1,3 +1,3 @@
@@ -10,19 +10,22 @@ const diff = `@@ -1,3 +1,3 @@
 +  return \`Hello \${name}\`
  }`
 
+const source = Array.from(
+	{ length: 36 },
+	(_, index) => `const greeting${index + 1} = \`Hello, Zoo Code ${index + 1}\``,
+).join("\n")
+
 export function RenderedContentContrastFixture() {
 	return (
-		<main className="w-[620px] space-y-4 rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
+		<main
+			data-virtuoso-scroller="true"
+			className="w-[620px] space-y-4 overflow-y-auto rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
 			<section aria-labelledby="code-title" className="space-y-2">
 				<h2 id="code-title" className="m-0 text-base font-semibold">
 					Code response
 				</h2>
 				<div data-testid="code-block">
-					<StyledPre wordwrap="true" windowshade="false">
-						<pre>
-							<code>const greeting = &quot;Hello, Zoo Code&quot;</code>
-						</pre>
-					</StyledPre>
+					<CodeBlock source={source} language="typescript" collapsedHeight={96} />
 				</div>
 			</section>
 

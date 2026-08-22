@@ -2,7 +2,7 @@
 
 import { render, screen, fireEvent, act } from "@/utils/test-utils"
 
-import CodeBlock from "../CodeBlock"
+import CodeBlock, { getCodeBlockTheme } from "../CodeBlock"
 
 // Mock the translation context
 vi.mock("../../../i18n/TranslationContext", () => ({
@@ -32,11 +32,11 @@ vi.mock("shiki", () => ({
 vi.mock("../../../utils/highlighter", () => {
 	const mockHighlighter = {
 		codeToHtml: vi.fn().mockImplementation((code, options) => {
-			const theme = options.theme === "github-light" ? "light" : "dark"
+			const theme = options.theme.includes("light") ? "light" : "dark"
 			return `<pre><code class="hljs language-${options.lang}">${code} [${theme}-theme]</code></pre>`
 		}),
 		codeToHast: vi.fn().mockImplementation((code, options) => {
-			const theme = options.theme === "github-light" ? "light" : "dark"
+			const theme = options.theme.includes("light") ? "light" : "dark"
 			// Return a comprehensive HAST node structure that matches Shiki's output
 			// Apply transformers if provided
 			const preNode = {
@@ -90,6 +90,13 @@ vi.mock("../../../utils/clipboard", () => ({
 }))
 
 describe("CodeBlock", () => {
+	it("selects syntax themes for each VS Code contrast mode", () => {
+		expect(getCodeBlockTheme("vscode-dark")).toBe("github-dark-high-contrast")
+		expect(getCodeBlockTheme("vscode-light")).toBe("github-light-high-contrast")
+		expect(getCodeBlockTheme("vscode-high-contrast")).toBe("github-dark-high-contrast")
+		expect(getCodeBlockTheme("vscode-high-contrast-light")).toBe("github-light-high-contrast")
+	})
+
 	const mockIntersectionObserver = vi.fn()
 	const originalGetComputedStyle = window.getComputedStyle
 
