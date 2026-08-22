@@ -3,8 +3,11 @@ import ReactMarkdown from "react-markdown"
 import styled from "styled-components"
 import { visit } from "unist-util-visit"
 import rehypeKatex from "rehype-katex"
-import remarkMath from "remark-math"
+import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
+import remarkMath from "remark-math"
+import remarkParse from "remark-parse"
+import { unified } from "unified"
 
 import { mentionRegexGlobal } from "@roo/context-mentions"
 
@@ -14,19 +17,97 @@ import { type AlertType, remarkGithubAlerts } from "@src/utils/markdown"
 import CodeBlock from "./CodeBlock"
 import MermaidBlock from "./MermaidBlock"
 
+// Control character that wraps a mention index in the preprocessed markdown.
+// It cannot be typed into a prompt and carries no markdown meaning, so remark
+// always keeps a whole placeholder inside a single text node. Built via
+// `new RegExp` from a string constant (a template literal) so the control
+// character does not appear in a regex literal (no-control-regex).
+const MENTION_PLACEHOLDER_CHAR = "\u0001"
+const MENTION_PLACEHOLDER_REGEX = new RegExp(`${MENTION_PLACEHOLDER_CHAR}(\\d+)${MENTION_PLACEHOLDER_CHAR}`, "g")
+
+// mdast node types whose raw source regions must never be mention-rewritten:
+// code blocks (fenced or indented), inline code, links, images, raw HTML, and
+// math all render as literal or non-text content.
+const MENTION_MASK_NODE_TYPES = new Set(["code", "inlineCode", "link", "image", "html", "inlineMath", "math"])
+
 /**
- * Rehype plugin that wraps context mentions (@/path, @problems, @terminal, etc.)
- * in clickable spans matching the styling used by the collapsed Mention component.
+ * Rewrite mention patterns in the RAW markdown string before remark tokenizes
+ * it, replacing each match with an indexed placeholder.
+ *
+ * Matching on remark's tokenized text nodes truncates paths that contain
+ * markdown-active characters: `@/src/__init__.py` is parsed as
+ * `@/src/` + <strong>init</strong> + `.py`, so per-node matching would only
+ * see `@/src/` and post the wrong path to `openMention`. Raw-string matching
+ * is also the behavior of the collapsed <Mention> component, so this restores
+ * it for the expanded view.
+ *
+ * Regions that render as literal content (code, links, images, HTML, math) are
+ * masked to spaces in a throwaway mdast parse first; using the exact positions
+ * remark sees guarantees a mention inside such a region is never rewritten.
  */
-function rehypeMentions() {
+function prepareMentions(markdown: string): { preparedMarkdown: string; mentions: string[] } {
+	if (!markdown) {
+		return { preparedMarkdown: markdown, mentions: [] }
+	}
+
+	// A throwaway parse with the same extensions as the render pipeline, so the
+	// reported positions match what remark will tokenize. Mask literal and
+	// non-text regions to spaces (mdast positions carry absolute source
+	// offsets): a mention inside any of them must stay inert, because code and
+	// links render as literal/interactive content, and images, raw HTML, and
+	// math keep their source text unchanged.
+	const tree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(markdown)
+
+	const masked = markdown.split("")
+	visit(tree, (node: any) => {
+		if (!MENTION_MASK_NODE_TYPES.has(node.type)) {
+			return
+		}
+		const start = node.position?.start?.offset
+		const end = node.position?.end?.offset
+		if (typeof start !== "number" || typeof end !== "number") {
+			return
+		}
+		for (let i = start; i < end && i < masked.length; i++) {
+			masked[i] = " "
+		}
+	})
+
+	const mentions: string[] = []
+	let preparedMarkdown = ""
+	let lastIndex = 0
+	for (const match of masked.join("").matchAll(mentionRegexGlobal)) {
+		const start = match.index!
+		preparedMarkdown += markdown.slice(lastIndex, start)
+		mentions.push(markdown.slice(start, start + match[0].length))
+		preparedMarkdown += `${MENTION_PLACEHOLDER_CHAR}${mentions.length - 1}${MENTION_PLACEHOLDER_CHAR}`
+		lastIndex = start + match[0].length
+	}
+	preparedMarkdown += markdown.slice(lastIndex)
+
+	return { preparedMarkdown, mentions }
+}
+
+/**
+ * Rehype plugin that replaces the mention placeholders produced by
+ * prepareMentions with clickable spans matching the styling used by the
+ * collapsed Mention component.
+ */
+function rehypeMentions(mentions: string[]) {
 	return (tree: any) => {
-		visit(tree, "text", (node: any, index, parent) => {
+		visit(tree, "text", (node: any, index: number | undefined, parent: any) => {
+			if (index === undefined || !parent) {
+				return
+			}
+
+			// Skip text inside spans we already created (the visitor may revisit
+			// children inserted during the same pass).
 			if (parent?.tagName === "span" && parent.properties?.className?.includes("mention-context-highlight")) {
 				return
 			}
 
-			// Code and links are literal or already-interactive content: never
-			// interactive-ify mention patterns inside them. Inside <a> a role=button
+			// prepareMentions already masks code and link regions, but keep these
+			// guards so the plugin stays safe on any tree: inside <a> a role=button
 			// span would be invalid nested interactive content (WHATWG) and its
 			// stopPropagation would block the anchor's own openFile handler; inside
 			// code it would corrupt the CodeBlock text extraction, which only keeps
@@ -36,9 +117,15 @@ function rehypeMentions() {
 			}
 
 			const originalValue = String(node.value)
-			const matches = Array.from(originalValue.matchAll(mentionRegexGlobal))
+			const matches = Array.from(originalValue.matchAll(MENTION_PLACEHOLDER_REGEX))
 
 			if (matches.length === 0) {
+				return
+			}
+
+			// If any placeholder fails to resolve (should not happen), leave the
+			// text untouched instead of rendering the control characters verbatim.
+			if (matches.some((match) => mentions[Number(match[1])] === undefined)) {
 				return
 			}
 
@@ -46,10 +133,10 @@ function rehypeMentions() {
 			let lastIndex = 0
 
 			for (const match of matches) {
-				const mentionText = match[0]
-				// mentionRegexGlobal has one mandatory capture group, so match[1] is always
-				// the non-empty value after "@" (match[0].slice(1) would be identical).
-				const mentionValue = match[1]
+				const mentionText = mentions[Number(match[1])]
+				// The raw mention includes the leading "@"; the posted value is the
+				// full path/word after it, matching the collapsed Mention component.
+				const mentionValue = mentionText.slice(1)
 				const mentionStart = match.index!
 
 				if (mentionStart > lastIndex) {
@@ -82,7 +169,7 @@ function rehypeMentions() {
 					children: [{ type: "text", value: mentionText }],
 				})
 
-				lastIndex = mentionStart + mentionText.length
+				lastIndex = mentionStart + match[0].length
 			}
 
 			if (lastIndex < originalValue.length) {
@@ -90,6 +177,30 @@ function rehypeMentions() {
 			}
 
 			parent.children.splice(index, 1, ...children)
+		})
+	}
+}
+
+/**
+ * Rehype plugin that drops the lone "\n" text node mdast-util-to-hast emits
+ * right after every <br> (its hardBreak handler returns [<br>, "\n"]).
+ *
+ * The paragraph styling in this webview uses `white-space: pre-wrap`, where a
+ * literal newline is significant. Without this, every remark-breaks <br> would
+ * be followed by an extra pre-wrap line break, inserting a blank line between
+ * each soft-broken line. Removing the node leaves exactly one line break per
+ * soft break, independent of CSS white-space handling.
+ */
+function rehypeStripBreakNewlines() {
+	return (tree: any) => {
+		visit(tree, "element", (node: any, index: number | undefined, parent: any) => {
+			if (node.tagName !== "br" || index === undefined || !parent) {
+				return
+			}
+			const next = parent.children[index + 1]
+			if (next?.type === "text" && next.value === "\n") {
+				parent.children.splice(index + 1, 1)
+			}
 		})
 	}
 }
@@ -122,6 +233,14 @@ interface MarkdownBlockProps {
 	 * keeps mention patterns as inert text.
 	 */
 	mentions?: boolean
+	/**
+	 * Render single newlines as <br> (remark-breaks) instead of collapsing them
+	 * to spaces per CommonMark. Off by default so the shared pipeline keeps its
+	 * CommonMark soft-break behavior for assistant-generated content. The
+	 * expanded task prompt (user-authored text) enables it so plain multi-line
+	 * prompts keep their line breaks while markdown still parses.
+	 */
+	breaks?: boolean
 }
 
 const StyledMarkdown = styled.div`
@@ -363,7 +482,7 @@ const StyledMarkdown = styled.div`
 	}
 `
 
-const MarkdownBlock = memo(({ markdown, mentions = false }: MarkdownBlockProps) => {
+const MarkdownBlock = memo(({ markdown, mentions = false, breaks = false }: MarkdownBlockProps) => {
 	const components = useMemo(
 		() => ({
 			table: ({ children, ...props }: any) => {
@@ -484,6 +603,13 @@ const MarkdownBlock = memo(({ markdown, mentions = false }: MarkdownBlockProps) 
 		[],
 	)
 
+	// When mentions are actionable, rewrite the raw markdown before parsing so
+	// mention matching runs on the untokenized string (see prepareMentions).
+	const { preparedMarkdown, mentions: mentionList } = useMemo(
+		() => (mentions ? prepareMentions(markdown || "") : { preparedMarkdown: markdown || "", mentions: [] }),
+		[markdown, mentions],
+	)
+
 	return (
 		<StyledMarkdown>
 			<ReactMarkdown
@@ -493,6 +619,7 @@ const MarkdownBlock = memo(({ markdown, mentions = false }: MarkdownBlockProps) 
 					[remarkGfm, { singleTilde: false }],
 					remarkMath,
 					remarkGithubAlerts,
+					...(breaks ? [remarkBreaks] : []),
 					() => {
 						return (tree: any) => {
 							visit(tree, "code", (node: any) => {
@@ -505,9 +632,13 @@ const MarkdownBlock = memo(({ markdown, mentions = false }: MarkdownBlockProps) 
 						}
 					},
 				]}
-				rehypePlugins={[...(mentions ? [rehypeMentions] : []), rehypeKatex as any]}
+				rehypePlugins={[
+					...(mentions ? [[rehypeMentions, mentionList] as const] : []),
+					...(breaks ? [rehypeStripBreakNewlines] : []),
+					rehypeKatex as any,
+				]}
 				components={components}>
-				{markdown || ""}
+				{preparedMarkdown}
 			</ReactMarkdown>
 		</StyledMarkdown>
 	)

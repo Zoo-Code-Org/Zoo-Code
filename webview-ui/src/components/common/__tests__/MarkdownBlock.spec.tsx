@@ -410,5 +410,113 @@ describe("MarkdownBlock", () => {
 			expect(mentions.length).toBe(1)
 			expect(mentions[0].textContent).toBe("@problems")
 		})
+
+		it("matches the full mention path when it contains markdown-active characters", async () => {
+			// remark tokenizes `@/src/__init__.py` as `@/src/` + <strong>init</strong> + `.py`,
+			// so matching on tokenized text nodes would truncate the mention to `@/src/` and
+			// post the wrong path. Mention matching must run on the raw string instead.
+			const markdown = "Run the tests for @/src/__init__.py now."
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/Run the tests/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@/src/__init__.py")
+
+			// No stray <strong> for the `__init__` part: the whole path is one mention.
+			expect(container.querySelector("p")?.querySelector("strong")).toBeNull()
+
+			// Clicking must post the FULL path, not the truncated `@/src/` prefix.
+			fireEvent.click(mentions[0])
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "/src/__init__.py" })
+		})
+
+		it("matches mentions containing asterisks on the raw string", async () => {
+			// `*files*` would tokenize as emphasis, splitting the path across text nodes.
+			const markdown = "Check @/src/*files* before shipping."
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/Check/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@/src/*files*")
+
+			fireEvent.click(mentions[0])
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "openMention", text: "/src/*files*" })
+		})
+
+		it("resolves mentions and line breaks together in the same prompt", async () => {
+			// The raw-string mention preprocessing and remark-breaks both rewrite the
+			// paragraph; they must compose: the mention stays a single span and the
+			// soft break between the lines renders as one <br>.
+			const markdown = "Check @/src/file.ts\nthen review @problems"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions breaks />)
+
+			await screen.findByText(/then review/, { exact: false })
+
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions).toHaveLength(2)
+			expect(mentions[0].textContent).toBe("@/src/file.ts")
+			expect(mentions[1].textContent).toBe("@problems")
+
+			const paragraph = container.querySelector("p")
+			expect(paragraph?.querySelectorAll("br")).toHaveLength(1)
+			expect(paragraph?.textContent).toBe("Check @/src/file.tsthen review @problems")
+		})
+
+		it("keeps placeholder-free output when the prompt contains no mentions", async () => {
+			// Preprocessing must not leak placeholder control characters into rendered
+			// text when the (raw) text happens to contain mention-like patterns that do
+			// not match (e.g. @ not preceded by whitespace).
+			const markdown = "Failed@localhost/status code 404."
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/Failed/, { exact: false })
+
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			expect(container.querySelector("p")?.textContent).toBe("Failed@localhost/status code 404.")
+		})
+	})
+
+	describe("line breaks (breaks prop)", () => {
+		it("renders a soft line break as <br> when breaks is set", async () => {
+			const markdown = "line one\nline two"
+			const { container } = render(<MarkdownBlock markdown={markdown} breaks />)
+
+			await screen.findByText(/line one/)
+
+			const paragraph = container.querySelector("p")
+			expect(paragraph).not.toBeNull()
+			// remark-breaks turns the single newline into a real <br> so the line
+			// break is structural instead of relying on CSS white-space.
+			expect(paragraph?.querySelector("br")).not.toBeNull()
+			expect(paragraph?.textContent).toBe("line oneline two")
+		})
+
+		it("keeps soft line breaks as text by default", async () => {
+			const markdown = "line one\nline two"
+			const { container } = render(<MarkdownBlock markdown={markdown} />)
+
+			// The text matcher must be inexact: by default the newline stays inside
+			// the single text node, so "line one" is not a standalone node.
+			await screen.findByText(/line one/, { exact: false })
+
+			const paragraph = container.querySelector("p")
+			expect(paragraph?.querySelector("br")).toBeNull()
+			expect(paragraph?.textContent).toBe("line one\nline two")
+		})
+
+		it("keeps blank lines as paragraph breaks when breaks is set", async () => {
+			const markdown = "first paragraph\n\nsecond paragraph"
+			const { container } = render(<MarkdownBlock markdown={markdown} breaks />)
+
+			await screen.findByText("first paragraph")
+
+			// Two separate paragraphs (the blank line is a hard break, not a soft one).
+			expect(container.querySelectorAll("p")).toHaveLength(2)
+			expect(container.querySelector("p")?.querySelector("br")).toBeNull()
+		})
 	})
 })

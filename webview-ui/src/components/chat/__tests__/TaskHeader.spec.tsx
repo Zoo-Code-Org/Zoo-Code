@@ -435,6 +435,55 @@ describe("TaskHeader", () => {
 			expect(container.querySelectorAll("span.mention-context-highlight")).toHaveLength(3)
 		})
 
+		it("keeps single newlines as line breaks in a plain-text prompt", async () => {
+			const { container } = renderTaskHeader({
+				task: { type: "say", ts: Date.now(), text: "Fix the login bug\nIt crashes on startup", images: [] },
+			})
+
+			// Expand via the header container (the raw multi-line title is not a stable text target).
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			// Inexact match: the soft break splits the paragraph into text<br>text, so no
+			// single element's full text equals the first line.
+			await screen.findByText(/Fix the login bug/, { exact: false })
+
+			// The previous expanded view rendered plain text with whitespace-pre-wrap, so a
+			// single newline was always a line break. The markdown pipeline collapses soft
+			// breaks to spaces per CommonMark unless remark-breaks is enabled, so the header
+			// must keep the newline structural (<br>) instead of reflowing the prompt into
+			// one paragraph.
+			const paragraph = container.querySelector(".scrollable p")
+			expect(paragraph).not.toBeNull()
+			expect(paragraph?.querySelector("br")).not.toBeNull()
+			expect(paragraph?.textContent).toBe("Fix the login bugIt crashes on startup")
+		})
+
+		it("still parses markdown headings and lists while keeping newlines inside them", async () => {
+			const { container } = renderTaskHeader({
+				task: {
+					type: "say",
+					ts: Date.now(),
+					text: "# Heading\n- item one\n  continued line\n- item two",
+					images: [],
+				},
+			})
+
+			// Expand via the header container (the raw multi-line title is not a stable text target).
+			fireEvent.click(container.querySelector(".cursor-pointer")!)
+
+			const heading = await screen.findByRole("heading")
+			expect(heading.textContent).toBe("Heading")
+
+			// Markdown still parses (the # line is a heading, the - lines are list items)...
+			const items = container.querySelectorAll(".scrollable li")
+			expect(items).toHaveLength(2)
+
+			// ...and the soft break inside the first item renders as a line break.
+			expect(items[0]?.querySelector("br")).not.toBeNull()
+			expect(items[0]?.textContent).toBe("item onecontinued line")
+			expect(items[1]?.textContent).toBe("item two")
+		})
+
 		it("renders an empty prompt without crashing", () => {
 			const { container } = renderTaskHeader({
 				// `text` is optional on ClineMessage; omit it to exercise the empty-prompt path.
