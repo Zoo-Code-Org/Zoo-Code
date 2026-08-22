@@ -959,6 +959,10 @@
 			"refreshSuccess": "Làm mới công cụ thành công",
 			"refreshError": "Không thể làm mới công cụ",
 			"toolParameters": "Thông số"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamic thinking effort",
+			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
 		}
 	},
 	"promptCaching": {

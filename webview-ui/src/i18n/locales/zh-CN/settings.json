@@ -959,6 +959,10 @@
 			"refreshSuccess": "工具刷新成功",
 			"refreshError": "工具刷新失败",
 			"toolParameters": "参数"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamic thinking effort",
+			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
 		}
 	},
 	"promptCaching": {
