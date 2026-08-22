@@ -9,8 +9,10 @@ import { ChevronDown, ChevronUp, Copy, Check } from "lucide-react"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { StandardTooltip } from "@/components/ui"
 
-export const CODE_BLOCK_BG_COLOR = "var(--vscode-editor-background, --vscode-sideBar-background, rgb(30 30 30))"
-export const WRAPPER_ALPHA = "cc" // 80% opacity
+export const CODE_BLOCK_BG_COLOR =
+	"var(--vscode-textCodeBlock-background, var(--vscode-editor-background, var(--vscode-sideBar-background, rgb(30 30 30))))"
+export const CODE_BLOCK_TOOLBAR_BG_COLOR =
+	"color-mix(in srgb, var(--vscode-editor-background, var(--vscode-sideBar-background, rgb(30 30 30))) 90%, transparent)"
 
 // Configuration constants
 export const WINDOW_SHADE_SETTINGS = {
@@ -42,14 +44,14 @@ interface CodeBlockProps {
 const CodeBlockButton = styled.button`
 	background: transparent;
 	border: none;
-	color: var(--vscode-foreground);
+	color: var(--vscode-icon-foreground, var(--vscode-foreground));
 	cursor: var(--copy-button-cursor, default);
 	padding: 4px;
 	margin: 0 0px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	opacity: 0.4;
+	opacity: 1;
 	border-radius: 3px;
 	pointer-events: var(--copy-button-events, none);
 	margin-left: 4px;
@@ -73,7 +75,7 @@ const CodeBlockButtonWrapper = styled.div`
 	right: var(--copy-button-right, 8px);
 	height: auto;
 	z-index: 40;
-	background: ${CODE_BLOCK_BG_COLOR}${WRAPPER_ALPHA};
+	background: ${CODE_BLOCK_TOOLBAR_BG_COLOR};
 	overflow: visible;
 	pointer-events: none;
 	opacity: var(--copy-button-opacity, 0);
