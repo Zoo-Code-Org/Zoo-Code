@@ -8,6 +8,7 @@ import { formatResponse } from "../../prompts/responses"
 import { ToolUse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { Terminal } from "../../../integrations/terminal/Terminal"
+import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 import type { RooTerminalCallbacks, RooTerminalProcess } from "../../../integrations/terminal/types"
 
 // Mock dependencies
@@ -97,7 +98,7 @@ describe("executeCommandTool", () => {
 						terminalOutputCharacterLimit: 100000,
 						terminalShellIntegrationDisabled: true,
 					}),
-					postMessageToWebview: vitest.fn(),
+					postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
 				}),
 			},
 			lastMessageTs: Date.now(),
@@ -212,6 +213,70 @@ describe("executeCommandTool", () => {
 	})
 
 	describe("Error handling", () => {
+		it("reports command parse errors to the webview", async () => {
+			const provider = await mockCline.providerRef.deref()
+			mockToolUse.params.command = 'echo "unterminated'
+			mockToolUse.nativeArgs = { command: 'echo "unterminated' }
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "commandExecutionStatus",
+					text: expect.stringContaining('"status":"error"'),
+				}),
+			)
+			expect(mockAskApproval).not.toHaveBeenCalled()
+		})
+
+		it("posts fallback status when retrying a pre-submission shell integration failure", async () => {
+			const provider = await mockCline.providerRef.deref()
+			const shellError = new executeCommandModule.ShellIntegrationError("startup failed", false)
+			const failedProcess = Object.assign(Promise.reject(shellError), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			const successfulProcess = Object.assign(Promise.resolve(), {
+				continue: vitest.fn(),
+				abort: vitest.fn(),
+			})
+			// The terminal mock only needs the Promise surface used by this execution path.
+			const successfulTerminalProcess = successfulProcess as unknown as RooTerminalProcess
+
+			vitest
+				.mocked(TerminalRegistry.getOrCreateTerminal)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockReturnValue(failedProcess),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+				.mockResolvedValueOnce({
+					runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+						void callbacks.onCompleted?.("", successfulTerminalProcess)
+						callbacks.onShellExecutionComplete?.({ exitCode: 0 }, successfulTerminalProcess)
+						return successfulProcess
+					}),
+					getCurrentWorkingDirectory: vitest.fn().mockReturnValue("/test/workspace"),
+				} as never)
+
+			await executeCommandTool.handle(mockCline as unknown as Task, mockToolUse, {
+				askApproval: mockAskApproval as unknown as AskApproval,
+				handleError: mockHandleError as unknown as HandleError,
+				pushToolResult: mockPushToolResult as unknown as PushToolResult,
+			})
+
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "commandExecutionStatus",
+					text: expect.stringContaining('"status":"fallback"'),
+				}),
+			)
+			expect(TerminalRegistry.getOrCreateTerminal).toHaveBeenCalledTimes(2)
+		})
+
 		it.each([
 			[undefined, undefined, "executeCommand.destructiveCommandGuard.blocked"],
 			["matches a destructive pattern", undefined, "executeCommand.destructiveCommandGuard.blockedWithReason"],
@@ -580,7 +645,7 @@ describe("executeCommandTool", () => {
 			mockCline.providerRef.deref.mockResolvedValue({
 				contextProxy: { getValue: vitest.fn().mockReturnValue(false) },
 				getState: vitest.fn().mockResolvedValue({ terminalShellIntegrationDisabled: false }),
-				postMessageToWebview: vitest.fn(),
+				postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
 			})
 			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(false)
 			const terminal = await setupControllableTerminal()

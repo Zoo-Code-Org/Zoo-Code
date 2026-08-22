@@ -8,6 +8,7 @@ import { CommandExecutionStatus, DEFAULT_TERMINAL_OUTPUT_PREVIEW_SIZE, Persisted
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../task/Task"
+import type { ClineProvider } from "../webview/ClineProvider"
 
 import { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
@@ -75,6 +76,12 @@ export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined)
 	return process.env.ROO_CLI_RUNTIME === "1" ? 0 : requestedAgentTimeout
 }
 
+// Fire-and-forget: some call sites are synchronous terminal callbacks that cannot await,
+// and postMessageToWebview swallows its own errors, so void is enough.
+function postCommandExecutionStatus(provider: ClineProvider | undefined, status: CommandExecutionStatus): void {
+	void provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+}
+
 export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 	readonly name = "execute_command" as const
 
@@ -115,7 +122,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 					status: "error",
 					message: parseError.message,
 				}
-				provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(errorStatus) })
+				postCommandExecutionStatus(provider, errorStatus)
 				task.didToolFailInCurrentTurn = true
 				pushToolResult(formatResponse.toolError(parseError.message))
 				return
@@ -203,7 +210,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				if (canRetryShellIntegrationError(error)) {
 					// Silent retry via execa — shell startup race, command was not submitted.
 					const status: CommandExecutionStatus = { executionId, status: "fallback" }
-					provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+					postCommandExecutionStatus(provider, status)
 
 					const [rejected, result] = await executeCommandInTerminal(task, {
 						...options,
@@ -294,7 +301,7 @@ export async function executeCommandInTerminal(
 	// panel immediately (same effect as the retry-fallback path).
 	if (isCmdExeFallback) {
 		const status: CommandExecutionStatus = { executionId, status: "fallback" }
-		provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+		postCommandExecutionStatus(provider, status)
 	}
 
 	// Get global storage path for persisted output artifacts
@@ -394,7 +401,7 @@ export async function executeCommandInTerminal(
 			const compressedOutput = Terminal.compressTerminalOutput(accumulatedOutput)
 			latestCompressedOutput = compressedOutput
 			const status: CommandExecutionStatus = { executionId, status: "output", output: compressedOutput }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 			schedulePartialCommandOutputUpdate()
 		},
 		onCompleted: async (output: string | undefined) => {
@@ -433,11 +440,11 @@ export async function executeCommandInTerminal(
 		},
 		onShellExecutionStarted: (pid: number | undefined) => {
 			const status: CommandExecutionStatus = { executionId, status: "started", pid, command }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 		},
 		onShellExecutionComplete: (details: ExitCodeDetails) => {
 			const status: CommandExecutionStatus = { executionId, status: "exited", exitCode: details.exitCode }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 			exitDetails = details
 		},
 	}
@@ -506,7 +513,7 @@ export async function executeCommandInTerminal(
 	} catch (error) {
 		if (isUserTimedOut) {
 			const status: CommandExecutionStatus = { executionId, status: "timeout" }
-			provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
+			postCommandExecutionStatus(provider, status)
 			await task.say("error", t("common:errors:command_timeout", { seconds: commandExecutionTimeoutSeconds }))
 			task.didToolFailInCurrentTurn = true
 			task.terminalProcess = undefined
