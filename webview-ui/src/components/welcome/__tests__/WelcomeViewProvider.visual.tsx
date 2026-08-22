@@ -18,12 +18,23 @@ for (const theme of visualThemes) {
 
 		const screen = component.locator(".fixed.inset-0")
 		const heading = component.getByRole("heading", { level: 2 })
+		const action = component.getByRole("button", { name: /provider/i }).first()
 		await expect(heading).toBeVisible()
 		await expectContrast(heading, { background: screen, label: `${theme.name} welcome heading` })
-		await expectContrast(component.getByRole("button", { name: /provider/i }).first(), {
-			background: component.getByRole("button", { name: /provider/i }).first(),
+		await expectContrast(action, {
+			background: action,
 			label: `${theme.name} welcome action`,
 		})
+		if (theme.name.startsWith("high-contrast")) {
+			await expect(action).toHaveCSS("border-top-width", "1px")
+			await expect(action).toHaveCSS("border-top-style", "solid")
+			await expectContrast(action, {
+				background: screen,
+				foregroundProperty: "border-color",
+				minimum: 3,
+				label: `${theme.name} welcome action boundary`,
+			})
+		}
 
 		await expect(screen).toHaveScreenshot(`welcome-screen-${theme.name}.png`)
 	})

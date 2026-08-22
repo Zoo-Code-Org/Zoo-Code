@@ -9,7 +9,8 @@ const buttonVariants = cva(
 	{
 		variants: {
 			variant: {
-				primary: "bg-primary text-primary-foreground hover:bg-primary/70",
+				primary:
+					"border border-[var(--vscode-button-border,var(--vscode-contrastBorder,transparent))] bg-primary text-primary-foreground hover:bg-primary/70",
 				secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
 				ghost: "hover:bg-accent hover:text-accent-foreground",
 				destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",

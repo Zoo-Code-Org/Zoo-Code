@@ -345,15 +345,18 @@ const CodeBlock = memo(
 
 		// Store whether we should scroll after highlighting completes
 		const shouldScrollAfterHighlightRef = useRef(false)
+		const previousSourceRef = useRef(source)
 
 		// Check if we should scroll when source changes
 		useEffect(() => {
-			// Only set the flag if we're at the bottom when source changes
-			if (preRef.current && source && !wasScrolledUpRef.current) {
+			const sourceChanged = previousSourceRef.current !== source
+			// Follow streaming updates when the user was already at the bottom, but keep initial content at the top.
+			if (sourceChanged && preRef.current && source && !wasScrolledUpRef.current) {
 				shouldScrollAfterHighlightRef.current = true
 			} else {
 				shouldScrollAfterHighlightRef.current = false
 			}
+			previousSourceRef.current = source
 		}, [source])
 
 		const updateCodeBlockButtonPosition = useCallback((forceHide = false) => {

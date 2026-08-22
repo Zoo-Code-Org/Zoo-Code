@@ -3,6 +3,7 @@
 import { render, screen, fireEvent, act, waitFor } from "@/utils/test-utils"
 
 import CodeBlock, { getCodeBlockTheme } from "../CodeBlock"
+import { getHighlighter } from "../../../utils/highlighter"
 
 // Mock the translation context
 vi.mock("../../../i18n/TranslationContext", () => ({
@@ -134,6 +135,30 @@ describe("CodeBlock", () => {
 		})
 
 		expect(screen.getByText(/const x = 1/)).toBeInTheDocument()
+	})
+
+	it("starts at the top and follows later source updates when already at the bottom", async () => {
+		const highlighter = await getHighlighter("typescript")
+		let resolveHighlighter: (value: typeof highlighter) => void = () => undefined
+		vi.mocked(getHighlighter).mockImplementationOnce(() => new Promise((resolve) => (resolveHighlighter = resolve)))
+
+		const { container, rerender } = render(<CodeBlock source="const first = 1;" language="typescript" />)
+		const scroller = container.querySelector('[windowshade="true"]') as HTMLDivElement
+		Object.defineProperties(scroller, {
+			scrollHeight: { configurable: true, value: 600 },
+			clientHeight: { configurable: true, value: 100 },
+		})
+
+		await act(async () => resolveHighlighter(highlighter))
+		await waitFor(() => expect(screen.getByText(/const first = 1/)).toBeInTheDocument())
+		expect(scroller.scrollTop).toBe(0)
+
+		scroller.scrollTop = 500
+		fireEvent.scroll(scroller)
+		rerender(<CodeBlock source={"const first = 1;\nconst second = 2;"} language="typescript" />)
+
+		await waitFor(() => expect(screen.getByText(/const second = 2/)).toBeInTheDocument())
+		await waitFor(() => expect(scroller.scrollTop).toBe(600))
 	})
 
 	it("handles theme switching", async () => {
