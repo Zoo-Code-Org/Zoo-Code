@@ -369,34 +369,6 @@ describe("executeCommand", () => {
 			expect(pendingProcess.abort).toHaveBeenCalled()
 		})
 
-		it("logs rejected command status updates without failing the command", async () => {
-			const postError = new Error("webview unavailable")
-			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(() => undefined)
-			mockProvider.postMessageToWebview.mockRejectedValue(postError)
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
-				setTimeout(() => {
-					void callbacks.onCompleted("Command completed successfully", mockProcess)
-					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
-				}, 0)
-				return mockProcess
-			})
-
-			const [rejected, result] = await executeCommandInTerminal(mockTask, {
-				executionId: "test-123",
-				command: "echo success",
-				terminalShellIntegrationDisabled: false,
-			})
-			await new Promise<void>((resolve) => setImmediate(resolve))
-
-			expect(rejected).toBe(false)
-			expect(result).toContain("Exit code: 0")
-			expect(consoleErrorSpy).toHaveBeenCalledWith(
-				"[ExecuteCommandTool] Failed to post exited command status:",
-				postError,
-			)
-			consoleErrorSpy.mockRestore()
-		})
-
 		it("should handle completed command with exit code 0", async () => {
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue("/test/project")
 			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {

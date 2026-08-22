@@ -76,12 +76,10 @@ export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined)
 	return process.env.ROO_CLI_RUNTIME === "1" ? 0 : requestedAgentTimeout
 }
 
+// Fire-and-forget: some call sites are synchronous terminal callbacks that cannot await,
+// and postMessageToWebview swallows its own errors, so void is enough.
 function postCommandExecutionStatus(provider: ClineProvider | undefined, status: CommandExecutionStatus): void {
-	void provider
-		?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
-		.catch((error) => {
-			console.error(`[ExecuteCommandTool] Failed to post ${status.status} command status:`, error)
-		})
+	void provider?.postMessageToWebview({ type: "commandExecutionStatus", text: JSON.stringify(status) })
 }
 
 export class ExecuteCommandTool extends BaseTool<"execute_command"> {
