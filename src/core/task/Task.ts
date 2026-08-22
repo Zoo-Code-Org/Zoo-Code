@@ -1521,6 +1521,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates the API configuration and rebuilds the API handler.
 	 * There is no tool-protocol switching or tool parser swapping.
 	 *
+	 * DTE series 2/5: when a task-local thinking effort override is active
+	 * (`setRuntimeThinkingEffort`), the incoming configuration's `reasoningEffort`
+	 * becomes the new restore value and the override is re-applied on top of the
+	 * fresh in-memory copy — clearing the override later restores the NEW profile's
+	 * value, not a stale one.
+	 *
 	 * @param newApiConfiguration - The new API configuration to use
 	 */
 	public updateApiConfiguration(newApiConfiguration: ProviderSettings): void {
@@ -2371,6 +2377,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * Centralized task teardown: releases task resources and resets transient
+	 * task-local state.
+	 *
+	 * DTE series 2/5: also clears the task-local thinking effort override (the
+	 * `setRuntimeThinkingEffort` state) — the override never outlives the task.
+	 */
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 

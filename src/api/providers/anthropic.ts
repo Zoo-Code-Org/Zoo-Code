@@ -62,6 +62,21 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		})
 	}
 
+	/**
+	 * Creates a streaming Anthropic message for the current model.
+	 *
+	 * Resolves the effective thinking effort for this request through the shared
+	 * `resolveEffectiveReasoningEffort` point (per-request override → settings →
+	 * model default). For adaptive-thinking models, when the resolved effort is one
+	 * of `ADAPTIVE_OUTPUT_CONFIG_EFFORTS` (low|medium|high|xhigh|max), the request
+	 * carries `output_config: { effort }` (DTE series 2/5); out-of-range or unset
+	 * efforts omit it so the API default applies.
+	 *
+	 * @param systemPrompt - The system prompt for the request.
+	 * @param messages - The message history to send.
+	 * @param metadata - Per-request metadata (carries the task-local effort override).
+	 * @returns An async iterator of parsed Anthropic stream events.
+	 */
 	async *createMessage(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
