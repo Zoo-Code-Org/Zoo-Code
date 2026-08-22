@@ -6,6 +6,7 @@ import type { ClineMessage } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { mergeClineMessageSnapshots } from "./mergeMessageSnapshots"
 
 export type TaskMessagesReadErrorKind = "not_found" | "invalid" | "io_error"
 
@@ -25,6 +26,29 @@ export type ReadTaskMessagesOptions = {
 	globalStoragePath: string
 }
 
+const READ_RETRY_MIN_MS = 10
+const READ_RETRY_RANGE_MS = 291
+
+function getErrorCode(error: unknown): string | undefined {
+	return typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
+		? error.code
+		: undefined
+}
+
+async function readFileWithMissingRetry(filePath: string): Promise<string> {
+	try {
+		return await fs.readFile(filePath, "utf8")
+	} catch (error) {
+		if (getErrorCode(error) !== "ENOENT") {
+			throw error
+		}
+
+		const retryDelay = READ_RETRY_MIN_MS + Math.floor(Math.random() * READ_RETRY_RANGE_MS)
+		await new Promise((resolve) => setTimeout(resolve, retryDelay))
+		return fs.readFile(filePath, "utf8")
+	}
+}
+
 export async function readTaskMessages({
 	taskId,
 	globalStoragePath,
@@ -34,12 +58,9 @@ export async function readTaskMessages({
 
 	let fileContent: string
 	try {
-		fileContent = await fs.readFile(filePath, "utf8")
+		fileContent = await readFileWithMissingRetry(filePath)
 	} catch (error) {
-		const kind =
-			typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT"
-				? "not_found"
-				: "io_error"
+		const kind = getErrorCode(error) === "ENOENT" ? "not_found" : "io_error"
 		throw new TaskMessagesReadError(kind, `Failed to read task messages for ${taskId} at ${filePath}`, error)
 	}
 
@@ -64,10 +85,16 @@ export type SaveTaskMessagesOptions = {
 	messages: ClineMessage[]
 	taskId: string
 	globalStoragePath: string
+	merge?: boolean
 }
 
-export async function saveTaskMessages({ messages, taskId, globalStoragePath }: SaveTaskMessagesOptions) {
+export async function saveTaskMessages({
+	messages,
+	taskId,
+	globalStoragePath,
+	merge = false,
+}: SaveTaskMessagesOptions) {
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.uiMessages)
-	await safeWriteJson(filePath, messages)
+	await safeWriteJson(filePath, messages, merge ? { merge: mergeClineMessageSnapshots } : undefined)
 }

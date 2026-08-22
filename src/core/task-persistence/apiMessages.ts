@@ -8,6 +8,7 @@ import { fileExistsAtPath } from "../../utils/fs"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { mergeApiMessageSnapshots } from "./mergeMessageSnapshots"
 
 export type ApiMessage = Anthropic.MessageParam & {
 	ts?: number
@@ -110,12 +111,14 @@ export async function saveApiMessages({
 	messages,
 	taskId,
 	globalStoragePath,
+	merge = false,
 }: {
 	messages: ApiMessage[]
 	taskId: string
 	globalStoragePath: string
+	merge?: boolean
 }) {
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.apiConversationHistory)
-	await safeWriteJson(filePath, messages)
+	await safeWriteJson(filePath, messages, merge ? { merge: mergeApiMessageSnapshots } : undefined)
 }

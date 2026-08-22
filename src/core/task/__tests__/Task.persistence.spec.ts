@@ -309,6 +309,20 @@ describe("Task persistence", () => {
 
 			const result = await task.retrySaveApiConversationHistory()
 			expect(result).toBe(true)
+			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: true }))
+		})
+
+		it("uses authoritative replacement for explicit API history overwrites", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteApiConversationHistory([{ role: "user", content: "replacement" }])
+
+			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
 		})
 
 		it("returns false on failure", async () => {
@@ -402,6 +416,20 @@ describe("Task persistence", () => {
 
 			const result = await (task as Record<string, any>).saveClineMessages()
 			expect(result).toBe(true)
+			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: true }))
+		})
+
+		it("uses authoritative replacement for explicit UI history overwrites", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			await task.overwriteClineMessages([{ ts: 1, type: "say", say: "text", text: "replacement" }])
+
+			expect(mockSaveTaskMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: false }))
 		})
 
 		it("returns false on failure", async () => {
@@ -1143,6 +1171,37 @@ describe("Task persistence", () => {
 
 			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
+		it("stops after API history hydration when the task is aborted", async () => {
+			const apiMessagesDeferred =
+				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()
+			mockReadTaskMessages.mockResolvedValue([{ ts: 1, type: "say", say: "text", text: "Original task" }])
+			mockReadApiMessages.mockReturnValue(apiMessagesDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-api-abort",
+					number: 1,
+					ts: 1,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			const askSpy = vi.spyOn(task, "ask")
+			const resumePromise = getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalled())
+
+			await task.abortTask(true)
+			apiMessagesDeferred.resolve([{ role: "user", content: [{ type: "text", text: "Original task" }] }])
+			await resumePromise
+
+			expect(askSpy).not.toHaveBeenCalled()
 		})
 	})
 

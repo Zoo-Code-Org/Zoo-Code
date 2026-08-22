@@ -4101,7 +4101,12 @@ export class ClineProvider
 			) {
 				parentClineMessages.push(subtaskUiMessage)
 			}
-			await saveTaskMessages({ messages: parentClineMessages, taskId: parentTaskId, globalStoragePath })
+			await saveTaskMessages({
+				messages: parentClineMessages,
+				taskId: parentTaskId,
+				globalStoragePath,
+				merge: true,
+			})
 
 			// Find the tool_use_id from the last assistant message's new_task tool_use
 			let toolUseId: string | undefined
@@ -4186,7 +4191,12 @@ export class ClineProvider
 				}
 			}
 
-			await saveApiMessages({ messages: parentApiMessages as any, taskId: parentTaskId, globalStoragePath })
+			await saveApiMessages({
+				messages: parentApiMessages as any,
+				taskId: parentTaskId,
+				globalStoragePath,
+				merge: true,
+			})
 
 			// 4) Close child instance if still open (single-open-task invariant).
 			//    This MUST happen BEFORE marking the child "completed" because

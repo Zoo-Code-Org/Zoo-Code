@@ -4,7 +4,7 @@ import * as os from "os"
 import * as path from "path"
 import * as fs from "fs/promises"
 
-import { readApiMessages } from "../apiMessages"
+import { readApiMessages, saveApiMessages } from "../apiMessages"
 
 let tmpBaseDir: string
 
@@ -82,5 +82,38 @@ describe("apiMessages.readApiMessages", () => {
 		})
 
 		expect(result).toEqual([])
+	})
+})
+
+describe("apiMessages.saveApiMessages", () => {
+	it("merges a concurrent disk suffix when requested", async () => {
+		const taskId = "task-merge-api"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		const filePath = path.join(taskDir, "api_conversation_history.json")
+		await fs.writeFile(
+			filePath,
+			JSON.stringify([
+				{ role: "user", content: "disk prefix", ts: 1 },
+				{ role: "assistant", content: "disk suffix", ts: 3 },
+			]),
+			"utf8",
+		)
+
+		await saveApiMessages({
+			taskId,
+			globalStoragePath: tmpBaseDir,
+			merge: true,
+			messages: [
+				{ role: "user", content: "updated prefix", ts: 1 },
+				{ role: "assistant", content: "incoming", ts: 2 },
+			],
+		})
+
+		expect(JSON.parse(await fs.readFile(filePath, "utf8"))).toEqual([
+			expect.objectContaining({ content: "updated prefix", ts: 1 }),
+			expect.objectContaining({ content: "incoming", ts: 2 }),
+			expect.objectContaining({ content: "disk suffix", ts: 3 }),
+		])
 	})
 })

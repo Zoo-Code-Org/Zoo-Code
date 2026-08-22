@@ -354,6 +354,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				]),
 				taskId: "p1",
 				globalStoragePath: "/storage",
+				merge: true,
 			}),
 		)
 
@@ -373,6 +374,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				]),
 				taskId: "p1",
 				globalStoragePath: "/storage",
+				merge: true,
 			}),
 		)
 
@@ -382,6 +384,40 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		const apiCall = vi.mocked(saveApiMessages).mock.calls[0][0]
 		expect(apiCall.messages).toHaveLength(2) // 1 original + 1 injected
+	})
+
+	it("does not reopen or overwrite a parent when its UI history cannot be read", async () => {
+		const parentItem = {
+			id: "parent-read-failure",
+			status: "delegated",
+			awaitingChildId: "child-read-failure",
+			childIds: ["child-read-failure"],
+			ts: 100,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const log = vi.fn()
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			getCurrentTask: vi.fn(() => ({ taskId: "child-read-failure" })),
+			taskHistoryStore: makeTaskHistoryStoreStub({ id: "child-read-failure", status: "active" }, parentItem),
+			log,
+		})
+		vi.mocked(readTaskMessages).mockRejectedValue(new Error("history unavailable"))
+
+		const result = await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "parent-read-failure",
+			childTaskId: "child-read-failure",
+			completionResultSummary: "Child done",
+		})
+
+		expect(result).toBe(false)
+		expect(log).toHaveBeenCalledWith(expect.stringContaining("history unavailable"))
+		expect(saveTaskMessages).not.toHaveBeenCalled()
+		expect(saveApiMessages).not.toHaveBeenCalled()
 	})
 
 	it("reopenParentFromDelegation injects tool_result when new_task tool_use exists in API history", async () => {

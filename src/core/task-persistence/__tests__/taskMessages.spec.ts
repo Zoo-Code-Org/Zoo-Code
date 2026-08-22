@@ -1,11 +1,18 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import * as os from "os"
 import * as path from "path"
 import * as fs from "fs/promises"
 
+import type { ClineMessage } from "@roo-code/types"
+
 // Mocks (use hoisted to avoid initialization ordering issues)
 const hoisted = vi.hoisted(() => ({
 	safeWriteJsonMock: vi.fn().mockResolvedValue(undefined),
+	readFileMock: vi.fn(),
+}))
+vi.mock("fs/promises", async (importOriginal) => ({
+	...(await importOriginal<typeof import("fs/promises")>()),
+	readFile: hoisted.readFileMock,
 }))
 vi.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: hoisted.safeWriteJsonMock,
@@ -18,8 +25,15 @@ let tmpBaseDir: string
 
 beforeEach(async () => {
 	hoisted.safeWriteJsonMock.mockClear()
+	const actualFs = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+	hoisted.readFileMock.mockReset().mockImplementation(actualFs.readFile)
 	// Create a unique, writable temp directory to act as globalStoragePath
 	tmpBaseDir = await fs.mkdtemp(path.join(os.tmpdir(), "roo-test-"))
+})
+
+afterEach(() => {
+	vi.useRealTimers()
+	vi.restoreAllMocks()
 })
 
 describe("taskMessages.saveTaskMessages", () => {
@@ -48,6 +62,7 @@ describe("taskMessages.saveTaskMessages", () => {
 		expect(hoisted.safeWriteJsonMock).toHaveBeenCalledTimes(1)
 		const [, persisted] = hoisted.safeWriteJsonMock.mock.calls[0]
 		expect(persisted).toEqual(messages)
+		expect(hoisted.safeWriteJsonMock.mock.calls[0][2]).toBeUndefined()
 	})
 
 	it("persists messages without modification when no metadata", async () => {
@@ -64,6 +79,23 @@ describe("taskMessages.saveTaskMessages", () => {
 
 		const [, persisted] = hoisted.safeWriteJsonMock.mock.calls[0]
 		expect(persisted).toEqual(messages)
+	})
+
+	it("passes the history merge callback only when requested", async () => {
+		const messages: ClineMessage[] = [{ ts: 2, type: "say", say: "text", text: "incoming" }]
+		await saveTaskMessages({
+			messages,
+			taskId: "task-merge",
+			globalStoragePath: tmpBaseDir,
+			merge: true,
+		})
+
+		const merge = hoisted.safeWriteJsonMock.mock.calls[0][2]?.merge
+		expect(merge).toBeTypeOf("function")
+		expect(merge([{ ts: 1, type: "say", say: "text", text: "disk" }], messages)).toEqual([
+			expect.objectContaining({ ts: 1, text: "disk" }),
+			expect.objectContaining({ ts: 2, text: "incoming" }),
+		])
 	})
 })
 
@@ -106,5 +138,35 @@ describe("taskMessages.readTaskMessages", () => {
 		await fs.writeFile(path.join(taskDir, "ui_messages.json"), "[]", "utf8")
 
 		await expect(readTaskMessages({ taskId, globalStoragePath: tmpBaseDir })).resolves.toEqual([])
+	})
+
+	it("retries one transient missing-file read after a jittered delay", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0)
+		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+		hoisted.readFileMock.mockRejectedValueOnce(missing).mockResolvedValueOnce("[]")
+
+		await expect(readTaskMessages({ taskId: "task-retry", globalStoragePath: tmpBaseDir })).resolves.toEqual([])
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
+	})
+
+	it("throws when the missing-file retry also fails", async () => {
+		vi.spyOn(Math, "random").mockReturnValue(0)
+		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
+		hoisted.readFileMock.mockRejectedValue(missing)
+
+		await expect(
+			readTaskMessages({ taskId: "task-still-missing", globalStoragePath: tmpBaseDir }),
+		).rejects.toMatchObject({ kind: "not_found" })
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(2)
+	})
+
+	it("does not retry non-ENOENT read failures", async () => {
+		const denied = Object.assign(new Error("denied"), { code: "EACCES" })
+		hoisted.readFileMock.mockRejectedValueOnce(denied)
+
+		await expect(readTaskMessages({ taskId: "task-denied", globalStoragePath: tmpBaseDir })).rejects.toMatchObject({
+			kind: "io_error",
+		})
+		expect(hoisted.readFileMock).toHaveBeenCalledTimes(1)
 	})
 })
