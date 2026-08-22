@@ -230,10 +230,12 @@ describe("Ollama Component - thinking setting", () => {
 		expect(mockSetApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything())
 	})
 
-	it("should render ThinkingBudget with a synthesized low/medium/high fallback when no model info is loaded", () => {
+	it("should render ThinkingBudget with a synthesized disable/low/medium/high fallback when no model info is loaded", () => {
 		// Default mock above returns info: undefined, so the fallback synthesis
 		// kicks in. The dropdown is also gated by enableReasoningEffort so we set
-		// that explicitly to make it render.
+		// that explicitly to make it render. The fallback includes "disable" (the
+		// UI sentinel for think: false) rather than a fake "none" level, because
+		// Ollama has no native string "none" thinking level.
 		const apiConfiguration: Partial<ProviderSettings> = {
 			enableReasoningEffort: true,
 			reasoningEffort: "medium",
@@ -248,9 +250,9 @@ describe("Ollama Component - thinking setting", () => {
 
 		const thinkingBudget = screen.getByTestId("thinking-budget")
 		expect(thinkingBudget).toBeInTheDocument()
-		// The fallback is `["none","low","medium","high"]` so users get None in
-		// the list alongside the model's effort levels.
-		expect(thinkingBudget.getAttribute("data-supports")).toBe("none,low,medium,high")
+		// The fallback is `["disable","low","medium","high"]` so users get None
+		// (the disable sentinel) in the list alongside the effort levels.
+		expect(thinkingBudget.getAttribute("data-supports")).toBe("disable,low,medium,high")
 	})
 
 	it("should not render ThinkingBudget when thinking is disabled", () => {
@@ -268,15 +270,17 @@ describe("Ollama Component - thinking setting", () => {
 		expect(screen.queryByTestId("thinking-budget")).toBeNull()
 	})
 
-	it("should pass the model's real supportsReasoningEffort array (with 'none' prepended) to ThinkingBudget when advertised", () => {
-		// When the selected model advertises effort levels (e.g. qwen3 on Ollama
-		// Cloud includes "max"), the settings selector surfaces those native
-		// levels with "none" prepended so users get the full None/low/med/high/
-		// max list.
+	it("should pass the model's real supportsReasoningEffort array verbatim (no 'none' prepend) to ThinkingBudget when advertised", () => {
+		// The fetcher includes "disable" in the advertised array for models that
+		// honor think: false, so off-support is part of the capability array the
+		// selector respects verbatim — there is no UI-side "none" prepend. For a
+		// qwen3-style model the advertised array is
+		// ["disable","low","medium","high","max"] and the settings selector
+		// surfaces exactly that.
 		useSelectedModelMock.mockReturnValue({
 			provider: "ollama",
 			id: "qwen3",
-			info: { supportsReasoningEffort: ["low", "medium", "high", "max"] },
+			info: { supportsReasoningEffort: ["disable", "low", "medium", "high", "max"] },
 		})
 
 		render(
@@ -294,16 +298,18 @@ describe("Ollama Component - thinking setting", () => {
 		)
 
 		const thinkingBudget = screen.getByTestId("thinking-budget")
-		expect(thinkingBudget.getAttribute("data-supports")).toBe("none,low,medium,high,max")
+		expect(thinkingBudget.getAttribute("data-supports")).toBe("disable,low,medium,high,max")
 	})
 
-	it("should not duplicate 'none' when the model already advertises it", () => {
-		// Idempotent: re-prepending "none" must not create a duplicate entry in
-		// the option list shown to the user.
+	it("should pass a gpt-oss advertised array verbatim, with no 'disable' option", () => {
+		// gpt-oss ignores think: false, so reasoning cannot be disabled; the
+		// fetcher omits "disable" and "max" and advertises exactly
+		// ["low","medium","high"]. The selector must surface that verbatim and
+		// must not inject a "disable"/"none" option that the model can't honor.
 		useSelectedModelMock.mockReturnValue({
 			provider: "ollama",
-			id: "qwen3",
-			info: { supportsReasoningEffort: ["none", "low", "medium", "high", "max"] },
+			id: "gpt-oss:20b",
+			info: { supportsReasoningEffort: ["low", "medium", "high"] },
 		})
 
 		render(
@@ -311,9 +317,9 @@ describe("Ollama Component - thinking setting", () => {
 				apiConfiguration={
 					{
 						apiProvider: "ollama",
-						ollamaModelId: "qwen3",
+						ollamaModelId: "gpt-oss:20b",
 						enableReasoningEffort: true,
-						reasoningEffort: "max",
+						reasoningEffort: "medium",
 					} as ProviderSettings
 				}
 				setApiConfigurationField={mockSetApiConfigurationField}
@@ -321,7 +327,9 @@ describe("Ollama Component - thinking setting", () => {
 		)
 
 		const thinkingBudget = screen.getByTestId("thinking-budget")
-		expect(thinkingBudget.getAttribute("data-supports")).toBe("none,low,medium,high,max")
+		expect(thinkingBudget.getAttribute("data-supports")).toBe("low,medium,high")
+		// No disable/none option for gpt-oss (it ignores think: false)
+		expect(thinkingBudget.getAttribute("data-supports")).not.toContain("disable")
 	})
 })
 

@@ -116,6 +116,12 @@ describe("Ollama Fetcher", () => {
 		})
 
 		it("should advertise native reasoning effort for models with the 'thinking' capability", () => {
+			// qwen3 is a thinking model that accepts the full low/medium/high/max
+			// set documented by Ollama's generic `think` API and honors `think:
+			// false`, so it advertises ["disable","low","medium","high","max"]. The
+			// "disable" sentinel is part of the capability array (not a UI-side
+			// prepend) so the selector respects it verbatim and never offers an
+			// un-disableable "None". No "xhigh" is advertised.
 			const modelDataWithThinking = {
 				...ollamaModelsData["qwen3-2to16:latest"],
 				capabilities: ["completion", "tools", "thinking"],
@@ -124,10 +130,98 @@ describe("Ollama Fetcher", () => {
 			const parsedModel = parseOllamaModel(modelDataWithThinking as Parameters<typeof parseOllamaModel>[0])
 
 			expect(parsedModel).not.toBeNull()
-			// Ollama Cloud accepts low/medium/high/max and rejects "xhigh", so the
-			// selector must surface exactly those native effort levels.
-			expect(parsedModel!.supportsReasoningEffort).toEqual(["low", "medium", "high", "max"])
+			expect(parsedModel!.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "max"])
 			expect(parsedModel!.reasoningEffort).toBe("medium")
+		})
+
+		it("should advertise only low/medium/high for gpt-oss thinking models (no max, no disable)", () => {
+			// Regression: Ollama's generic `think` API documents low/medium/high/max,
+			// but gpt-oss only accepts low/medium/high
+			// (https://ollama.com/library/gpt-oss: "Easily adjust the reasoning
+			// effort (low, medium, high) ..."). gpt-oss also ignores `think: false`,
+			// so reasoning cannot be disabled — the advertised array must omit both
+			// "max" and the "disable" sentinel. Advertising "max" would surface a
+			// choice the model rejects at request time, and advertising "disable"
+			// would offer an un-disableable "None". The array must be model-specific,
+			// not a single constant keyed off the boolean "thinking" capability.
+			// Ollama reports family "gptoss" and architecture "gptoss" (no hyphen)
+			// for gpt-oss in the /api/show response; the model id keeps the hyphen
+			// ("gpt-oss:20b"). Detection must match all three forms.
+			const gptOssModelData = {
+				...ollamaModelsData["qwen3-2to16:latest"],
+				details: {
+					...ollamaModelsData["qwen3-2to16:latest"].details,
+					family: "gptoss",
+					families: ["gptoss"],
+					parameter_size: "9.5B",
+				},
+				model_info: {
+					...ollamaModelsData["qwen3-2to16:latest"].model_info,
+					"general.architecture": "gptoss",
+				},
+				capabilities: ["completion", "tools", "thinking"],
+			}
+
+			const parsedModel = parseOllamaModel(
+				gptOssModelData as Parameters<typeof parseOllamaModel>[0],
+				"gpt-oss:20b",
+			)
+
+			expect(parsedModel).not.toBeNull()
+			expect(parsedModel!.supportsReasoningEffort).toEqual(["low", "medium", "high"])
+			// "max" must not be advertised for gpt-oss
+			expect(parsedModel!.supportsReasoningEffort).not.toContain("max")
+			// "disable" must not be advertised for gpt-oss (it ignores think: false)
+			expect(parsedModel!.supportsReasoningEffort).not.toContain("disable")
+			expect(parsedModel!.reasoningEffort).toBe("medium")
+		})
+
+		it("should detect gpt-oss from the architecture field alone (gptoss, no hyphen)", () => {
+			// Ollama strips the hyphen for general.architecture, reporting "gptoss".
+			// The heuristic must match the no-hyphen form even when the model id and
+			// family are absent or different.
+			const gptOssByArchitectureOnly = {
+				...ollamaModelsData["qwen3-2to16:latest"],
+				details: {
+					...ollamaModelsData["qwen3-2to16:latest"].details,
+					family: "other",
+				},
+				model_info: {
+					...ollamaModelsData["qwen3-2to16:latest"].model_info,
+					"general.architecture": "gptoss",
+				},
+				capabilities: ["completion", "tools", "thinking"],
+			}
+
+			const parsedModel = parseOllamaModel(gptOssByArchitectureOnly as Parameters<typeof parseOllamaModel>[0])
+
+			expect(parsedModel!.supportsReasoningEffort).toEqual(["low", "medium", "high"])
+		})
+
+		it("should detect gpt-oss from the model id even when family/architecture differ", () => {
+			// The model id ("gpt-oss:120b") keeps the hyphen and is the most reliable
+			// signal the user actually selected gpt-oss. Detection must match on the
+			// id even if Ollama reports a different family/architecture (e.g. a
+			// future quant or custom Modelfile).
+			const gptOssByIdOnly = {
+				...ollamaModelsData["qwen3-2to16:latest"],
+				details: {
+					...ollamaModelsData["qwen3-2to16:latest"].details,
+					family: "unknown",
+				},
+				model_info: {
+					...ollamaModelsData["qwen3-2to16:latest"].model_info,
+					"general.architecture": "unknown",
+				},
+				capabilities: ["completion", "tools", "thinking"],
+			}
+
+			const parsedModel = parseOllamaModel(
+				gptOssByIdOnly as Parameters<typeof parseOllamaModel>[0],
+				"gpt-oss:120b",
+			)
+
+			expect(parsedModel!.supportsReasoningEffort).toEqual(["low", "medium", "high"])
 		})
 
 		it("should not advertise reasoning effort when the 'thinking' capability is absent", () => {

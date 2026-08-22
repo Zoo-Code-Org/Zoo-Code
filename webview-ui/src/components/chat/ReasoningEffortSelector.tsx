@@ -8,15 +8,18 @@ Providers settings page edits (persisted via the `upsertApiConfiguration`
 message), so both controls stay in sync through the extension state broadcast.
 
 Option computation is shared with the settings selectors via
-`getReasoningEffortSelection`, so the values shown here always match Settings.
-For Ollama, the synthesized model info prepends "none" so the dropdown always
-lists None alongside the model's advertised effort levels (e.g.
-low/medium/high/max for cloud ollama models).
+`getReasoningEffortSelection`, and the Ollama model-info normalization is shared
+via `getOllamaReasoningModelInfo`, so the values shown here always match Settings
+and both surfaces can't drift. The fetcher's capability array is passed through
+verbatim (it includes "disable" for models that honor think: false and omits it
+for models that don't, e.g. gpt-oss); the fallback synthesizes
+[disable, low, medium, high] when no model info has loaded yet.
 */
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 
-import { type ModelInfo, ollamaDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
+import type { ModelInfo } from "@roo-code/types/model"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import { cn } from "@src/lib/utils"
 import { useRooPortal } from "@src/components/ui/hooks/useRooPortal"
@@ -25,6 +28,7 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import {
+	getOllamaReasoningModelInfo,
 	getReasoningEffortSelection,
 	getReasoningEffortTranslationKey,
 	type ReasoningEffortOption,
@@ -42,32 +46,16 @@ export const ReasoningEffortSelector = ({ disabled = false, triggerClassName = "
 	const { provider, info: selectedModelInfo } = useSelectedModel(apiConfiguration)
 	const [open, setOpen] = useState(false)
 	const portalContainer = useRooPortal("roo-portal")
+	const listRef = useRef<HTMLDivElement>(null)
 
-	// Build the modelInfo the same way the Ollama settings page does, so the
-	// chat dropdown lists exactly the same options as the settings dropdown.
-	// For Ollama, prepend "none" so users can pick "None" alongside the model's
-	// advertised effort levels. For other providers, fall through to whatever
-	// the selected model advertises (the selector stays hidden when nothing
-	// advertises `supportsReasoningEffort`).
+	// Build the modelInfo through the same shared Ollama normalization the
+	// settings page uses, so the chat dropdown lists exactly the same options
+	// as the settings dropdown. The fetcher's advertised array is passed through
+	// verbatim; the fallback synthesizes [disable, low, medium, high] when no
+	// model info has loaded yet so the selector can render immediately.
 	const modelInfo = useMemo<ModelInfo | undefined>(() => {
 		if (provider === providerIdentifiers.ollama) {
-			if (selectedModelInfo?.supportsReasoningEffort) {
-				const advertised = selectedModelInfo.supportsReasoningEffort
-				return {
-					...selectedModelInfo,
-					supportsReasoningEffort: Array.isArray(advertised)
-						? advertised.includes("none")
-							? advertised
-							: (["none", ...advertised] as typeof advertised)
-						: advertised,
-				}
-			}
-
-			// No advertised info yet (router models still loading, or local model
-			// without thinking metadata). Fall back to a synthesized modelInfo
-			// exposing the levels Ollama's native `think` parameter supports so
-			// the selector can render immediately.
-			return { ...ollamaDefaultModelInfo, supportsReasoningEffort: ["none", "low", "medium", "high"] }
+			return getOllamaReasoningModelInfo(selectedModelInfo)
 		}
 
 		return selectedModelInfo
@@ -86,11 +74,15 @@ export const ReasoningEffortSelector = ({ disabled = false, triggerClassName = "
 
 			// Write only `reasoningEffort`. The Enable Thinking checkbox in the
 			// settings page owns `enableReasoningEffort` independently, so the chat
-			// selector never flips it. Picking "None" in chat keeps
-			// enableReasoningEffort as-is and stores reasoningEffort: "none",
-			// which `getOllamaThinkParam()` translates to `think: true` with
-			// `reasoning: "none"` (an explicit "no reasoning level" choice that
-			// ollama accepts and that the settings dropdown shows verbatim).
+			// selector never flips it. Picking "None" (the "disable" option) in
+			// chat keeps enableReasoningEffort as-is and stores
+			// reasoningEffort: "disable". `getOllamaThinkParam()` gates the think
+			// param on `enableReasoningEffort === true` first, so when that flag
+			// stays on it still emits no think param only if reasoningEffort maps
+			// to off — but the chat selector is a soft toggle that does not change
+			// the flag, so the authoritative on/off state remains the settings
+			// checkbox. There is no separate `reasoning: "none"` field; Ollama has
+			// no native "none" string level, and "disable" maps to think: false.
 			vscode.postMessage({
 				type: "upsertApiConfiguration",
 				text: currentApiConfigName,
@@ -103,6 +95,37 @@ export const ReasoningEffortSelector = ({ disabled = false, triggerClassName = "
 		},
 		[apiConfiguration, currentApiConfigName],
 	)
+
+	// Keyboard navigation for the option list. The container acts as a listbox
+	// (role="listbox") and each option is a native <button> with role="option",
+	// so Tab reaches the first option and Arrow Up/Down moves between them; Enter
+	// or Space activates the focused option. This keeps the selector usable for
+	// keyboard-only and screen-reader users instead of the previous
+	// non-focusable <div onClick> rows.
+	const handleListKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+		const buttons = listRef.current
+			? Array.from(listRef.current.querySelectorAll<HTMLButtonElement>('button[role="option"]'))
+			: []
+		if (buttons.length === 0) {
+			return
+		}
+		const currentIndex = buttons.findIndex((b) => b === document.activeElement)
+		if (event.key === "ArrowDown") {
+			event.preventDefault()
+			const next = buttons[currentIndex + 1] ?? buttons[0]
+			next.focus()
+		} else if (event.key === "ArrowUp") {
+			event.preventDefault()
+			const prev = buttons[currentIndex - 1] ?? buttons[buttons.length - 1]
+			prev.focus()
+		} else if (event.key === "Home") {
+			event.preventDefault()
+			buttons[0].focus()
+		} else if (event.key === "End") {
+			event.preventDefault()
+			buttons[buttons.length - 1].focus()
+		}
+	}, [])
 
 	// The Enable Thinking checkbox in the settings page owns
 	// `enableReasoningEffort`; the chat selector only edits `reasoningEffort`
@@ -146,28 +169,41 @@ export const ReasoningEffortSelector = ({ disabled = false, triggerClassName = "
 					<div className="p-3 border-b border-vscode-dropdown-border">
 						<p className="text-xs text-vscode-descriptionForeground m-0">{title}</p>
 					</div>
-					<div className="max-h-[300px] overflow-y-auto py-1">
-						{availableOptions.map((option) => (
-							<div
-								key={option}
-								data-testid={`reasoning-effort-option-${option}`}
-								onClick={() => handleSelect(option)}
-								className={cn(
-									"px-3 py-1.5 text-sm cursor-pointer flex items-center",
-									"hover:bg-vscode-list-hoverBackground",
-									option === currentReasoningEffort &&
-										"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
-								)}>
-								<span className="flex-1 min-w-0 truncate">
-									{t(getReasoningEffortTranslationKey(option))}
-								</span>
-								{option === currentReasoningEffort && (
-									<div className="size-5 p-1 flex items-center justify-center">
-										<span className="codicon codicon-check text-xs" />
-									</div>
-								)}
-							</div>
-						))}
+					<div
+						ref={listRef}
+						role="listbox"
+						aria-label={title}
+						tabIndex={-1}
+						onKeyDown={handleListKeyDown}
+						className="max-h-[300px] overflow-y-auto py-1">
+						{availableOptions.map((option) => {
+							const selected = option === currentReasoningEffort
+							return (
+								<button
+									key={option}
+									type="button"
+									role="option"
+									aria-selected={selected}
+									data-testid={`reasoning-effort-option-${option}`}
+									onClick={() => handleSelect(option)}
+									className={cn(
+										"w-full text-left px-3 py-1.5 text-sm flex items-center",
+										"focus:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-vscode-focusBorder",
+										"hover:bg-vscode-list-hoverBackground",
+										selected &&
+											"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
+									)}>
+									<span className="flex-1 min-w-0 truncate">
+										{t(getReasoningEffortTranslationKey(option))}
+									</span>
+									{selected && (
+										<div className="size-5 p-1 flex items-center justify-center">
+											<span className="codicon codicon-check text-xs" />
+										</div>
+									)}
+								</button>
+							)
+						})}
 					</div>
 				</div>
 			</PopoverContent>
