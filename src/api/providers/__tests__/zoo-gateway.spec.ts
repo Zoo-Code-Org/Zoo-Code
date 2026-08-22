@@ -311,6 +311,39 @@ describe("ZooGatewayHandler", () => {
 			})
 		})
 
+		it("defaults totalCost to 0 when usage omits cost", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" }, index: 0 }],
+						usage: null,
+					},
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: {
+							prompt_tokens: 10,
+							completion_tokens: 5,
+							total_tokens: 15,
+						},
+					},
+				]),
+			)
+
+			const handler = new ZooGatewayHandler(mockOptions)
+			const chunks = await collectStream(
+				handler.createMessage("You are helpful.", [{ role: "user", content: "Hello" }]),
+			)
+
+			expect(chunks).toContainEqual({
+				type: "usage",
+				inputTokens: 10,
+				outputTokens: 5,
+				cacheWriteTokens: undefined,
+				cacheReadTokens: undefined,
+				totalCost: 0,
+			})
+		})
+
 		it("forwards task and mode metadata as request headers", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 
@@ -694,43 +727,49 @@ describe("ZooGatewayHandler", () => {
 		})
 
 		it("refetches when the configured model is missing from a populated map", async () => {
-			const { getModels } = await import("../fetchers/modelCache")
-			vitest.mocked(getModels).mockResolvedValueOnce({
-				"anthropic/claude-sonnet-4": {
-					maxTokens: 64000,
-					contextWindow: 200000,
-					supportsImages: true,
-					supportsPromptCache: true,
-					inputPrice: 3,
-					outputPrice: 15,
-				},
-			})
+			vitest.useFakeTimers()
+			try {
+				const { getModels } = await import("../fetchers/modelCache")
+				vitest.mocked(getModels).mockResolvedValueOnce({
+					"anthropic/claude-sonnet-4": {
+						maxTokens: 64000,
+						contextWindow: 200000,
+						supportsImages: true,
+						supportsPromptCache: true,
+						inputPrice: 3,
+						outputPrice: 15,
+					},
+				})
 
-			const handler = new ZooGatewayHandler({
-				...mockOptions,
-				zooGatewayModelId: "alibaba/qwen3.8-max",
-			})
+				const handler = new ZooGatewayHandler({
+					...mockOptions,
+					zooGatewayModelId: "alibaba/qwen3.8-max",
+				})
 
-			await handler.ensureModelFetched()
-			expect(handler.getModel().info.inputPrice).toBe(0)
+				await handler.ensureModelFetched()
+				expect(handler.getModel().info.inputPrice).toBe(0)
 
-			vitest.mocked(getModels).mockClear()
-			vitest.mocked(getModels).mockResolvedValueOnce({
-				"alibaba/qwen3.8-max": {
-					maxTokens: 65536,
-					contextWindow: 1_000_000,
-					supportsImages: true,
-					supportsPromptCache: true,
-					inputPrice: 0.222,
-					outputPrice: 0.667,
-				},
-			})
+				vitest.mocked(getModels).mockClear()
+				vitest.mocked(getModels).mockResolvedValueOnce({
+					"alibaba/qwen3.8-max": {
+						maxTokens: 65536,
+						contextWindow: 1_000_000,
+						supportsImages: true,
+						supportsPromptCache: true,
+						inputPrice: 0.222,
+						outputPrice: 0.667,
+					},
+				})
 
-			await handler.ensureModelFetched()
+				vitest.advanceTimersByTime(5 * 60 * 1000 + 1)
+				await handler.ensureModelFetched()
 
-			expect(getModels).toHaveBeenCalled()
-			expect(handler.getModel().info.inputPrice).toBe(0.222)
-			expect(handler.getModel().info.outputPrice).toBe(0.667)
+				expect(getModels).toHaveBeenCalled()
+				expect(handler.getModel().info.inputPrice).toBe(0.222)
+				expect(handler.getModel().info.outputPrice).toBe(0.667)
+			} finally {
+				vitest.useRealTimers()
+			}
 		})
 
 		it("does not reuse default model prices for an unknown configured model", async () => {
@@ -750,6 +789,34 @@ describe("ZooGatewayHandler", () => {
 			expect(info.outputPrice).toBe(0)
 			expect(info.cacheWritesPrice).toBe(0)
 			expect(info.cacheReadsPrice).toBe(0)
+		})
+
+		it("does not refetch an unresolved model on every ensureModelFetched call", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockResolvedValue({
+				"anthropic/claude-sonnet-4": {
+					maxTokens: 64000,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 3,
+					outputPrice: 15,
+				},
+			})
+
+			const handler = new ZooGatewayHandler({
+				...mockOptions,
+				zooGatewayModelId: "alibaba/qwen3.8-max",
+			})
+
+			await handler.ensureModelFetched()
+			vitest.mocked(getModels).mockClear()
+
+			await handler.ensureModelFetched()
+			await handler.ensureModelFetched()
+
+			expect(getModels).not.toHaveBeenCalled()
+			expect(handler.getModel().info.inputPrice).toBe(0)
 		})
 
 		it("deduplicates concurrent calls into a single fetch", async () => {
