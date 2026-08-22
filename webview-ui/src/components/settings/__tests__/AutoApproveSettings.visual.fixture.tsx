@@ -7,7 +7,23 @@ import { ExtensionStateContextProvider } from "@/context/ExtensionStateContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { AutoApproveSettings } from "../AutoApproveSettings"
 
+import enSettings from "@/i18n/locales/en/settings.json"
+import enCommon from "@/i18n/locales/en/common.json"
+
 const i18n = createInstance()
+
+i18n.init({
+	lng: "en",
+	fallbackLng: "en",
+	resources: {
+		en: {
+			settings: enSettings,
+			common: enCommon,
+		},
+	},
+	interpolation: { escapeValue: false },
+	initImmediate: false,
+})
 
 type AutoApproveFixtureProps = {
 	alwaysAllowReadOnly?: boolean
@@ -32,7 +48,7 @@ const AutoApproveSettingsFixture = ({
 }: AutoApproveFixtureProps) => (
 	<TranslationContext.Provider
 		value={{
-			t: (key) => (key === "settings:autoApprove.followupQuestions.timeoutDisabled" ? "Disabled" : key),
+			t: (key, options?) => i18n.t(key, options),
 			i18n,
 		}}>
 		<ExtensionStateContextProvider
