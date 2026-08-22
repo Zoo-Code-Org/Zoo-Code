@@ -379,8 +379,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
 	private messageQueueStateChangedHandler: (() => void) | undefined
-	private queuedFeedbackRows = new Set<string>()
-	private queuedFeedbackRetryTimers = new Map<string, NodeJS.Timeout>()
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -897,40 +895,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.pendingAction = pendingAction
 	}
 
-	public acknowledgeQueuedMessage(messageId: string): boolean {
-		return this.messageQueueService.removeMessage(messageId)
-	}
-
 	public async persistQueuedFeedbackAndAcknowledge(
 		messageId: string,
 		text?: string,
 		images?: string[],
 	): Promise<boolean> {
-		if (!this.queuedFeedbackRows.has(messageId)) {
-			await this.say("user_feedback", text ?? "", images)
-			this.queuedFeedbackRows.add(messageId)
-		}
-		const saved = await this.saveClineMessages()
-		if (saved) {
-			const retryTimer = this.queuedFeedbackRetryTimers.get(messageId)
-			if (retryTimer) {
-				clearTimeout(retryTimer)
-				this.queuedFeedbackRetryTimers.delete(messageId)
+		await this.say("user_feedback", text ?? "", images)
+		while (!this.abort) {
+			if (await this.saveClineMessages()) {
+				return this.messageQueueService.removeMessage(messageId)
 			}
-			this.queuedFeedbackRows.delete(messageId)
-			return this.acknowledgeQueuedMessage(messageId)
-		}
-
-		if (!this.abort && !this.queuedFeedbackRetryTimers.has(messageId)) {
-			const retryTimer = setTimeout(() => {
-				this.queuedFeedbackRetryTimers.delete(messageId)
-				void this.persistQueuedFeedbackAndAcknowledge(messageId, text, images).catch((error) => {
-					console.error(`[Task#persistQueuedFeedbackAndAcknowledge] Retry failed for ${messageId}:`, error)
-				})
-			}, 250)
-			this.queuedFeedbackRetryTimers.set(messageId, retryTimer)
+			await delay(250)
 		}
 		return false
+	}
+
+	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
+		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
+		if (resolution.requiresDurableAck) {
+			return message.id
+		}
+		this.messageQueueService.removeMessage(message.id)
+		return undefined
 	}
 
 	static create(options: TaskOptions): [Task, Promise<void>] {
@@ -1276,7 +1262,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
-		const queuedMessage = this.messageQueueService.peekMessage()
+		const queuedMessage =
+			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
 		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
@@ -1462,14 +1449,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 			}
 		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
-			this.handleWebviewAskResponse(queuedAskResolution.response, queuedMessage.text, queuedMessage.images)
-			if (queuedAskResolution.requiresDurableAck) {
-				if (this.messageQueueService.claimMessage(queuedMessage.id)) {
-					queuedMessageId = queuedMessage.id
-				}
-			} else {
-				this.messageQueueService.removeMessage(queuedMessage.id)
-			}
+			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 		}
 
 		// Wait for askResponse to be set
@@ -1483,17 +1463,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// suggestion click that was incorrectly queued due to UI state), consume it
 				// immediately so the task doesn't hang.
 				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.peekMessage()
+					const message = this.messageQueueService.claimNextMessage()
 					const resolution = message ? queuedResponseForAsk(type, text) : undefined
 					if (message && resolution) {
-						this.handleWebviewAskResponse(resolution.response, message.text, message.images)
-						if (resolution.requiresDurableAck) {
-							if (this.messageQueueService.claimMessage(message.id)) {
-								queuedMessageId = message.id
-							}
-						} else {
-							this.messageQueueService.removeMessage(message.id)
-						}
+						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
 					}
 				}
 
@@ -2510,11 +2483,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Dispose message queue and remove event listeners.
 		try {
-			for (const retryTimer of this.queuedFeedbackRetryTimers.values()) {
-				clearTimeout(retryTimer)
-			}
-			this.queuedFeedbackRetryTimers.clear()
-			this.queuedFeedbackRows.clear()
 			if (this.messageQueueStateChangedHandler) {
 				this.messageQueueService.removeListener("stateChanged", this.messageQueueStateChangedHandler)
 				this.messageQueueStateChangedHandler = undefined

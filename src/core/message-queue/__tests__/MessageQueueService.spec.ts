@@ -6,36 +6,24 @@ describe("MessageQueueService claims", () => {
 		const first = queue.addMessage("first")!
 		const second = queue.addMessage("second")!
 
-		expect(queue.claimMessage(first.id)).toBe(true)
-		expect(queue.peekMessage()).toEqual(second)
-		expect(queue.dequeueMessage()).toEqual(second)
-		expect(queue.peekMessage()).toBeUndefined()
+		expect(queue.claimNextMessage()).toEqual(first)
+		expect(queue.claimNextMessage()).toEqual(second)
 		expect(queue.dequeueMessage()).toBeUndefined()
-		expect(queue.messages).toEqual([first])
-	})
-
-	it("rejects duplicate and unknown claims", () => {
-		const queue = new MessageQueueService()
-		const message = queue.addMessage("feedback")!
-
-		expect(queue.claimMessage(message.id)).toBe(true)
-		expect(queue.claimMessage(message.id)).toBe(false)
-		expect(queue.claimMessage("missing")).toBe(false)
+		expect(queue.messages).toEqual([first, second])
 	})
 
 	it("clears claim state when a message is removed or the queue is disposed", () => {
 		const queue = new MessageQueueService()
 		const message = queue.addMessage("feedback")!
-		queue.claimMessage(message.id)
+		expect(queue.claimNextMessage()).toEqual(message)
 
 		expect(queue.removeMessage(message.id)).toBe(true)
 		expect(queue.removeMessage(message.id)).toBe(false)
-		expect(queue.claimMessage(message.id)).toBe(false)
 
 		const next = queue.addMessage("next")!
-		queue.claimMessage(next.id)
+		expect(queue.claimNextMessage()).toEqual(next)
 		queue.dispose()
 		expect(queue.messages).toEqual([])
-		expect(queue.claimMessage(next.id)).toBe(false)
+		expect(queue.claimNextMessage()).toBeUndefined()
 	})
 })

@@ -89,16 +89,12 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return message
 	}
 
-	public peekMessage(): QueuedMessage | undefined {
-		return this._messages.find((message) => !this.claimedMessageIds.has(message.id))
-	}
-
-	public claimMessage(id: string): boolean {
-		if (!this._messages.some((message) => message.id === id) || this.claimedMessageIds.has(id)) {
-			return false
+	public claimNextMessage(): QueuedMessage | undefined {
+		const message = this._messages.find((candidate) => !this.claimedMessageIds.has(candidate.id))
+		if (message) {
+			this.claimedMessageIds.add(message.id)
 		}
-		this.claimedMessageIds.add(id)
-		return true
+		return message
 	}
 
 	public get messages(): QueuedMessage[] {
