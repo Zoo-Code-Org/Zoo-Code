@@ -69,6 +69,7 @@ export const ThinkingEffortToggle = ({ disabled = false, triggerClassName = "" }
 			<StandardTooltip content={tooltipText}>
 				<PopoverTrigger
 					disabled={disabled}
+					aria-label={t("chat:thinkingEffort.toggleTitle")}
 					data-testid="thinking-effort-toggle-trigger"
 					className={cn(
 						"relative inline-flex items-center justify-center whitespace-nowrap px-1.5 py-1",
