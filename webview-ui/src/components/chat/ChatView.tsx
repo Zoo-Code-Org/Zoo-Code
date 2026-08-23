@@ -1812,7 +1812,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 										newTaskAskSupportedEfforts &&
 										newTaskAskSupportedEfforts.length > 0 && (
 											<select
-												aria-label="Thinking effort"
+												// DTE series 5/5: reuses the settings reasoning-effort labels, which are translated
+												// in every locale, so the accessible name and option labels are localized
+												// like the rest of the chat UI.
+												aria-label={t("settings:providers.reasoningEffort.label")}
 												// The prefill normalizes newTaskAskEffort to a supported level (see the
 												// newTask branch of the ask handler), so rendered and posted values agree.
 												value={newTaskAskEffort ?? newTaskAskSupportedEfforts[0]}
@@ -1834,7 +1837,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 												}}>
 												{newTaskAskSupportedEfforts.map((effort) => (
 													<option key={effort} value={effort}>
-														{effort}
+														{t(`settings:providers.reasoningEffort.${effort}`)}
 													</option>
 												))}
 											</select>
