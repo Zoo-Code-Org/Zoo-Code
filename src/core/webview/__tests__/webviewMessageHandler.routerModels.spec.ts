@@ -59,15 +59,9 @@ vi.mock("vscode", () => ({
 // Mock modelCache getModels/flushModels used by the handler
 const getModelsMock = vi.fn()
 const flushModelsMock = vi.fn()
-const kimiCodeGetAccessTokenMock = vi.fn()
 vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: (...args: any[]) => getModelsMock(...args),
 	flushModels: (...args: any[]) => flushModelsMock(...args),
-}))
-vi.mock("../../../integrations/kimi-code/oauth", () => ({
-	kimiCodeOAuthManager: {
-		getAccessToken: (...args: unknown[]) => kimiCodeGetAccessTokenMock(...args),
-	},
 }))
 
 describe("webviewMessageHandler - requestRouterModels provider filter", () => {
@@ -434,7 +428,6 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 	})
 
 	it("flushes DeepSeek models when an unsaved base URL is paired with the stored API key", async () => {
-	it("flushes DeepSeek models when an unsaved base URL is paired with the stored API key", async () => {
 		mockProvider.getState.mockResolvedValue({
 			apiConfiguration: {
 				deepSeekApiKey: "stored-deepseek-key",
@@ -462,22 +455,24 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 				kimiCodeAuthMethod: "oauth",
 			},
 		})
-		kimiCodeGetAccessTokenMock.mockRejectedValueOnce(new Error("refresh failed"))
+		getKimiCodeAccessTokenMock.mockRejectedValueOnce(new Error("refresh failed"))
 
 		await webviewMessageHandler(mockProvider, {
 			type: "requestRouterModels",
-			values: { provider: "kimi-code" },
+			values: { provider: providerIdentifiers.kimiCode },
 		} satisfies WebviewMessage)
 
-		expect(kimiCodeGetAccessTokenMock).toHaveBeenCalledOnce()
+		expect(getKimiCodeAccessTokenMock).toHaveBeenCalledOnce()
 		expect(mockProvider.log).toHaveBeenCalledWith(
 			"[requestRouterModels] kimi-code credential lookup failed: refresh failed",
 		)
-		expect(getModelsMock).not.toHaveBeenCalledWith(expect.objectContaining({ provider: "kimi-code" }))
+		expect(getModelsMock).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.kimiCode }),
+		)
 		expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {},
-			values: { provider: "kimi-code" },
+			values: { provider: providerIdentifiers.kimiCode },
 		})
 	})
 

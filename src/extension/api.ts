@@ -27,6 +27,7 @@ import { IpcServer } from "@roo-code/ipc"
 import { Package } from "../shared/package"
 import { getAllModes, type Mode } from "../shared/modes"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import type { Task } from "../core/task/Task"
 import { Terminal } from "../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../integrations/terminal/TerminalRegistry"
 import { openClineInNewTab } from "../activate/registerCommands"
@@ -580,8 +581,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	// Global Settings Management
 
 	public getConfiguration(): RooCodeSettings {
+		// getValues() merges view-local state, whose apiConfiguration is a nested object that
+		// can carry provider secrets (e.g. apiKey). Flatten the provider settings onto the top
+		// level (the pre-existing flat shape) so the secret filter removes them before return.
+		const values = this.sidebarProvider.getValues()
+		const { apiConfiguration, ...rest } = values
 		return Object.fromEntries(
-			Object.entries(this.sidebarProvider.getValues()).filter(([key]) => !isSecretStateKey(key)),
+			Object.entries({ ...rest, ...apiConfiguration }).filter(([key]) => !isSecretStateKey(key)),
 		)
 	}
 

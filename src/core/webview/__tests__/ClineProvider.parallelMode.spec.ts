@@ -8,6 +8,7 @@ import {
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	RooCodeEventName,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { defaultModeSlug } from "../../../shared/modes"
@@ -286,7 +287,7 @@ vi.mock("../../config/ContextProxy", () => {
 			pinnedApiConfigs: this.context?.globalState?.get("pinnedApiConfigs") ?? defaultState.pinnedApiConfigs,
 		}))
 		getValue = vi.fn().mockImplementation((key: string) => this.context?.globalState?.get(key))
-		getProviderSettings = vi.fn().mockReturnValue({ apiProvider: "anthropic" })
+		getProviderSettings = vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic })
 		setValue = vi.fn().mockImplementation((key: string, value: any) => {
 			return this.context?.globalState?.update?.(key, value) ?? Promise.resolve()
 		})
@@ -488,7 +489,7 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 			activateProfile: vi.fn().mockImplementation(async (args: { name?: string; id?: string }) => ({
 				name: args.name ?? "default",
 				id: args.id ?? "test-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})),
 			setModeConfig: vi.fn().mockResolvedValue(undefined),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -809,7 +810,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			const testApiConfig = {
-				apiProvider: "openrouter" as const,
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "claude-3.5-sonnet",
 				openRouterApiKey: "secret-key",
 			}
@@ -933,7 +934,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
 				name: "profile-a",
 				id: "profile-a-id",
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/anthropic/claude-sonnet-4",
 			} as any)
 
@@ -942,7 +943,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			})
 			await provider.contextProxy.setValue("mode" as any, "debugger")
 			await provider.contextProxy.setValue("currentApiConfigName" as any, "profile-b")
-			await provider.contextProxy.setValue("apiConfiguration" as any, { apiProvider: "anthropic" })
+			await provider.contextProxy.setValue("apiConfiguration" as any, {
+				apiProvider: providerIdentifiers.anthropic,
+			})
 
 			await (provider as any).setViewStateId(stableViewId)
 			const state = await provider.getState()
@@ -951,7 +954,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.mode).toBe("architect")
 			expect(state.currentApiConfigName).toBe("profile-a")
 			expect(state.apiConfiguration).toMatchObject({
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/anthropic/claude-sonnet-4",
 			})
 
@@ -1054,7 +1057,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			await (provider as any).saveViewState("apiConfiguration", {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "local-key",
 			})
 
@@ -1078,7 +1081,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				mode: "debugger",
 				currentApiConfigName: "shared-profile",
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "shared-key",
 				},
 				customModePrompts: { code: { roleDefinition: "shared" } },
@@ -1087,7 +1090,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await providerAccess.saveViewState("mode", "architect")
 			await providerAccess.saveViewState("currentApiConfigName", "view-profile")
 			await providerAccess.saveViewState("apiConfiguration", {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "view-key",
 			})
 
@@ -1096,7 +1099,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(values.mode).toBe("architect")
 			expect(values.currentApiConfigName).toBe("view-profile")
 			expect(values.apiConfiguration).toEqual({
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "view-key",
 			})
 			expect(values.customModePrompts).toEqual({ code: { roleDefinition: "shared" } })
@@ -1108,12 +1111,12 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			await (provider as any).saveViewState("apiConfiguration", {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/old-model",
 			})
 
 			await provider.setValues({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				awsUseApiKey: true,
 				awsApiKey: "mock-key",
 				awsRegion: "us-east-1",
@@ -1231,16 +1234,16 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValueOnce({
 				name: "new-profile",
 				id: "new-profile-id",
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/new-model",
 			} as any)
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([
-				{ id: "new-profile-id", name: "new-profile", apiProvider: "openrouter" },
+				{ id: "new-profile-id", name: "new-profile", apiProvider: providerIdentifiers.openrouter },
 			] as any)
 			const saveViewStateSpy = vi.spyOn(provider as any, "saveViewState")
 			;(provider as any).viewLocalState = {
 				currentApiConfigName: "stale-profile",
-				apiConfiguration: { apiProvider: "anthropic" },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			}
 
 			await provider.activateProviderProfile({ name: "new-profile" })
@@ -1249,7 +1252,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(saveViewStateSpy).not.toHaveBeenCalled()
 			expect(state.currentApiConfigName).toBe("new-profile")
 			expect(state.apiConfiguration).toMatchObject({
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openrouter/new-model",
 			})
 
@@ -1259,16 +1262,16 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		it("should synchronize viewLocalState when upsertProviderProfile activates a saved profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ id: "test-id", name: "saved-profile", apiProvider: "bedrock" },
+				{ id: "test-id", name: "saved-profile", apiProvider: providerIdentifiers.bedrock },
 			] as any)
 			const saveViewStateSpy = vi.spyOn(provider as any, "saveViewState")
 			;(provider as any).viewLocalState = {
 				currentApiConfigName: "stale-profile",
-				apiConfiguration: { apiProvider: "anthropic" },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			}
 
 			await provider.upsertProviderProfile("saved-profile", {
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				awsRegion: "us-east-1",
 			} as any)
 			const state = await provider.getState()
@@ -1276,7 +1279,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(saveViewStateSpy).not.toHaveBeenCalled()
 			expect(state.currentApiConfigName).toBe("saved-profile")
 			expect(state.apiConfiguration).toMatchObject({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				awsRegion: "us-east-1",
 			})
 
@@ -1287,24 +1290,24 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			await provider.contextProxy.setValue("currentApiConfigName" as any, "deleted-profile")
 			await provider.contextProxy.setValue("listApiConfigMeta" as any, [
-				{ id: "deleted-id", name: "deleted-profile", apiProvider: "anthropic" },
-				{ id: "replacement-id", name: "replacement-profile", apiProvider: "openrouter" },
+				{ id: "deleted-id", name: "deleted-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
 			;(provider as any).viewLocalState = {
 				currentApiConfigName: "deleted-profile",
-				apiConfiguration: { apiProvider: "anthropic" },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			}
 
 			await provider.deleteProviderProfile({
 				id: "deleted-id",
 				name: "deleted-profile",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			} as any)
 			const state = await provider.getState()
 
 			expect(state.currentApiConfigName).toBe("replacement-profile")
 			expect(state.listApiConfigMeta).toEqual([
-				{ id: "replacement-id", name: "replacement-profile", apiProvider: "openrouter" },
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
 
 			await provider.dispose()
@@ -1318,7 +1321,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			;(provider as any).viewLocalState = {
 				mode: "architect",
 				currentApiConfigName: "stale-profile",
-				apiConfiguration: { apiProvider: "openrouter" },
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
 			}
 
 			await provider.resetState()
@@ -1333,19 +1336,19 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		it("should sync view-local apiConfiguration when activating an upserted profile", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			await (provider as any).saveViewState("apiConfiguration", {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				openRouterModelId: "openai/gpt-4.1",
 			})
 
 			const providerSettings = {
-				apiProvider: "zai" as const,
+				apiProvider: providerIdentifiers.zai,
 				zaiApiKey: "mock-key",
 				zaiApiLine: "international_api" as const,
 				apiModelId: "glm-5.1",
 			}
 			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("zai-profile-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "default", id: "zai-profile-id", apiProvider: "zai" },
+				{ name: "default", id: "zai-profile-id", apiProvider: providerIdentifiers.zai },
 			])
 
 			await provider.upsertProviderProfile("default", providerSettings, true)
@@ -1404,12 +1407,12 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
 				name: "mode-profile",
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			}
 			const profileSettings: ProviderSettingsWithId & { name: string } = {
 				id: "profile-id",
 				name: "mode-profile",
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			}
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
@@ -1526,11 +1529,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await (provider as any).saveViewState("mode", "architect")
 			await (provider as any).saveViewState("currentApiConfigName", "my-profile")
-			await (provider as any).saveViewState("apiConfiguration", { apiProvider: "openrouter" })
+			await (provider as any).saveViewState("apiConfiguration", { apiProvider: providerIdentifiers.openrouter })
 
 			expect((provider as any).viewLocalState.mode).toBe("architect")
 			expect((provider as any).viewLocalState.currentApiConfigName).toBe("my-profile")
-			expect((provider as any).viewLocalState.apiConfiguration).toEqual({ apiProvider: "openrouter" })
+			expect((provider as any).viewLocalState.apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+			})
 
 			// Call _clearViewLocalState
 			;(provider as any)._clearViewLocalState()

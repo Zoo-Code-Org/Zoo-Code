@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
+import { providerIdentifiers } from "@roo-code/types"
+
 import { API } from "../api"
 
 vi.mock("@roo-code/ipc", () => ({
@@ -35,7 +37,7 @@ describe("API.setConfiguration", () => {
 		} as any
 		const api = new API({ appendLine: vi.fn() } as any, provider)
 		const configuration = {
-			apiProvider: "bedrock" as const,
+			apiProvider: providerIdentifiers.bedrock,
 			currentApiConfigName: "default",
 			awsRegion: "us-east-1",
 			apiModelId: "us.anthropic.claude-haiku-4-5-20251001-v1:0",
