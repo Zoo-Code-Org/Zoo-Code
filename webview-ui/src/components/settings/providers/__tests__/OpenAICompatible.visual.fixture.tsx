@@ -82,7 +82,7 @@ export const OpenAICompatibleAzureFixture = () => (
 export const OpenAICompatibleExtraBodyFixture = () => (
 	<Providers>
 		<TooltipProvider>
-			<div className="h-[660px] w-[480px] overflow-hidden bg-vscode-editor-background p-4 text-vscode-foreground">
+			<div className="w-[480px] max-w-full bg-vscode-editor-background p-4 text-vscode-foreground">
 				<OpenAICompatible
 					apiConfiguration={extraBodyApiConfiguration}
 					setApiConfigurationField={() => {}}
