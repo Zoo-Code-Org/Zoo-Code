@@ -633,6 +633,9 @@ export class NativeToolCallParser {
 						mode: partialArgs.mode,
 						message: partialArgs.message,
 						todos: partialArgs.todos,
+						// DTE series 5/5: optional subtask start effort must reach execute()
+						// for capability validation (dropping it made the arg a silent no-op).
+						thinking_effort: partialArgs.thinking_effort,
 					}
 				}
 				break
@@ -988,6 +991,9 @@ export class NativeToolCallParser {
 							mode: args.mode,
 							message: args.message,
 							todos: args.todos,
+							// DTE series 5/5: optional subtask start effort must reach execute()
+							// for capability validation (dropping it made the arg a silent no-op).
+							thinking_effort: args.thinking_effort,
 						} as NativeArgsFor<TName>
 					}
 					break
