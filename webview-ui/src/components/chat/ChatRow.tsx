@@ -1564,7 +1564,11 @@ export const ChatRowContent = ({
 											)
 										) : (
 											<Trans
-												i18nKey="chat:thinkingEffort.applied"
+												i18nKey={
+													info.source === "you"
+														? "chat:thinkingEffort.appliedByUser"
+														: "chat:thinkingEffort.applied"
+												}
 												components={{
 													code: <code className="font-medium">{info.effort}</code>,
 												}}

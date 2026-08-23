@@ -8,6 +8,7 @@ import {
 	ListChevronsDownUp,
 	ArrowLeft,
 	ArrowRight,
+	Brain,
 } from "lucide-react"
 import prettyBytes from "pretty-bytes"
 
@@ -28,6 +29,8 @@ import { ContextWindowProgress } from "./ContextWindowProgress"
 import { Mention } from "./Mention"
 import { TodoListDisplay } from "./TodoListDisplay"
 import { LucideIconButton } from "./LucideIconButton"
+
+import { computeThinkingEffortDisplay } from "@/utils/thinkingEffort"
 
 export interface TaskHeaderProps {
 	task: ClineMessage
@@ -63,7 +66,7 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem } = useExtensionState()
+	const { apiConfiguration, currentTaskItem, experiments, taskThinkingEffort } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 
@@ -85,6 +88,25 @@ const TaskHeader = ({
 	)
 	// vscode-lm reports maxTokens: -1 (unlimited); a negative reserve must not distort the window math.
 	const reservedForOutput = maxTokens && maxTokens > 0 ? maxTokens : 0
+
+	// DTE series 4/5: current effective thinking effort + source badge
+	// (task-local override → settings → model default/adaptive).
+	const thinkingEffortDisplay = useMemo(
+		() =>
+			computeThinkingEffortDisplay({
+				experiments,
+				apiConfiguration,
+				model,
+				taskThinkingEffort,
+			}),
+		[experiments, apiConfiguration, model, taskThinkingEffort],
+	)
+	const thinkingEffortSourceKey =
+		thinkingEffortDisplay?.source === "you"
+			? "chat:thinkingEffort.sourceYou"
+			: thinkingEffortDisplay?.source === "auto"
+				? "chat:thinkingEffort.sourceAuto"
+				: "chat:thinkingEffort.sourceDefault"
 
 	const condenseButton = (
 		<LucideIconButton
@@ -187,6 +209,21 @@ const TaskHeader = ({
 							)}
 						</div>
 						<div className="flex items-center shrink-0 ml-2" onClick={(e) => e.stopPropagation()}>
+							{thinkingEffortDisplay && (
+								<StandardTooltip
+									content={t("chat:thinkingEffort.chipTooltip", {
+										effort: thinkingEffortDisplay.effort,
+										source: t(thinkingEffortSourceKey),
+									})}>
+									<span className="flex items-center gap-1 rounded-md border border-vscode-panel-border bg-vscode-sideBar-background/60 px-1.5 py-0.5 text-[11px] text-vscode-descriptionForeground">
+										<Brain className="size-3" />
+										<span className="font-medium text-vscode-foreground/90">
+											{thinkingEffortDisplay.effort}
+										</span>
+										<span>{t(thinkingEffortSourceKey)}</span>
+									</span>
+								</StandardTooltip>
+							)}
 							<StandardTooltip content={isTaskExpanded ? t("chat:task.collapse") : t("chat:task.expand")}>
 								<button
 									onClick={() => setIsTaskExpanded(!isTaskExpanded)}

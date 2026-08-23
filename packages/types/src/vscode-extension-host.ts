@@ -336,6 +336,12 @@ export type ExtensionState = Pick<
 	clineMessages: ClineMessage[]
 	currentTaskId?: string
 	currentTaskItem?: HistoryItem
+	// DTE series 4/5: task-local thinking effort override for the current task.
+	// Present only while a task-local override is active (set by the composer
+	// toggle, the set_thinking_effort tool, or a parent orchestrator); undefined
+	// otherwise, in which case the webview derives the display from settings ->
+	// model default. Authoritative state stays extension-side.
+	taskThinkingEffort?: { effort: string; source: string }
 	currentTaskTodos?: TodoItem[] // Initial todos for the current task
 	apiConfiguration: ProviderSettings
 	uriScheme?: string
@@ -501,6 +507,7 @@ export interface WebviewMessage {
 		| "openMention"
 		| "cancelTask"
 		| "cancelAutoApproval"
+		| "setTaskThinkingEffort"
 		| "updateVSCodeSetting"
 		| "getVSCodeSetting"
 		| "vsCodeSetting"
@@ -648,6 +655,11 @@ export interface WebviewMessage {
 		| "themeFixtureProbeResponse"
 	text?: string
 	taskId?: string
+	// DTE series 4/5: task-local thinking effort set from the composer toggle
+	// (message type "setTaskThinkingEffort"). Task-local only; persisted settings
+	// are never touched.
+	effort?: string
+	reason?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
 	disabled?: boolean

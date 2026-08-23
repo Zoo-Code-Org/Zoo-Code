@@ -16,6 +16,8 @@ import {
 	type Command as SlashCommand,
 	type WebviewMessage,
 	type EditQueuedMessagePayload,
+	type ClineSayTool,
+	reasoningEffortExtendedSchema,
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
@@ -1655,6 +1657,39 @@ export const webviewMessageHandler = async (
 			// Cancel any pending auto-approval timeout for the current task
 			provider.getCurrentTask()?.cancelAutoApprovalTimeout()
 			break
+		case "setTaskThinkingEffort": {
+			// DTE series 4/5: task-local thinking effort set from the composer
+			// toggle. Task-local only — persisted settings are never touched.
+			// Defense in depth: the composer menu only offers model-supported
+			// levels, but the webview is never trusted blindly.
+			const setEffortTask = provider.getCurrentTask()
+			// Validate the webview-supplied effort against the canonical enum.
+			const setEffortParsed = reasoningEffortExtendedSchema.safeParse(message.effort)
+			if (setEffortTask && setEffortParsed.success) {
+				const setEffortValue = setEffortParsed.data
+				const capability = setEffortTask.api.getModel().info.supportsReasoningEffort
+				const supported = Array.isArray(capability)
+					? (capability as string[]).includes(setEffortValue)
+					: capability === true
+				if (supported) {
+					setEffortTask.setRuntimeThinkingEffort(setEffortValue, "you")
+					// Single in-chat line (same ChatRow case as model-initiated changes).
+					await setEffortTask.say(
+						"tool",
+						JSON.stringify({
+							tool: "thinkingEffort",
+							effort: setEffortValue,
+							source: "you",
+						} satisfies ClineSayTool),
+						undefined,
+						false,
+					)
+					// Push the authoritative display state to the webview.
+					await provider.postStateToWebviewWithoutTaskHistory()
+				}
+			}
+			break
+		}
 		case "allowedCommands": {
 			// Validate and sanitize the commands array
 			const commands = message.commands ?? []
