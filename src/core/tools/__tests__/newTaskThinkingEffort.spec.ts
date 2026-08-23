@@ -51,7 +51,7 @@ import newTaskSchema from "../../prompts/tools/native-tools/new_task"
 import type { Task } from "../../task/Task"
 
 interface RunOptions {
-	/** Target model capability array (boolean/undefined = no known levels). */
+	/** Target model capability: array = allow-list; true = full level set; false/undefined = unsupported. */
 	supportsReasoningEffort?: boolean | string[]
 	/** Effort the user chose in the ask block (carried by the ask response). */
 	askEffort?: string
@@ -310,5 +310,37 @@ describe("new_task thinking_effort validation (DTE series 5/5)", () => {
 		await runNewTask(task, {}, callbacks)
 
 		expect(delegateParentAndOpenChild).toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: "low" }))
+	})
+
+	it("accepts a valid level when the capability is boolean true (full level set)", async () => {
+		const { task, delegateParentAndOpenChild } = makeTask({
+			supportsReasoningEffort: true,
+		})
+		const callbacks = makeCallbacks()
+
+		// xhigh is a valid level but is not in any provider allow-list today: only the
+		// boolean-true normalization (full level set) accepts it.
+		await runNewTask(task, { thinking_effort: "xhigh" }, callbacks)
+
+		expect(delegateParentAndOpenChild).toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: "xhigh" }))
+
+		// The ask payload lists the full level set for a boolean-true capability.
+		const [, toolMessage] = vi.mocked(callbacks.askApproval).mock.calls[0]
+		const payload = JSON.parse(toolMessage as string) as { supportedThinkingEfforts?: string[] }
+		expect(payload.supportedThinkingEfforts).toEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
+	})
+
+	it("rejects an effort when the capability is boolean false", async () => {
+		const { task, delegateParentAndOpenChild } = makeTask({
+			supportsReasoningEffort: false,
+		})
+		const callbacks = makeCallbacks()
+
+		await runNewTask(task, { thinking_effort: "low" }, callbacks)
+
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("does not support thinking_effort"),
+		)
+		expect(delegateParentAndOpenChild).not.toHaveBeenCalled()
 	})
 })
