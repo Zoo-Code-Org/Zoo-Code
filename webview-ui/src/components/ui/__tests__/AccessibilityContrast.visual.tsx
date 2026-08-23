@@ -115,24 +115,65 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} outline button boundary`,
 		})
-		const galleryContentRight = await gallery.evaluate((element) => {
-			const styles = getComputedStyle(element)
-			return element.getBoundingClientRect().right - Number.parseFloat(styles.paddingRight)
-		})
-		for (const button of await gallery.getByRole("button").all()) {
-			const geometry = await button.evaluate((element) => {
-				const styles = getComputedStyle(element)
+		const layout = await gallery.evaluate((element) => {
+			const contentBox = (target: Element) => {
+				const rect = target.getBoundingClientRect()
+				const styles = getComputedStyle(target)
 				return {
-					clientWidth: element.clientWidth,
-					scrollWidth: element.scrollWidth,
-					leftPadding: Number.parseFloat(styles.paddingLeft),
-					rightPadding: Number.parseFloat(styles.paddingRight),
-					right: element.getBoundingClientRect().right,
+					left: rect.left + Number.parseFloat(styles.borderLeftWidth) + Number.parseFloat(styles.paddingLeft),
+					right:
+						rect.right -
+						Number.parseFloat(styles.borderRightWidth) -
+						Number.parseFloat(styles.paddingRight),
 				}
-			})
-			expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1)
-			expect(Math.abs(geometry.leftPadding - geometry.rightPadding)).toBeLessThanOrEqual(0.5)
-			expect(geometry.right).toBeLessThanOrEqual(galleryContentRight + 0.5)
+			}
+			const rect = element.getBoundingClientRect()
+			const root = document.querySelector("#root") as HTMLElement
+			return {
+				viewportWidth: window.innerWidth,
+				rootContent: contentBox(root),
+				galleryRect: { left: rect.left, right: rect.right },
+				galleryContent: contentBox(element),
+				buttons: Array.from(element.querySelectorAll("button")).map((button) => {
+					const buttonRect = button.getBoundingClientRect()
+					const styles = getComputedStyle(button)
+					return {
+						left: buttonRect.left,
+						right: buttonRect.right,
+						clientWidth: button.clientWidth,
+						scrollWidth: button.scrollWidth,
+						leftPadding: Number.parseFloat(styles.paddingLeft),
+						rightPadding: Number.parseFloat(styles.paddingRight),
+					}
+				}),
+				actionRows: ["chat-actions", "settings-actions"].map((testId) => {
+					const row = element.querySelector(`[data-testid="${testId}"]`) as HTMLElement
+					const rowRect = row.getBoundingClientRect()
+					const buttons = row.querySelectorAll("button")
+					return {
+						left: rowRect.left,
+						right: rowRect.right,
+						clientWidth: row.clientWidth,
+						scrollWidth: row.scrollWidth,
+						firstButtonLeft: buttons[0].getBoundingClientRect().left,
+						lastButtonRight: buttons[buttons.length - 1].getBoundingClientRect().right,
+					}
+				}),
+			}
+		})
+		expect(layout.galleryRect.left).toBeGreaterThanOrEqual(layout.rootContent.left - 0.5)
+		expect(layout.galleryRect.right).toBeLessThanOrEqual(layout.rootContent.right + 0.5)
+		expect(layout.galleryRect.right).toBeLessThanOrEqual(layout.viewportWidth)
+		for (const button of layout.buttons) {
+			expect(button.scrollWidth).toBeLessThanOrEqual(button.clientWidth)
+			expect(Math.abs(button.leftPadding - button.rightPadding)).toBeLessThanOrEqual(0.5)
+			expect(button.left).toBeGreaterThanOrEqual(layout.galleryContent.left - 0.5)
+			expect(button.right).toBeLessThanOrEqual(layout.galleryContent.right + 0.5)
+		}
+		for (const row of layout.actionRows) {
+			expect(row.scrollWidth).toBeLessThanOrEqual(row.clientWidth)
+			expect(row.firstButtonLeft).toBeGreaterThanOrEqual(row.left - 0.5)
+			expect(row.lastButtonRight).toBeLessThanOrEqual(row.right + 0.5)
 		}
 		await expect(
 			expectContrast(component.getByTestId("unsupported-gradient"), {
@@ -140,7 +181,8 @@ for (const theme of visualThemes) {
 			}),
 		).rejects.toThrow("Unsupported background image")
 
-		await expect(component).toHaveScreenshot(`accessibility-gallery-resting-${theme.name}.png`)
+		const snapshot = page.locator("#root")
+		await expect(snapshot).toHaveScreenshot(`accessibility-gallery-resting-${theme.name}.png`)
 
 		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 		for (
@@ -163,6 +205,6 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} input focus indicator against fill`,
 		})
-		await expect(component).toHaveScreenshot(`accessibility-gallery-focus-${theme.name}.png`)
+		await expect(snapshot).toHaveScreenshot(`accessibility-gallery-focus-${theme.name}.png`)
 	})
 }
