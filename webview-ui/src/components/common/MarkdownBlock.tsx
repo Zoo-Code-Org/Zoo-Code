@@ -26,9 +26,20 @@ const MENTION_PLACEHOLDER_CHAR = "\u0001"
 const MENTION_PLACEHOLDER_REGEX = new RegExp(`${MENTION_PLACEHOLDER_CHAR}(\\d+)${MENTION_PLACEHOLDER_CHAR}`, "g")
 
 // mdast node types whose raw source regions must never be mention-rewritten:
-// code blocks (fenced or indented), inline code, links, images, raw HTML, and
-// math all render as literal or non-text content.
-const MENTION_MASK_NODE_TYPES = new Set(["code", "inlineCode", "link", "image", "html", "inlineMath", "math"])
+// code blocks (fenced or indented), inline code, links, images, raw HTML, math,
+// and reference link definitions all render as literal or non-text content
+// (rewriting a definition's destination would corrupt the reference link's
+// href instead of producing a mention span).
+const MENTION_MASK_NODE_TYPES = new Set([
+	"code",
+	"inlineCode",
+	"link",
+	"image",
+	"html",
+	"inlineMath",
+	"math",
+	"definition",
+])
 
 /**
  * Rewrite mention patterns in the RAW markdown string before remark tokenizes
@@ -44,10 +55,10 @@ const MENTION_MASK_NODE_TYPES = new Set(["code", "inlineCode", "link", "image", 
  * Matching runs on the raw string so the shared regex's boundary rules apply
  * unchanged (replacing literal regions with spaces would turn a preceding `)`
  * or backtick into whitespace and make non-mentions actionable). Literal / non-
- * text regions (code, links, images, HTML, math) are marked via a throwaway
- * mdast parse with the exact positions remark sees, and a match whose range
- * intersects one of them is discarded so mentions inside such regions stay
- * inert.
+ * text regions (code, links, images, HTML, math, reference link definitions)
+ * are marked via a throwaway mdast parse with the exact positions remark sees,
+ * and a match whose range intersects one of them is discarded so mentions
+ * inside such regions stay inert.
  */
 function prepareMentions(markdown: string): { preparedMarkdown: string; mentions: string[] } {
 	if (!markdown) {
@@ -58,8 +69,9 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 	// reported positions match what remark will tokenize. Mark literal and
 	// non-text regions (mdast positions carry absolute source offsets): a
 	// mention inside any of them must stay inert, because code and links render
-	// as literal/interactive content, and images, raw HTML, and math keep their
-	// source text unchanged.
+	// as literal/interactive content, images, raw HTML, and math keep their
+	// source text unchanged, and a reference link definition's destination
+	// becomes the link's href (rewriting it would corrupt the href).
 	const tree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(markdown)
 
 	const isMasked = new Array<boolean>(markdown.length).fill(false)

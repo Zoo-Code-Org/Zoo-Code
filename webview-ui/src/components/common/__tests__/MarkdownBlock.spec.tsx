@@ -358,6 +358,33 @@ describe("MarkdownBlock", () => {
 			expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "openMention" }))
 		})
 
+		it("keeps reference link destinations inert and preserves the original href", async () => {
+			// A reference definition's destination renders as the reference link's
+			// href, so rewriting it to a mention placeholder would corrupt the href
+			// (control characters instead of the original path) rather than produce
+			// a mention span. The whole definition region must stay masked.
+			const markdown = "[docs]: @/docs/readme.md\n\nSee [docs] and @problems."
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/See/, { exact: false })
+
+			// The reference link keeps its original href, untouched by mention
+			// preprocessing, and the destination never becomes a mention span.
+			const anchor = container.querySelector("a")!
+			expect(anchor).toHaveAttribute("href", "@/docs/readme.md")
+			expect(anchor.textContent).toBe("docs")
+			expect(container.querySelectorAll("a span.mention-context-highlight").length).toBe(0)
+
+			// Masking the definition must not affect a real mention in the body.
+			const mentions = container.querySelectorAll("span.mention-context-highlight")
+			expect(mentions.length).toBe(1)
+			expect(mentions[0].textContent).toBe("@problems")
+
+			// No placeholder control characters leak into the rendered output.
+			expect(container.textContent).not.toContain("\u0001")
+			expect(anchor.getAttribute("href")).not.toContain("\u0001")
+		})
+
 		it("keeps the shared regex boundary rules when a mention directly follows a link or inline code", async () => {
 			// Matching must run on the raw string so the shared regex's start boundary
 			// sees the real characters: with no whitespace after a closing `)` or a
