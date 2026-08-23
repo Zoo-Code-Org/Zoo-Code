@@ -3469,6 +3469,51 @@ describe("Cline", () => {
 			saveSpy.mockRestore()
 		})
 
+		it("finalizePartialToolAsk logs (instead of rejecting) when updateClineMessage rejects", async () => {
+			// Pins the .catch arm on updateClineMessage in finalizePartialToolAsk: the
+			// partial flag must already be persisted (saveClineMessages ran first), the
+			// failure must only be logged, and finalize must still resolve so callers'
+			// error-path cleanup (diff-view reset, resetTaskPartialState) always completes.
+			const boom = new Error("updateClineMessage boom")
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockImplementation(async () => {
+					throw boom
+				})
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(saveSpy).toHaveBeenCalled()
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] updateClineMessage failed:",
+				boom,
+			)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
 		it("logs (instead of crashing) when updateClineMessage rejects from the ask() ignore-partial path", async () => {
 			// Pins the .catch arm on the fire-and-forget updateClineMessage call
 			// in ask() when a new partial ask arrives while the previous partial
