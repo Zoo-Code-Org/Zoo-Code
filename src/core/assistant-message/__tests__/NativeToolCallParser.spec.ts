@@ -291,6 +291,57 @@ describe("NativeToolCallParser", () => {
 				})
 			})
 		})
+		describe("new_task tool", () => {
+			it("should carry the optional thinking_effort argument into nativeArgs (DTE series 5/5)", () => {
+				const toolCall = {
+					id: "toolu_new_task_effort",
+					name: "new_task" as const,
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: "Complete the delegated subtask",
+						todos: "- [ ] step one",
+						thinking_effort: "high",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as {
+						mode: string
+						message: string
+						todos?: string
+						thinking_effort?: string
+					}
+					expect(nativeArgs.mode).toBe("ask")
+					expect(nativeArgs.message).toBe("Complete the delegated subtask")
+					expect(nativeArgs.todos).toBe("- [ ] step one")
+					expect(nativeArgs.thinking_effort).toBe("high")
+				}
+			})
+
+			it("should leave nativeArgs.thinking_effort undefined when the argument is omitted", () => {
+				const toolCall = {
+					id: "toolu_new_task_no_effort",
+					name: "new_task" as const,
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: "Complete the delegated subtask",
+					}),
+				}
+
+				const result = NativeToolCallParser.parseToolCall(toolCall)
+
+				expect(result).not.toBeNull()
+				expect(result?.type).toBe("tool_use")
+				if (result?.type === "tool_use") {
+					const nativeArgs = result.nativeArgs as { thinking_effort?: string }
+					expect(nativeArgs.thinking_effort).toBeUndefined()
+				}
+			})
+		})
 	})
 
 	describe("processStreamingChunk", () => {
