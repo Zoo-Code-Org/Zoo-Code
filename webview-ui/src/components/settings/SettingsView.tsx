@@ -40,13 +40,11 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	ImageGenerationProvider,
-	providerIdentifiers,
 } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 import { cn } from "@src/lib/utils"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
-import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import { ExtensionStateContextType, useExtensionState } from "@src/context/ExtensionStateContext"
 import {
 	AlertDialog,
@@ -70,7 +68,6 @@ import { SetCachedStateField, SetExperimentEnabled } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import ApiConfigManager from "./ApiConfigManager"
 import ApiOptions from "./ApiOptions"
-import { ReasoningModeSelector } from "./ReasoningModeSelector"
 import { AutoApproveSettings } from "./AutoApproveSettings"
 import { CheckpointSettings } from "./CheckpointSettings"
 import { NotificationSettings } from "./NotificationSettings"
@@ -225,8 +222,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	} = cachedState
 
 	const apiConfiguration = useMemo(() => cachedState.apiConfiguration ?? {}, [cachedState.apiConfiguration])
-
-	const selectedModelInfo = useSelectedModel(apiConfiguration).info
 
 	useEffect(() => {
 		// Update when currentApiConfigName or mode changes.
@@ -775,55 +770,39 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 								<SectionHeader>{t("settings:sections.providers")}</SectionHeader>
 
 								<Section>
-									<div className="flex flex-col gap-4 md:flex-row md:items-start">
-										<div className="flex-1 min-w-0">
-											<ApiConfigManager
-												currentApiConfigName={currentApiConfigName}
-												listApiConfigMeta={listApiConfigMeta}
-												onSelectConfig={(configName: string) =>
-													checkUnsaveChanges(() =>
-														vscode.postMessage({
-															type: "loadApiConfiguration",
-															text: configName,
-														}),
-													)
-												}
-												onDeleteConfig={(configName: string) =>
-													vscode.postMessage({
-														type: "deleteApiConfiguration",
-														text: configName,
-													})
-												}
-												onRenameConfig={(oldName: string, newName: string) => {
-													vscode.postMessage({
-														type: "renameApiConfiguration",
-														values: { oldName, newName },
-														apiConfiguration,
-													})
-													prevApiConfigName.current = newName
-												}}
-												onUpsertConfig={(configName: string) =>
-													vscode.postMessage({
-														type: "upsertApiConfiguration",
-														text: configName,
-														apiConfiguration,
-													})
-												}
-											/>
-										</div>
-										{/* Ollama owns its reasoning-effort UI inside the provider
-											component (gated by its "Enable thinking" checkbox, which
-											controls the native think parameter). Rendering the
-											top-level selector for Ollama would duplicate it and its
-											sync effect would force enableReasoningEffort back on. */}
-										{apiConfiguration.apiProvider !== providerIdentifiers.ollama && (
-											<ReasoningModeSelector
-												apiConfiguration={apiConfiguration}
-												setApiConfigurationField={setApiConfigurationField}
-												modelInfo={selectedModelInfo}
-											/>
-										)}
-									</div>
+									<ApiConfigManager
+										currentApiConfigName={currentApiConfigName}
+										listApiConfigMeta={listApiConfigMeta}
+										onSelectConfig={(configName: string) =>
+											checkUnsaveChanges(() =>
+												vscode.postMessage({
+													type: "loadApiConfiguration",
+													text: configName,
+												}),
+											)
+										}
+										onDeleteConfig={(configName: string) =>
+											vscode.postMessage({
+												type: "deleteApiConfiguration",
+												text: configName,
+											})
+										}
+										onRenameConfig={(oldName: string, newName: string) => {
+											vscode.postMessage({
+												type: "renameApiConfiguration",
+												values: { oldName, newName },
+												apiConfiguration,
+											})
+											prevApiConfigName.current = newName
+										}}
+										onUpsertConfig={(configName: string) =>
+											vscode.postMessage({
+												type: "upsertApiConfiguration",
+												text: configName,
+												apiConfiguration,
+											})
+										}
+									/>
 									<ApiOptions
 										uriScheme={uriScheme}
 										apiConfiguration={apiConfiguration}

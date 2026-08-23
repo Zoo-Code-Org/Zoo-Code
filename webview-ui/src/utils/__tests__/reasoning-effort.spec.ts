@@ -25,7 +25,7 @@ describe("normalizeReasoningEffortOnModelChange", () => {
 	})
 
 	it("returns undefined when the stored value is still a valid option", () => {
-		const apiConfiguration = { reasoningEffort: "medium" } as ProviderSettings
+		const apiConfiguration = { reasoningEffort: "medium" } satisfies ProviderSettings
 		const selection = getReasoningEffortSelection(apiConfiguration, gptOssModel)
 		expect(normalizeReasoningEffortOnModelChange(selection)).toBeUndefined()
 	})
@@ -41,7 +41,7 @@ describe("normalizeReasoningEffortOnModelChange", () => {
 		// request mapper would send think: false while the UI shows "Low". The
 		// helper returns the clamped value to persist so the stored effort, the
 		// displayed effort, and the request stay in sync.
-		const apiConfiguration = { reasoningEffort: "disable" } as ProviderSettings
+		const apiConfiguration = { reasoningEffort: "disable" } satisfies ProviderSettings
 		const selection = getReasoningEffortSelection(apiConfiguration, gptOssModel)
 
 		// Sanity: the display clamped away from "disable"...
@@ -58,7 +58,7 @@ describe("normalizeReasoningEffortOnModelChange", () => {
 	it("clamps 'max' to the fallback when switching from a max-capable model to gpt-oss", () => {
 		// Symmetric case: "max" is valid for qwen3 but not gpt-oss. Switching
 		// models should normalize the stored "max" to gpt-oss's first option.
-		const apiConfiguration = { reasoningEffort: "max" } as ProviderSettings
+		const apiConfiguration = { reasoningEffort: "max" } satisfies ProviderSettings
 		const selection = getReasoningEffortSelection(apiConfiguration, gptOssModel)
 
 		expect(normalizeReasoningEffortOnModelChange(selection)).toBe("low")
@@ -67,7 +67,7 @@ describe("normalizeReasoningEffortOnModelChange", () => {
 	it("does not normalize when switching back to a model that still supports the stored value", () => {
 		// "low" is valid for both qwen3 and gpt-oss, so switching between them
 		// must not trigger a write.
-		const apiConfiguration = { reasoningEffort: "low" } as ProviderSettings
+		const apiConfiguration = { reasoningEffort: "low" } satisfies ProviderSettings
 		const selection = getReasoningEffortSelection(apiConfiguration, gptOssModel)
 		expect(normalizeReasoningEffortOnModelChange(selection)).toBeUndefined()
 	})
