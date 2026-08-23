@@ -23,7 +23,7 @@ test("renders Azure OpenAI endpoint and deployment guidance in the VS Code dark 
 					.trim()
 			}),
 		)
-		.toBe("#1e1e1e")
+		.toBe("#1f1f1f")
 
 	await component.evaluate(async () => {
 		await document.fonts.ready

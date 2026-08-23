@@ -20,6 +20,7 @@ interface AnnouncementProps {
  * announcement will render. As soon as an announcement is shown, the id will be
  * updated in state. This ensures that announcements are not shown more than
  * once, even if the user doesn't close it themselves.
+ * Release-specific copy is maintained in each locale's `chat.json` announcement keys.
  */
 
 const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {

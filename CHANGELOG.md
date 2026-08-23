@@ -1,5 +1,35 @@
 # Zoo Code Changelog
 
+## [3.80.0]
+
+### Minor Changes
+
+- Add separate Read and Write allowlists so users can restrict file operations to approved paths (#1273 by @nh2, PR #1274 by @nh2)
+- Add official GLM 5.3 support to the Z.ai API (PR #1284 by @app/zoomote)
+- Add Gemini 3.5 Flash Lite and Gemini 3.1 Flash Lite to the Gemini API provider (#1251 by @MrMody0, PR #1334 by @easonLiangWorldedtech)
+- Prevent webview gray screens and out-of-memory failures by throttling extension-state pushes (#629 by @edelauna, PR #1078 by @JunyongParkDev)
+- Recover stale delegated child tasks after an extension restart (#1100 by @aniruddhabag3, PR #1210 by @edelauna)
+- Replace the shared task-history index with atomic per-task merges to prevent lost or corrupted history (#1231 by @martin-rueegg, PR #1261 by @edelauna)
+- Mark interrupted tool calls as errors in persisted task history so resumed conversations remain consistent (#1283 by @martin-rueegg, PR #1323 by @easonLiangWorldedtech)
+- Complete OpenAI Codex prompts over the streaming transport instead of waiting indefinitely (#1242 by @Rafael-Silva-Oliveira, PR #1243 by @Rafael-Silva-Oliveira)
+- Stream LM Studio `reasoning_content` so model reasoning is preserved in responses (#1075 by @marunguy, PR #1175 by @daewoongoh)
+- Fix NanoGPT Muse Spark tool-use requests (PR #1310 by @app/zoomote)
+- Make settings import await provider-state persistence before reporting success (PR #1340 by @app/zoomote)
+- Default telemetry to opt-out and require explicit consent through the telemetry UI (PR #1069 by @edelauna)
+- Introduce an SDK-agnostic request configuration builder for consistent abort-signal support (#1007 by @easonLiangWorldedtech, PR #1008 by @easonLiangWorldedtech)
+- Delegate VS Code shell-profile reads to Terminal methods for more reliable profile detection (#634 by @marty-a11y, PR #1033 by @edelauna)
+- Increase the Semble archive download limit for larger codebase-intelligence binaries (#1305 by @navedmerchant, PR #1306 by @navedmerchant)
+- Stop estimating Zoo Gateway UI costs from unrelated default-model prices when authoritative cost data is unavailable (PR #1339 by @JamesRobert20)
+- Improve Mermaid label contrast in light IDE themes (PR #1285 by @app/zoomote)
+- Keep chat controls legible in light IDE themes (PR #1298 by @app/zoomote)
+- Fix the remaining chat controls that faded into light IDE themes (PR #1312 by @app/zoomote)
+- Improve shared-control contrast across IDE themes (PR #1333 by @app/zoomote)
+- Canonicalize provider and model identifiers in webview messages (PR #1143 by @WebMad)
+- Canonicalize model-router calls across providers (PR #1165 by @WebMad)
+- Enforce canonical provider identifiers through provider lint rules (#1294 by @WebMad, PR #1297 by @WebMad)
+- Enforce safe asynchronous handling in core tools (PR #1255 by @app/zoomote)
+- Build downloadable VSIX artifacts for pull requests (PR #1314 by @app/zoomote)
+
 ## [3.78.0]
 
 ### Minor Changes

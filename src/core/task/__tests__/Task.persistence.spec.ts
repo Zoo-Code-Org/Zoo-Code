@@ -6,6 +6,7 @@ import * as vscode from "vscode"
 
 import type { ClineMessage, GlobalState, ProviderSettings } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
+import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
@@ -15,6 +16,7 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 type TaskPersistenceAccess = {
 	resumeTaskFromHistory: () => Promise<void>
 	saveClineMessages: () => Promise<boolean>
+	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 }
 
 function getTaskPersistenceAccess(task: Task): TaskPersistenceAccess {
@@ -581,6 +583,140 @@ describe("Task persistence", () => {
 
 			expect(saveClineMessagesSpy).toHaveBeenCalledTimes(1)
 			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	// ── resumeTaskFromHistory — interrupted tool calls must be recorded as errors ──
+
+	describe("resumeTaskFromHistory interrupted tool calls", () => {
+		const interruptedToolResultContent = "Task was interrupted before this tool call could be completed."
+
+		it("marks synthetic tool_results from an interrupted assistant turn as errors", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "interrupted-subtask",
+					number: 1,
+					ts: Date.now(),
+					task: "Interrupted subtask",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			// Stop the resume flow right before the agentic loop so the test only
+			// exercises history reconstruction; the loop would make a real API call.
+			const initiateTaskLoopSpy = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+
+			// The persisted history ends with an assistant turn whose tool calls
+			// (attempt_completion) were never answered because the task was
+			// interrupted. See: https://github.com/Zoo-Code-Org/Zoo-Code/issues/1283
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "Wrapping up" },
+						{
+							type: "tool_use",
+							id: "toolu_interrupted_1",
+							name: "attempt_completion",
+							input: { result: "done" },
+						},
+					],
+				},
+			])
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
+			const newUserContent = initiateTaskLoopSpy.mock.calls[0][0]
+			const toolResults = newUserContent.filter((block) => block.type === "tool_result")
+			// The synthetic tool_result must be recorded as an error so the history
+			// cannot be misread as a successful completion of the interrupted call.
+			expect(toolResults).toEqual([
+				{
+					type: "tool_result",
+					tool_use_id: "toolu_interrupted_1",
+					content: interruptedToolResultContent,
+					is_error: true,
+				},
+			])
+		})
+
+		it("marks missing tool_results for an interrupted trailing user turn as errors", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "interrupted-subtask-2",
+					number: 2,
+					ts: Date.now(),
+					task: "Interrupted subtask 2",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiateTaskLoopSpy = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+
+			// The persisted history ends with a user turn that only answered the
+			// first of two parallel tool calls.
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: "toolu_int_a",
+							name: "execute_command",
+							input: { command: "ls" },
+						},
+						{ type: "tool_use", id: "toolu_int_b", name: "read_file", input: { path: "a.txt" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{
+							type: "tool_result",
+							tool_use_id: "toolu_int_a",
+							content: "partial result",
+						},
+					],
+				},
+			])
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
+			const newUserContent = initiateTaskLoopSpy.mock.calls[0][0]
+			const toolResults = newUserContent.filter((block) => block.type === "tool_result")
+			// The pre-existing result is preserved untouched; the synthesized one
+			// for the unanswered tool call is marked as an error.
+			expect(toolResults).toEqual([
+				{
+					type: "tool_result",
+					tool_use_id: "toolu_int_a",
+					content: "partial result",
+				},
+				{
+					type: "tool_result",
+					tool_use_id: "toolu_int_b",
+					content: interruptedToolResultContent,
+					is_error: true,
+				},
+			])
 		})
 	})
 

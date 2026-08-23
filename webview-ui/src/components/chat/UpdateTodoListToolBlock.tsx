@@ -36,21 +36,9 @@ interface UpdateTodoListToolBlockProps {
 }
 
 const STATUS_OPTIONS = [
-	{ value: "", label: "Not Started", color: "var(--vscode-foreground)", border: "#bbb", bg: "transparent" },
-	{
-		value: "in_progress",
-		label: "In Progress",
-		color: "var(--vscode-charts-yellow)",
-		border: "var(--vscode-charts-yellow)",
-		bg: "rgba(255, 221, 51, 0.15)",
-	},
-	{
-		value: "completed",
-		label: "Completed",
-		color: "var(--vscode-charts-green)",
-		border: "var(--vscode-charts-green)",
-		bg: "var(--vscode-charts-green)",
-	},
+	{ value: "", label: "Not Started" },
+	{ value: "in_progress", label: "In Progress" },
+	{ value: "completed", label: "Completed" },
 ]
 
 const genId = () => Math.random().toString(36).slice(2, 10)
@@ -345,7 +333,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 												style={{
 													border: "none",
 													background: "transparent",
-													color: "#f14c4c",
+													color: "var(--vscode-errorForeground)",
 													cursor: "pointer",
 													fontSize: 14,
 													marginLeft: 2,
@@ -380,7 +368,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 											fontSize: 13,
 											marginRight: 6,
 											padding: "1px 3px",
-											borderBottom: "1px solid #eee",
+											borderBottom: "1px solid var(--vscode-input-border)",
 										}}
 									/>
 									<button

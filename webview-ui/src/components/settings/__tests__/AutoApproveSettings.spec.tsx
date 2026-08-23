@@ -39,6 +39,8 @@ const renderSettings = (overrides = {}) => {
 		alwaysAllowExecute: true, // reveal the command list section
 		allowedCommands: [] as string[],
 		deniedCommands: [] as string[],
+		allowedReadFiles: [] as string[],
+		allowedWriteFiles: [] as string[],
 		setCachedStateField,
 		...overrides,
 	}
@@ -116,6 +118,69 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 
 		expect(setCachedStateField).toHaveBeenCalledWith("deniedCommands", [])
 		expectNoImmediateUpdateSettings()
+	})
+
+	// Case 4: the allowlists, edited as one pattern per line so that their order,
+	// which decides which negation wins, stays under the user's control.
+	it.each([
+		["write", "allowed-write-file-input", "allowedWriteFiles"],
+		["read", "allowed-read-file-input", "allowedReadFiles"],
+	])("buffers an edited %s allowlist without persisting before Save", (_label, testId, field) => {
+		const { setCachedStateField } = renderSettings()
+
+		fireEvent.input(screen.getByTestId(testId), { target: { value: "notes.md\ndocs/scratch/**" } })
+
+		expect(setCachedStateField).toHaveBeenCalledWith(field, ["notes.md", "docs/scratch/**"])
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("renders the existing patterns one per line", () => {
+		renderSettings({ allowedWriteFiles: ["notes.md", "todo.md"] })
+
+		expect(screen.getByTestId("allowed-write-file-input")).toHaveValue("notes.md\ntodo.md")
+	})
+
+	it("keeps a pattern's whitespace, which is significant in gitignore syntax", () => {
+		const { setCachedStateField } = renderSettings()
+
+		fireEvent.input(screen.getByTestId("allowed-write-file-input"), { target: { value: " notes.md" } })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("allowedWriteFiles", [" notes.md"])
+	})
+
+	// Blank lines are unavoidable while editing text, and are dropped when the
+	// settings are saved rather than while typing, so the cursor does not jump.
+	it("keeps blank lines while editing", () => {
+		const { setCachedStateField } = renderSettings()
+
+		fireEvent.input(screen.getByTestId("allowed-write-file-input"), { target: { value: "notes.md\n\n" } })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("allowedWriteFiles", ["notes.md", "", ""])
+	})
+
+	// Each list grants access on its own, so it must be reachable without the
+	// toggle it is meant to avoid having to enable.
+	it("shows both allowlists while the Read and Write toggles are off", () => {
+		renderSettings({ alwaysAllowWrite: false, alwaysAllowReadOnly: false })
+
+		expect(screen.getByTestId("allowed-write-file-input")).toBeInTheDocument()
+		expect(screen.getByTestId("allowed-read-file-input")).toBeInTheDocument()
+	})
+
+	// The two lists share one component, so they must not share state.
+	it("keeps the read and write lists independent", () => {
+		const { setCachedStateField } = renderSettings({
+			allowedReadFiles: ["read.md"],
+			allowedWriteFiles: ["write.md"],
+		})
+
+		expect(screen.getByTestId("allowed-read-file-input")).toHaveValue("read.md")
+		expect(screen.getByTestId("allowed-write-file-input")).toHaveValue("write.md")
+
+		fireEvent.input(screen.getByTestId("allowed-read-file-input"), { target: { value: "read.md\nmore-read.md" } })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("allowedReadFiles", ["read.md", "more-read.md"])
+		expect(setCachedStateField).not.toHaveBeenCalledWith("allowedWriteFiles", expect.anything())
 	})
 
 	it("buffers the destructive command guard setting", () => {

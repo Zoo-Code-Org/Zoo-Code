@@ -8,9 +8,9 @@ const themes = [
 		name: "dark",
 		bodyClass: "vscode-dark",
 		themeId: "Default Dark Modern",
-		editorBackground: "#1e1e1e",
-		dropdownBackground: "#3c3c3c",
-		triggerBackground: "rgb(60, 60, 60)",
+		editorBackground: "#1f1f1f",
+		dropdownBackground: "#313131",
+		triggerBackground: "rgb(49, 49, 49)",
 	},
 	{
 		name: "light",

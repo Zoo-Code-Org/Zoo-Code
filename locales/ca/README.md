@@ -47,13 +47,11 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.78.0
+## Novetats a la v3.80.0
 
-- **Han arribat tres grans models nous** — utilitza els nous Gemini 3.7 Flash, GLM 5.3 i Qwen3.8 Max, a més de millores en el raonament, els preus i la cobertura de proveïdors de DeepSeek V4.
-- **Connecta't a NanoGPT** — utilitza el descobriment dinàmic de models, streaming i completions de prompts, i preferències d'encaminament per velocitat, preu, latència, rendiment, compatibilitat amb eines i memòria cau.
-- **Proveïdors i tasques més fiables** — les correccions milloren la configuració dels endpoints d'Azure OpenAI, els límits de sortida de Kimi Code, la conservació dels títols de l'historial de tasques i la importació/exportació de configuració de Zoo.
-- Destructive Command Guard ara és compatible amb els Mac basats en Intel.
-- Les actualitzacions de seguretat solucionen vulnerabilitats a `undici` i Mermaid.
+- **Accés als fitxers més segur** — utilitza llistes de permisos de lectura i escriptura separades per controlar a quines rutes pot accedir Zoo Code.
+- **Més models per triar** — GLM 5.3 ja està disponible mitjançant Z.ai, i Gemini 3.5 Flash Lite i Gemini 3.1 Flash Lite s'han afegit al proveïdor Gemini.
+- **Fluxos de treball quotidians més fiables** — les millores reforcen la recuperació i l'historial de tasques, l'streaming i l'ús d'eines dels proveïdors, la importació de configuració i la llegibilitat en diferents temes de l'IDE.
 
 ## Què pot fer Zoo Code per TU?
 
