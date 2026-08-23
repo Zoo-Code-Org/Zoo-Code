@@ -3885,10 +3885,22 @@ export class ClineProvider
 				// orchestrator, not the child's own settings.
 				child.setRuntimeThinkingEffort(thinkingEffort, "parent")
 			} else {
-				await child.say(
-					"error",
-					`new_task thinking_effort '${thinkingEffort}' is not supported by the child model (${childModel.id}); the child starts without the effort override.`,
-				)
+				// Non-fatal: the parent is already disposed at this point, so a rejecting
+				// say must not abort the delegation — the metadata transaction and child
+				// scheduling below are the recovery path, and losing them would leave the
+				// child active while the parent has no delegation metadata.
+				await child
+					.say(
+						"error",
+						`new_task thinking_effort '${thinkingEffort}' is not supported by the child model (${childModel.id}); the child starts without the effort override.`,
+					)
+					.catch((error) => {
+						this.log(
+							`[delegateParentAndOpenChild] Failed to notify child of unsupported thinking_effort (non-fatal): ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						)
+					})
 			}
 		}
 
