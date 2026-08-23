@@ -936,6 +936,33 @@ describe("ClineProvider", () => {
 		expect(state.taskHistory).toEqual([historyItem])
 	})
 
+	test("getStateToPostToWebview surfaces the task-local thinking effort override (DTE 4/5)", async () => {
+		const task = (effort: { effort: string; source?: string } | undefined) => ({
+			taskId: "effort-task",
+			clineMessages: [],
+			todoList: [],
+			getRuntimeThinkingEffort: () => effort,
+		})
+		vi.spyOn(provider.taskHistoryStore, "getAll").mockReturnValue([])
+		const getCurrentTaskSpy = vi.spyOn(provider, "getCurrentTask")
+
+		getCurrentTaskSpy.mockReturnValue(task({ effort: "high", source: "you" }) as never)
+		let state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toEqual({ effort: "high", source: "you" })
+
+		// A source-less runtime override is reported as the default source.
+		getCurrentTaskSpy.mockReturnValue(task({ effort: "medium" }) as never)
+		state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toEqual({ effort: "medium", source: "default" })
+
+		// Without an active override the field is omitted.
+		getCurrentTaskSpy.mockReturnValue(task(undefined) as never)
+		state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toBeUndefined()
+
+		getCurrentTaskSpy.mockRestore()
+	})
+
 	describe("postStateToWebviewThrottled", () => {
 		beforeEach(() => {
 			vi.useFakeTimers()
