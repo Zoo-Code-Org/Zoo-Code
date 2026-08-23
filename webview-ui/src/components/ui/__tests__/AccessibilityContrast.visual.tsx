@@ -181,8 +181,7 @@ for (const theme of visualThemes) {
 			}),
 		).rejects.toThrow("Unsupported background image")
 
-		const snapshot = page.locator("#root")
-		await expect(snapshot).toHaveScreenshot(`accessibility-gallery-resting-${theme.name}.png`)
+		await expect(component).toHaveScreenshot(`accessibility-gallery-resting-${theme.name}.png`)
 
 		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
 		for (
@@ -205,6 +204,6 @@ for (const theme of visualThemes) {
 			minimum: 3,
 			label: `${theme.name} input focus indicator against fill`,
 		})
-		await expect(snapshot).toHaveScreenshot(`accessibility-gallery-focus-${theme.name}.png`)
+		await expect(component).toHaveScreenshot(`accessibility-gallery-focus-${theme.name}.png`)
 	})
 }
