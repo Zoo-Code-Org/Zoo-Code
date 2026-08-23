@@ -22,6 +22,7 @@ import ErrorBoundary from "./components/ErrorBoundary"
 import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonInteractiveClick"
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
+import { useThemeFixtureProbe } from "./utils/useThemeFixtureProbe"
 
 type Tab = "settings" | "history" | "chat" | "marketplace"
 
@@ -51,6 +52,8 @@ const tabsByMessageAction: Partial<Record<NonNullable<ExtensionMessage["action"]
 }
 
 const App = () => {
+	useThemeFixtureProbe()
+
 	const {
 		didHydrateState,
 		showWelcome,

@@ -10,10 +10,10 @@ const themes = [
 		bodyClass: "vscode-dark",
 		themeId: "Default Dark Modern",
 		expected: {
-			hover: "rgb(42, 45, 46)",
+			hover: "rgba(90, 93, 94, 0.31)",
 			active: "rgb(42, 45, 46)",
 			description: "rgb(157, 157, 157)",
-			background: "rgb(30, 30, 30)",
+			background: "rgb(31, 31, 31)",
 		},
 	},
 	{
@@ -21,9 +21,9 @@ const themes = [
 		bodyClass: "vscode-light",
 		themeId: "Default Light Modern",
 		expected: {
-			hover: "rgb(232, 232, 232)",
-			active: "rgb(232, 232, 232)",
-			description: "rgb(113, 113, 113)",
+			hover: "rgba(184, 184, 184, 0.31)",
+			active: "rgb(242, 242, 242)",
+			description: "rgb(59, 59, 59)",
 			background: "rgb(255, 255, 255)",
 		},
 	},

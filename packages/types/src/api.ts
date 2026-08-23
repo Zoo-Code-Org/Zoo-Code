@@ -6,6 +6,7 @@ import type { RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
+import type { WebviewThemeFixture } from "./vscode-extension-host.js"
 
 export type RooCodeAPIEvents = RooCodeEvents
 
@@ -167,6 +168,10 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+}
+
+export interface RooCodeTestAPI extends RooCodeAPI {
+	captureWebviewThemeFixture(): Promise<WebviewThemeFixture>
 }
 
 export interface RooCodeIpcServer extends EventEmitter<IpcServerEvents> {

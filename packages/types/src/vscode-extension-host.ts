@@ -107,6 +107,7 @@ export interface ExtensionMessage {
 		| "rules"
 		| "fileContent"
 		| "rooHistoryImportProgress"
+		| "themeFixtureProbeRequest"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -154,6 +155,7 @@ export interface ExtensionMessage {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	values?: Record<string, any>
 	requestId?: string
+	themeFixture?: WebviewThemeFixture
 	promptText?: string
 	results?:
 		| { path: string; type: "file" | "folder"; label?: string }[]
@@ -270,9 +272,11 @@ export type ExtensionState = Pick<
 	| "autoApprovalEnabled"
 	| "alwaysAllowReadOnly"
 	| "alwaysAllowReadOnlyOutsideWorkspace"
+	| "allowedReadFiles"
 	| "alwaysAllowWrite"
 	| "alwaysAllowWriteOutsideWorkspace"
 	| "alwaysAllowWriteProtected"
+	| "allowedWriteFiles"
 	| "alwaysAllowMcp"
 	| "alwaysAllowModeSwitch"
 	| "alwaysAllowSubtasks"
@@ -641,6 +645,7 @@ export interface WebviewMessage {
 		| "deleteRule"
 		| "openRuleFile"
 		| "openRulesDirectory"
+		| "themeFixtureProbeResponse"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -687,6 +692,7 @@ export interface WebviewMessage {
 	/** Target mode slugs for updateSkillModes */
 	newSkillModeSlugs?: string[] // For updateSkillModes (new mode restrictions)
 	requestId?: string
+	themeFixture?: WebviewThemeFixture
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
@@ -751,6 +757,12 @@ export interface WebviewMessage {
 	worktreeForce?: boolean
 	worktreeNewWindow?: boolean
 	worktreeIncludeContent?: string
+}
+
+export interface WebviewThemeFixture {
+	themeId: string
+	bodyClass: string
+	variables: Record<string, string>
 }
 
 export interface RequestOpenAiCodexRateLimitsMessage {

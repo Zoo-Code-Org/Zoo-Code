@@ -308,6 +308,20 @@
 				"description": "Sta Zoo toe om beschermde bestanden (zoals .rooignore en .roo/ configuratiebestanden) aan te maken en te bewerken zonder goedkeuring."
 			}
 		},
+		"allowlists": {
+			"label": "Toelatingslijsten",
+			"description": "Geef toegang tot afzonderlijke bestanden, zonder een hele categorie acties automatisch goed te keuren. Eén patroon per regel, in door .gitignore geïnspireerde syntaxis: \"notes.md\" komt overeen met dat bestand in elke map van de workspace, \"docs/scratch/**\" met alles onder die map en \"*.md\" met elk Markdown-bestand. Een patroon benoemt altijd bestanden, nooit mappen: \"docs\" geeft alleen toegang tot een bestand met de naam \"docs\"; schrijf \"docs/**\" voor de inhoud van een map. Een \"./\" aan het begin betekent de root van de workspace, terwijl een \"/\" aan het begin de root van het bestandssysteem betekent, zodat \"/tmp/notes.md\" tot buiten de workspace reikt, net als \"~/notes.md\", waarbij een \"~/\" aan het begin je home-map betekent. Zet \"!\" voor een patroon om uit te sluiten wat een eerdere regel heeft gevonden; net als in .gitignore wint de laatste regel die overeenkomt, dus de volgorde telt. Patronen die relatief zijn aan de workspace worden genegeerd zolang er geen map is geopend. Hoofd- en kleine letters worden onderscheiden, behalve op Windows. Er wordt niets automatisch goedgekeurd zolang \"Automatisch goedkeuren\" hierboven uit staat.",
+			"readFiles": {
+				"label": "Patronen van de lees-toelatingslijst",
+				"description": "Bestanden die Zoo zonder goedkeuring mag lezen, ook als \"Lezen\" hierboven uit staat. Bestanden uit de schrijf-toelatingslijst hieronder mogen altijd ook gelezen worden, dus die hoef je niet twee keer toe te voegen. Mapoverzichten en zoekopdrachten volgen altijd de \"Lezen\"-instelling. Bestanden die .rooignore uitsluit, blijven hoe dan ook onleesbaar.",
+				"placeholder": "Eén patroon per regel, bijv. notes.md"
+			},
+			"writeFiles": {
+				"label": "Patronen van de schrijf-toelatingslijst",
+				"description": "Bestanden die Zoo zonder goedkeuring mag aanmaken en bewerken, ook als \"Schrijven\" hierboven uit staat. Beschermde bestanden vereisen nog steeds goedkeuring, tenzij \"Inclusief beschermde bestanden\" is ingeschakeld (in de instellingen van de \"Schrijven\"-autogoedkeuring). Bestanden die .rooignore uitsluit, blijven hoe dan ook niet beschrijfbaar.",
+				"placeholder": "Eén patroon per regel, bijv. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Automatische goedkeuring van individuele MCP-tools in het MCP-serversoverzicht inschakelen (vereist zowel deze instelling als het selectievakje 'Altijd toestaan' bij de tool)"

@@ -308,6 +308,20 @@
 				"description": "Zoo'nun korumalı dosyaları (.rooignore ve .roo/ yapılandırma dosyaları gibi) onay gerektirmeden oluşturmasına ve düzenlemesine izin ver."
 			}
 		},
+		"allowlists": {
+			"label": "İzin listeleri",
+			"description": "Bütün bir işlem kategorisini otomatik onaylamadan, tek tek dosyalara erişim ver. Her satıra bir desen, .gitignore'dan esinlenen sözdizimiyle: \"notes.md\" çalışma alanındaki herhangi bir dizinde o dosyayla eşleşir, \"docs/scratch/**\" o dizinin altındaki her şeyle ve \"*.md\" herhangi bir Markdown dosyasıyla eşleşir. Bir desen her zaman dosyaları adlandırır, dizinleri asla: \"docs\" yalnızca \"docs\" adlı bir dosyaya izin verir; bir dizinin içeriği için \"docs/**\" yaz. Baştaki \"./\" çalışma alanı kökünü, baştaki \"/\" ise dosya sisteminin kökünü belirtir; böylece \"/tmp/notes.md\" çalışma alanının dışına uzanır; \"~/notes.md\" de öyle, burada baştaki \"~/\" ev dizinini belirtir. Bir desenin önüne \"!\" koyarak önceki bir satırın eşleştirdiğini dışarıda bırak; .gitignore'da olduğu gibi eşleşen son satır kazanır, yani sıra önemlidir. Hiçbir klasör açık değilken çalışma alanına göreli desenler yok sayılır. Büyük ve küçük harf ayırt edilir, Windows dışında. Yukarıdaki \"Otomatik Onay\" kapalıyken hiçbir şey otomatik onaylanmaz.",
+			"readFiles": {
+				"label": "Okuma izin listesi desenleri",
+				"description": "Yukarıdaki \"Okuma\" kapalı olsa bile Zoo'nun onay almadan okuyabileceği dosyalar. Aşağıdaki yazma izin listesindeki dosyalar her zaman okunabilir de, bu yüzden iki kez eklenmeleri gerekmez. Dizin listelemeleri ve aramalar her zaman \"Okuma\" ayarını izler. .rooignore ile dışlanan dosyalar yine de okunamaz.",
+				"placeholder": "Her satıra bir desen, örn. notes.md"
+			},
+			"writeFiles": {
+				"label": "Yazma izin listesi desenleri",
+				"description": "Yukarıdaki \"Yazma\" kapalı olsa bile Zoo'nun onay almadan oluşturup düzenleyebileceği dosyalar. \"Korumalı dosyaları dahil et\" etkinleştirilmediği sürece (\"Yazma\" otomatik onayının ayarlarında) korumalı dosyalar yine onay gerektirir. .rooignore ile dışlanan dosyalar yine de yazılamaz.",
+				"placeholder": "Her satıra bir desen, örn. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "MCP Sunucuları görünümünde bireysel MCP araçlarının otomatik onayını etkinleştir (hem bu ayar hem de aracın \"Her zaman izin ver\" onay kutusu gerekir)"

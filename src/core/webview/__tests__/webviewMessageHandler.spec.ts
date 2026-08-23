@@ -117,12 +117,57 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
+	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
+
+describe("webviewMessageHandler - theme fixture probes", () => {
+	const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+	const themeFixture = {
+		themeId: "Default Dark Modern",
+		bodyClass: "vscode-dark",
+		variables: { "--vscode-foreground": "#cccccc" },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		process.env.ROO_CODE_THEME_FIXTURE_PROBE = "1"
+	})
+
+	afterEach(() => {
+		if (originalProbeSetting === undefined) {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		} else {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalProbeSetting
+		}
+	})
+
+	it("resolves a complete response when probing is enabled", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "themeFixtureProbeResponse",
+			requestId: "request-1",
+			themeFixture,
+		})
+
+		expect(mockClineProvider.resolveWebviewThemeFixtureProbe).toHaveBeenCalledWith("request-1", themeFixture)
+	})
+
+	it("ignores incomplete or disabled responses", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "themeFixtureProbeResponse" })
+		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		await webviewMessageHandler(mockClineProvider, {
+			type: "themeFixtureProbeResponse",
+			requestId: "request-1",
+			themeFixture,
+		})
+
+		expect(mockClineProvider.resolveWebviewThemeFixtureProbe).not.toHaveBeenCalled()
+	})
+})
 
 import { t } from "../../../i18n"
 
@@ -1262,6 +1307,91 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+	})
+})
+
+// Both allowlists are normalized by the same branch, so both are held to the
+// same contract.
+describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists the configured patterns", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md", "docs/scratch/**"] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, ["notes.md", "docs/scratch/**"])
+	})
+
+	it("drops entries that cannot name a file", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The double assertion stands in for an untyped payload: the message
+			// arrives as JSON from the webview, so a non-string can reach the
+			// handler even though the type says otherwise. That is what the
+			// handler's `typeof` filter is there to catch, so the test has to be
+			// able to express it.
+			updatedSettings: { [key]: ["notes.md", "", "   ", 42 as unknown as string] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, ["notes.md"])
+	})
+
+	// Whitespace is significant in gitignore syntax, so it must survive saving.
+	it("keeps whitespace within a pattern", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: [" notes.md", "my notes.md", "notes.md\\ "] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, [
+			" notes.md",
+			"my notes.md",
+			"notes.md\\ ",
+		])
+	})
+
+	it("persists an empty list when the setting is cleared", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: [] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, [])
+	})
+
+	// Unlike allowed/denied commands, these settings have no
+	// workspace-configuration counterpart, so nothing should be written to VS
+	// Code settings.
+	it("does not write to the VS Code workspace configuration", async () => {
+		const update = vi.fn()
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update } as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md"] },
+		})
+
+		expect(update).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - allowlists together", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists both allowlists from one save", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedReadFiles: ["read.md"], allowedWriteFiles: ["write.md"] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedReadFiles", ["read.md"])
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedWriteFiles", ["write.md"])
 	})
 })
 
