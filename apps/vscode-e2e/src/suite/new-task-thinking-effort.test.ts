@@ -104,8 +104,10 @@ async function pipeFetchResponse(target: ServerResponse, source: Response) {
 function resolveAllowedUpstreamUrl(baseUrl: string): URL {
 	const upstreamBase = new URL(baseUrl)
 	const isLocalProxy = upstreamBase.hostname === "127.0.0.1" || upstreamBase.hostname === "localhost"
+	const isLocalHttp = isLocalProxy && upstreamBase.protocol === "http:"
+	const isAnthropicUpstream = upstreamBase.origin === "https://api.anthropic.com"
 
-	if (!isLocalProxy || (upstreamBase.protocol !== "http:" && baseUrl !== "https://api.anthropic.com")) {
+	if (!isLocalHttp && !isAnthropicUpstream) {
 		throw new Error("Unexpected Anthropic proxy target: " + upstreamBase.origin)
 	}
 
