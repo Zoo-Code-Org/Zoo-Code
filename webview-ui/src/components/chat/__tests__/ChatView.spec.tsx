@@ -1577,6 +1577,29 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		expect(select).toHaveValue("low")
 	})
 
+	it("posts the displayed level when approving an unsupported prefill without touching the select", async () => {
+		const { getByLabelText, getByRole } = renderChatView()
+
+		// The payload's effort ("xhigh") is not in the supported list (["low", "high"]):
+		// the select displays "low" (the first supported level). If the user approves
+		// without changing the selector, the posted effort must be the displayed level —
+		// not the raw payload value the user never saw.
+		await postToolAsk({ ...NEW_TASK_ASK, thinkingEffort: "xhigh", supportedThinkingEfforts: ["low", "high"] })
+
+		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		expect(select).toHaveValue("low")
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: "chat:approve.title" }))
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "askResponse",
+			askResponse: "yesButtonClicked",
+			thinkingEffort: "low",
+		})
+	})
+
 	it("hides the selector for non-newTask tool asks (the ask effect resets the state)", async () => {
 		const { getByLabelText, queryByLabelText } = renderChatView()
 

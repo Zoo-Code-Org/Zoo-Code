@@ -63,11 +63,24 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 
 			// DTE series 5/5: the child task is created with the parent's API configuration,
 			// so the child model is the parent's current model. Validate the optional start
-			// effort against that model's capability array before asking for approval.
+			// effort against that model's capability before asking for approval.
+			//
+			// ModelInfo.supportsReasoningEffort is `boolean | string[] | undefined`: the bare
+			// `true` means the model supports reasoning effort without an explicit allow-list,
+			// so normalize it to the full level set. `false`/`undefined` stay unsupported
+			// (argument rejected below). The normalized array is the single source of truth
+			// for the argument validation, the ask payload, and the ask-selection check.
 			const modelCapabilities = task.api.getModel().info.supportsReasoningEffort
+			// "disable" stays in the element type: capability arrays may carry it (it is a
+			// settings off-switch, not a start level) and is filtered where levels are listed.
+			const supportedLevels: readonly (ReasoningEffortExtended | "disable")[] =
+				modelCapabilities === true
+					? NEW_TASK_EFFORT_LEVELS
+					: Array.isArray(modelCapabilities)
+						? modelCapabilities
+						: []
 			let validatedEffort: ReasoningEffortExtended | undefined
 			if (thinking_effort !== undefined && thinking_effort !== "") {
-				const supportedLevels = Array.isArray(modelCapabilities) ? modelCapabilities : []
 				if (!isNewTaskEffortLevel(thinking_effort) || !supportedLevels.includes(thinking_effort)) {
 					const reason = !isNewTaskEffortLevel(thinking_effort)
 						? `must be one of: ${NEW_TASK_EFFORT_LEVELS.join(", ")}`
@@ -146,9 +159,10 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 				content: message,
 				todos: todoItems,
 				thinkingEffort: validatedEffort ?? task.resolveNewTaskEffectiveEffort(),
-				supportedThinkingEfforts: Array.isArray(modelCapabilities)
-					? modelCapabilities.filter((level): level is ReasoningEffortExtended => level !== "disable")
-					: undefined,
+				supportedThinkingEfforts:
+					supportedLevels.length > 0
+						? supportedLevels.filter((level): level is ReasoningEffortExtended => level !== "disable")
+						: undefined,
 			})
 
 			const didApprove = await askApproval("tool", toolMessage)
@@ -162,8 +176,7 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 			// model-specified value, which wins over the parent's effective effort. An
 			// ask selection the target model does not support falls back the same way.
 			const askEffort = task.takeNewTaskAskThinkingEffort()
-			const askEffortSupported =
-				askEffort !== undefined && Array.isArray(modelCapabilities) && modelCapabilities.includes(askEffort)
+			const askEffortSupported = askEffort !== undefined && supportedLevels.includes(askEffort)
 			const childThinkingEffort = askEffortSupported
 				? askEffort
 				: (validatedEffort ?? task.resolveNewTaskEffectiveEffort())

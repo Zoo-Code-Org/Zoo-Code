@@ -362,9 +362,20 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							const tool = JSON.parse(lastMessage.text || "{}") as ClineSayTool
 							// DTE series 5/5: pre-fill the new_task ask effort selector (see NewTaskTool
 							// for how the extension builds these fields); cleared for other tools.
+							// The prefill also normalizes the SELECTION STATE to the supported levels, not
+							// just the rendered value: the state is what gets posted on approval (see
+							// handlePrimaryButtonClick), so an unsupported pre-filled effort falls back to
+							// the first supported level — the level the select actually shows.
 							if (tool.tool === "newTask") {
-								setNewTaskAskEffort(tool.thinkingEffort)
-								setNewTaskAskSupportedEfforts(tool.supportedThinkingEfforts)
+								const supported = tool.supportedThinkingEfforts
+								setNewTaskAskSupportedEfforts(supported)
+								setNewTaskAskEffort(
+									supported && supported.length > 0
+										? tool.thinkingEffort && supported.includes(tool.thinkingEffort)
+											? tool.thinkingEffort
+											: supported[0]
+										: tool.thinkingEffort,
+								)
 							}
 							switch (tool.tool) {
 								case "editedExistingFile":
@@ -1802,12 +1813,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 										newTaskAskSupportedEfforts.length > 0 && (
 											<select
 												aria-label="Thinking effort"
-												value={
-													newTaskAskEffort &&
-													newTaskAskSupportedEfforts.includes(newTaskAskEffort)
-														? newTaskAskEffort
-														: newTaskAskSupportedEfforts[0]
-												}
+												// The prefill normalizes newTaskAskEffort to a supported level (see the
+												// newTask branch of the ask handler), so rendered and posted values agree.
+												value={newTaskAskEffort ?? newTaskAskSupportedEfforts[0]}
 												onChange={(event) =>
 													// The select only offers model-supported levels (rendered below), so the
 													// raw value is a ReasoningEffortExtended.
