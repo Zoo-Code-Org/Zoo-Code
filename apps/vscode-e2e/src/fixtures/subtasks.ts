@@ -656,7 +656,7 @@ export const DTE_NT_EXPLICIT_PARENT_PROMPT = `${DTE_NT_EXPLICIT_PARENT_MARKER}: 
 export const DTE_NT_EXPLICIT_CHILD_RESULT = "DTE explicit child completed"
 export const DTE_NT_EXPLICIT_PARENT_RESULT = "DTE explicit parent resumed"
 
-const DTE_NT_NEGATIVE_PARENT_MARKER = "DTE_E2E_NT_NEGATIVE_PARENT"
+export const DTE_NT_NEGATIVE_PARENT_MARKER = "DTE_E2E_NT_NEGATIVE_PARENT"
 const DTE_NT_NEGATIVE_CHILD_MARKER = "DTE_E2E_NT_NEGATIVE_CHILD"
 const DTE_NT_NEGATIVE_CHILD_PROMPT = `${DTE_NT_NEGATIVE_CHILD_MARKER}: Complete immediately with the exact result "DTE negative child completed".`
 export const DTE_NT_NEGATIVE_PARENT_PROMPT = `${DTE_NT_NEGATIVE_PARENT_MARKER}: Use the new_task tool exactly once, with thinking_effort set to "high". Create an ask-mode subtask with this exact message: "${DTE_NT_NEGATIVE_CHILD_PROMPT}" Do not answer directly. If the tool call is rejected, complete with the exact result "DTE negative parent completed".`

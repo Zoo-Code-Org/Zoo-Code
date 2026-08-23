@@ -12,6 +12,7 @@ import {
 	DTE_NT_INHERIT_PARENT_MARKER,
 	DTE_NT_INHERIT_PARENT_PROMPT,
 	DTE_NT_INHERIT_PARENT_RESULT,
+	DTE_NT_NEGATIVE_PARENT_MARKER,
 	DTE_NT_NEGATIVE_PARENT_PROMPT,
 	DTE_NT_NEGATIVE_PARENT_RESULT,
 } from "../fixtures/subtasks"
@@ -27,6 +28,10 @@ type CapturedEffortRequest = {
 	thinkingType?: string
 	outputConfigEffort?: string
 	lastUserMessage: string
+	// The full request body as sent over the wire. Lets assertions check
+	// model-visible content (e.g. tool results) that is not part of the
+	// last user message.
+	rawBody: string
 }
 
 const ANTHROPIC_MESSAGES_PATH = "/v1/messages"
@@ -140,6 +145,7 @@ async function withEffortProxy<T>(
 				thinkingType: body.thinking?.type,
 				outputConfigEffort: body.output_config?.effort,
 				lastUserMessage,
+				rawBody: bodyText,
 			})
 
 			const forwardHeaders: Record<string, string> = {}
@@ -415,68 +421,79 @@ suite("new_task thinking effort (DTE series 5/5)", function () {
 			this.skip()
 		}
 
-		// aimock serves the Anthropic /v1/messages endpoint directly, so the negative
-		// flow does not need the capturing proxy — just point the base URL at the mock.
-		await api.setConfiguration({
-			apiProvider: "anthropic" as const,
-			apiKey: aimockUrl && !isRecord ? "mock-key" : process.env.ANTHROPIC_API_KEY!,
-			apiModelId: "claude-opus-4-7",
-			...(aimockUrl && { anthropicBaseUrl: aimockUrl }),
-		})
-
-		const says: Record<string, ClineMessage[]> = {}
-		const seenTaskIds = new Set<string>()
-
-		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			seenTaskIds.add(taskId)
-			if (message.type === "say" && message.partial === false) {
-				says[taskId] = says[taskId] || []
-				says[taskId].push(message)
-			}
-		}
-
-		api.on(RooCodeEventName.Message, messageHandler)
-
-		let parentTaskId: string | undefined
-
-		try {
-			parentTaskId = await api.startNewTask({
-				configuration: {
-					mode: "ask",
-					alwaysAllowModeSwitch: true,
-					alwaysAllowSubtasks: true,
-					autoApprovalEnabled: true,
-					enableCheckpoints: false,
-				},
-				text: DTE_NT_NEGATIVE_PARENT_PROMPT,
+		// The rejected tool call's error reaches the model as a tool_result in the
+		// parent's follow-up request (the extension emits no user-visible message for
+		// tool results), so this flow runs through the capturing proxy and the
+		// visibility assertion runs against the captured wire request.
+		await withEffortProxy(aimockUrl || "https://api.anthropic.com", async ({ proxyUrl, requests }) => {
+			await api.setConfiguration({
+				apiProvider: "anthropic" as const,
+				apiKey: aimockUrl && !isRecord ? "mock-key" : process.env.ANTHROPIC_API_KEY!,
+				apiModelId: "claude-opus-4-7",
+				anthropicBaseUrl: proxyUrl,
 			})
 
-			await waitUntilCompleted({ api, taskId: parentTaskId, timeout: 60_000 })
+			const says: Record<string, ClineMessage[]> = {}
+			const seenTaskIds = new Set<string>()
 
-			assert.strictEqual(
-				says[parentTaskId!]?.find(({ say }) => say === "completion_result")?.text?.trim(),
-				DTE_NT_NEGATIVE_PARENT_RESULT,
-				"Parent should complete after the rejected tool call",
-			)
-			assert.strictEqual(
-				seenTaskIds.size,
-				1,
-				"No child subtask should be created for a rejected thinking_effort (task ids: " +
-					[...seenTaskIds].join(", ") +
-					")",
-			)
-			assert.ok(
-				Object.values(says)
-					.flat()
-					.some(({ text }) => (text ?? "").includes("Invalid thinking_effort")),
-				"The tool error should be visible to the model",
-			)
-		} finally {
-			api.off(RooCodeEventName.Message, messageHandler)
-			while (api.getCurrentTaskStack().length > 0) {
-				await api.clearCurrentTask()
+			const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
+				seenTaskIds.add(taskId)
+				if (message.type === "say" && message.partial === false) {
+					says[taskId] = says[taskId] || []
+					says[taskId].push(message)
+				}
 			}
-			await sleep(1_500)
-		}
+
+			api.on(RooCodeEventName.Message, messageHandler)
+
+			let parentTaskId: string | undefined
+
+			try {
+				parentTaskId = await api.startNewTask({
+					configuration: {
+						mode: "ask",
+						alwaysAllowModeSwitch: true,
+						alwaysAllowSubtasks: true,
+						autoApprovalEnabled: true,
+						enableCheckpoints: false,
+					},
+					text: DTE_NT_NEGATIVE_PARENT_PROMPT,
+				})
+
+				await waitUntilCompleted({ api, taskId: parentTaskId, timeout: 60_000 })
+
+				assert.strictEqual(
+					says[parentTaskId!]?.find(({ say }) => say === "completion_result")?.text?.trim(),
+					DTE_NT_NEGATIVE_PARENT_RESULT,
+					"Parent should complete after the rejected tool call",
+				)
+				assert.strictEqual(
+					seenTaskIds.size,
+					1,
+					"No child subtask should be created for a rejected thinking_effort (task ids: " +
+						[...seenTaskIds].join(", ") +
+						")",
+				)
+
+				// Wire assertion: the rejection must be visible to the model in the
+				// parent's own follow-up request (tool_result content) — a request
+				// carrying both the parent marker and the tool-error text.
+				const errorRequests = requests.filter(
+					(request) =>
+						request.rawBody.includes("Invalid thinking_effort") &&
+						request.rawBody.includes(DTE_NT_NEGATIVE_PARENT_MARKER),
+				)
+				assert.ok(
+					errorRequests.length > 0,
+					"The rejected thinking_effort tool error should be visible to the model on the wire",
+				)
+			} finally {
+				api.off(RooCodeEventName.Message, messageHandler)
+				while (api.getCurrentTaskStack().length > 0) {
+					await api.clearCurrentTask()
+				}
+				await sleep(1_500)
+			}
+		})
 	})
 })
