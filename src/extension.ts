@@ -15,7 +15,6 @@ if (fs.existsSync(envPath)) {
 	}
 }
 
-import type { CloudUserInfo, AuthState } from "@roo-code/types"
 import { isTelemetryOptedIn } from "@roo-code/types"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService, PostHogTelemetryClient } from "@roo-code/telemetry"
@@ -64,9 +63,7 @@ let outputChannel: vscode.OutputChannel
 let extensionContext: vscode.ExtensionContext
 let cloudService: CloudService | undefined
 
-let authStateChangedHandler: ((data: { state: AuthState; previousState: AuthState }) => Promise<void>) | undefined
-let settingsUpdatedHandler: (() => Promise<void>) | undefined
-let userInfoHandler: ((data: { userInfo: CloudUserInfo }) => Promise<void>) | undefined
+let settingsUpdatedHandler: (() => void) | undefined
 
 /**
  * Check if we should auto-open the Zoo Code sidebar after switching to a worktree.
@@ -225,25 +222,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
 
 	// Initialize Roo Code Cloud service.
-	const postStateListener = () => ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
-
-	authStateChangedHandler = async (_data: { state: AuthState; previousState: AuthState }) => {
-		await postStateListener()
-	}
-
-	settingsUpdatedHandler = async () => {
-		await postStateListener()
-	}
-
-	userInfoHandler = async ({ userInfo }: { userInfo: CloudUserInfo }) => {
-		await postStateListener()
+	settingsUpdatedHandler = () => {
+		void ClineProvider.getVisibleInstance()
+			?.postStateToWebviewWithoutClineMessages()
+			.catch((error) => {
+				outputChannel.appendLine(
+					`[CloudService] Failed to refresh state after settings update: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			})
 	}
 
 	try {
 		cloudService = await CloudService.createInstance(context, cloudLogger, {
-			"auth-state-changed": authStateChangedHandler,
 			"settings-updated": settingsUpdatedHandler,
-			"user-info": userInfoHandler,
 		})
 
 		// Add to subscriptions for proper cleanup on deactivate.
@@ -395,16 +386,8 @@ export async function deactivate() {
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {
-			if (authStateChangedHandler) {
-				CloudService.instance.off("auth-state-changed", authStateChangedHandler)
-			}
-
 			if (settingsUpdatedHandler) {
 				CloudService.instance.off("settings-updated", settingsUpdatedHandler)
-			}
-
-			if (userInfoHandler) {
-				CloudService.instance.off("user-info", userInfoHandler as any)
 			}
 
 			outputChannel.appendLine("CloudService event handlers cleaned up")

@@ -1,7 +1,6 @@
 // npx vitest run __tests__/extension.spec.ts
 
 import type * as vscode from "vscode"
-import type { AuthState, CloudUserInfo } from "@roo-code/types"
 
 vi.mock("vscode", () => ({
 	window: {
@@ -189,7 +188,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 		resolveWebviewView: vi.fn(),
 		postMessageToWebview: vi.fn(),
 		postStateToWebview: vi.fn(),
-		postStateToWebviewWithoutClineMessages: vi.fn(),
+		postStateToWebviewWithoutClineMessages: vi.fn().mockResolvedValue(undefined),
 		getState: vi.fn().mockResolvedValue({}),
 		initializeCloudProfileSyncWhenReady: vi.fn().mockResolvedValue(undefined),
 		providerSettingsManager: {},
@@ -221,11 +220,7 @@ vi.mock("../api/providers/fetchers/modelCache", () => ({
 
 describe("extension.ts", () => {
 	let mockContext: vscode.ExtensionContext
-	let authStateChangedHandler:
-		| ((data: { state: AuthState; previousState: AuthState }) => void | Promise<void>)
-		| undefined
 	let settingsUpdatedHandler: ((data: Record<string, never>) => void | Promise<void>) | undefined
-	let userInfoHandler: ((data: { userInfo: CloudUserInfo }) => void | Promise<void>) | undefined
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -239,9 +234,7 @@ describe("extension.ts", () => {
 			subscriptions: [],
 		} as unknown as vscode.ExtensionContext
 
-		authStateChangedHandler = undefined
 		settingsUpdatedHandler = undefined
-		userInfoHandler = undefined
 	})
 
 	test("does not call dotenv.config when optional .env does not exist", async () => {
@@ -274,21 +267,17 @@ describe("extension.ts", () => {
 		expect(dotenv.config).toHaveBeenCalledTimes(1)
 	})
 
-	describe("cloud auth state handling", () => {
+	describe("cloud organization settings handling", () => {
 		beforeEach(() => {
 			vi.resetModules()
 		})
 
-		test("auth state changes still post webview state without Roo model cache side effects", async () => {
+		test("settings updates refresh webview state and contain failures", async () => {
 			const { CloudService } = await import("@roo-code/cloud")
 			const { ClineProvider } = await import("../core/webview/ClineProvider")
 
 			vi.mocked(CloudService.createInstance).mockImplementation(async (_context, _logger, handlers) => {
-				if (handlers?.["auth-state-changed"]) {
-					authStateChangedHandler = handlers["auth-state-changed"]
-				}
 				settingsUpdatedHandler = handlers?.["settings-updated"]
-				userInfoHandler = handlers?.["user-info"]
 				return {
 					off: vi.fn(),
 					on: vi.fn(),
@@ -310,29 +299,18 @@ describe("extension.ts", () => {
 				}
 			).getVisibleInstance()
 			provider.postStateToWebviewWithoutClineMessages.mockClear()
+			const refreshError = new Error("state refresh failed")
+			provider.postStateToWebviewWithoutClineMessages.mockRejectedValueOnce(refreshError)
 
-			let resolveStateRefresh!: () => void
-			const stateRefreshPromise = new Promise<void>((resolve) => {
-				resolveStateRefresh = resolve
-			})
-			provider.postStateToWebviewWithoutClineMessages.mockReturnValueOnce(stateRefreshPromise)
-			const handlerPromise = authStateChangedHandler!({
-				state: "active-session" as AuthState,
-				previousState: "logged-out" as AuthState,
-			}) as Promise<void>
-			let settled = false
-			void handlerPromise.then(() => {
-				settled = true
-			})
+			settingsUpdatedHandler!({})
 			await Promise.resolve()
-			expect(settled).toBe(false)
 
-			resolveStateRefresh()
-			await handlerPromise
-			await settingsUpdatedHandler!({})
-			await userInfoHandler!({ userInfo: {} as CloudUserInfo })
-
-			expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(3)
+			expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(1)
+			const vscode = await import("vscode")
+			const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+			expect(channel?.appendLine).toHaveBeenCalledWith(
+				"[CloudService] Failed to refresh state after settings update: state refresh failed",
+			)
 		})
 
 		test("activation continues when model cache refresh initialization fails", async () => {
