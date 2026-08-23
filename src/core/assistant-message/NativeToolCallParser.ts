@@ -862,7 +862,9 @@ export class NativeToolCallParser {
 					break
 
 				case "set_thinking_effort":
-					if (args.effort !== undefined && args.reason !== undefined) {
+					// Both values must be strings: a non-string payload is an
+					// invalid tool call and must not reach the executor.
+					if (typeof args.effort === "string" && typeof args.reason === "string") {
 						nativeArgs = {
 							effort: args.effort,
 							reason: args.reason,

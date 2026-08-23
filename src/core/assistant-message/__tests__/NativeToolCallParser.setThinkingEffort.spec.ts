@@ -48,6 +48,28 @@ describe("NativeToolCallParser — set_thinking_effort", () => {
 			const result = NativeToolCallParser.parseToolCall(toolCall)
 			expect(result).toBeNull()
 		})
+
+		it("rejects a non-string reason (no nativeArgs, so the executor is not reached)", () => {
+			const toolCall = {
+				id: "toolu_dte_3",
+				name: "set_thinking_effort" as const,
+				arguments: JSON.stringify({ effort: "high", reason: {} }),
+			}
+
+			const result = NativeToolCallParser.parseToolCall(toolCall)
+			expect(result).toBeNull()
+		})
+
+		it("rejects a non-string effort (no nativeArgs, so the executor is not reached)", () => {
+			const toolCall = {
+				id: "toolu_dte_4",
+				name: "set_thinking_effort" as const,
+				arguments: JSON.stringify({ effort: 123, reason: "escalating" }),
+			}
+
+			const result = NativeToolCallParser.parseToolCall(toolCall)
+			expect(result).toBeNull()
+		})
 	})
 
 	describe("processStreamingChunk (partial)", () => {
@@ -65,6 +87,28 @@ describe("NativeToolCallParser — set_thinking_effort", () => {
 			expect(nativeArgs).toBeDefined()
 			expect(nativeArgs?.effort).toBe("high")
 			expect(nativeArgs?.reason).toBe("escalating")
+		})
+
+		it("emits a partial ToolUse carrying only the streamed reason", () => {
+			const id = "toolu_dte_stream_2"
+			NativeToolCallParser.startStreamingToolCall(id, "set_thinking_effort")
+
+			const result = NativeToolCallParser.processStreamingChunk(id, JSON.stringify({ reason: "escalating" }))
+
+			expect(result).not.toBeNull()
+			const nativeArgs = result?.nativeArgs as { effort?: string; reason?: string } | undefined
+			expect(nativeArgs?.effort).toBeUndefined()
+			expect(nativeArgs?.reason).toBe("escalating")
+		})
+
+		it("emits a partial ToolUse without nativeArgs when neither param has streamed yet", () => {
+			const id = "toolu_dte_stream_3"
+			NativeToolCallParser.startStreamingToolCall(id, "set_thinking_effort")
+
+			const result = NativeToolCallParser.processStreamingChunk(id, JSON.stringify({ other: "value" }))
+
+			expect(result).not.toBeNull()
+			expect((result as { nativeArgs?: unknown }).nativeArgs).toBeUndefined()
 		})
 	})
 

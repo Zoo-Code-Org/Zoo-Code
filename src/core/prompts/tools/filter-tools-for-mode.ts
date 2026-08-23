@@ -367,9 +367,10 @@ function hasAnyMcpResources(mcpHub: McpHub, allowedServers?: string[]): boolean 
  * DTE series 3/5: whether the set_thinking_effort tool should be exposed.
  *
  * Requires both the dynamicThinkingEffort experiment to be enabled and the
- * model to advertise per-request reasoning effort support (a non-empty
- * `supportsReasoningEffort` capability array, or boolean/adaptive-class
- * support). Evaluated at task start only (prompt-cache safety).
+ * model to advertise per-request reasoning effort support (a
+ * `supportsReasoningEffort` capability array with at least one settable
+ * non-`disable` level, or boolean/adaptive-class support). Evaluated at
+ * task start only (prompt-cache safety).
  *
  * @param experiments - Experiment flags from the current state
  * @param modelInfo - Current model info (from apiConfiguration)
@@ -384,7 +385,9 @@ export function isSetThinkingEffortEnabled(
 	}
 	const capability = modelInfo?.supportsReasoningEffort
 	if (Array.isArray(capability)) {
-		return capability.length > 0
+		// A "disable"-only array exposes a tool that cannot apply any level
+		// (the executor's clamp would land on "disable" and refuse every call).
+		return capability.some((effort) => effort !== "disable")
 	}
 	return capability === true
 }

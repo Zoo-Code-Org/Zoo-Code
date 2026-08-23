@@ -25,7 +25,7 @@ interface TaskDouble {
 	api: { getModel: () => { id: string; info: { supportsReasoningEffort: Capability } } }
 	providerRef: {
 		deref: () => {
-			getState: () => Promise<{ experiments: Record<string, boolean> }>
+			getState: () => Promise<{ experiments?: Record<string, boolean> }>
 		}
 	}
 }
@@ -148,6 +148,17 @@ describe("setThinkingEffortTool", () => {
 			const result = callbacks.pushToolResult.mock.calls[0][0] as string
 			expect(result).toContain("does not support")
 		})
+
+		it("rejects when the provider state carries no experiment flags", async () => {
+			use()
+			double.providerRef.deref().getState = vi.fn().mockResolvedValue({})
+
+			await setThinkingEffortTool.execute({ effort: "high", reason: "because" }, task, callbacks)
+
+			expect(double.setRuntimeThinkingEffort).not.toHaveBeenCalled()
+			const result = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(result).toContain("experiment")
+		})
 	})
 
 	describe("clamp to model capability", () => {
@@ -192,6 +203,24 @@ describe("setThinkingEffortTool", () => {
 			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("low", "model")
 			const display = sayPayloads(double)[0]
 			expect(display).toEqual({ tool: "thinkingEffort", effort: "low", reason: "tie-break" })
+			const result = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(result).toContain("clamped to 'low'")
+		})
+
+		it("resolves nearest-level ties toward the lower level regardless of array order", async () => {
+			use({ capability: ["low", "high"], settingsEffort: "high" })
+			await setThinkingEffortTool.execute({ effort: "medium", reason: "tie-break order" }, task, callbacks)
+
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("low", "model")
+			const result = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(result).toContain("clamped to 'low'")
+		})
+
+		it("clamps robustly when the capability array contains an unknown level", async () => {
+			use({ capability: ["weird", "low"], settingsEffort: "high" })
+			await setThinkingEffortTool.execute({ effort: "max", reason: "robust clamp" }, task, callbacks)
+
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("low", "model")
 			const result = callbacks.pushToolResult.mock.calls[0][0] as string
 			expect(result).toContain("clamped to 'low'")
 		})
@@ -242,6 +271,14 @@ describe("setThinkingEffortTool", () => {
 			const result = callbacks.pushToolResult.mock.calls[0][0] as string
 			expect(result).toContain("already")
 		})
+
+		it("applies normally when the task has no settings baseline (undefined current)", async () => {
+			use()
+			await setThinkingEffortTool.execute({ effort: "high", reason: "no baseline" }, task, callbacks)
+
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("high", "model")
+			expect(sayPayloads(double).some((p) => (p as Record<string, unknown>).refusal !== undefined)).toBe(false)
+		})
 	})
 
 	describe("escalation cap", () => {
@@ -263,18 +300,17 @@ describe("setThinkingEffortTool", () => {
 		})
 
 		it("does not count downward changes toward the cap", async () => {
-			use({ capability: ["low", "medium", "high", "xhigh", "max"], settingsEffort: "low" })
+			use({ capability: ["none", "low", "medium", "high", "xhigh", "max"], settingsEffort: "max" })
 			const step = (effort: string) => setThinkingEffortTool.execute({ effort, reason: "x" }, task, callbacks)
 
+			await step("none") // downward: not counted
 			await step("medium") // upward 1
-			await step("low") // downward: not counted
 			await step("high") // upward 2
-			await step("medium") // downward: not counted
 			await step("xhigh") // upward 3
-			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledTimes(5)
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledTimes(4)
 
 			await step("max") // 4th upward change: refused
-			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledTimes(5)
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledTimes(4)
 			const refusal = sayPayloads(double).at(-1)
 			expect(refusal).toEqual({ tool: "thinkingEffort", refusal: "escalation_cap" })
 		})
@@ -282,12 +318,12 @@ describe("setThinkingEffortTool", () => {
 
 	describe("oscillation detection", () => {
 		it("refuses an A -> B -> A ping-pong within the task", async () => {
-			use({ capability: ["low", "medium", "high"], settingsEffort: "low" })
+			use({ capability: ["low", "medium", "high"], settingsEffort: "high" })
 			const step = (effort: string) => setThinkingEffortTool.execute({ effort, reason: "x" }, task, callbacks)
 
-			await step("medium")
-			await step("low") // downward, allowed
-			await step("medium") // ping-pong: refused
+			await step("low") // downward from the baseline, allowed
+			await step("medium") // upward
+			await step("low") // ping-pong back: refused
 
 			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledTimes(2)
 			const refusal = sayPayloads(double).at(-1)
@@ -296,6 +332,23 @@ describe("setThinkingEffortTool", () => {
 			expect(result).toContain("oscillation")
 			expect(result).toContain("'medium'")
 			expect(result).toContain("'low'")
+		})
+
+		it("refuses a return to the task baseline (baseline oscillation)", async () => {
+			use({ capability: ["low", "medium"], settingsEffort: "low" })
+			const step = (effort: string) => setThinkingEffortTool.execute({ effort, reason: "x" }, task, callbacks)
+
+			await step("low") // at the baseline: no-op, not a change
+			expect(callbacks.pushToolResult).toHaveBeenLastCalledWith("Thinking effort is already 'low'.")
+
+			await step("medium") // move away from the baseline
+			await step("low") // return to the baseline: refused as oscillation
+
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledTimes(1)
+			const refusal = sayPayloads(double).at(-1)
+			expect(refusal).toEqual({ tool: "thinkingEffort", refusal: "oscillation" })
+			const result = callbacks.pushToolResult.mock.calls.at(-1)?.[0] as string
+			expect(result).toContain("oscillation")
 		})
 
 		it("does not refuse the same level twice in a row (no-op path instead)", async () => {
@@ -338,6 +391,44 @@ describe("setThinkingEffortTool", () => {
 			expect(double.say).toHaveBeenCalledWith(
 				"tool",
 				JSON.stringify({ tool: "thinkingEffort", effort: "high", reason: "deep" }),
+				undefined,
+				true,
+			)
+			expect(double.setRuntimeThinkingEffort).not.toHaveBeenCalled()
+		})
+
+		it("emits a partial say with the streamed effort when the reason is not streamed yet", async () => {
+			const block: ToolUse<"set_thinking_effort"> = {
+				type: "tool_use" as const,
+				name: "set_thinking_effort" as const,
+				params: { effort: "high" },
+				partial: true,
+			}
+
+			await setThinkingEffortTool.handle(task, block, callbacks)
+
+			expect(double.say).toHaveBeenCalledWith(
+				"tool",
+				JSON.stringify({ tool: "thinkingEffort", effort: "high", reason: "" }),
+				undefined,
+				true,
+			)
+			expect(double.setRuntimeThinkingEffort).not.toHaveBeenCalled()
+		})
+
+		it("emits a partial say with the streamed reason when the effort is not streamed yet", async () => {
+			const block: ToolUse<"set_thinking_effort"> = {
+				type: "tool_use" as const,
+				name: "set_thinking_effort" as const,
+				params: { reason: "deep" },
+				partial: true,
+			}
+
+			await setThinkingEffortTool.handle(task, block, callbacks)
+
+			expect(double.say).toHaveBeenCalledWith(
+				"tool",
+				JSON.stringify({ tool: "thinkingEffort", effort: "", reason: "deep" }),
 				undefined,
 				true,
 			)

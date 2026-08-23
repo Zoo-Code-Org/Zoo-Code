@@ -50,6 +50,10 @@ describe("isSetThinkingEffortEnabled", () => {
 		expect(isSetThinkingEffortEnabled({ dynamicThinkingEffort: true }, modelInfo(["low", "high"]))).toBe(true)
 		expect(isSetThinkingEffortEnabled({ dynamicThinkingEffort: true }, modelInfo(true))).toBe(true)
 	})
+
+	it("is false for a capability array that only lists 'disable' (no settable level)", () => {
+		expect(isSetThinkingEffortEnabled({ dynamicThinkingEffort: true }, modelInfo(["disable"]))).toBe(false)
+	})
 })
 
 describe("filterNativeToolsForMode set_thinking_effort gate", () => {
@@ -73,6 +77,14 @@ describe("filterNativeToolsForMode set_thinking_effort gate", () => {
 			modelInfo: modelInfo(false),
 		})
 		expect(toolNames(result)).not.toContain("set_thinking_effort")
+	})
+
+	it("removes the tool for a capability array that only lists 'disable'", () => {
+		const result = filterNativeToolsForMode(TOOLS, "code", undefined, { dynamicThinkingEffort: true }, undefined, {
+			modelInfo: modelInfo(["disable"]),
+		})
+		expect(toolNames(result)).not.toContain("set_thinking_effort")
+		expect(toolNames(result)).toContain("execute_command")
 	})
 
 	it("keeps the tool list stable across repeated calls (prompt-cache safety)", () => {
@@ -131,7 +143,9 @@ describe("isToolAllowedInMode — set_thinking_effort gate (prompt-side)", () =>
 				modelInfo: modelInfo(false),
 			}),
 		).toBe(false)
-		// Other always-available tools remain unconditional.
+		// Other always-available tools remain unconditional; in particular the
+		// DTE branch is skipped for them (non-set_thinking_effort path).
 		expect(isToolAllowedInMode("execute_command", "code", undefined, undefined, undefined, undefined)).toBe(true)
+		expect(isToolAllowedInMode("switch_mode", "code", undefined, undefined, undefined, undefined)).toBe(true)
 	})
 })

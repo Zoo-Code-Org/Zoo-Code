@@ -14,7 +14,8 @@ import { BaseTool, ToolCallbacks } from "./BaseTool"
  * capability, instantly undoable); guardrails replace approval:
  * - always a one-line chat notification (success or refusal)
  * - escalation cap: max 3 upward changes per task
- * - oscillation detection: A -> B -> A ping-pong within a task is refused
+ * - oscillation detection: A -> B -> A ping-pong within a task (including a
+ *   return to the task baseline) is refused
  * - hard clamp to the model capability array
  *
  * The tool is only exposed when the dynamicThinkingEffort experiment is on
@@ -54,7 +55,10 @@ export const MAX_UPWARD_CHANGES = 3
 /** Per-task guardrail state (scoped per Task; see guardState WeakMap). */
 interface EffortGuardState {
 	upwardChanges: number
-	/** Model-driven applied efforts, most recent last. */
+	/**
+	 * Applied efforts, most recent last; seeded with the task's effective
+	 * baseline (when defined) so returning to it counts as oscillation.
+	 */
 	history: string[]
 }
 
@@ -102,10 +106,16 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 	 */
 	private guardState = new WeakMap<Task, EffortGuardState>()
 
-	private getGuardState(task: Task): EffortGuardState {
+	private getGuardState(task: Task, baseline: string | undefined): EffortGuardState {
 		let state = this.guardState.get(task)
 		if (!state) {
-			state = { upwardChanges: 0, history: [] }
+			state = {
+				upwardChanges: 0,
+				// Seed the history with the task's effective baseline so that
+				// returning from a changed value to the original baseline is
+				// detected as oscillation (A -> B -> A) instead of re-applied.
+				history: baseline === undefined ? [] : [baseline],
+			}
 			this.guardState.set(task, state)
 		}
 		return state
@@ -175,9 +185,11 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 				task.consecutiveMistakeCount++
 				task.recordToolError("set_thinking_effort")
 				task.didToolFailInCurrentTurn = true
-				const supported = Array.isArray(capability)
-					? capability.filter((l) => l !== "disable").join(", ")
-					: "none"
+				// Invariant: clampToCapability only returns "disable" when the
+				// capability is a non-empty array containing "disable", so the
+				// capability is a (non-empty) array here — single documented cast,
+				// no double assertion.
+				const supported = (capability as string[]).filter((l) => l !== "disable").join(", ")
 				pushToolResult(
 					formatResponse.toolError(
 						"'" + effort + "' is not supported by the current model. Supported levels: " + supported + ".",
@@ -186,8 +198,8 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 				return
 			}
 
-			const guard = this.getGuardState(task)
 			const current = task.getRuntimeThinkingEffort().effort ?? task.apiConfiguration.reasoningEffort
+			const guard = this.getGuardState(task, current)
 
 			// No-op: already at the requested level — confirm without churn.
 			if (clamped === current) {

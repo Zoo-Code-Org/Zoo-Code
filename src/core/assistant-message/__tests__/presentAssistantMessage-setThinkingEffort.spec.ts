@@ -185,6 +185,9 @@ describe("presentAssistantMessage - set_thinking_effort dispatch", () => {
 		]
 
 		await presentAssistantMessage(asTask())
+
+		const handle = vi.mocked(setThinkingEffortTool.handle)
+		expect(handle).not.toHaveBeenCalled()
 	})
 
 	it("describes a skipped set_thinking_effort block via the tool description when the task already rejected a tool", async () => {
@@ -200,5 +203,27 @@ describe("presentAssistantMessage - set_thinking_effort dispatch", () => {
 		const content = (result as { content?: string }).content
 		expect(content).toContain("set_thinking_effort to 'high'")
 		expect(content).toContain("rejecting")
+	})
+
+	it("describes a set_thinking_effort block without an effort param via the tool description fallback", async () => {
+		mockTask.didRejectTool = true
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use" as const,
+				id: toolCallId(),
+				name: "set_thinking_effort",
+				params: {},
+				partial: false,
+			},
+		]
+
+		await presentAssistantMessage(asTask())
+
+		const handle = vi.mocked(setThinkingEffortTool.handle)
+		expect(handle).not.toHaveBeenCalled()
+		const result = dispatchedToolResult()
+		expect(result).toBeDefined()
+		const content = (result as { content?: string }).content
+		expect(content).toContain("set_thinking_effort to ''")
 	})
 })
