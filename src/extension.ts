@@ -65,7 +65,7 @@ let extensionContext: vscode.ExtensionContext
 let cloudService: CloudService | undefined
 
 let authStateChangedHandler: ((data: { state: AuthState; previousState: AuthState }) => Promise<void>) | undefined
-let settingsUpdatedHandler: (() => void) | undefined
+let settingsUpdatedHandler: (() => Promise<void>) | undefined
 let userInfoHandler: ((data: { userInfo: CloudUserInfo }) => Promise<void>) | undefined
 
 /**
@@ -228,15 +228,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	const postStateListener = () => ClineProvider.getVisibleInstance()?.postStateToWebviewWithoutClineMessages()
 
 	authStateChangedHandler = async (_data: { state: AuthState; previousState: AuthState }) => {
-		postStateListener()
+		await postStateListener()
 	}
 
 	settingsUpdatedHandler = async () => {
-		postStateListener()
+		await postStateListener()
 	}
 
 	userInfoHandler = async ({ userInfo }: { userInfo: CloudUserInfo }) => {
-		postStateListener()
+		await postStateListener()
 	}
 
 	try {
@@ -380,7 +380,11 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// Initialize background model cache refresh
-	initializeModelCacheRefresh()
+	void initializeModelCacheRefresh().catch((error) => {
+		outputChannel.appendLine(
+			`[ModelCache] Background refresh initialization failed: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	})
 
 	return new API(outputChannel, provider, socketPath, enableLogging)
 }

@@ -58,6 +58,7 @@ export default [
 			"core/task/**/*.ts",
 			"core/tools/**/*.ts",
 			"core/webview/**/*.ts",
+			"extension.ts",
 			"integrations/**/*.ts",
 			"services/**/*.ts",
 		],

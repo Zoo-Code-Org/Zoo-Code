@@ -1,7 +1,7 @@
 // npx vitest run __tests__/extension.spec.ts
 
 import type * as vscode from "vscode"
-import type { AuthState } from "@roo-code/types"
+import type { AuthState, CloudUserInfo } from "@roo-code/types"
 
 vi.mock("vscode", () => ({
 	window: {
@@ -215,7 +215,7 @@ vi.mock("../core/webview/ClineProvider", async () => {
 vi.mock("../api/providers/fetchers/modelCache", () => ({
 	flushModels: vi.fn(),
 	getModels: vi.fn().mockResolvedValue([]),
-	initializeModelCacheRefresh: vi.fn(),
+	initializeModelCacheRefresh: vi.fn().mockResolvedValue(undefined),
 	refreshModels: vi.fn().mockResolvedValue({}),
 }))
 
@@ -224,6 +224,8 @@ describe("extension.ts", () => {
 	let authStateChangedHandler:
 		| ((data: { state: AuthState; previousState: AuthState }) => void | Promise<void>)
 		| undefined
+	let settingsUpdatedHandler: ((data: Record<string, never>) => void | Promise<void>) | undefined
+	let userInfoHandler: ((data: { userInfo: CloudUserInfo }) => void | Promise<void>) | undefined
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -238,6 +240,8 @@ describe("extension.ts", () => {
 		} as unknown as vscode.ExtensionContext
 
 		authStateChangedHandler = undefined
+		settingsUpdatedHandler = undefined
+		userInfoHandler = undefined
 	})
 
 	test("does not call dotenv.config when optional .env does not exist", async () => {
@@ -283,6 +287,8 @@ describe("extension.ts", () => {
 				if (handlers?.["auth-state-changed"]) {
 					authStateChangedHandler = handlers["auth-state-changed"]
 				}
+				settingsUpdatedHandler = handlers?.["settings-updated"]
+				userInfoHandler = handlers?.["user-info"]
 				return {
 					off: vi.fn(),
 					on: vi.fn(),
@@ -305,12 +311,43 @@ describe("extension.ts", () => {
 			).getVisibleInstance()
 			provider.postStateToWebviewWithoutClineMessages.mockClear()
 
-			await authStateChangedHandler!({
+			let resolveStateRefresh!: () => void
+			const stateRefreshPromise = new Promise<void>((resolve) => {
+				resolveStateRefresh = resolve
+			})
+			provider.postStateToWebviewWithoutClineMessages.mockReturnValueOnce(stateRefreshPromise)
+			const handlerPromise = authStateChangedHandler!({
 				state: "active-session" as AuthState,
 				previousState: "logged-out" as AuthState,
+			}) as Promise<void>
+			let settled = false
+			void handlerPromise.then(() => {
+				settled = true
 			})
+			await Promise.resolve()
+			expect(settled).toBe(false)
 
-			expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(1)
+			resolveStateRefresh()
+			await handlerPromise
+			await settingsUpdatedHandler!({})
+			await userInfoHandler!({ userInfo: {} as CloudUserInfo })
+
+			expect(provider.postStateToWebviewWithoutClineMessages).toHaveBeenCalledTimes(3)
+		})
+
+		test("activation continues when model cache refresh initialization fails", async () => {
+			const { initializeModelCacheRefresh } = await import("../api/providers/fetchers/modelCache")
+			vi.mocked(initializeModelCacheRefresh).mockRejectedValueOnce(new Error("cache startup failed"))
+
+			const { activate } = await import("../extension")
+			await expect(activate(mockContext)).resolves.toBeDefined()
+			await Promise.resolve()
+
+			const vscode = await import("vscode")
+			const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
+			expect(channel?.appendLine).toHaveBeenCalledWith(
+				"[ModelCache] Background refresh initialization failed: cache startup failed",
+			)
 		})
 
 		test("activation continues when CloudService initialization fails", async () => {
