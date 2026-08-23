@@ -47,13 +47,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.78.0
+## Nouveautés de la v3.80.0
 
-- **Trois nouveaux modèles majeurs sont arrivés** — utilise les tout nouveaux Gemini 3.7 Flash, GLM 5.3 et Qwen3.8 Max, ainsi que les améliorations du raisonnement, des tarifs et de la couverture des providers de DeepSeek V4.
-- **Connecte-toi à NanoGPT** — profite de la découverte dynamique des modèles, du streaming et de la complétion des prompts, avec des préférences de routage pour la vitesse, le prix, la latence, le débit, la prise en charge des outils et le cache.
-- **Providers et tâches plus fiables** — les correctifs améliorent la configuration des endpoints Azure OpenAI, les limites de sortie de Kimi Code, la conservation des titres dans l'historique des tâches et l'import/export des paramètres Zoo.
-- Destructive Command Guard prend désormais en charge les Mac équipés d'un processeur Intel.
-- Des mises à jour de sécurité corrigent des vulnérabilités dans `undici` et Mermaid.
+- **Accès aux fichiers plus sûr** — utilise des listes d'autorisation distinctes pour la lecture et l'écriture afin de contrôler les chemins auxquels Zoo Code peut accéder.
+- **Plus de modèles au choix** — GLM 5.3 est désormais disponible via Z.ai, et Gemini 3.5 Flash Lite ainsi que Gemini 3.1 Flash Lite ont été ajoutés au provider Gemini.
+- **Des workflows quotidiens plus fiables** — les améliorations renforcent la récupération et l'historique des tâches, le streaming et l'utilisation des outils par les providers, l'import des paramètres et la lisibilité dans les différents thèmes d'IDE.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

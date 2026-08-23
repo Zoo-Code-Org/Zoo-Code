@@ -11,7 +11,13 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { importSettings, importSettingsFromFile, importSettingsWithFeedback, exportSettings } from "../importExport"
+import {
+	importSettings,
+	importSettingsFromFile,
+	importSettingsFromPath,
+	importSettingsWithFeedback,
+	exportSettings,
+} from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
 import { CustomModesManager } from "../CustomModesManager"
@@ -19,6 +25,14 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import type { Mock } from "vitest"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
+
+function createDeferred<T>() {
+	let resolve!: (value: T) => void
+	const promise = new Promise<T>((resolvePromise) => {
+		resolve = resolvePromise
+	})
+	return { promise, resolve }
+}
 
 vi.mock("vscode", () => ({
 	workspace: {
@@ -149,6 +163,92 @@ describe("importExport", () => {
 					return map.set(key, value)
 				}),
 			},
+		})
+	})
+
+	describe("importSettingsFromPath persistence", () => {
+		const validFileContent = JSON.stringify({
+			providerProfiles: {
+				currentApiConfigName: "test",
+				apiConfigs: {
+					test: { apiProvider: providerIdentifiers.openai, apiKey: "test-key", id: "test-id" },
+				},
+			},
+			globalSettings: { mode: "code" },
+		})
+		const previousProviderProfiles = {
+			currentApiConfigName: "default",
+			apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+		}
+		const profileMetadata = [
+			{ name: "test", id: "test-id", apiProvider: providerIdentifiers.openai },
+			{ name: "default", id: "default-id", apiProvider: providerIdentifiers.anthropic },
+		]
+
+		beforeEach(() => {
+			;(fs.readFile as Mock).mockResolvedValue(validFileContent)
+			mockProviderSettingsManager.export.mockResolvedValue(previousProviderProfiles)
+			mockProviderSettingsManager.import.mockResolvedValue(undefined)
+			mockProviderSettingsManager.listConfig.mockResolvedValue(profileMetadata)
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+		})
+
+		it("waits for each provider-state write before reporting success", async () => {
+			const currentProfileWrite = createDeferred<void>()
+			const providerSettingsWrite = createDeferred<void>()
+			const profileMetadataWrite = createDeferred<void>()
+			mockContextProxy.setValue.mockImplementation((key) => {
+				if (key === "currentApiConfigName") return currentProfileWrite.promise
+				if (key === "listApiConfigMeta") return profileMetadataWrite.promise
+				return Promise.resolve()
+			})
+			mockContextProxy.setProviderSettings.mockReturnValue(providerSettingsWrite.promise)
+
+			const resultPromise = importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+			let settled = false
+			void resultPromise.then(() => {
+				settled = true
+			})
+
+			await vi.waitFor(() =>
+				expect(mockContextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "test"),
+			)
+			expect(mockContextProxy.setProviderSettings).not.toHaveBeenCalled()
+			expect(settled).toBe(false)
+
+			currentProfileWrite.resolve()
+			await vi.waitFor(() => expect(mockContextProxy.setProviderSettings).toHaveBeenCalled())
+			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
+			expect(settled).toBe(false)
+
+			providerSettingsWrite.resolve()
+			await vi.waitFor(() =>
+				expect(mockContextProxy.setValue).toHaveBeenCalledWith("listApiConfigMeta", profileMetadata),
+			)
+			expect(settled).toBe(false)
+
+			profileMetadataWrite.resolve()
+			await expect(resultPromise).resolves.toMatchObject({ success: true })
+		})
+
+		it("reports failure without continuing after a provider-state write rejects", async () => {
+			mockContextProxy.setValue.mockRejectedValueOnce(new Error("current profile write failed"))
+
+			const result = await importSettingsFromPath("/mock/path/settings.json", {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result).toEqual({ success: false, error: "current profile write failed" })
+			expect(mockContextProxy.setProviderSettings).not.toHaveBeenCalled()
+			expect(mockContextProxy.setValue).not.toHaveBeenCalledWith("listApiConfigMeta", expect.anything())
 		})
 	})
 

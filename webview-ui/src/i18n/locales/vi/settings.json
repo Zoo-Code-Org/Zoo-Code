@@ -308,6 +308,20 @@
 				"description": "Cho phép Zoo tạo và chỉnh sửa các tệp được bảo vệ (như .rooignore và các tệp cấu hình .roo/) mà không yêu cầu phê duyệt."
 			}
 		},
+		"allowlists": {
+			"label": "Danh sách cho phép",
+			"description": "Cấp quyền truy cập vào từng tệp cụ thể, mà không tự động phê duyệt cả một nhóm hành động. Mỗi dòng một mẫu, theo cú pháp lấy cảm hứng từ .gitignore: \"notes.md\" khớp với tệp đó trong bất kỳ thư mục nào của workspace, \"docs/scratch/**\" khớp với mọi thứ bên dưới thư mục đó, và \"*.md\" khớp với mọi tệp Markdown. Một mẫu luôn chỉ tệp, không bao giờ chỉ thư mục: \"docs\" chỉ cấp một tệp tên \"docs\"; hãy viết \"docs/**\" cho nội dung của một thư mục. Dấu \"./\" ở đầu chỉ gốc workspace, còn dấu \"/\" ở đầu chỉ gốc hệ thống tệp, nên \"/tmp/notes.md\" vươn ra ngoài workspace, cũng như \"~/notes.md\", trong đó dấu \"~/\" ở đầu chỉ thư mục home của bạn. Thêm \"!\" trước một mẫu để loại trừ những gì dòng trước đã khớp; như trong .gitignore, dòng khớp cuối cùng thắng, nên thứ tự có ý nghĩa. Khi chưa mở thư mục nào, các mẫu tương đối với workspace sẽ bị bỏ qua. Chữ hoa và chữ thường được phân biệt, trừ trên Windows. Không có gì được tự động phê duyệt khi \"Tự động phê duyệt\" ở trên đang tắt.",
+			"readFiles": {
+				"label": "Mẫu danh sách cho phép đọc",
+				"description": "Các tệp mà Zoo có thể đọc không cần phê duyệt, kể cả khi \"Đọc\" ở trên đang tắt. Các tệp trong danh sách cho phép ghi bên dưới cũng luôn đọc được, nên không cần thêm hai lần. Việc liệt kê thư mục và tìm kiếm luôn tuân theo cài đặt \"Đọc\". Các tệp bị .rooignore loại trừ vẫn không đọc được.",
+				"placeholder": "Mỗi dòng một mẫu, ví dụ notes.md"
+			},
+			"writeFiles": {
+				"label": "Mẫu danh sách cho phép ghi",
+				"description": "Các tệp mà Zoo có thể tạo và chỉnh sửa không cần phê duyệt, kể cả khi \"Ghi\" ở trên đang tắt. Các tệp được bảo vệ vẫn cần phê duyệt trừ khi bật \"Bao gồm các tệp được bảo vệ\" (trong cài đặt tự động phê duyệt \"Ghi\"). Các tệp bị .rooignore loại trừ vẫn không ghi được.",
+				"placeholder": "Mỗi dòng một mẫu, ví dụ notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Bật tự động phê duyệt các công cụ MCP riêng lẻ trong chế độ xem Máy chủ MCP (yêu cầu cả cài đặt này và hộp kiểm \"Luôn cho phép\" của công cụ)"

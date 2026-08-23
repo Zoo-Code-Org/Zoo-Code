@@ -308,6 +308,20 @@
 				"description": "Permetti a Zoo di creare e modificare file protetti (come .rooignore e file di configurazione .roo/) senza richiedere approvazione."
 			}
 		},
+		"allowlists": {
+			"label": "Liste di autorizzazione",
+			"description": "Concedi l'accesso a singoli file, senza approvare automaticamente un'intera categoria di azioni. Un pattern per riga, con sintassi ispirata a .gitignore: \"notes.md\" corrisponde a quel file in qualsiasi directory del workspace, \"docs/scratch/**\" a tutto ciò che si trova sotto quella directory e \"*.md\" a qualsiasi file Markdown. Un pattern nomina sempre file, mai directory: \"docs\" concede solo un file chiamato \"docs\"; per il contenuto di una directory scrivi \"docs/**\". Un \"./\" iniziale indica la radice del workspace, mentre un \"/\" iniziale indica la radice del filesystem, così \"/tmp/notes.md\" arriva fuori dal workspace, come anche \"~/notes.md\", dove un \"~/\" iniziale indica la tua directory home. Metti \"!\" davanti a un pattern per escludere ciò che una riga precedente ha già trovato; come in .gitignore, vince l'ultima riga corrispondente, quindi l'ordine conta. I pattern relativi al workspace vengono ignorati finché non è aperta nessuna cartella. Maiuscole e minuscole vengono distinte, tranne su Windows. Niente viene approvato automaticamente se \"Auto-approvazione\" sopra è disattivata.",
+			"readFiles": {
+				"label": "Pattern della lista di autorizzazione in lettura",
+				"description": "File che Zoo può leggere senza approvazione, anche quando \"Leggi\" sopra è disattivato. I file della lista di autorizzazione in scrittura qui sotto possono sempre essere letti, quindi non serve aggiungerli due volte. Gli elenchi di directory e le ricerche seguono sempre l'impostazione \"Leggi\". I file esclusi da .rooignore restano comunque illeggibili.",
+				"placeholder": "Un pattern per riga, es. notes.md"
+			},
+			"writeFiles": {
+				"label": "Pattern della lista di autorizzazione in scrittura",
+				"description": "File che Zoo può creare e modificare senza approvazione, anche quando \"Scrivi\" sopra è disattivato. I file protetti richiedono ancora l'approvazione, a meno che \"Includi file protetti\" non sia abilitato (nelle impostazioni dell'auto-approvazione \"Scrivi\"). I file esclusi da .rooignore restano comunque non scrivibili.",
+				"placeholder": "Un pattern per riga, es. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Abilita l'approvazione automatica dei singoli strumenti MCP nella vista Server MCP (richiede sia questa impostazione che la casella \"Consenti sempre\" dello strumento)"

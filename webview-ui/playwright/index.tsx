@@ -1,7 +1,10 @@
-import "./vscode-theme-dark.css"
 import "@vscode/codicons/dist/codicon.css"
+import "./themes/vscode-theme-dark.css"
+import "./themes/vscode-theme-light.css"
+import "./themes/vscode-theme-high-contrast.css"
+import "./themes/vscode-theme-high-contrast-light.css"
+import "./vscode-theme-base.css"
 import "../src/index.css"
-import "./vscode-theme-light.css"
 
 // Components read `window.IMAGES_BASE_URI` at mount time to resolve extension
 // image assets. Under Playwright CT the extension host isn't present, so seed

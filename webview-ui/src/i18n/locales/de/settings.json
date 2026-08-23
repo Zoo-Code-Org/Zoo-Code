@@ -308,6 +308,20 @@
 				"description": "Zoo erlauben, geschützte Dateien (wie .rooignore und .roo/ Konfigurationsdateien) ohne Genehmigung zu erstellen und zu bearbeiten."
 			}
 		},
+		"allowlists": {
+			"label": "Zulassungslisten",
+			"description": "Erteile Zugriff auf einzelne Dateien, ohne eine ganze Kategorie von Aktionen automatisch zu genehmigen. Ein Muster pro Zeile, in .gitignore-inspirierter Syntax: \"notes.md\" passt auf diese Datei in jedem Verzeichnis des Workspace, \"docs/scratch/**\" auf alles unter diesem Verzeichnis und \"*.md\" auf jede Markdown-Datei. Ein Muster benennt immer Dateien, niemals Verzeichnisse: \"docs\" erlaubt nur eine Datei namens \"docs\"; für den Inhalt eines Verzeichnisses schreibe \"docs/**\". Ein führendes \"./\" meint das Workspace-Wurzelverzeichnis, ein führendes \"/\" dagegen die Wurzel des Dateisystems, sodass \"/tmp/notes.md\" über den Workspace hinausreicht, ebenso \"~/notes.md\", wo ein führendes \"~/\" für dein Home-Verzeichnis steht. Ein \"!\" vor einem Muster nimmt aus, was eine frühere Zeile erfasst hat; wie in .gitignore gewinnt die letzte passende Zeile, die Reihenfolge zählt also. Workspace-relative Muster werden ignoriert, solange kein Ordner geöffnet ist. Groß- und Kleinschreibung werden unterschieden, außer unter Windows. Solange \"Auto-Genehmigung\" oben aus ist, wird nichts automatisch genehmigt.",
+			"readFiles": {
+				"label": "Muster der Lese-Zulassungsliste",
+				"description": "Dateien, die Zoo ohne Genehmigung lesen darf, auch wenn \"Lesen\" oben aus ist. Dateien aus der Schreib-Zulassungsliste unten dürfen immer auch gelesen werden und müssen daher nicht zweimal aufgeführt werden. Verzeichnisauflistungen und Suchen folgen immer der \"Lesen\"-Einstellung. Von .rooignore ausgeschlossene Dateien bleiben trotzdem nicht lesbar.",
+				"placeholder": "Ein Muster pro Zeile, z.B. notes.md"
+			},
+			"writeFiles": {
+				"label": "Muster der Schreib-Zulassungsliste",
+				"description": "Dateien, die Zoo ohne Genehmigung erstellen und bearbeiten darf, auch wenn \"Schreiben\" oben aus ist. Geschützte Dateien brauchen weiterhin eine Genehmigung, sofern \"Geschützte Dateien einbeziehen\" nicht aktiviert ist (in den Einstellungen der \"Schreiben\"-Auto-Genehmigung). Von .rooignore ausgeschlossene Dateien bleiben trotzdem nicht beschreibbar.",
+				"placeholder": "Ein Muster pro Zeile, z.B. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Automatische Genehmigung einzelner MCP-Tools in der MCP-Server-Ansicht aktivieren (erfordert sowohl diese Einstellung als auch das 'Immer erlauben'-Kontrollkästchen des Tools)"

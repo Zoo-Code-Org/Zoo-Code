@@ -308,6 +308,20 @@
 				"description": "Pozwól Zoo na tworzenie i edycję plików chronionych (takich jak .rooignore i pliki konfiguracyjne .roo/) bez konieczności zatwierdzania."
 			}
 		},
+		"allowlists": {
+			"label": "Listy dozwolonych",
+			"description": "Przyznaj dostęp do pojedynczych plików, bez automatycznego zatwierdzania całej kategorii działań. Jeden wzorzec na wiersz, w składni inspirowanej .gitignore: \"notes.md\" pasuje do tego pliku w dowolnym katalogu obszaru roboczego, \"docs/scratch/**\" do wszystkiego poniżej tego katalogu, a \"*.md\" do dowolnego pliku Markdown. Wzorzec zawsze nazywa pliki, nigdy katalogi: \"docs\" przyznaje dostęp tylko do pliku o nazwie \"docs\"; zawartość katalogu zapisz jako \"docs/**\". Początkowe \"./\" oznacza katalog główny obszaru roboczego, natomiast początkowe \"/\" oznacza katalog główny systemu plików, więc \"/tmp/notes.md\" sięga poza obszar roboczy, podobnie jak \"~/notes.md\", gdzie początkowe \"~/\" oznacza twój katalog domowy. Poprzedź wzorzec znakiem \"!\", aby wykluczyć to, co dopasował wcześniejszy wiersz; tak jak w .gitignore wygrywa ostatni pasujący wiersz, więc kolejność ma znaczenie. Wzorce względne wobec obszaru roboczego są ignorowane, dopóki nie jest otwarty żaden folder. Wielkość liter ma znaczenie, z wyjątkiem Windows. Dopóki \"Automatyczne zatwierdzanie\" powyżej jest wyłączone, nic nie jest zatwierdzane automatycznie.",
+			"readFiles": {
+				"label": "Wzorce listy dozwolonych do odczytu",
+				"description": "Pliki, które Zoo może czytać bez zatwierdzania, nawet gdy \"Odczyt\" powyżej jest wyłączony. Pliki z listy dozwolonych do zapisu poniżej zawsze można także czytać, więc nie trzeba ich dodawać dwukrotnie. Listowanie katalogów i wyszukiwanie zawsze podlegają ustawieniu \"Odczyt\". Pliki wykluczone przez .rooignore i tak pozostają nieczytelne.",
+				"placeholder": "Jeden wzorzec na wiersz, np. notes.md"
+			},
+			"writeFiles": {
+				"label": "Wzorce listy dozwolonych do zapisu",
+				"description": "Pliki, które Zoo może tworzyć i edytować bez zatwierdzania, nawet gdy \"Zapis\" powyżej jest wyłączony. Pliki chronione nadal wymagają zatwierdzenia, chyba że włączysz \"Uwzględnij pliki chronione\" (w ustawieniach automatycznego zatwierdzania \"Zapis\"). Pliki wykluczone przez .rooignore i tak pozostają niezapisywalne.",
+				"placeholder": "Jeden wzorzec na wiersz, np. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Włącz automatyczne zatwierdzanie poszczególnych narzędzi MCP w widoku Serwerów MCP (wymaga zarówno tego ustawienia, jak i pola wyboru \"Zawsze zezwalaj\" narzędzia)"

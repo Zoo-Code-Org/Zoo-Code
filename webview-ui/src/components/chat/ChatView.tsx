@@ -72,7 +72,7 @@ export interface ChatViewRef {
 	acceptInput: () => void
 }
 
-export const MAX_IMAGES_PER_MESSAGE = 20 // This is the Anthropic limit.
+import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 const CHAT_DEFAULT_ITEM_HEIGHT = 180
 const CHAT_VIEWPORT_BUFFER = {
 	top: 600,

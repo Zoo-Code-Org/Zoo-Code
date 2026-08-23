@@ -309,6 +309,20 @@
 				"description": "Permettre à Zoo de créer et modifier des fichiers protégés (comme .rooignore et les fichiers de configuration .roo/) sans nécessiter d'approbation."
 			}
 		},
+		"allowlists": {
+			"label": "Listes d'autorisation",
+			"description": "Accorde l'accès à des fichiers précis, sans approuver automatiquement toute une catégorie d'actions. Un motif par ligne, dans une syntaxe inspirée de .gitignore : \"notes.md\" correspond à ce fichier dans n'importe quel répertoire de l'espace de travail, \"docs/scratch/**\" à tout ce qui se trouve sous ce répertoire et \"*.md\" à n'importe quel fichier Markdown. Un motif désigne toujours des fichiers, jamais des répertoires : \"docs\" n'accorde qu'un fichier nommé \"docs\" ; écris \"docs/**\" pour le contenu d'un répertoire. Un \"./\" initial désigne la racine de l'espace de travail, tandis qu'un \"/\" initial désigne la racine du système de fichiers, si bien que \"/tmp/notes.md\" va au-delà de l'espace de travail, tout comme \"~/notes.md\", où un \"~/\" initial désigne ton répertoire personnel. Préfixe un motif par \"!\" pour exclure ce qu'une ligne précédente a fait correspondre ; comme dans .gitignore, la dernière ligne correspondante l'emporte, l'ordre compte donc. Les motifs relatifs à l'espace de travail sont ignorés tant qu'aucun dossier n'est ouvert. Les majuscules et les minuscules sont distinguées, sauf sous Windows. Rien n'est approuvé automatiquement tant que \"Approbation automatique\" ci-dessus est désactivée.",
+			"readFiles": {
+				"label": "Motifs de la liste d'autorisation de lecture",
+				"description": "Fichiers que Zoo peut lire sans approbation, même si \"Lecture\" est désactivé ci-dessus. Les fichiers de la liste d'autorisation d'écriture ci-dessous peuvent toujours être lus aussi, il n'est donc pas nécessaire de les ajouter deux fois. Les listages de répertoires et les recherches suivent toujours le paramètre \"Lecture\". Les fichiers exclus par .rooignore restent illisibles malgré tout.",
+				"placeholder": "Un motif par ligne, ex. notes.md"
+			},
+			"writeFiles": {
+				"label": "Motifs de la liste d'autorisation d'écriture",
+				"description": "Fichiers que Zoo peut créer et modifier sans approbation, même si \"Écriture\" est désactivé ci-dessus. Les fichiers protégés nécessitent toujours une approbation, sauf si \"Inclure les fichiers protégés\" est activé (dans les paramètres de l'approbation automatique \"Écriture\"). Les fichiers exclus par .rooignore restent non modifiables malgré tout.",
+				"placeholder": "Un motif par ligne, ex. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Activer l'approbation automatique des outils MCP individuels dans la vue des serveurs MCP (nécessite à la fois ce paramètre et la case à cocher \"Toujours autoriser\" de l'outil)"
