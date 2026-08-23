@@ -537,6 +537,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const taskHistoryStore = makeStoreStub()
 		const providerLog = vi.fn()
 
+		// Partial provider double: the real ClineProvider.prototype.delegateParentAndOpenChild
+		// is invoked below via .call() with only the members that method reads, so the full
+		// interface is not implemented and the double assertion is the last-resort hand-off.
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
@@ -563,9 +566,19 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		// The say rejection is surfaced through the provider log, not thrown.
 		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("non-fatal"))
 		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("task disposed"))
-		// Delegation metadata is still persisted for the (already disposed) parent.
+		// Delegation metadata is still persisted for the (already disposed) parent:
+		// capture the updater's resulting item and assert the delegated status and both
+		// child links, not just that the metadata transaction was entered.
 		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
-		expect(taskHistoryStore.atomicReadAndUpdate.mock.calls[0][0]).toBe("parent-1")
+		const [calledTaskId, updater] = taskHistoryStore.atomicReadAndUpdate.mock.calls[0]
+		expect(calledTaskId).toBe("parent-1")
+		expect(updater(parentHistoryItem)).toMatchObject({
+			id: "parent-1",
+			status: "delegated",
+			delegatedToId: "child-1",
+			awaitingChildId: "child-1",
+			childIds: expect.arrayContaining(["child-1"]),
+		})
 		// And the child is still scheduled despite the failed notification.
 		expect(childRun).toHaveBeenCalledTimes(1)
 	})

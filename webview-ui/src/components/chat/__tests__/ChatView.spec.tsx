@@ -1561,11 +1561,20 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 
 		await postToolAsk(NEW_TASK_ASK)
 
-		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
 		// Pre-filled with the effort the extension resolved for the new task...
 		expect(select).toHaveValue("low")
 		// ...and offers exactly the levels the target model supports.
 		expect(Array.from(select.options).map((option) => option.value)).toEqual(["low", "medium", "high"])
+		// Option labels are bound to the translated level keys (settings:providers.reasoningEffort.*);
+		// in this test the effective t() is the identity function, so the raw keys render verbatim.
+		expect(Array.from(select.options).map((option) => option.textContent)).toEqual([
+			"settings:providers.reasoningEffort.low",
+			"settings:providers.reasoningEffort.medium",
+			"settings:providers.reasoningEffort.high",
+		])
 	})
 
 	it("falls back to the first supported level when the pre-fill is not supported", async () => {
@@ -1573,7 +1582,9 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 
 		await postToolAsk({ ...NEW_TASK_ASK, thinkingEffort: "xhigh", supportedThinkingEfforts: ["low", "high"] })
 
-		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
 		expect(select).toHaveValue("low")
 	})
 
@@ -1586,7 +1597,9 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		// not the raw payload value the user never saw.
 		await postToolAsk({ ...NEW_TASK_ASK, thinkingEffort: "xhigh", supportedThinkingEfforts: ["low", "high"] })
 
-		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
 		expect(select).toHaveValue("low")
 
 		await act(async () => {
@@ -1605,7 +1618,7 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 
 		await postToolAsk(NEW_TASK_ASK)
 		await waitFor(() => {
-			expect(getByLabelText("Thinking effort")).toBeInTheDocument()
+			expect(getByLabelText("settings:providers.reasoningEffort.label")).toBeInTheDocument()
 		})
 
 		// A subsequent readFile ask must drop the selector: the effort state is
@@ -1618,7 +1631,7 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		})
 
 		await waitFor(() => {
-			expect(queryByLabelText("Thinking effort")).not.toBeInTheDocument()
+			expect(queryByLabelText("settings:providers.reasoningEffort.label")).not.toBeInTheDocument()
 		})
 	})
 
@@ -1631,14 +1644,16 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		await waitFor(() => {
 			expect(getByRole("button", { name: "chat:approve.title" })).toBeInTheDocument()
 		})
-		expect(queryByLabelText("Thinking effort")).not.toBeInTheDocument()
+		expect(queryByLabelText("settings:providers.reasoningEffort.label")).not.toBeInTheDocument()
 	})
 
 	it("posts the selected effort when the user approves the newTask ask", async () => {
 		const { getByLabelText, getByRole } = renderChatView()
 
 		await postToolAsk(NEW_TASK_ASK)
-		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
 
 		// The user switches the effort before entering the subtask...
 		await act(async () => {
@@ -1661,7 +1676,9 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		const { getByLabelText, getByRole, getByTestId } = renderChatView()
 
 		await postToolAsk(NEW_TASK_ASK)
-		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
 		await act(async () => {
 			fireEvent.change(select, { target: { value: "medium" } })
 		})
@@ -1704,7 +1721,9 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		const { getByLabelText, getByTestId } = renderChatView()
 
 		await postToolAsk(NEW_TASK_ASK)
-		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
 		await act(async () => {
 			fireEvent.change(select, { target: { value: "high" } })
 		})
