@@ -1531,3 +1531,174 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 		)
 	})
 })
+
+describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => {
+	// Posts a fresh state snapshot whose last message is the given tool ask.
+	const postToolAsk = (toolPayload: Record<string, unknown>) =>
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Parent task" },
+				{ type: "ask", ask: "tool", ts: 2, text: JSON.stringify(toolPayload) },
+			],
+		})
+
+	const NEW_TASK_ASK: Record<string, unknown> = {
+		tool: "newTask",
+		mode: "Code Mode",
+		content: "Do the delegated work",
+		todos: [],
+		thinkingEffort: "low",
+		supportedThinkingEfforts: ["low", "medium", "high"],
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockTaskHeaderState.renders.length = 0
+	})
+
+	it("renders the effort selector pre-filled from the newTask ask payload", async () => {
+		const { getByLabelText } = renderChatView()
+
+		await postToolAsk(NEW_TASK_ASK)
+
+		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		// Pre-filled with the effort the extension resolved for the new task...
+		expect(select).toHaveValue("low")
+		// ...and offers exactly the levels the target model supports.
+		expect(Array.from(select.options).map((option) => option.value)).toEqual(["low", "medium", "high"])
+	})
+
+	it("falls back to the first supported level when the pre-fill is not supported", async () => {
+		const { getByLabelText } = renderChatView()
+
+		await postToolAsk({ ...NEW_TASK_ASK, thinkingEffort: "xhigh", supportedThinkingEfforts: ["low", "high"] })
+
+		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		expect(select).toHaveValue("low")
+	})
+
+	it("hides the selector for non-newTask tool asks (the ask effect resets the state)", async () => {
+		const { getByLabelText, queryByLabelText } = renderChatView()
+
+		await postToolAsk(NEW_TASK_ASK)
+		await waitFor(() => {
+			expect(getByLabelText("Thinking effort")).toBeInTheDocument()
+		})
+
+		// A subsequent readFile ask must drop the selector: the effort state is
+		// cleared for every unanswered ask and only re-set for newTask asks.
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Parent task" },
+				{ type: "ask", ask: "tool", ts: 3, text: JSON.stringify({ tool: "readFile", path: "a.ts" }) },
+			],
+		})
+
+		await waitFor(() => {
+			expect(queryByLabelText("Thinking effort")).not.toBeInTheDocument()
+		})
+	})
+
+	it("hides the selector when the payload carries no supported efforts", async () => {
+		const { getByRole, queryByLabelText } = renderChatView()
+
+		await postToolAsk({ tool: "newTask", mode: "Code Mode", content: "Do the work", todos: [] })
+
+		// Wait for the ask UI to settle (approve button rendered) before asserting absence.
+		await waitFor(() => {
+			expect(getByRole("button", { name: "chat:approve.title" })).toBeInTheDocument()
+		})
+		expect(queryByLabelText("Thinking effort")).not.toBeInTheDocument()
+	})
+
+	it("posts the selected effort when the user approves the newTask ask", async () => {
+		const { getByLabelText, getByRole } = renderChatView()
+
+		await postToolAsk(NEW_TASK_ASK)
+		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+
+		// The user switches the effort before entering the subtask...
+		await act(async () => {
+			fireEvent.change(select, { target: { value: "high" } })
+		})
+
+		// ...and approves without typing feedback (bare yesButtonClicked branch).
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: "chat:approve.title" }))
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "askResponse",
+			askResponse: "yesButtonClicked",
+			thinkingEffort: "high",
+		})
+	})
+
+	it("posts the selected effort along with feedback text on approval", async () => {
+		const { getByLabelText, getByRole, getByTestId } = renderChatView()
+
+		await postToolAsk(NEW_TASK_ASK)
+		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		await act(async () => {
+			fireEvent.change(select, { target: { value: "medium" } })
+		})
+
+		const input = getByTestId("chat-textarea").querySelector("input")! as HTMLInputElement
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "focus on tests" } })
+			fireEvent.click(getByRole("button", { name: "chat:approve.title" }))
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "askResponse",
+			askResponse: "yesButtonClicked",
+			text: "focus on tests",
+			images: [],
+			thinkingEffort: "medium",
+		})
+	})
+
+	it("posts undefined effort when approving a non-newTask tool ask", async () => {
+		const { getByRole } = renderChatView()
+
+		await postToolAsk({ tool: "readFile", path: "a.ts" })
+		await waitFor(() => {
+			expect(getByRole("button", { name: "chat:approve.title" })).toBeInTheDocument()
+		})
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: "chat:approve.title" }))
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "askResponse",
+			askResponse: "yesButtonClicked",
+			thinkingEffort: undefined,
+		})
+	})
+
+	it("posts the effort when a message is sent during the pending newTask ask", async () => {
+		const { getByLabelText, getByTestId } = renderChatView()
+
+		await postToolAsk(NEW_TASK_ASK)
+		const select = await waitFor(() => getByLabelText("Thinking effort") as HTMLSelectElement)
+		await act(async () => {
+			fireEvent.change(select, { target: { value: "high" } })
+		})
+
+		vscodePostMessageMock.cleanup()
+		const input = getByTestId("chat-textarea").querySelector("input")! as HTMLInputElement
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "please hurry" } })
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "askResponse",
+			askResponse: "messageResponse",
+			text: "please hurry",
+			images: [],
+			thinkingEffort: "high",
+		})
+	})
+})

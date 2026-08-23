@@ -20,7 +20,15 @@ import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchNearby } from "@src/utils/batchNearby"
 import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
-import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
+import type {
+	ClineAsk,
+	ClineSayTool,
+	ClineMessage,
+	ExtensionMessage,
+	AudioType,
+	SuggestionItem,
+	ReasoningEffortExtended,
+} from "@roo-code/types"
 import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
@@ -182,6 +190,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const [enableButtons, setEnableButtons] = useState<boolean>(false)
 	const [primaryButtonText, setPrimaryButtonText] = useState<string | undefined>(undefined)
 	const [secondaryButtonText, setSecondaryButtonText] = useState<string | undefined>(undefined)
+	// DTE series 5/5: the effort chosen in the pending new_task ask block (pre-filled
+	// from the tool payload) and the levels the target model supports for it.
+	const [newTaskAskEffort, setNewTaskAskEffort] = useState<ReasoningEffortExtended | undefined>(undefined)
+	const [newTaskAskSupportedEfforts, setNewTaskAskSupportedEfforts] = useState<ReasoningEffortExtended[] | undefined>(
+		undefined,
+	)
 	const [_didClickCancel, setDidClickCancel] = useState(false)
 	const virtuosoRef = useRef<VirtuosoHandle>(null)
 	const [expandedRows, setExpandedRows] = useState<Record<number, boolean>>({})
@@ -305,6 +319,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					if (lastMessage.isAnswered) {
 						break
 					}
+					// DTE series 5/5: drop any previous new_task ask-block effort selection;
+					// the "tool" case re-sets it when the pending ask is a newTask.
+					setNewTaskAskEffort(undefined)
+					setNewTaskAskSupportedEfforts(undefined)
+
 					// Reset user response flag when a new ask arrives to allow auto-approval
 					userRespondedRef.current = false
 					const isPartial = lastMessage.partial === true
@@ -341,6 +360,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							setClineAsk("tool")
 							setEnableButtons(!isPartial)
 							const tool = JSON.parse(lastMessage.text || "{}") as ClineSayTool
+							// DTE series 5/5: pre-fill the new_task ask effort selector (see NewTaskTool
+							// for how the extension builds these fields); cleared for other tools.
+							if (tool.tool === "newTask") {
+								setNewTaskAskEffort(tool.thinkingEffort)
+								setNewTaskAskSupportedEfforts(tool.supportedThinkingEfforts)
+							}
 							switch (tool.tool) {
 								case "editedExistingFile":
 								case "appliedDiff":
@@ -703,6 +728,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								askResponse: "messageResponse",
 								text,
 								images,
+								// DTE series 5/5: the new_task ask-block effort selection (undefined for other asks).
+								thinkingEffort: newTaskAskEffort,
 							})
 							break
 						// There is no other case that a textfield should be enabled.
@@ -722,6 +749,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			isStreaming,
 			messageQueue.length,
 			apiConfiguration?.apiProvider,
+			// DTE series 5/5: the grouped askResponse branch carries the new_task effort selection.
+			newTaskAskEffort,
 		], // messagesRef and clineAskRef are stable
 	)
 
@@ -793,19 +822,26 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				case "tool":
 				case "use_mcp_server":
 				case "mistake_limit_reached":
-					// Only send text/images if they exist
+					// DTE series 5/5: carry the new_task ask-block effort selection with the
+					// approval; the selector only exists for newTask asks, so this is undefined
+					// (a no-op for the extension) for every other ask type.
 					if (trimmedInput || (images && images.length > 0)) {
 						vscode.postMessage({
 							type: "askResponse",
 							askResponse: "yesButtonClicked",
 							text: trimmedInput,
 							images: images,
+							thinkingEffort: newTaskAskEffort,
 						})
 						// Clear input state after sending
 						setInputValue("")
 						setSelectedImages([])
 					} else {
-						vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
+						vscode.postMessage({
+							type: "askResponse",
+							askResponse: "yesButtonClicked",
+							thinkingEffort: newTaskAskEffort,
+						})
 					}
 					break
 				case "resume_task":
@@ -849,7 +885,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons],
+		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons, newTaskAskEffort],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -1759,6 +1795,42 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								</>
 							) : (
 								<>
+									{/* DTE series 5/5: the new_task ask effort selector — pre-filled from the
+										tool payload, switchable before entering the subtask. Rich surfaces are PR-4. */}
+									{clineAsk === "tool" &&
+										newTaskAskSupportedEfforts &&
+										newTaskAskSupportedEfforts.length > 0 && (
+											<select
+												aria-label="Thinking effort"
+												value={
+													newTaskAskEffort &&
+													newTaskAskSupportedEfforts.includes(newTaskAskEffort)
+														? newTaskAskEffort
+														: newTaskAskSupportedEfforts[0]
+												}
+												onChange={(event) =>
+													// The select only offers model-supported levels (rendered below), so the
+													// raw value is a ReasoningEffortExtended.
+													setNewTaskAskEffort(event.target.value as ReasoningEffortExtended)
+												}
+												style={{
+													border: "1px solid var(--vscode-input-border)",
+													backgroundColor: "var(--vscode-input-background)",
+													color: "var(--vscode-input-foreground)",
+													borderRadius: 2,
+													height: 24,
+													marginRight: 8,
+													padding: "0 4px",
+													fontSize: 12,
+													flexShrink: 0,
+												}}>
+												{newTaskAskSupportedEfforts.map((effort) => (
+													<option key={effort} value={effort}>
+														{effort}
+													</option>
+												))}
+											</select>
+										)}
 									{primaryButtonText && (
 										<StandardTooltip
 											content={

@@ -10,6 +10,8 @@ const MESSAGE_PARAMETER_DESCRIPTION = `Initial user instructions or context for 
 
 const TODOS_PARAMETER_DESCRIPTION = `Optional initial todo list written as a markdown checklist; required when the workspace mandates todos`
 
+const THINKING_EFFORT_PARAMETER_DESCRIPTION = `Optional thinking effort the new task starts with (e.g., "low", "medium", "high"). Must be a level the target model supports. When omitted, the new task starts with the current task's effective effort. The user can still change it before entering the new task.`
+
 export default {
 	type: "function",
 	function: {
@@ -30,6 +32,10 @@ export default {
 				todos: {
 					type: ["string", "null"],
 					description: TODOS_PARAMETER_DESCRIPTION,
+				},
+				thinking_effort: {
+					type: "string",
+					description: THINKING_EFFORT_PARAMETER_DESCRIPTION,
 				},
 			},
 			required: ["mode", "message", "todos"],

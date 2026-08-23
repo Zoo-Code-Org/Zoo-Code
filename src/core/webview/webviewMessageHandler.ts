@@ -716,7 +716,14 @@ export const webviewMessageHandler = async (
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
 				provider
 					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+					// DTE series 5/5: forward the new_task ask-block effort selection (undefined
+					// for all other ask responses).
+					?.handleWebviewAskResponse(
+						message.askResponse!,
+						resolved.text,
+						resolved.images,
+						message.thinkingEffort,
+					)
 			}
 			break
 

@@ -386,4 +386,81 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistoryItem)
 	})
+
+	it("applies the parent-supplied starting effort to the child at init (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+		})
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		const child = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "high",
+		})
+		await Promise.resolve() // drain scheduler microtask so child.run() is invoked
+
+		expect(child.taskId).toBe("child-1")
+		// Applied as a task-local override with provenance "parent" before the child's
+		// first request (the child header shows it from the start).
+		expect(setRuntimeThinkingEffort).toHaveBeenCalledTimes(1)
+		expect(setRuntimeThinkingEffort).toHaveBeenCalledWith("high", "parent")
+	})
+
+	it("leaves the child's effort untouched when no starting effort is supplied (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+		})
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+		})
+		await Promise.resolve()
+
+		expect(setRuntimeThinkingEffort).not.toHaveBeenCalled()
+	})
 })

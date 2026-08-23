@@ -35,6 +35,7 @@ import {
 	type CreateTaskOptions,
 	type TokenUsage,
 	type ToolUsage,
+	type ReasoningEffortExtended,
 	type ExtensionMessage,
 	type ExtensionState,
 	type MarketplaceInstalledMetadata,
@@ -3714,8 +3715,11 @@ export class ClineProvider
 		message: string
 		initialTodos: TodoItem[]
 		mode: string
+		// DTE series 5/5: the subtask start effort (model-specified or the parent's
+		// current effective effort); applied to the child at init below.
+		thinkingEffort?: ReasoningEffortExtended
 	}): Promise<Task> {
-		const { parentTaskId, message, initialTodos, mode } = params
+		const { parentTaskId, message, initialTodos, mode, thinkingEffort } = params
 
 		// Metadata-driven delegation is always enabled
 
@@ -3807,6 +3811,13 @@ export class ClineProvider
 			initialStatus: "active",
 			startTask: false,
 		})
+
+		// DTE series 5/5: apply the subtask start effort as a task-local override before
+		// the child's first request so the child header shows it from the start.
+		// Source "parent" — set by the orchestrator, not the child's own settings.
+		if (thinkingEffort !== undefined) {
+			child.setRuntimeThinkingEffort(thinkingEffort, "parent")
+		}
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a

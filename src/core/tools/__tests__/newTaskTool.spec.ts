@@ -97,6 +97,11 @@ const mockCline = {
 	enableCheckpoints: false,
 	checkpointSave: mockCheckpointSave,
 	startSubtask: mockStartSubtask,
+	// DTE series 5/5: new_task resolves the target model's capability from the
+	// task's API handler and consults the pending new_task ask effort on Task.
+	api: { getModel: () => ({ id: "test-model", info: {} }) },
+	resolveNewTaskEffectiveEffort: vi.fn().mockReturnValue(undefined),
+	takeNewTaskAskThinkingEffort: vi.fn().mockReturnValue(undefined),
 	providerRef: {
 		deref: vi.fn(() => ({
 			getState: vi.fn(() => ({ customModes: [], mode: "ask" })),
@@ -635,6 +640,10 @@ describe("newTaskTool delegation flow", () => {
 			enableCheckpoints: false,
 			checkpointSave: mockCheckpointSave,
 			startSubtask: localStartSubtask,
+			// DTE series 5/5: target model lookup + ask-block effort plumbing.
+			api: { getModel: () => ({ id: "test-model", info: {} }) },
+			resolveNewTaskEffectiveEffort: vi.fn().mockReturnValue(undefined),
+			takeNewTaskAskThinkingEffort: vi.fn().mockReturnValue(undefined),
 			providerRef: {
 				deref: vi.fn(() => providerSpy),
 			},
@@ -659,11 +668,14 @@ describe("newTaskTool delegation flow", () => {
 		})
 
 		// Assert: provider method called with correct params
+		// DTE series 5/5: thinkingEffort is always present; undefined here because the
+		// tool, the ask block, and the parent's effective resolution all yield none.
 		expect(providerSpy.delegateParentAndOpenChild).toHaveBeenCalledWith({
 			parentTaskId: "mock-parent-task-id",
 			message: "Do something",
 			initialTodos: [],
 			mode: "code",
+			thinkingEffort: undefined,
 		})
 
 		// Assert: legacy path not used

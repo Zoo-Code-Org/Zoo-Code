@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 
-import { TodoItem } from "@roo-code/types"
+import { TodoItem, type ReasoningEffortExtended } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { getModeBySlug } from "../../shared/modes"
@@ -15,13 +15,32 @@ interface NewTaskParams {
 	mode: string
 	message: string
 	todos?: string
+	// DTE series 5/5: optional subtask start effort (validated against the target model).
+	thinking_effort?: string
 }
+
+// DTE series 5/5: the effort levels a new task can start with. "disable" is a settings
+// off-switch, not a start level, so it is excluded from this list.
+const NEW_TASK_EFFORT_LEVELS: readonly ReasoningEffortExtended[] = [
+	"none",
+	"minimal",
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]
+
+// Narrows a raw tool argument to a reasoning-effort level (single documented cast:
+// the literal list above is exactly the value set of ReasoningEffortExtended).
+const isNewTaskEffortLevel = (value: string): value is ReasoningEffortExtended =>
+	(NEW_TASK_EFFORT_LEVELS as readonly string[]).includes(value)
 
 export class NewTaskTool extends BaseTool<"new_task"> {
 	readonly name = "new_task" as const
 
 	async execute(params: NewTaskParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
-		const { mode, message, todos } = params
+		const { mode, message, todos, thinking_effort } = params
 		const { askApproval, handleError, pushToolResult } = callbacks
 
 		try {
@@ -40,6 +59,27 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 				task.didToolFailInCurrentTurn = true
 				pushToolResult(await task.sayAndCreateMissingParamError("new_task", "message"))
 				return
+			}
+
+			// DTE series 5/5: the child task is created with the parent's API configuration,
+			// so the child model is the parent's current model. Validate the optional start
+			// effort against that model's capability array before asking for approval.
+			const modelCapabilities = task.api.getModel().info.supportsReasoningEffort
+			let validatedEffort: ReasoningEffortExtended | undefined
+			if (thinking_effort !== undefined && thinking_effort !== "") {
+				const supportedLevels = Array.isArray(modelCapabilities) ? modelCapabilities : []
+				if (!isNewTaskEffortLevel(thinking_effort) || !supportedLevels.includes(thinking_effort)) {
+					const reason = !isNewTaskEffortLevel(thinking_effort)
+						? `must be one of: ${NEW_TASK_EFFORT_LEVELS.join(", ")}`
+						: supportedLevels.length > 0
+							? `the target model only supports: ${
+									supportedLevels.filter((level) => level !== "disable").join(", ") || "none"
+								}`
+							: "the target model does not support thinking_effort"
+					pushToolResult(formatResponse.toolError(`Invalid thinking_effort '${thinking_effort}'. ${reason}`))
+					return
+				}
+				validatedEffort = thinking_effort
 			}
 
 			// Get the VSCode setting for requiring todos.
@@ -96,11 +136,19 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 				return
 			}
 
+			// DTE series 5/5: the ask payload pre-fills the webview effort selector with
+			// the validated model effort (falling back to the parent's current effective
+			// effort) and lists the levels the target model supports ("disable" is a
+			// settings off-switch, not a level a child task can start with).
 			const toolMessage = JSON.stringify({
 				tool: "newTask",
 				mode: targetMode.name,
 				content: message,
 				todos: todoItems,
+				thinkingEffort: validatedEffort ?? task.resolveNewTaskEffectiveEffort(),
+				supportedThinkingEfforts: Array.isArray(modelCapabilities)
+					? modelCapabilities.filter((level): level is ReasoningEffortExtended => level !== "disable")
+					: undefined,
 			})
 
 			const didApprove = await askApproval("tool", toolMessage)
@@ -109,12 +157,24 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 				return
 			}
 
+			// DTE series 5/5: the user may have switched the effort in the ask block —
+			// the ask response carries it (consumed once from Task) and wins over the
+			// model-specified value, which wins over the parent's effective effort. An
+			// ask selection the target model does not support falls back the same way.
+			const askEffort = task.takeNewTaskAskThinkingEffort()
+			const askEffortSupported =
+				askEffort !== undefined && Array.isArray(modelCapabilities) && modelCapabilities.includes(askEffort)
+			const childThinkingEffort = askEffortSupported
+				? askEffort
+				: (validatedEffort ?? task.resolveNewTaskEffectiveEffort())
+
 			// Delegate parent and open child as sole active task
 			const child = await (provider as any).delegateParentAndOpenChild({
 				parentTaskId: task.taskId,
 				message: unescapedMessage,
 				initialTodos: todoItems,
 				mode,
+				thinkingEffort: childThinkingEffort,
 			})
 
 			// Reflect delegation in tool result (no pause/unpause, no wait)
