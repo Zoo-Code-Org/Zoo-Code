@@ -2,8 +2,26 @@
 
 import { RooTerminalCallbacks } from "../types"
 import { ExecaTerminal } from "../ExecaTerminal"
+import { ExecaTerminalProcess } from "../ExecaTerminalProcess"
 
 describe("ExecaTerminal", () => {
+	it("rejects the command promise when process startup rejects", async () => {
+		const startupError = new Error("execa startup failed")
+		const runSpy = vi.spyOn(ExecaTerminalProcess.prototype, "run").mockRejectedValueOnce(startupError)
+		const terminal = new ExecaTerminal(1, "/tmp")
+
+		const commandPromise = terminal.runCommand("echo test", {
+			onLine: vi.fn(),
+			onCompleted: vi.fn(),
+			onShellExecutionStarted: vi.fn(),
+			onShellExecutionComplete: vi.fn(),
+		})
+
+		await expect(commandPromise).rejects.toThrow("execa startup failed")
+		expect(runSpy).toHaveBeenCalledWith("echo test")
+		runSpy.mockRestore()
+	})
+
 	it("should run terminal commands and collect output", async () => {
 		// TODO: Run the equivalent test for Windows.
 		if (process.platform === "win32") {

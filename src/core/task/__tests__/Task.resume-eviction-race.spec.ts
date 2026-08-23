@@ -19,6 +19,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // ─── Hoisted mocks ───────────────────────────────────────────────────────────
 
@@ -161,7 +162,7 @@ describe("Task resume/eviction race (Work #1 (no message) regression)", () => {
 		}
 
 		mockApiConfig = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiModelId: "claude-3-5-sonnet-20241022",
 			apiKey: "test-api-key",
 		}

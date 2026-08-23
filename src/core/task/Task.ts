@@ -1182,7 +1182,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
-		const approval = await checkAutoApproval({ state, ask: type, text, isProtected })
+		// `this.cwd`, not `provider.cwd`:
+		// The path inside `text` was made relative to this task's workspace,
+		// which for a resumed or child task need not be the one the provider
+		// currently reports.
+		const approval = await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
@@ -2101,10 +2105,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						const toolUseBlocks = content.filter(
 							(block) => block.type === "tool_use",
 						) as Anthropic.Messages.ToolUseBlock[]
+						// Mark the synthetic results as errors (is_error: true) so the persisted
+						// history cannot be misread as a successful completion of the interrupted
+						// tool calls (e.g. attempt_completion). The task list already records the
+						// task as interrupted; the API history must agree.
+						// See: https://github.com/Zoo-Code-Org/Zoo-Code/issues/1283
 						const toolResponses: Anthropic.ToolResultBlockParam[] = toolUseBlocks.map((block) => ({
 							type: "tool_result",
 							tool_use_id: block.id,
 							content: "Task was interrupted before this tool call could be completed.",
+							is_error: true,
 						}))
 						modifiedApiConversationHistory = [...existingApiConversationHistory] // no changes
 						modifiedOldUserContent = [...toolResponses]
@@ -2140,10 +2150,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									(toolUse) =>
 										!existingToolResults.some((result) => result.tool_use_id === toolUse.id),
 								)
+								// is_error: true — same rationale as the assistant-last case above.
+								// See: https://github.com/Zoo-Code-Org/Zoo-Code/issues/1283
 								.map((toolUse) => ({
 									type: "tool_result",
 									tool_use_id: toolUse.id,
 									content: "Task was interrupted before this tool call could be completed.",
+									is_error: true,
 								}))
 
 							modifiedApiConversationHistory = existingApiConversationHistory.slice(0, -1) // removes the last user message
