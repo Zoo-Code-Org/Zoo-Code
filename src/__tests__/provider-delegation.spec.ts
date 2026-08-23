@@ -519,6 +519,57 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(childRun).toHaveBeenCalledTimes(1)
 	})
 
+	it("does not abort delegation when the fallback say rejects after the parent is disposed (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		// The parent is already disposed when this say runs, so the webview state can be
+		// gone and the say rejects (e.g. posting to a removed task).
+		const say = vi.fn().mockRejectedValue(new Error("task disposed"))
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+			say,
+			api: { getModel: () => ({ id: "child-model", info: { supportsReasoningEffort: ["low", "high"] } }) },
+		})
+		const taskHistoryStore = makeStoreStub()
+		const providerLog = vi.fn()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: providerLog,
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		// Must NOT reject: the failing notification is non-fatal.
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "xhigh",
+		})
+		await Promise.resolve()
+
+		// The say rejection is surfaced through the provider log, not thrown.
+		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("non-fatal"))
+		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("task disposed"))
+		// Delegation metadata is still persisted for the (already disposed) parent.
+		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		expect(taskHistoryStore.atomicReadAndUpdate.mock.calls[0][0]).toBe("parent-1")
+		// And the child is still scheduled despite the failed notification.
+		expect(childRun).toHaveBeenCalledTimes(1)
+	})
+
 	it("applies the effort when the child model (post mode switch) has a boolean-true capability (DTE series 5/5)", async () => {
 		const parentTask = makeParentTask()
 		const setRuntimeThinkingEffort = vi.fn()
