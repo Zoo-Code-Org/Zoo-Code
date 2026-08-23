@@ -385,6 +385,43 @@ describe("MarkdownBlock", () => {
 			expect(anchor.getAttribute("href")).not.toContain("\u0001")
 		})
 
+		it("keeps reference link labels inert and preserves the label text", async () => {
+			// A mention inside a reference link's label renders as the anchor's
+			// text. Rewriting it to a mention placeholder would leak the raw
+			// placeholder (rehypeMentions skips anchors, so the control characters
+			// would render verbatim inside the link) and a role=button span inside
+			// <a> would be invalid nested interactive content. The whole reference
+			// region must stay masked.
+			const markdown = "See [the @problems summary][docs] now.\n\n[docs]: https://example.com/problems"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/now/, { exact: false })
+
+			const anchor = container.querySelector("a")!
+			expect(anchor).toHaveAttribute("href", "https://example.com/problems")
+			expect(anchor.textContent).toBe("the @problems summary")
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+
+			// No placeholder control characters leak into the rendered output.
+			expect(container.textContent).not.toContain("\u0001")
+		})
+
+		it("keeps image reference alt text inert and preserves the alt attribute", async () => {
+			// An image reference's alt renders as the img's alt attribute. Rewriting
+			// it to a mention placeholder would corrupt the alt instead of producing
+			// a mention span. The whole reference region must stay masked.
+			const markdown = "See ![a @problems screenshot][docs] now.\n\n[docs]: https://example.com/problems.png"
+			const { container } = render(<MarkdownBlock markdown={markdown} mentions />)
+
+			await screen.findByText(/now/, { exact: false })
+
+			const img = container.querySelector("img")!
+			expect(img).toHaveAttribute("src", "https://example.com/problems.png")
+			expect(img).toHaveAttribute("alt", "a @problems screenshot")
+			expect(container.querySelectorAll("span.mention-context-highlight").length).toBe(0)
+			expect(container.textContent).not.toContain("\u0001")
+		})
+
 		it("keeps the shared regex boundary rules when a mention directly follows a link or inline code", async () => {
 			// Matching must run on the raw string so the shared regex's start boundary
 			// sees the real characters: with no whitespace after a closing `)` or a

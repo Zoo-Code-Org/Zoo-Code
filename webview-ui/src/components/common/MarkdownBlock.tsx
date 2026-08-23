@@ -27,9 +27,11 @@ const MENTION_PLACEHOLDER_REGEX = new RegExp(`${MENTION_PLACEHOLDER_CHAR}(\\d+)$
 
 // mdast node types whose raw source regions must never be mention-rewritten:
 // code blocks (fenced or indented), inline code, links, images, raw HTML, math,
-// and reference link definitions all render as literal or non-text content
-// (rewriting a definition's destination would corrupt the reference link's
-// href instead of producing a mention span).
+// reference link definitions, and reference links/images all render as literal
+// or non-text content. Rewriting a definition's destination would corrupt the
+// reference link's href; rewriting a reference label or alt would leak the raw
+// placeholder into the anchor text or img alt (rehypeMentions skips anchors),
+// instead of producing a mention span.
 const MENTION_MASK_NODE_TYPES = new Set([
 	"code",
 	"inlineCode",
@@ -39,6 +41,8 @@ const MENTION_MASK_NODE_TYPES = new Set([
 	"inlineMath",
 	"math",
 	"definition",
+	"linkReference",
+	"imageReference",
 ])
 
 /**
@@ -55,10 +59,10 @@ const MENTION_MASK_NODE_TYPES = new Set([
  * Matching runs on the raw string so the shared regex's boundary rules apply
  * unchanged (replacing literal regions with spaces would turn a preceding `)`
  * or backtick into whitespace and make non-mentions actionable). Literal / non-
- * text regions (code, links, images, HTML, math, reference link definitions)
- * are marked via a throwaway mdast parse with the exact positions remark sees,
- * and a match whose range intersects one of them is discarded so mentions
- * inside such regions stay inert.
+ * text regions (code, links, images, HTML, math, reference link definitions,
+ * and reference links/images) are marked via a throwaway mdast parse with the
+ * exact positions remark sees, and a match whose range intersects one of them
+ * is discarded so mentions inside such regions stay inert.
  */
 function prepareMentions(markdown: string): { preparedMarkdown: string; mentions: string[] } {
 	if (!markdown) {
@@ -70,8 +74,10 @@ function prepareMentions(markdown: string): { preparedMarkdown: string; mentions
 	// non-text regions (mdast positions carry absolute source offsets): a
 	// mention inside any of them must stay inert, because code and links render
 	// as literal/interactive content, images, raw HTML, and math keep their
-	// source text unchanged, and a reference link definition's destination
-	// becomes the link's href (rewriting it would corrupt the href).
+	// source text unchanged, a reference link definition's destination becomes
+	// the link's href, and a reference link/image label or alt renders as the
+	// anchor text or img alt (rewriting any of them would corrupt the href/alt
+	// or leak the raw placeholder into the rendered output).
 	const tree = unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(markdown)
 
 	const isMasked = new Array<boolean>(markdown.length).fill(false)
