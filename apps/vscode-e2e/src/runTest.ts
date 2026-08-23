@@ -18,7 +18,7 @@ import { addTerminalProfileResultFixtures } from "./fixtures/terminal-profile"
 import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
-import { addSubtaskFixtures } from "./fixtures/subtasks"
+import { addDteNewTaskEffortFixtures, addSubtaskFixtures } from "./fixtures/subtasks"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 import { createScenarioWorkspace, removeScenarioWorkspace } from "./restart/scenarioWorkspace"
@@ -140,6 +140,7 @@ async function main() {
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
 				addSubtaskFixtures(mock)
+				addDteNewTaskEffortFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 				addDeepSeekV4Fixtures(mock)

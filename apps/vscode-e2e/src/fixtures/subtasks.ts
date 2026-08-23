@@ -627,3 +627,192 @@ export function addSubtaskFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 	})
 }
+
+// ---------------------------------------------------------------------------
+// DTE series 5/5 — new_task thinking_effort pass-through (e2e).
+//
+// Three scenarios with unique, stable markers (no timestamps, no environment
+// details):
+// - INHERIT:  the parent's new_task call carries NO thinking_effort — the child
+//   starts with the parent's current effective effort (PR-2 resolution) and the
+//   child's real request must carry it.
+// - EXPLICIT: the parent's new_task call carries thinking_effort "high" on a
+//   model with a capability array — validation passes and the child subtask
+//   runs to completion on the real host.
+// - NEGATIVE: the parent's new_task call carries thinking_effort on a model
+//   without a capability array — the tool rejects before the approval ask, no
+//   child is created, and the error is visible to the model.
+export const DTE_NT_INHERIT_PARENT_MARKER = "DTE_E2E_NT_INHERIT_PARENT"
+export const DTE_NT_INHERIT_CHILD_MARKER = "DTE_E2E_NT_INHERIT_CHILD"
+const DTE_NT_INHERIT_CHILD_PROMPT = `${DTE_NT_INHERIT_CHILD_MARKER}: Complete immediately with the exact result "DTE inherit child completed".`
+export const DTE_NT_INHERIT_PARENT_PROMPT = `${DTE_NT_INHERIT_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${DTE_NT_INHERIT_CHILD_PROMPT}" Do not answer directly. When the subtask returns, complete with the exact result "DTE inherit parent resumed".`
+export const DTE_NT_INHERIT_CHILD_RESULT = "DTE inherit child completed"
+export const DTE_NT_INHERIT_PARENT_RESULT = "DTE inherit parent resumed"
+
+const DTE_NT_EXPLICIT_PARENT_MARKER = "DTE_E2E_NT_EXPLICIT_PARENT"
+const DTE_NT_EXPLICIT_CHILD_MARKER = "DTE_E2E_NT_EXPLICIT_CHILD"
+const DTE_NT_EXPLICIT_CHILD_PROMPT = `${DTE_NT_EXPLICIT_CHILD_MARKER}: Complete immediately with the exact result "DTE explicit child completed".`
+export const DTE_NT_EXPLICIT_PARENT_PROMPT = `${DTE_NT_EXPLICIT_PARENT_MARKER}: Use the new_task tool exactly once. Create an ask-mode subtask with this exact message: "${DTE_NT_EXPLICIT_CHILD_PROMPT}" Do not answer directly. When the subtask returns, complete with the exact result "DTE explicit parent resumed".`
+export const DTE_NT_EXPLICIT_CHILD_RESULT = "DTE explicit child completed"
+export const DTE_NT_EXPLICIT_PARENT_RESULT = "DTE explicit parent resumed"
+
+const DTE_NT_NEGATIVE_PARENT_MARKER = "DTE_E2E_NT_NEGATIVE_PARENT"
+const DTE_NT_NEGATIVE_CHILD_MARKER = "DTE_E2E_NT_NEGATIVE_CHILD"
+const DTE_NT_NEGATIVE_CHILD_PROMPT = `${DTE_NT_NEGATIVE_CHILD_MARKER}: Complete immediately with the exact result "DTE negative child completed".`
+export const DTE_NT_NEGATIVE_PARENT_PROMPT = `${DTE_NT_NEGATIVE_PARENT_MARKER}: Use the new_task tool exactly once, with thinking_effort set to "high". Create an ask-mode subtask with this exact message: "${DTE_NT_NEGATIVE_CHILD_PROMPT}" Do not answer directly. If the tool call is rejected, complete with the exact result "DTE negative parent completed".`
+export const DTE_NT_NEGATIVE_PARENT_RESULT = "DTE negative parent completed"
+
+export function addDteNewTaskEffortFixtures(mock: InstanceType<typeof LLMock>) {
+	// INHERIT: parent turn -> new_task without an explicit effort.
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(DTE_NT_INHERIT_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: DTE_NT_INHERIT_CHILD_PROMPT,
+					}),
+					id: "call_dte_nt_inherit_new_task_001",
+				},
+			],
+		},
+	})
+
+	// Child turn: the child prompt is embedded verbatim in the parent prompt, so the
+	// parent-marker exclusion keeps parent turns out of this fixture (same collision
+	// class as the fast-child fixture above).
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, DTE_NT_INHERIT_CHILD_MARKER) &&
+				!requestContains(req, [DTE_NT_INHERIT_PARENT_MARKER]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: DTE_NT_INHERIT_CHILD_RESULT }),
+					id: "call_dte_nt_inherit_child_completion_002",
+				},
+			],
+		},
+	})
+
+	// Parent resume turn: guarded on the child-result injection (not the child result
+	// text, which the parent prompt embeds verbatim).
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [DTE_NT_INHERIT_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: DTE_NT_INHERIT_PARENT_RESULT }),
+					id: "call_dte_nt_inherit_parent_completion_003",
+				},
+			],
+		},
+	})
+
+	// EXPLICIT: parent turn -> new_task with thinking_effort "high" (valid on models
+	// whose capability array accepts it, e.g. deepseek-v4-pro).
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(DTE_NT_EXPLICIT_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: DTE_NT_EXPLICIT_CHILD_PROMPT,
+						thinking_effort: "high",
+					}),
+					id: "call_dte_nt_explicit_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				lastUserMessageContains(req, DTE_NT_EXPLICIT_CHILD_MARKER) &&
+				!requestContains(req, [DTE_NT_EXPLICIT_PARENT_MARKER]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: DTE_NT_EXPLICIT_CHILD_RESULT }),
+					id: "call_dte_nt_explicit_child_completion_002",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [DTE_NT_EXPLICIT_PARENT_MARKER, SUBTASK_RESULT_INJECTION]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: DTE_NT_EXPLICIT_PARENT_RESULT }),
+					id: "call_dte_nt_explicit_parent_completion_003",
+				},
+			],
+		},
+	})
+
+	// NEGATIVE: parent turn -> new_task with thinking_effort "high" on a model without a
+	// capability array. The tool rejects before the approval ask, so the next parent
+	// turn is the error-recovery completion (matched on the tool-error text, which only
+	// appears in a request after the rejected call).
+	mock.addFixture({
+		match: {
+			userMessage: new RegExp(DTE_NT_NEGATIVE_PARENT_MARKER),
+			sequenceIndex: 0,
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "new_task",
+					arguments: JSON.stringify({
+						mode: "ask",
+						message: DTE_NT_NEGATIVE_CHILD_PROMPT,
+						thinking_effort: "high",
+					}),
+					id: "call_dte_nt_negative_new_task_001",
+				},
+			],
+		},
+	})
+
+	mock.addFixture({
+		match: {
+			predicate: (req: ChatCompletionRequest) =>
+				requestContains(req, [DTE_NT_NEGATIVE_PARENT_MARKER, "Invalid thinking_effort"]),
+		},
+		response: {
+			toolCalls: [
+				{
+					name: "attempt_completion",
+					arguments: JSON.stringify({ result: DTE_NT_NEGATIVE_PARENT_RESULT }),
+					id: "call_dte_nt_negative_parent_completion_002",
+				},
+			],
+		},
+	})
+}
