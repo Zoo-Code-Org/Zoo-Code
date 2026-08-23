@@ -6,6 +6,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import type { CodeIndexManager } from "../../../services/code-index/manager"
 import type { McpHub } from "../../../services/mcp/McpHub"
 import { isToolAllowedForMode } from "../../../core/tools/validateToolUse"
+import { EXPERIMENT_IDS } from "../../../shared/experiments"
 
 /**
  * Reverse lookup map - maps alias name to canonical tool name.
@@ -295,6 +296,14 @@ export function filterNativeToolsForMode(
 		allowedToolNames.delete("run_slash_command")
 	}
 
+	// DTE series 3/5: conditionally exclude set_thinking_effort unless the
+	// dynamicThinkingEffort experiment is enabled AND the current model supports
+	// per-request reasoning effort. The gate is evaluated here at task start so
+	// the tool list stays stable within a task (prompt-cache safety).
+	if (!isSetThinkingEffortEnabled(experiments, settings?.modelInfo as ModelInfo | undefined)) {
+		allowedToolNames.delete("set_thinking_effort")
+	}
+
 	// Remove tools that are explicitly disabled via the disabledTools setting
 	if (settings?.disabledTools?.length) {
 		for (const toolName of settings.disabledTools) {
@@ -355,6 +364,32 @@ function hasAnyMcpResources(mcpHub: McpHub, allowedServers?: string[]): boolean 
 }
 
 /**
+ * DTE series 3/5: whether the set_thinking_effort tool should be exposed.
+ *
+ * Requires both the dynamicThinkingEffort experiment to be enabled and the
+ * model to advertise per-request reasoning effort support (a non-empty
+ * `supportsReasoningEffort` capability array, or boolean/adaptive-class
+ * support). Evaluated at task start only (prompt-cache safety).
+ *
+ * @param experiments - Experiment flags from the current state
+ * @param modelInfo - Current model info (from apiConfiguration)
+ * @returns true when the tool should be included in the task tool list
+ */
+export function isSetThinkingEffortEnabled(
+	experiments: Record<string, boolean> | undefined,
+	modelInfo: ModelInfo | undefined,
+): boolean {
+	if (experiments?.[EXPERIMENT_IDS.DYNAMIC_THINKING_EFFORT] !== true) {
+		return false
+	}
+	const capability = modelInfo?.supportsReasoningEffort
+	if (Array.isArray(capability)) {
+		return capability.length > 0
+	}
+	return capability === true
+}
+
+/**
  * Checks if a specific tool is allowed in the current mode.
  * This is useful for dynamically filtering system prompt content.
  *
@@ -395,6 +430,9 @@ export function isToolAllowedInMode(
 		}
 		if (toolName === "run_slash_command") {
 			return experiments?.runSlashCommand === true
+		}
+		if (toolName === "set_thinking_effort") {
+			return isSetThinkingEffortEnabled(experiments, settings?.modelInfo as ModelInfo | undefined)
 		}
 		return true
 	}

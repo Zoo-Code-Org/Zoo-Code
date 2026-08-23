@@ -66,6 +66,7 @@ export const toolParamNames = [
 	"new_string", // search_replace and edit_file parameter
 	"replace_all", // edit tool parameter for replacing all occurrences
 	"expected_replacements", // edit_file parameter for multiple occurrences
+	"effort", // set_thinking_effort parameter
 	"timeout", // execute_command parameter
 	"artifact_id", // read_command_output parameter
 	"search", // read_command_output parameter for grep-like search
@@ -109,6 +110,7 @@ export type NativeToolArgs = {
 	}
 	codebase_search: { query: string; path?: string }
 	generate_image: GenerateImageParams
+	set_thinking_effort: { effort: string; reason: string }
 	run_slash_command: { command: string; args?: string }
 	skill: { skill: string; args?: string }
 	search_files: { path: string; regex: string; file_pattern?: string | null }
@@ -289,6 +291,7 @@ export const TOOL_DISPLAY_NAMES: Record<ToolName, string> = {
 	run_slash_command: "run slash command",
 	skill: "load skill",
 	generate_image: "generate images",
+	set_thinking_effort: "set thinking effort",
 	custom_tool: "use custom tools",
 	invalid_tool_call: "invalid tool call",
 } as const
@@ -323,6 +326,7 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"update_todo_list",
 	"run_slash_command",
 	"skill",
+	"set_thinking_effort",
 ] as const
 
 /**

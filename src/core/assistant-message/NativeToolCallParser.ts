@@ -510,6 +510,15 @@ export class NativeToolCallParser {
 				}
 				break
 
+			case "set_thinking_effort":
+				if (partialArgs.effort !== undefined || partialArgs.reason !== undefined) {
+					nativeArgs = {
+						effort: partialArgs.effort,
+						reason: partialArgs.reason,
+					}
+				}
+				break
+
 			case "run_slash_command":
 				if (partialArgs.command !== undefined) {
 					nativeArgs = {
@@ -848,6 +857,15 @@ export class NativeToolCallParser {
 							prompt: args.prompt,
 							path: args.path,
 							image: args.image,
+						} as NativeArgsFor<TName>
+					}
+					break
+
+				case "set_thinking_effort":
+					if (args.effort !== undefined && args.reason !== undefined) {
+						nativeArgs = {
+							effort: args.effort,
+							reason: args.reason,
 						} as NativeArgsFor<TName>
 					}
 					break

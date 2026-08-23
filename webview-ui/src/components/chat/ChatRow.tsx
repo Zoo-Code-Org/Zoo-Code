@@ -65,6 +65,7 @@ import {
 	SquareArrowOutUpRight,
 	FileCode2,
 	PocketKnife,
+	Brain,
 	FolderTree,
 	SquareTerminal,
 	MessageCircle,
@@ -1546,6 +1547,31 @@ export const ChatRowContent = ({
 											({infoText})
 										</span>
 									)}
+								</div>
+							)
+						}
+						case "thinkingEffort": {
+							const info = sayTool
+							return (
+								<div style={headerStyle}>
+									<Brain className="w-4 shrink-0" aria-label="Thinking effort icon" />
+									<span style={{ fontWeight: "bold" }}>
+										{info.refusal ? (
+											info.refusal === "oscillation" ? (
+												t("chat:thinkingEffort.oscillationRefused")
+											) : (
+												t("chat:thinkingEffort.escalationCapRefused")
+											)
+										) : (
+											<Trans
+												i18nKey="chat:thinkingEffort.applied"
+												components={{
+													code: <code className="font-medium">{info.effort}</code>,
+												}}
+												values={{ effort: info.effort, reason: info.reason }}
+											/>
+										)}
+									</span>
 								</div>
 							)
 						}

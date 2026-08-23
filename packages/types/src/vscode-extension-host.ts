@@ -835,6 +835,7 @@ export interface ClineSayTool {
 		| "runSlashCommand"
 		| "updateTodoList"
 		| "skill"
+		| "thinkingEffort"
 	path?: string
 	// For readCommandOutput
 	readStart?: number
@@ -892,6 +893,9 @@ export interface ClineSayTool {
 	description?: string
 	// Properties for skill tool
 	skill?: string
+	// Properties for thinkingEffort (DTE series 3/5)
+	effort?: string
+	refusal?: string
 }
 
 export interface ClineAskUseMcpServer {
