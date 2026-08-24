@@ -473,6 +473,13 @@
 		"didRun": "Zooはスラッシュコマンドを実行しました"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 思考努力度を {{effort}} に設定しました",
+		"chipTooltip": "思考努力度: {{effort}} ({{source}})",
+		"sourceDefault": "デフォルト",
+		"sourceAuto": "Zoo (自動)",
+		"sourceYou": "ユーザー",
+		"toggleTitle": "思考努力度",
+		"adaptiveHint": "このモデルは自動的に努力度を決定します。選択は参考情報です。",
 		"applied": "🧠 思考強度: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 思考強度を変更できません: タスクごとの最大 3 回の引き上げ制限に達しました",
 		"oscillationRefused": "🧠 思考強度を変更できません: レベル間での振動を検出しました"

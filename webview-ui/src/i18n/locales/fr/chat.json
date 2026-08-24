@@ -473,6 +473,13 @@
 		"didRun": "Zoo a exécuté une commande slash"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Effort de raisonnement défini sur : {{effort}}",
+		"chipTooltip": "Effort de raisonnement : {{effort}} ({{source}})",
+		"sourceDefault": "par défaut",
+		"sourceAuto": "Zoo (auto)",
+		"sourceYou": "vous",
+		"toggleTitle": "Effort de raisonnement",
+		"adaptiveHint": "Ce modèle détermine son effort automatiquement — votre choix n'est qu'un guide souple.",
 		"applied": "🧠 Effort de réflexion : {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Effort de réflexion inchangé : limite d'escalade de 3 modifications vers le haut par tâche atteinte",
 		"oscillationRefused": "🧠 Effort de réflexion inchangé : oscillation entre les niveaux détectée"

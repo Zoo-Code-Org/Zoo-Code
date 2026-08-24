@@ -473,6 +473,13 @@
 		"didRun": "Zoo heeft een slash commando uitgevoerd"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Denkinspanning ingesteld op: {{effort}}",
+		"chipTooltip": "Denkinspanning: {{effort}} ({{source}})",
+		"sourceDefault": "standaard",
+		"sourceAuto": "Zoo (auto)",
+		"sourceYou": "jij",
+		"toggleTitle": "Denkinspanning",
+		"adaptiveHint": "Dit model bepaalt zijn inspanning automatisch — je keuze is slechts een zachte aanwijzing.",
 		"applied": "🧠 Denkwerk: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Denkwerk ongewijzigd: limiet van 3 verhogingen per taak bereikt",
 		"oscillationRefused": "🧠 Denkwerk ongewijzigd: oscillatie tussen niveaus gedetecteerd"

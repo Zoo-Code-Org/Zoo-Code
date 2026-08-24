@@ -936,6 +936,38 @@ describe("ClineProvider", () => {
 		expect(state.taskHistory).toEqual([historyItem])
 	})
 
+	test("getStateToPostToWebview surfaces the task-local thinking effort override (DTE 4/5)", async () => {
+		// Models the real Task contract: getRuntimeThinkingEffort always returns an
+		// object; the no-override state is the empty object (effort undefined).
+		// The double is partial on purpose — the spy only needs the method under test;
+		// Task has many constructor-dependent required members, hence the cast.
+		const task = (runtime: { effort?: string; source?: string }) =>
+			({
+				taskId: "effort-task",
+				clineMessages: [],
+				todoList: [],
+				getRuntimeThinkingEffort: () => runtime,
+			}) as unknown as Task
+		vi.spyOn(provider.taskHistoryStore, "getAll").mockReturnValue([])
+		const getCurrentTaskSpy = vi.spyOn(provider, "getCurrentTask")
+
+		getCurrentTaskSpy.mockReturnValue(task({ effort: "high", source: "you" }))
+		let state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toEqual({ effort: "high", source: "you" })
+
+		// A source-less runtime override is reported as the default source.
+		getCurrentTaskSpy.mockReturnValue(task({ effort: "medium" }))
+		state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toEqual({ effort: "medium", source: "default" })
+
+		// Without an active override (the real empty-object shape) the field is omitted.
+		getCurrentTaskSpy.mockReturnValue(task({}))
+		state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toBeUndefined()
+
+		getCurrentTaskSpy.mockRestore()
+	})
+
 	describe("postStateToWebviewThrottled", () => {
 		beforeEach(() => {
 			vi.useFakeTimers()

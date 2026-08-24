@@ -14,6 +14,7 @@ vi.mock("@src/utils/vscode", () => ({
 // Mock i18n (value-substituting Trans for the one-line display)
 const tMap: Record<string, string> = {
 	"chat:thinkingEffort.applied": "🧠 Thinking effort: {{effort}} (Zoo) — {{reason}}",
+	"chat:thinkingEffort.appliedByUser": "🧠 Thinking effort set to: {{effort}}",
 	"chat:thinkingEffort.escalationCapRefused":
 		"🧠 Thinking effort unchanged: escalation limit of 3 upward changes per task reached",
 	"chat:thinkingEffort.oscillationRefused": "🧠 Thinking effort unchanged: oscillation between levels detected",
@@ -100,6 +101,20 @@ describe("ChatRow - thinkingEffort display (DTE series 3/5)", () => {
 		expect(
 			screen.getByText("🧠 Thinking effort unchanged: escalation limit of 3 upward changes per task reached"),
 		).toBeInTheDocument()
+	})
+
+	// DTE series 4/5: user-set (composer toggle) changes reuse the same one-line
+	// display with a user-specific phrasing.
+	it("renders the applied display with user phrasing for source 'you'", () => {
+		renderChatRow(sayToolMessage({ tool: "thinkingEffort", effort: "high", source: "you" }))
+
+		expect(screen.getByText("🧠 Thinking effort set to: high")).toBeInTheDocument()
+	})
+
+	it("keeps the model phrasing for non-user sources", () => {
+		renderChatRow(sayToolMessage({ tool: "thinkingEffort", effort: "high", source: "model", reason: "deep dive" }))
+
+		expect(screen.getByText("🧠 Thinking effort: high (Zoo) — deep dive")).toBeInTheDocument()
 	})
 
 	it("renders nothing for unknown say-tool payloads", () => {

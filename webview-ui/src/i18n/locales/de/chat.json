@@ -473,6 +473,13 @@
 		"didRun": "Zoo hat einen Slash-Befehl ausgeführt"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Denkanstrengung festgelegt auf: {{effort}}",
+		"chipTooltip": "Denkanstrengung: {{effort}} ({{source}})",
+		"sourceDefault": "Standard",
+		"sourceAuto": "Zoo (auto)",
+		"sourceYou": "Sie",
+		"toggleTitle": "Denkanstrengung",
+		"adaptiveHint": "Dieses Modell bestimmt seine Denkanstrengung automatisch — Ihre Auswahl ist nur eine sanfte Vorgabe.",
 		"applied": "🧠 Denkintensität: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Denkintensität unverändert: Limit von 3 Erhöhungen pro Aufgabe erreicht",
 		"oscillationRefused": "🧠 Denkintensität unverändert: Oszillation zwischen Stufen erkannt"

@@ -454,6 +454,13 @@
 		"didRun": "Zoo 執行了斜線指令"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 思考強度已設為:{{effort}}",
+		"chipTooltip": "思考強度:{{effort}}({{source}})",
+		"sourceDefault": "預設",
+		"sourceAuto": "Zoo(自動)",
+		"sourceYou": "你",
+		"toggleTitle": "思考強度",
+		"adaptiveHint": "此模型會自動決定思考強度,你的選擇僅作為軟性指引。",
 		"applied": "🧠 思考強度: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 思考強度未改變: 已達到每任務 3 次上調的升級上限",
 		"oscillationRefused": "🧠 思考強度未改變: 偵測到等級間震盪"

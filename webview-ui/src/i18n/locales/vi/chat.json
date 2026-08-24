@@ -474,6 +474,13 @@
 		"didRun": "Zoo đã chạy lệnh slash"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Đã đặt nỗ lực suy luận: {{effort}}",
+		"chipTooltip": "Nỗ lực suy luận: {{effort}} ({{source}})",
+		"sourceDefault": "mặc định",
+		"sourceAuto": "Zoo (tự động)",
+		"sourceYou": "bạn",
+		"toggleTitle": "Nỗ lực suy luận",
+		"adaptiveHint": "Mô hình này tự quyết định nỗ lực — lựa chọn của bạn chỉ là gợi ý mềm.",
 		"applied": "🧠 Nỗ lực suy nghĩ: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Nỗ lực suy nghĩ không đổi: đã đạt giới hạn 3 lần nâng cao mỗi tác vụ",
 		"oscillationRefused": "🧠 Nỗ lực suy nghĩ không đổi: phát hiện dao động giữa các mức"

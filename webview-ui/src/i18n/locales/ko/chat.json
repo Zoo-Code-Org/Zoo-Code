@@ -473,6 +473,13 @@
 		"didRun": "Zoo가 슬래시 명령어를 실행했습니다"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 사고 노력이 {{effort}}(으)로 설정됨",
+		"chipTooltip": "사고 노력: {{effort}} ({{source}})",
+		"sourceDefault": "기본값",
+		"sourceAuto": "Zoo (자동)",
+		"sourceYou": "사용자",
+		"toggleTitle": "사고 노력",
+		"adaptiveHint": "이 모델은 자동으로 노력도를 결정합니다. 선택은 단순 참고용입니다.",
 		"applied": "🧠 사고 노력: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 사고 노력 변경 없음: 작업당 최대 3회 상향 조정 한도에 도달했습니다",
 		"oscillationRefused": "🧠 사고 노력 변경 없음: 레벨 간 진동 감지됨"

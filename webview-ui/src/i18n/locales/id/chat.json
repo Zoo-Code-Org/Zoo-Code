@@ -479,6 +479,13 @@
 		"didRun": "Zoo telah menjalankan perintah slash"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Upaya pemikiran diatur ke: {{effort}}",
+		"chipTooltip": "Upaya pemikiran: {{effort}} ({{source}})",
+		"sourceDefault": "bawaan",
+		"sourceAuto": "Zoo (otomatis)",
+		"sourceYou": "anda",
+		"toggleTitle": "Upaya pemikiran",
+		"adaptiveHint": "Model ini menentukan usahanya secara otomatis — pilihan Anda hanya panduan lunak.",
 		"applied": "🧠 Usaha berpikir: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Usaha berpikir tidak berubah: batas eskalasi 3 perubahan naik per tugas tercapai",
 		"oscillationRefused": "🧠 Usaha berpikir tidak berubah: osilasi antar tingkat terdeteksi"

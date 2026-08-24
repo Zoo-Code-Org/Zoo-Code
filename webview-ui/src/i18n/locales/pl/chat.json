@@ -473,6 +473,13 @@
 		"didRun": "Zoo uruchomił komendę slash"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Wysiłek myślowy ustawiony na: {{effort}}",
+		"chipTooltip": "Wysiłek myślowy: {{effort}} ({{source}})",
+		"sourceDefault": "domyślny",
+		"sourceAuto": "Zoo (auto)",
+		"sourceYou": "ty",
+		"toggleTitle": "Wysiłek myślowy",
+		"adaptiveHint": "Ten model samodzielnie decyduje o wysiłku — Twój wybór to tylko luźna wskazówka.",
 		"applied": "🧠 Wysiłek myślowy: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Wysiłek myślowy bez zmian: osiągnięto limit 3 eskalacji w górę na zadanie",
 		"oscillationRefused": "🧠 Wysiłek myślowy bez zmian: wykryto oscylację między poziomami"

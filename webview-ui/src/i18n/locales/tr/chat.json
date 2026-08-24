@@ -474,6 +474,13 @@
 		"didRun": "Zoo bir slash komutu çalıştırdı"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 Düşünme çabası şuna ayarlandı: {{effort}}",
+		"chipTooltip": "Düşünme çabası: {{effort}} ({{source}})",
+		"sourceDefault": "varsayılan",
+		"sourceAuto": "Zoo (otomatik)",
+		"sourceYou": "sen",
+		"toggleTitle": "Düşünme çabası",
+		"adaptiveHint": "Bu model çabasını otomatik olarak belirler — seçiminiz yalnızca yumuşak bir yönergedir.",
 		"applied": "🧠 Düşünme çabası: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 Düşünme çabası değişmedi: görev başına 3 artış limiti aşıldı",
 		"oscillationRefused": "🧠 Düşünme çabası değişmedi: seviyeler arası salınım algılandı"

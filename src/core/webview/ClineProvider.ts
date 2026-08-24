@@ -2649,6 +2649,11 @@ export class ClineProvider
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
+		// DTE series 4/5: task-local thinking effort override for the current task
+		// (undefined while no override is active — the webview then derives the
+		// display from settings -> model default). The optional call keeps this
+		// tolerant of partial task doubles in extension tests.
+		const currentTaskRuntimeEffort = currentTask?.getRuntimeThinkingEffort?.()
 		let zooCodeState: {
 			zooCodeIsAuthenticated: boolean
 			zooCodeUserName: string | undefined
@@ -2706,6 +2711,9 @@ export class ClineProvider
 			currentTaskItem: currentTask?.taskId ? this.taskHistoryStore.get(currentTask.taskId) : undefined,
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
+			taskThinkingEffort: currentTaskRuntimeEffort?.effort
+				? { effort: currentTaskRuntimeEffort.effort, source: currentTaskRuntimeEffort.source ?? "default" }
+				: undefined,
 			messageQueue: currentTask?.messageQueueService?.messages,
 			taskHistory: includeTaskHistory
 				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)

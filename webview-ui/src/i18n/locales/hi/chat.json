@@ -473,6 +473,13 @@
 		"didRun": "Zoo ने एक स्लैश कमांड चलाया"
 	},
 	"thinkingEffort": {
+		"appliedByUser": "🧠 सोच प्रयास सेट किया गया: {{effort}}",
+		"chipTooltip": "सोच प्रयास: {{effort}} ({{source}})",
+		"sourceDefault": "डिफ़ॉल्ट",
+		"sourceAuto": "Zoo (ऑटो)",
+		"sourceYou": "आप",
+		"toggleTitle": "सोच प्रयास",
+		"adaptiveHint": "यह मॉडल अपने प्रयास को स्वतः निर्धारित करता है — आपका चयन केवल एक लचीली मार्गदर्शिका है।",
 		"applied": "🧠 चिंतन प्रयास: {{effort}} (Zoo) — {{reason}}",
 		"escalationCapRefused": "🧠 चिंतन प्रयास अपरिवर्तित: प्रति कार्य अधिकतम 3 वृद्धि की सीमा पहुँची",
 		"oscillationRefused": "🧠 चिंतन प्रयास अपरिवर्तित: स्तरों के बीच दोलन का पता चला"
