@@ -16,6 +16,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 
 import { TagMatcher } from "../../utils/tag-matcher"
 
+import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
@@ -287,7 +288,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 	override getModel() {
 		const id = this.options.openAiModelId ?? ""
-		const info: ModelInfo = this.options.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults
+		// F7: fill in user-declared reasoning effort levels where the model (custom
+		// model info or sane defaults) does not advertise its own capability.
+		const info: ModelInfo = withDeclaredReasoningEffort(
+			this.options.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults,
+			this.options,
+		)
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,

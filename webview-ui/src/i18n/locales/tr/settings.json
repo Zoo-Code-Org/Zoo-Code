@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dinamik düşünme çabası",
-			"description": "Modelin her adımda kendi düşünme çabasını belirlemesini ve onu sohbette ayarlamayı sağlar. (deneysel)"
+			"description": "Modelin her adımda kendi düşünme çabasını belirlemesini ve onu sohbette ayarlamayı sağlar. (deneysel)",
+			"hint": "OpenAI uyumlu profiller (özel OpenAI uç noktası, LM Studio, Ollama, LiteLLM ve benzerleri) supportedReasoningEfforts ayarında modellerinin desteklediği akıl yürütme çaba düzeylerini bildirebilir. Bildirilen düzeyler her istekle gönderilir, ancak yerel sunucu bu parametreyi yok sayabilir."
 		}
 	},
 	"promptCaching": {

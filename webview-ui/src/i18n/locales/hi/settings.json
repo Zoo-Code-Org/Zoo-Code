@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"hint": "OpenAI-संगत प्रोफ़ाइल (कस्टम OpenAI एंडपॉइंट, LM Studio, Ollama, LiteLLM और समान) supportedReasoningEfforts सेटिंग में अपने मॉडल द्वारा समर्थित रीज़निंग एफर्ट स्तरों की घोषणा कर सकती हैं। घोषित स्तर हर अनुरोध के साथ भेजे जाते हैं, लेकिन लोकल सर्वर पैरामीटर को नज़रअंदाज़ कर सकता है।"
 		}
 	},
 	"promptCaching": {

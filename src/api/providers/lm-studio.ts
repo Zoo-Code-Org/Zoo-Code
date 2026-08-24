@@ -14,6 +14,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { NativeToolCallParser } from "../../core/assistant-message/NativeToolCallParser"
 import { TagMatcher } from "../../utils/tag-matcher"
 
+import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { ApiStream } from "../transform/stream"
 
@@ -195,12 +196,14 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		if (models && this.options.lmStudioModelId && models[this.options.lmStudioModelId]) {
 			return {
 				id: this.options.lmStudioModelId,
-				info: models[this.options.lmStudioModelId],
+				// F7: fill in user-declared reasoning effort levels where the fetched
+				// model does not advertise its own capability.
+				info: withDeclaredReasoningEffort(models[this.options.lmStudioModelId], this.options),
 			}
 		} else {
 			return {
 				id: this.options.lmStudioModelId || "",
-				info: openAiModelInfoSaneDefaults,
+				info: withDeclaredReasoningEffort(openAiModelInfoSaneDefaults, this.options),
 			}
 		}
 	}

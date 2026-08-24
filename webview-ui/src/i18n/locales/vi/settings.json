@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Nỗ lực suy nghĩ động",
-			"description": "Để model tự quyết định nỗ lực suy nghĩ của từng bước và cho phép bạn điều chỉnh trong trò chuyện. (thực nghiệm)"
+			"description": "Để model tự quyết định nỗ lực suy nghĩ của từng bước và cho phép bạn điều chỉnh trong trò chuyện. (thực nghiệm)",
+			"hint": "Các hồ sơ tương thích OpenAI (điểm cuối OpenAI tùy chỉnh, LM Studio, Ollama, LiteLLM và tương tự) có thể khai báo trong cài đặt supportedReasoningEfforts các mức nỗ lực suy luận mà mô hình hỗ trợ. Các mức đã khai báo được gửi theo mỗi yêu cầu, nhưng máy chủ cục bộ có thể bỏ qua tham số này."
 		}
 	},
 	"promptCaching": {

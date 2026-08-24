@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamiczny wysiłek myślowy",
-			"description": "Pozwala modelowi samodzielnie decydować o wysiłku myślowym na każdym kroku oraz dostosowywać go w czacie. (eksperymentalne)"
+			"description": "Pozwala modelowi samodzielnie decydować o wysiłku myślowym na każdym kroku oraz dostosowywać go w czacie. (eksperymentalne)",
+			"hint": "Profile zgodne z OpenAI (własny endpoint OpenAI, LM Studio, Ollama, LiteLLM i podobne) mogą w ustawieniu supportedReasoningEfforts zadeklarować poziomy wysiłku rozumowania obsługiwane przez model. Zadeklarowane poziomy są wysyłane z każdym żądaniem, ale lokalny serwer może zignorować ten parametr."
 		}
 	},
 	"promptCaching": {

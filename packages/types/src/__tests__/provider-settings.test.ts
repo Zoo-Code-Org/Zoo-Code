@@ -181,3 +181,58 @@ describe("getApiProtocol", () => {
 		})
 	})
 })
+
+describe("supportedReasoningEfforts (F7)", () => {
+	it("accepts a canonical effort-level declaration on OpenAI-compatible providers", () => {
+		const settings = {
+			apiProvider: providerIdentifiers.lmstudio,
+			lmStudioBaseUrl: "http://localhost:1234/v1",
+			lmStudioModelId: "qwen3-32b",
+			supportedReasoningEfforts: ["low", "high", "max"],
+		}
+
+		const parsed = providerSettingsSchemaDiscriminated.parse(settings)
+		expect(parsed).toEqual(settings)
+	})
+
+	it.each([
+		providerIdentifiers.openai,
+		providerIdentifiers.ollama,
+		providerIdentifiers.litellm,
+		providerIdentifiers.baseten,
+	])("accepts the declaration on the %s provider branch", (apiProvider) => {
+		const settings = {
+			apiProvider,
+			supportedReasoningEfforts: ["none", "minimal", "low", "medium", "high", "xhigh", "max"],
+		}
+		expect(providerSettingsSchemaDiscriminated.safeParse(settings).success).toBe(true)
+	})
+
+	it("rejects non-canonical effort values", () => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.lmstudio,
+				supportedReasoningEfforts: ["low", "turbo"],
+			}).success,
+		).toBe(false)
+		// The UI-level "disable" sentinel is a settings value, not a declarable level.
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.ollama,
+				supportedReasoningEfforts: ["disable"],
+			}).success,
+		).toBe(false)
+	})
+
+	it("accepts an empty declaration and leaves the field omitted when unset", () => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openai,
+				supportedReasoningEfforts: [],
+			}).success,
+		).toBe(true)
+		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider: providerIdentifiers.openai }).success).toBe(
+			true,
+		)
+	})
+})

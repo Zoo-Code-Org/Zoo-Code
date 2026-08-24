@@ -1003,7 +1003,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "動態思考強度",
-			"description": "讓模型自行決定每一步的思考強度，並讓您在對話中調整。（實驗性）"
+			"description": "讓模型自行決定每一步的思考強度，並讓您在對話中調整。（實驗性）",
+			"hint": "OpenAI 相容的設定檔（自訂 OpenAI 端點、LM Studio、Ollama、LiteLLM 等）可在 supportedReasoningEfforts 設定中宣告模型支援的思考強度等級。宣告的等級會隨每個請求傳送，但本機伺服器可能會忽略此參數。"
 		}
 	},
 	"promptCaching": {

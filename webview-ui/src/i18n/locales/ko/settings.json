@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "동적 사고 노력",
-			"description": "단계별로 모델이 사고 노력을 결정하도록 하고, 채팅에서 조정할 수 있습니다. (실험적 기능)"
+			"description": "단계별로 모델이 사고 노력을 결정하도록 하고, 채팅에서 조정할 수 있습니다. (실험적 기능)",
+			"hint": "OpenAI 호환 프로필(사용자 지정 OpenAI 엔드포인트, LM Studio, Ollama, LiteLLM 등)은 supportedReasoningEfforts 설정에서 모델이 지원하는 추론 수준을 선언할 수 있습니다. 선언된 수준은 각 요청과 함께 전송되지만 로컬 서버가 해당 파라미터를 무시할 수 있습니다."
 		}
 	},
 	"promptCaching": {

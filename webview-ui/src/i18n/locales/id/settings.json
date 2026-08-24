@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"hint": "Profil yang kompatibel dengan OpenAI (endpoint OpenAI kustom, LM Studio, Ollama, LiteLLM, dan sejenisnya) dapat mendeklarasikan level usaha penalaran yang didukung modelnya dalam pengaturan supportedReasoningEfforts. Level yang dideklarasikan dikirim dengan setiap permintaan, tetapi server lokal dapat mengabaikan parameter ini."
 		}
 	},
 	"promptCaching": {

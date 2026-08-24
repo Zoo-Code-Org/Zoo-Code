@@ -1,6 +1,10 @@
 import type { ModelInfo, ProviderSettings } from "@roo-code/types"
 
-import { computeThinkingEffortDisplay, THINKING_EFFORT_ADAPTIVE_LEVEL } from "../thinkingEffort"
+import {
+	computeThinkingEffortDisplay,
+	resolveReasoningEffortCapability,
+	THINKING_EFFORT_ADAPTIVE_LEVEL,
+} from "../thinkingEffort"
 
 describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 	const modelWithLevels: ModelInfo = {
@@ -145,5 +149,123 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 		})
 		expect(display?.effort).toBe("adaptive")
 		expect(display?.source).toBe("you")
+	})
+})
+
+describe("resolveReasoningEffortCapability (F7)", () => {
+	const modelNoCapability: ModelInfo = {
+		contextWindow: 1_000_000,
+		maxTokens: 128_000,
+		supportsPromptCache: false,
+	}
+
+	it("fills in the declared levels when the model has no capability of its own", () => {
+		const result = resolveReasoningEffortCapability(modelNoCapability, {
+			supportedReasoningEfforts: ["low", "high", "max"],
+		} as ProviderSettings)
+		expect(result?.supportsReasoningEffort).toEqual(["low", "high", "max"])
+		// Other model fields pass through unchanged.
+		expect(result?.contextWindow).toBe(1_000_000)
+	})
+
+	it("never overrides a registry capability (registry wins over declaration)", () => {
+		const registryModel: ModelInfo = {
+			...modelNoCapability,
+			supportsReasoningEffort: ["low", "medium"],
+		}
+		const result = resolveReasoningEffortCapability(registryModel, {
+			supportedReasoningEfforts: ["low", "high", "max"],
+		} as ProviderSettings)
+		expect(result).toBe(registryModel)
+		expect(result?.supportsReasoningEffort).toEqual(["low", "medium"])
+	})
+
+	it("never overrides a boolean registry capability", () => {
+		const adaptiveModel: ModelInfo = { ...modelNoCapability, supportsReasoningEffort: true }
+		const result = resolveReasoningEffortCapability(adaptiveModel, {
+			supportedReasoningEfforts: ["low", "high"],
+		} as ProviderSettings)
+		expect(result).toBe(adaptiveModel)
+		expect(result?.supportsReasoningEffort).toBe(true)
+	})
+
+	it("returns the model unchanged without a declaration or with an empty one", () => {
+		expect(resolveReasoningEffortCapability(modelNoCapability, undefined)).toBe(modelNoCapability)
+		expect(resolveReasoningEffortCapability(modelNoCapability, {} as ProviderSettings)).toBe(modelNoCapability)
+		expect(
+			resolveReasoningEffortCapability(modelNoCapability, { supportedReasoningEfforts: [] } as ProviderSettings),
+		).toBe(modelNoCapability)
+	})
+
+	it("returns undefined for an undefined model", () => {
+		expect(
+			resolveReasoningEffortCapability(undefined, {
+				supportedReasoningEfforts: ["low"],
+			} as ProviderSettings),
+		).toBeUndefined()
+	})
+
+	it("does not mutate the input model or share the declared array", () => {
+		const declaredLevels: string[] = ["low", "high"]
+		const result = resolveReasoningEffortCapability(modelNoCapability, {
+			supportedReasoningEfforts: declaredLevels as ProviderSettings["supportedReasoningEfforts"],
+		})
+		expect(result).not.toBe(modelNoCapability)
+		expect(modelNoCapability.supportsReasoningEffort).toBeUndefined()
+		expect(result?.supportsReasoningEffort).not.toBe(declaredLevels)
+	})
+})
+
+describe("computeThinkingEffortDisplay with declared capability (F7)", () => {
+	const selfHostedModel: ModelInfo = {
+		contextWindow: 32_768,
+		maxTokens: 8_192,
+		supportsPromptCache: false,
+	}
+
+	it("resolves with the declared levels when the model has no capability of its own", () => {
+		const display = computeThinkingEffortDisplay({
+			model: selfHostedModel,
+			apiConfiguration: {
+				reasoningEffort: "high",
+				supportedReasoningEfforts: ["low", "high", "max"],
+			} as ProviderSettings,
+		})
+		expect(display?.supportedLevels).toEqual(["low", "high", "max"])
+		expect(display?.effort).toBe("high")
+		expect(display?.isAdaptiveClass).toBe(false)
+	})
+
+	it("excludes the disable sentinel from declared levels", () => {
+		// "disable" cannot be declared (not a canonical level), but the menu must
+		// still stay sentinel-free for arrays carrying it defensively.
+		const display = computeThinkingEffortDisplay({
+			model: selfHostedModel,
+			apiConfiguration: {
+				supportedReasoningEfforts: ["low", "high"],
+			} as ProviderSettings,
+			taskThinkingEffort: { effort: "high", source: "you" },
+		})
+		expect(display?.supportedLevels).toEqual(["low", "high"])
+	})
+
+	it("keeps the registry capability over the declaration", () => {
+		const registryModel: ModelInfo = {
+			...selfHostedModel,
+			supportsReasoningEffort: ["low", "medium"],
+			reasoningEffort: "medium",
+		}
+		const display = computeThinkingEffortDisplay({
+			model: registryModel,
+			apiConfiguration: {
+				supportedReasoningEfforts: ["low", "high", "max"],
+			} as ProviderSettings,
+		})
+		expect(display?.supportedLevels).toEqual(["low", "medium"])
+		expect(display?.effort).toBe("medium")
+	})
+
+	it("returns null without a declaration (existing behavior)", () => {
+		expect(computeThinkingEffortDisplay({ model: selfHostedModel })).toBeNull()
 	})
 })

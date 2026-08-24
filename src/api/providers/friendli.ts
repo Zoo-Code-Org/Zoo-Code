@@ -6,6 +6,7 @@ import { type FriendliModelId, friendliDefaultModelId, friendliModels } from "@r
 import type { ApiHandlerOptions } from "../../shared/api"
 import { shouldUseReasoningEffort, getModelMaxOutputTokens } from "../../shared/api"
 
+import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { getModelParams } from "../transform/model-params"
 
@@ -78,7 +79,9 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 				? (this.options.apiModelId as FriendliModelId)
 				: this.defaultProviderModelId
 
-		const info = this.providerModels[id]
+		// F7: fill in user-declared reasoning effort levels where the model does not
+		// advertise its own capability (registry values are never overridden).
+		const info = withDeclaredReasoningEffort(this.providerModels[id], this.options)
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,
