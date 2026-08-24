@@ -9,6 +9,7 @@ import axios from "axios"
 
 import {
 	type ProviderSettingsEntry,
+	type RooCodeSettings,
 	type ClineMessage,
 	type ExtensionMessage,
 	type ExtensionState,
@@ -263,8 +264,31 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 
 vi.mock("../../task/Task", () => ({
 	Task: vi.fn().mockImplementation(function (options: any) {
+		// DTE: per-instance runtime-effort state and a capability-advertising
+		// api model (mirrors the deepseek catalog levels) so createTask's
+		// pending-effort consumption path can be exercised in these unit tests.
+		let runtimeEffort: string | undefined
+		let runtimeSource: string | undefined
+		const messages: Array<Record<string, unknown>> = []
 		return {
-			api: undefined,
+			api: {
+				getModel: vi.fn().mockReturnValue({
+					id: "claude-3-sonnet",
+					info: {
+						supportsReasoningEffort: ["disable", "low", "high", "max"],
+					},
+				}),
+			},
+			setRuntimeThinkingEffort: vi.fn((effort: string, source?: string) => {
+				runtimeEffort = effort
+				runtimeSource = source
+			}),
+			getRuntimeThinkingEffort: vi.fn(() =>
+				runtimeEffort !== undefined ? { effort: runtimeEffort, source: runtimeSource } : {},
+			),
+			say: vi.fn(async (type: string, text?: string) => {
+				messages.push({ type: "say", say: type, text, ts: Date.now() })
+			}),
 			abortTask: vi.fn(),
 			handleWebviewAskResponse: vi.fn(),
 			clineMessages: [],
@@ -410,11 +434,34 @@ afterAll(() => {
 describe("ClineProvider", () => {
 	beforeAll(() => {
 		vi.mocked(Task).mockImplementation(function (options: any) {
+			// DTE: per-instance runtime-effort state and a capability-advertising
+			// api model (mirrors the deepseek catalog levels) so createTask's
+			// pending-effort consumption path can be exercised in these unit tests.
+			let runtimeEffort: string | undefined
+			let runtimeSource: string | undefined
+			const messages: Array<Record<string, unknown>> = []
 			const task: any = {
-				api: undefined,
+				api: {
+					getModel: vi.fn().mockReturnValue({
+						id: "claude-3-sonnet",
+						info: {
+							supportsReasoningEffort: ["disable", "low", "high", "max"],
+						},
+					}),
+				},
+				setRuntimeThinkingEffort: vi.fn((effort: string, source?: string) => {
+					runtimeEffort = effort
+					runtimeSource = source
+				}),
+				getRuntimeThinkingEffort: vi.fn(() =>
+					runtimeEffort !== undefined ? { effort: runtimeEffort, source: runtimeSource } : {},
+				),
+				say: vi.fn(async (type: string, text?: string) => {
+					messages.push({ type: "say", say: type, text, ts: Date.now() })
+				}),
 				abortTask: vi.fn(),
 				handleWebviewAskResponse: vi.fn(),
-				clineMessages: [],
+				clineMessages: messages,
 				apiConversationHistory: [],
 				overwriteClineMessages: vi.fn(),
 				overwriteApiConversationHistory: vi.fn(),
@@ -965,7 +1012,50 @@ describe("ClineProvider", () => {
 		state = await provider.getStateToPostToWebview()
 		expect(state.taskThinkingEffort).toBeUndefined()
 
+		// A parked composer effort (selected while no task was open) surfaces as
+		// the webview state fallback until the next task consumes it.
+		provider.setPendingTaskThinkingEffort("high")
+		state = await provider.getStateToPostToWebview()
+		expect(state.taskThinkingEffort).toEqual({ effort: "high", source: "you" })
+		// Reset the private field for the other tests (no public clear needed —
+		// createTask consumes it; the narrow cast documents the intent).
+		;(provider as unknown as { pendingTaskThinkingEffort?: unknown }).pendingTaskThinkingEffort = undefined
+
 		getCurrentTaskSpy.mockRestore()
+	})
+
+	test("createTask applies a parked composer effort to a new top-level task when the model supports it (DTE)", async () => {
+		await provider.setValues({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.deepseek,
+				apiModelId: "deepseek-v4-flash",
+			},
+		} as unknown as RooCodeSettings)
+
+		provider.setPendingTaskThinkingEffort("max")
+
+		const task = await provider.createTask("pending effort task", undefined, undefined, { startTask: false })
+
+		expect(task.api.getModel().info.supportsReasoningEffort).toEqual(["disable", "low", "high", "max"])
+		expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "max", source: "you" })
+		expect(provider.getPendingTaskThinkingEffort()).toBeUndefined()
+		const sayLines = task.clineMessages.filter((m) => m.type === "say" && m.say === "tool")
+		expect(sayLines.length).toBeGreaterThan(0)
+		expect(JSON.parse(sayLines[sayLines.length - 1].text ?? ("{}" as string))).toEqual({
+			tool: "thinkingEffort",
+			effort: "max",
+			source: "you",
+		})
+	})
+
+	test("createTask consumes a parked effort the new task's model does not support (DTE)", async () => {
+		// deepseek-v4-flash does not advertise the "xhigh" level.
+		provider.setPendingTaskThinkingEffort("xhigh")
+
+		const task = await provider.createTask("stale effort task", undefined, undefined, { startTask: false })
+
+		expect(task.getRuntimeThinkingEffort()).toEqual({})
+		expect(provider.getPendingTaskThinkingEffort()).toBeUndefined()
 	})
 
 	describe("postStateToWebviewThrottled", () => {

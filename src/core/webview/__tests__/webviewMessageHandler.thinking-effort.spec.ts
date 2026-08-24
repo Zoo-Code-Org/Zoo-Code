@@ -45,6 +45,7 @@ describe("webviewMessageHandler setTaskThinkingEffort (DTE series 4/5)", () => {
 	const makeProvider = (task: unknown) => ({
 		getCurrentTask: vi.fn(() => task),
 		postStateToWebviewWithoutTaskHistory: vi.fn(async () => {}),
+		setPendingTaskThinkingEffort: vi.fn(),
 	})
 
 	const apply = (provider: ReturnType<typeof makeProvider>, message: Record<string, unknown>) =>
@@ -87,11 +88,24 @@ describe("webviewMessageHandler setTaskThinkingEffort (DTE series 4/5)", () => {
 		expect(provider.postStateToWebviewWithoutTaskHistory).not.toHaveBeenCalled()
 	})
 
-	it("ignores the message when there is no current task", async () => {
+	it("parks a pending effort for the next task when there is no current task", async () => {
 		const provider = makeProvider(undefined)
 
 		await apply(provider, { type: "setTaskThinkingEffort", effort: "high" })
 
+		expect(provider.setPendingTaskThinkingEffort).toHaveBeenCalledWith("high")
+		expect(provider.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledTimes(1)
+	})
+
+	it.each([
+		["an effort outside the canonical enum", { effort: "bogus" }],
+		["a missing effort", {}],
+	])("does not park %s when there is no current task", async (_name, message) => {
+		const provider = makeProvider(undefined)
+
+		await apply(provider, { type: "setTaskThinkingEffort", ...message })
+
+		expect(provider.setPendingTaskThinkingEffort).not.toHaveBeenCalled()
 		expect(provider.postStateToWebviewWithoutTaskHistory).not.toHaveBeenCalled()
 	})
 })
