@@ -17,6 +17,7 @@ import {
 	type ProviderName,
 	type ProviderSettings,
 	type RooCodeSettings,
+	type ReasoningEffortExtended,
 	type ProviderSettingsEntry,
 	type StaticAppProperties,
 	type DynamicAppProperties,
@@ -35,6 +36,7 @@ import {
 	type CreateTaskOptions,
 	type TokenUsage,
 	type ToolUsage,
+	type ClineSayTool,
 	type ExtensionMessage,
 	type ExtensionState,
 	type WebviewThemeFixture,
@@ -201,6 +203,10 @@ export class ClineProvider
 	private marketplaceManager: MarketplaceManager
 	private mdmService?: MdmService
 	private taskCreationCallback: (task: Task) => void
+	// DTE: thinking effort selected in the composer while no task was open.
+	// Parked here and applied to the next top-level task in createTask
+	// (non-persisted, like task-local overrides).
+	private pendingTaskThinkingEffort: { effort: ReasoningEffortExtended; source: string } | undefined
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
@@ -2713,7 +2719,7 @@ export class ClineProvider
 			currentTaskTodos: currentTask?.todoList || [],
 			taskThinkingEffort: currentTaskRuntimeEffort?.effort
 				? { effort: currentTaskRuntimeEffort.effort, source: currentTaskRuntimeEffort.source ?? "default" }
-				: undefined,
+				: this.pendingTaskThinkingEffort,
 			messageQueue: currentTask?.messageQueueService?.messages,
 			taskHistory: includeTaskHistory
 				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)
@@ -3365,6 +3371,16 @@ export class ClineProvider
 	// from the stack and the caller is resumed in this way we can have a chain
 	// of tasks, each one being a sub task of the previous one until the main
 	// task is finished.
+	// DTE: park a composer-selected thinking effort for the next top-level
+	// task (no task open yet). createTask consumes and validates it.
+	public setPendingTaskThinkingEffort(effort: ReasoningEffortExtended): void {
+		this.pendingTaskThinkingEffort = { effort, source: "you" }
+	}
+
+	public getPendingTaskThinkingEffort(): { effort: ReasoningEffortExtended; source: string } | undefined {
+		return this.pendingTaskThinkingEffort
+	}
+
 	public async createTask(
 		text?: string,
 		images?: string[],
@@ -3455,6 +3471,33 @@ export class ClineProvider
 		})
 
 		await this.addClineToStack(task)
+
+		// DTE: apply the composer-parked thinking effort (selected while no task
+		// was open) to the new top-level task when its model supports the level.
+		// Consumed regardless of support so a stale selection never leaks into a
+		// later task.
+		if (!parentTask && this.pendingTaskThinkingEffort) {
+			const pendingEffort = this.pendingTaskThinkingEffort
+			this.pendingTaskThinkingEffort = undefined
+			const pendingCapability = task.api.getModel().info.supportsReasoningEffort
+			const pendingSupported = Array.isArray(pendingCapability)
+				? (pendingCapability as string[]).includes(pendingEffort.effort)
+				: pendingCapability === true
+			if (pendingSupported) {
+				task.setRuntimeThinkingEffort(pendingEffort.effort, pendingEffort.source)
+				await task.say(
+					"tool",
+					JSON.stringify({
+						tool: "thinkingEffort",
+						effort: pendingEffort.effort,
+						source: pendingEffort.source,
+					} satisfies ClineSayTool),
+					undefined,
+					false,
+				)
+			}
+		}
+
 		if (options.startTask !== false) {
 			scheduleTask(this.taskScheduler, task, "createTask")
 		}

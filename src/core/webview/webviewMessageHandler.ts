@@ -1665,26 +1665,36 @@ export const webviewMessageHandler = async (
 			const setEffortTask = provider.getCurrentTask()
 			// Validate the webview-supplied effort against the canonical enum.
 			const setEffortParsed = reasoningEffortExtendedSchema.safeParse(message.effort)
-			if (setEffortTask && setEffortParsed.success) {
-				const setEffortValue = setEffortParsed.data
-				const capability = setEffortTask.api.getModel().info.supportsReasoningEffort
-				const supported = Array.isArray(capability)
-					? (capability as string[]).includes(setEffortValue)
-					: capability === true
-				if (supported) {
-					setEffortTask.setRuntimeThinkingEffort(setEffortValue, "you")
-					// Single in-chat line (same ChatRow case as model-initiated changes).
-					await setEffortTask.say(
-						"tool",
-						JSON.stringify({
-							tool: "thinkingEffort",
-							effort: setEffortValue,
-							source: "you",
-						} satisfies ClineSayTool),
-						undefined,
-						false,
-					)
-					// Push the authoritative display state to the webview.
+			if (setEffortParsed.success) {
+				if (setEffortTask) {
+					const setEffortValue = setEffortParsed.data
+					const capability = setEffortTask.api.getModel().info.supportsReasoningEffort
+					const supported = Array.isArray(capability)
+						? (capability as string[]).includes(setEffortValue)
+						: capability === true
+					if (supported) {
+						setEffortTask.setRuntimeThinkingEffort(setEffortValue, "you")
+						// Single in-chat line (same ChatRow case as model-initiated changes).
+						await setEffortTask.say(
+							"tool",
+							JSON.stringify({
+								tool: "thinkingEffort",
+								effort: setEffortValue,
+								source: "you",
+							} satisfies ClineSayTool),
+							undefined,
+							false,
+						)
+						// Push the authoritative display state to the webview.
+						await provider.postStateToWebviewWithoutTaskHistory()
+					}
+				} else {
+					// No open task: park the selection as the pending effort for the
+					// next top-level task (createTask applies it after validating the
+					// new task's model capability). The toggle keeps showing the
+					// selection because the webview state falls back to the pending
+					// value while no task is open.
+					provider.setPendingTaskThinkingEffort(setEffortParsed.data)
 					await provider.postStateToWebviewWithoutTaskHistory()
 				}
 			}
