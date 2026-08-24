@@ -4,7 +4,7 @@ import { ChatRowContent } from "../ChatRow"
 import type { ClineMessage, ClineSayTool } from "@roo-code/types"
 
 /** The thinkingEffort say-tool payload shape emitted by SetThinkingEffortTool. */
-type ThinkingEffortSayTool = Pick<ClineSayTool, "tool" | "effort" | "reason" | "refusal"> & {
+type ThinkingEffortSayTool = Pick<ClineSayTool, "tool" | "effort" | "reason" | "refusal" | "source"> & {
 	tool: "thinkingEffort"
 }
 
