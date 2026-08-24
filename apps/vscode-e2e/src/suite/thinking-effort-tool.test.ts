@@ -31,6 +31,14 @@ import { waitUntilCompleted } from "./utils"
  *   executor re-checks the model capability after the first request has loaded
  *   the catalog, so the flow is correct even if the first request's tool list
  *   was built before the catalog fetch resolved.
+ * - Fixture matching (apps/vscode-e2e/fixtures/thinking-effort-tool.json): the
+ *   post-tool request ends with a role:user message (fresh environment details
+ *   are appended after the tool result), so aimock's toolCallId matcher — which
+ *   inspects only the LAST message — can never match it. The follow-up request is
+ *   scoped by the DTE-only model + hasToolResult instead, with turnIndex 1 as a
+ *   tie-break. Note the fixture file is plain JSON: aimock's fixture-loader uses
+ *   JSON.parse and SKIPS the whole file on parse errors, so no // comments may be
+ *   added to it.
  */
 
 const DTE_MODEL_ID = "openai/gpt-5"
