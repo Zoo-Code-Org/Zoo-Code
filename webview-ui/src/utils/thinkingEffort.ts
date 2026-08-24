@@ -23,6 +23,10 @@ export const THINKING_EFFORT_ADAPTIVE_LEVEL = "adaptive"
  * (provider profile) → model default (`model.reasoningEffort`); boolean/
  * adaptive-class models fall back to the "adaptive" soft-guidance display.
  * Returns `null` when the model does not advertise per-request effort support.
+ *
+ * Source-label rule: a task-local override that lands exactly on the resolved
+ * default (settings effort, else model default) is displayed with source
+ * "default" — the "you" badge only marks a non-default choice.
  */
 export function computeThinkingEffortDisplay(args: {
 	apiConfiguration?: ProviderSettings
@@ -44,10 +48,17 @@ export function computeThinkingEffortDisplay(args: {
 		return null
 	}
 
+	// Settings-derived effort (provider profile). The "disable" sentinel means
+	// "no effort" for the per-request envelope resolution. Resolved before the
+	// task-local branch so the default-source rule can compare against it.
+	const settingsEffort = apiConfiguration?.reasoningEffort as ReasoningEffortExtended | "disable" | undefined
+	const resolvedDefault = settingsEffort && settingsEffort !== "disable" ? settingsEffort : model?.reasoningEffort
+
 	// 1. Task-local override (authoritative extension push).
 	if (taskThinkingEffort?.effort) {
+		const isAtResolvedDefault = resolvedDefault !== undefined && taskThinkingEffort.effort === resolvedDefault
 		const source: ThinkingEffortSource =
-			taskThinkingEffort.source === "you"
+			taskThinkingEffort.source === "you" && !isAtResolvedDefault
 				? "you"
 				: taskThinkingEffort.source === "model" || taskThinkingEffort.source === "parent"
 					? "auto"
@@ -55,9 +66,7 @@ export function computeThinkingEffortDisplay(args: {
 		return { effort: taskThinkingEffort.effort, source, supportedLevels, isAdaptiveClass }
 	}
 
-	// 2. Settings-derived effort (provider profile). The "disable" sentinel
-	// means "no effort" for the per-request envelope resolution.
-	const settingsEffort = apiConfiguration?.reasoningEffort as ReasoningEffortExtended | "disable" | undefined
+	// 2. Settings-derived effort (provider profile).
 	if (settingsEffort && settingsEffort !== "disable") {
 		return { effort: settingsEffort, source: "default", supportedLevels, isAdaptiveClass }
 	}

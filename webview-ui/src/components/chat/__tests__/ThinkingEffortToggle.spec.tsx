@@ -195,6 +195,31 @@ describe("ThinkingEffortToggle (DTE series 4/5)", () => {
 		expect(icon).toHaveClass("text-vscode-textLink-foreground")
 	})
 
+	it("shows the current effective effort value in the trigger", () => {
+		// Settings-derived default.
+		const view = renderToggle()
+		expect(screen.getByTestId("thinking-effort-toggle-trigger")).toHaveTextContent("low")
+		// Follows the task-local override.
+		mockState.taskThinkingEffort = { effort: "high", source: "you" }
+		view.rerender(<ThinkingEffortToggle />)
+		expect(screen.getByTestId("thinking-effort-toggle-trigger")).toHaveTextContent("high")
+	})
+
+	it("applies the sibling-selector hover treatment when enabled", () => {
+		renderToggle()
+		const trigger = screen.getByTestId("thinking-effort-toggle-trigger")
+		expect(trigger).toHaveClass("hover:border-vscode-focusBorder")
+		expect(trigger).toHaveClass("hover:bg-vscode-toolbar-hoverBackground")
+	})
+
+	it("drops the user highlight when the override lands on the resolved default", () => {
+		// settings effort is "low" — a user override to "low" displays as default.
+		mockState.taskThinkingEffort = { effort: "low", source: "you" }
+		renderToggle()
+		const icon = screen.getByTestId("thinking-effort-toggle-trigger").querySelector("svg")
+		expect(icon).not.toHaveClass("text-vscode-textLink-foreground")
+	})
+
 	it("shows the adaptive soft-guidance hint and a single adaptive level for boolean-class models", () => {
 		mockModelInfo = {
 			contextWindow: 1_000_000,
