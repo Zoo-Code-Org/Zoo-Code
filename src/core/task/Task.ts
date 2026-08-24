@@ -140,6 +140,7 @@ import { shouldAddUserMessageToHistory } from "./messageCounting"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
 
 type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
 
@@ -901,13 +902,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 	): Promise<boolean> {
 		await this.say("user_feedback", text ?? "", images)
-		while (!this.abort) {
+		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
+			if (this.abort) {
+				this.messageQueueService.releaseMessage(messageId)
+				return false
+			}
 			if (await this.saveClineMessages()) {
 				return this.messageQueueService.removeMessage(messageId)
 			}
-			await delay(250)
+			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
+				await delay(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+			}
 		}
+		console.error(
+			`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
+		)
+		this.messageQueueService.releaseMessage(messageId)
 		return false
+	}
+
+	private async clearPendingActionAfterDurableResult(actionId: string): Promise<void> {
+		if (this.pendingAction?.actionId !== actionId) {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		const cleared = await provider?.clearPendingTaskAction(this.taskId, actionId)
+		if (cleared) {
+			if (this.pendingAction?.actionId === actionId) {
+				this.pendingAction = undefined
+			}
+			return
+		}
+
+		const storedPendingAction = provider?.taskHistoryStore.get(this.taskId)?.pendingAction
+		if (this.pendingAction?.actionId !== actionId) {
+			return
+		}
+		if (!storedPendingAction) {
+			this.pendingAction = undefined
+		} else if (storedPendingAction.actionId !== actionId) {
+			this.pendingAction = storedPendingAction
+		}
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
@@ -961,15 +997,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}),
 		)
 
-		const saved = await this.saveApiConversationHistory()
+		let saved = await this.saveApiConversationHistory()
+		if (!saved && resolvesPendingAction) {
+			saved = await this.retrySaveApiConversationHistory()
+		}
 		if (saved && resolvesPendingAction && this.pendingAction) {
 			try {
-				const cleared = await this.providerRef
-					.deref()
-					?.clearPendingTaskAction(this.taskId, this.pendingAction.actionId)
-				if (cleared) {
-					this.pendingAction = undefined
-				}
+				await this.clearPendingActionAfterDurableResult(this.pendingAction.actionId)
 			} catch (error) {
 				console.error(
 					`[Task#addToApiConversationHistory] Failed to clear pending action for ${this.taskId}:`,
@@ -1477,6 +1511,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
+			if (queuedMessageId) {
+				this.messageQueueService.releaseMessage(queuedMessageId)
+			}
 			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
@@ -1484,6 +1521,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Could happen if we send multiple asks in a row i.e. with
 			// command_output. It's important that when we know an ask could
 			// fail, it is handled gracefully.
+			if (queuedMessageId) {
+				this.messageQueueService.releaseMessage(queuedMessageId)
+			}
 			throw new AskIgnoredError("superseded")
 		}
 
@@ -2141,8 +2181,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						),
 				)
 			) {
-				await this.providerRef.deref()?.clearPendingTaskAction(this.taskId, this.pendingAction.actionId)
-				this.pendingAction = undefined
+				await this.clearPendingActionAfterDurableResult(this.pendingAction.actionId)
 			}
 
 			if (this.pendingAction) {
@@ -2346,7 +2385,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error(`[Task#resumePendingTaskAction] Provider unavailable for task ${this.taskId}`)
 		}
 
-		const { response, text, images, queuedMessageId } = await this.ask("tool", action.approvalText, false)
+		let { response, text, images, queuedMessageId } = await this.ask("tool", action.approvalText, false)
 
 		if (response === "yesButtonClicked") {
 			if (action.kind === "create_subtask") {
@@ -2369,10 +2408,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (didReopen) {
 				return
 			}
+
+			await this.clearPendingActionAfterDurableResult(action.actionId)
+			if (this.pendingAction) {
+				await this.resumePendingTaskAction(this.pendingAction)
+				return
+			}
+			;({ response, text, images, queuedMessageId } = await this.ask("completion_result", "", false))
+			if (response === "yesButtonClicked") {
+				return
+			}
 		}
 
 		if (queuedMessageId) {
-			await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+			const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+			if (!persisted) {
+				throw new Error(
+					`[Task#resumePendingTaskAction] Failed to persist queued feedback ${queuedMessageId}; task loop was not resumed`,
+				)
+			}
 		} else if (text || images?.length) {
 			await this.say("user_feedback", text ?? "", images)
 		}

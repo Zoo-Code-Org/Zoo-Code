@@ -286,6 +286,46 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 			"Handle this first",
 			undefined,
 		)
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+	})
+
+	it("acknowledges an empty queued denial instead of stranding its claim", async () => {
+		vi.mocked(isValidToolName).mockReturnValue(true)
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_new_task_empty_denial",
+				name: "new_task",
+				params: { mode: "ask", message: "Child task" },
+				nativeArgs: { mode: "ask", message: "Child task" },
+				partial: false,
+			},
+		]
+		mockTask.currentStreamingDidCheckpoint = false
+		mockTask.checkpointSave = vi.fn().mockResolvedValue(undefined)
+		mockTask.ask = vi.fn().mockResolvedValue({
+			response: "noButtonClicked",
+			queuedMessageId: "queued-empty-denial",
+		})
+		mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(true)
+		mockNewTaskHandle.mockImplementation(
+			async (
+				_task: unknown,
+				_block: unknown,
+				callbacks: { askApproval: (type: "tool", text: string) => Promise<boolean> },
+			) => {
+				expect(await callbacks.askApproval("tool", JSON.stringify({ tool: "newTask" }))).toBe(false)
+			},
+		)
+
+		await presentAssistantMessage(mockTask)
+
+		expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+			"queued-empty-denial",
+			undefined,
+			undefined,
+		)
+		expect(mockTask.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
 	})
 
 	it("merges ordinary approval feedback into a native tool result", async () => {

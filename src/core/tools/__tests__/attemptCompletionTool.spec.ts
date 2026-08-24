@@ -850,6 +850,36 @@ describe("attemptCompletionTool", () => {
 				)
 				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("One more change"))
 			})
+
+			it("does not continue when queued completion feedback persistence fails", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "One more change",
+					queuedMessageId: "queued-1",
+				})
+				mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(false)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"inspecting site",
+					expect.objectContaining({ message: expect.stringContaining("queued-1") }),
+				)
+				expect(mockPushToolResult).not.toHaveBeenCalled()
+			})
 		})
 	})
 })

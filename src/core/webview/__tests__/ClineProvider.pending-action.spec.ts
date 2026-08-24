@@ -59,4 +59,30 @@ describe("ClineProvider pending task actions", () => {
 		).resolves.toBe(false)
 		expect(stale.current().pendingAction).toEqual(pendingAction)
 	})
+
+	it("returns false when the task was deleted before clear", async () => {
+		const provider = {
+			taskHistoryStore: {
+				atomicReadAndUpdate: vi
+					.fn()
+					.mockRejectedValue(
+						new Error("[TaskHistoryStore] atomicReadAndUpdate: task task-1 not found in cache"),
+					),
+			},
+		} as unknown as ClineProvider
+
+		await expect(ClineProvider.prototype.clearPendingTaskAction.call(provider, "task-1", "action-1")).resolves.toBe(
+			false,
+		)
+	})
+
+	it("propagates unrelated store failures", async () => {
+		const provider = {
+			taskHistoryStore: { atomicReadAndUpdate: vi.fn().mockRejectedValue(new Error("disk unavailable")) },
+		} as unknown as ClineProvider
+
+		await expect(
+			ClineProvider.prototype.clearPendingTaskAction.call(provider, "task-1", "action-1"),
+		).rejects.toThrow("disk unavailable")
+	})
 })

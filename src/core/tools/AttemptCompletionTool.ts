@@ -214,7 +214,10 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			// User provided feedback - push tool result to continue the conversation
 			if (queuedMessageId) {
-				await task.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+				const persisted = await task.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+				if (!persisted) {
+					throw new Error(`Failed to persist queued completion feedback ${queuedMessageId}`)
+				}
 			} else {
 				await task.say("user_feedback", text ?? "", images)
 			}

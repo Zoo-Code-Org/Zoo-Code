@@ -26,4 +26,15 @@ describe("MessageQueueService claims", () => {
 		expect(queue.messages).toEqual([])
 		expect(queue.claimNextMessage()).toBeUndefined()
 	})
+
+	it("releases a claim without removing its durable payload", () => {
+		const queue = new MessageQueueService()
+		const message = queue.addMessage("retry later")!
+		expect(queue.claimNextMessage()).toEqual(message)
+
+		expect(queue.releaseMessage(message.id)).toBe(true)
+		expect(queue.releaseMessage(message.id)).toBe(false)
+		expect(queue.messages).toEqual([message])
+		expect(queue.claimNextMessage()).toEqual(message)
+	})
 })

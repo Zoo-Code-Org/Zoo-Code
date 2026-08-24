@@ -97,6 +97,14 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return message
 	}
 
+	/**
+	 * Makes a claimed message available to a later consumer without removing it.
+	 * Durable consumers must use removeMessage() only after their persistence write succeeds.
+	 */
+	public releaseMessage(messageId: string): boolean {
+		return this.claimedMessageIds.delete(messageId)
+	}
+
 	public get messages(): QueuedMessage[] {
 		return this._messages
 	}

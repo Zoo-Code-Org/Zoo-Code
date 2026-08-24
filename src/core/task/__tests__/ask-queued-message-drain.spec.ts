@@ -3,6 +3,9 @@ import { Task } from "../Task"
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
+	addToClineMessages: () => Promise<void>
+	lastMessageTs?: number
+	abort: boolean
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
@@ -181,6 +184,70 @@ describe("Task.ask queued message drain", () => {
 			expect(say).toHaveBeenCalledTimes(1)
 			expect(saveClineMessages).toHaveBeenCalledTimes(2)
 			expect(task.messageQueueService.isEmpty()).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("releases durable queued feedback when its ask is superseded", async () => {
+		const task = await createTask()
+		let finishAddingAsk!: () => void
+		const addingAsk = new Promise<void>((resolve) => {
+			finishAddingAsk = resolve
+		})
+		const access = getQueueTaskTestAccess(task)
+		access.addToClineMessages = vi.fn(() => addingAsk)
+		task.messageQueueService.addMessage("Still durable")
+		const ask = task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
+		await Promise.resolve()
+		access.lastMessageTs = Date.now() + 1
+		finishAddingAsk()
+
+		await expect(ask).rejects.toThrow("superseded")
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Still durable")
+	})
+
+	it("releases durable queued feedback when its ask is aborted", async () => {
+		const task = await createTask()
+		let finishAddingAsk!: () => void
+		const addingAsk = new Promise<void>((resolve) => {
+			finishAddingAsk = resolve
+		})
+		const access = getQueueTaskTestAccess(task)
+		access.addToClineMessages = vi.fn(() => addingAsk)
+		task.messageQueueService.addMessage("Persist me later")
+		const ask = task.ask("completion_result", "Done", false)
+		await Promise.resolve()
+		access.abort = true
+		finishAddingAsk()
+
+		await expect(ask).rejects.toThrow("aborted")
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Persist me later")
+	})
+
+	it("bounds durable feedback retries and releases the claim after persistent failure", async () => {
+		vi.useFakeTimers()
+		try {
+			const task = await createTask()
+			task.messageQueueService.addMessage("Do not spin")
+			const result = await task.ask("completion_result", "Done", false)
+			const access = getQueueTaskTestAccess(task)
+			access.say = vi.fn().mockResolvedValue(undefined)
+			access.saveClineMessages = vi.fn().mockResolvedValue(false)
+
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.runAllTimersAsync()
+
+			await expect(persistence).resolves.toBe(false)
+			expect(access.saveClineMessages).toHaveBeenCalledTimes(4)
+			expect(task.messageQueueService.messages).toHaveLength(1)
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("Do not spin")
 		} finally {
 			vi.useRealTimers()
 		}

@@ -738,14 +738,24 @@ export class ClineProvider
 
 	public async clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean> {
 		let cleared = false
-		await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => {
-			if (historyItem.pendingAction?.actionId !== actionId) {
-				return historyItem
-			}
+		try {
+			await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => {
+				if (historyItem.pendingAction?.actionId !== actionId) {
+					return historyItem
+				}
 
-			cleared = true
-			return { ...historyItem, pendingAction: undefined }
-		})
+				cleared = true
+				return { ...historyItem, pendingAction: undefined }
+			})
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message === `[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`
+			) {
+				return false
+			}
+			throw error
+		}
 		if (cleared) {
 			this.recentTasksCache = undefined
 		}

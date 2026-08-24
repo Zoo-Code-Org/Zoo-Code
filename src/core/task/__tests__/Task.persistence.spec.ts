@@ -833,8 +833,141 @@ describe("Task persistence", () => {
 
 			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
 		})
-	})
 
+		it("retries a rejected tool-result save before clearing pending metadata", async () => {
+			vi.useFakeTimers()
+			try {
+				mockSaveApiMessages
+					.mockRejectedValueOnce(new Error("temporary failure"))
+					.mockResolvedValueOnce(undefined)
+				mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "child-1",
+						number: 1,
+						ts: 1,
+						task: "Child",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						pendingAction,
+					},
+					startTask: false,
+				})
+
+				const saving = getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+				})
+				await vi.advanceTimersByTimeAsync(0)
+				expect(mockProvider.clearPendingTaskAction).not.toHaveBeenCalled()
+
+				await vi.advanceTimersByTimeAsync(100)
+				await saving
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "finish-action")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("reconciles stale in-memory metadata after an idempotent clear without clearing a newer action", async () => {
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(false)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction,
+				},
+				startTask: false,
+			})
+			const storeGet = vi.mocked(mockProvider.taskHistoryStore.get)
+			storeGet.mockReturnValueOnce(undefined)
+
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied" }],
+			})
+
+			const taskState = task as unknown as { pendingAction?: PendingTaskAction }
+			expect(taskState.pendingAction).toBeUndefined()
+
+			const newerAction: PendingTaskAction = { ...pendingAction, actionId: "newer-action" }
+			task.setPendingTaskAction(pendingAction)
+			storeGet.mockReturnValueOnce({
+				id: "child-1",
+				number: 1,
+				ts: 1,
+				task: "Child",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+				pendingAction: newerAction,
+			})
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "finish-action", content: "Denied again" }],
+			})
+
+			expect(taskState.pendingAction).toEqual(newerAction)
+		})
+
+		it("completes the deny-with-feedback lifecycle using the sanitized action id", async () => {
+			const rawToolUseId = "finish.action/with spaces"
+			const sanitizedActionId = "finish_action_with_spaces"
+			const lifecycleAction: PendingTaskAction = {
+				...pendingAction,
+				actionId: sanitizedActionId,
+			}
+			mockProvider.clearPendingTaskAction = vi.fn().mockResolvedValue(true)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "child-1",
+					number: 1,
+					ts: 1,
+					task: "Child",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					pendingAction: lifecycleAction,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockResolvedValue({
+				response: "messageResponse",
+				text: "Please revise",
+				queuedMessageId: "queued-lifecycle",
+			})
+			const persist = vi.spyOn(task, "persistQueuedFeedbackAndAcknowledge").mockResolvedValue(true)
+			const initiate = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockImplementation(async (content) => {
+					await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "user", content })
+				})
+
+			await getTaskPersistenceAccess(task).resumePendingTaskAction(lifecycleAction)
+
+			expect(rawToolUseId).not.toBe(sanitizedActionId)
+			expect(persist).toHaveBeenCalledWith("queued-lifecycle", "Please revise", undefined)
+			expect(initiate).toHaveBeenCalledWith([
+				expect.objectContaining({ type: "tool_result", tool_use_id: sanitizedActionId }),
+			])
+			expect(mockSaveApiMessages).toHaveBeenCalled()
+			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", sanitizedActionId)
+			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiate.mock.invocationCallOrder[0])
+		})
+	})
 
 	// ── flushPendingToolResultsToHistory — save failure/success ───────────
 
