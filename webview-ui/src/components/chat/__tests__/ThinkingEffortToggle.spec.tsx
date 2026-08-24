@@ -115,6 +115,15 @@ describe("ThinkingEffortToggle (DTE series 4/5)", () => {
 		expect(container.textContent).toBe("")
 	})
 
+	it("exposes the localized accessible name on the icon-only trigger", () => {
+		renderToggle()
+		// The mocked i18n returns keys, so the exact localized label is the raw key.
+		expect(screen.getByTestId("thinking-effort-toggle-trigger")).toHaveAttribute(
+			"aria-label",
+			"chat:thinkingEffort.toggleTitle",
+		)
+	})
+
 	it("renders nothing when the model does not advertise effort support", () => {
 		mockModelInfo = { contextWindow: 1_000_000, maxTokens: 128_000, supportsPromptCache: false }
 		const { container } = renderToggle()
