@@ -543,6 +543,13 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		return this.getModel()
 	}
 
+	/**
+	 * Resolves the active model and its capability metadata.
+	 *
+	 * F7: fills in user-declared `supportedReasoningEfforts` (registry-wins)
+	 * for self-hosted / OpenAI-compatible profiles that do not advertise the
+	 * capability in the registry.
+	 */
 	override getModel(): { id: string; info: ModelInfo } {
 		const modelId = this.options.ollamaModelId || ""
 		// F7: fill in user-declared reasoning effort levels where the fetched model

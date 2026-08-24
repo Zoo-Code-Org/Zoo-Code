@@ -113,6 +113,13 @@ export abstract class RouterProvider extends BaseProvider {
 		await this.fetchModel()
 	}
 
+	/**
+	 * Resolves the active model and its capability metadata.
+	 *
+	 * F7: fills in user-declared `supportedReasoningEfforts` (registry-wins)
+	 * for self-hosted / OpenAI-compatible profiles that do not advertise the
+	 * capability in the registry.
+	 */
 	override getModel(): { id: string; info: ModelInfo } {
 		// Use `||` (not `??`) so an empty-string modelId also falls back to the default,
 		// guaranteeing a non-empty id rather than forwarding "" to the API as an invalid

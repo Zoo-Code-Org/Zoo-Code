@@ -73,6 +73,13 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		})
 	}
 
+	/**
+	 * Resolves the active model and its capability metadata.
+	 *
+	 * F7: fills in user-declared `supportedReasoningEfforts` (registry-wins)
+	 * for self-hosted / OpenAI-compatible profiles that do not advertise the
+	 * capability in the registry.
+	 */
 	override getModel() {
 		const id =
 			this.options.apiModelId && this.options.apiModelId in this.providerModels
