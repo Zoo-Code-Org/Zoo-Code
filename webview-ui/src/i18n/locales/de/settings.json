@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamische Denkintensität",
-			"description": "Lässt das Modell die Denkintensität pro Schritt selbst bestimmen und ermöglicht Ihnen, sie im Chat anzupassen. (experimentell)"
+			"description": "Lässt das Modell die Denkintensität pro Schritt selbst bestimmen und ermöglicht Ihnen, sie im Chat anzupassen. (experimentell)",
+			"hint": "OpenAI-kompatible Profile (eigener OpenAI-Endpunkt, LM Studio, Ollama, LiteLLM und ähnliche) können in der supportedReasoningEfforts-Einstellung deklarieren, welche Reasoning-Bemühungsstufen ihr Modell unterstützt. Deklarierte Stufen werden mit jeder Anfrage gesendet, aber der lokale Server kann den Parameter ignorieren."
 		}
 	},
 	"promptCaching": {

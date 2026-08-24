@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
+import { reasoningEffortExtendedSchema, reasoningEffortSettingSchema, verbosityLevelsSchema } from "../model.js"
 import type { ProviderIdentifier } from "../provider-identifiers.js"
 
 export const API_PROVIDER_FIELD = "apiProvider"
@@ -18,6 +18,15 @@ export const baseProviderSettingsShape = {
 	modelMaxTokens: z.number().optional(),
 	modelMaxThinkingTokens: z.number().optional(),
 	verbosity: verbosityLevelsSchema.optional(),
+	/**
+	 * F7: per-profile declaration of the canonical reasoning effort levels the
+	 * selected model supports. Self-hosted / OpenAI-compatible models do not
+	 * advertise `supportsReasoningEffort` in the model registry, so a profile can
+	 * declare the levels its model accepts; the resolution rule fills the gap only
+	 * where the model info has no value of its own (registry values are never
+	 * overridden).
+	 */
+	supportedReasoningEfforts: z.array(reasoningEffortExtendedSchema).optional(),
 }
 
 export const apiModelIdProviderModelShape = {

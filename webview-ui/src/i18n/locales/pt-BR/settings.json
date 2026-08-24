@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esforço de pensamento dinâmico",
-			"description": "Permite que o modelo decida seu esforço de pensamento em cada etapa e que você o ajuste na conversa. (experimental)"
+			"description": "Permite que o modelo decida seu esforço de pensamento em cada etapa e que você o ajuste na conversa. (experimental)",
+			"hint": "Perfis compatíveis com OpenAI (endpoint OpenAI personalizado, LM Studio, Ollama, LiteLLM e similares) podem declarar na configuração supportedReasoningEfforts os níveis de esforço de raciocínio que o modelo suporta. Os níveis declarados são enviados em cada solicitação, mas o servidor local pode ignorar o parâmetro."
 		}
 	},
 	"promptCaching": {

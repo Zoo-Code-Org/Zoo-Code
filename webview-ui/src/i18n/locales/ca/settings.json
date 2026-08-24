@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esforç de pensament dinàmic",
-			"description": "Permet que el model decideixi el seu esforç de pensament per pas i que tu l'ajustis en el xat. (experimental)"
+			"description": "Permet que el model decideixi el seu esforç de pensament per pas i que tu l'ajustis en el xat. (experimental)",
+			"hint": "Els perfils compatibles amb OpenAI (punt final d'OpenAI personalitzat, LM Studio, Ollama, LiteLLM i similars) poden declarar a la configuració supportedReasoningEfforts els nivells d'esforç de raonament que el model admet. Els nivells declarats s'envien amb cada sol·licitud, però el servidor local pot ignorar el paràmetre."
 		}
 	},
 	"promptCaching": {

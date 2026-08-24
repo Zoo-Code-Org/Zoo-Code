@@ -976,7 +976,8 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "ダイナミック思考強度",
-			"description": "ステップごとにモデルが思考強度を決定し、チャット内で調整できます。 (実験的機能)"
+			"description": "ステップごとにモデルが思考強度を決定し、チャット内で調整できます。 (実験的機能)",
+			"hint": "OpenAI互換のプロファイル（カスタムOpenAIエンドポイント、LM Studio、Ollama、LiteLLM など）は、supportedReasoningEfforts の設定で、モデルがサポートする思考レベルを宣言できます。宣言されたレベルはリクエストごとに送信されますが、ローカルサーバーがそのパラメータを無視する場合があります。"
 		}
 	},
 	"promptCaching": {

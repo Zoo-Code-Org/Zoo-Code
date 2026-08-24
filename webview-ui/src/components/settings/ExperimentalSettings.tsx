@@ -118,6 +118,14 @@ export const ExperimentalSettings = ({
 										)
 									}
 								/>
+								{/* F7: hint for declaring supported effort levels on OpenAI-compatible profiles */}
+								{config[0] === "DYNAMIC_THINKING_EFFORT" && (
+									<p
+										data-testid="dynamic-thinking-effort-hint"
+										className="text-vscode-descriptionForeground text-xs mt-1">
+										{t("settings:experimental.DYNAMIC_THINKING_EFFORT.hint")}
+									</p>
+								)}
 							</SearchableSetting>
 						)
 					})}

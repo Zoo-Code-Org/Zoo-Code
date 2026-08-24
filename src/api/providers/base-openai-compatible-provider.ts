@@ -9,6 +9,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -248,6 +249,8 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				? (this.options.apiModelId as ModelName)
 				: this.defaultProviderModelId
 
-		return { id, info: this.providerModels[id] }
+		// F7: fill in user-declared reasoning effort levels where the model does not
+		// advertise its own capability (registry values are never overridden).
+		return { id, info: withDeclaredReasoningEffort(this.providerModels[id], this.options) }
 	}
 }

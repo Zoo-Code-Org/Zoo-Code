@@ -2,6 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { Message, Ollama, Tool as OllamaTool, type Config as OllamaOptions } from "ollama"
 import { ModelInfo, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -544,9 +545,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 	override getModel(): { id: string; info: ModelInfo } {
 		const modelId = this.options.ollamaModelId || ""
+		// F7: fill in user-declared reasoning effort levels where the fetched model
+		// does not advertise its own capability.
 		return {
 			id: modelId,
-			info: this.models[modelId] || openAiModelInfoSaneDefaults,
+			info: withDeclaredReasoningEffort(this.models[modelId] || openAiModelInfoSaneDefaults, this.options),
 		}
 	}
 

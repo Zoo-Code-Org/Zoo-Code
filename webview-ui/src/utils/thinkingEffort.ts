@@ -14,6 +14,37 @@ export interface ThinkingEffortDisplay {
 export const THINKING_EFFORT_ADAPTIVE_LEVEL = "adaptive"
 
 /**
+ * F7: webview-side mirror of the extension fill-in
+ * (`withDeclaredReasoningEffort` in src/api/model-capabilities.ts).
+ *
+ * Self-hosted / OpenAI-compatible models do not advertise
+ * `supportsReasoningEffort` in the model registry, so the webview state
+ * ModelInfo has no capability of its own and the DTE surfaces are hidden.
+ * When the profile declares a non-empty `supportedReasoningEfforts` and the
+ * model has no value of its own (`undefined`), the model is treated as
+ * supporting exactly that array. Registry values are NEVER overridden
+ * (fill-in-the-gap only), so models that already advertise a capability
+ * (boolean or array) keep it.
+ *
+ * Pure and non-mutating: returns the original model when nothing is filled in.
+ */
+export function resolveReasoningEffortCapability(
+	model: ModelInfo | undefined,
+	apiConfiguration: ProviderSettings | undefined,
+): ModelInfo | undefined {
+	if (!model || model.supportsReasoningEffort !== undefined) {
+		return model
+	}
+
+	const declared = apiConfiguration?.supportedReasoningEfforts
+	if (!Array.isArray(declared) || declared.length === 0) {
+		return model
+	}
+
+	return { ...model, supportsReasoningEffort: [...declared] }
+}
+
+/**
  * DTE series 4/5: webview-side computation of the current effective thinking
  * effort and its source, shared by the TaskHeader chip and the composer
  * bottom-bar toggle.
@@ -35,7 +66,12 @@ export function computeThinkingEffortDisplay(args: {
 }): ThinkingEffortDisplay | null {
 	const { apiConfiguration, model, taskThinkingEffort } = args
 
-	const capability = model?.supportsReasoningEffort
+	// F7: apply the profile-declared reasoning effort capability fill-in so the
+	// composer toggle and TaskHeader chip render for models whose registry entry
+	// does not advertise the capability (OpenAI-compatible / self-hosted).
+	const effectiveModel = resolveReasoningEffortCapability(model, apiConfiguration)
+
+	const capability = effectiveModel?.supportsReasoningEffort
 	const isAdaptiveClass = capability === true
 	// The "disable" sentinel is a UI off-switch (settings value), not a level a
 	// task can be set to — keep it out of the menu even when a model advertises it.
@@ -75,8 +111,8 @@ export function computeThinkingEffortDisplay(args: {
 	if (isAdaptiveClass) {
 		return { effort: THINKING_EFFORT_ADAPTIVE_LEVEL, source: "auto", supportedLevels, isAdaptiveClass }
 	}
-	if (model?.reasoningEffort) {
-		return { effort: model.reasoningEffort, source: "default", supportedLevels, isAdaptiveClass }
+	if (effectiveModel?.reasoningEffort) {
+		return { effort: effectiveModel.reasoningEffort, source: "default", supportedLevels, isAdaptiveClass }
 	}
 	return null
 }

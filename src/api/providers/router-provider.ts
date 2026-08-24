@@ -4,6 +4,7 @@ import { type ModelInfo, type ModelRecord } from "@roo-code/types"
 
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
+import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { BaseProvider } from "./base-provider"
 import { getModels, getModelsFromCache, refreshModels } from "./fetchers/modelCache"
 
@@ -123,7 +124,9 @@ export abstract class RouterProvider extends BaseProvider {
 
 		// First check instance models (populated by fetchModel)
 		if (this.models[id]) {
-			return { id, info: this.models[id] }
+			// F7: fill in user-declared reasoning effort levels where the fetched
+			// model does not advertise its own capability.
+			return { id, info: withDeclaredReasoningEffort(this.models[id], this.options) }
 		}
 
 		// Fall back to global cache (synchronous disk/memory cache).
@@ -137,7 +140,7 @@ export abstract class RouterProvider extends BaseProvider {
 		if (cachedModels?.[id]) {
 			// Also populate instance models for future calls
 			this.models = cachedModels
-			return { id, info: cachedModels[id] }
+			return { id, info: withDeclaredReasoningEffort(cachedModels[id], this.options) }
 		}
 
 		// Last resort: keep the configured id so we don't swap models, but zero
@@ -145,17 +148,20 @@ export abstract class RouterProvider extends BaseProvider {
 		if (id !== this.defaultModelId) {
 			return {
 				id,
-				info: {
-					...this.defaultModelInfo,
-					inputPrice: 0,
-					outputPrice: 0,
-					cacheWritesPrice: 0,
-					cacheReadsPrice: 0,
-				},
+				info: withDeclaredReasoningEffort(
+					{
+						...this.defaultModelInfo,
+						inputPrice: 0,
+						outputPrice: 0,
+						cacheWritesPrice: 0,
+						cacheReadsPrice: 0,
+					},
+					this.options,
+				),
 			}
 		}
 
-		return { id, info: this.defaultModelInfo }
+		return { id, info: withDeclaredReasoningEffort(this.defaultModelInfo, this.options) }
 	}
 
 	protected supportsTemperature(modelId: string): boolean {
