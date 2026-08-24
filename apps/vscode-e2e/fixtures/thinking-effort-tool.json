@@ -16,8 +16,14 @@
 			}
 		},
 		{
+			// The post-tool request ends with a role:user message (fresh environment details
+			// appended after the tool result), so aimock's toolCallId matcher — which only
+			// inspects the LAST message — can never match it. Scope by the DTE-only model plus
+			// the presence of a tool-result message (turnIndex 1 tie-breaks the two requests).
 			"match": {
-				"toolCallId": "call_dte_e2e_001"
+				"model": "openai/gpt-5",
+				"hasToolResult": true,
+				"turnIndex": 1
 			},
 			"response": {
 				"toolCalls": [
