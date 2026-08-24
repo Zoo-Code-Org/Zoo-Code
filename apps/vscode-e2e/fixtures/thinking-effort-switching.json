@@ -1,0 +1,84 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"model": "openai/gpt-5.1",
+				"hasToolResult": false,
+				"turnIndex": 0
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "set_thinking_effort",
+						"arguments": "{\"effort\": \"medium\", \"reason\": \"start at medium\"}",
+						"id": "call_dte_sw_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "openai/gpt-5.1",
+				"hasToolResult": true,
+				"turnIndex": 1
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "set_thinking_effort",
+						"arguments": "{\"effort\": \"medium\", \"reason\": \"confirm current level\"}",
+						"id": "call_dte_sw_002"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "openai/gpt-5.1",
+				"hasToolResult": true,
+				"turnIndex": 2
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "set_thinking_effort",
+						"arguments": "{\"effort\": \"high\", \"reason\": \"raise to high\"}",
+						"id": "call_dte_sw_003"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "openai/gpt-5.1",
+				"hasToolResult": true,
+				"turnIndex": 3
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "set_thinking_effort",
+						"arguments": "{\"effort\": \"medium\", \"reason\": \"try returning to medium\"}",
+						"id": "call_dte_sw_004"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"model": "openai/gpt-5.1",
+				"hasToolResult": true,
+				"turnIndex": 4
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\": \"DTE_E2E_SWITCH_DONE\"}",
+						"id": "call_dte_sw_005"
+					}
+				]
+			}
+		}
+	]
+}
