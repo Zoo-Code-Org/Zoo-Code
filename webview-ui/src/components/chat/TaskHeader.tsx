@@ -66,7 +66,7 @@ const TaskHeader = ({
 	todos,
 }: TaskHeaderProps) => {
 	const { t } = useTranslation()
-	const { apiConfiguration, currentTaskItem, experiments, taskThinkingEffort } = useExtensionState()
+	const { apiConfiguration, currentTaskItem, taskThinkingEffort } = useExtensionState()
 	const { id: modelId, info: model } = useSelectedModel(apiConfiguration)
 	const [isTaskExpanded, setIsTaskExpanded] = useState(false)
 
@@ -94,12 +94,11 @@ const TaskHeader = ({
 	const thinkingEffortDisplay = useMemo(
 		() =>
 			computeThinkingEffortDisplay({
-				experiments,
 				apiConfiguration,
 				model,
 				taskThinkingEffort,
 			}),
-		[experiments, apiConfiguration, model, taskThinkingEffort],
+		[apiConfiguration, model, taskThinkingEffort],
 	)
 	const thinkingEffortSourceKey =
 		thinkingEffortDisplay?.source === "you"

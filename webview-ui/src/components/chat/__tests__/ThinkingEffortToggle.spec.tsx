@@ -108,11 +108,15 @@ describe("ThinkingEffortToggle (DTE series 4/5)", () => {
 		}
 	})
 
-	it("renders nothing when the dynamic-thinking-effort experiment is disabled", () => {
+	it("renders when the dynamic-thinking-effort experiment is disabled", () => {
 		mockState.experiments = { dynamicThinkingEffort: false }
-		const { container } = renderToggle()
-		expect(screen.queryByTestId("thinking-effort-toggle-trigger")).toBeNull()
-		expect(container.textContent).toBe("")
+		renderToggle()
+		// The manual toggle is a normal feature: gated by model capability, not the experiment.
+		expect(screen.getByTestId("thinking-effort-toggle-trigger")).toBeInTheDocument()
+		expect(screen.getByTestId("thinking-effort-toggle-trigger")).toHaveAttribute(
+			"aria-label",
+			"chat:thinkingEffort.toggleTitle",
+		)
 	})
 
 	it("exposes the localized accessible name on the icon-only trigger", () => {

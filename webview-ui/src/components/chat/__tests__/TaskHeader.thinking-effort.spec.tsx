@@ -146,10 +146,12 @@ describe("TaskHeader - thinking effort chip (DTE series 4/5)", () => {
 		expect(screen.getByText("Zoo (auto)")).toBeInTheDocument()
 	})
 
-	it("hides the chip when the dynamic-thinking-effort experiment is disabled", () => {
+	it("shows the chip when the dynamic-thinking-effort experiment is disabled", () => {
 		mockState.experiments = { dynamicThinkingEffort: false }
 		renderChip()
-		expect(screen.queryByText("medium")).toBeNull()
+		// The chip is a normal feature: gated by model capability, not the experiment.
+		expect(screen.getByText("medium")).toBeInTheDocument()
+		expect(screen.getByText("default")).toBeInTheDocument()
 	})
 
 	it("hides the chip when the model does not advertise effort support", () => {

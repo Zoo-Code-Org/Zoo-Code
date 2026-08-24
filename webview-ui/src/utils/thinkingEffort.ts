@@ -1,4 +1,4 @@
-import type { Experiments, ModelInfo, ProviderSettings, ReasoningEffortExtended } from "@roo-code/types"
+import type { ModelInfo, ProviderSettings, ReasoningEffortExtended } from "@roo-code/types"
 
 export type ThinkingEffortSource = "default" | "auto" | "you"
 
@@ -22,20 +22,14 @@ export const THINKING_EFFORT_ADAPTIVE_LEVEL = "adaptive"
  * extension-side push via `taskThinkingEffort`) → settings `reasoningEffort`
  * (provider profile) → model default (`model.reasoningEffort`); boolean/
  * adaptive-class models fall back to the "adaptive" soft-guidance display.
- * Returns `null` when the dynamic-thinking-effort experiment is disabled or
- * the model does not advertise per-request effort support.
+ * Returns `null` when the model does not advertise per-request effort support.
  */
 export function computeThinkingEffortDisplay(args: {
-	experiments?: Experiments
 	apiConfiguration?: ProviderSettings
 	model?: ModelInfo
 	taskThinkingEffort?: { effort: string; source: string }
 }): ThinkingEffortDisplay | null {
-	const { experiments, apiConfiguration, model, taskThinkingEffort } = args
-
-	if (experiments?.dynamicThinkingEffort !== true) {
-		return null
-	}
+	const { apiConfiguration, model, taskThinkingEffort } = args
 
 	const capability = model?.supportsReasoningEffort
 	const isAdaptiveClass = capability === true
