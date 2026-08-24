@@ -171,6 +171,10 @@ export abstract class RouterProvider extends BaseProvider {
 		return { id, info: withDeclaredReasoningEffort(this.defaultModelInfo, this.options) }
 	}
 
+	/**
+	 * Router/LiteLLM model ids are opaque, so temperature support is
+	 * inferred: only the known openai/o3-mini ids reject temperature.
+	 */
 	protected supportsTemperature(modelId: string): boolean {
 		return !modelId.startsWith("openai/o3-mini")
 	}

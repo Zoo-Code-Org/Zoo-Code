@@ -129,6 +129,16 @@ export function getToolAliasGroup(toolName: string): readonly string[] {
 }
 
 /**
+ * Result of applying model tool customization.
+ * Contains the set of allowed tools and any alias renames to apply.
+ */
+interface ModelToolCustomizationResult {
+	allowedTools: Set<string>
+	/** Maps canonical tool name to alias name for tools that should be renamed */
+	aliasRenames: Map<string, string>
+}
+
+/**
  * Apply model-specific tool customization to a set of allowed tools.
  *
  * This function filters tools based on model configuration:
@@ -140,16 +150,6 @@ export function getToolAliasGroup(toolName: string): readonly string[] {
  * @param modelInfo - Model configuration with tool customization
  * @returns Modified set of tools after applying model customization
  */
-/**
- * Result of applying model tool customization.
- * Contains the set of allowed tools and any alias renames to apply.
- */
-interface ModelToolCustomizationResult {
-	allowedTools: Set<string>
-	/** Maps canonical tool name to alias name for tools that should be renamed */
-	aliasRenames: Map<string, string>
-}
-
 export function applyModelToolCustomization(
 	allowedTools: Set<string>,
 	modeConfig: ModeConfig,
