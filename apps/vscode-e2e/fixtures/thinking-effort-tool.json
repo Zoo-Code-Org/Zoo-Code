@@ -1,0 +1,33 @@
+{
+	"fixtures": [
+		{
+			"match": {
+				"sequenceIndex": 0,
+				"userMessage": "DTE_E2E_EFFORT_APPLY: answer the math question"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "set_thinking_effort",
+						"arguments": "{\"effort\": \"high\", \"reason\": \"multi-step math\"}",
+						"id": "call_dte_e2e_001"
+					}
+				]
+			}
+		},
+		{
+			"match": {
+				"toolCallId": "call_dte_e2e_001"
+			},
+			"response": {
+				"toolCalls": [
+					{
+						"name": "attempt_completion",
+						"arguments": "{\"result\": \"42\"}",
+						"id": "call_dte_e2e_002"
+					}
+				]
+			}
+		}
+	]
+}
