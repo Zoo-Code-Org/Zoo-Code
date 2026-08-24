@@ -975,8 +975,8 @@
 			"toolParameters": "매개변수"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"name": "동적 사고 노력",
+			"description": "단계별로 모델이 사고 노력을 결정하도록 하고, 채팅에서 조정할 수 있습니다. (실험적 기능)"
 		}
 	},
 	"promptCaching": {

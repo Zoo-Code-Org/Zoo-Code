@@ -70,15 +70,27 @@ function effortRank(level: string | undefined): number {
  * Hard clamp to the model capability array: an in-array request passes
  * through unchanged; any other valid level is mapped to the nearest
  * supported level (ties resolved toward the lower level).
+ *
+ * Only recognized effort values (SETTABLE_EFFORTS plus "disable") count as
+ * supported: capability arrays may carry provider-specific garbage, and the
+ * nearest-level selection must never yield an unrecognized value that would
+ * be applied as the runtime effort. Returns `undefined` when the array holds
+ * no recognized value at all, in which case the caller must refuse the call.
  */
 function clampToCapability(
 	requested: SettableEffort,
 	capability: ModelInfo["supportsReasoningEffort"],
-): SettableEffort | "disable" {
+): SettableEffort | "disable" | undefined {
 	if (!Array.isArray(capability) || capability.length === 0) {
 		return requested
 	}
-	const supported = capability
+	const supported = capability.filter(
+		(level): level is SettableEffort | "disable" =>
+			(SETTABLE_EFFORTS as readonly string[]).includes(level) || level === "disable",
+	)
+	if (supported.length === 0) {
+		return undefined
+	}
 	if (supported.includes(requested)) {
 		return requested
 	}
@@ -179,6 +191,20 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 
 			// Hard clamp to the model capability array.
 			const clamped = clampToCapability(requested, capability)
+			if (clamped === undefined) {
+				// The capability array contains no recognizable effort level, so no valid
+				// value can be applied; refuse the call (standard refusal path) instead of
+				// applying an unrecognized value as the runtime effort.
+				task.consecutiveMistakeCount++
+				task.recordToolError("set_thinking_effort")
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(
+					formatResponse.toolError(
+						"The current model does not advertise any usable thinking effort levels; keeping the current effort.",
+					),
+				)
+				return
+			}
 			if (clamped === "disable") {
 				// The clamp landed on "disable", which this tool cannot set (the
 				// task-local API takes an effort level, not a UI off-switch).

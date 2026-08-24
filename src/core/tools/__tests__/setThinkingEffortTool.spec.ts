@@ -225,6 +225,29 @@ describe("setThinkingEffortTool", () => {
 			expect(result).toContain("clamped to 'low'")
 		})
 
+		it("refuses a capability array that contains no settable effort", async () => {
+			use({ capability: ["weird"], settingsEffort: "low" })
+			await setThinkingEffortTool.execute({ effort: "high", reason: "multi-step math" }, task, callbacks)
+
+			expect(double.consecutiveMistakeCount).toBe(1)
+			expect(double.recordToolError).toHaveBeenCalledWith("set_thinking_effort")
+			expect(double.didToolFailInCurrentTurn).toBe(true)
+			expect(double.setRuntimeThinkingEffort).not.toHaveBeenCalled()
+			expect(double.say).not.toHaveBeenCalled()
+			const result = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(result).toContain("error")
+			expect(result).toContain("usable thinking effort levels")
+		})
+
+		it("still passes through a settable level when the capability array also contains garbage", async () => {
+			use({ capability: ["weird", "high"], settingsEffort: "low" })
+			await setThinkingEffortTool.execute({ effort: "high", reason: "passthrough" }, task, callbacks)
+
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("high", "model")
+			const result = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(result).not.toContain("clamped")
+		})
+
 		it("rejects a request that clamps to 'disable' (capability without settable levels)", async () => {
 			use({ capability: ["disable"], settingsEffort: "disable" })
 			await setThinkingEffortTool.execute({ effort: "low", reason: "some reasoning" }, task, callbacks)

@@ -1,7 +1,17 @@
 import React from "react"
 import { render, screen } from "@/utils/test-utils"
 import { ChatRowContent } from "../ChatRow"
-import type { ClineMessage } from "@roo-code/types"
+import type { ClineMessage, ClineSayTool } from "@roo-code/types"
+
+/** The thinkingEffort say-tool payload shape emitted by SetThinkingEffortTool. */
+type ThinkingEffortSayTool = Pick<ClineSayTool, "tool" | "effort" | "reason" | "refusal"> & {
+	tool: "thinkingEffort"
+}
+
+/** A non-thinkingEffort say-tool payload (arbitrary tool name) for negative tests. */
+type OtherSayTool = Pick<ClineSayTool, "effort" | "reason" | "refusal"> & {
+	tool: string
+}
 
 // Mock vscode API
 const mockPostMessage = vi.fn()
@@ -49,7 +59,7 @@ vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({ info: { supportsImages: true } }),
 }))
 
-function renderChatRow(message: any) {
+function renderChatRow(message: ClineMessage) {
 	mockClineMessages = [message]
 	return render(
 		<ChatRowContent
@@ -66,7 +76,7 @@ function renderChatRow(message: any) {
 	)
 }
 
-function sayToolMessage(text: object): any {
+function sayToolMessage(text: ThinkingEffortSayTool | OtherSayTool): ClineMessage {
 	return {
 		ts: Date.now(),
 		type: "say" as const,
