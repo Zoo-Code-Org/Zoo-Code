@@ -474,16 +474,16 @@
 		"didRun": "Zoo 运行了斜杠命令"
 	},
 	"thinkingEffort": {
-		"appliedByUser": "🧠 思考强度已设为:{{effort}}",
-		"chipTooltip": "思考强度:{{effort}}({{source}})",
+		"appliedByUser": "思考强度已设为: {{effort}}",
+		"chipTooltip": "思考强度: {{effort}} ({{source}})",
 		"sourceDefault": "默认",
 		"sourceAuto": "Zoo(自动)",
 		"sourceYou": "你",
 		"toggleTitle": "思考强度",
 		"adaptiveHint": "此模型会自动决定思考强度,你的选择仅作为软性指引。",
-		"applied": "🧠 思考强度: {{effort}} (Zoo) — {{reason}}",
-		"escalationCapRefused": "🧠 思考强度未改变: 已达到每任务 3 次上调的升级上限",
-		"oscillationRefused": "🧠 思考强度未改变: 检测到等级间振荡"
+		"applied": "思考强度: {{effort}} (Zoo) — {{reason}}",
+		"escalationCapRefused": "思考强度未改变: 已达到每任务 3 次上调的升级上限",
+		"oscillationRefused": "思考强度未改变: 检测到等级间振荡"
 	},
 	"todo": {
 		"partial": "已完成 {{completed}} / {{total}} 个待办事项",

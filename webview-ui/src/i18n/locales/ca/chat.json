@@ -467,16 +467,16 @@
 		"didRun": "Zoo ha executat una comanda slash"
 	},
 	"thinkingEffort": {
-		"appliedByUser": "🧠 Esforç de raonament establert a: {{effort}}",
+		"appliedByUser": "Esforç de raonament establert a: {{effort}}",
 		"chipTooltip": "Esforç de raonament: {{effort}} ({{source}})",
 		"sourceDefault": "per defecte",
 		"sourceAuto": "Zoo (auto)",
 		"sourceYou": "tu",
 		"toggleTitle": "Esforç de raonament",
 		"adaptiveHint": "Aquest model decideix el seu esforç automàticament — la teva selecció és només una guia suau.",
-		"applied": "🧠 Esforç de pensament: {{effort}} (Zoo) — {{reason}}",
-		"escalationCapRefused": "🧠 Esforç de pensament sense canvis: s'ha assolit el límit d'escalada de 3 canvis cap amunt per tasca",
-		"oscillationRefused": "🧠 Esforç de pensament sense canvis: s'ha detectat oscil·lació entre nivells"
+		"applied": "Esforç de pensament: {{effort}} (Zoo) — {{reason}}",
+		"escalationCapRefused": "Esforç de pensament sense canvis: s'ha assolit el límit d'escalada de 3 canvis cap amunt per tasca",
+		"oscillationRefused": "Esforç de pensament sense canvis: s'ha detectat oscil·lació entre nivells"
 	},
 	"contextMenu": {
 		"noResults": "Sense resultats",

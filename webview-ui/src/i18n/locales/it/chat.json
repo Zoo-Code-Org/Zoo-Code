@@ -473,16 +473,16 @@
 		"didRun": "Zoo ha eseguito un comando slash"
 	},
 	"thinkingEffort": {
-		"appliedByUser": "🧠 Sforzo di ragionamento impostato su: {{effort}}",
+		"appliedByUser": "Sforzo di ragionamento impostato su: {{effort}}",
 		"chipTooltip": "Sforzo di ragionamento: {{effort}} ({{source}})",
 		"sourceDefault": "predefinito",
 		"sourceAuto": "Zoo (auto)",
 		"sourceYou": "tu",
 		"toggleTitle": "Sforzo di ragionamento",
 		"adaptiveHint": "Questo modello decide il proprio sforzo automaticamente — la tua selezione è solo una guida flessibile.",
-		"applied": "🧠 Sforzo di pensiero: {{effort}} (Zoo) — {{reason}}",
-		"escalationCapRefused": "🧠 Sforzo di pensiero invariato: raggiunto il limite di escalation di 3 modifiche in salita per task",
-		"oscillationRefused": "🧠 Sforzo di pensiero invariato: oscillazione tra i livelli rilevata"
+		"applied": "Sforzo di pensiero: {{effort}} (Zoo) — {{reason}}",
+		"escalationCapRefused": "Sforzo di pensiero invariato: raggiunto il limite di escalation di 3 modifiche in salita per task",
+		"oscillationRefused": "Sforzo di pensiero invariato: oscillazione tra i livelli rilevata"
 	},
 	"todo": {
 		"partial": "{{completed}} di {{total}} cose da fare completate",
