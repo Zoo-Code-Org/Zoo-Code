@@ -975,8 +975,8 @@
 			"toolParameters": "パラメーター"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"name": "ダイナミック思考強度",
+			"description": "ステップごとにモデルが思考強度を決定し、チャット内で調整できます。 (実験的機能)"
 		}
 	},
 	"promptCaching": {
