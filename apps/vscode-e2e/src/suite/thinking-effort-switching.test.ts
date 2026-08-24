@@ -4,7 +4,7 @@ import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
 import { withOpenRouterCaptureProxy, type CapturedDteRequest } from "./thinking-effort-proxy"
 import { setDefaultSuiteTimeout } from "./test-utils"
-import { waitUntilCompleted } from "./utils"
+import { waitUntilCompleted, waitFor } from "./utils"
 
 /**
  * DTE addendum: set_thinking_effort switching within a single task.
@@ -131,7 +131,19 @@ suite("set_thinking_effort switching within a task (DTE addendum)", function () 
 				text: SWITCH_MARKER + ": manage the thinking effort for this task",
 			})
 
+			const countEffortSays = () =>
+				messages.filter(
+					({ say, text }) => say === "tool" && typeof text === "string" && text.includes("thinkingEffort"),
+				).length
+
 			await waitUntilCompleted({ api, taskId })
+
+			// Event delivery race: the final display say can be observed after the
+			// TaskCompleted event (separate event channels, no cross-channel
+			// ordering guarantee). Settle the expected display says before
+			// detaching the listener; a genuine shortfall still fails below.
+			await waitFor(() => countEffortSays() >= 3, { timeout: 5_000, interval: 100 })
+
 			api.off(RooCodeEventName.Message, onMessage)
 
 			// (a) Real boundary: the task completes after the full switching sequence.
