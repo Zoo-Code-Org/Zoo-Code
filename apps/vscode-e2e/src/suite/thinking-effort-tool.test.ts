@@ -152,6 +152,8 @@ async function withOpenRouterCaptureProxy<T>(
 			const requestUrl = req.url ?? "/"
 
 			if (!isChatCompletionsUrl("http://127.0.0.1" + requestUrl)) {
+				// DTE-DEBUG (temporary): log non-chat requests (e.g. model catalog) the proxy sees.
+				console.error("DTE-DEBUG non-chat", req.method, requestUrl)
 				res.writeHead(404)
 				res.end("Not found")
 				return
@@ -169,6 +171,18 @@ async function withOpenRouterCaptureProxy<T>(
 				carriesSetEffortToolResult: JSON.stringify(body.messages ?? []).includes(SET_EFFORT_TOOL_CALL_ID),
 				lastUserMessage,
 			})
+
+			// DTE-DEBUG (temporary): log every chat request the proxy sees.
+			console.error(
+				"DTE-DEBUG chat",
+				JSON.stringify({
+					url: requestUrl,
+					model: body.model,
+					reasoning: body.reasoning,
+					roles: (body.messages ?? []).map((message) => message.role),
+					lastUserMessage: lastUserMessage.slice(0, 200),
+				}),
+			)
 
 			const forwardHeaders: Record<string, string> = {}
 			for (const [key, value] of Object.entries(req.headers)) {
@@ -271,8 +285,51 @@ suite("set_thinking_effort mid-task workflow (DTE addendum)", function () {
 				text: APPLY_MARKER + ": answer the math question",
 			})
 
-			await waitUntilCompleted({ api, taskId })
-			api.off(RooCodeEventName.Message, onMessage)
+			try {
+				await waitUntilCompleted({ api, taskId })
+			} finally {
+				api.off(RooCodeEventName.Message, onMessage)
+
+				// DTE-DEBUG (temporary): dump aimock's request journal and the proxy's
+				// captured requests so a failure reveals the exact request shapes that
+				// the aimock matcher saw.
+				try {
+					const journalResponse = await fetch(aimockUrl + "/v1/_requests?limit=20")
+					const journal = (await journalResponse.json()) as Array<{
+						method?: string
+						path?: string
+						body?: { model?: string; messages?: Array<{ role?: string; content?: unknown }> }
+						response?: { status?: number }
+					}>
+					for (const entry of journal.slice(-10)) {
+						const entries = entry.body?.messages ?? []
+						const lastUser = [...entries].reverse().find((message) => message.role === "user")
+						const text =
+							typeof lastUser?.content === "string"
+								? lastUser.content
+								: JSON.stringify(lastUser?.content ?? "")
+						console.error(
+							"DTE-DEBUG aimock-journal",
+							entry.method,
+							entry.path,
+							"model=" + String(entry.body?.model ?? "?"),
+							"status=" + String(entry.response?.status ?? "?"),
+							"lastUserMessage=" + text.slice(0, 200),
+						)
+					}
+					console.error(
+						"DTE-DEBUG captured",
+						JSON.stringify(
+							requests.map((request) => ({
+								model: request.model,
+								lastUserMessage: request.lastUserMessage.slice(0, 200),
+							})),
+						),
+					)
+				} catch (error) {
+					console.error("DTE-DEBUG journal fetch failed", error)
+				}
+			}
 
 			// (a) Real boundary: the task completes with the math answer after the
 			// mid-task tool round trip.
