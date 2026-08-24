@@ -90,14 +90,14 @@ export const ThinkingEffortToggle = ({ disabled = false, triggerClassName = "" }
 			</StandardTooltip>
 			<PopoverContent
 				container={portalContainer}
-				className="z-50 w-44"
+				className="z-50 w-44 p-1.5"
 				align="start"
 				data-testid="thinking-effort-toggle-menu">
-				<div className="px-2.5 pt-2 pb-1 text-xs font-medium text-vscode-descriptionForeground">
+				<div className="px-2.5 pt-1 pb-0.5 text-xs font-medium text-vscode-descriptionForeground">
 					{t("chat:thinkingEffort.toggleTitle")}
 				</div>
 				{display.isAdaptiveClass && (
-					<div className="px-2.5 pb-1.5 text-[11px] text-vscode-descriptionForeground">
+					<div className="px-2.5 pb-1 text-[11px] text-vscode-descriptionForeground">
 						{t("chat:thinkingEffort.adaptiveHint")}
 					</div>
 				)}
