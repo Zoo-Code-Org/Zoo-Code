@@ -58,6 +58,23 @@ export class TerminalProcess extends BaseTerminalProcess {
 		return terminal
 	}
 
+	public handleTerminalClosed(): void {
+		const executionStarted = this.ownExecution !== undefined
+		this.terminal.shellExecutionComplete({ exitCode: undefined })
+
+		if (executionStarted) {
+			return
+		}
+
+		// run() has not installed its completion listener yet, so finish the
+		// startup-wait path directly instead of leaving runCommand() pending.
+		this.terminal.activeShellExecution = undefined
+		this.cleanupScriptFile()
+		this.stopHotTimer()
+		this.emit("completed", "")
+		this.emit("continue")
+	}
+
 	public override async run(command: string) {
 		this.command = command
 
