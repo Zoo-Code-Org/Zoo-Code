@@ -35,6 +35,7 @@ import {
 	type CreateTaskOptions,
 	type TokenUsage,
 	type ToolUsage,
+	type ReasoningEffortExtended,
 	type ExtensionMessage,
 	type ExtensionState,
 	type WebviewThemeFixture,
@@ -3777,8 +3778,11 @@ export class ClineProvider
 		message: string
 		initialTodos: TodoItem[]
 		mode: string
+		// DTE series 5/5: the subtask start effort (model-specified or the parent's
+		// current effective effort); applied to the child at init below.
+		thinkingEffort?: ReasoningEffortExtended
 	}): Promise<Task> {
-		const { parentTaskId, message, initialTodos, mode } = params
+		const { parentTaskId, message, initialTodos, mode, thinkingEffort } = params
 
 		// Metadata-driven delegation is always enabled
 
@@ -3870,6 +3874,43 @@ export class ClineProvider
 			initialStatus: "active",
 			startTask: false,
 		})
+
+		// DTE series 5/5: the mode switch above can change the provider profile and
+		// therefore the model the child actually runs on (mode-specific provider
+		// profiles), so a level validated against the parent model can be invalid for
+		// the child's. Re-validate against the child's resolved model immediately before
+		// applying; when the child model does not support the level, fall back to no
+		// task-local override (the settings-derived effort applies) with an observable
+		// say on the child instead of failing the whole delegation.
+		if (thinkingEffort !== undefined) {
+			const childModel = child.api.getModel()
+			const childCapability = childModel.info.supportsReasoningEffort
+			const childSupportsEffort =
+				childCapability === true || (Array.isArray(childCapability) && childCapability.includes(thinkingEffort))
+			if (childSupportsEffort) {
+				// Applied as a task-local override before the child's first request so the
+				// child header shows it from the start. Source "parent" — set by the
+				// orchestrator, not the child's own settings.
+				child.setRuntimeThinkingEffort(thinkingEffort, "parent")
+			} else {
+				// Non-fatal: the parent is already disposed at this point, so a rejecting
+				// say must not abort the delegation — the metadata transaction and child
+				// scheduling below are the recovery path, and losing them would leave the
+				// child active while the parent has no delegation metadata.
+				await child
+					.say(
+						"error",
+						`new_task thinking_effort '${thinkingEffort}' is not supported by the child model (${childModel.id}); the child starts without the effort override.`,
+					)
+					.catch((error) => {
+						this.log(
+							`[delegateParentAndOpenChild] Failed to notify child of unsupported thinking_effort (non-fatal): ${
+								error instanceof Error ? error.message : String(error)
+							}`,
+						)
+					})
+			}
+		}
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.
 		//    atomicReadAndUpdate reads from the in-memory cache and writes back within a

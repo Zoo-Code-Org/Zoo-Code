@@ -58,6 +58,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
+import { resolveEffectiveReasoningEffort } from "../../api/transform/reasoning"
 import { CloudService } from "@roo-code/cloud"
 
 // api
@@ -297,6 +298,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Settings-derived effort captured when the override activates, so clearing
 	// (undefined) restores it in the in-memory apiConfiguration copy.
 	private preOverrideReasoningEffort?: ProviderSettings["reasoningEffort"]
+	// DTE series 5/5: thinking effort chosen in the webview new_task ask block; carried
+	// by the ask response (handleWebviewAskResponse) and consumed once by NewTaskTool.
+	private newTaskAskThinkingEffort?: ReasoningEffortExtended
 	private rateLimitClock: RateLimitClock
 	private autoApprovalHandler: AutoApprovalHandler
 
@@ -1447,13 +1451,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return result
 	}
 
-	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	/**
+	 * DTE series 5/5: the optional `thinkingEffort` is the user's new_task ask-block
+	 * selection (webview `WebviewMessage.thinkingEffort`), consumed by NewTaskTool.
+	 */
+	handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+		thinkingEffort?: ReasoningEffortExtended,
+	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+
+		if (thinkingEffort !== undefined) {
+			this.newTaskAskThinkingEffort = thinkingEffort
+		}
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -1606,6 +1623,38 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	private getRuntimeThinkingEffortMetadata(): Pick<ApiHandlerCreateMessageMetadata, "reasoningEffort"> {
 		return this.runtimeThinkingEffort !== undefined ? { reasoningEffort: this.runtimeThinkingEffort } : {}
+	}
+
+	/**
+	 * DTE series 5/5: resolves this task's current effective thinking effort — used to
+	 * pre-fill the new_task ask block and to inherit the effort into a child task when
+	 * neither the model nor the user specifies one.
+	 *
+	 * Resolution reuses the PR-2 point (task-local override → settings
+	 * `reasoningEffort` → model default). The settings "disable" sentinel is excluded:
+	 * it is a UI off-switch, not a level a child task can start with.
+	 */
+	public resolveNewTaskEffectiveEffort(): ReasoningEffortExtended | undefined {
+		const { effort: runtimeEffort } = this.getRuntimeThinkingEffort()
+		if (runtimeEffort !== undefined) {
+			return runtimeEffort
+		}
+		const resolved = resolveEffectiveReasoningEffort({
+			settingsReasoningEffort: this.apiConfiguration?.reasoningEffort,
+			modelDefaultEffort: this.api.getModel().info.reasoningEffort,
+		})
+		return resolved === "disable" ? undefined : resolved
+	}
+
+	/**
+	 * DTE series 5/5: reads and clears the thinking effort the user chose in the
+	 * pending new_task ask block (set from the webview ask response). The value is
+	 * consumed once by NewTaskTool so a later, different ask cannot reuse it.
+	 */
+	public takeNewTaskAskThinkingEffort(): ReasoningEffortExtended | undefined {
+		const effort = this.newTaskAskThinkingEffort
+		this.newTaskAskThinkingEffort = undefined
+		return effort
 	}
 
 	public async submitUserMessage(
@@ -2401,10 +2450,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 
 		// DTE series 2/5: the task-local effort override is transient — clear it on
-		// task end so a disposed task never carries it forward.
+		// task end so a disposed task never carries it forward. DTE series 5/5: the
+		// pending new_task ask-block selection is consumed or discarded the same way.
 		this.runtimeThinkingEffort = undefined
 		this.runtimeThinkingEffortSource = undefined
 		this.preOverrideReasoningEffort = undefined
+		this.newTaskAskThinkingEffort = undefined
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -2502,6 +2553,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			message,
 			initialTodos,
 			mode,
+			// DTE series 5/5: the child starts with the parent's current effective
+			// effort (source "parent") so its header shows it from the first request.
+			thinkingEffort: this.resolveNewTaskEffectiveEffort(),
 		})
 		return child
 	}

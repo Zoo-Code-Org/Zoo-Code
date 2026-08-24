@@ -386,4 +386,240 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(deleteTaskWithId).toHaveBeenCalledWith("child-1", false)
 		expect(createTaskWithHistoryItem).toHaveBeenCalledWith(parentHistoryItem)
 	})
+
+	it("applies the parent-supplied starting effort to the child at init (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+			// The child's resolved model (post mode switch) supports the requested level.
+			api: {
+				getModel: () => ({ id: "child-model", info: { supportsReasoningEffort: ["low", "medium", "high"] } }),
+			},
+		})
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		const child = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "high",
+		})
+		await Promise.resolve() // drain scheduler microtask so child.run() is invoked
+
+		expect(child.taskId).toBe("child-1")
+		// Applied as a task-local override with provenance "parent" before the child's
+		// first request (the child header shows it from the start).
+		expect(setRuntimeThinkingEffort).toHaveBeenCalledTimes(1)
+		expect(setRuntimeThinkingEffort).toHaveBeenCalledWith("high", "parent")
+	})
+
+	it("leaves the child's effort untouched when no starting effort is supplied (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+		})
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+		})
+		await Promise.resolve()
+
+		expect(setRuntimeThinkingEffort).not.toHaveBeenCalled()
+	})
+
+	it("falls back with an observable say when the child model (post mode switch) does not support the effort (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		const say = vi.fn().mockResolvedValue(undefined)
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		// The mode switch resolved a DIFFERENT model than the parent's: it only
+		// supports low/high, so the parent-validated "xhigh" must not be applied.
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+			say,
+			api: { getModel: () => ({ id: "child-model", info: { supportsReasoningEffort: ["low", "high"] } }) },
+		})
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "xhigh",
+		})
+		await Promise.resolve()
+
+		// No task-local override: the child runs with the settings-derived effort.
+		expect(setRuntimeThinkingEffort).not.toHaveBeenCalled()
+		// Observable on the child task: the fallback is announced, not silent.
+		expect(say).toHaveBeenCalledTimes(1)
+		const [sayType, sayText] = say.mock.calls[0]
+		expect(sayType).toBe("error")
+		expect(sayText).toContain("xhigh")
+		expect(sayText).toContain("child-model")
+		// Delegation itself still proceeds: the child runs.
+		expect(childRun).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not abort delegation when the fallback say rejects after the parent is disposed (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		// The parent is already disposed when this say runs, so the webview state can be
+		// gone and the say rejects (e.g. posting to a removed task).
+		const say = vi.fn().mockRejectedValue(new Error("task disposed"))
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+			say,
+			api: { getModel: () => ({ id: "child-model", info: { supportsReasoningEffort: ["low", "high"] } }) },
+		})
+		const taskHistoryStore = makeStoreStub()
+		const providerLog = vi.fn()
+
+		// Partial provider double: the real ClineProvider.prototype.delegateParentAndOpenChild
+		// is invoked below via .call() with only the members that method reads, so the full
+		// interface is not implemented and the double assertion is the last-resort hand-off.
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: providerLog,
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		// Must NOT reject: the failing notification is non-fatal.
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "xhigh",
+		})
+		await Promise.resolve()
+
+		// The say rejection is surfaced through the provider log, not thrown.
+		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("non-fatal"))
+		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("task disposed"))
+		// Delegation metadata is still persisted for the (already disposed) parent:
+		// capture the updater's resulting item and assert the delegated status and both
+		// child links, not just that the metadata transaction was entered.
+		expect(taskHistoryStore.atomicReadAndUpdate).toHaveBeenCalledTimes(1)
+		const [calledTaskId, updater] = taskHistoryStore.atomicReadAndUpdate.mock.calls[0]
+		expect(calledTaskId).toBe("parent-1")
+		expect(updater(parentHistoryItem)).toMatchObject({
+			id: "parent-1",
+			status: "delegated",
+			delegatedToId: "child-1",
+			awaitingChildId: "child-1",
+			childIds: expect.arrayContaining(["child-1"]),
+		})
+		// And the child is still scheduled despite the failed notification.
+		expect(childRun).toHaveBeenCalledTimes(1)
+	})
+
+	it("applies the effort when the child model (post mode switch) has a boolean-true capability (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		// Boolean-true capability: the child model supports every level.
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+			api: { getModel: () => ({ id: "child-model", info: { supportsReasoningEffort: true } }) },
+		})
+		const taskHistoryStore = makeStoreStub()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "xhigh",
+		})
+		await Promise.resolve()
+
+		expect(setRuntimeThinkingEffort).toHaveBeenCalledTimes(1)
+		expect(setRuntimeThinkingEffort).toHaveBeenCalledWith("xhigh", "parent")
+	})
 })

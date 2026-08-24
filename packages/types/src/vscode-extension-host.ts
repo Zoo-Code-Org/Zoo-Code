@@ -12,7 +12,7 @@ import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList,
 import type { SerializedCustomToolDefinition } from "./custom-tool.js"
 import type { GitCommit } from "./git.js"
 import type { McpServer } from "./mcp.js"
-import { RouterModelsMessageType, type ModelRecord, type RouterModels } from "./model.js"
+import { RouterModelsMessageType, type ModelRecord, type RouterModels, type ReasoningEffortExtended } from "./model.js"
 import { LmStudioModelsMessageType } from "./providers/lm-studio.js"
 import { OllamaModelsMessageType } from "./providers/ollama.js"
 import { OpenAiModelsMessageType } from "./providers/openai.js"
@@ -660,6 +660,9 @@ export interface WebviewMessage {
 	// are never touched.
 	effort?: string
 	reason?: string
+	// DTE series 5/5: thinking effort chosen in the pending new_task ask block
+	// (sent with the ask response, see Task.handleWebviewAskResponse).
+	thinkingEffort?: ReasoningEffortExtended
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
 	disabled?: boolean
@@ -920,6 +923,10 @@ export interface ClineSayTool {
 	// Properties for thinkingEffort (DTE series 3/5)
 	effort?: string
 	refusal?: string
+	// DTE series 5/5: new_task thinking-effort prefill for the ask block and the
+	// effort levels the target model supports (see NewTaskTool).
+	thinkingEffort?: ReasoningEffortExtended
+	supportedThinkingEfforts?: ReasoningEffortExtended[]
 }
 
 export interface ClineAskUseMcpServer {

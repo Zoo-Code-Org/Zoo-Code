@@ -20,14 +20,20 @@ describe("Task.startSubtask() metadata-driven delegation", () => {
 		;(parent as any).taskId = "parent-1"
 		;(parent as any).providerRef = { deref: () => provider }
 		;(parent as any).emit = vi.fn()
+		// DTE series 5/5: startSubtask now passes the parent's effective effort to the
+		// child's init; this Object.create double bypasses the constructor, so shadow
+		// the public resolver with the value under test.
+		parent.resolveNewTaskEffectiveEffort = () => undefined
 
 		const child = await (Task.prototype as any).startSubtask.call(parent, "Do something", [], "code")
 
+		// DTE series 5/5: thinkingEffort is always present (undefined = inherit parent effective).
 		expect(provider.delegateParentAndOpenChild).toHaveBeenCalledWith({
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
 			mode: "code",
+			thinkingEffort: undefined,
 		})
 		expect(child.taskId).toBe("child-1")
 

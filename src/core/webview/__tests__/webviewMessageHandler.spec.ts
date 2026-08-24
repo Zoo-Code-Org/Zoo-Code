@@ -73,6 +73,7 @@ import type { ModelRecord } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
+import type { Task } from "../../task/Task"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
@@ -356,9 +357,41 @@ describe("webviewMessageHandler - image mentions", () => {
 		})
 
 		expect(vi.mocked(resolveImageMentions)).toHaveBeenCalled()
-		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "See @/img.png", [
-			"data:image/png;base64,from-mention",
-		])
+		// DTE series 5/5: the handler always forwards the ask-block effort as the 4th
+		// argument (undefined for responses without a selection).
+		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith(
+			"messageResponse",
+			"See @/img.png",
+			["data:image/png;base64,from-mention"],
+			undefined,
+		)
+	})
+
+	it("forwards the new_task ask-block thinking effort to the task (DTE series 5/5)", async () => {
+		const mockHandleWebviewAskResponse = vi.fn()
+		// Structural double: the askResponse case only dereferences the current task
+		// to forward the response (single documented double assertion, last resort).
+		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
+			cwd: "/mock/workspace",
+			rooIgnoreController: undefined,
+			handleWebviewAskResponse: mockHandleWebviewAskResponse,
+		} as unknown as Task)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "askResponse",
+			askResponse: "yesButtonClicked",
+			text: "",
+			thinkingEffort: "high",
+		})
+
+		// The ask-block selection is forwarded as the 4th argument; every other ask
+		// type omits the field, so the task only stores it for new_task approvals.
+		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith(
+			"yesButtonClicked",
+			"",
+			["data:image/png;base64,from-mention"],
+			"high",
+		)
 	})
 })
 
