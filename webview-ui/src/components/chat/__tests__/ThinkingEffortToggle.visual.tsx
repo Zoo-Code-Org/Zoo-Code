@@ -21,6 +21,12 @@ for (const theme of visualThemes.filter((candidate) => candidate.name === "dark"
 		const menu = page.getByTestId("thinking-effort-toggle-menu")
 		await expect(menu).toBeVisible()
 		await expect(menu.getByTestId("thinking-effort-option-high")).toBeVisible()
-		await expect(story).toHaveScreenshot(`thinking-effort-toggle-menu-${theme.name}.png`)
+		// The menu is a portal sibling of the story box (opened below the
+		// trigger), so capture the menu element itself. Finish the portal
+		// entrance animations first so the capture is pixel-stable.
+		await page.evaluate(() => {
+			document.getAnimations().forEach((animation) => animation.finish())
+		})
+		await expect(menu).toHaveScreenshot(`thinking-effort-toggle-menu-${theme.name}.png`)
 	})
 }
