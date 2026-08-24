@@ -47,6 +47,9 @@ const HOP_BY_HOP = new Set([
 	"content-length",
 ])
 
+/**
+ * Whether a raw URL targets the OpenRouter-compatible chat/completions endpoint.
+ */
 function isChatCompletionsUrl(rawUrl: string): boolean {
 	try {
 		return new URL(rawUrl).pathname.endsWith(CHAT_COMPLETIONS_PATH)
@@ -55,6 +58,9 @@ function isChatCompletionsUrl(rawUrl: string): boolean {
 	}
 }
 
+/**
+ * Collects the full request body as a UTF-8 string.
+ */
 function readRequestBody(req: IncomingMessage): Promise<string> {
 	return new Promise((resolve, reject) => {
 		const chunks: Buffer[] = []
@@ -64,6 +70,10 @@ function readRequestBody(req: IncomingMessage): Promise<string> {
 	})
 }
 
+/**
+ * Mirrors the upstream response headers onto the proxy response, dropping the
+ * headers that would break fetch()-decoded streaming (content-encoding / length).
+ */
 function writeResponseHeaders(target: ServerResponse, source: Response) {
 	const headers: Record<string, string> = {}
 	source.headers.forEach((value, key) => {
@@ -78,6 +88,10 @@ function writeResponseHeaders(target: ServerResponse, source: Response) {
 	target.writeHead(source.status, headers)
 }
 
+/**
+ * Streams the upstream (already-decoded) fetch body through to the proxy
+ * response, ending the response when the body completes.
+ */
 async function pipeFetchResponse(target: ServerResponse, source: Response) {
 	writeResponseHeaders(target, source)
 
@@ -98,6 +112,10 @@ async function pipeFetchResponse(target: ServerResponse, source: Response) {
 	target.end()
 }
 
+/**
+ * Resolves the upstream chat/completions URL, rejecting any target that is not
+ * a loopback HTTP origin (the proxy must never forward to a real endpoint).
+ */
 function resolveAllowedUpstreamUrl(baseUrl: string): URL {
 	const upstreamBase = new URL(baseUrl)
 
