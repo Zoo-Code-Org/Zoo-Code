@@ -2,7 +2,7 @@ import React from "react"
 import { Brain, Check } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { selectorTriggerClassName } from "@/components/ui/selectorTriggerStyles"
+import { enabledSelectorTriggerClassName, selectorTriggerClassName } from "@/components/ui/selectorTriggerStyles"
 
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
@@ -24,7 +24,8 @@ interface ThinkingEffortToggleProps {
 
 /**
  * DTE series 4/5: composer bottom-bar toggle for the task-local thinking
- * effort (icon-only, next to the API config selector).
+ * effort (icon + current value, next to the API config selector). The
+ * trigger carries the same border/hover treatment as the sibling selectors
  *
  * The menu lists the model-advertised levels only; boolean/adaptive-class
  * models get the single "adaptive" soft-guidance entry. Selecting a level
@@ -72,8 +73,9 @@ export const ThinkingEffortToggle = ({ disabled = false, triggerClassName = "" }
 					aria-label={t("chat:thinkingEffort.toggleTitle")}
 					data-testid="thinking-effort-toggle-trigger"
 					className={cn(
-						"relative inline-flex items-center justify-center whitespace-nowrap px-1.5 py-1",
+						"relative inline-flex items-center justify-center gap-1 whitespace-nowrap px-1.5 py-1",
 						selectorTriggerClassName,
+						!disabled && enabledSelectorTriggerClassName,
 						disabled ? "opacity-50 cursor-not-allowed" : "",
 						triggerClassName,
 					)}>
@@ -83,6 +85,7 @@ export const ThinkingEffortToggle = ({ disabled = false, triggerClassName = "" }
 							display.source === "you" && "text-vscode-textLink-foreground",
 						)}
 					/>
+					<span className="text-xs leading-none">{display.effort}</span>
 				</PopoverTrigger>
 			</StandardTooltip>
 			<PopoverContent

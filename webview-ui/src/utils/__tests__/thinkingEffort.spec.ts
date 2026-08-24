@@ -90,6 +90,35 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 		}
 	})
 
+	it("shows a user-set task-local effort as default when it equals the model default", () => {
+		const display = computeThinkingEffortDisplay({
+			model: modelWithLevels,
+			taskThinkingEffort: { effort: "medium", source: "you" },
+		})
+		expect(display?.effort).toBe("medium")
+		expect(display?.source).toBe("default")
+	})
+
+	it("shows a user-set task-local effort as default when it equals the settings effort", () => {
+		const display = computeThinkingEffortDisplay({
+			apiConfiguration: { reasoningEffort: "low" } as ProviderSettings,
+			model: modelWithLevels,
+			taskThinkingEffort: { effort: "low", source: "you" },
+		})
+		expect(display?.effort).toBe("low")
+		expect(display?.source).toBe("default")
+	})
+
+	it("keeps the user badge when the task-local effort differs from the resolved default", () => {
+		const display = computeThinkingEffortDisplay({
+			apiConfiguration: { reasoningEffort: "low" } as ProviderSettings,
+			model: modelWithLevels,
+			taskThinkingEffort: { effort: "high", source: "you" },
+		})
+		expect(display?.effort).toBe("high")
+		expect(display?.source).toBe("you")
+	})
+
 	it("resolves an unrecognized task-local source as default", () => {
 		const display = computeThinkingEffortDisplay({
 			model: modelWithLevels,
