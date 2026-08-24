@@ -16,7 +16,10 @@ interface NewTaskParams {
 	message: string
 	todos?: string
 	// DTE series 5/5: optional subtask start effort (validated against the target model).
-	thinking_effort?: string
+	// "null" is the strict-mode "omitted" sentinel (the schema type is
+	// ["string", "null"] so the parameter can be required without forcing a
+	// value); treated as absent, same as undefined/"".
+	thinking_effort?: string | null
 }
 
 // DTE series 5/5: the effort levels a new task can start with. "disable" is a settings
@@ -80,8 +83,14 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 						? modelCapabilities
 						: []
 			let validatedEffort: ReasoningEffortExtended | undefined
-			if (thinking_effort !== undefined && thinking_effort !== "") {
+			if (thinking_effort !== undefined && thinking_effort !== null && thinking_effort !== "") {
 				if (!isNewTaskEffortLevel(thinking_effort) || !supportedLevels.includes(thinking_effort)) {
+					// Consistent with every other failure path in this tool: advance the
+					// consecutive-mistake guardrail and record the failure for telemetry,
+					// so a model repeating an unsupported effort trips the mistake loop.
+					task.consecutiveMistakeCount++
+					task.recordToolError("new_task")
+					task.didToolFailInCurrentTurn = true
 					const reason = !isNewTaskEffortLevel(thinking_effort)
 						? `must be one of: ${NEW_TASK_EFFORT_LEVELS.join(", ")}`
 						: supportedLevels.length > 0

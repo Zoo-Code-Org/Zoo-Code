@@ -202,6 +202,17 @@ const restoreOpenRouterConfig = async () => {
 		openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 		openRouterModelId: "openai/gpt-4.1",
 		...(aimockUrl && { openRouterBaseUrl: aimockUrl + "/v1" }),
+		// This suite switches the profile to the Anthropic provider with an
+		// ephemeral proxy base URL and sets the global reasoning-effort fields.
+		// saveConfig is a full profile replacement, so the persisted profile is
+		// clean either way; the explicit clears also reset the in-memory provider
+		// settings, so a later suite selecting the anthropic provider is not
+		// pointed at the (closed) local port and does not inherit this suite's
+		// effort baseline.
+		anthropicBaseUrl: undefined,
+		apiModelId: undefined,
+		enableReasoningEffort: undefined,
+		reasoningEffort: undefined,
 	})
 }
 

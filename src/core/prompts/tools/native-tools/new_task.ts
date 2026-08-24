@@ -34,11 +34,15 @@ export default {
 					description: TODOS_PARAMETER_DESCRIPTION,
 				},
 				thinking_effort: {
-					type: "string",
+					// strict: true + additionalProperties: false requires every property to be
+					// listed in `required` (the Anthropic API rejects the tool definition
+					// otherwise), so the optional parameter uses the same ["string", "null"]
+					// pattern as `todos`: the model sends null to omit it.
+					type: ["string", "null"],
 					description: THINKING_EFFORT_PARAMETER_DESCRIPTION,
 				},
 			},
-			required: ["mode", "message", "todos"],
+			required: ["mode", "message", "todos", "thinking_effort"],
 			additionalProperties: false,
 		},
 	},

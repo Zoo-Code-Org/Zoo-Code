@@ -115,7 +115,7 @@ const makeCallbacks = () => ({
 
 const runNewTask = async (
 	task: Task,
-	params: { mode?: string; message?: string; todos?: string; thinking_effort?: string },
+	params: { mode?: string; message?: string; todos?: string; thinking_effort?: string | null },
 	callbacks: ReturnType<typeof makeCallbacks>,
 ) => {
 	const args = {
@@ -148,17 +148,23 @@ const runNewTask = async (
 }
 
 describe("new_task thinking_effort schema (DTE series 5/5)", () => {
-	it("exposes an optional thinking_effort string parameter", () => {
+	it("exposes the optional thinking_effort parameter in strict-mode form", () => {
 		const parameters = newTaskSchema.function.parameters
 
+		// strict: true + additionalProperties: false requires every property to be
+		// listed in `required` (the Anthropic API rejects the tool definition
+		// otherwise), so the optional parameter uses the same ["string", "null"]
+		// pattern as `todos`: the model sends null when it wants to omit it.
 		expect(parameters.properties.thinking_effort).toEqual({
-			type: "string",
+			type: ["string", "null"],
 			description: expect.stringContaining("thinking effort"),
 		})
-		// Optional: omitting it makes the child start with the parent's current
-		// effective effort. additionalProperties stays closed.
-		expect(parameters.required).toEqual(["mode", "message", "todos"])
+		expect(parameters.required).toEqual(["mode", "message", "todos", "thinking_effort"])
 		expect(parameters.additionalProperties).toBe(false)
+		// Strict-mode invariant: no property may be optional.
+		for (const key of Object.keys(parameters.properties)) {
+			expect((parameters.required as string[]).includes(key)).toBe(true)
+		}
 	})
 })
 
@@ -204,6 +210,28 @@ describe("new_task thinking_effort validation (DTE series 5/5)", () => {
 		expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("must be one of"))
 		expect(delegateParentAndOpenChild).not.toHaveBeenCalled()
 		expect(callbacks.askApproval).not.toHaveBeenCalled()
+		// The invalid-effort failure path advances the mistake guardrail and records
+		// the tool error like every other failure path, so a model repeating an
+		// unsupported effort trips the consecutive-mistake loop.
+		expect(task.consecutiveMistakeCount).toBe(1)
+		expect(task.recordToolError).toHaveBeenCalledWith("new_task")
+		expect(task.didToolFailInCurrentTurn).toBe(true)
+	})
+
+	it("treats an explicit null thinking_effort as omitted (strict-mode null sentinel)", async () => {
+		const { task, delegateParentAndOpenChild } = makeTask({
+			supportsReasoningEffort: ["low", "medium"],
+			parentEffort: "medium",
+		})
+		const callbacks = makeCallbacks()
+
+		await runNewTask(task, { thinking_effort: null }, callbacks)
+
+		// null is the strict-mode "omitted" sentinel: validation is skipped and the
+		// child starts with the parent's effective effort.
+		expect(delegateParentAndOpenChild).toHaveBeenCalledWith(expect.objectContaining({ thinkingEffort: "medium" }))
+		expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Invalid thinking_effort"))
+		expect(task.consecutiveMistakeCount).toBe(0)
 	})
 
 	it("rejects a level the target model does not support", async () => {
