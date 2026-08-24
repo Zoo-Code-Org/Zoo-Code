@@ -20,21 +20,37 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 
 	const modelNone: ModelInfo = { contextWindow: 1_000_000, maxTokens: 128_000, supportsPromptCache: false }
 
-	it("returns null when the dynamic-thinking-effort experiment is disabled", () => {
-		expect(computeThinkingEffortDisplay({ experiments: {}, model: modelWithLevels })).toBeNull()
-		expect(
-			computeThinkingEffortDisplay({ experiments: { dynamicThinkingEffort: false }, model: modelWithLevels }),
-		).toBeNull()
-		expect(computeThinkingEffortDisplay({ experiments: undefined, model: modelWithLevels })).toBeNull()
+	it("resolves the display for capable models without the experiment flag", () => {
+		// The manual surfaces are normal features: resolution is gated only by
+		// model capability. Settings effort wins over the model default.
+		const settings = computeThinkingEffortDisplay({
+			apiConfiguration: { reasoningEffort: "low" } as ProviderSettings,
+			model: modelWithLevels,
+		})
+		expect(settings?.effort).toBe("low")
+		expect(settings?.source).toBe("default")
+		// Model default.
+		const modelDefault = computeThinkingEffortDisplay({ model: modelWithLevels })
+		expect(modelDefault?.effort).toBe("medium")
+		expect(modelDefault?.source).toBe("default")
+		// Boolean/adaptive-class model.
+		const adaptive = computeThinkingEffortDisplay({ model: modelAdaptive })
+		expect(adaptive?.effort).toBe(THINKING_EFFORT_ADAPTIVE_LEVEL)
+		expect(adaptive?.source).toBe("auto")
+	})
+
+	it("shows the task-local value with source 'you' when the experiment flag is absent", () => {
+		const display = computeThinkingEffortDisplay({
+			model: modelWithLevels,
+			taskThinkingEffort: { effort: "max", source: "you" },
+		})
+		expect(display?.effort).toBe("max")
+		expect(display?.source).toBe("you")
 	})
 
 	it("returns null when the model does not advertise effort support", () => {
-		expect(
-			computeThinkingEffortDisplay({ experiments: { dynamicThinkingEffort: true }, model: modelNone }),
-		).toBeNull()
-		expect(
-			computeThinkingEffortDisplay({ experiments: { dynamicThinkingEffort: true }, model: undefined }),
-		).toBeNull()
+		expect(computeThinkingEffortDisplay({ model: modelNone })).toBeNull()
+		expect(computeThinkingEffortDisplay({ model: undefined })).toBeNull()
 	})
 
 	it("returns null when the capability array only advertises the disable sentinel", () => {
@@ -44,23 +60,17 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 			supportsPromptCache: false,
 			supportsReasoningEffort: ["disable"],
 		}
-		expect(
-			computeThinkingEffortDisplay({ experiments: { dynamicThinkingEffort: true }, model: disableOnly }),
-		).toBeNull()
+		expect(computeThinkingEffortDisplay({ model: disableOnly })).toBeNull()
 	})
 
 	it("excludes the disable sentinel from the supported levels", () => {
-		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
-			model: modelWithLevels,
-		})
+		const display = computeThinkingEffortDisplay({ model: modelWithLevels })
 		expect(display?.supportedLevels).toEqual(["low", "medium", "high", "max"])
 		expect(display?.isAdaptiveClass).toBe(false)
 	})
 
 	it("resolves a task-local override with source 'you'", () => {
 		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
 			apiConfiguration: { reasoningEffort: "low" } as ProviderSettings,
 			model: modelWithLevels,
 			taskThinkingEffort: { effort: "max", source: "you" },
@@ -72,7 +82,6 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 	it("resolves task-local overrides from model/parent sources as auto", () => {
 		for (const source of ["model", "parent"]) {
 			const display = computeThinkingEffortDisplay({
-				experiments: { dynamicThinkingEffort: true },
 				model: modelWithLevels,
 				taskThinkingEffort: { effort: "high", source },
 			})
@@ -83,7 +92,6 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 
 	it("resolves an unrecognized task-local source as default", () => {
 		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
 			model: modelWithLevels,
 			taskThinkingEffort: { effort: "high", source: "unknown-origin" },
 		})
@@ -92,7 +100,6 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 
 	it("resolves the settings effort with source 'default' when no override is active", () => {
 		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
 			apiConfiguration: { reasoningEffort: "low" } as ProviderSettings,
 			model: modelWithLevels,
 		})
@@ -102,7 +109,6 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 
 	it("treats the settings 'disable' sentinel as unset and falls through", () => {
 		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
 			apiConfiguration: { reasoningEffort: "disable" } as ProviderSettings,
 			model: modelWithLevels,
 		})
@@ -111,24 +117,18 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 	})
 
 	it("falls back to the model default effort", () => {
-		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
-			model: modelWithLevels,
-		})
+		const display = computeThinkingEffortDisplay({ model: modelWithLevels })
 		expect(display?.effort).toBe("medium")
 		expect(display?.source).toBe("default")
 	})
 
 	it("returns null for a level-array model with no settings or model default", () => {
 		const noDefault: ModelInfo = { ...modelWithLevels, reasoningEffort: undefined }
-		expect(
-			computeThinkingEffortDisplay({ experiments: { dynamicThinkingEffort: true }, model: noDefault }),
-		).toBeNull()
+		expect(computeThinkingEffortDisplay({ model: noDefault })).toBeNull()
 	})
 
 	it("resolves boolean/adaptive-class models to the adaptive soft-guidance level", () => {
 		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
 			apiConfiguration: { reasoningEffort: "disable" } as ProviderSettings,
 			model: modelAdaptive,
 		})
@@ -140,7 +140,6 @@ describe("computeThinkingEffortDisplay (DTE series 4/5)", () => {
 
 	it("lets a task-local override win over the adaptive fallback", () => {
 		const display = computeThinkingEffortDisplay({
-			experiments: { dynamicThinkingEffort: true },
 			model: modelAdaptive,
 			taskThinkingEffort: { effort: "adaptive", source: "you" },
 		})

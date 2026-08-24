@@ -36,15 +36,15 @@ export const ThinkingEffortToggle = ({ disabled = false, triggerClassName = "" }
 	const [open, setOpen] = React.useState(false)
 	const portalContainer = useRooPortal("roo-portal")
 	const { t } = useAppTranslation()
-	const { apiConfiguration, experiments, taskThinkingEffort } = useExtensionState()
+	const { apiConfiguration, taskThinkingEffort } = useExtensionState()
 	const { info: model } = useSelectedModel(apiConfiguration)
 
 	const display = React.useMemo(
-		() => computeThinkingEffortDisplay({ experiments, apiConfiguration, model, taskThinkingEffort }),
-		[experiments, apiConfiguration, model, taskThinkingEffort],
+		() => computeThinkingEffortDisplay({ apiConfiguration, model, taskThinkingEffort }),
+		[apiConfiguration, model, taskThinkingEffort],
 	)
 
-	// Hidden unless the experiment is enabled and the model advertises effort support.
+	// Hidden unless the selected model advertises per-request effort support.
 	if (!display) {
 		return null
 	}

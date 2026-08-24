@@ -4,8 +4,10 @@ import { AppProviders } from "../../../../playwright/AppProviders"
 import { ThinkingEffortToggle } from "../ThinkingEffortToggle"
 
 // DTE series 4/5: CT story for the composer thinking-effort toggle. Uses a real
-// model (gpt-5.6-sol) that advertises a per-request effort array, with the
-// dynamicThinkingEffort experiment enabled — the default state hides the toggle.
+// model (gpt-5.6-sol) that advertises a per-request effort array; the toggle
+// renders for capable models regardless of the experiment flag. The experiment
+// state is kept in the initial state so the story renders exactly the component
+// state the baselines were generated with.
 export function ThinkingEffortToggleStory() {
 	return (
 		<AppProviders
