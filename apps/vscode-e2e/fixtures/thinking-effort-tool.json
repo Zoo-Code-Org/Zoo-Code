@@ -17,7 +17,9 @@
 		},
 		{
 			"match": {
-				"toolCallId": "call_dte_e2e_001"
+				"model": "openai/gpt-5",
+				"hasToolResult": true,
+				"turnIndex": 1
 			},
 			"response": {
 				"toolCalls": [

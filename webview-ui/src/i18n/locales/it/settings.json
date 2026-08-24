@@ -975,8 +975,8 @@
 			"toolParameters": "Parametri"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"name": "Sforzo di pensiero dinamico",
+			"description": "Consente al modello di decidere lo sforzo di pensiero per ogni passaggio e di regolarlo nella chat. (sperimentale)",
 			"hint": "I profili compatibili con OpenAI (endpoint OpenAI personalizzato, LM Studio, Ollama, LiteLLM e simili) possono dichiarare nelle impostazioni supportedReasoningEfforts i livelli di impegno di ragionamento supportati dal modello. I livelli dichiarati vengono inviati con ogni richiesta, ma il server locale potrebbe ignorare il parametro."
 		}
 	},
