@@ -67,6 +67,10 @@ type ThinkingEffortSay = {
 	refusal?: string
 }
 
+/**
+ * Finds the first captured wire request whose body carries the given tool
+ * call id — i.e. the post-tool request that follows a specific tool call.
+ */
 function firstRequestCarrying(requests: CapturedDteRequest[], callId: string): CapturedDteRequest | undefined {
 	return requests.find((request) => request.bodyText.includes(callId))
 }
