@@ -283,6 +283,18 @@ export const OpenAICompatible = ({
 									const openAiCustomModelInfo =
 										apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults
 
+									if (value === "disable") {
+										// "disable" is an option a custom model's own capability array can
+										// expose. Selecting it must turn reasoning effort off end-to-end —
+										// same as unchecking the parent switch — rather than store a value
+										// the wire path never emits.
+										const { reasoningEffort: _, ...rest } = openAiCustomModelInfo
+
+										setApiConfigurationField("openAiCustomModelInfo", rest)
+										setApiConfigurationField("enableReasoningEffort", false)
+										return
+									}
+
 									setApiConfigurationField("openAiCustomModelInfo", {
 										...openAiCustomModelInfo,
 										reasoningEffort: value as ReasoningEffortExtended,
