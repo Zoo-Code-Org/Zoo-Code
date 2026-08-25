@@ -476,7 +476,7 @@
 		"appliedByUser": "Denkanstrengung festgelegt auf: {{effort}}",
 		"chipTooltip": "Denkanstrengung: {{effort}} ({{source}})",
 		"sourceDefault": "Standard",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automatisch)",
 		"sourceYou": "Sie",
 		"toggleTitle": "Denkanstrengung",
 		"adaptiveHint": "Dieses Modell bestimmt seine Denkanstrengung automatisch — Ihre Auswahl ist nur eine sanfte Vorgabe.",

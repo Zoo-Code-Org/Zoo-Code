@@ -476,7 +476,7 @@
 		"appliedByUser": "Denkinspanning ingesteld op: {{effort}}",
 		"chipTooltip": "Denkinspanning: {{effort}} ({{source}})",
 		"sourceDefault": "standaard",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automatisch)",
 		"sourceYou": "jij",
 		"toggleTitle": "Denkinspanning",
 		"adaptiveHint": "Dit model bepaalt zijn inspanning automatisch — je keuze is slechts een zachte aanwijzing.",

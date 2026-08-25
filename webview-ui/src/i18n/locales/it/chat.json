@@ -476,7 +476,7 @@
 		"appliedByUser": "Sforzo di ragionamento impostato su: {{effort}}",
 		"chipTooltip": "Sforzo di ragionamento: {{effort}} ({{source}})",
 		"sourceDefault": "predefinito",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automatico)",
 		"sourceYou": "tu",
 		"toggleTitle": "Sforzo di ragionamento",
 		"adaptiveHint": "Questo modello decide il proprio sforzo automaticamente — la tua selezione è solo una guida flessibile.",

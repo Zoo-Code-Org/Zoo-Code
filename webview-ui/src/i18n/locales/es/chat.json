@@ -476,7 +476,7 @@
 		"appliedByUser": "Esfuerzo de razonamiento establecido en: {{effort}}",
 		"chipTooltip": "Esfuerzo de razonamiento: {{effort}} ({{source}})",
 		"sourceDefault": "predeterminado",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automático)",
 		"sourceYou": "tú",
 		"toggleTitle": "Esfuerzo de razonamiento",
 		"adaptiveHint": "Este modelo decide su esfuerzo automáticamente — tu selección es solo una guía suave.",
