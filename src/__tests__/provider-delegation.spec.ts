@@ -602,6 +602,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const taskHistoryStore = makeStoreStub()
 		const providerLog = vi.fn()
 
+		// Partial provider double: the real ClineProvider.prototype.delegateParentAndOpenChild
+		// is invoked below via .call() with only the members that method reads, so the full
+		// interface is not implemented and the double assertion is the last-resort hand-off.
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
