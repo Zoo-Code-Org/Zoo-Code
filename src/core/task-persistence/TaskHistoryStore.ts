@@ -7,11 +7,22 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 
 /** Valid status values for a task's HistoryItem. */
 export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
+
+export class DeltaRejectedError extends Error {
+	constructor(
+		public readonly taskId: string,
+		public readonly diskStatus: HistoryItemStatus,
+		public readonly attemptedStatus: HistoryItemStatus,
+	) {
+		super(`Delta rejected for task ${taskId}: disk status ${diskStatus} rejects transition to ${attemptedStatus}`)
+		this.name = "DeltaRejectedError"
+	}
+}
 
 const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
 	active: ["delegated", "completed", "interrupted"],
@@ -34,12 +45,30 @@ export function assertValidTransition(from: HistoryItemStatus | undefined, to: H
 }
 
 /**
- * Index file format for fast startup reads.
+ * Build a `safeWriteJson` merge callback that applies only `delta` to the
+ * current disk state, preserving fields written by another process.
  */
-interface HistoryIndex {
-	version: number
-	updatedAt: number
-	entries: HistoryItem[]
+function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
+	return (existing, incoming) => {
+		if (!existing || typeof existing !== "object" || !("id" in existing)) {
+			return incoming
+		}
+		const disk = existing as HistoryItem
+		if (delta.status !== undefined) {
+			const diskStatus: HistoryItemStatus = disk.status ?? "active"
+			if (delta.status !== diskStatus) {
+				const validTargets = VALID_TRANSITIONS[diskStatus]
+				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
+					throw new DeltaRejectedError(disk.id, diskStatus, delta.status as HistoryItemStatus)
+				}
+			}
+		}
+		const merged = { ...disk, ...delta }
+		if (delta.childIds && disk.childIds) {
+			merged.childIds = [...new Set([...disk.childIds, ...delta.childIds])]
+		}
+		return merged
+	}
 }
 
 /**
@@ -75,12 +104,14 @@ interface DelegationRepairIntent {
  *
  * Each task's HistoryItem is stored as an individual JSON file in its
  * existing task directory (`globalStorage/tasks/<taskId>/history_item.json`).
- * A single index file (`globalStorage/tasks/_index.json`) is maintained
- * as a cache for fast list reads at startup.
+ * There is no shared index file. Reads scan the task directories.
  *
- * Cross-process safety comes from `safeWriteJson`'s `proper-lockfile`
- * on per-task file writes. Within a single extension host process,
- * an in-process write lock serializes mutations.
+ * Cross-process safety for per-task files comes from `safeWriteJson`'s
+ * `proper-lockfile` with a `merge` callback: each write reads the
+ * current file under the advisory lock and merges incoming fields, so
+ * a concurrent writer's changes are preserved rather than silently
+ * dropped. Within a single extension host process, an in-process write
+ * lock serializes mutations.
  */
 /**
  * Options for TaskHistoryStore constructor.
@@ -100,7 +131,6 @@ export class TaskHistoryStore {
 	private cache: Map<string, HistoryItem> = new Map()
 	private taskFileMtimes: Map<string, number> = new Map()
 	private writeLock: Promise<void> = Promise.resolve()
-	private indexWriteTimer: ReturnType<typeof setTimeout> | null = null
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
 	private disposed = false
@@ -111,9 +141,6 @@ export class TaskHistoryStore {
 	 */
 	public readonly initialized: Promise<void>
 	private resolveInitialized!: () => void
-
-	/** Debounce window for index writes in milliseconds. */
-	private static readonly INDEX_WRITE_DEBOUNCE_MS = 2000
 
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
@@ -129,37 +156,34 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Lifecycle ──────────────────────────────
 
 	/**
-	 * Load index, reconcile if needed, start watchers.
+	 * Scan task files, reconcile delegation state, start watchers.
 	 */
 	async initialize(): Promise<void> {
 		try {
 			const tasksDir = await this.getTasksDir()
 			await fs.mkdir(tasksDir, { recursive: true })
 
-			// 1. Load existing index into the cache
-			await this.loadIndex()
-
-			// 2. Reconcile cache against actual task directories on disk
+			// 1. Scan task directories to populate the cache
 			await this.reconcile({ forceRefresh: true })
 			// Capture which active tasks were present in persisted state before replay can
 			// change any statuses. Reconciliation must not treat a replay-repaired parent
 			// as an orphaned active child in the same startup pass.
 			const persistedActiveIds = this.getPersistedActiveIds()
 
-			// 3. Complete any two-record repair interrupted after its intent was durable.
+			// 2. Complete any two-record repair interrupted after its intent was durable.
 			try {
 				await this.replayDelegationRepairIntent()
 			} catch (error) {
 				console.error("[TaskHistoryStore] Failed to replay delegation repair intent:", error)
 			}
 
-			// 4. Repair delegation inconsistencies left by a previous crash
+			// 3. Repair delegation inconsistencies left by a previous crash
 			await this.reconcileDelegationState(persistedActiveIds)
 
-			// 5. Start fs.watch for cross-instance reactivity
+			// 4. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
 
-			// 6. Start periodic reconciliation as a defensive fallback
+			// 5. Start periodic reconciliation as a defensive fallback
 			this.startPeriodicReconciliation()
 		} finally {
 			// Mark initialization as complete so callers awaiting `initialized` can proceed
@@ -173,11 +197,6 @@ export class TaskHistoryStore {
 	dispose(): void {
 		this.disposed = true
 
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-			this.indexWriteTimer = null
-		}
-
 		if (this.reconcileTimer) {
 			clearTimeout(this.reconcileTimer)
 			this.reconcileTimer = null
@@ -187,11 +206,6 @@ export class TaskHistoryStore {
 			this.fsWatcher.close()
 			this.fsWatcher = null
 		}
-
-		// Synchronously flush the index (best-effort)
-		this.flushIndex().catch((err) => {
-			console.error("[TaskHistoryStore] Error flushing index on dispose:", err)
-		})
 	}
 
 	// ────────────────────────────── Reads ──────────────────────────────
@@ -222,8 +236,8 @@ export class TaskHistoryStore {
 	/**
 	 * Insert or update a history item.
 	 *
-	 * Writes the per-task file immediately (source of truth),
-	 * updates the in-memory Map, and schedules a debounced index write.
+	 * Writes the per-task file immediately (source of truth)
+	 * and updates the in-memory cache.
 	 */
 	async upsert(item: HistoryItem): Promise<HistoryItem[]> {
 		return this.withLock(() => this.upsertCore(item))
@@ -250,20 +264,40 @@ export class TaskHistoryStore {
 		if (!options.skipTransitionCheck && existing && item.status !== undefined) {
 			const normalizedExisting: HistoryItemStatus = existing.status ?? "active"
 			if (item.status !== normalizedExisting) {
-				assertValidTransition(existing.status, item.status)
+				try {
+					assertValidTransition(existing.status, item.status)
+				} catch (cacheError) {
+					// Cache may be stale from a peer write. Re-read disk
+					// under the store lock before rejecting the transition.
+					const diskItem = await this.readTaskFile(item.id)
+					if (!diskItem) {
+						throw cacheError
+					}
+					assertValidTransition(diskItem.status, item.status)
+				}
 			}
 		}
 
 		// Merge: preserve existing metadata unless explicitly overwritten
 		const merged = existing ? { ...existing, ...item } : item
 
-		// Write per-task file (source of truth)
-		await this.writeTaskFile(merged)
+		const delta = existing ? this.buildDelta(item.id, existing, item) : { ...item }
+		let written: HistoryItem
+		try {
+			written = await this.writeTaskFile(merged, delta)
+		} catch (error) {
+			if (error instanceof DeltaRejectedError) {
+				const diskItem = await this.readTaskFile(item.id)
+				if (diskItem) {
+					this.cache.set(item.id, diskItem)
+				}
+				throw error
+			}
+			throw error
+		}
 
-		// Update in-memory cache
-		this.cache.set(merged.id, merged)
-		// Schedule debounced index write
-		this.scheduleIndexWrite()
+		// Update in-memory cache with what was actually persisted
+		this.cache.set(written.id, written)
 
 		const all = this.getAll()
 
@@ -291,8 +325,6 @@ export class TaskHistoryStore {
 				// File may already be deleted
 			}
 
-			this.scheduleIndexWrite()
-
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
@@ -317,8 +349,6 @@ export class TaskHistoryStore {
 				}
 			}
 
-			this.scheduleIndexWrite()
-
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
@@ -329,7 +359,7 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Reconciliation ──────────────────────────────
 
 	/**
-	 * Scan task directories vs index and fix any drift.
+	 * Scan task directories and fix any drift between disk and cache.
 	 *
 	 * - Tasks on disk but missing from cache: read and add
 	 * - Tasks in cache but missing from disk: remove
@@ -346,20 +376,18 @@ export class TaskHistoryStore {
 				return // tasks dir doesn't exist yet
 			}
 
-			// Filter out the index file and hidden files
+			// Filter out hidden and reserved names
 			const taskDirNames = dirEntries.filter((name) => !name.startsWith("_") && !name.startsWith("."))
 
 			const onDiskIds = new Set(taskDirNames)
 			const cacheIds = new Set(this.cache.keys())
-			let changed = false
+			const liveIds = new Set<string>()
 
-			// Task files are authoritative during startup. Later watcher and periodic
-			// reconciliations use mtime change detection to avoid rewriting the index when
-			// nothing changed on disk.
 			for (const taskId of onDiskIds) {
 				try {
 					const taskFilePath = await this.getTaskFilePath(taskId)
 					const { mtimeMs } = await fs.stat(taskFilePath)
+					liveIds.add(taskId)
 					if (
 						!options.forceRefresh &&
 						this.cache.has(taskId) &&
@@ -369,30 +397,36 @@ export class TaskHistoryStore {
 					}
 
 					const item = await this.readTaskFile(taskId)
-					if (item) {
+					if (item?.id === taskId) {
 						const previous = this.cache.get(taskId)
 						this.taskFileMtimes.set(taskId, mtimeMs)
 						if (!deepEqual(previous, item)) {
 							this.cache.set(taskId, item)
-							changed = true
 						}
 					}
 				} catch {
-					// Corrupted or missing file, skip
+					// File may be temporarily absent during a peer's atomic
+					// rename window in safeWriteJson. The advisory lock is
+					// held for the entire write, so its presence means a
+					// write is in progress — keep the task live.
+					try {
+						const lockPath = (await this.getTaskFilePath(taskId)) + ".lock"
+						const lockStat = await fs.stat(lockPath)
+						if (Date.now() - lockStat.mtimeMs < LOCK_STALE_MS) {
+							liveIds.add(taskId)
+						}
+					} catch {
+						// No lock file — file is genuinely absent
+					}
 				}
 			}
 
-			// Tasks in cache but not on disk: remove from cache
+			// Evict tasks whose history_item.json no longer exists
 			for (const taskId of cacheIds) {
-				if (!onDiskIds.has(taskId)) {
+				if (!liveIds.has(taskId)) {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
-					changed = true
 				}
-			}
-
-			if (changed) {
-				this.scheduleIndexWrite()
 			}
 		})
 	}
@@ -428,7 +462,7 @@ export class TaskHistoryStore {
 	 * Reconcile delegation state while the store lock is already held.
 	 *
 	 * Callers that do not hold the lock must use `reconcileDelegationState()`.
-	 * Migration uses this core method so its cache/file/index updates and the
+	 * Migration uses this core method so its cache/file updates and the
 	 * follow-up repair remain one serialized operation without re-entering the
 	 * non-reentrant lock.
 	 */
@@ -584,12 +618,6 @@ export class TaskHistoryStore {
 				await this.onWrite(this.getAll())
 			}
 			await this.removeDelegationRepairIntent()
-			// Task files are authoritative and the intent is the recovery journal.
-			// Clean up the journal before scheduling the derived index: a crash after
-			// cleanup but before the index write is safe because startup rebuilds the
-			// index from task files, while the reverse ordering could make the index
-			// appear durable before recovery metadata is settled.
-			this.scheduleIndexWrite()
 		})
 	}
 
@@ -645,9 +673,6 @@ export class TaskHistoryStore {
 			await this.onWrite(this.getAll())
 		}
 		await this.removeDelegationRepairIntent()
-		// The index is derived state; keep the intent until authoritative task-file
-		// writes and write-through have completed, then schedule the index update.
-		this.scheduleIndexWrite()
 	}
 
 	private matchesDelegationRepairParentPreconditions(intent: DelegationRepairIntent, parent: HistoryItem): boolean {
@@ -845,96 +870,52 @@ export class TaskHistoryStore {
 				}
 			}
 
-			// Write the index
-			await this.writeIndex()
-
 			// Repair any delegation inconsistencies introduced by the migrated entries.
 			// Run the lock-free core because migration already holds the store lock.
 			await this.reconcileDelegationStateCore(this.getPersistedActiveIds())
 		})
 	}
 
-	// ────────────────────────────── Private: Index management ──────────────────────────────
-
-	/**
-	 * Load the `_index.json` file into the in-memory cache.
-	 */
-	private async loadIndex(): Promise<void> {
-		const indexPath = await this.getIndexPath()
-
-		try {
-			const raw = await fs.readFile(indexPath, "utf8")
-			const index: HistoryIndex = JSON.parse(raw)
-
-			if (index.version === 1 && Array.isArray(index.entries)) {
-				for (const entry of index.entries) {
-					if (entry.id) {
-						this.cache.set(entry.id, entry)
-					}
-				}
-			}
-		} catch {
-			// Index doesn't exist or is corrupted; cache stays empty.
-			// Reconciliation will rebuild it from per-task files.
-		}
-	}
-
-	/**
-	 * Write the full index to disk.
-	 */
-	private async writeIndex(): Promise<void> {
-		const indexPath = await this.getIndexPath()
-		const index: HistoryIndex = {
-			version: 1,
-			updatedAt: Date.now(),
-			entries: this.getAll(),
-		}
-
-		await safeWriteJson(indexPath, index)
-	}
-
-	/**
-	 * Schedule a debounced index write.
-	 */
-	private scheduleIndexWrite(): void {
-		if (this.disposed) {
-			return
-		}
-
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-		}
-
-		this.indexWriteTimer = setTimeout(async () => {
-			this.indexWriteTimer = null
-			try {
-				await this.writeIndex()
-			} catch (err) {
-				console.error("[TaskHistoryStore] Failed to write index:", err)
-			}
-		}, TaskHistoryStore.INDEX_WRITE_DEBOUNCE_MS)
-	}
-
-	/**
-	 * Force an immediate index write (called on dispose/shutdown).
-	 */
-	async flushIndex(): Promise<void> {
-		if (this.indexWriteTimer) {
-			clearTimeout(this.indexWriteTimer)
-			this.indexWriteTimer = null
-		}
-
-		await this.writeIndex()
-	}
-
 	// ────────────────────────────── Private: Per-task file I/O ──────────────────────────────
 
 	/**
-	 * Write a HistoryItem to its per-task `history_item.json` file.
+	 * Return only the fields in `incoming` that differ from `cached`.
 	 */
-	private async writeTaskFile(item: HistoryItem): Promise<void> {
+	private computeDelta(cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
+		return Object.fromEntries(
+			Object.entries(incoming).filter(([k, v]) => !deepEqual(v, (cached as Record<string, unknown>)[k])),
+		) as Partial<HistoryItem>
+	}
+
+	private buildDelta(id: string, cached: HistoryItem, incoming: Partial<HistoryItem>): Partial<HistoryItem> {
+		return { id, ...this.computeDelta(cached, incoming) }
+	}
+
+	/**
+	 * Write a HistoryItem to its per-task `history_item.json` file.
+	 *
+	 * When `delta` is provided, the merge callback applies only the
+	 * delta to the current disk state, so fields written by another
+	 * process are preserved. Without a delta the full item is written
+	 * as-is (used by administrative repair paths that are authoritative).
+	 */
+	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
-		await safeWriteJson(filePath, item)
+		if (delta) {
+			let written: HistoryItem = item
+			const mergeFn = mergeWithDisk(delta)
+			await safeWriteJson(filePath, item, {
+				merge: (existing, incoming) => {
+					const result = mergeFn(existing, incoming)
+					written = result as HistoryItem
+					return result
+				},
+			})
+			return written
+		} else {
+			await safeWriteJson(filePath, item)
+			return item
+		}
 	}
 
 	/**
@@ -1055,10 +1036,11 @@ export class TaskHistoryStore {
 	}
 
 	/**
-	 * Atomically update two related HistoryItems within a single lock acquisition.
-	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes are
-	 * committed before the lock releases — no concurrent writer can observe an
-	 * intermediate state.
+	 * Update two related HistoryItems within a single in-process lock acquisition.
+	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes
+	 * complete before the lock releases, so no in-process reader can observe an
+	 * intermediate state. Cross-process atomicity is NOT guaranteed — each
+	 * writeTaskFile call acquires and releases its own advisory file lock.
 	 *
 	 * @throws If either task ID is not present in the cache.
 	 */
@@ -1105,16 +1087,21 @@ export class TaskHistoryStore {
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
 
-			// Write both files before touching the cache so readers never observe a
-			// half-updated in-memory state between the two await points.
-			await this.writeTaskFile(mergedFirst)
-			await this.writeTaskFile(mergedSecond)
+			const writtenFirst = await this.writeTaskFile(mergedFirst, this.buildDelta(firstId, first, updatedFirst))
+			let writtenSecond: HistoryItem
+			try {
+				writtenSecond = await this.writeTaskFile(mergedSecond, this.buildDelta(secondId, second, updatedSecond))
+			} catch (error) {
+				// First record is committed on disk. Update cache so it
+				// reflects disk state before propagating the error.
+				this.cache.set(firstId, writtenFirst)
+				throw error
+			}
 
-			// Both disk writes succeeded — now update the cache atomically.
-			this.cache.set(firstId, mergedFirst)
-			this.cache.set(secondId, mergedSecond)
+			// Both disk writes succeeded — now update the cache.
+			this.cache.set(firstId, writtenFirst)
+			this.cache.set(secondId, writtenSecond)
 
-			this.scheduleIndexWrite()
 			const all = this.getAll()
 			if (this.onWrite) {
 				await this.onWrite(all)
@@ -1154,13 +1141,5 @@ export class TaskHistoryStore {
 	private async getTaskFilePath(taskId: string): Promise<string> {
 		const tasksDir = await this.getTasksDir()
 		return path.join(tasksDir, taskId, GlobalFileNames.historyItem)
-	}
-
-	/**
-	 * Get the path to the `_index.json` file.
-	 */
-	private async getIndexPath(): Promise<string> {
-		const tasksDir = await this.getTasksDir()
-		return path.join(tasksDir, GlobalFileNames.historyIndex)
 	}
 }

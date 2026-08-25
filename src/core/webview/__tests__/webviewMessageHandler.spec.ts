@@ -11,6 +11,10 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
 
+vi.mock("../../../integrations/theme/getTheme", () => ({
+	getTheme: vi.fn().mockResolvedValue({}),
+}))
+
 vi.mock("../../../integrations/openai-codex/oauth", () => ({
 	openAiCodexOAuthManager: {
 		getAccessToken: vi.fn(),
@@ -53,6 +57,16 @@ vi.mock("../rulesMessageHandler", () => ({
 	handleDeleteRule: vi.fn(),
 	handleOpenRuleFile: vi.fn(),
 	handleOpenRulesDirectory: vi.fn(),
+}))
+
+vi.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		hasInstance: vi.fn().mockReturnValue(false),
+		instance: {
+			updateTelemetryState: vi.fn(),
+			captureTelemetrySettingsChanged: vi.fn(),
+		},
+	},
 }))
 
 import type { ModelRecord } from "@roo-code/types"
@@ -103,12 +117,57 @@ const mockClineProvider = {
 	},
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
+	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
+
+describe("webviewMessageHandler - theme fixture probes", () => {
+	const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+	const themeFixture = {
+		themeId: "Default Dark Modern",
+		bodyClass: "vscode-dark",
+		variables: { "--vscode-foreground": "#cccccc" },
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		process.env.ROO_CODE_THEME_FIXTURE_PROBE = "1"
+	})
+
+	afterEach(() => {
+		if (originalProbeSetting === undefined) {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		} else {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalProbeSetting
+		}
+	})
+
+	it("resolves a complete response when probing is enabled", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "themeFixtureProbeResponse",
+			requestId: "request-1",
+			themeFixture,
+		})
+
+		expect(mockClineProvider.resolveWebviewThemeFixtureProbe).toHaveBeenCalledWith("request-1", themeFixture)
+	})
+
+	it("ignores incomplete or disabled responses", async () => {
+		await webviewMessageHandler(mockClineProvider, { type: "themeFixtureProbeResponse" })
+		delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+		await webviewMessageHandler(mockClineProvider, {
+			type: "themeFixtureProbeResponse",
+			requestId: "request-1",
+			themeFixture,
+		})
+
+		expect(mockClineProvider.resolveWebviewThemeFixtureProbe).not.toHaveBeenCalled()
+	})
+})
 
 import { t } from "../../../i18n"
 
@@ -131,6 +190,9 @@ vi.mock("vscode", () => {
 		},
 		commands: {
 			executeCommand: vi.fn().mockResolvedValue(undefined),
+		},
+		env: {
+			isTelemetryEnabled: true,
 		},
 	}
 })
@@ -197,6 +259,7 @@ vi.mock("../../mentions/resolveImageMentions", () => ({
 import { resolveImageMentions } from "../../mentions/resolveImageMentions"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
@@ -232,7 +295,10 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			type: "requestLmStudioModels",
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "lmstudio", baseUrl: "http://localhost:1234" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.lmstudio,
+			baseUrl: "http://localhost:1234",
+		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "lmStudioModels",
@@ -332,7 +398,10 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 			type: "requestOllamaModels",
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "ollama", baseUrl: "http://localhost:1234" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.ollama,
+			baseUrl: "http://localhost:1234",
+		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "ollamaModels",
@@ -413,14 +482,14 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 		// Should use the URL from message values, not the saved state
 		expect(mockFlushModels).toHaveBeenCalledWith(
 			{
-				provider: "ollama",
+				provider: providerIdentifiers.ollama,
 				baseUrl: "https://ollama.example.com",
 				apiKey: "secret-key",
 			},
 			true,
 		)
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "ollama",
+			provider: providerIdentifiers.ollama,
 			baseUrl: "https://ollama.example.com",
 			apiKey: "secret-key",
 		})
@@ -468,25 +537,30 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 
 		// Verify getModels was called for each provider
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "openrouter", apiKey: "openrouter-key" })
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.openrouter,
+			apiKey: "openrouter-key",
+		})
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
 		expect(mockGetModels).toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "unbound",
+				provider: providerIdentifiers.unbound,
 			}),
 		)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		expect(mockGetModels).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.opencodeGo }),
+		)
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		expect(mockGetModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -533,7 +607,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
 
 		// Must be fetched despite no configured key, forwarding apiKey: undefined.
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.opencodeGo, apiKey: undefined })
 
 		const routerModelsCall = (mockClineProvider.postMessageToWebview as any).mock.calls.find(
 			([msg]: [{ type: string }]) => msg.type === "routerModels",
@@ -557,13 +631,16 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 			values: {
-				provider: "opencode-go",
+				provider: providerIdentifiers.opencodeGo,
 				opencodeGoApiKey: "fresh-key",
 			},
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: "fresh-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "opencode-go", apiKey: "fresh-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.opencodeGo, apiKey: "fresh-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.opencodeGo, apiKey: "fresh-key" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {
@@ -571,7 +648,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 					"opencode/model": expect.objectContaining({ description: "Opencode model" }),
 				},
 			},
-			values: { provider: "opencode-go" },
+			values: { provider: providerIdentifiers.opencodeGo },
 		})
 	})
 
@@ -591,13 +668,16 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 			values: {
-				provider: "kenari",
+				provider: providerIdentifiers.kenari,
 				kenariApiKey: "fresh-kenari-key",
 			},
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "kenari", apiKey: "fresh-kenari-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.kenari, apiKey: "fresh-kenari-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.kenari, apiKey: "fresh-kenari-key" })
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "routerModels",
 			routerModels: {
@@ -605,7 +685,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 					"glm-5-2": expect.objectContaining({ description: "Kenari model" }),
 				},
 			},
-			values: { provider: "kenari" },
+			values: { provider: providerIdentifiers.kenari },
 		})
 	})
 
@@ -617,10 +697,10 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
-			values: { provider: "nanogpt" },
+			values: { provider: providerIdentifiers.nanogpt },
 		})
 
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 		expect(mockFlushModels).not.toHaveBeenCalled()
 	})
 
@@ -634,11 +714,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
-			values: { provider: "nanogpt", nanoGptApiKey: "unsaved-key" },
+			values: { provider: providerIdentifiers.nanogpt, nanoGptApiKey: "unsaved-key" },
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "unsaved-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "unsaved-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: "unsaved-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: "unsaved-key" })
 	})
 
 	it("uses the saved NanoGPT key for manual refresh", async () => {
@@ -649,11 +732,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
-			values: { provider: "nanogpt", refresh: true },
+			values: { provider: providerIdentifiers.nanogpt, refresh: true },
 		})
 
-		expect(mockFlushModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "saved-key" }, true)
-		expect(mockGetModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: "saved-key" })
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.nanogpt, apiKey: "saved-key" },
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: "saved-key" })
 	})
 
 	it("handles LiteLLM models with values from message when config is missing", async () => {
@@ -686,7 +772,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify LiteLLM was called with values from message
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-litellm-key",
 			baseUrl: "http://message-url:4000",
 		})
@@ -720,7 +806,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Verify LiteLLM was NOT called
 		expect(mockGetModels).not.toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "litellm",
+				provider: providerIdentifiers.litellm,
 			}),
 		)
 
@@ -779,14 +865,14 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 
 		// Verify final routerModels response includes successful providers and empty objects for failed ones
@@ -832,35 +918,35 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Structured error message",
-			values: { provider: "openrouter" },
+			values: { provider: providerIdentifiers.openrouter },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Unbound error",
-			values: { provider: "unbound" },
+			values: { provider: providerIdentifiers.unbound },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Vercel AI Gateway error",
-			values: { provider: "vercel-ai-gateway" },
+			values: { provider: providerIdentifiers.vercelAiGateway },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 	})
 
@@ -873,7 +959,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Roo Code Router has been removed. Please select and configure a different provider.",
-			values: { provider: "roo" },
+			values: { provider: retiredProviderIdentifiers.roo },
 		})
 	})
 
@@ -891,7 +977,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify message values take precedence over saved config (current unsaved field state wins)
 		expect(mockGetModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-key", // From message.values
 			baseUrl: "http://message-url", // From message.values
 		})
@@ -1224,6 +1310,91 @@ describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 
 		expect(ensureDcgInstalled).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("destructiveCommandGuardEnabled", false)
+	})
+})
+
+// Both allowlists are normalized by the same branch, so both are held to the
+// same contract.
+describe.each(["allowedReadFiles", "allowedWriteFiles"] as const)("webviewMessageHandler - %s", (key) => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists the configured patterns", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md", "docs/scratch/**"] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, ["notes.md", "docs/scratch/**"])
+	})
+
+	it("drops entries that cannot name a file", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The double assertion stands in for an untyped payload: the message
+			// arrives as JSON from the webview, so a non-string can reach the
+			// handler even though the type says otherwise. That is what the
+			// handler's `typeof` filter is there to catch, so the test has to be
+			// able to express it.
+			updatedSettings: { [key]: ["notes.md", "", "   ", 42 as unknown as string] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, ["notes.md"])
+	})
+
+	// Whitespace is significant in gitignore syntax, so it must survive saving.
+	it("keeps whitespace within a pattern", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: [" notes.md", "my notes.md", "notes.md\\ "] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, [
+			" notes.md",
+			"my notes.md",
+			"notes.md\\ ",
+		])
+	})
+
+	it("persists an empty list when the setting is cleared", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: [] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, [])
+	})
+
+	// Unlike allowed/denied commands, these settings have no
+	// workspace-configuration counterpart, so nothing should be written to VS
+	// Code settings.
+	it("does not write to the VS Code workspace configuration", async () => {
+		const update = vi.fn()
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({ update } as never)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { [key]: ["notes.md"] },
+		})
+
+		expect(update).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - allowlists together", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists both allowlists from one save", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedReadFiles: ["read.md"], allowedWriteFiles: ["write.md"] },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedReadFiles", ["read.md"])
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedWriteFiles", ["write.md"])
 	})
 })
 
@@ -1631,23 +1802,23 @@ describe("zooCodeSignOut", () => {
 
 		;(mockClineProvider as any).contextProxy = {
 			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
 			listConfig: vi.fn().mockResolvedValue([
-				{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
-				{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
 			]),
 			getProfile: vi
 				.fn()
 				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: "token-active",
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				})
 				.mockResolvedValueOnce({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: "token-backup",
 				}),
 			saveConfig,
@@ -1674,13 +1845,15 @@ describe("zooCodeSignOut", () => {
 
 		;(mockClineProvider as any).contextProxy = {
 			...mockClineProvider.contextProxy,
-			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: "zoo-gateway" }),
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 			getProfile: vi.fn().mockResolvedValue({
-				apiProvider: "zoo-gateway",
+				apiProvider: providerIdentifiers.zooGateway,
 				zooGatewayModelId: "anthropic/claude-sonnet-4",
 			}),
 			saveConfig: vi.fn(),
@@ -1839,5 +2012,267 @@ describe("webviewMessageHandler - kimiCodeSignOut", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "kimiCodeSignOut" })
 
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Kimi Code sign out failed.")
+	})
+})
+
+describe("webviewMessageHandler - telemetrySetting", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(vscode.env).isTelemetryEnabled = true
+	})
+
+	// Regression test: TelemetryService.updateTelemetryState must be gated on
+	// vscode.env.isTelemetryEnabled in addition to the stored setting, matching
+	// extension.ts's onDidChangeTelemetryEnabled listener. Without this AND, a user
+	// clicking Accept in the webview could re-enable telemetry even while VS Code's
+	// global telemetry toggle is off.
+	it("does not enable telemetry when the user accepts but VS Code's global telemetry toggle is off", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+		vi.mocked(vscode.env).isTelemetryEnabled = false
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, { type: "telemetrySetting", text: "enabled" })
+
+		expect(TelemetryService.instance.updateTelemetryState).toHaveBeenCalledWith(false)
+	})
+
+	it("enables telemetry when the user accepts and VS Code's global telemetry toggle is on", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+		vi.mocked(vscode.env).isTelemetryEnabled = true
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, { type: "telemetrySetting", text: "enabled" })
+
+		expect(TelemetryService.instance.updateTelemetryState).toHaveBeenCalledWith(true)
+	})
+
+	it("keeps telemetry disabled when the user declines, regardless of VS Code's global toggle", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+		vi.mocked(vscode.env).isTelemetryEnabled = true
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, { type: "telemetrySetting", text: "disabled" })
+
+		expect(TelemetryService.instance.updateTelemetryState).toHaveBeenCalledWith(false)
+	})
+
+	// Finding #12 regression: without serialization, two concurrent "telemetrySetting" messages
+	// each capture their own isOptedIn in a closure and apply it to TelemetryService whenever
+	// their own persistence write resolves -- with no ordering guarantee between the two
+	// invocations. A slow first write racing a fast second write could let the *first*
+	// message's (now-stale) intent win the live telemetry state, even though the *second*
+	// message reflects the user's actual final choice.
+	it("applies the most recently sent telemetrySetting last, even if an earlier message's write is slower", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+		vi.mocked(vscode.env).isTelemetryEnabled = true
+
+		// Track the "stored" setting so the second call's getGlobalState read reflects
+		// whatever the first call has (or hasn't yet) written -- mirrors ContextProxy's real
+		// synchronous stateCache update inside setValue.
+		let storedSetting: string | undefined
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation(() => storedSetting)
+
+		let resolveSlowWrite!: () => void
+		const slowWrite = new Promise<void>((resolve) => {
+			resolveSlowWrite = resolve
+		})
+
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (_key, value) => {
+			if (value === "disabled") {
+				// First message's write is slow -- resolves only after we explicitly release it
+				// below, once the second (fast) message has already been sent.
+				await slowWrite
+			}
+			storedSetting = value as string
+		})
+
+		// First message: turn telemetry off (slow write).
+		const first = webviewMessageHandler(mockClineProvider, { type: "telemetrySetting", text: "disabled" })
+
+		// Second message: turn telemetry back on (fast write), sent immediately after.
+		const second = webviewMessageHandler(mockClineProvider, { type: "telemetrySetting", text: "enabled" })
+
+		// Now let the first message's write proceed.
+		resolveSlowWrite()
+
+		await Promise.all([first, second])
+
+		// The user's final, most-recently-sent choice was "enabled" -- the live telemetry
+		// state must reflect that, not "disabled" from the stale, slower first message.
+		const calls = vi.mocked(TelemetryService.instance.updateTelemetryState).mock.calls
+		expect(calls.at(-1)).toEqual([true])
+	})
+
+	// CodeRabbit follow-up on the finding #12 fix: webviewDidLaunch's telemetry init read state
+	// via an async provider.getStateToPostToWebview().then(...) continuation, outside
+	// telemetrySettingQueue -- so it could resolve after a concurrent "telemetrySetting" message
+	// and clobber that message's queued (correct) update with a stale value. webviewDidLaunch now
+	// reads getGlobalState synchronously and is routed through the same queue.
+	it("does not let webviewDidLaunch's telemetry init race and clobber a concurrent telemetrySetting message", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+		vi.mocked(vscode.env).isTelemetryEnabled = true
+
+		// webviewDidLaunch starts out "unset" (disclosed opt-out default -- opted in). Scoped to
+		// the "telemetrySetting" key specifically -- webviewDidLaunch also calls
+		// updateGlobalState("customModes", ...) through the same contextProxy mock, which must
+		// not clobber storedSetting.
+		let storedSetting: string | undefined = "unset"
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "telemetrySetting" ? storedSetting : undefined,
+		)
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key: string, value) => {
+			if (key === "telemetrySetting") {
+				storedSetting = value as string
+			}
+		})
+
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		const providerForLaunch = mockClineProvider as unknown as {
+			getMcpHub: ReturnType<typeof vi.fn>
+			providerSettingsManager: { listConfig: ReturnType<typeof vi.fn> }
+			getStateToPostToWebview: ReturnType<typeof vi.fn>
+		}
+		providerForLaunch.getMcpHub = vi.fn().mockReturnValue(undefined)
+		providerForLaunch.providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue(undefined),
+		}
+
+		// Deferred-promise handshake instead of setTimeout delays, so ordering is enforced
+		// explicitly rather than by racing real clock delays. Signals when webviewDidLaunch has
+		// taken its (pre-fix) state snapshot -- only fires under the *old* code path
+		// (provider.getStateToPostToWebview().then(...)); the fix never calls it at all.
+		let snapshotTaken!: () => void
+		const snapshotTakenPromise = new Promise<void>((resolve) => {
+			snapshotTaken = resolve
+		})
+		let releaseSnapshot!: () => void
+		const snapshotReleased = new Promise<void>((resolve) => {
+			releaseSnapshot = resolve
+		})
+
+		// Snapshots storedSetting at call time (mirroring the real ClineProvider building its
+		// state object synchronously before any internal awaits), signals it was taken, then
+		// waits until the test explicitly releases it -- by which point the concurrent
+		// telemetrySetting write below has already landed, making the snapshot genuinely stale
+		// once its .then() callback finally runs.
+		providerForLaunch.getStateToPostToWebview = vi.fn().mockImplementation(async () => {
+			const snapshot = storedSetting
+			snapshotTaken()
+			await snapshotReleased
+			return { telemetrySetting: snapshot }
+		})
+
+		// webviewDidLaunch fires first (e.g. webview reload) -- its telemetry init is now queued
+		// behind telemetrySettingQueue rather than resolving independently.
+		const launch = webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		// Wait for webviewDidLaunch to either take its (pre-fix) snapshot, or flush a fixed
+		// number of microtask turns as a same-tick fallback for the fixed code path (which never
+		// triggers that signal) -- enough for its synchronous prefix (await getCustomModes(),
+		// await updateGlobalState()) to run, without relying on a wall-clock timer.
+		await Promise.race([
+			snapshotTakenPromise,
+			(async () => {
+				for (let i = 0; i < 10; i++) {
+					await Promise.resolve()
+				}
+			})(),
+		])
+
+		// A concurrent "telemetrySetting" message turns telemetry off, and is awaited to
+		// completion -- including its own updateTelemetryState(false) call -- *before* the
+		// deferred (pre-fix-only) snapshot below is released. Against the pre-fix code, this
+		// proves the snapshot it captured earlier ("unset") is genuinely stale by the time its
+		// .then() callback finally runs: the user's real, later choice already landed.
+		const disable = webviewMessageHandler(mockClineProvider, { type: "telemetrySetting", text: "disabled" })
+		await disable
+
+		// Now release the deferred snapshot so a getStateToPostToWebview() call, if the old code
+		// path is exercised, resolves (with its already-captured, now-stale value) only after
+		// the disable write above has fully landed.
+		const snapshotResolved = vi.mocked(providerForLaunch.getStateToPostToWebview).mock.results[0]?.value as
+			| Promise<unknown>
+			| undefined
+		releaseSnapshot()
+
+		await Promise.all([launch, snapshotResolved])
+
+		// webviewDidLaunch's telemetry init is fire-and-forget from the handler's own point of
+		// view (the "webviewDidLaunch" case doesn't await it), so even awaiting
+		// getStateToPostToWebview() directly isn't enough to observe its .then() callback --
+		// flush one more microtask turn for that callback to run.
+		await Promise.resolve()
+
+		// The user's explicit "disabled" choice must be the final state -- webviewDidLaunch's
+		// queued re-application of the (by-then-stale) "unset"/opted-in state must not run after
+		// and override it.
+		const calls = vi.mocked(TelemetryService.instance.updateTelemetryState).mock.calls
+		expect(calls.at(-1)).toEqual([false])
+	})
+
+	// Review finding: webviewDidLaunch's queued telemetry update wasn't awaited by the
+	// "webviewDidLaunch" case, so a thrown error inside it was only ever caught by a later,
+	// unrelated queue link's leading .catch(() => undefined) -- silently swallowed rather than
+	// logged. Now awaited with its own .catch that logs via provider.log.
+	it("logs an error via provider.log if the queued telemetry init throws on launch", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(true)
+
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) => {
+			if (key === "telemetrySetting") {
+				throw new Error("contextProxy read failed")
+			}
+			return undefined
+		})
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		const providerForLaunch = mockClineProvider as unknown as {
+			getMcpHub: ReturnType<typeof vi.fn>
+			providerSettingsManager: { listConfig: ReturnType<typeof vi.fn> }
+			getStateToPostToWebview: ReturnType<typeof vi.fn>
+		}
+		providerForLaunch.getMcpHub = vi.fn().mockReturnValue(undefined)
+		providerForLaunch.providerSettingsManager = { listConfig: vi.fn().mockResolvedValue(undefined) }
+		providerForLaunch.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "unset" })
+
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })
+
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Error initializing telemetry state on launch"),
+		)
+	})
+
+	// CodeRabbit finding: webviewDidLaunch's queued telemetry update called
+	// TelemetryService.instance directly, unlike the "telemetrySetting" case a few lines
+	// below which checks hasInstance() first. If webviewDidLaunch fires before the service
+	// is created (e.g. during activation), TelemetryService.instance throws -- and since
+	// this whole chain isn't awaited by the "webviewDidLaunch" case, that throw becomes an
+	// unhandled promise rejection instead of a no-op.
+	it("does not throw or update telemetry state when webviewDidLaunch fires before TelemetryService exists", async () => {
+		const { TelemetryService } = await import("@roo-code/telemetry")
+		vi.mocked(TelemetryService.hasInstance).mockReturnValue(false)
+
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue("unset")
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		const providerForLaunch = mockClineProvider as unknown as {
+			getMcpHub: ReturnType<typeof vi.fn>
+			providerSettingsManager: { listConfig: ReturnType<typeof vi.fn> }
+			getStateToPostToWebview: ReturnType<typeof vi.fn>
+		}
+		providerForLaunch.getMcpHub = vi.fn().mockReturnValue(undefined)
+		providerForLaunch.providerSettingsManager = { listConfig: vi.fn().mockResolvedValue(undefined) }
+		providerForLaunch.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "unset" })
+
+		await expect(webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch" })).resolves.not.toThrow()
+
+		// The queued telemetry update is fire-and-forget from the handler's own point of
+		// view -- flush a microtask turn so its .then() callback runs before asserting.
+		await Promise.resolve()
+
+		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
 	})
 })

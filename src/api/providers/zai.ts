@@ -13,16 +13,17 @@ import {
 import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/api"
 import { convertToZAiFormat } from "../transform/zai-format"
 
-import type { ApiHandlerCreateMessageMetadata } from "../index"
+import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
+import { NOT_PROVIDED } from "./constants"
 import { handleOpenAIError } from "./utils/error-handler"
 
 // Custom interface for Z.ai params to support thinking mode and reasoning effort tiers.
 // Z.ai accepts the standard `reasoning_effort` ladder (none/minimal/low/medium/high/xhigh/max)
 // alongside the GLM-specific `thinking` toggle. Omit the OpenAI-typed `reasoning_effort` so we
 // can widen it to include provider-specific values such as "max".
-type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsStreaming, "reasoning_effort"> & {
-	thinking?: { type: "enabled" | "disabled" }
+type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParams, "reasoning_effort"> & {
+	thinking?: { type: "enabled" | "disabled"; clear_thinking?: boolean }
 	reasoning_effort?: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
 }
 
@@ -37,7 +38,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			...options,
 			providerName: "Z.ai",
 			baseURL: zaiApiLineConfigs[apiLine].baseUrl,
-			apiKey: options.zaiApiKey ?? "not-provided",
+			apiKey: options.zaiApiKey ?? NOT_PROVIDED,
 			defaultProviderModelId: defaultModelId,
 			providerModels: models,
 			defaultTemperature: ZAI_DEFAULT_TEMPERATURE,
@@ -78,7 +79,50 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		metadata?: ApiHandlerCreateMessageMetadata,
 	) {
 		const { id: model, info } = this.getModel()
+		const { reasoningEffort, useReasoning } = this.getReasoningSettings(info)
 
+		const max_tokens =
+			this.options.modelMaxTokens ||
+			(getModelMaxOutputTokens({
+				modelId: model,
+				model: info,
+				settings: this.options,
+				format: "openai",
+			}) ??
+				undefined)
+
+		const temperature = this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature
+
+		// Use Z.ai format to preserve reasoning_content and merge post-tool text into tool messages
+		const convertedMessages = convertToZAiFormat(messages, { mergeToolResultText: true })
+
+		const params: ZAiChatCompletionParams = {
+			model,
+			max_tokens,
+			temperature,
+			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
+			stream: true,
+			stream_options: { include_usage: true },
+			// Models with required reasoning stay enabled even when an old setting requests disable.
+			thinking: useReasoning
+				? { type: "enabled", ...(model === "glm-5.3" && { clear_thinking: false }) }
+				: { type: "disabled" },
+			reasoning_effort: reasoningEffort,
+			tools: this.convertToolsForOpenAI(metadata?.tools),
+			tool_choice: metadata?.tool_choice,
+			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+		}
+
+		try {
+			return this.client.chat.completions.create(
+				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+			)
+		} catch (error) {
+			throw handleOpenAIError(error, this.providerName)
+		}
+	}
+
+	private getReasoningSettings(info: ModelInfo) {
 		// Fall back to the model default when the resolved effort isn't supported by the model.
 		const supported = info.supportsReasoningEffort
 		const raw =
@@ -93,42 +137,30 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 					? info.reasoningEffort
 					: raw
 		const reasoningEffort = effort && effort !== "disable" ? effort : undefined
-		const useReasoning = requiresReasoning || reasoningEffort !== undefined
 
-		const max_tokens =
-			this.options.modelMaxTokens ||
-			(getModelMaxOutputTokens({
-				modelId: model,
-				model: info,
-				settings: this.options,
-				format: "openai",
-			}) ??
-				undefined)
+		return { reasoningEffort, useReasoning: requiresReasoning || reasoningEffort !== undefined }
+	}
 
-		const temperature = this.options.modelTemperature ?? this.defaultTemperature
+	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		const { id: model, info } = this.getModel()
+		if (model !== "glm-5.3") {
+			return super.completePrompt(prompt, options)
+		}
 
-		// Use Z.ai format to preserve reasoning_content and merge post-tool text into tool messages
-		const convertedMessages = convertToZAiFormat(messages, { mergeToolResultText: true })
-
+		const { reasoningEffort } = this.getReasoningSettings(info)
 		const params: ZAiChatCompletionParams = {
 			model,
-			max_tokens,
-			temperature,
-			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
-			stream: true,
-			stream_options: { include_usage: true },
-			// Models with required reasoning stay enabled even when an old setting requests disable.
-			thinking: useReasoning ? { type: "enabled" } : { type: "disabled" },
+			messages: [{ role: "user", content: prompt }],
+			temperature: this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature,
+			thinking: { type: "enabled", clear_thinking: false },
 			reasoning_effort: reasoningEffort,
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
 		try {
-			return this.client.chat.completions.create(
-				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming,
+			const response = await this.client.chat.completions.create(
+				params as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
 			)
+			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}

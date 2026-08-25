@@ -9,6 +9,7 @@ import {
 	type ModelInfo,
 	type ReasoningEffortExtended,
 	ApiProviderError,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -18,6 +19,7 @@ import { convertToAiSdkMessages, convertToolsForAiSdk, processAiSdkStreamPart } 
 import { ApiStream } from "../transform/stream"
 
 import { BaseProvider } from "./base-provider"
+import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { getModelsFromCache } from "./fetchers/modelCache"
 
@@ -31,7 +33,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 		super()
 		this.options = options
 		this.poe = createPoe({
-			apiKey: options.poeApiKey ?? "not-provided",
+			apiKey: options.poeApiKey ?? NOT_PROVIDED,
 			baseURL: options.poeBaseUrl || undefined,
 		})
 	}
@@ -39,7 +41,7 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 	override getModel() {
 		const id = this.options.apiModelId ?? poeDefaultModelId
 		const cached = getModelsFromCache({
-			provider: "poe",
+			provider: providerIdentifiers.poe,
 			apiKey: this.options.poeApiKey,
 			baseUrl: this.options.poeBaseUrl,
 		})
@@ -108,7 +110,9 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			})
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			TelemetryService.instance.captureException(new ApiProviderError(errorMessage, "poe", id, "createMessage"))
+			TelemetryService.instance.captureException(
+				new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "createMessage"),
+			)
 			throw new Error(`Poe completion error: ${errorMessage}`)
 		}
 
@@ -133,7 +137,9 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			}
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			TelemetryService.instance.captureException(new ApiProviderError(errorMessage, "poe", id, "createMessage"))
+			TelemetryService.instance.captureException(
+				new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "createMessage"),
+			)
 			throw new Error(`Poe streaming error: ${errorMessage}`)
 		}
 	}
@@ -148,7 +154,9 @@ export class PoeHandler extends BaseProvider implements SingleCompletionHandler 
 			return text
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			TelemetryService.instance.captureException(new ApiProviderError(errorMessage, "poe", id, "completePrompt"))
+			TelemetryService.instance.captureException(
+				new ApiProviderError(errorMessage, providerIdentifiers.poe, id, "completePrompt"),
+			)
 			throw new Error(`Poe completion error: ${errorMessage}`)
 		}
 	}

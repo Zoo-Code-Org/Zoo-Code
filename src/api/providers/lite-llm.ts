@@ -1,7 +1,7 @@
 import OpenAI from "openai"
 import { Anthropic } from "@anthropic-ai/sdk" // Keep for type usage only
 
-import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
+import { litellmDefaultModelId, litellmDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { calculateApiCostOpenAI } from "../../shared/cost"
 
@@ -27,7 +27,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "litellm",
+			name: providerIdentifiers.litellm,
 			baseURL: `${options.litellmBaseUrl || "http://localhost:4000"}`,
 			apiKey: options.litellmApiKey || "dummy-key",
 			modelId: options.litellmModelId,

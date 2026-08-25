@@ -1,7 +1,13 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { type ModelInfo, type ModelRecord, unboundDefaultModelId, unboundDefaultModelInfo } from "@roo-code/types"
+import {
+	type ModelInfo,
+	type ModelRecord,
+	providerIdentifiers,
+	unboundDefaultModelId,
+	unboundDefaultModelInfo,
+} from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { calculateApiCostOpenAI } from "../../shared/cost"
@@ -11,7 +17,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { OpenAiReasoningParams } from "../transform/reasoning"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -54,7 +60,7 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 
 		this.options = options
 
-		const apiKey = this.options.unboundApiKey ?? "not-provided"
+		const apiKey = this.options.unboundApiKey ?? NOT_PROVIDED
 
 		this.client = new OpenAI({
 			baseURL: "https://api.getunbound.ai/v1",
@@ -68,7 +74,10 @@ export class UnboundHandler extends BaseProvider implements SingleCompletionHand
 	}
 
 	public async fetchModel() {
-		this.models = await getModels({ provider: "unbound", apiKey: this.options.unboundApiKey })
+		this.models = await getModels({
+			provider: providerIdentifiers.unbound,
+			apiKey: this.options.unboundApiKey,
+		})
 		return this.getModel()
 	}
 

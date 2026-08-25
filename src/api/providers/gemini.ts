@@ -25,6 +25,7 @@ import { getModelParams } from "../transform/model-params"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { BaseProvider } from "./base-provider"
+import { NOT_PROVIDED } from "./constants"
 import { parseVertexJsonCredentials } from "./utils/vertex-credentials"
 
 type GeminiHandlerOptions = ApiHandlerOptions & {
@@ -184,9 +185,9 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 		this.options = options
 
-		const project = this.options.vertexProjectId ?? "not-provided"
-		const location = this.options.vertexRegion ?? "not-provided"
-		const apiKey = this.options.geminiApiKey ?? "not-provided"
+		const project = this.options.vertexProjectId ?? NOT_PROVIDED
+		const location = this.options.vertexRegion ?? NOT_PROVIDED
+		const apiKey = this.options.geminiApiKey ?? NOT_PROVIDED
 
 		const parsedVertexCredentials = parseVertexJsonCredentials(this.options.vertexJsonCredentials)
 
