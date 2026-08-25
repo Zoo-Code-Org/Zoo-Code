@@ -220,6 +220,23 @@ describe("new_task thinking_effort validation (DTE series 5/5)", () => {
 		expect(delegateParentAndOpenChild).not.toHaveBeenCalled()
 	})
 
+	it("reports 'none' when the target model's only capability is 'disable' (DTE series 5/5)", async () => {
+		const { task, delegateParentAndOpenChild } = makeTask({
+			supportsReasoningEffort: ["disable"],
+		})
+		const callbacks = makeCallbacks()
+
+		await runNewTask(task, { thinking_effort: "low" }, callbacks)
+
+		// 'disable' is a settings off-switch, never a start level: it is filtered
+		// from the error hint, leaving an empty list — the message falls back to
+		// 'none' instead of trailing a dangling colon.
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("the target model only supports: none"),
+		)
+		expect(delegateParentAndOpenChild).not.toHaveBeenCalled()
+	})
+
 	it("rejects an effort when the target model exposes no capability array", async () => {
 		const { task, delegateParentAndOpenChild } = makeTask({
 			supportsReasoningEffort: undefined,

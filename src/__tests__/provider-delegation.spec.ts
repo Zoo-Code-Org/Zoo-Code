@@ -583,6 +583,56 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(childRun).toHaveBeenCalledTimes(1)
 	})
 
+	it("stringifies a non-Error say rejection in the non-fatal log (DTE series 5/5)", async () => {
+		const parentTask = makeParentTask()
+		const setRuntimeThinkingEffort = vi.fn()
+		// A non-Error rejection (e.g. a raw string from the webview messaging
+		// layer): the catch must not assume an Error shape, where error.message
+		// would be undefined and the log line would read 'undefined'.
+		const say = vi.fn().mockRejectedValue("webview gone")
+		const childRun = vi.fn().mockResolvedValue(undefined)
+		const createTask = vi.fn().mockResolvedValue({
+			taskId: "child-1",
+			start: vi.fn(),
+			run: childRun,
+			setRuntimeThinkingEffort,
+			say,
+			api: { getModel: () => ({ id: "child-model", info: { supportsReasoningEffort: ["low", "high"] } }) },
+		})
+		const taskHistoryStore = makeStoreStub()
+		const providerLog = vi.fn()
+
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: providerLog,
+			isViewLaunched: false,
+			recentTasksCache: undefined,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		// Must NOT reject: the failing notification is non-fatal.
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+			thinkingEffort: "xhigh",
+		})
+		await Promise.resolve()
+
+		// The non-Error rejection is stringified into the log (the Error-instance
+		// arm is covered by the disposed-parent test above).
+		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("non-fatal"))
+		expect(providerLog).toHaveBeenCalledWith(expect.stringContaining("webview gone"))
+		// Delegation still proceeds: the child runs.
+		expect(childRun).toHaveBeenCalledTimes(1)
+	})
+
 	it("applies the effort when the child model (post mode switch) has a boolean-true capability (DTE series 5/5)", async () => {
 		const parentTask = makeParentTask()
 		const setRuntimeThinkingEffort = vi.fn()
