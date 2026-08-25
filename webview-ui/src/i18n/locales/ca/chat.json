@@ -470,7 +470,7 @@
 		"appliedByUser": "Esforç de raonament establert a: {{effort}}",
 		"chipTooltip": "Esforç de raonament: {{effort}} ({{source}})",
 		"sourceDefault": "per defecte",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automàtic)",
 		"sourceYou": "tu",
 		"toggleTitle": "Esforç de raonament",
 		"adaptiveHint": "Aquest model decideix el seu esforç automàticament — la teva selecció és només una guia suau.",

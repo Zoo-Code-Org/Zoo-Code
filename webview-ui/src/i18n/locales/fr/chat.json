@@ -476,7 +476,7 @@
 		"appliedByUser": "Effort de raisonnement défini sur : {{effort}}",
 		"chipTooltip": "Effort de raisonnement : {{effort}} ({{source}})",
 		"sourceDefault": "par défaut",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automatique)",
 		"sourceYou": "vous",
 		"toggleTitle": "Effort de raisonnement",
 		"adaptiveHint": "Ce modèle détermine son effort automatiquement — votre choix n'est qu'un guide souple.",

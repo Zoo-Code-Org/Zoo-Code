@@ -476,7 +476,7 @@
 		"appliedByUser": "Wysiłek myślowy ustawiony na: {{effort}}",
 		"chipTooltip": "Wysiłek myślowy: {{effort}} ({{source}})",
 		"sourceDefault": "domyślny",
-		"sourceAuto": "Zoo (auto)",
+		"sourceAuto": "Zoo (automatycznie)",
 		"sourceYou": "ty",
 		"toggleTitle": "Wysiłek myślowy",
 		"adaptiveHint": "Ten model samodzielnie decyduje o wysiłku — Twój wybór to tylko luźna wskazówka.",
