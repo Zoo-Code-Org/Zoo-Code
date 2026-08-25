@@ -1853,7 +1853,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 														padding: "0 6px 0 20px",
 														fontSize: 12,
 														cursor: "pointer",
-														outline: "none",
+														// Keep the native focus outline so keyboard users can identify the active
+														// control (no outline suppression).
 													}}>
 													{newTaskAskSupportedEfforts.map((effort) => (
 														<option key={effort} value={effort}>

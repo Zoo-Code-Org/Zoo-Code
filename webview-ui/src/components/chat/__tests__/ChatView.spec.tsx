@@ -1595,6 +1595,8 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		expect(select.style.cursor).toBe("pointer")
 		// Room for the icon: the trigger pads left of the 13px Brain glyph.
 		expect(select.style.paddingLeft).toBe("20px")
+		// Keep the native keyboard focus indicator — no outline suppression.
+		expect(inlineStyle).not.toContain("outline")
 		// The Brain icon sits inside a relative wrapper, immediately before the select —
 		// native <option> elements cannot carry icons, so the trigger is the only place.
 		const icon = select.previousElementSibling
