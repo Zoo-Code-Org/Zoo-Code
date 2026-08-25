@@ -506,5 +506,33 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
 			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toEqual(["medium"])
 		})
+
+		it("turns reasoning effort off when a custom-model 'disable' option is selected", () => {
+			renderConfig({
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: ["low", "disable"],
+				},
+			})
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			// The custom-model capability array is respected exactly, so "disable" is offered.
+			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toContain("disable")
+
+			thinkingBudgetProps.setApiConfigurationField("reasoningEffort", "disable")
+
+			// The stored effort is cleared and the parent switch is unchecked — the same
+			// end state as unchecking "Enable Reasoning Effort" by hand.
+			const modelCalls = mockSetApiConfigurationField.mock.calls.filter(
+				(call) => call[0] === "openAiCustomModelInfo",
+			)
+			expect(modelCalls[modelCalls.length - 1]?.[1]).toEqual({
+				contextWindow: 128_000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["low", "disable"],
+			})
+			expect(mockSetApiConfigurationField).toHaveBeenLastCalledWith("enableReasoningEffort", false)
+		})
 	})
 })
