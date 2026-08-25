@@ -899,7 +899,12 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("my-custom-model")
 		})
 
-		it("should use litellmDefaultModelInfo when selected model not found in routerModels", () => {
+		it("preserves a configured model ID that is absent from the populated list", () => {
+			// Regression: LiteLLM is a proxy whose users may configure aliases or models
+			// that the fetched /models list does not include (custom aliases, incomplete or
+			// stale listings). The configured ID is the user's explicit selection and must
+			// not be replaced by a hardcoded default, which made the settings screen appear
+			// to ignore model ID changes.
 			mockUseRouterModels.mockReturnValue({
 				data: {
 					openrouter: {},
@@ -926,9 +931,40 @@ describe("useSelectedModel", () => {
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
 
 			expect(result.current.provider).toBe(providerIdentifiers.litellm)
-			// Falls back to default model ID
+			// The configured ID is preserved even though it is absent from the fetched list
+			expect(result.current.id).toBe("non-existing-model")
+			// Model info falls back to litellmDefaultModelInfo since the model is not in router models
+			expect(result.current.info).toEqual(litellmDefaultModelInfo)
+		})
+
+		it("falls back to the default model ID only when nothing is configured but a list exists", () => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {
+						"existing-model": {
+							maxTokens: 4096,
+							contextWindow: 8192,
+							supportsImages: false,
+							supportsPromptCache: false,
+						},
+					},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.litellm,
+				// litellmModelId intentionally omitted
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			// Nothing configured: fall back to the provider default so the picker shows a selection
 			expect(result.current.id).toBe("claude-3-7-sonnet-20250219")
-			// Should use litellmDefaultModelInfo as fallback since default model also not in router models
 			expect(result.current.info).toEqual(litellmDefaultModelInfo)
 		})
 

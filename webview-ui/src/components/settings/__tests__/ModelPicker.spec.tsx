@@ -3,15 +3,21 @@
 import { screen, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
 import { act } from "react"
 import { QueryClient } from "@tanstack/react-query"
+import { type Mock } from "vitest"
 
-import { ModelInfo, providerIdentifiers } from "@roo-code/types"
+import { litellmDefaultModelId, ModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { ModelPicker } from "../ModelPicker"
+import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	ExtensionStateContextProvider: ({ children }: any) => children,
 	useExtensionState: vi.fn(),
 }))
+
+vi.mock("@src/components/ui/hooks/useRouterModels")
+
+const mockUseRouterModels = useRouterModels as Mock<typeof useRouterModels>
 
 Element.prototype.scrollIntoView = vi.fn()
 
@@ -55,6 +61,8 @@ describe("ModelPicker", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.useFakeTimers()
+		// Default: no router models available. Provider-specific tests override per test.
+		mockUseRouterModels.mockReturnValue({ data: {}, isLoading: false, isError: false } as any)
 	})
 
 	afterEach(() => {
@@ -252,6 +260,98 @@ describe("ModelPicker", () => {
 			})
 
 			expect(screen.getByTestId("automatic-fetch-hint")).toBeInTheDocument()
+		})
+	})
+
+	describe("LiteLLM custom model selection", () => {
+		const litellmModels: Record<string, ModelInfo> = {
+			"gpt-4o-mini": { description: "LiteLLM proxy model", ...modelInfo },
+		}
+
+		const renderLiteLLMPicker = (
+			apiConfiguration: Record<string, unknown>,
+			setField: (field: string, value: unknown) => void,
+		) =>
+			renderWithExtensionState(
+				<ModelPicker
+					apiConfiguration={apiConfiguration as never}
+					defaultModelId={litellmDefaultModelId}
+					models={litellmModels}
+					modelIdKey="litellmModelId"
+					serviceName="LiteLLM"
+					serviceUrl="https://docs.litellm.ai/"
+					setApiConfigurationField={setField as never}
+					organizationAllowList={{ allowAll: true, providers: {} }}
+				/>,
+				{ queryClient },
+			)
+
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: { litellm: litellmModels },
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("keeps a custom model ID in the picker instead of reverting to the default", async () => {
+			// Regression: on the LiteLLM settings screen the user could not change the
+			// model ID to a value absent from the fetched /models list -- the picker
+			// silently reverted to the hardcoded default model after the selection.
+			const customModelId = "my-litellm-alias"
+			let apiConfiguration: Record<string, unknown> = { apiProvider: providerIdentifiers.litellm }
+			const setField = vi.fn((field: string, value: unknown) => {
+				apiConfiguration = { ...apiConfiguration, [field]: value }
+			})
+
+			const { rerender } = await act(async () => {
+				return renderLiteLLMPicker(apiConfiguration, setField)
+			})
+
+			// Before any selection the picker shows the provider default.
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(litellmDefaultModelId)
+
+			// Open the popover and type a model ID that is not in the fetched list.
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("model-picker-button"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.input(screen.getByTestId("model-input"), { target: { value: customModelId } })
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+			await act(async () => {
+				fireEvent.click(screen.getByTestId("use-custom-model"))
+			})
+			await act(async () => {
+				vi.advanceTimersByTime(100)
+			})
+
+			expect(setField).toHaveBeenCalledWith("litellmModelId", customModelId)
+
+			// Re-render with the updated configuration (as SettingsView does after the
+			// setter runs) and assert the selection is kept, not reset to the default.
+			await act(async () => {
+				rerender(
+					<ModelPicker
+						apiConfiguration={apiConfiguration as never}
+						defaultModelId={litellmDefaultModelId}
+						models={litellmModels}
+						modelIdKey="litellmModelId"
+						serviceName="LiteLLM"
+						serviceUrl="https://docs.litellm.ai/"
+						setApiConfigurationField={setField as never}
+						organizationAllowList={{ allowAll: true, providers: {} }}
+					/>,
+				)
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(customModelId)
+			expect(screen.getByTestId("model-picker-button")).not.toHaveTextContent(litellmDefaultModelId)
 		})
 	})
 })
