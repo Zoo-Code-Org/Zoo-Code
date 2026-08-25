@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "启用推理工作量",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "支持的推理工作量级别",
+			"description": "你的模型接受的推理工作量级别。自托管和 OpenAI 兼容模型不会声明其支持此能力，因此请在此处声明级别，以使用思考工作量控制。"
 		},
 		"claudeCode": {
 			"pathLabel": "Claude Code 路径",
