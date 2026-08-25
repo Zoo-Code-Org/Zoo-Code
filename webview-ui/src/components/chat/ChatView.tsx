@@ -13,6 +13,7 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso"
 import removeMd from "remove-markdown"
 import useSound from "use-sound"
 import { LRUCache } from "lru-cache"
+import { Brain } from "lucide-react"
 
 import { useDebounceEffect } from "@src/utils/useDebounceEffect"
 import { appendImages } from "@src/utils/imageUtils"
@@ -1811,36 +1812,56 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 									{clineAsk === "tool" &&
 										newTaskAskSupportedEfforts &&
 										newTaskAskSupportedEfforts.length > 0 && (
-											<select
-												// DTE series 5/5: reuses the settings reasoning-effort labels, which are translated
-												// in every locale, so the accessible name and option labels are localized
-												// like the rest of the chat UI.
-												aria-label={t("settings:providers.reasoningEffort.label")}
-												// The prefill normalizes newTaskAskEffort to a supported level (see the
-												// newTask branch of the ask handler), so rendered and posted values agree.
-												value={newTaskAskEffort ?? newTaskAskSupportedEfforts[0]}
-												onChange={(event) =>
-													// The select only offers model-supported levels (rendered below), so the
-													// raw value is a ReasoningEffortExtended.
-													setNewTaskAskEffort(event.target.value as ReasoningEffortExtended)
-												}
-												style={{
-													border: "1px solid var(--vscode-input-border)",
-													backgroundColor: "var(--vscode-input-background)",
-													color: "var(--vscode-input-foreground)",
-													borderRadius: 2,
-													height: 24,
-													marginRight: 8,
-													padding: "0 4px",
-													fontSize: 12,
-													flexShrink: 0,
-												}}>
-												{newTaskAskSupportedEfforts.map((effort) => (
-													<option key={effort} value={effort}>
-														{t(`settings:providers.reasoningEffort.${effort}`)}
-													</option>
-												))}
-											</select>
+											// DTE series 5/5: wrapped in a relative container so the Brain icon can sit
+											// inside the trigger — native <option> elements cannot carry icons.
+											<div style={{ position: "relative", marginRight: 8, flexShrink: 0 }}>
+												<Brain
+													size={13}
+													style={{
+														position: "absolute",
+														left: 6,
+														top: "50%",
+														transform: "translateY(-50%)",
+														color: "var(--vscode-descriptionForeground)",
+														pointerEvents: "none",
+													}}
+												/>
+												<select
+													// DTE series 5/5: reuses the settings reasoning-effort labels, which are translated
+													// in every locale, so the accessible name and option labels are localized
+													// like the rest of the chat UI.
+													aria-label={t("settings:providers.reasoningEffort.label")}
+													data-testid="new-task-effort-select"
+													// The prefill normalizes newTaskAskEffort to a supported level (see the
+													// newTask branch of the ask handler), so rendered and posted values agree.
+													value={newTaskAskEffort ?? newTaskAskSupportedEfforts[0]}
+													onChange={(event) =>
+														// The select only offers model-supported levels (rendered below), so the
+														// raw value is a ReasoningEffortExtended.
+														setNewTaskAskEffort(
+															event.target.value as ReasoningEffortExtended,
+														)
+													}
+													// Dropdown border variables: in the default themes the input border is
+													// transparent, so the trigger rendered without a visible border before.
+													style={{
+														border: "1px solid var(--vscode-dropdown-border)",
+														background: "var(--vscode-dropdown-background)",
+														color: "var(--vscode-dropdown-foreground)",
+														borderRadius: 4,
+														height: 24,
+														padding: "0 6px 0 20px",
+														fontSize: 12,
+														cursor: "pointer",
+														outline: "none",
+													}}>
+													{newTaskAskSupportedEfforts.map((effort) => (
+														<option key={effort} value={effort}>
+															{t(`settings:providers.reasoningEffort.${effort}`)}
+														</option>
+													))}
+												</select>
+											</div>
 										)}
 									{primaryButtonText && (
 										<StandardTooltip

@@ -1577,6 +1577,32 @@ describe("ChatView - new_task thinking effort selector (DTE series 5/5)", () => 
 		])
 	})
 
+	it("styles the effort selector with dropdown tokens and a Brain icon", async () => {
+		const { getByLabelText } = renderChatView()
+
+		await postToolAsk(NEW_TASK_ASK)
+
+		const select = await waitFor(
+			() => getByLabelText("settings:providers.reasoningEffort.label") as HTMLSelectElement,
+		)
+		// The trigger uses the dropdown (not input) tokens: in the default themes the
+		// input border is transparent, which left the old trigger borderless.
+		const inlineStyle = select.getAttribute("style") ?? ""
+		expect(inlineStyle).toContain("var(--vscode-dropdown-border)")
+		expect(inlineStyle).toContain("var(--vscode-dropdown-background)")
+		expect(inlineStyle).toContain("var(--vscode-dropdown-foreground)")
+		expect(select.style.borderRadius).toBe("4px")
+		expect(select.style.cursor).toBe("pointer")
+		// Room for the icon: the trigger pads left of the 13px Brain glyph.
+		expect(select.style.paddingLeft).toBe("20px")
+		// The Brain icon sits inside a relative wrapper, immediately before the select —
+		// native <option> elements cannot carry icons, so the trigger is the only place.
+		const icon = select.previousElementSibling
+		expect(icon?.tagName).toBe("svg")
+		expect(icon?.getAttribute("aria-hidden")).toBe("true")
+		expect(select.parentElement?.style.position).toBe("relative")
+	})
+
 	it("falls back to the first supported level when the pre-fill is not supported", async () => {
 		const { getByLabelText } = renderChatView()
 
