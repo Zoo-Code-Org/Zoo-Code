@@ -73,16 +73,21 @@ export const OpenRouter = ({
 					setRefreshError(message.error)
 				}
 			} else if (message.type === RouterModelsMessageType.routerModels) {
-				if (refreshStatus === RefreshStatus.Loading) {
-					if (!errorJustReceived.current) {
-						setRefreshStatus(RefreshStatus.Success)
-						void queryClient.invalidateQueries({
-							queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.openrouter],
-						})
-						void queryClient.invalidateQueries({
-							queryKey: [RouterModelsMessageType.routerModels, allRouterModelsProvider],
-						})
-					}
+				const providerName = message.values?.provider as RouterName | undefined
+				// Scoped responses must match our provider; unscoped (legacy/global)
+				// broadcasts are still accepted so Loading cannot hang.
+				if (
+					(providerName === undefined || providerName === providerIdentifiers.openrouter) &&
+					refreshStatus === RefreshStatus.Loading &&
+					!errorJustReceived.current
+				) {
+					setRefreshStatus(RefreshStatus.Success)
+					void queryClient.invalidateQueries({
+						queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.openrouter],
+					})
+					void queryClient.invalidateQueries({
+						queryKey: [RouterModelsMessageType.routerModels, allRouterModelsProvider],
+					})
 				}
 			}
 		}
