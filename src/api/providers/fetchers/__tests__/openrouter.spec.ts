@@ -43,7 +43,7 @@ describe("OpenRouter API", () => {
 				description: expect.any(String),
 				supportsReasoningBudget: true,
 				requiredReasoningBudget: true,
-				supportsReasoningEffort: true,
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
 				supportedParameters: ["max_tokens", "temperature", "reasoning", "include_reasoning"],
 			})
 
