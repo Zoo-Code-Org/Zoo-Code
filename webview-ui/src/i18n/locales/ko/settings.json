@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "추론 노력 활성화",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "지원되는 추론 노력 수준",
+			"description": "모델이 받아들이는 추론 노력 수준입니다. 셀프호스팅 및 OpenAI 호환 모델은 이 기능을 광고하지 않으므로, 사고 노력 제어를 사용하려면 여기에 수준을 선언하세요."
 		},
 		"claudeCode": {
 			"pathLabel": "클로드 코드 경로",

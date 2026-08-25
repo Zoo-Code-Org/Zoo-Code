@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "Aktifkan Upaya Reasoning",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "Level Upaya Reasoning yang Didukung",
+			"description": "Level upaya reasoning yang diterima oleh model Anda. Model self-hosted dan yang kompatibel dengan OpenAI tidak mengiklankan kemampuan ini, jadi nyatakan levelnya di sini untuk menggunakan kontrol upaya reasoning."
 		},
 		"claudeCode": {
 			"pathLabel": "Jalur Kode Claude",

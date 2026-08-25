@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "तर्क प्रयास सक्षम करें",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "समर्थित तर्क प्रयास स्तर",
+			"description": "वे तर्क प्रयास स्तर जो आपका मॉडल स्वीकार करता है। स्व-होस्टेड और OpenAI-संगत मॉडल इस क्षमता की घोषणा नहीं करते हैं, इसलिए तर्क प्रयास नियंत्रणों का उपयोग करने के लिए स्तर यहाँ घोषित करें।"
 		},
 		"claudeCode": {
 			"pathLabel": "क्लाउड कोड पथ",

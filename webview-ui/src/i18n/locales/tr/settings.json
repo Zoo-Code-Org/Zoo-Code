@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "Akıl Yürütme Çabasını Etkinleştir",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "Desteklenen akıl yürütme çabası düzeyleri",
+			"description": "Modelinizin kabul ettiği akıl yürütme çabası düzeyleri. Kendi barındırmanızdaki ve OpenAI uyumlu modeller bu yeteneği belirtmez; akıl yürütme çabası kontrollerini kullanmak için düzeyleri burada tanımlayın."
 		},
 		"claudeCode": {
 			"pathLabel": "Claude Code Yolu",

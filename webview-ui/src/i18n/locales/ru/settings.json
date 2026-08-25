@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "Включить усилие рассуждения",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "Поддерживаемые уровни усилия рассуждения",
+			"description": "Уровни усилия рассуждения, которые принимает ваша модель. Self-hosted и совместимые с OpenAI модели не сообщают об этой возможности, поэтому объявите уровни здесь, чтобы использовать элементы управления усилием рассуждения."
 		},
 		"claudeCode": {
 			"pathLabel": "Путь к Claude Code",

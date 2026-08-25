@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "Redeneervermogen inschakelen",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "Ondersteunde redeneervermogensniveaus",
+			"description": "De redeneervermogensniveaus die je model accepteert. Zelfgehostede en OpenAI-compatibele modellen adverteren deze mogelijkheid niet, dus verklaar je de niveaus hier om de redeneervermogen-besturing te gebruiken."
 		},
 		"claudeCode": {
 			"pathLabel": "Claude Code Pad",

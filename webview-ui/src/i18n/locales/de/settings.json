@@ -679,8 +679,8 @@
 		},
 		"setReasoningLevel": "Denkaufwand aktivieren",
 		"supportedEffortLevels": {
-			"label": "Supported Reasoning Effort Levels",
-			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+			"label": "Unterstützte Denkaufwandsstufen",
+			"description": "Die Denkaufwandsstufen, die dein Modell akzeptiert. Selbst gehostete und OpenAI-kompatible Modelle bewerben diese Fähigkeit nicht, daher deklarierst du die Stufen hier, um die Denkaufwand-Steuerung zu verwenden."
 		},
 		"claudeCode": {
 			"pathLabel": "Claude-Code-Pfad",
