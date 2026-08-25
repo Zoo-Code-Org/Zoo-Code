@@ -1833,8 +1833,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 													aria-label={t("settings:providers.reasoningEffort.label")}
 													data-testid="new-task-effort-select"
 													// The prefill normalizes newTaskAskEffort to a supported level (see the
-													// newTask branch of the ask handler), so rendered and posted values agree.
-													value={newTaskAskEffort ?? newTaskAskSupportedEfforts[0]}
+													// newTask branch of the ask handler) and every other ask clears it together
+													// with the supported list, so the value is defined whenever the selector
+													// renders — rendered and posted values agree by construction.
+													value={newTaskAskEffort}
 													onChange={(event) =>
 														// The select only offers model-supported levels (rendered below), so the
 														// raw value is a ReasoningEffortExtended.
