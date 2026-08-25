@@ -429,4 +429,82 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			})
 		})
 	})
+
+	describe("reasoning effort level declaration (F7)", () => {
+		const baseConfiguration: Partial<ProviderSettings> = {
+			enableReasoningEffort: true,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				supportsPromptCache: false,
+			},
+		}
+
+		function renderConfig(overrides: Partial<ProviderSettings> = {}) {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ ...baseConfiguration, ...overrides } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+		}
+
+		it("renders the level declaration checkboxes when reasoning effort is enabled", () => {
+			renderConfig()
+
+			expect(screen.getByTestId("checkbox-settings:providers.reasoningeffort.low")).toBeInTheDocument()
+			expect(screen.getByTestId("checkbox-settings:providers.reasoningeffort.xhigh")).toBeInTheDocument()
+		})
+
+		it("does not render the level declaration checkboxes when reasoning effort is disabled", () => {
+			renderConfig({ enableReasoningEffort: false })
+
+			expect(screen.queryByTestId("checkbox-settings:providers.reasoningeffort.low")).not.toBeInTheDocument()
+		})
+
+		it("appends a toggled level in canonical order", () => {
+			renderConfig({ supportedReasoningEfforts: ["high"] })
+
+			fireEvent.click(screen.getByTestId("checkbox-input-settings:providers.reasoningeffort.low"))
+
+			expect(mockSetApiConfigurationField).toHaveBeenLastCalledWith("supportedReasoningEfforts", ["low", "high"])
+		})
+
+		it("removes a toggled-off level", () => {
+			renderConfig({ supportedReasoningEfforts: ["low", "high"] })
+
+			fireEvent.click(screen.getByTestId("checkbox-input-settings:providers.reasoningeffort.low"))
+
+			expect(mockSetApiConfigurationField).toHaveBeenLastCalledWith("supportedReasoningEfforts", ["high"])
+		})
+
+		it("disables the reasoning-effort switch when the declaration becomes empty", () => {
+			renderConfig({ supportedReasoningEfforts: ["low"] })
+
+			fireEvent.click(screen.getByTestId("checkbox-input-settings:providers.reasoningeffort.low"))
+
+			expect(mockSetApiConfigurationField).toHaveBeenLastCalledWith("enableReasoningEffort", false)
+		})
+
+		it("drives the ThinkingBudget options from the declared levels when the custom model has no capability", () => {
+			renderConfig({ supportedReasoningEfforts: ["low", "max"] })
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toEqual(["low", "max"])
+		})
+
+		it("keeps a custom-model capability over the declared levels (registry wins)", () => {
+			renderConfig({
+				supportedReasoningEfforts: ["low", "max"],
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: ["medium"],
+				},
+			})
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			expect(thinkingBudgetProps.modelInfo.supportsReasoningEffort).toEqual(["medium"])
+		})
+	})
 })

@@ -26,18 +26,31 @@ export const THINKING_EFFORT_ADAPTIVE_LEVEL = "adaptive"
  * (fill-in-the-gap only), so models that already advertise a capability
  * (boolean or array) keep it.
  *
- * Pure and non-mutating: returns the original model when nothing is filled in.
+ * Pure and non-mutating: returns the original model when nothing is filled in,
+ * and `undefined` when the model itself is `undefined` with no declaration.
  */
 export function resolveReasoningEffortCapability(
 	model: ModelInfo | undefined,
 	apiConfiguration: ProviderSettings | undefined,
 ): ModelInfo | undefined {
-	if (!model || model.supportsReasoningEffort !== undefined) {
+	const declared = apiConfiguration?.supportedReasoningEfforts
+	const hasDeclaration = Array.isArray(declared) && declared.length > 0
+
+	// F7: when no model info reaches the webview at all (self-hosted providers
+	// can resolve `undefined` when their model list is empty), the profile
+	// declaration is the only capability source — synthesize a minimal ModelInfo
+	// carrying it so the DTE surfaces still render.
+	if (!model) {
+		return hasDeclaration
+			? { contextWindow: 0, supportsPromptCache: false, supportsReasoningEffort: [...declared] }
+			: model
+	}
+
+	if (model.supportsReasoningEffort !== undefined) {
 		return model
 	}
 
-	const declared = apiConfiguration?.supportedReasoningEfforts
-	if (!Array.isArray(declared) || declared.length === 0) {
+	if (!hasDeclaration) {
 		return model
 	}
 

@@ -197,11 +197,23 @@ describe("resolveReasoningEffortCapability (F7)", () => {
 		).toBe(modelNoCapability)
 	})
 
-	it("returns undefined for an undefined model", () => {
+	it("synthesizes a minimal model from the declaration when no model info reaches the webview", () => {
+		// Self-hosted providers can resolve `model` to undefined when their model
+		// list is empty; the profile declaration is then the only capability source.
+		const result = resolveReasoningEffortCapability(undefined, {
+			supportedReasoningEfforts: ["low", "high"],
+		} as ProviderSettings)
+		expect(result?.supportsReasoningEffort).toEqual(["low", "high"])
+		// Minimal ModelInfo shape: the required fields are present, nothing else implied.
+		expect(result?.contextWindow).toBe(0)
+		expect(result?.supportsPromptCache).toBe(false)
+	})
+
+	it("returns undefined for an undefined model without a declaration", () => {
+		expect(resolveReasoningEffortCapability(undefined, undefined)).toBeUndefined()
+		expect(resolveReasoningEffortCapability(undefined, {} as ProviderSettings)).toBeUndefined()
 		expect(
-			resolveReasoningEffortCapability(undefined, {
-				supportedReasoningEfforts: ["low"],
-			} as ProviderSettings),
+			resolveReasoningEffortCapability(undefined, { supportedReasoningEfforts: [] } as ProviderSettings),
 		).toBeUndefined()
 	})
 

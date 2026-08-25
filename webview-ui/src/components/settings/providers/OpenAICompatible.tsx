@@ -23,6 +23,7 @@ import { inputEventTransform, noTransform } from "../transforms"
 import { ModelPicker } from "../ModelPicker"
 import { R1FormatSetting } from "../R1FormatSetting"
 import { ThinkingBudget } from "../ThinkingBudget"
+import { SupportedEffortLevels } from "../SupportedEffortLevels"
 
 type OpenAICompatibleProps = {
 	apiConfiguration: ProviderSettings
@@ -267,27 +268,41 @@ export const OpenAICompatible = ({
 					{t("settings:providers.setReasoningLevel")}
 				</Checkbox>
 				{!!apiConfiguration.enableReasoningEffort && (
-					<ThinkingBudget
-						apiConfiguration={{
-							...apiConfiguration,
-							reasoningEffort: apiConfiguration.openAiCustomModelInfo?.reasoningEffort,
-						}}
-						setApiConfigurationField={(field, value) => {
-							if (field === "reasoningEffort") {
-								const openAiCustomModelInfo =
-									apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults
+					<>
+						<SupportedEffortLevels
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+						/>
+						<ThinkingBudget
+							apiConfiguration={{
+								...apiConfiguration,
+								reasoningEffort: apiConfiguration.openAiCustomModelInfo?.reasoningEffort,
+							}}
+							setApiConfigurationField={(field, value) => {
+								if (field === "reasoningEffort") {
+									const openAiCustomModelInfo =
+										apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults
 
-								setApiConfigurationField("openAiCustomModelInfo", {
-									...openAiCustomModelInfo,
-									reasoningEffort: value as ReasoningEffortExtended,
-								})
-							}
-						}}
-						modelInfo={{
-							...(apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults),
-							supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
-						}}
-					/>
+									setApiConfigurationField("openAiCustomModelInfo", {
+										...openAiCustomModelInfo,
+										reasoningEffort: value as ReasoningEffortExtended,
+									})
+								}
+							}}
+							modelInfo={{
+								...(apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults),
+								// F7: the custom-model entry's own capability wins (registry-wins);
+								// otherwise the user-declared profile levels; otherwise the
+								// OpenAI-compatible default set.
+								supportsReasoningEffort:
+									(apiConfiguration.openAiCustomModelInfo || openAiModelInfoSaneDefaults)
+										.supportsReasoningEffort ??
+									(apiConfiguration.supportedReasoningEfforts?.length
+										? apiConfiguration.supportedReasoningEfforts
+										: ["low", "medium", "high", "xhigh", "max"]),
+							}}
+						/>
+					</>
 				)}
 			</div>
 			<div className="flex flex-col gap-3">

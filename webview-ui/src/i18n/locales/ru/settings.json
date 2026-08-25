@@ -678,6 +678,10 @@
 			"description": "Контролирует, насколько подробны ответы модели. Низкая подробность дает краткие ответы, а высокая — подробные объяснения."
 		},
 		"setReasoningLevel": "Включить усилие рассуждения",
+		"supportedEffortLevels": {
+			"label": "Supported Reasoning Effort Levels",
+			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+		},
 		"claudeCode": {
 			"pathLabel": "Путь к Claude Code",
 			"description": "Необязательный путь к вашему Claude Code CLI. По умолчанию используется 'claude', если не установлено.",
