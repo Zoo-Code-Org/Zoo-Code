@@ -1682,6 +1682,12 @@ export const webviewMessageHandler = async (
 					if (supported) {
 						setEffortTask.setRuntimeThinkingEffort(setEffortValue, "you")
 						// Single in-chat line (same ChatRow case as model-initiated changes).
+						// isNonInteractive: the line is display-only and can fire while the task
+						// is blocked on a pending ask (e.g. the followup ask after a subtask
+						// returns). Without it, say() bumps lastMessageTs and Task.ask's pWaitFor
+						// treats the pending ask as superseded (AskIgnoredError) — killing the
+						// request loop, so the next user message has no waiter (no API call,
+						// frozen UI).
 						await setEffortTask.say(
 							"tool",
 							JSON.stringify({
@@ -1691,6 +1697,9 @@ export const webviewMessageHandler = async (
 							} satisfies ClineSayTool),
 							undefined,
 							false,
+							undefined /* checkpoint */,
+							undefined /* progressStatus */,
+							{ isNonInteractive: true },
 						)
 						// Push the authoritative display state to the webview.
 						await provider.postStateToWebviewWithoutTaskHistory()
