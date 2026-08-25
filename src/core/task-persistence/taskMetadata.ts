@@ -1,7 +1,7 @@
 import NodeCache from "node-cache"
 import getFolderSize from "get-folder-size"
 
-import type { ClineMessage, HistoryItem } from "@roo-code/types"
+import type { ClineMessage, HistoryItem, ReasoningEffortExtended } from "@roo-code/types"
 
 import { combineApiRequests } from "../../shared/combineApiRequests"
 import { combineCommandSequences } from "../../shared/combineCommandSequences"
@@ -25,6 +25,10 @@ export type TaskMetadataOptions = {
 	apiConfigName?: string
 	/** Initial status for the task (e.g., "active" for child tasks) */
 	initialStatus?: "active" | "delegated" | "completed" | "interrupted"
+	/** DTE series 2/5: active task-local thinking effort override to persist on the history item. */
+	thinkingEffort?: ReasoningEffortExtended
+	/** DTE series 2/5: provenance of the persisted effort (e.g. "you", "model", "parent"). */
+	thinkingEffortSource?: string
 }
 
 export async function taskMetadata({
@@ -38,6 +42,8 @@ export async function taskMetadata({
 	mode,
 	apiConfigName,
 	initialStatus,
+	thinkingEffort,
+	thinkingEffortSource,
 }: TaskMetadataOptions) {
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, id)
 
@@ -112,6 +118,10 @@ export async function taskMetadata({
 		mode,
 		...(typeof apiConfigName === "string" && apiConfigName.length > 0 ? { apiConfigName } : {}),
 		...(initialStatus && { status: initialStatus }),
+		// DTE series 2/5: persist the active task-local effort (and its provenance) so
+		// reopening this task from history restores it.
+		...(thinkingEffort && { thinkingEffort }),
+		...(thinkingEffortSource && { thinkingEffortSource }),
 	}
 
 	return { historyItem, tokenUsage }

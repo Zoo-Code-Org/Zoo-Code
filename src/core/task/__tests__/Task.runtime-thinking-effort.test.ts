@@ -4,12 +4,13 @@
 // setRuntimeThinkingEffort / getRuntimeThinkingEffort, the in-memory
 // apiConfiguration merge + restore, and the task-end reset in dispose().
 
-import { ProviderSettings, type ReasoningEffortExtended } from "@roo-code/types"
+import { ProviderSettings, type HistoryItem, type ReasoningEffortExtended } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { buildApiHandler } from "../../../api"
+import { taskMetadata } from "../../task-persistence"
 
 // Mock dependencies (same lightweight set as Task.throttle.test.ts)
 vi.mock("../../webview/ClineProvider")
@@ -76,6 +77,7 @@ type RuntimeThinkingEffortAccess = {
 	runtimeThinkingEffortSource?: string
 	preOverrideReasoningEffort?: ProviderSettings["reasoningEffort"]
 	getRuntimeThinkingEffortMetadata: () => { reasoningEffort?: ReasoningEffortExtended }
+	saveClineMessages: () => Promise<boolean>
 }
 
 function getPrivateAccess(task: Task): RuntimeThinkingEffortAccess {
@@ -306,6 +308,64 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			expect(access.runtimeThinkingEffort).toBeUndefined()
 			expect(access.runtimeThinkingEffortSource).toBeUndefined()
 			expect(access.preOverrideReasoningEffort).toBeUndefined()
+		})
+	})
+
+	describe("history persistence round-trip", () => {
+		const baseHistoryItem: HistoryItem = {
+			id: "hist-task-id",
+			number: 2,
+			task: "Task from history",
+			ts: Date.now(),
+			totalCost: 0.01,
+			tokensIn: 10,
+			tokensOut: 5,
+		}
+
+		function makeHistoryTask(historyItem: Partial<HistoryItem>): Task {
+			return new Task({
+				provider: mockProvider as unknown as ClineProvider,
+				apiConfiguration: mockApiConfiguration,
+				startTask: false,
+				historyItem: { ...baseHistoryItem, ...historyItem },
+			})
+		}
+
+		it("restores the persisted task-local effort when constructed from a history item", () => {
+			const histTask = makeHistoryTask({ thinkingEffort: "xhigh", thinkingEffortSource: "you" })
+
+			expect(histTask.getRuntimeThinkingEffort()).toEqual({ effort: "xhigh", source: "you" })
+			// The in-memory copy carries the restored effort, so the rebuilt handler uses it.
+			expect(histTask.apiConfiguration).toEqual(expect.objectContaining({ reasoningEffort: "xhigh" }))
+			const lastCall = vi.mocked(buildApiHandler).mock.calls.at(-1)
+			expect(lastCall?.[0]).toEqual(expect.objectContaining({ reasoningEffort: "xhigh" }))
+			histTask.dispose()
+		})
+
+		it("leaves the override inactive for history items without a persisted effort", () => {
+			const histTask = makeHistoryTask({})
+
+			expect(histTask.getRuntimeThinkingEffort()).toEqual({ effort: undefined, source: undefined })
+			expect(histTask.apiConfiguration.reasoningEffort).toBe(SETTINGS_EFFORT)
+			histTask.dispose()
+		})
+
+		it("carries the active task-local effort onto the taskMetadata payload in saveClineMessages", async () => {
+			task.setRuntimeThinkingEffort("max", "you")
+
+			await getPrivateAccess(task).saveClineMessages()
+
+			expect(vi.mocked(taskMetadata)).toHaveBeenCalledWith(
+				expect.objectContaining({ thinkingEffort: "max", thinkingEffortSource: "you" }),
+			)
+		})
+
+		it("omits the effort values from the taskMetadata payload while inactive", async () => {
+			await getPrivateAccess(task).saveClineMessages()
+
+			expect(vi.mocked(taskMetadata)).toHaveBeenCalledWith(
+				expect.objectContaining({ thinkingEffort: undefined, thinkingEffortSource: undefined }),
+			)
 		})
 	})
 })

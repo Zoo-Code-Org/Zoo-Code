@@ -561,6 +561,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (historyItem) {
 			this._taskMode = historyItem.mode || defaultModeSlug
 			this._taskApiConfigName = historyItem.apiConfigName
+			// DTE series 2/5: restore the task-local thinking effort persisted with the
+			// history item so a reopened task keeps the effort it had instead of
+			// silently falling back to the settings value.
+			if (historyItem.thinkingEffort) {
+				this.setRuntimeThinkingEffort(historyItem.thinkingEffort, historyItem.thinkingEffortSource)
+			}
 			this.taskModeReady = Promise.resolve()
 			this.taskApiConfigReady = Promise.resolve()
 			TelemetryService.instance.captureTaskRestarted(this.taskId)
@@ -1133,6 +1139,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
 				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
 				initialStatus: this.initialStatus,
+				// DTE series 2/5: persist the active task-local effort override so it
+				// survives reopening this task from history (undefined while inactive).
+				thinkingEffort: this.getRuntimeThinkingEffort().effort,
+				thinkingEffortSource: this.getRuntimeThinkingEffort().source,
 			})
 
 			// Emit token/tool usage updates using debounced function

@@ -1,5 +1,7 @@
 import { z } from "zod"
 
+import { reasoningEffortExtendedSchema } from "./model.js"
+
 /**
  * HistoryItem
  */
@@ -26,6 +28,12 @@ export const historyItemSchema = z.object({
 	awaitingChildId: z.string().optional(), // Child currently awaited (set when delegated)
 	completedByChildId: z.string().optional(), // Child that completed and resumed this parent
 	completionResultSummary: z.string().optional(), // Summary from completed child
+	// DTE series 2/5: task-local thinking effort override persisted with the history
+	// item so a task reopened from history keeps the effort it had (user-set or
+	// model/parent-chosen) instead of falling back to the settings value.
+	thinkingEffort: reasoningEffortExtendedSchema.optional(),
+	// Provenance of the persisted effort (e.g. "you", "model", "parent").
+	thinkingEffortSource: z.string().optional(),
 })
 
 export type HistoryItem = z.infer<typeof historyItemSchema>
