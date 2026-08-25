@@ -33,7 +33,7 @@ vi.mock("vscode", () => ({
 
 describe("webviewMessageHandler setTaskThinkingEffort (DTE series 4/5)", () => {
 	const makeTask = (supportsReasoningEffort: unknown) => {
-		const say = vi.fn(async (_say: string, _text?: string) => {})
+		const say = vi.fn(async (_say: string, _text?: string, ..._rest: unknown[]) => {})
 		return {
 			taskId: "test-task-id",
 			api: { getModel: () => ({ id: "test-model", info: { supportsReasoningEffort } }) },
@@ -62,6 +62,23 @@ describe("webviewMessageHandler setTaskThinkingEffort (DTE series 4/5)", () => {
 		expect(say).toBe("tool")
 		expect(text).toBe(JSON.stringify({ tool: "thinkingEffort", effort: "high", source: "you" }))
 		expect(provider.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledTimes(1)
+	})
+
+	it("marks the display line isNonInteractive so a pending ask is never superseded (regression)", async () => {
+		// Regression: setting the effort while the task was blocked on a pending ask
+		// (e.g. the followup ask after a subtask returned) made say() bump lastMessageTs;
+		// Task.ask's pWaitFor then resolved and threw AskIgnoredError("superseded"),
+		// killing the request loop. The next user message reached
+		// handleWebviewAskResponse with no waiter — no API call, frozen UI.
+		// isNonInteractive keeps the display line out of the ask superseding flow.
+		const task = makeTask(["low", "medium", "high"])
+		const provider = makeProvider(task)
+
+		await apply(provider, { type: "setTaskThinkingEffort", effort: "low" })
+
+		// Task.say(type, text, images, partial, checkpoint, progressStatus, options)
+		const options = task.say.mock.calls[0]?.[6]
+		expect(options).toEqual({ isNonInteractive: true })
 	})
 
 	it("accepts boolean/adaptive-class capability", async () => {
