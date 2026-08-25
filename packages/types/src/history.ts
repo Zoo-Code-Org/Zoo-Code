@@ -1,6 +1,6 @@
 import { z } from "zod"
 
-import { reasoningEffortExtendedSchema } from "./model"
+import { reasoningEffortExtendedSchema } from "./model.js"
 
 /**
  * HistoryItem
