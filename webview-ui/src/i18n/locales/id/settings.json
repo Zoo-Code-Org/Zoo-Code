@@ -678,6 +678,10 @@
 			"description": "Mengontrol seberapa detail respons model. Verbositas rendah menghasilkan jawaban singkat, sedangkan verbositas tinggi memberikan penjelasan menyeluruh."
 		},
 		"setReasoningLevel": "Aktifkan Upaya Reasoning",
+		"supportedEffortLevels": {
+			"label": "Supported Reasoning Effort Levels",
+			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+		},
 		"claudeCode": {
 			"pathLabel": "Jalur Kode Claude",
 			"description": "Jalur opsional ke Claude Code CLI Anda. Defaultnya adalah 'claude' jika tidak diatur.",
@@ -975,8 +979,8 @@
 			"toolParameters": "Parameter"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"name": "Usaha berpikir dinamis",
+			"description": "Biarkan model memutuskan usaha berpikirnya per langkah, dan biarkan Anda menyesuaikannya di obrolan. (eksperimental)",
 			"hint": "Profil yang kompatibel dengan OpenAI (endpoint OpenAI kustom, LM Studio, Ollama, LiteLLM, dan sejenisnya) dapat mendeklarasikan level usaha penalaran yang didukung modelnya dalam pengaturan supportedReasoningEfforts. Level yang dideklarasikan dikirim dengan setiap permintaan, tetapi server lokal dapat mengabaikan parameter ini."
 		}
 	},

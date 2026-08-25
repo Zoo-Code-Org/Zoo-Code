@@ -62,6 +62,11 @@ interface EffortGuardState {
 	history: string[]
 }
 
+/**
+ * Ordinal rank of a settable effort level (drives nearest-level
+ * clamping and the escalation/oscillation guardrails). Unknown or
+ * undefined values rank as "disable" — the bottom of the scale.
+ */
 function effortRank(level: string | undefined): number {
 	return level === undefined ? EFFORT_RANK.disable : (EFFORT_RANK[level] ?? EFFORT_RANK.disable)
 }
@@ -118,6 +123,10 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 	 */
 	private guardState = new WeakMap<Task, EffortGuardState>()
 
+	/**
+	 * Returns the per-task guardrail state, creating it on first use with
+	 * the task's effective baseline seeded into the history.
+	 */
 	private getGuardState(task: Task, baseline: string | undefined): EffortGuardState {
 		let state = this.guardState.get(task)
 		if (!state) {
@@ -133,6 +142,14 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 		return state
 	}
 
+	/**
+	 * Applies a model-requested thinking-effort change with guardrails:
+	 * clamps to the model's capability array, refuses oscillation
+	 * (A -> B -> A returns) and escalation-cap violations, applies the
+	 * task-local runtime effort, and publishes the one-line display say.
+	 * There is no approval gate — the model decides, and the user can
+	 * adjust the effort in chat at any time.
+	 */
 	async execute(params: SetThinkingEffortParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
 		const { effort, reason } = params
 		const { handleError, pushToolResult } = callbacks
@@ -297,6 +314,10 @@ export class SetThinkingEffortTool extends BaseTool<"set_thinking_effort"> {
 		}
 	}
 
+	/**
+	 * Streams a partial display say while the model's tool arguments are
+	 * still streaming in (updates the same one-line display as it arrives).
+	 */
 	override async handlePartial(task: Task, block: ToolUse<"set_thinking_effort">): Promise<void> {
 		const effort: string | undefined = block.params.effort
 		const reason: string | undefined = block.params.reason

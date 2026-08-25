@@ -678,6 +678,10 @@
 			"description": "Contrôle le niveau de détail des réponses du modèle. Une faible verbosité produit des réponses concises, tandis qu'une verbosité élevée fournit des explications approfondies."
 		},
 		"setReasoningLevel": "Activer l'effort de raisonnement",
+		"supportedEffortLevels": {
+			"label": "Supported Reasoning Effort Levels",
+			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+		},
 		"claudeCode": {
 			"pathLabel": "Chemin du code Claude",
 			"description": "Chemin facultatif vers votre CLI Claude Code. La valeur par défaut est 'claude' si non défini.",
@@ -975,8 +979,8 @@
 			"toolParameters": "Paramètres"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"name": "Effort de réflexion dynamique",
+			"description": "Permet au modèle de décider de son effort de réflexion à chaque étape et de l'ajuster dans le chat. (expérimental)",
 			"hint": "Les profils compatibles OpenAI (point de terminaison OpenAI personnalisé, LM Studio, Ollama, LiteLLM et similaires) peuvent déclarer dans le paramètre supportedReasoningEfforts les niveaux d'effort de raisonnement pris en charge par leur modèle. Les niveaux déclarés sont envoyés avec chaque requête, mais le serveur local peut ignorer le paramètre."
 		}
 	},

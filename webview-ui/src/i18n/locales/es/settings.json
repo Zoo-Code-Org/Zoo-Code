@@ -678,6 +678,10 @@
 			"description": "Controla qué tan detalladas son las respuestas del modelo. La verbosidad baja produce respuestas concisas, mientras que la verbosidad alta proporciona explicaciones exhaustivas."
 		},
 		"setReasoningLevel": "Habilitar esfuerzo de razonamiento",
+		"supportedEffortLevels": {
+			"label": "Supported Reasoning Effort Levels",
+			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+		},
 		"claudeCode": {
 			"pathLabel": "Ruta de Claude Code",
 			"description": "Ruta opcional a su CLI de Claude Code. Por defecto, es 'claude' si no se establece.",
@@ -975,8 +979,8 @@
 			"toolParameters": "Parámetros"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"name": "Esfuerzo de pensamiento dinámico",
+			"description": "Permite que el modelo decida su esfuerzo de pensamiento por paso y que tú lo ajustes en el chat. (experimental)",
 			"hint": "Los perfiles compatibles con OpenAI (punto de conexión personalizado de OpenAI, LM Studio, Ollama, LiteLLM y similares) pueden declarar en la configuración supportedReasoningEfforts los niveles de esfuerzo de razonamiento que su modelo admite. Los niveles declarados se envían con cada solicitud, pero el servidor local puede ignorar el parámetro."
 		}
 	},

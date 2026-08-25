@@ -678,6 +678,10 @@
 			"description": "मॉडल की प्रतिक्रियाएं कितनी विस्तृत हैं, इसे नियंत्रित करता है। कम वर्बोसिटी संक्षिप्त उत्तर देती है, जबकि उच्च वर्बोसिटी विस्तृत स्पष्टीकरण प्रदान करती है।"
 		},
 		"setReasoningLevel": "तर्क प्रयास सक्षम करें",
+		"supportedEffortLevels": {
+			"label": "Supported Reasoning Effort Levels",
+			"description": "Reasoning effort levels your model accepts. Self-hosted and OpenAI-compatible models do not advertise this capability, so declare the levels here to use the thinking effort controls."
+		},
 		"claudeCode": {
 			"pathLabel": "क्लाउड कोड पथ",
 			"description": "आपके क्लाउड कोड सीएलआई का वैकल्पिक पथ। यदि सेट नहीं है तो डिफ़ॉल्ट 'claude' है।",
@@ -975,8 +979,8 @@
 			"toolParameters": "पैरामीटर्स"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)",
+			"name": "डायनामिक चिंतन प्रयास",
+			"description": "मॉडल को हर चरण में अपना चिंतन प्रयास स्वयं तय करने दें, और आप चैट में इसे समायोजित कर सकते हैं। (प्रयोगात्मक)",
 			"hint": "OpenAI-संगत प्रोफ़ाइल (कस्टम OpenAI एंडपॉइंट, LM Studio, Ollama, LiteLLM और समान) supportedReasoningEfforts सेटिंग में अपने मॉडल द्वारा समर्थित रीज़निंग एफर्ट स्तरों की घोषणा कर सकती हैं। घोषित स्तर हर अनुरोध के साथ भेजे जाते हैं, लेकिन लोकल सर्वर पैरामीटर को नज़रअंदाज़ कर सकता है।"
 		}
 	},

@@ -104,7 +104,10 @@ export type NativeToolArgs = {
 	edit_file: { file_path: string; old_string: string; new_string: string; expected_replacements?: number }
 	apply_patch: { patch: string }
 	list_files: { path: string; recursive?: boolean }
-	new_task: { mode: string; message: string; todos?: string; thinking_effort?: string }
+	// thinking_effort is ["string", "null"] in the strict-mode schema: null is the
+	// "omitted" sentinel the model sends (the parameter must be required under
+	// strict: true + additionalProperties: false).
+	new_task: { mode: string; message: string; todos?: string; thinking_effort?: string | null }
 	ask_followup_question: {
 		question: string
 		follow_up: Array<{ text: string; mode?: string }>
@@ -137,8 +140,9 @@ export interface ToolUse<TName extends ToolName = ToolName> {
 	 * Used to preserve tool names in API conversation history.
 	 */
 	originalName?: string
-	// params is a partial record, allowing only some or none of the possible parameters to be used
-	params: Partial<Record<ToolParamName, string>>
+	// params is a partial record, allowing only some or none of the possible parameters to be used.
+	// new_task.thinking_effort may be the strict-mode null sentinel (see NativeToolArgs.new_task).
+	params: Omit<Partial<Record<ToolParamName, string>>, "thinking_effort"> & { thinking_effort?: string | null }
 	partial: boolean
 	// nativeArgs is properly typed based on TName if it's in NativeToolArgs, otherwise never
 	nativeArgs?: TName extends keyof NativeToolArgs ? NativeToolArgs[TName] : never
