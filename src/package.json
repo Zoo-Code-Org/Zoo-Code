@@ -466,7 +466,7 @@
 		"@lmstudio/sdk": "^1.1.1",
 		"@mistralai/mistralai": "^1.9.18",
 		"@modelcontextprotocol/sdk": "1.29.0",
-		"@qdrant/js-client-rest": "^1.14.0",
+		"@qdrant/js-client-rest": "^1.18.0",
 		"@roo-code/cloud": "workspace:^",
 		"@roo-code/core": "workspace:^",
 		"@roo-code/ipc": "workspace:^",
