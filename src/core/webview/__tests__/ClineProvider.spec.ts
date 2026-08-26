@@ -262,6 +262,13 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 	}
 })
 
+// DTE: the capability advertised by the mocked Task's model, mutable per test.
+// Defaults to the deepseek catalog levels; tests that exercise the boolean
+// (all-levels) side of the support check override it and restore in `finally`.
+const { taskModelCapabilityRef } = vi.hoisted(() => ({
+	taskModelCapabilityRef: { value: ["disable", "low", "high", "max"] as string[] | boolean },
+}))
+
 vi.mock("../../task/Task", () => ({
 	Task: vi.fn().mockImplementation(function (options: any) {
 		// DTE: per-instance runtime-effort state and a capability-advertising
@@ -275,7 +282,7 @@ vi.mock("../../task/Task", () => ({
 				getModel: vi.fn().mockReturnValue({
 					id: "claude-3-sonnet",
 					info: {
-						supportsReasoningEffort: ["disable", "low", "high", "max"],
+						supportsReasoningEffort: taskModelCapabilityRef.value,
 					},
 				}),
 			},
@@ -1056,6 +1063,25 @@ describe("ClineProvider", () => {
 
 		expect(task.getRuntimeThinkingEffort()).toEqual({})
 		expect(provider.getPendingTaskThinkingEffort()).toBeUndefined()
+	})
+
+	test("createTask applies a parked effort when the model advertises a boolean capability (DTE)", async () => {
+		// A non-array capability reaches the other side of the support check:
+		// boolean `true` means every level is supported, so the parked effort
+		// is applied (and consumed) exactly like the array path.
+		taskModelCapabilityRef.value = true
+		try {
+			provider.setPendingTaskThinkingEffort("high")
+
+			const task = await provider.createTask("boolean capability task", undefined, undefined, {
+				startTask: false,
+			})
+
+			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: "high", source: "you" })
+			expect(provider.getPendingTaskThinkingEffort()).toBeUndefined()
+		} finally {
+			taskModelCapabilityRef.value = ["disable", "low", "high", "max"]
+		}
 	})
 
 	describe("postStateToWebviewThrottled", () => {
