@@ -317,6 +317,72 @@ describe("NativeOllamaHandler", () => {
 			)
 		})
 
+		it("should let a per-request reasoningEffort override the configured value (DTE F7)", async () => {
+			// The per-request override (metadata.reasoningEffort) takes precedence over
+			// the configured reasoningEffort, mirroring the shared override-first
+			// resolution order.
+			const options: ApiHandlerOptions = {
+				apiModelId: "qwen3",
+				ollamaModelId: "qwen3",
+				ollamaBaseUrl: "http://localhost:11434",
+				enableReasoningEffort: true,
+				reasoningEffort: "high",
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok", thinking: "hmm" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }], {
+				taskId: "task-1",
+				reasoningEffort: "low",
+			})
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					think: "low",
+				}),
+			)
+		})
+
+		it("should send a think parameter from a per-request override when no effort is configured (DTE F7)", async () => {
+			// The per-request override (metadata.reasoningEffort) is also the sole
+			// source when the configured reasoningEffort is unset (opt-in checked,
+			// no effort selected): the override-first resolution order still applies.
+			const options: ApiHandlerOptions = {
+				apiModelId: "qwen3",
+				ollamaModelId: "qwen3",
+				ollamaBaseUrl: "http://localhost:11434",
+				enableReasoningEffort: true,
+				// reasoningEffort intentionally unset
+			}
+
+			handler = new NativeOllamaHandler(options)
+
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "ok" } }
+			})
+
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Hi" }], {
+				taskId: "task-1",
+				reasoningEffort: "medium",
+			})
+			for await (const _ of stream) {
+				// consume
+			}
+
+			expect(mockChat).toHaveBeenCalledWith(
+				expect.objectContaining({
+					think: "medium",
+				}),
+			)
+		})
+
 		it("should map reasoningEffort levels to Ollama think values", async () => {
 			const cases: Array<
 				[NonNullable<ApiHandlerOptions["reasoningEffort"]>, boolean | "high" | "medium" | "low"]

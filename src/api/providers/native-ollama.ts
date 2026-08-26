@@ -2,6 +2,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import { Message, Ollama, Tool as OllamaTool, type Config as OllamaOptions } from "ollama"
 import { ModelInfo, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import type { ReasoningEffortExtended } from "@roo-code/types"
 import { withDeclaredReasoningEffort } from "../model-capabilities"
 import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
@@ -336,7 +337,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * - "low" / "medium" / "high" -> the matching effort level
 	 * - "xhigh" / "max" -> "high" (highest level the SDK currently supports)
 	 */
-	private getOllamaThinkParam(): boolean | "high" | "medium" | "low" | undefined {
+	private getOllamaThinkParam(override?: ReasoningEffortExtended): boolean | "high" | "medium" | "low" | undefined {
 		// Require an explicit Ollama opt-in before mapping reasoningEffort.
 		// Without this guard, a stale reasoningEffort inherited from another
 		// provider config could still emit a think param when the UI checkbox
@@ -345,7 +346,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			return undefined
 		}
 
-		const effort = this.options.reasoningEffort
+		const effort = override ?? this.options.reasoningEffort
 		if (effort === undefined) {
 			return undefined
 		}
@@ -380,6 +381,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 */
 	private buildChatRequestOptions(
 		useR1Format: boolean,
+		effortOverride?: ReasoningEffortExtended,
 	): [OllamaChatOptions, boolean | "high" | "medium" | "low" | undefined] {
 		const chatOptions: OllamaChatOptions = {
 			temperature: this.options.modelTemperature ?? (useR1Format ? DEEP_SEEK_DEFAULT_TEMPERATURE : 0),
@@ -390,7 +392,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			chatOptions.num_ctx = this.options.ollamaNumCtx
 		}
 
-		const thinkParam = this.getOllamaThinkParam()
+		const thinkParam = this.getOllamaThinkParam(effortOverride)
 		return [chatOptions, thinkParam]
 	}
 
@@ -423,7 +425,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// reasoning models (qwen3, deepseek-r1, etc.) emit thinking via
 			// the dedicated message.thinking field instead of (or in addition
 			// to) think/thought tags embedded in content.
-			const [chatOptions, thinkParam] = this.buildChatRequestOptions(useR1Format)
+			const [chatOptions, thinkParam] = this.buildChatRequestOptions(useR1Format, metadata?.reasoningEffort)
 
 			// Create the actual API request promise. The `stream: true` literal
 			// is kept inline so TypeScript selects the streaming overload of
