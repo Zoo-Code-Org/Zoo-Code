@@ -386,6 +386,20 @@
 				"description": "Allow Zoo to create and edit protected files (like .rooignore and .roo/ configuration files) without requiring approval."
 			}
 		},
+		"allowlists": {
+			"label": "Allowlists",
+			"description": "Grant access to individual files, without auto-approving a whole category of actions. One pattern per line, in .gitignore-inspired syntax: \"notes.md\" matches that file in any directory of the workspace, \"docs/scratch/**\" everything below that directory, and \"*.md\" any Markdown file. A pattern always names files, never directories, so \"docs\" grants nothing but a file called \"docs\"; write \"docs/**\" for a directory's contents. A leading \"./\" means the workspace root, while a leading \"/\" means the filesystem root, so \"/tmp/notes.md\" reaches outside the workspace, as does \"~/notes.md\", where a leading \"~/\" stands for your home directory. Prefix a pattern with \"!\" to exclude what an earlier line matched; as in .gitignore, the last matching line wins, so order counts. Upper and lower case are distinguished, except on Windows. Workspace-relative patterns are ignored while no folder is open, and nothing is auto-approved unless \"Auto-Approve\" above is enabled.",
+			"readFiles": {
+				"label": "Read allowlist patterns",
+				"description": "Files Zoo may read without approval, even when \"Read\" above is off. Files in the write allowlist below can always be read too, so they do not need to be listed twice. Directory listings and searches always follow the \"Read\" setting. Files excluded by .rooignore stay unreadable either way.",
+				"placeholder": "One pattern per line, e.g. notes.md"
+			},
+			"writeFiles": {
+				"label": "Write allowlist patterns",
+				"description": "Files Zoo may create and edit without approval, even when \"Write\" above is off. Protected files still require approval unless \"Include protected files\" is enabled (in the settings of the \"Write\" Auto-Approve). Files excluded by .rooignore stay unwritable either way.",
+				"placeholder": "One pattern per line, e.g. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Enable auto-approval of individual MCP tools in the MCP Servers view (requires both this setting and the tool's individual \"Always allow\" checkbox)"

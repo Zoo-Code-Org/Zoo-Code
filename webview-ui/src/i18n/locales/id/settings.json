@@ -308,6 +308,20 @@
 				"description": "Izinkan Zoo membuat dan mengedit file yang dilindungi (seperti .rooignore dan file konfigurasi .roo/) tanpa memerlukan persetujuan."
 			}
 		},
+		"allowlists": {
+			"label": "Daftar izin",
+			"description": "Berikan akses ke file tertentu, tanpa menyetujui otomatis seluruh kategori tindakan. Satu pola per baris, dengan sintaks yang diilhami .gitignore: \"notes.md\" cocok dengan file itu di direktori mana pun dalam workspace, \"docs/scratch/**\" semua yang ada di bawah direktori itu, dan \"*.md\" file Markdown apa pun. Pola selalu menamai file, bukan direktori: \"docs\" hanya memberi akses ke file bernama \"docs\"; tulis \"docs/**\" untuk isi sebuah direktori. Awalan \"./\" berarti root workspace, sedangkan awalan \"/\" berarti root sistem file, sehingga \"/tmp/notes.md\" menjangkau di luar workspace, begitu pula \"~/notes.md\", di mana awalan \"~/\" berarti direktori home kamu. Beri awalan \"!\" pada pola untuk mengecualikan apa yang dicocokkan baris sebelumnya; seperti pada .gitignore, baris terakhir yang cocok menang, jadi urutan penting. Pola relatif terhadap workspace diabaikan selama tidak ada folder yang terbuka. Huruf besar dan kecil dibedakan, kecuali di Windows. Tidak ada yang disetujui otomatis selama \"Persetujuan Otomatis\" di atas nonaktif.",
+			"readFiles": {
+				"label": "Pola daftar izin baca",
+				"description": "File yang boleh dibaca Zoo tanpa persetujuan, bahkan ketika \"Baca\" di atas nonaktif. File pada daftar izin tulis di bawah selalu boleh dibaca juga, jadi tidak perlu ditambahkan dua kali. Daftar direktori dan pencarian selalu mengikuti pengaturan \"Baca\". File yang dikecualikan oleh .rooignore tetap tidak bisa dibaca.",
+				"placeholder": "Satu pola per baris, misalnya notes.md"
+			},
+			"writeFiles": {
+				"label": "Pola daftar izin tulis",
+				"description": "File yang boleh dibuat dan diedit Zoo tanpa persetujuan, bahkan ketika \"Tulis\" di atas nonaktif. File yang dilindungi tetap memerlukan persetujuan kecuali \"Sertakan file yang dilindungi\" diaktifkan (di pengaturan persetujuan otomatis \"Tulis\"). File yang dikecualikan oleh .rooignore tetap tidak bisa ditulis.",
+				"placeholder": "Satu pola per baris, misalnya notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Aktifkan auto-approval tool MCP individual di tampilan Server MCP (memerlukan pengaturan ini dan checkbox \"Selalu izinkan\" tool tersebut)"

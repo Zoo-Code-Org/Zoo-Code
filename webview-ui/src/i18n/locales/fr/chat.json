@@ -344,9 +344,9 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés :",
-			"highlight1": "Trois nouveaux modèles majeurs sont arrivés — utilise les tout nouveaux Gemini 3.7 Flash, GLM 5.3 et Qwen3.8 Max, ainsi que les améliorations du raisonnement, des tarifs et de la couverture des providers de DeepSeek V4.",
-			"highlight2": "Connecte-toi à NanoGPT — profite de la découverte dynamique des modèles, du streaming et de la complétion des prompts, avec des préférences de routage pour la vitesse, le prix, la latence, le débit, la prise en charge des outils et le cache.",
-			"highlight3": "Providers et tâches plus fiables — les correctifs améliorent la configuration des endpoints Azure OpenAI, les limites de sortie de Kimi Code, la conservation des titres dans l'historique des tâches et l'import/export des paramètres Zoo."
+			"highlight1": "Accès aux fichiers plus sûr — utilise des listes d'autorisation distinctes pour la lecture et l'écriture afin de contrôler les chemins auxquels Zoo Code peut accéder.",
+			"highlight2": "Plus de modèles au choix — GLM 5.3 est désormais disponible via Z.ai, et Gemini 3.5 Flash Lite ainsi que Gemini 3.1 Flash Lite ont été ajoutés au provider Gemini.",
+			"highlight3": "Des workflows quotidiens plus fiables — les améliorations renforcent la récupération et l'historique des tâches, le streaming et l'utilisation des outils par les providers, l'import des paramètres et la lisibilité dans les différents thèmes d'IDE."
 		},
 		"cloudAgents": {
 			"heading": "Nouveautés dans le Cloud :",

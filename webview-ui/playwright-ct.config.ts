@@ -7,6 +7,13 @@ import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
+const rooCodeTypesShim = path.resolve(dirname, "./playwright/roo-code-types.ts")
+const rooCodeTypesShimImporters = [
+	"/src/shared/modes.ts",
+	"/webview-ui/src/components/chat/CodeIndexPopover.tsx",
+	"/webview-ui/src/components/chat/ModeSelector.tsx",
+	"/webview-ui/src/components/settings/UISettings.tsx",
+]
 
 const monocartReporter: ReporterDescription = [
 	"monocart-reporter",
@@ -49,6 +56,19 @@ export default defineConfig({
 		ctTemplateDir: "./playwright",
 		ctViteConfig: {
 			plugins: [
+				{
+					name: "playwright-ct-roo-code-types-shim",
+					enforce: "pre",
+					resolveId(source, importer) {
+						if (
+							source === "@roo-code/types" &&
+							importer &&
+							rooCodeTypesShimImporters.some((suffix) => importer.endsWith(suffix))
+						) {
+							return rooCodeTypesShim
+						}
+					},
+				},
 				react({
 					babel: {
 						plugins: [["babel-plugin-react-compiler", { target: "18" }]],
@@ -57,17 +77,28 @@ export default defineConfig({
 				tailwindcss(),
 			],
 			resolve: {
-				alias: {
-					"@src/i18n/TranslationContext": path.resolve(dirname, "./playwright/TranslationContext.ts"),
-					"@": path.resolve(dirname, "./src"),
-					"@src": path.resolve(dirname, "./src"),
-					"@roo": path.resolve(dirname, "../src/shared"),
-					"@vscode/webview-ui-toolkit/react": path.resolve(
-						dirname,
-						"./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx",
-					),
-					vscode: path.resolve(dirname, "../src/__mocks__/vscode.js"),
-				},
+				alias: [
+					{
+						find: "@/context/ExtensionStateContext",
+						replacement: path.resolve(dirname, "./playwright/ExtensionStateContext.tsx"),
+					},
+					{
+						find: "@src/context/ExtensionStateContext",
+						replacement: path.resolve(dirname, "./playwright/ExtensionStateContext.tsx"),
+					},
+					{
+						find: "@src/i18n/TranslationContext",
+						replacement: path.resolve(dirname, "./playwright/TranslationContext.ts"),
+					},
+					{ find: "@", replacement: path.resolve(dirname, "./src") },
+					{ find: "@src", replacement: path.resolve(dirname, "./src") },
+					{ find: "@roo", replacement: path.resolve(dirname, "../src/shared") },
+					{
+						find: "@vscode/webview-ui-toolkit/react",
+						replacement: path.resolve(dirname, "./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx"),
+					},
+					{ find: "vscode", replacement: path.resolve(dirname, "../src/__mocks__/vscode.js") },
+				],
 			},
 			define: {
 				"process.platform": JSON.stringify(process.platform),

@@ -216,10 +216,11 @@ export class DirectoryScanner implements IDirectoryScanner {
 										activeBatchPromises.add(batchPromise)
 
 										// Clean up completed promises to prevent memory accumulation
-										batchPromise.finally(() => {
+										const cleanupBatch = () => {
 											activeBatchPromises.delete(batchPromise)
 											pendingBatchCount--
-										})
+										}
+										void batchPromise.then(cleanupBatch, cleanupBatch)
 									}
 								} finally {
 									release()
@@ -306,10 +307,11 @@ export class DirectoryScanner implements IDirectoryScanner {
 				activeBatchPromises.add(batchPromise)
 
 				// Clean up completed promises to prevent memory accumulation
-				batchPromise.finally(() => {
+				const cleanupBatch = () => {
 					activeBatchPromises.delete(batchPromise)
 					pendingBatchCount--
-				})
+				}
+				void batchPromise.then(cleanupBatch, cleanupBatch)
 			} finally {
 				release()
 			}

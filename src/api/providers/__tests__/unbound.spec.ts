@@ -32,6 +32,10 @@ vi.mock("../fetchers/modelCache", () => ({
 			description: "GPT-4o",
 		},
 	}),
+	refreshModels: vi.fn(async (options) => {
+		const { getModels } = await import("../fetchers/modelCache")
+		return getModels(options)
+	}),
 }))
 
 describe("UnboundHandler", () => {

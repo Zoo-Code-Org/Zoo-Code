@@ -308,6 +308,20 @@
 				"description": "Permitir que o Zoo crie e edite arquivos protegidos (como .rooignore e arquivos de configuração .roo/) sem exigir aprovação."
 			}
 		},
+		"allowlists": {
+			"label": "Listas de permissão",
+			"description": "Conceda acesso a arquivos específicos, sem aprovar automaticamente toda uma categoria de ações. Um padrão por linha, em sintaxe inspirada no .gitignore: \"notes.md\" corresponde a esse arquivo em qualquer diretório do espaço de trabalho, \"docs/scratch/**\" a tudo abaixo desse diretório e \"*.md\" a qualquer arquivo Markdown. Um padrão sempre nomeia arquivos, nunca diretórios: \"docs\" concede apenas um arquivo chamado \"docs\"; escreva \"docs/**\" para o conteúdo de um diretório. Um \"./\" inicial indica a raiz do espaço de trabalho, enquanto um \"/\" inicial indica a raiz do sistema de arquivos, de modo que \"/tmp/notes.md\" alcança fora do espaço de trabalho, assim como \"~/notes.md\", onde um \"~/\" inicial indica seu diretório pessoal. Prefixe um padrão com \"!\" para excluir o que uma linha anterior correspondeu; como no .gitignore, a última linha correspondente vence, então a ordem importa. Padrões relativos ao espaço de trabalho são ignorados enquanto nenhuma pasta estiver aberta. Maiúsculas e minúsculas são diferenciadas, exceto no Windows. Nada é aprovado automaticamente enquanto \"Aprovação automática\" acima estiver desativada.",
+			"readFiles": {
+				"label": "Padrões da lista de permissão de leitura",
+				"description": "Arquivos que o Zoo pode ler sem aprovação, mesmo quando \"Leitura\" acima está desativado. Os arquivos da lista de permissão de escrita abaixo sempre podem ser lidos também, então não precisam ser adicionados duas vezes. Listagens de diretórios e buscas sempre seguem a configuração \"Leitura\". Arquivos excluídos pelo .rooignore continuam não podendo ser lidos de qualquer forma.",
+				"placeholder": "Um padrão por linha, ex. notes.md"
+			},
+			"writeFiles": {
+				"label": "Padrões da lista de permissão de escrita",
+				"description": "Arquivos que o Zoo pode criar e editar sem aprovação, mesmo quando \"Escrita\" acima está desativado. Arquivos protegidos continuam exigindo aprovação, a menos que \"Incluir arquivos protegidos\" esteja ativado (nas configurações da aprovação automática de \"Escrita\"). Arquivos excluídos pelo .rooignore continuam não podendo ser gravados de qualquer forma.",
+				"placeholder": "Um padrão por linha, ex. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Ativar aprovação automática de ferramentas MCP individuais na visualização de Servidores MCP (requer tanto esta configuração quanto a caixa de seleção \"Permitir sempre\" da ferramenta)"

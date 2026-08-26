@@ -308,6 +308,20 @@
 				"description": "Permetre a Zoo crear i editar fitxers protegits (com .rooignore i fitxers de configuració .roo/) sense requerir aprovació."
 			}
 		},
+		"allowlists": {
+			"label": "Llistes de permisos",
+			"description": "Concedeix accés a fitxers concrets, sense aprovar automàticament tota una categoria d'accions. Un patró per línia, amb sintaxi inspirada en .gitignore: \"notes.md\" coincideix amb aquest fitxer en qualsevol directori de l'espai de treball, \"docs/scratch/**\" amb tot el que hi ha sota aquell directori i \"*.md\" amb qualsevol fitxer Markdown. Un patró sempre anomena fitxers, mai directoris: \"docs\" només concedeix un fitxer anomenat \"docs\"; escriu \"docs/**\" per al contingut d'un directori. Un \"./\" inicial indica l'arrel de l'espai de treball, mentre que un \"/\" inicial indica l'arrel del sistema de fitxers, de manera que \"/tmp/notes.md\" arriba fora de l'espai de treball, igual que \"~/notes.md\", on un \"~/\" inicial indica el teu directori personal. Posa \"!\" davant d'un patró per excloure el que ha coincidit en una línia anterior; com a .gitignore, guanya l'última línia que coincideix, així que l'ordre compta. Els patrons relatius a l'espai de treball s'ignoren mentre no hi hagi cap carpeta oberta. Es distingeixen majúscules i minúscules, excepte a Windows. No s'aprova res automàticament si \"Auto-aprovació\" de dalt està desactivada.",
+			"readFiles": {
+				"label": "Patrons de la llista de permisos de lectura",
+				"description": "Fitxers que Zoo pot llegir sense aprovació, encara que \"Llegir\" estigui desactivat a dalt. Els fitxers de la llista de permisos d'escriptura de sota sempre es poden llegir també, així que no cal afegir-los dues vegades. Els llistats de directoris i les cerques sempre segueixen la configuració de \"Llegir\". Els fitxers exclosos per .rooignore continuen sense poder-se llegir.",
+				"placeholder": "Un patró per línia, ex. notes.md"
+			},
+			"writeFiles": {
+				"label": "Patrons de la llista de permisos d'escriptura",
+				"description": "Fitxers que Zoo pot crear i editar sense aprovació, encara que \"Escriure\" estigui desactivat a dalt. Els fitxers protegits continuen requerint aprovació tret que activis \"Incloure fitxers protegits\" (a la configuració de l'auto-aprovació d'\"Escriure\"). Els fitxers exclosos per .rooignore continuen sense poder-se escriure.",
+				"placeholder": "Un patró per línia, ex. notes.md"
+			}
+		},
 		"mcp": {
 			"label": "MCP",
 			"description": "Habilitar l'aprovació automàtica d'eines MCP individuals a la vista de Servidors MCP (requereix tant aquesta configuració com la casella \"Permetre sempre\" de l'eina)"

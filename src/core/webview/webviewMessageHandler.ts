@@ -574,6 +574,11 @@ export const webviewMessageHandler = async (
 	}
 
 	switch (message.type) {
+		case "themeFixtureProbeResponse":
+			if (process.env.ROO_CODE_THEME_FIXTURE_PROBE === "1" && message.requestId && message.themeFixture) {
+				provider.resolveWebviewThemeFixtureProbe(message.requestId, message.themeFixture)
+			}
+			break
 		case "webviewDidLaunch":
 			// Load custom modes first
 			const customModes = await provider.customModesManager.getCustomModes()
@@ -766,6 +771,17 @@ export const webviewMessageHandler = async (
 						await vscode.workspace
 							.getConfiguration(Package.name)
 							.update("deniedCommands", newValue, vscode.ConfigurationTarget.Global)
+					} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
+						const patterns = value ?? []
+
+						// Blank lines, which the textarea editor produces freely,
+						// name no file and are dropped here. Patterns are
+						// otherwise not `.trim()`ed: leading whitespace is
+						// significant in gitignore syntax, and trailing
+						// whitespace has to be escaped by the user to be kept.
+						newValue = Array.isArray(patterns)
+							? patterns.filter((pattern) => typeof pattern === "string" && pattern.trim().length > 0)
+							: []
 					} else if (key === "ttsEnabled") {
 						newValue = value ?? true
 						setTtsEnabled(newValue as boolean)

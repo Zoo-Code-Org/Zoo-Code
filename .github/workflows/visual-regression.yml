@@ -5,6 +5,13 @@ on:
     pull_request:
         types: [opened, reopened, ready_for_review, synchronize]
         paths:
+            - "apps/vscode-e2e/package.json"
+            - "apps/vscode-e2e/src/theme-fixtures/**"
+            - "packages/types/src/api.ts"
+            - "packages/types/src/vscode-extension-host.ts"
+            - "src/core/webview/ClineProvider.ts"
+            - "src/core/webview/webviewMessageHandler.ts"
+            - "src/extension/api.ts"
             - "webview-ui/**"
             - "src/shared/**"
             - "package.json"
@@ -55,3 +62,32 @@ jobs:
                       webview-ui/playwright-report
                       webview-ui/test-results
                   if-no-files-found: ignore
+
+    theme-fixtures:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  persist-credentials: false
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+            - name: Install xvfb
+              run: sudo apt-get install -y xvfb
+            - name: Get pinned VS Code version
+              id: vscode-version
+              run: |
+                  VERSION=$(node -p 'require("./apps/vscode-e2e/package.json").devDependencies["@types/vscode"]')
+                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            - name: Cache pinned VS Code
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+              with:
+                  path: apps/vscode-e2e/.vscode-test/
+                  key: vscode-theme-fixtures-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}-v1
+            - name: Test theme fixture serialization
+              run: pnpm --filter @roo-code/vscode-e2e themes:test
+            - name: Check generated VS Code theme fixtures
+              run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e themes:check

@@ -34,6 +34,10 @@ vitest.mock("../fetchers/modelCache", () => ({
 			},
 		}),
 	),
+	refreshModels: vitest.fn(async (options) => {
+		const { getModels } = await import("../fetchers/modelCache")
+		return getModels(options)
+	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 
