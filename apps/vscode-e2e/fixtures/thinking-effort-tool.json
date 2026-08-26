@@ -18,6 +18,7 @@
 		{
 			"match": {
 				"model": "openai/gpt-5",
+				"userMessage": "<environment_details>",
 				"hasToolResult": true,
 				"turnIndex": 1
 			},

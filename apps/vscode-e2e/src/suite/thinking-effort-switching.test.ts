@@ -39,13 +39,18 @@ import { waitUntilCompleted, waitFor } from "./utils"
  * - Fixture matching (apps/vscode-e2e/fixtures/thinking-effort-switching.json):
  *   post-tool requests end with a role:user message (fresh environment details
  *   are appended after the tool result), so aimock's toolCallId matcher — which
- *   inspects only the LAST message — can never match them. Each fixture is
- *   scoped by model + hasToolResult + turnIndex instead; aimock's
- *   selectByTurnIndex picks the highest turnIndex <= the request's assistant
- *   count, and each turnIndex is unique per fixture, so every request matches
- *   exactly one fixture. Note the fixture file is plain JSON: aimock's
- *   fixture loader uses JSON.parse and SKIPS the whole file on parse errors,
- *   so no // comments may be added to it.
+ *   inspects only the LAST message — can never match them; the fixtures are
+ *   scoped to this flow with the match keys a JSON fixture can express: the
+ *   first turn binds to this suite's unique prompt marker (userMessage
+ *   "DTE_E2E_SWITCH"), and every follow-up turn additionally binds to the
+ *   post-tool continuation shape (userMessage "<environment_details>": after
+ *   each tool result the request's last user message is the fresh
+ *   environment-details block), on top of model + hasToolResult + turnIndex.
+ *   aimock's selectByTurnIndex picks the highest turnIndex <= the request's
+ *   assistant count, and each turnIndex is unique per fixture, so every
+ *   request matches exactly one fixture. Note the fixture file is plain JSON:
+ *   aimock's fixture loader uses JSON.parse and SKIPS the whole file on parse
+ *   errors, so no // comments may be added to it.
  */
 
 const SWITCH_MODEL_ID = "openai/gpt-5.1"
