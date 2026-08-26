@@ -292,7 +292,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				output = `IMPORTANT: File content truncated.
 	Status: Showing lines ${start}-${end} of ${result.totalLines} total lines.
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${effectiveLimit}.
-	
+
 	${result.content}`
 			} else if (result.includedRanges.length > 0) {
 				const rangeStr = result.includedRanges.map(([s, e]) => `${s}-${e}`).join(", ")
@@ -320,7 +320,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 			output = `IMPORTANT: File content truncated.
 	Status: Showing lines ${startLine}-${endLine} of ${result.totalLines} total lines.
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
-	
+
 	${result.content}`
 		} else if (result.returnedLines === 0) {
 			output = "Note: File is empty"
@@ -453,7 +453,9 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				filesToApprove.forEach((fr) => {
 					updateFileResult(fr.path, { status: "approved", feedbackText: text, feedbackImages: images })
 				})
-			} else if (response === "noButtonClicked") {
+			} else if (response === "noButtonClicked" || response === "messageResponse") {
+				// A queued conversational message resolves the ask as messageResponse;
+				// it is feedback, not the JSON payload used by per-file permissions.
 				if (text) await task.say("user_feedback", text, images)
 				task.didRejectTool = true
 				filesToApprove.forEach((fr) => {

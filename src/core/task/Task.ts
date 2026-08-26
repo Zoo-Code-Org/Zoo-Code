@@ -1264,6 +1264,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return undefined
 	}
 
+	private drainQueuedMessageIntoAskResponse(): void {
+		// A synchronous auto-approval may already have resolved the ask before the
+		// entry queue snapshot is acted on. Never replace that resolved response.
+		if (this.askResponse !== undefined) {
+			return
+		}
+
+		const message = this.messageQueueService.dequeueMessage()
+		if (message) {
+			this.handleWebviewAskResponse("messageResponse", message.text, message.images)
+		}
+	}
+
 	// Note that `partial` has three valid states true (partial message),
 	// false (completion of partial message), undefined (individual complete
 	// message).
