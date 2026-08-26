@@ -31,14 +31,16 @@ import { waitUntilCompleted } from "./utils"
  *   executor re-checks the model capability after the first request has loaded
  *   the catalog, so the flow is correct even if the first request's tool list
  *   was built before the catalog fetch resolved.
- * - Fixture matching (apps/vscode-e2e/fixtures/thinking-effort-tool.json): the
+ * - Fixture matching (apps/vscode-e2e/src/fixtures/thinking-effort.ts): the
  *   post-tool request ends with a role:user message (fresh environment details
  *   are appended after the tool result), so aimock's toolCallId matcher — which
- *   inspects only the LAST message — can never match it. The follow-up request is
- *   scoped by the DTE-only model + hasToolResult instead, with turnIndex 1 as a
- *   tie-break. Note the fixture file is plain JSON: aimock's fixture-loader uses
- *   JSON.parse and SKIPS the whole file on parse errors, so no // comments may be
- *   added to it.
+ *   requires the LAST message to be role:tool — can never bind it, and a JSON
+ *   fixture cannot carry a predicate. The fixtures live in a JS module added via
+ *   addThinkingEffortFixtures (same pattern as deepseek-v4.ts): the baseline turn
+ *   binds to this suite's unique prompt marker ("DTE_E2E_EFFORT_APPLY") and the
+ *   follow-up binds to the set_thinking_effort call's unique tool call id
+ *   ("call_dte_e2e_001"), so no other suite can serve these responses and this
+ *   suite cannot match unrelated turns.
  */
 
 const DTE_MODEL_ID = "openai/gpt-5"
