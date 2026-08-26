@@ -981,7 +981,7 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamisch denkwerk",
 			"description": "Laat het model per stap het denkwerk zelf bepalen en u dat in het gesprek aanpassen. (experimenteel)",
-			"hint": "OpenAI-compatibiele profielen (aangepast OpenAI-endpoint, LM Studio, Ollama, LiteLLM en vergelijkbare) kunnen in de supportedReasoningEfforts-instelling de redeneer-inspanningsniveaus declareren die hun model ondersteunt. Gedecreëerde inspanningen worden met elk verzoek verzonden, maar de lokale server kan de parameter negeren."
+			"hint": "OpenAI-compatibele profielen (aangepast OpenAI-endpoint, LM Studio, Ollama, LiteLLM en vergelijkbare) kunnen in de supportedReasoningEfforts-instelling de redeneer-inspanningsniveaus declareren die hun model ondersteunt. Gedecreëerde inspanningen worden met elk verzoek verzonden, maar de lokale server kan de parameter negeren."
 		}
 	},
 	"promptCaching": {
