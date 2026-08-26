@@ -1,13 +1,15 @@
 // cd src && npx vitest run core/task-persistence/__tests__/taskMetadata.spec.ts
 //
 // DTE series 2/5: taskMetadata() persists the active task-local thinking effort
-// (and its provenance) on the history item via
-//   ...(thinkingEffort && { thinkingEffort }),
-//   ...(thinkingEffortSource && { thinkingEffortSource }),
-// so that reopening the task from history restores it.
+// (and its provenance) on the history item so that reopening the task from
+// history restores it.
 //
-// These tests drive the real taskMetadata() with both truthy and falsy effort
-// values so both sides of the logical-AND spread are covered.
+// The keys are always present on the returned history item — even while
+// undefined — so that clearing the override propagates through the
+// TaskHistoryStore merge (an absent key would leave the stale disk value in
+// place; see buildDelta/mergeWithDisk, which only propagate keys present in
+// the incoming item). These tests drive the real taskMetadata() with both
+// truthy and falsy effort values to pin that contract.
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as os from "os"
 import * as path from "path"
@@ -56,11 +58,15 @@ async function runMetadata(overrides: { thinkingEffort?: ReasoningEffortExtended
 }
 
 describe("taskMetadata thinkingEffort persistence", () => {
-	it("omits the effort fields from the history item when not provided", async () => {
+	it("clears the effort fields with explicit keys when not provided", async () => {
 		const { historyItem } = await runMetadata({})
 
 		expect(historyItem.thinkingEffort).toBeUndefined()
 		expect(historyItem.thinkingEffortSource).toBeUndefined()
+		// The keys must still be PRESENT (with undefined) so the history-store
+		// merge propagates the clear and drops any stale disk value.
+		expect("thinkingEffort" in historyItem).toBe(true)
+		expect("thinkingEffortSource" in historyItem).toBe(true)
 		// The rest of the history item is still written.
 		expect(historyItem.id).toBe("task-meta-1")
 		expect(historyItem.task).toBe("Do the thing")
