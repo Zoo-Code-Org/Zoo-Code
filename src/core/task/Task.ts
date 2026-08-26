@@ -2144,6 +2144,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
+			// Incomplete reasoning has no matching API-history entry and would become
+			// an orphaned bubble when the resumed request starts fresh reasoning.
+			while (modifiedClineMessages.length > 0) {
+				const lastMessage = modifiedClineMessages[modifiedClineMessages.length - 1]
+				if (lastMessage.type === "say" && lastMessage.say === "reasoning" && lastMessage.partial === true) {
+					modifiedClineMessages.pop()
+				} else {
+					break
+				}
+			}
+
 			// Since we don't use `api_req_finished` anymore, we need to check if the
 			// last `api_req_started` has a cost value, if it doesn't and no
 			// cancellation reason to present, then we remove it since it indicates

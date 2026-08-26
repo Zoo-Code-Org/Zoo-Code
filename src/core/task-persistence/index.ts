@@ -1,4 +1,10 @@
-export { type ApiMessage, readApiMessages, saveApiMessages } from "./apiMessages"
+export {
+	type ApiMessage,
+	ApiMessagesReadError,
+	type ApiMessagesReadErrorKind,
+	readApiMessages,
+	saveApiMessages,
+} from "./apiMessages"
 export {
 	readTaskMessages,
 	saveTaskMessages,

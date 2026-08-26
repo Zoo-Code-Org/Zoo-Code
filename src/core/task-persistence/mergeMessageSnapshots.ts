@@ -44,19 +44,24 @@ function mergeTimestampedSnapshots(
 		messages.slice(consumedByTimestamp.get(timestamp) ?? 0),
 	)
 
-	for (const diskMessage of diskOnlyTimestamped) {
-		const insertionIndex = merged.findIndex(
-			(message) => isRecord(message) && typeof message.ts === "number" && message.ts > (diskMessage.ts as number),
-		)
-		if (insertionIndex === -1) {
-			merged.push(diskMessage)
-		} else {
-			merged.splice(insertionIndex, 0, diskMessage)
+	const timestampMerged: unknown[] = []
+	let diskOnlyIndex = 0
+	for (const incomingMessage of merged) {
+		if (isRecord(incomingMessage) && typeof incomingMessage.ts === "number") {
+			while (
+				diskOnlyIndex < diskOnlyTimestamped.length &&
+				(diskOnlyTimestamped[diskOnlyIndex].ts as number) < incomingMessage.ts
+			) {
+				timestampMerged.push(diskOnlyTimestamped[diskOnlyIndex])
+				diskOnlyIndex++
+			}
 		}
+		timestampMerged.push(incomingMessage)
 	}
+	timestampMerged.push(...diskOnlyTimestamped.slice(diskOnlyIndex))
 
-	merged.push(...existingLegacy.slice(incomingLegacyCount))
-	return merged
+	timestampMerged.push(...existingLegacy.slice(incomingLegacyCount))
+	return timestampMerged
 }
 
 export function mergeClineMessageSnapshots(existing: unknown, incoming: unknown): unknown {

@@ -1173,6 +1173,40 @@ describe("Task persistence", () => {
 			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
 		})
 
+		it("removes incomplete trailing reasoning before prompting to resume", async () => {
+			mockReadTaskMessages.mockResolvedValue([
+				{ ts: 1, type: "say", say: "text", text: "Original task" },
+				{ ts: 2, type: "say", say: "reasoning", text: "Incomplete conclusion", partial: true },
+			])
+			mockReadApiMessages.mockResolvedValue([
+				{ role: "user", content: [{ type: "text", text: "Original task" }] },
+			])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "issue-1279-partial-reasoning",
+					number: 1,
+					ts: 2,
+					task: "Original task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+			})
+			vi.spyOn(task, "ask").mockImplementation(async () => {
+				expect(task.clineMessages).not.toContainEqual(
+					expect.objectContaining({ say: "reasoning", partial: true }),
+				)
+				throw new Error("stop after hydration")
+			})
+
+			await expect(getTaskPersistenceAccess(task).resumeTaskFromHistory()).rejects.toThrow("stop after hydration")
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+
 		it("stops after API history hydration when the task is aborted", async () => {
 			const apiMessagesDeferred =
 				createDeferred<Array<{ role: "user"; content: Array<{ type: "text"; text: string }> }>>()
@@ -1198,10 +1232,16 @@ describe("Task persistence", () => {
 			await vi.waitFor(() => expect(mockReadApiMessages).toHaveBeenCalled())
 
 			await task.abortTask(true)
+			// abortTask persists its own cancellation state. Reset those calls so the
+			// assertions below isolate work performed by the resumed hydration path.
+			mockSaveTaskMessages.mockClear()
+			vi.mocked(mockProvider.updateTaskHistory).mockClear()
 			apiMessagesDeferred.resolve([{ role: "user", content: [{ type: "text", text: "Original task" }] }])
 			await resumePromise
 
 			expect(askSpy).not.toHaveBeenCalled()
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled()
 		})
 	})
 

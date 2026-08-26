@@ -4,11 +4,10 @@ import * as fs from "fs/promises"
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import { fileExistsAtPath } from "../../utils/fs"
-
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { getTaskDirectoryPath } from "../../utils/storage"
 import { mergeApiMessageSnapshots } from "./mergeMessageSnapshots"
+import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 
 export type ApiMessage = Anthropic.MessageParam & {
 	ts?: number
@@ -38,6 +37,59 @@ export type ApiMessage = Anthropic.MessageParam & {
 	isTruncationMarker?: boolean
 }
 
+export type ApiMessagesReadErrorKind = "invalid" | "io_error"
+
+export class ApiMessagesReadError extends Error {
+	constructor(
+		public readonly kind: ApiMessagesReadErrorKind,
+		message: string,
+		public readonly originalError?: unknown,
+	) {
+		super(message)
+		this.name = "ApiMessagesReadError"
+	}
+}
+
+function parseApiMessages(fileContent: string, taskId: string, filePath: string): ApiMessage[] {
+	let parsedData: unknown
+	try {
+		parsedData = JSON.parse(fileContent)
+	} catch (error) {
+		throw new ApiMessagesReadError(
+			"invalid",
+			`Failed to parse API conversation history for ${taskId} at ${filePath}`,
+			error,
+		)
+	}
+
+	if (!Array.isArray(parsedData)) {
+		throw new ApiMessagesReadError(
+			"invalid",
+			`API conversation history for ${taskId} at ${filePath} must be an array, got ${typeof parsedData}`,
+		)
+	}
+
+	return parsedData
+}
+
+async function readApiMessagesFile(taskId: string, filePath: string): Promise<ApiMessage[] | undefined> {
+	let fileContent: string
+	try {
+		fileContent = await readFileWithMissingRetry(filePath)
+	} catch (error) {
+		if (getErrorCode(error) === "ENOENT") {
+			return undefined
+		}
+		throw new ApiMessagesReadError(
+			"io_error",
+			`Failed to read API conversation history for ${taskId} at ${filePath}`,
+			error,
+		)
+	}
+
+	return parseApiMessages(fileContent, taskId, filePath)
+}
+
 export async function readApiMessages({
 	taskId,
 	globalStoragePath,
@@ -48,63 +100,27 @@ export async function readApiMessages({
 	const taskDir = await getTaskDirectoryPath(globalStoragePath, taskId)
 	const filePath = path.join(taskDir, GlobalFileNames.apiConversationHistory)
 
-	if (await fileExistsAtPath(filePath)) {
-		const fileContent = await fs.readFile(filePath, "utf8")
-		try {
-			const parsedData = JSON.parse(fileContent)
-			if (!Array.isArray(parsedData)) {
-				console.warn(
-					`[readApiMessages] Parsed data is not an array (got ${typeof parsedData}), returning empty. TaskId: ${taskId}, Path: ${filePath}`,
-				)
-				return []
-			}
-			if (parsedData.length === 0) {
-				console.error(
-					`[Roo-Debug] readApiMessages: Found API conversation history file, but it's empty (parsed as []). TaskId: ${taskId}, Path: ${filePath}`,
-				)
-			}
-			return parsedData
-		} catch (error) {
-			console.warn(
-				`[readApiMessages] Error parsing API conversation history file, returning empty. TaskId: ${taskId}, Path: ${filePath}, Error: ${error}`,
-			)
-			return []
-		}
-	} else {
-		const oldPath = path.join(taskDir, "claude_messages.json")
-
-		if (await fileExistsAtPath(oldPath)) {
-			const fileContent = await fs.readFile(oldPath, "utf8")
-			try {
-				const parsedData = JSON.parse(fileContent)
-				if (!Array.isArray(parsedData)) {
-					console.warn(
-						`[readApiMessages] Parsed OLD data is not an array (got ${typeof parsedData}), returning empty. TaskId: ${taskId}, Path: ${oldPath}`,
-					)
-					return []
-				}
-				if (parsedData.length === 0) {
-					console.error(
-						`[Roo-Debug] readApiMessages: Found OLD API conversation history file (claude_messages.json), but it's empty (parsed as []). TaskId: ${taskId}, Path: ${oldPath}`,
-					)
-				}
-				await fs.unlink(oldPath)
-				return parsedData
-			} catch (error) {
-				console.warn(
-					`[readApiMessages] Error parsing OLD API conversation history file (claude_messages.json), returning empty. TaskId: ${taskId}, Path: ${oldPath}, Error: ${error}`,
-				)
-				// DO NOT unlink oldPath if parsing failed.
-				return []
-			}
-		}
+	const currentMessages = await readApiMessagesFile(taskId, filePath)
+	if (currentMessages !== undefined) {
+		return currentMessages
 	}
 
-	// If we reach here, neither the new nor the old history file was found.
-	console.error(
-		`[Roo-Debug] readApiMessages: API conversation history file not found for taskId: ${taskId}. Expected at: ${filePath}`,
-	)
-	return []
+	const oldPath = path.join(taskDir, "claude_messages.json")
+	const legacyMessages = await readApiMessagesFile(taskId, oldPath)
+	if (legacyMessages === undefined) {
+		return []
+	}
+
+	try {
+		await fs.unlink(oldPath)
+	} catch (error) {
+		throw new ApiMessagesReadError(
+			"io_error",
+			`Failed to remove migrated API conversation history for ${taskId} at ${oldPath}`,
+			error,
+		)
+	}
+	return legacyMessages
 }
 
 export async function saveApiMessages({

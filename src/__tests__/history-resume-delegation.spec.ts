@@ -399,11 +399,12 @@ describe("History resume delegation - parent metadata transitions", () => {
 			totalCost: 0,
 		}
 		const log = vi.fn()
+		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "child-read-failure", status: "active" }, parentItem)
 		const provider = makeProviderStub({
 			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
 			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
 			getCurrentTask: vi.fn(() => ({ taskId: "child-read-failure" })),
-			taskHistoryStore: makeTaskHistoryStoreStub({ id: "child-read-failure", status: "active" }, parentItem),
+			taskHistoryStore,
 			log,
 		})
 		vi.mocked(readTaskMessages).mockRejectedValue(new Error("history unavailable"))
@@ -416,8 +417,10 @@ describe("History resume delegation - parent metadata transitions", () => {
 
 		expect(result).toBe(false)
 		expect(log).toHaveBeenCalledWith(expect.stringContaining("history unavailable"))
+		expect(readApiMessages).not.toHaveBeenCalled()
 		expect(saveTaskMessages).not.toHaveBeenCalled()
 		expect(saveApiMessages).not.toHaveBeenCalled()
+		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
 	})
 
 	it("reopenParentFromDelegation injects tool_result when new_task tool_use exists in API history", async () => {
