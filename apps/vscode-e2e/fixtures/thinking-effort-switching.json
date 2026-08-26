@@ -3,6 +3,7 @@
 		{
 			"match": {
 				"model": "openai/gpt-5.1",
+				"userMessage": "DTE_E2E_SWITCH",
 				"hasToolResult": false,
 				"turnIndex": 0
 			},
@@ -19,6 +20,7 @@
 		{
 			"match": {
 				"model": "openai/gpt-5.1",
+				"userMessage": "<environment_details>",
 				"hasToolResult": true,
 				"turnIndex": 1
 			},
@@ -35,6 +37,7 @@
 		{
 			"match": {
 				"model": "openai/gpt-5.1",
+				"userMessage": "<environment_details>",
 				"hasToolResult": true,
 				"turnIndex": 2
 			},
@@ -51,6 +54,7 @@
 		{
 			"match": {
 				"model": "openai/gpt-5.1",
+				"userMessage": "<environment_details>",
 				"hasToolResult": true,
 				"turnIndex": 3
 			},
@@ -67,6 +71,7 @@
 		{
 			"match": {
 				"model": "openai/gpt-5.1",
+				"userMessage": "<environment_details>",
 				"hasToolResult": true,
 				"turnIndex": 4
 			},
