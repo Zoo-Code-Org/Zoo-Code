@@ -82,6 +82,11 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 					: Array.isArray(modelCapabilities)
 						? modelCapabilities
 						: []
+			// "disable" is a settings off-switch, never a start level: filtering it can
+			// leave an empty list (a model whose only capability is "disable"). In that
+			// case the unsupported-model wording is the accurate hint — an empty list
+			// would otherwise suggest sending "none", which fails validation again.
+			const startLevels = supportedLevels.filter((level) => level !== "disable")
 			let validatedEffort: ReasoningEffortExtended | undefined
 			if (thinking_effort !== undefined && thinking_effort !== null && thinking_effort !== "") {
 				if (!isNewTaskEffortLevel(thinking_effort) || !supportedLevels.includes(thinking_effort)) {
@@ -93,10 +98,8 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 					task.didToolFailInCurrentTurn = true
 					const reason = !isNewTaskEffortLevel(thinking_effort)
 						? `must be one of: ${NEW_TASK_EFFORT_LEVELS.join(", ")}`
-						: supportedLevels.length > 0
-							? `the target model only supports: ${
-									supportedLevels.filter((level) => level !== "disable").join(", ") || "none"
-								}`
+						: startLevels.length > 0
+							? `the target model only supports: ${startLevels.join(", ")}`
 							: "the target model does not support thinking_effort"
 					pushToolResult(formatResponse.toolError(`Invalid thinking_effort '${thinking_effort}'. ${reason}`))
 					return
