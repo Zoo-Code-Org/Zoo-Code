@@ -73,11 +73,16 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 			const modelCapabilities = task.api.getModel().info.supportsReasoningEffort
 			// "disable" stays in the element type: capability arrays may carry it (it is a
 			// settings off-switch, not a start level) and is filtered where levels are listed.
+			// Registry capability arrays are never trusted blindly — normalize to the known
+			// level set so an unknown string cannot reach the ask payload or the child effort.
 			const supportedLevels: readonly (ReasoningEffortExtended | "disable")[] =
 				modelCapabilities === true
 					? NEW_TASK_EFFORT_LEVELS
 					: Array.isArray(modelCapabilities)
-						? modelCapabilities
+						? modelCapabilities.filter(
+								(level): level is ReasoningEffortExtended | "disable" =>
+									level === "disable" || isNewTaskEffortLevel(level),
+							)
 						: []
 			// "disable" is a settings off-switch, never a start level: filtering it can
 			// leave an empty list (a model whose only capability is "disable"). In that
