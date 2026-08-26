@@ -368,4 +368,27 @@ describe("Task runtime thinking effort (DTE series 2/5)", () => {
 			)
 		})
 	})
+
+	describe("abortTask final save (DTE series 2/5)", () => {
+		it("records the active task-local effort on the final history save despite dispose() clearing it", async () => {
+			task.setRuntimeThinkingEffort("high", "you")
+
+			await task.abortTask()
+
+			// dispose() has already cleared the live state...
+			expect(task.getRuntimeThinkingEffort()).toEqual({ effort: undefined, source: undefined })
+			// ...but the final save still recorded the pre-dispose snapshot.
+			expect(vi.mocked(taskMetadata)).toHaveBeenCalledWith(
+				expect.objectContaining({ thinkingEffort: "high", thinkingEffortSource: "you" }),
+			)
+		})
+
+		it("saves undefined effort fields on the final history save while inactive", async () => {
+			await task.abortTask()
+
+			expect(vi.mocked(taskMetadata)).toHaveBeenCalledWith(
+				expect.objectContaining({ thinkingEffort: undefined, thinkingEffortSource: undefined }),
+			)
+		})
+	})
 })

@@ -119,9 +119,11 @@ export async function taskMetadata({
 		...(typeof apiConfigName === "string" && apiConfigName.length > 0 ? { apiConfigName } : {}),
 		...(initialStatus && { status: initialStatus }),
 		// DTE series 2/5: persist the active task-local effort (and its provenance) so
-		// reopening this task from history restores it.
-		...(thinkingEffort && { thinkingEffort }),
-		...(thinkingEffortSource && { thinkingEffortSource }),
+		// reopening this task from history restores it. The keys are always present
+		// (even while undefined) so that clearing the override propagates through the
+		// history-store merge — an absent key would leave the stale disk value in place.
+		thinkingEffort,
+		thinkingEffortSource,
 	}
 
 	return { historyItem, tokenUsage }
