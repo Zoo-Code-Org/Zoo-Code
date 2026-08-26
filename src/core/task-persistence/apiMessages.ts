@@ -111,6 +111,11 @@ export async function readApiMessages({
 		return []
 	}
 
+	// Persist the successfully parsed legacy history before deleting its source.
+	// The next ordinary task-history save may not happen until after user input,
+	// so returning the in-memory data alone would leave a data-loss window.
+	await safeWriteJson(filePath, legacyMessages, { merge: mergeApiMessageSnapshots })
+
 	try {
 		await fs.unlink(oldPath)
 	} catch (error) {

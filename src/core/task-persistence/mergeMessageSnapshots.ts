@@ -7,7 +7,7 @@ function isRecord(value: unknown): value is MessageRecord {
 function mergeTimestampedSnapshots(
 	existing: unknown,
 	incoming: unknown,
-	mergeMatch: (disk: MessageRecord, next: MessageRecord) => MessageRecord,
+	mergeMatch?: (disk: MessageRecord, next: MessageRecord) => MessageRecord,
 ): unknown {
 	if (!Array.isArray(existing) || !Array.isArray(incoming)) {
 		return incoming
@@ -37,7 +37,10 @@ function mergeTimestampedSnapshots(
 		const consumed = consumedByTimestamp.get(message.ts) ?? 0
 		consumedByTimestamp.set(message.ts, consumed + 1)
 		const diskMessage = existingGroups.get(message.ts)?.[consumed]
-		return diskMessage ? mergeMatch(diskMessage, message) : message
+		if (mergeMatch !== undefined && diskMessage !== undefined) {
+			return mergeMatch(diskMessage, message)
+		}
+		return message
 	})
 
 	const diskOnlyTimestamped = [...existingGroups.entries()].flatMap(([timestamp, messages]) =>
@@ -82,5 +85,5 @@ export function mergeClineMessageSnapshots(existing: unknown, incoming: unknown)
 }
 
 export function mergeApiMessageSnapshots(existing: unknown, incoming: unknown): unknown {
-	return mergeTimestampedSnapshots(existing, incoming, (_disk, next) => next)
+	return mergeTimestampedSnapshots(existing, incoming)
 }

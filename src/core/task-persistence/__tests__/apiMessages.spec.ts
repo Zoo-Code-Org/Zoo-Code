@@ -84,6 +84,20 @@ describe("apiMessages.readApiMessages", () => {
 		await expect(readApiMessages({ taskId: "task-missing", globalStoragePath: tmpBaseDir })).resolves.toEqual([])
 	})
 
+	it("migrates valid legacy history before deleting its source", async () => {
+		const taskId = "task-legacy-api"
+		const taskDir = path.join(tmpBaseDir, "tasks", taskId)
+		await fs.mkdir(taskDir, { recursive: true })
+		const oldPath = path.join(taskDir, "claude_messages.json")
+		const currentPath = path.join(taskDir, "api_conversation_history.json")
+		const legacyMessages = [{ role: "user", content: "legacy", ts: 1 }]
+		await fs.writeFile(oldPath, JSON.stringify(legacyMessages), "utf8")
+
+		await expect(readApiMessages({ taskId, globalStoragePath: tmpBaseDir })).resolves.toEqual(legacyMessages)
+		await expect(fs.readFile(currentPath, "utf8").then(JSON.parse)).resolves.toEqual(legacyMessages)
+		await expect(fs.access(oldPath)).rejects.toMatchObject({ code: "ENOENT" })
+	})
+
 	it("retries one transient missing-file read", async () => {
 		vi.spyOn(Math, "random").mockReturnValue(0)
 		const missing = Object.assign(new Error("missing"), { code: "ENOENT" })
