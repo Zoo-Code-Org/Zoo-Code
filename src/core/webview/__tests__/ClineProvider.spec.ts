@@ -452,7 +452,10 @@ describe("ClineProvider", () => {
 					getModel: vi.fn().mockReturnValue({
 						id: "claude-3-sonnet",
 						info: {
-							supportsReasoningEffort: ["disable", "low", "high", "max"],
+							// DTE: read from the shared ref (set per test) so the boolean
+							// (all-levels) capability side of the support check can be
+							// exercised; defaults to the deepseek catalog levels.
+							supportsReasoningEffort: taskModelCapabilityRef.value,
 						},
 					}),
 				},
