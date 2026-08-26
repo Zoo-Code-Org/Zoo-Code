@@ -279,6 +279,44 @@ describe("new_task thinking_effort validation (DTE series 5/5)", () => {
 		expect(delegateParentAndOpenChild).not.toHaveBeenCalled()
 	})
 
+	it("filters unknown capability strings out of the supported levels (DTE series 5/5)", async () => {
+		const { task } = makeTask({
+			supportsReasoningEffort: ["turbo", "low", "disable"],
+			askEffort: "low",
+		})
+		const callbacks = makeCallbacks()
+
+		await runNewTask(task, { thinking_effort: "low" }, callbacks)
+
+		// Registry data is normalized to the known level set: the unknown "turbo"
+		// and the settings off-switch "disable" never reach the ask payload.
+		expect(callbacks.askApproval).toHaveBeenCalledTimes(1)
+		const [askType, toolMessage] = vi.mocked(callbacks.askApproval).mock.calls[0]
+		expect(askType).toBe("tool")
+		const payload = JSON.parse(toolMessage as string) as {
+			tool: string
+			supportedThinkingEfforts?: string[]
+		}
+		expect(payload.tool).toBe("newTask")
+		expect(payload.supportedThinkingEfforts).toEqual(["low"])
+	})
+
+	it("treats a capability array of only unknown values as unsupported (DTE series 5/5)", async () => {
+		const { task, delegateParentAndOpenChild } = makeTask({
+			supportsReasoningEffort: ["turbo"],
+		})
+		const callbacks = makeCallbacks()
+
+		await runNewTask(task, { thinking_effort: "low" }, callbacks)
+
+		// Normalization drops the unknown value, leaving no start level: the
+		// unsupported-model wording is the accurate hint.
+		expect(callbacks.pushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining("does not support thinking_effort"),
+		)
+		expect(delegateParentAndOpenChild).not.toHaveBeenCalled()
+	})
+
 	it("pre-fills the ask payload with the effort and the supported levels, filtering 'disable'", async () => {
 		const { task } = makeTask({
 			supportsReasoningEffort: ["disable", "low", "medium"],
