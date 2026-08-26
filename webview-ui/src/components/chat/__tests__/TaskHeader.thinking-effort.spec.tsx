@@ -1,6 +1,6 @@
 import React from "react"
 import { renderWithExtensionState, screen } from "@/utils/test-utils"
-import type { ProviderSettings } from "@roo-code/types"
+import type { ClineMessage, Experiments, HistoryItem, ModelInfo, ProviderSettings } from "@roo-code/types"
 
 import TaskHeader, { TaskHeaderProps } from "../TaskHeader"
 
@@ -32,41 +32,60 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeBadge: ({ children }: { children: React.ReactNode }) => <div data-testid="vscode-badge">{children}</div>,
 }))
 
-const mockState: {
-	apiConfiguration: ProviderSettings
-	currentTaskItem: { id: string } | null
-	clineMessages: any[]
-	taskHistory: any[]
-	experiments: Record<string, boolean>
-	taskThinkingEffort: { effort: string; source: string } | undefined
-} = {
-	apiConfiguration: {
-		apiProvider: "anthropic",
-		apiKey: "test-key",
-		apiModelId: "claude-3-opus-20240229",
-	} as ProviderSettings,
-	currentTaskItem: { id: "test-task-id" },
-	clineMessages: [],
-	taskHistory: [],
-	experiments: { dynamicThinkingEffort: true },
-	taskThinkingEffort: undefined,
-}
-vi.mock("@src/context/ExtensionStateContext", () => ({
-	ExtensionStateContextProvider: ({ children }: any) => children,
-	useExtensionState: () => mockState,
-}))
+// DTE series 4/5: typed test doubles — structurally valid ExtensionState subset,
+// full ModelInfo / HistoryItem values and a ProviderSettings fixture factory
+// instead of any-typed assertions.
+const makeTaskItem = (id: string): HistoryItem => ({
+	id,
+	number: 1,
+	ts: Date.now(),
+	task: "Test task",
+	tokensIn: 100,
+	tokensOut: 50,
+	totalCost: 0.05,
+})
 
-vi.mock("@roo/array", () => ({
-	findLastIndex: (array: any[], predicate: (item: any) => boolean) => array.map(predicate).findLastIndex(Boolean),
-}))
+const anthropicSettings = (overrides: Pick<ProviderSettings, "reasoningEffort"> = {}): ProviderSettings => ({
+	apiProvider: "anthropic",
+	apiKey: "test-key",
+	apiModelId: "claude-3-opus-20240229",
+	...overrides,
+})
 
-let mockModelInfo: any = {
+const baseModelInfo: ModelInfo = {
 	contextWindow: 1_000_000,
 	maxTokens: 128_000,
 	supportsPromptCache: true,
 	supportsReasoningEffort: ["low", "medium", "high"],
 	reasoningEffort: "medium",
 }
+
+const mockState: {
+	apiConfiguration: ProviderSettings
+	currentTaskItem: HistoryItem | null
+	clineMessages: ClineMessage[]
+	taskHistory: HistoryItem[]
+	experiments: Experiments
+	taskThinkingEffort: { effort: string; source: string } | undefined
+} = {
+	apiConfiguration: anthropicSettings(),
+	currentTaskItem: makeTaskItem("test-task-id"),
+	clineMessages: [],
+	taskHistory: [],
+	experiments: { dynamicThinkingEffort: true },
+	taskThinkingEffort: undefined,
+}
+vi.mock("@src/context/ExtensionStateContext", () => ({
+	ExtensionStateContextProvider: ({ children }: { children: React.ReactNode }) => children,
+	useExtensionState: () => mockState,
+}))
+
+vi.mock("@roo/array", () => ({
+	findLastIndex: <T,>(array: T[], predicate: (item: T) => boolean): number =>
+		array.map(predicate).findLastIndex(Boolean),
+}))
+
+let mockModelInfo: ModelInfo = { ...baseModelInfo }
 vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({
 		provider: "anthropic",
@@ -97,18 +116,8 @@ describe("TaskHeader - thinking effort chip (DTE series 4/5)", () => {
 		mockMaxOutputTokens = 0
 		mockState.experiments = { dynamicThinkingEffort: true }
 		mockState.taskThinkingEffort = undefined
-		mockState.apiConfiguration = {
-			apiProvider: "anthropic",
-			apiKey: "test-key",
-			apiModelId: "claude-3-opus-20240229",
-		} as ProviderSettings
-		mockModelInfo = {
-			contextWindow: 1_000_000,
-			maxTokens: 128_000,
-			supportsPromptCache: true,
-			supportsReasoningEffort: ["low", "medium", "high"],
-			reasoningEffort: "medium",
-		}
+		mockState.apiConfiguration = anthropicSettings()
+		mockModelInfo = { ...baseModelInfo }
 	})
 
 	const renderChip = () => renderWithExtensionState(<TaskHeader {...defaultProps} />)
@@ -128,19 +137,14 @@ describe("TaskHeader - thinking effort chip (DTE series 4/5)", () => {
 	})
 
 	it("shows the settings-derived effort with a 'default' source badge", () => {
-		mockState.apiConfiguration = { apiProvider: "anthropic", reasoningEffort: "medium" } as ProviderSettings
+		mockState.apiConfiguration = anthropicSettings({ reasoningEffort: "medium" })
 		renderChip()
 		expect(screen.getByText("medium")).toBeInTheDocument()
 		expect(screen.getByText("default")).toBeInTheDocument()
 	})
 
 	it("shows the adaptive soft-guidance level with 'Zoo (auto)' for boolean-class models", () => {
-		mockModelInfo = {
-			contextWindow: 1_000_000,
-			maxTokens: 128_000,
-			supportsPromptCache: false,
-			supportsReasoningEffort: true,
-		}
+		mockModelInfo = { ...baseModelInfo, supportsPromptCache: false, supportsReasoningEffort: true }
 		renderChip()
 		expect(screen.getByText("adaptive")).toBeInTheDocument()
 		expect(screen.getByText("Zoo (auto)")).toBeInTheDocument()
