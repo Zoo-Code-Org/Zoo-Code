@@ -19,6 +19,7 @@ import { addListFilesResultFixtures } from "./fixtures/list-files"
 import { addReadFileResultFixtures } from "./fixtures/read-file"
 import { addSearchFilesResultFixtures } from "./fixtures/search-files"
 import { addSubtaskFixtures } from "./fixtures/subtasks"
+import { addThinkingEffortFixtures } from "./fixtures/thinking-effort"
 import { addUseMcpToolResultFixtures } from "./fixtures/use-mcp-tool"
 import { addWriteToFileResultFixtures } from "./fixtures/write-to-file"
 import { createScenarioWorkspace, removeScenarioWorkspace } from "./restart/scenarioWorkspace"
@@ -140,6 +141,7 @@ async function main() {
 				addReadFileResultFixtures(mock)
 				addSearchFilesResultFixtures(mock)
 				addSubtaskFixtures(mock)
+				addThinkingEffortFixtures(mock)
 				addUseMcpToolResultFixtures(mock)
 				addWriteToFileResultFixtures(mock)
 				addDeepSeekV4Fixtures(mock)

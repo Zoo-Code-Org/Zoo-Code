@@ -36,21 +36,17 @@ import { waitUntilCompleted, waitFor } from "./utils"
  *   replaces the whole provider profile (ProviderSettingsManager.saveConfig),
  *   so the baseline is deterministic and cannot inherit state from other
  *   suites; "low" is distinct from every level the tool applies here.
- * - Fixture matching (apps/vscode-e2e/fixtures/thinking-effort-switching.json):
+ * - Fixture matching (apps/vscode-e2e/src/fixtures/thinking-effort.ts):
  *   post-tool requests end with a role:user message (fresh environment details
  *   are appended after the tool result), so aimock's toolCallId matcher — which
- *   inspects only the LAST message — can never match them; the fixtures are
- *   scoped to this flow with the match keys a JSON fixture can express: the
- *   first turn binds to this suite's unique prompt marker (userMessage
- *   "DTE_E2E_SWITCH"), and every follow-up turn additionally binds to the
- *   post-tool continuation shape (userMessage "<environment_details>": after
- *   each tool result the request's last user message is the fresh
- *   environment-details block), on top of model + hasToolResult + turnIndex.
- *   aimock's selectByTurnIndex picks the highest turnIndex <= the request's
- *   assistant count, and each turnIndex is unique per fixture, so every
- *   request matches exactly one fixture. Note the fixture file is plain JSON:
- *   aimock's fixture loader uses JSON.parse and SKIPS the whole file on parse
- *   errors, so no // comments may be added to it.
+ *   requires the LAST message to be role:tool — can never bind the continuation
+ *   turns, and a JSON fixture cannot carry a predicate. The fixtures live in a
+ *   JS module added via addThinkingEffortFixtures (same pattern as
+ *   deepseek-v4.ts): the baseline turn binds to this suite's unique prompt
+ *   marker ("DTE_E2E_SWITCH"), and every continuation binds to the previous
+ *   turn's unique tool call id (call_dte_sw_001 → 002 → 003 → 004 →
+ *   completion), so no other suite can serve these responses and this suite
+ *   cannot match unrelated turns.
  */
 
 const SWITCH_MODEL_ID = "openai/gpt-5.1"
