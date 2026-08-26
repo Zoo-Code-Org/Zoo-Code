@@ -9,6 +9,7 @@ import type { ModelInfo, ProviderSettings } from "@roo-code/types"
 import { BaseOpenAiCompatibleProvider } from "../base-openai-compatible-provider"
 import { LiteLLMHandler } from "../lite-llm"
 import { LmStudioHandler } from "../lm-studio"
+import { getModelsFromCache } from "../fetchers/modelCache"
 import { getOllamaModels } from "../fetchers/ollama"
 import { NativeOllamaHandler } from "../native-ollama"
 import { OpenAiHandler } from "../openai"
@@ -30,6 +31,15 @@ vitest.mock("openai", () => ({
 
 vi.mock("../fetchers/ollama", () => ({
 	getOllamaModels: vi.fn(),
+}))
+
+// RouterProvider resolves a missing instance catalog through the global model
+// cache; mock it so the cache-fallback branch of getModel() is deterministic.
+vi.mock("../fetchers/modelCache", () => ({
+	getModels: vi.fn().mockResolvedValue({}),
+	refreshModels: vi.fn().mockResolvedValue({}),
+	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+	flushModels: vi.fn(),
 }))
 
 // Concrete test implementation of the abstract base class (same pattern as
@@ -210,6 +220,30 @@ describe("F7 declared reasoning effort fill-in at handler construction sites", (
 				}),
 			)
 			expect(handler.getModel().info.supportsReasoningEffort).toBeUndefined()
+		})
+
+		it("fills in declared levels from the cached catalog fallback", () => {
+			// No instance catalog (fetchModel was never awaited), so getModel()
+			// must resolve the model through the global cache fallback and apply
+			// the declared levels on that path too.
+			vi.mocked(getModelsFromCache).mockReturnValueOnce({
+				"custom/model": {
+					maxTokens: 8_192,
+					contextWindow: 32_768,
+					supportsImages: false,
+					supportsPromptCache: false,
+					inputPrice: 0,
+					outputPrice: 0,
+				},
+			})
+			const handler = new LiteLLMHandler(
+				makeApiHandlerOptions({
+					litellmBaseUrl: "http://localhost:4000",
+					litellmModelId: "custom/model",
+					supportedReasoningEfforts: DECLARED,
+				}),
+			)
+			expect(handler.getModel().info.supportsReasoningEffort).toEqual(DECLARED)
 		})
 	})
 })

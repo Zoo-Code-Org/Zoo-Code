@@ -534,5 +534,27 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			})
 			expect(mockSetApiConfigurationField).toHaveBeenLastCalledWith("enableReasoningEffort", false)
 		})
+
+		it("ignores fields other than reasoningEffort from the budget callback", () => {
+			renderConfig()
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			mockSetApiConfigurationField.mockClear()
+			thinkingBudgetProps.setApiConfigurationField("maxTokens", 4096)
+
+			expect(mockSetApiConfigurationField).not.toHaveBeenCalled()
+		})
+
+		it("stores the budget against the sane defaults when no custom model info is set", () => {
+			renderConfig({ openAiCustomModelInfo: undefined })
+
+			const thinkingBudgetProps = mockThinkingBudget.mock.calls[0][0]
+			thinkingBudgetProps.setApiConfigurationField("reasoningEffort", "max")
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith(
+				"openAiCustomModelInfo",
+				expect.objectContaining({ reasoningEffort: "max" }),
+			)
+		})
 	})
 })
