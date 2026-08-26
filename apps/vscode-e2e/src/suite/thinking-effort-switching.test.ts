@@ -78,9 +78,11 @@ function firstRequestCarrying(requests: CapturedDteRequest[], callId: string): C
 suite("set_thinking_effort switching within a task (DTE addendum)", function () {
 	setDefaultSuiteTimeout(this)
 
-	// Replace the provider profile with the defaults (the suite setup replaces it
-	// again, and saveConfig is a full replacement) so subsequent suites are
-	// unaffected, including this suite's baseline effort and the experiment flag.
+	// Restore the provider profile defaults so subsequent suites are unaffected.
+	// setConfiguration merges per-key into ContextProxy (setValues ->
+	// updateGlobalState), so the experiment flag and this suite's reasoning
+	// envelope (enableReasoningEffort + baseline reasoningEffort) are explicitly
+	// cleared below.
 	suiteTeardown(async () => {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
@@ -90,6 +92,11 @@ suite("set_thinking_effort switching within a task (DTE addendum)", function () 
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
 			experiments: { dynamicThinkingEffort: false },
+			// Clear this suite's reasoning envelope so later suites do not inherit
+			// a persisted enableReasoningEffort / reasoningEffort pair (undefined
+			// deletes the key via Memento.update semantics).
+			enableReasoningEffort: false,
+			reasoningEffort: undefined,
 		})
 	})
 
