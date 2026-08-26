@@ -302,6 +302,18 @@ describe("setThinkingEffortTool", () => {
 			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("high", "model")
 			expect(sayPayloads(double).some((p) => (p as Record<string, unknown>).refusal !== undefined)).toBe(false)
 		})
+
+		it("ranks an unknown settings baseline as the bottom of the scale (defensive rank fallback)", async () => {
+			// A settings baseline that predates the effort scale is not validated
+			// here (only the requested effort is); effortRank must still rank it
+			// as the bottom of the scale instead of throwing.
+			use({ capability: ["low", "medium"], settingsEffort: "custom-legacy" })
+			await setThinkingEffortTool.execute({ effort: "low", reason: "legacy baseline" }, task, callbacks)
+
+			expect(double.setRuntimeThinkingEffort).toHaveBeenCalledWith("low", "model")
+			const result = callbacks.pushToolResult.mock.calls[0][0] as string
+			expect(result).toContain("Thinking effort is now 'low'")
+		})
 	})
 
 	describe("escalation cap", () => {
