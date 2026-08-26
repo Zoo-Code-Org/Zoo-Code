@@ -66,6 +66,19 @@ describe("Task.ask queued message drain", () => {
 		expect((task as any).messageQueueService.messages[0]?.text).toBe("1+1=?")
 	})
 
+	it("does not consume a message already queued before a command_output ask", async () => {
+		const task = await createTask()
+		task.messageQueueService.addMessage("queued before output")
+
+		const askPromise = task.ask("command_output", "command is still running...", false)
+		setTimeout(() => task.approveAsk(), 0)
+		const result = await askPromise
+
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.messages).toHaveLength(1)
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("queued before output")
+	})
+
 	it.each(["finishTask", "newTask"])("queued feedback overrides auto-approval for %s", async (tool) => {
 		const task = await createTask({
 			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowSubtasks: true }),
@@ -248,6 +261,36 @@ describe("Task.ask queued message drain", () => {
 			expect(access.saveClineMessages).toHaveBeenCalledTimes(4)
 			expect(task.messageQueueService.messages).toHaveLength(1)
 			expect(task.messageQueueService.claimNextMessage()?.text).toBe("Do not spin")
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("releases durable queued feedback when the task aborts during retry backoff", async () => {
+		vi.useFakeTimers()
+		try {
+			const task = await createTask()
+			task.messageQueueService.addMessage("Retry after abort")
+			const result = await task.ask("completion_result", "Done", false)
+			const access = getQueueTaskTestAccess(task)
+			access.say = vi.fn().mockResolvedValue(undefined)
+			access.saveClineMessages = vi.fn().mockResolvedValue(false)
+
+			const persistence = task.persistQueuedFeedbackAndAcknowledge(
+				result.queuedMessageId!,
+				result.text,
+				result.images,
+			)
+			await vi.advanceTimersByTimeAsync(0)
+			expect(access.saveClineMessages).toHaveBeenCalledTimes(1)
+
+			access.abort = true
+			await vi.advanceTimersByTimeAsync(250)
+
+			await expect(persistence).resolves.toBe(false)
+			expect(access.saveClineMessages).toHaveBeenCalledTimes(1)
+			expect(task.messageQueueService.messages).toHaveLength(1)
+			expect(task.messageQueueService.claimNextMessage()?.text).toBe("Retry after abort")
 		} finally {
 			vi.useRealTimers()
 		}

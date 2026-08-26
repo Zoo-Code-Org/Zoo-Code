@@ -880,6 +880,77 @@ describe("attemptCompletionTool", () => {
 				)
 				expect(mockPushToolResult).not.toHaveBeenCalled()
 			})
+
+			it("records image-only completion feedback before continuing", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					images: ["data:image/png;base64,feedback"],
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "", ["data:image/png;base64,feedback"])
+				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			})
+
+			it("does not clear pending metadata when stale delegation continues without an action id", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "delegated", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn(),
+					clearPendingTaskAction: vi.fn(),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(false),
+				}
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
+					parentTaskId: "parent-1",
+					childTaskId: "child-1",
+					completionResultSummary: "Done",
+				})
+				expect(mockProvider.clearPendingTaskAction).not.toHaveBeenCalled()
+				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
+			})
 		})
 	})
 })

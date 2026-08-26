@@ -137,6 +137,59 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(removeClineFromStack).not.toHaveBeenCalled()
 	})
 
+	it("rejects an ownership change detected inside the atomic child updater", async () => {
+		const parentHistoryItem = {
+			id: "parent-1",
+			status: "delegated",
+			awaitingChildId: "child-1",
+			ts: Date.now(),
+			task: "Parent task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const expectedAction = {
+			kind: "finish_subtask",
+			actionId: "finish-action",
+			approvalText: JSON.stringify({ tool: "finishTask" }),
+			parentTaskId: "parent-1",
+			result: "Done",
+		}
+		const childHistoryItem = { id: "child-1", status: "active", pendingAction: expectedAction }
+		const atomicUpdatePair = vi.fn(
+			async (_firstId: string, _secondId: string, firstUpdater: (item: HistoryItem) => HistoryItem) => {
+				firstUpdater({
+					...childHistoryItem,
+					pendingAction: { ...expectedAction, actionId: "replacement-action" },
+				} as unknown as HistoryItem)
+				return []
+			},
+		)
+		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem, { atomicUpdatePair })
+		const createTaskWithHistoryItem = vi.fn()
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
+			getCurrentTask: vi.fn(() => undefined),
+			removeClineFromStack: vi.fn(),
+			createTaskWithHistoryItem,
+			taskHistoryStore,
+			log: vi.fn(),
+		})
+
+		await expect(
+			ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+				parentTaskId: "parent-1",
+				childTaskId: "child-1",
+				completionResultSummary: "Done",
+				pendingActionId: "finish-action",
+			}),
+		).rejects.toThrow("Pending action mismatch for child child-1")
+
+		expect(atomicUpdatePair).toHaveBeenCalledTimes(1)
+		expect(createTaskWithHistoryItem).not.toHaveBeenCalled()
+	})
+
 	it("reopenParentFromDelegation accepts an active parent awaiting the returning child", async () => {
 		const providerEmit = vi.fn()
 		const parentHistoryItem = {
