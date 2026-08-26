@@ -1112,7 +1112,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	private async saveClineMessages(): Promise<boolean> {
+	private async saveClineMessages(
+		// DTE series 2/5: abortTask() snapshots the effort state before dispose() clears
+		// it and passes it here so the final history save still records it. Other
+		// callers pass nothing and the live state is read.
+		effortSnapshot?: { effort?: ReasoningEffortExtended; source?: string },
+	): Promise<boolean> {
 		try {
 			await saveTaskMessages({
 				messages: structuredClone(this.clineMessages),
@@ -1123,6 +1128,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
 			}
+
+			// DTE series 2/5: the abort path passes a pre-dispose snapshot because
+			// dispose() has already cleared the live state by the time the final save runs.
+			const runtimeEffort = effortSnapshot ?? this.getRuntimeThinkingEffort()
 
 			const { historyItem, tokenUsage } = await taskMetadata({
 				taskId: this.taskId,
@@ -1137,8 +1146,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				initialStatus: this.initialStatus,
 				// DTE series 2/5: persist the active task-local effort override so it
 				// survives reopening this task from history (undefined while inactive).
-				thinkingEffort: this.getRuntimeThinkingEffort().effort,
-				thinkingEffortSource: this.getRuntimeThinkingEffort().source,
+				thinkingEffort: runtimeEffort.effort,
+				thinkingEffortSource: runtimeEffort.source,
 			})
 
 			// Emit token/tool usage updates using debounced function
@@ -2365,6 +2374,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		this.emit(RooCodeEventName.TaskAborted)
 
+		// DTE series 2/5: snapshot the transient effort state before dispose() clears
+		// it, so the final history save below still records the effort the task was
+		// using (otherwise an aborted task's history item loses its effort and the
+		// history-restore path cannot recover it).
+		const effortAtAbort = this.getRuntimeThinkingEffort()
+
 		try {
 			this.dispose() // Call the centralized dispose method
 		} catch (error) {
@@ -2381,7 +2396,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 		try {
-			await this.saveClineMessages()
+			await this.saveClineMessages(effortAtAbort)
 		} catch (error) {
 			console.error(`Error saving messages during abort for task ${this.taskId}.${this.instanceId}:`, error)
 		}
