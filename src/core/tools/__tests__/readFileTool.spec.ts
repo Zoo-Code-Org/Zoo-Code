@@ -13,10 +13,16 @@
  */
 
 import path from "path"
+import type { Stats } from "fs"
+
+import type { LegacyReadFileParams } from "@roo-code/types"
 
 import { isBinaryFile } from "isbinaryfile"
 
 import { readFileTool, ReadFileTool } from "../ReadFileTool"
+import type { Task } from "../../task/Task"
+import { ObservationRegistry } from "../../task/observationRegistry"
+import { computeVersionToken } from "../../../utils/versionToken"
 import { formatResponse } from "../../prompts/responses"
 import {
 	validateImageForProcessing,
@@ -136,6 +142,7 @@ interface MockTaskOptions {
 	rooIgnoreAllowed?: boolean
 	maxImageFileSize?: number
 	maxTotalImageSize?: number
+	observationRegistry?: ObservationRegistry
 }
 
 function createMockTask(options: MockTaskOptions = {}) {
@@ -143,6 +150,9 @@ function createMockTask(options: MockTaskOptions = {}) {
 
 	return {
 		cwd: "/test/workspace",
+		// Mirror Task: every task always owns an observation registry (A2, #1375).
+		// Tests asserting on observations pass their own instance via options.
+		observationRegistry: options.observationRegistry ?? new ObservationRegistry(),
 		api: {
 			getModel: vi.fn().mockReturnValue({
 				info: { supportsImages },
@@ -1488,6 +1498,109 @@ describe("ReadFileTool", () => {
 			await readFileTool.execute({ path: "src/" }, mockTask as any, callbacks)
 
 			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		describe("observation registry", () => {
+			it("records an observation on successful read of an existing file", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				// Override the beforeEach default stat mock with proper BigIntStats.
+				mockedFsStat.mockResolvedValue({
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats)
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				// Spy on observe to capture the exact key used (Windows path.resolve may use backslashes).
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "existing.ts" }, mockTask as unknown as Task, callbacks)
+
+				// Verify the tool called observe exactly once with a valid token.
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
+				expect(calledPath).toContain("existing.ts")
+				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+
+				// Verify get() returns the same data using the spy-captured key.
+				const obs = reg.get(calledPath)
+				expect(obs).toBeDefined()
+				expect(obs!.version).toBe(calledVersion)
+			})
+
+			it("a failed read (absent path) leaves the registry size 0 and does not throw", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsReadFile.mockRejectedValue(new Error("ENOENT"))
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute({ path: "missing.ts" }, mockTask as unknown as Task, callbacks)
+
+				// observationRegistry is guaranteed present because we passed it in createMockTask.
+				const reg = mockTask.observationRegistry
+				expect(reg).toBeDefined()
+				expect(reg!.size).toBe(0)
+			})
+
+			it("records an observation for legacy-format reads of existing files", async () => {
+				const mockTask = createMockTask({
+					observationRegistry: new ObservationRegistry(),
+				})
+				const callbacks = createMockCallbacks()
+
+				mockedFsStat.mockResolvedValue({
+					isDirectory: () => false,
+					dev: BigInt(1),
+					ino: BigInt(2),
+					size: BigInt(300),
+					mtimeNs: BigInt(4_000_000_000n),
+					ctimeNs: BigInt(5_000_000_000n),
+					// Cast: the mock only implements the members the tool and versionToken read.
+				} as unknown as Stats)
+				mockedIsBinaryFile.mockResolvedValue(false)
+
+				const reg = mockTask.observationRegistry!
+				const observeSpy = vi.spyOn(reg, "observe")
+
+				// Typed legacy (pre-refactor) params: the multi-file format with the
+				// _legacyFormat discriminant (see LegacyReadFileParams).
+				const legacyParams: LegacyReadFileParams = {
+					files: [{ path: "legacy.ts" }],
+					_legacyFormat: true,
+				}
+
+				// Cast: the mock task only implements the members ReadFileTool.execute touches.
+				await readFileTool.execute(legacyParams, mockTask as unknown as Task, callbacks)
+
+				expect(observeSpy).toHaveBeenCalledTimes(1)
+				const [calledPath, calledVersion] = observeSpy.mock.calls[0]
+				expect(calledPath).toContain("legacy.ts")
+				expect(calledVersion).toMatch(/^\d+:\d+:\d+:\d+:\d+$/)
+			})
+
+			it("two separate Task-owned registries are independent", async () => {
+				const regA = new ObservationRegistry()
+				const regB = new ObservationRegistry()
+				regA.observe("/shared.ts", "v1")
+				expect(regA.get("/shared.ts")!.version).toBe("v1")
+				expect(regB.get("/shared.ts")).toBeUndefined()
+				regB.observe("/shared.ts", "v2")
+				expect(regA.get("/shared.ts")!.version).toBe("v1")
+				expect(regB.get("/shared.ts")!.version).toBe("v2")
+			})
 		})
 	})
 })
