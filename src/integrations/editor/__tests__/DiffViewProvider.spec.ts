@@ -811,15 +811,16 @@ describe("DiffViewProvider", () => {
 			expect(result.finalContent).toBe("new content")
 		})
 
-		it("should not open file when openWithoutFocus is false", async () => {
+		it("should not open file when openWithoutFocus is false (focus not stolen: in-memory document only)", async () => {
 			await diffViewProvider.saveDirectly("test.ts", "new content", false, true, 1000)
 
 			// Verify file was written
 			const fs = await import("fs/promises")
 			expect(fs.writeFile).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content", "utf-8")
 
-			// Verify file was NOT opened
+			// Verify file was NOT opened in the editor, and the document is loaded in memory only
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			expect(vscode.workspace.openTextDocument).toHaveBeenCalled()
 		})
 
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {

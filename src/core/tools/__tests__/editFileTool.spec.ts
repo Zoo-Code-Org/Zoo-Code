@@ -115,7 +115,9 @@ describe("editFileTool", () => {
 				getState: vi.fn().mockResolvedValue({
 					diagnosticsEnabled: true,
 					writeDelayMs: 1000,
-					experiments: {},
+					// Pin the legacy diff-editor path explicitly: the PREVENT_FOCUS_DISRUPTION default
+					// flipped to true (L2, plan #33), so these tests must opt out.
+					experiments: { preventFocusDisruption: false } as Record<string, boolean>,
 				}),
 			}),
 		}

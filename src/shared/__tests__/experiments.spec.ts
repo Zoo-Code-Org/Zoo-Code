@@ -6,10 +6,10 @@ import { EXPERIMENT_IDS, experimentConfigsMap, experiments as Experiments } from
 
 describe("experiments", () => {
 	describe("PREVENT_FOCUS_DISRUPTION", () => {
-		it("is configured correctly", () => {
+		it("is configured correctly (chat-diff is the default approval path)", () => {
 			expect(EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION).toBe("preventFocusDisruption")
 			expect(experimentConfigsMap.PREVENT_FOCUS_DISRUPTION).toMatchObject({
-				enabled: false,
+				enabled: true,
 			})
 		})
 	})
