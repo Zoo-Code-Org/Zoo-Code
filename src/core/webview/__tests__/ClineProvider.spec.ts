@@ -1409,14 +1409,14 @@ describe("ClineProvider", () => {
 		expect(state.language).toBe("pt-BR")
 	})
 
-	test("writeDelayMs defaults to 1000ms", async () => {
+	test("writeDelayMs defaults to DEFAULT_WRITE_DELAY_MS", async () => {
 		// Mock globalState.get to return undefined for writeDelayMs
 		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
 			return key === "writeDelayMs" ? undefined : null
 		})
 
 		const state = await provider.getState()
-		expect(state.writeDelayMs).toBe(1000)
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
