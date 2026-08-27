@@ -170,6 +170,18 @@
 			"claudeCodeNotAuthenticated": "Devi accedere per utilizzare Claude Code. Vai su Impostazioni e clicca su \"Accedi a Claude Code\" per autenticarti."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} file modificati in questo passaggio",
+		"rollbackFile": "Annulla modifiche a questo file",
+		"rollbackStep": "Annulla modifiche del passaggio",
+		"rollbackWarning": "Ripristina il contenuto precedente dei file di questo passaggio.",
+		"confirm": "Conferma",
+		"cancel": "Annulla",
+		"rollingBack": "Annullamento...",
+		"rolledBack": "Annullato",
+		"stepRolledBack": "Passaggio annullato",
+		"rollbackFailed": "Annullamento non riuscito"
+	},
 	"checkpoint": {
 		"regular": "Checkpoint",
 		"initializingWarning": "Inizializzazione del checkpoint in corso... Se questa operazione richiede troppo tempo, puoi disattivare i checkpoint nelle <settingsLink>impostazioni</settingsLink> e riavviare l'attività.",

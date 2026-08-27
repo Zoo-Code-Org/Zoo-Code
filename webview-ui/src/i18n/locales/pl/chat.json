@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "Musisz się zalogować, aby korzystać z Claude Code. Przejdź do Ustawień i kliknij \"Zaloguj się do Claude Code\", aby się uwierzytelnić."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} plik(ów) zmienionych w tym kroku",
+		"rollbackFile": "Cofnij ten plik",
+		"rollbackStep": "Cofnij krok",
+		"rollbackWarning": "Przywraca poprzednią zawartość plików tego kroku.",
+		"confirm": "Potwierdź",
+		"cancel": "Anuluj",
+		"rollingBack": "Cofanie...",
+		"rolledBack": "Cofnięto",
+		"stepRolledBack": "Krok cofnięty",
+		"rollbackFailed": "Cofnięcie nie powiodło się"
+	},
 	"checkpoint": {
 		"regular": "Punkt kontrolny",
 		"initializingWarning": "Trwa inicjalizacja punktu kontrolnego... Jeśli to trwa zbyt długo, możesz wyłączyć punkty kontrolne w <settingsLink>ustawieniach</settingsLink> i uruchomić zadanie ponownie.",

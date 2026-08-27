@@ -460,6 +460,47 @@ describe("SettingsView - Sound Settings", () => {
 		)
 	})
 
+	it("saves the change-card detail setting in the updateSettings payload", async () => {
+		// B3a: toggling the checkpoints section control updates cachedState and the
+		// save handler forwards the value ("full" here) to the extension host.
+		const { activateTab } = renderSettingsView({})
+
+		activateTab("checkpoints")
+		// The webview test env resolves i18n keys, so query the control by its
+		// test id rather than the translated label.
+		fireEvent.click(screen.getByTestId("change-card-detail-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "full" }),
+				}),
+			),
+		)
+	})
+
+	it("falls back to the summary default for change-card detail when unset", async () => {
+		// B3a: an unset setting is persisted with the shared default ("summary").
+		// Dirty the form via the unrelated per-write control while leaving
+		// changeCardDetail unset (Save is disabled until the form is dirty),
+		// then assert the submitted payload carries the default.
+		const { activateTab } = renderSettingsView({})
+
+		activateTab("checkpoints")
+		fireEvent.click(screen.getByTestId("per-write-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		await waitFor(() =>
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "updateSettings",
+					updatedSettings: expect.objectContaining({ changeCardDetail: "summary" }),
+				}),
+			),
+		)
+	})
 	it("shows tts slider when sound is enabled", () => {
 		// Render once and get the activateTab helper
 		const { activateTab, getSettingsContent } = renderSettingsView()

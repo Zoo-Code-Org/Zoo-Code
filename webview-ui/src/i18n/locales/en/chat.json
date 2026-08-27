@@ -189,6 +189,18 @@
 			"claudeCodeNotAuthenticated": "You need to sign in to use Claude Code. Go to Settings and click \"Sign in to Claude Code\" to authenticate."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} file(s) changed this step",
+		"rollbackFile": "Rollback this file",
+		"rollbackStep": "Rollback step",
+		"rollbackWarning": "Restores the previous content of this step's files.",
+		"confirm": "Confirm",
+		"cancel": "Cancel",
+		"rollingBack": "Rolling back...",
+		"rolledBack": "Rolled back",
+		"stepRolledBack": "Step rolled back",
+		"rollbackFailed": "Rollback failed"
+	},
 	"checkpoint": {
 		"regular": "Checkpoint",
 		"initializingWarning": "Still initializing checkpoint... If this takes too long, you can disable checkpoints in <settingsLink>settings</settingsLink> and restart your task.",

@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "Du musst dich anmelden, um Claude Code zu verwenden. Gehe zu den Einstellungen und klicke auf \"Bei Claude Code anmelden\", um dich zu authentifizieren."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} Datei(en) in diesem Schritt geändert",
+		"rollbackFile": "Diese Datei zurücksetzen",
+		"rollbackStep": "Schritt zurücksetzen",
+		"rollbackWarning": "Stellt den vorherigen Inhalt der Dateien dieses Schritts wieder her.",
+		"confirm": "Bestätigen",
+		"cancel": "Abbrechen",
+		"rollingBack": "Wird zurückgesetzt...",
+		"rolledBack": "Zurückgesetzt",
+		"stepRolledBack": "Schritt zurückgesetzt",
+		"rollbackFailed": "Zurücksetzen fehlgeschlagen"
+	},
 	"checkpoint": {
 		"regular": "Checkpoint",
 		"initializingWarning": "Checkpoint wird noch initialisiert... Falls dies zu lange dauert, kannst du Checkpoints in den <settingsLink>Einstellungen</settingsLink> deaktivieren und deine Aufgabe neu starten.",
