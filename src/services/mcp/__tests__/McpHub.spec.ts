@@ -260,6 +260,58 @@ describe("McpHub", () => {
 			expect(writtenPath).toBe(settingsPath)
 			expect(JSON.parse(writtenData as string)).toEqual(concurrentConfig)
 		})
+
+		it("writes the default stub when no settings file exists yet", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// Existence check and the locked read both see an absent file.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+
+			const returnedPath = await mcpHub.getMcpSettingsFilePath()
+
+			expect(returnedPath).toBe(settingsPath)
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [writtenPath, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(writtenPath).toBe(settingsPath)
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing content has no mcpServers object", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// Existence check sees an absent file, but the locked read finds content
+			// that does not carry a mcpServers object (e.g. a torn or foreign write).
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ someOtherKey: true }))
+
+			await mcpHub.getMcpSettingsFilePath()
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing mcpServers value is not an object", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: "corrupted" }))
+
+			await mcpHub.getMcpSettingsFilePath()
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
 	})
 
 	describe("Discriminated union type handling", () => {
