@@ -721,6 +721,7 @@ describe("ClineProvider", () => {
 			ttsEnabled: false,
 			enableCheckpoints: false,
 			perWriteCheckpoints: false,
+			changeCardDetail: "summary",
 			writeDelayMs: 1000,
 			mcpEnabled: true,
 			mode: defaultModeSlug,
@@ -1442,6 +1443,39 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.perWriteCheckpoints).toBe(true)
+	})
+
+	test("getState returns the saved changeCardDetail setting", async () => {
+		await provider.contextProxy.setValue("changeCardDetail", "full")
+
+		const state = await provider.getState()
+
+		expect(state.changeCardDetail).toBe("full")
+	})
+
+	test("getState defaults changeCardDetail to summary when unset", async () => {
+		const state = await provider.getState()
+
+		expect(state.changeCardDetail).toBe("summary")
+	})
+
+	test("getStateToPostToWebview returns the saved changeCardDetail setting", async () => {
+		// The default is "summary", so only an explicit "full" proves that the
+		// stored value (rather than the default) reaches the webview state.
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("changeCardDetail", "full")
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.changeCardDetail).toBe("full")
+	})
+
+	test("getStateToPostToWebview defaults changeCardDetail to summary when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.changeCardDetail).toBe("summary")
 	})
 
 	test("language is set to VSCode language", async () => {

@@ -11,6 +11,7 @@ import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from 
 import { checkpointSave } from "../../checkpoints"
 import { formatResponse } from "../../prompts/responses"
 import { writeToFileTool } from "../WriteToFileTool"
+import { convertNewFileToUnifiedDiff, sanitizeUnifiedDiff } from "../../diff/stats"
 
 vi.mock("path", async () => {
 	const originalPath = await vi.importActual("path")
@@ -101,6 +102,10 @@ describe("writeToFileTool", () => {
 	const absoluteFilePath = process.platform === "win32" ? "C:\\test\\file.txt" : "/test/file.txt"
 	const testContent = "Line 1\nLine 2\nLine 3"
 	const testContentWithMarkdown = "```javascript\nLine 1\nLine 2\n```"
+
+	// The exact approval diff the tool computes for a new file (B3a threads it
+	// into the checkpoint write for the per-step change card).
+	const newFileApprovalDiff = sanitizeUnifiedDiff(convertNewFileToUnifiedDiff(testContent, testFilePath))
 
 	// Mocked functions with correct types
 	const mockedFileExistsAtPath = fileExistsAtPath as MockedFunction<typeof fileExistsAtPath>
@@ -489,12 +494,14 @@ describe("writeToFileTool", () => {
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			// B2: the write info threads the path, operation, and the approval
 			// diff stats (3 added lines, 0 removed) into the checkpoint hook.
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockCline,
-				false,
-				true,
-				{ path: testFilePath, operation: "create", diffStats: { additions: 3, deletions: 0 } },
-			)
+			// B3a: the approval diff itself is threaded verbatim for the
+			// per-step change card.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+				diff: newFileApprovalDiff,
+			})
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
@@ -570,7 +577,8 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({})
 
 			// The experiment branch saves directly (no diff view) and still
-			// journals the write through the same single checkpoint hook.
+			// journals the write through the same single checkpoint hook, carrying
+			// the approval diff for the per-step change card (B3a).
 			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
 				testFilePath,
 				testContent,
@@ -578,12 +586,12 @@ describe("writeToFileTool", () => {
 				true,
 				1000,
 			)
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockCline,
-				false,
-				true,
-				{ path: testFilePath, operation: "create", diffStats: { additions: 3, deletions: 0 } },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+				diff: newFileApprovalDiff,
+			})
 		})
 
 		it("omits diff stats from the checkpoint write when the approval diff is empty", async () => {
@@ -594,12 +602,33 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: true })
 
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockCline,
-				false,
-				true,
-				{ path: testFilePath, operation: "update" },
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "update",
+			})
+		})
+
+		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {
+			// B3a: when the step is auto-approved the checkpoint write carries
+			// autoApproved so checkpointSave can force the compact change card.
+			mockCline.providerRef.deref = vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					autoApprovalEnabled: true,
+					alwaysAllowWrite: true,
+				}),
+			})
+
+			await executeWriteFileTool({})
+
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
+				path: testFilePath,
+				operation: "create",
+				diffStats: { additions: 3, deletions: 0 },
+				diff: newFileApprovalDiff,
+				autoApproved: true,
+			})
 		})
 	})
 })

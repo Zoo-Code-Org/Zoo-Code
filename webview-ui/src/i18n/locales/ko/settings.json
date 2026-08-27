@@ -705,6 +705,10 @@
 		"perWrite": {
 			"label": "파일을 쓸 때마다 체크포인트",
 			"description": "에이전트가 파일 쓰기에 성공할 때마다 체크포인트 스냅샷을 기록합니다"
+		},
+		"changeCardDetail": {
+			"label": "변경 카드에 전체 diff 표시",
+			"description": "단계별 변경 카드에 각 파일의 전체 unified diff를 인라인으로 포함합니다. 끄면 카드는 추가/제거 줄 수만 있는 파일 목록만 표시합니다."
 		}
 	},
 	"notifications": {

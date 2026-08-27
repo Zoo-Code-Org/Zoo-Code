@@ -212,6 +212,7 @@ const createInitialExtensionState = (): ExtensionState => ({
 	ttsSpeed: 1.0,
 	enableCheckpoints: true,
 	perWriteCheckpoints: true,
+	changeCardDetail: "summary",
 	checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, // Default to 15 seconds
 	language: "en", // Default language code
 	writeDelayMs: 1000,

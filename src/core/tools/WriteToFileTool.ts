@@ -15,6 +15,7 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff, type DiffStats } from "../diff/stats"
 import { checkpointSave } from "../checkpoints"
+import { checkAutoApproval } from "../auto-approval"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -111,8 +112,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			)
 
 			// B2: the approval-diff stats for the write, shared by both the
-			// approval message and the change-journal entry below.
+			// approval message and the change-journal entry below. B3a also
+			// reuses the sanitized unified diff itself for the per-step change
+			// card (never recomputed).
 			let approvalDiffStats: DiffStats | null = null
+			let approvalDiff = ""
+			let completeMessage = ""
 
 			if (isPreventFocusDisruptionEnabled) {
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
@@ -128,7 +133,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					: convertNewFileToUnifiedDiff(newContent, relPath)
 				unified = sanitizeUnifiedDiff(unified)
 				approvalDiffStats = computeDiffStats(unified)
-				const completeMessage = JSON.stringify({
+				approvalDiff = unified
+				completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					content: unified,
 					diffStats: approvalDiffStats || undefined,
@@ -161,7 +167,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					: convertNewFileToUnifiedDiff(newContent, relPath)
 				unified = sanitizeUnifiedDiff(unified)
 				approvalDiffStats = computeDiffStats(unified)
-				const completeMessage = JSON.stringify({
+				approvalDiff = unified
+				completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					content: unified,
 					diffStats: approvalDiffStats || undefined,
@@ -192,13 +199,27 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				// checkpointSave (the hook stays a single call site), keyed by the
 				// checkpoint commit that call produces. Await so the checkpoint
 				// (staging + commit) finishes before the next queued write starts;
-				// otherwise two writes can collapse into one commit.
+				// otherwise two writes can collapse into one commit. B3a threads
+				// the approval diff (for the change card) and whether the step was
+				// auto-approved (auto-approved steps always get the compact card).
+				const autoApproved =
+					(
+						await checkAutoApproval({
+							state,
+							cwd: task.cwd,
+							ask: "tool",
+							text: completeMessage,
+							isProtected: isWriteProtected,
+						})
+					).decision === "approve"
 				await checkpointSave(task, false, true, {
 					path: relPath,
 					operation: fileExists ? "update" : "create",
 					diffStats: approvalDiffStats
 						? { additions: approvalDiffStats.added, deletions: approvalDiffStats.removed }
 						: undefined,
+					...(approvalDiff ? { diff: approvalDiff } : {}),
+					...(autoApproved ? { autoApproved: true } : {}),
 				}).catch(() => {})
 			}
 

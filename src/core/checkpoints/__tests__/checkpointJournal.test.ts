@@ -66,6 +66,7 @@ interface ProviderLike {
 	context: { globalStorageUri: { fsPath: string } }
 	log: (...args: unknown[]) => void
 	postMessageToWebview: (...args: unknown[]) => void
+	getState: () => Promise<Record<string, unknown>>
 }
 
 interface TaskLike {
@@ -74,6 +75,7 @@ interface TaskLike {
 	checkpointService: ServiceLike
 	checkpointServiceInitializing: boolean
 	providerRef: { deref: () => ProviderLike | undefined }
+	say: (...args: unknown[]) => Promise<void>
 }
 
 describe("checkpointSave change-journal wiring (B2)", () => {
@@ -81,7 +83,11 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 	let saveCheckpointSpy: Mock
 	let mockProvider: ProviderLike
 	let mockTask: TaskLike
-	const write: CheckpointWriteInfo = { path: "src/foo.ts", operation: "create", diffStats: { additions: 3, deletions: 0 } }
+	const write: CheckpointWriteInfo = {
+		path: "src/foo.ts",
+		operation: "create",
+		diffStats: { additions: 3, deletions: 0 },
+	}
 
 	beforeEach(async () => {
 		tmpStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b2-journal-wiring-"))
@@ -90,6 +96,8 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 			context: { globalStorageUri: { fsPath: tmpStorageDir } },
 			log: vi.fn(),
 			postMessageToWebview: vi.fn(),
+			// B3a: the card emission reads the live settings through getState.
+			getState: vi.fn().mockResolvedValue({}),
 		}
 		// Structural test double for Task (the class is not instantiated at
 		// this unit layer); the cast is safe because the fields checkpointSave
@@ -100,6 +108,10 @@ describe("checkpointSave change-journal wiring (B2)", () => {
 			checkpointService: { isInitialized: true, saveCheckpoint: saveCheckpointSpy },
 			checkpointServiceInitializing: false,
 			providerRef: { deref: () => mockProvider },
+			// B3a: the card emission calls task.say; a resolved double keeps the
+			// test double complete instead of letting the emission take the
+			// error path.
+			say: vi.fn().mockResolvedValue(undefined),
 		}
 	})
 

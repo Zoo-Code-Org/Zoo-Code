@@ -705,6 +705,10 @@
 		"perWrite": {
 			"label": "Her dosya yazımından sonra kontrol noktası",
 			"description": "Ajanın her başarılı dosya yazımından sonra bir kontrol noktası görüntüsü kaydeder"
+		},
+		"changeCardDetail": {
+			"label": "Değişiklik kartlarında tam diff'i göster",
+			"description": "Adım başına değişiklik kartlarında her dosya için tam birleşik diff'i satır içi olarak içerir. Kapalıyken kartlar yalnızca eklenen/çıkarılan satır sayıları dosya listesini gösterir."
 		}
 	},
 	"notifications": {

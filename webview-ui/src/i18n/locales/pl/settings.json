@@ -705,6 +705,10 @@
 		"perWrite": {
 			"label": "Punkt kontrolny po każdym zapisaniu pliku",
 			"description": "Rejestruje migawkę punktu kontrolnego po każdym udanym zapisaniu pliku przez agenta"
+		},
+		"changeCardDetail": {
+			"label": "Pokaż pełny diff w kartach zmian",
+			"description": "Zawiera pełny spójny diff inline dla każdego pliku w kartach zmian per krok. Po wyłączeniu karty pokazują tylko listę plików z dodanymi/usuniętymi liniami."
 		}
 	},
 	"notifications": {

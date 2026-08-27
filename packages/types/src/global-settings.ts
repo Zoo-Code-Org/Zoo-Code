@@ -12,6 +12,7 @@ import {
 } from "./provider-settings.js"
 import { telemetrySettingsSchema } from "./telemetry.js"
 import { toolNamesSchema } from "./tool.js"
+import { changeCardDetailSchema, type ChangeCardDetail } from "./message.js"
 import { type Keys } from "./type-fu.js"
 import { languagesSchema } from "./vscode.js"
 
@@ -105,6 +106,14 @@ export const DEFAULT_CHECKPOINT_TIMEOUT_SECONDS = 15
  * @default true
  */
 export const DEFAULT_PER_WRITE_CHECKPOINTS = true
+
+/**
+ * Default detail level for per-step change cards (B3a).
+ * "summary" keeps cards compact (file list with +/− counts; the UI fetches
+ * diffs lazily); "full" carries the unified diff inline per file.
+ * @default "summary"
+ */
+export const DEFAULT_CHANGE_CARD_DETAIL: ChangeCardDetail = "summary"
 
 /**
  * GlobalSettings
@@ -213,6 +222,13 @@ export const globalSettingsSchema = z.object({
 	 * @default true
 	 */
 	perWriteCheckpoints: z.boolean().optional(),
+	/**
+	 * Detail level for per-step change cards: "full" includes the unified diff
+	 * inline for every changed file, "summary" carries only the file list with
+	 * +/− counts (diffs are fetched lazily by the UI).
+	 * @default "summary"
+	 */
+	changeCardDetail: changeCardDetailSchema.optional(),
 
 	ttsEnabled: z.boolean().optional(),
 	ttsSpeed: z.number().optional(),

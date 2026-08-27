@@ -17,6 +17,7 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
 import { appendChange, ChangeJournalEntry } from "./changeJournal"
+import { buildChangeCardPayload } from "./changeCard"
 
 const WARNING_THRESHOLD_MS = 5000
 
@@ -225,6 +226,16 @@ export type CheckpointWriteInfo = {
 	path: string
 	operation: "create" | "update" | "delete"
 	diffStats?: { additions: number; deletions: number }
+	/**
+	 * The unified approval diff for this write, reused verbatim by the B3a
+	 * change card (never recomputed).
+	 */
+	diff?: string
+	/**
+	 * Whether the tool step was auto-approved (no human interaction). Auto-
+	 * approved steps always get the compact ("summary") change card.
+	 */
+	autoApproved?: boolean
 }
 
 export async function checkpointSave(
@@ -250,9 +261,9 @@ export async function checkpointSave(
 			// resolves to undefined / rejects), and non-write checkpoint calls
 			// (e.g. the task-start baseline) pass no `write` value at all.
 			if (result?.commit && write) {
+				const writes = Array.isArray(write) ? write : [write]
 				const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
 				if (globalStorageDir) {
-					const writes = Array.isArray(write) ? write : [write]
 					// Append sequentially so journal lines preserve write order. A
 					// journal failure is logged here and never propagates to the
 					// checkpoint error handler (checkpoints stay enabled).
@@ -268,6 +279,20 @@ export async function checkpointSave(
 					} catch (err) {
 						console.error("[Task#checkpointSave] failed to append change journal entry", err)
 					}
+				}
+
+				// B3a: emit the per-step change card now that the checkpoint commit
+				// exists. The card reuses the approval diff/stats the tool already
+				// computed and is always emitted (auto-approved steps included);
+				// a card failure is logged and never disables checkpoints.
+				try {
+					const state = await task.providerRef.deref()?.getState()
+					const card = buildChangeCardPayload(result.commit, writes, state?.changeCardDetail)
+					await task.say("change_card", JSON.stringify(card), undefined, undefined, undefined, undefined, {
+						isNonInteractive: true,
+					})
+				} catch (err) {
+					console.error("[Task#checkpointSave] failed to emit change card", err)
 				}
 			}
 			return result

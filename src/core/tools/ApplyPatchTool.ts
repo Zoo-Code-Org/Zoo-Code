@@ -7,6 +7,7 @@ import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
 import { checkpointSave } from "../checkpoints"
+import { checkAutoApproval } from "../auto-approval"
 import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
@@ -144,14 +145,28 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					const addResult = await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					const addResult = await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
 					patchSucceeded = addResult.succeeded && patchSucceeded
 					if (addResult.wrote) {
 						successfulChanges.push(change)
 					}
 				} else if (change.type === "delete") {
 					// Delete file
-					const deleteResult = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					const deleteResult = await this.handleDeleteFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
 					patchSucceeded = deleteResult.succeeded && patchSucceeded
 					if (deleteResult.wrote) {
 						successfulChanges.push(change)
@@ -194,21 +209,34 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
 					// B2: one journal entry per file that was actually written by
-				// the patch (the simplest correct design for multi-file patches),
+					// the patch (the simplest correct design for multi-file patches),
 					// all referencing the single checkpoint above. A no-op update
 					// contributes no entry because nothing was written. `movePath`,
-					// when present, is the file's final location. diffStats is
-					// omitted: the per-file approval diffs are computed inside the
-					// handlers and are not retained after the patch completes.
-					void checkpointSave(
+					// when present, is the file's final location. B3a: the per-file
+					// approval diff/stats and auto-approval state, retained by the
+					// handlers, feed the per-step change card.
+					// Awaited: a later write must not interleave with this patch's
+					// staging/commit/journal/change-card work. checkpointSave never
+					// rejects (service call wrapped in try/catch upstream).
+					await checkpointSave(
 						task,
 						false,
 						true,
 						successfulChanges.map((change) => ({
 							path: change.movePath ?? change.path,
 							operation: change.type === "add" ? "create" : change.type,
+							...(change.diffStats
+								? {
+										diffStats: {
+											additions: change.diffStats.added,
+											deletions: change.diffStats.removed,
+										},
+									}
+								: {}),
+							...(change.diff ? { diff: change.diff } : {}),
+							...(change.autoApproved ? { autoApproved: true } : {}),
 						})),
-					).catch(() => {})
+					)
 				}
 			}
 		} catch (error) {
@@ -274,6 +302,21 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			diffStats,
 		} satisfies ClineSayTool)
 
+		// B3a: retain the approval diff/stats and auto-approval state so the
+		// post-loop checkpoint hook can build the per-step change card.
+		change.diff = sanitizedDiff
+		change.diffStats = diffStats
+		change.autoApproved =
+			(
+				await checkAutoApproval({
+					state,
+					cwd: task.cwd,
+					ask: "tool",
+					text: completeMessage,
+					isProtected: isWriteProtected,
+				})
+			).decision === "approve"
+
 		// Show diff view if focus disruption prevention is disabled
 		if (!isPreventFocusDisruptionEnabled) {
 			await task.diffViewProvider.open(relPath)
@@ -311,6 +354,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 	}
 
 	private async handleDeleteFile(
+		change: ApplyPatchFileChange,
 		absolutePath: string,
 		relPath: string,
 		task: Task,
@@ -344,6 +388,19 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			content: `Delete file: ${relPath}`,
 			isProtected: isWriteProtected,
 		} satisfies ClineSayTool)
+
+		// B3a: auto-approval state feeds the per-step change card (deletes have
+		// no diff to thread).
+		change.autoApproved =
+			(
+				await checkAutoApproval({
+					state: await task.providerRef.deref()?.getState(),
+					cwd: task.cwd,
+					ask: "tool",
+					text: completeMessage,
+					isProtected: isWriteProtected,
+				})
+			).decision === "approve"
 
 		const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
 
@@ -440,6 +497,21 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			isProtected: isWriteProtected,
 			diffStats,
 		} satisfies ClineSayTool)
+
+		// B3a: retain the approval diff/stats and auto-approval state so the
+		// post-loop checkpoint hook can build the per-step change card.
+		change.diff = sanitizedDiff
+		change.diffStats = diffStats
+		change.autoApproved =
+			(
+				await checkAutoApproval({
+					state,
+					cwd: task.cwd,
+					ask: "tool",
+					text: completeMessage,
+					isProtected: isWriteProtected,
+				})
+			).decision === "approve"
 
 		// Show diff view if focus disruption prevention is disabled
 		if (!isPreventFocusDisruptionEnabled) {

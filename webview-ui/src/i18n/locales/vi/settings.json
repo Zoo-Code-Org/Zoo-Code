@@ -705,6 +705,10 @@
 		"perWrite": {
 			"label": "Điểm kiểm tra sau mỗi lần ghi file",
 			"description": "Ghi lại ảnh chụp nhanh điểm kiểm tra sau mỗi lần ghi file thành công của agent"
+		},
+		"changeCardDetail": {
+			"label": "Hiển thị diff đầy đủ trong thẻ thay đổi",
+			"description": "Bao gồm diff thống nhất đầy đủ nội tuyến cho từng tệp trong thẻ thay đổi theo bước. Khi tắt, thẻ chỉ hiển thị danh sách tệp với số dòng thêm/xóa."
 		}
 	},
 	"notifications": {

@@ -705,6 +705,10 @@
 		"perWrite": {
 			"label": "Punt de control després de cada escriptura de fitxer",
 			"description": "Registra una instantània de punt de control després de cada escriptura de fitxer reeixida de l’agent"
+		},
+		"changeCardDetail": {
+			"label": "Mostra la diff completa a les targetes de canvis",
+			"description": "Inclou la diff unificada completa en línia per a cada fitxer a les targetes de canvis per pas. Desactivada, les targetes només mostren la llista de fitxers amb les línies afegides/eliminades."
 		}
 	},
 	"notifications": {
