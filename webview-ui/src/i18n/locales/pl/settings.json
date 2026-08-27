@@ -701,6 +701,10 @@
 		"enable": {
 			"label": "Włącz automatyczne punkty kontrolne",
 			"description": "Gdy włączone, Zoo automatycznie utworzy punkty kontrolne podczas wykonywania zadań, ułatwiając przeglądanie zmian lub powrót do wcześniejszych stanów. <0>Dowiedz się więcej</0>"
+		},
+		"perWrite": {
+			"label": "Punkt kontrolny po każdym zapisaniu pliku",
+			"description": "Rejestruje migawkę punktu kontrolnego po każdym udanym zapisaniu pliku przez agenta"
 		}
 	},
 	"notifications": {

@@ -701,6 +701,10 @@
 		"enable": {
 			"label": "Automatische checkpoints inschakelen",
 			"description": "Indien ingeschakeld, maakt Zoo automatisch checkpoints tijdens het uitvoeren van taken, zodat je eenvoudig wijzigingen kunt bekijken of terugzetten. <0>Meer informatie</0>"
+		},
+		"perWrite": {
+			"label": "Checkpoint na elke bestandsschrijving",
+			"description": "Neemt een checkpoint-snapshot op na elke succesvolle bestandsschrijving door de agent"
 		}
 	},
 	"notifications": {

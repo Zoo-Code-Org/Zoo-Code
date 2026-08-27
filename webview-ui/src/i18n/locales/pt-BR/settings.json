@@ -701,6 +701,10 @@
 		"enable": {
 			"label": "Ativar pontos de verificação automáticos",
 			"description": "Quando ativado, o Zoo criará automaticamente pontos de verificação durante a execução de tarefas, facilitando a revisão de alterações ou o retorno a estados anteriores. <0>Saiba mais</0>"
+		},
+		"perWrite": {
+			"label": "Ponto de verificação após cada gravação de arquivo",
+			"description": "Registra um snapshot de ponto de verificação após cada gravação de arquivo bem-sucedida pelo agente"
 		}
 	},
 	"notifications": {

@@ -100,6 +100,13 @@ export const MAX_CHECKPOINT_TIMEOUT_SECONDS = 60
 export const DEFAULT_CHECKPOINT_TIMEOUT_SECONDS = 15
 
 /**
+ * Whether per-write checkpoints and task-start baseline are enabled by default.
+ * Master switch for the B cluster of checkpoint features.
+ * @default true
+ */
+export const DEFAULT_PER_WRITE_CHECKPOINTS = true
+
+/**
  * GlobalSettings
  */
 
@@ -200,6 +207,12 @@ export const globalSettingsSchema = z.object({
 		.min(MIN_CHECKPOINT_TIMEOUT_SECONDS)
 		.max(MAX_CHECKPOINT_TIMEOUT_SECONDS)
 		.optional(),
+	/**
+	 * Whether to record a shadow-git checkpoint after every successful write_to_file,
+	 * edit_file, and apply_patch (per-write checkpoints), plus a task-start baseline.
+	 * @default true
+	 */
+	perWriteCheckpoints: z.boolean().optional(),
 
 	ttsEnabled: z.boolean().optional(),
 	ttsSpeed: z.number().optional(),

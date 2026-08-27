@@ -701,6 +701,10 @@
 		"enable": {
 			"label": "Bật điểm kiểm tra tự động",
 			"description": "Khi được bật, Zoo sẽ tự động tạo các điểm kiểm tra trong quá trình thực hiện nhiệm vụ, giúp dễ dàng xem lại các thay đổi hoặc quay lại trạng thái trước đó. <0>Tìm hiểu thêm</0>"
+		},
+		"perWrite": {
+			"label": "Điểm kiểm tra sau mỗi lần ghi file",
+			"description": "Ghi lại ảnh chụp nhanh điểm kiểm tra sau mỗi lần ghi file thành công của agent"
 		}
 	},
 	"notifications": {
