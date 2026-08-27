@@ -1419,6 +1419,28 @@ describe("ClineProvider", () => {
 		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
+	test("getStateToPostToWebview returns the persisted writeDelayMs value", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Simulate the updateSettings handler storing the value.
+		await provider.contextProxy.setValue("writeDelayMs", 500)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(500)
+	})
+
+	test("getStateToPostToWebview defaults writeDelayMs to DEFAULT_WRITE_DELAY_MS when unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		// Ensure the setting is not persisted.
+		await provider.contextProxy.setValue("writeDelayMs", undefined)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
+	})
+
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
 		;(mockContext.globalState.get as any).mockImplementation((key: string) => {
 			if (
