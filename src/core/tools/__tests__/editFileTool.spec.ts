@@ -8,6 +8,7 @@ import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
 import { getReadablePath } from "../../../utils/path"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { checkpointSave } from "../../checkpoints"
+import { computeDiffStats } from "../../diff/stats"
 import { editFileTool } from "../EditFileTool"
 
 vi.mock("fs/promises", () => ({
@@ -57,11 +58,16 @@ vi.mock("../../../utils/path", () => ({
 
 vi.mock("../../diff/stats", () => ({
 	sanitizeUnifiedDiff: vi.fn((diff) => diff),
-	computeDiffStats: vi.fn(() => ({ additions: 1, deletions: 1 })),
+	// The real computeDiffStats returns { added, removed } (DiffStats) —
+	// keep the mock faithful to the production shape.
+	computeDiffStats: vi.fn(() => ({ added: 1, removed: 1 })),
 }))
 
 vi.mock("../../checkpoints", () => ({
+	getCheckpointService: vi.fn(),
 	checkpointSave: vi.fn().mockResolvedValue(undefined),
+	checkpointRestore: vi.fn(),
+	checkpointDiff: vi.fn(),
 }))
 
 vi.mock("vscode", () => ({
@@ -788,7 +794,14 @@ describe("editFileTool", () => {
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true)
+			// B2: the write info threads the path, operation, and the approval
+			// diff stats into the checkpoint hook.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockTask,
+				false,
+				true,
+				{ path: testFilePath, operation: "update", diffStats: { additions: 1, deletions: 1 } },
+			)
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
@@ -814,6 +827,35 @@ describe("editFileTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("edit_file", expect.any(Error))
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
+		})
+
+		it("records the checkpoint with a create operation for a new file", async () => {
+			await executeEditFileTool({ old_string: "", new_string: "New file content" }, { fileExists: false })
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockTask,
+				false,
+				true,
+				{ path: testFilePath, operation: "create", diffStats: { additions: 1, deletions: 1 } },
+			)
+		})
+
+		it("omits diff stats from the checkpoint write when the diff has no stats", async () => {
+			// A null approval diff produces no diffStats on the journal write.
+			vi.mocked(computeDiffStats).mockReturnValueOnce(null)
+
+			await executeEditFileTool({})
+
+			expect(mockTask.consecutiveMistakeCount).toBe(0)
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockTask,
+				false,
+				true,
+				{ path: testFilePath, operation: "update" },
+			)
 		})
 	})
 })

@@ -9,6 +9,7 @@ import { unescapeHtmlEntities } from "../../../utils/text-normalization"
 import { everyLineHasLineNumbers, stripLineNumbers } from "../../../integrations/misc/extract-text"
 import { ToolUse, ToolResponse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import { checkpointSave } from "../../checkpoints"
+import { formatResponse } from "../../prompts/responses"
 import { writeToFileTool } from "../WriteToFileTool"
 
 vi.mock("path", async () => {
@@ -161,6 +162,7 @@ describe("writeToFileTool", () => {
 				userEdits: null,
 				finalContent: "final content",
 			}),
+			saveDirectly: vi.fn().mockResolvedValue({ finalContent: "saved" }),
 			scrollToFirstDiff: vi.fn(),
 			updateDiagnosticSettings: vi.fn(),
 			pushToolWriteResult: vi.fn().mockImplementation(async function (
@@ -485,7 +487,14 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({})
 
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true)
+			// B2: the write info threads the path, operation, and the approval
+			// diff stats (3 added lines, 0 removed) into the checkpoint hook.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockCline,
+				false,
+				true,
+				{ path: testFilePath, operation: "create", diffStats: { additions: 3, deletions: 0 } },
+			)
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
@@ -547,6 +556,50 @@ describe("writeToFileTool", () => {
 			await toolPromise
 			expect(settled).toBe(true)
 			expect(processQueuedSpy).toHaveBeenCalledOnce()
+		})
+
+		it("threads write info with approval diff stats when the prevent-focus-disruption experiment is enabled", async () => {
+			mockCline.providerRef.deref = vi.fn().mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+
+			await executeWriteFileTool({})
+
+			// The experiment branch saves directly (no diff view) and still
+			// journals the write through the same single checkpoint hook.
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				testContent,
+				false,
+				true,
+				1000,
+			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockCline,
+				false,
+				true,
+				{ path: testFilePath, operation: "create", diffStats: { additions: 3, deletions: 0 } },
+			)
+		})
+
+		it("omits diff stats from the checkpoint write when the approval diff is empty", async () => {
+			// Writing identical content to an existing file produces an empty
+			// approval diff, so the checkpoint write carries no diffStats.
+			vi.mocked(formatResponse.createPrettyPatch).mockReturnValueOnce("")
+
+			await executeWriteFileTool({}, { fileExists: true })
+
+			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(
+				mockCline,
+				false,
+				true,
+				{ path: testFilePath, operation: "update" },
+			)
 		})
 	})
 })

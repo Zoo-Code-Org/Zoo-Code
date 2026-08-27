@@ -13,7 +13,7 @@ import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
-import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
+import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff, type DiffStats } from "../diff/stats"
 import { checkpointSave } from "../checkpoints"
 import type { ToolUse } from "../../shared/tools"
 
@@ -110,6 +110,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
 			)
 
+			// B2: the approval-diff stats for the write, shared by both the
+			// approval message and the change-journal entry below.
+			let approvalDiffStats: DiffStats | null = null
+
 			if (isPreventFocusDisruptionEnabled) {
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
 				if (fileExists) {
@@ -123,10 +127,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
 					: convertNewFileToUnifiedDiff(newContent, relPath)
 				unified = sanitizeUnifiedDiff(unified)
+				approvalDiffStats = computeDiffStats(unified)
 				const completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					content: unified,
-					diffStats: computeDiffStats(unified) || undefined,
+					diffStats: approvalDiffStats || undefined,
 				} satisfies ClineSayTool)
 
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
@@ -155,10 +160,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
 					: convertNewFileToUnifiedDiff(newContent, relPath)
 				unified = sanitizeUnifiedDiff(unified)
+				approvalDiffStats = computeDiffStats(unified)
 				const completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					content: unified,
-					diffStats: computeDiffStats(unified) || undefined,
+					diffStats: approvalDiffStats || undefined,
 				} satisfies ClineSayTool)
 
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
@@ -182,9 +188,18 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			pushToolResult(message)
 
 			if (perWriteCheckpoints) {
-				// Await so the checkpoint (staging + commit) finishes before the next
-				// queued write starts; otherwise two writes can collapse into one commit.
-				await checkpointSave(task, false, true).catch(() => {})
+				// B2: the change-journal entry for this write is appended inside
+				// checkpointSave (the hook stays a single call site), keyed by the
+				// checkpoint commit that call produces. Await so the checkpoint
+				// (staging + commit) finishes before the next queued write starts;
+				// otherwise two writes can collapse into one commit.
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: fileExists ? "update" : "create",
+					diffStats: approvalDiffStats
+						? { additions: approvalDiffStats.added, deletions: approvalDiffStats.removed }
+						: undefined,
+				}).catch(() => {})
 			}
 
 			await task.diffViewProvider.reset()

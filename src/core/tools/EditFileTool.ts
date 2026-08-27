@@ -466,7 +466,14 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			pushToolResult(message + replacementInfo)
 
 			if (perWriteCheckpoints) {
-				void checkpointSave(task, false, true).catch(() => {})
+				// B2: the change-journal entry for this edit is appended inside
+				// checkpointSave (the hook stays a single call site), keyed by the
+				// checkpoint commit that call produces.
+				void checkpointSave(task, false, true, {
+					path: relPath,
+					operation: isNewFile ? "create" : "update",
+					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,
+				}).catch(() => {})
 			}
 
 			await task.diffViewProvider.reset()
