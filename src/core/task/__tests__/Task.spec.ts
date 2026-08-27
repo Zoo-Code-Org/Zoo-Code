@@ -4347,6 +4347,9 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 				getMcpHub: vi.fn().mockReturnValue(undefined),
 				postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 				updateTaskHistory: vi.fn().mockResolvedValue(undefined),
+				// Task receives a full ClineProvider at runtime; this focused unit test only
+				// exercises these methods, so the partial double is cast (same pattern as the
+				// "Subtask Rate Limiting" block above).
 			} as unknown as MockedClineProvider
 
 			const task = new Task({
