@@ -221,7 +221,43 @@ describe("NanoGptHandler", () => {
 	})
 
 	it("uses the first supported effort when the model cannot disable reasoning", async () => {
+		vi.mocked(getModels).mockResolvedValue({
+			"model:thinking": {
+				maxTokens: 128000,
+				contextWindow: 1050000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["high", "medium", "low"],
+			},
+		})
+
 		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
+
+		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
+	})
+
+	it.each([undefined, true] as const)(
+		"omits reasoning effort when the disable option is selected and enableReasoningEffort is %s",
+		async (enableReasoningEffort) => {
+			await collectStream(
+				new NanoGptHandler({
+					nanoGptModelId: "model:thinking",
+					enableReasoningEffort,
+					reasoningEffort: "disable",
+				}).createMessage("sys", messages),
+			)
+
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("reasoning_effort")
+		},
+	)
+
+	it("resolves none to the canonical lowest supported effort when reasoning is enabled", async () => {
+		await collectStream(
+			new NanoGptHandler({
+				nanoGptModelId: "model:thinking",
+				enableReasoningEffort: true,
+				reasoningEffort: "none",
+			}).createMessage("sys", messages),
+		)
 
 		expect(mockCreate.mock.calls[0][0]).toMatchObject({ reasoning_effort: "low" })
 	})

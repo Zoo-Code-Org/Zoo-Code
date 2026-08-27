@@ -99,8 +99,7 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 		? ["disable", ...baseAvailableOptions]
 		: baseAvailableOptions
 
-	// Default reasoning effort - use model's default if available
-	// GPT-5 models have "medium" as their default in the model configuration
+	// Use the model's declared default when present; otherwise fall back based on requiredReasoningEffort.
 	const modelDefaultReasoningEffort = modelInfo?.reasoningEffort as ReasoningEffortExtended | undefined
 	const defaultReasoningEffort: ReasoningEffortOption =
 		modelDefaultReasoningEffort ?? (modelInfo?.requiredReasoningEffort ? "medium" : "disable")

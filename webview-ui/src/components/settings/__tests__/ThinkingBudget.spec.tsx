@@ -425,6 +425,11 @@ describe("ThinkingBudget", () => {
 				expect(setApiConfigurationField).toHaveBeenCalledWith("reasoningEffort", expectedWrite, false)
 			} else {
 				expect(setApiConfigurationField).not.toHaveBeenCalledWith("reasoningEffort", expect.anything(), false)
+				expect(setApiConfigurationField).not.toHaveBeenCalledWith(
+					"enableReasoningEffort",
+					expect.anything(),
+					false,
+				)
 			}
 		})
 
