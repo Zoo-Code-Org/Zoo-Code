@@ -332,6 +332,28 @@ describe("searchReplaceTool", () => {
 		})
 	})
 
+	describe("focus disruption default (L2: chat-diff is the default approval path)", () => {
+		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// No stored experiment value: the default (flipped to true in L2) resolves
+			// to the chat-diff path.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: {},
+				}),
+			})
+
+			await executeSearchReplaceTool()
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(true)
+		})
+	})
+
 	describe("partial block handling", () => {
 		it("handles partial block without errors after path stabilizes", async () => {
 			// Path stabilization requires two consecutive calls with the same path

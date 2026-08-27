@@ -820,7 +820,7 @@ describe("DiffViewProvider", () => {
 
 			// Verify file was NOT opened in the editor, and the document is loaded in memory only
 			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
-			expect(vscode.workspace.openTextDocument).toHaveBeenCalled()
+			expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(vscode.Uri.file(`${mockCwd}/test.ts`))
 		})
 
 		it("should skip diagnostics when diagnosticsEnabled is false", async () => {
