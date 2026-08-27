@@ -598,6 +598,25 @@ describe("editFileTool", () => {
 			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(mockTask.didEditFile).toBe(true)
 		})
+
+		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// Explicit stored true: same chat-diff routing as the default.
+			mockTask.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+
+			await executeEditFileTool()
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+		})
 	})
 
 	describe("partial block handling", () => {

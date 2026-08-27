@@ -388,6 +388,25 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
 			expect(mockCline.didEditFile).toBe(true)
 		})
+
+		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
+			mockAskApproval.mockResolvedValue(true)
+			// Explicit stored true: same chat-diff routing as the default.
+			mockCline.providerRef.deref.mockReturnValue({
+				getState: vi.fn().mockResolvedValue({
+					diagnosticsEnabled: true,
+					writeDelayMs: 1000,
+					experiments: { preventFocusDisruption: true },
+				}),
+			})
+
+			await executeWriteFileTool()
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(true)
+		})
 	})
 
 	describe("file operations", () => {
