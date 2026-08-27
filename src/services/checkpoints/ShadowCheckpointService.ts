@@ -407,6 +407,73 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		}
 	}
 
+	/**
+	 * Restore a single file to its state at `commitHash` without moving the
+	 * branch or truncating the checkpoint list (unlike
+	 * {@link restoreCheckpoint}).
+	 *
+	 * If the file did not exist at `commitHash`, it is removed from the
+	 * working tree instead — rolling a file back to before it was created.
+	 */
+	public async restoreFile(commitHash: string, filePath: string): Promise<void> {
+		try {
+			this.log(`[${this.constructor.name}#restoreFile] restoring ${filePath} from ${commitHash}`)
+
+			if (!this.git) {
+				throw new Error("Shadow git repo not initialized")
+			}
+
+			// Git pathspecs are always POSIX: normalize a native (Windows
+			// backslash) path before the git calls. Without this, `cat-file -e` on
+			// a backslashed path never matches, the file is treated as absent at
+			// the checkpoint, and the delete branch below would remove a file the
+			// checkpoint actually contains. The local fs.rm join keeps the native
+			// form, since the OS treats both separators interchangeably there.
+			const gitPath = filePath.toPosix()
+
+			// Constrain the path to the workspace before either branch: `..`
+			// segments would otherwise normalize (path.join / git pathspec) to a
+			// location outside `this.workspaceDir`, and the delete branch could
+			// remove an unrelated file. `path.resolve` normalizes the segments;
+			// the trailing-separator prefix check is the containment guard.
+			const resolvedTarget = path.resolve(this.workspaceDir, filePath)
+			const workspaceRoot = this.workspaceDir.endsWith(path.sep)
+				? this.workspaceDir
+				: this.workspaceDir + path.sep
+			if (resolvedTarget !== this.workspaceDir && !resolvedTarget.startsWith(workspaceRoot)) {
+				throw new Error(`restoreFile target is outside the workspace: ${filePath}`)
+			}
+
+			const start = Date.now()
+			const existed = await this.fileExistsInCommit(commitHash, gitPath)
+
+			if (existed) {
+				await this.git.checkout([commitHash, "--", gitPath])
+			} else {
+				await fs.rm(path.join(this.workspaceDir, filePath), { force: true })
+			}
+
+			const duration = Date.now() - start
+			this.emit("restore", { type: "restore", commitHash, duration })
+			this.log(`[${this.constructor.name}#restoreFile] restored ${filePath} in ${duration}ms`)
+		} catch (e) {
+			const error = e instanceof Error ? e : new Error(String(e))
+			this.log(`[${this.constructor.name}#restoreFile] failed to restore file: ${error.message}`)
+			this.emit("error", { type: "error", error })
+			throw error
+		}
+	}
+
+	/** Whether `filePath` exists in the tree of `commitHash`. */
+	private async fileExistsInCommit(commitHash: string, filePath: string): Promise<boolean> {
+		try {
+			await this.git!.raw(["cat-file", "-e", `${commitHash}:${filePath}`])
+			return true
+		} catch {
+			return false
+		}
+	}
+
 	public async getDiff({ from, to }: { from?: string; to?: string }): Promise<CheckpointDiff[]> {
 		if (!this.git) {
 			throw new Error("Shadow git repo not initialized")
