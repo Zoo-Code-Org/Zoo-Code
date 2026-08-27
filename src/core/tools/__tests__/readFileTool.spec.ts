@@ -687,6 +687,22 @@ describe("ReadFileTool", () => {
 			})
 			parseSpy.mockRestore()
 		})
+
+		it("denies batch reads for a queued message response without text", async () => {
+			const task = Object.create(Task.prototype) as Task
+			Object.defineProperty(task, "cwd", { value: "/test/workspace", writable: true })
+			Object.assign(task, createMockTask())
+			task.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text: undefined, images: undefined })
+			const fileResults = [
+				{ path: "one.ts", status: "pending" as const, entry: { path: "one.ts", mode: "slice" as const } },
+				{ path: "two.ts", status: "pending" as const, entry: { path: "two.ts", mode: "slice" as const } },
+			]
+
+			await readFileTool["requestApproval"](task, fileResults, () => {})
+
+			expect(task.say).not.toHaveBeenCalledWith("user_feedback", expect.anything(), expect.anything())
+			expect(task.didRejectTool).toBe(true)
+		})
 	})
 
 	describe("output structure", () => {
