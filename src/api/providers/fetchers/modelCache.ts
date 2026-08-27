@@ -97,9 +97,9 @@ const KEY_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.zooGateway, // Per-session-token account identity
 	providerIdentifiers.kimiCode, // Per-session-token account identity
 	providerIdentifiers.nanogpt, // Public catalog can still vary by API-key allowlist
+	providerIdentifiers.lmstudio, // Remote/tunneled servers may gate models behind an API key
 ])
 
-// Providers whose model lists are scoped to the signed-in user (e.g. per-account
 // allowlists or org policies). For these we MUST NOT cache results on disk or
 // in memory: a sign-in/out cycle could otherwise serve a previous user's model
 // list to the next user, and stale data could mask backend allowlist updates.
@@ -244,7 +244,7 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			models = await getOllamaModels(options.baseUrl, options.apiKey)
 			break
 		case providerIdentifiers.lmstudio:
-			models = await getLMStudioModels(options.baseUrl)
+			models = await getLMStudioModels(options.baseUrl, options.apiKey)
 			break
 		case providerIdentifiers.vercelAiGateway:
 			models = await getVercelAiGatewayModels()

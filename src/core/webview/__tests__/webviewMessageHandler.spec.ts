@@ -203,6 +203,9 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockGetLMStudioModels.mockReset()
+		mockFlushModels.mockReset()
+		mockFlushModels.mockResolvedValue(undefined)
+		mockGetModels.mockReset()
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
 				lmStudioModelId: "model-1",
@@ -236,6 +239,7 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 		expect(mockGetModels).toHaveBeenCalledWith({
 			provider: providerIdentifiers.lmstudio,
 			baseUrl: "http://localhost:1234",
+			apiKey: undefined,
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
@@ -244,28 +248,58 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 		})
 	})
 
-	it("prefers the request payload base URL over persisted settings", async () => {
-		mockGetLMStudioModels.mockResolvedValue({})
+	it("uses baseUrl and apiKey from message values over saved state", async () => {
+		const mockModels: ModelRecord = {
+			"remote-model": {
+				maxTokens: 4096,
+				contextWindow: 8192,
+				supportsPromptCache: false,
+				description: "Remote model",
+			},
+		}
+
+		mockGetModels.mockResolvedValue(mockModels)
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestLmStudioModels",
-			values: { baseUrl: "http://127.0.0.1:4321" },
+			values: {
+				baseUrl: "http://127.0.0.1:4321",
+				apiKey: "secret-key",
+			},
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321")
-		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockFlushModels).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.lmstudio,
+				baseUrl: "http://127.0.0.1:4321",
+				apiKey: "secret-key",
+			},
+			true,
+		)
+		expect(mockGetModels).toHaveBeenCalledWith({
+			provider: providerIdentifiers.lmstudio,
+			baseUrl: "http://127.0.0.1:4321",
+			apiKey: "secret-key",
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "lmStudioModels",
+			lmStudioModels: mockModels,
+		})
 	})
 
-	it("treats an empty-string base URL as an explicit preview request", async () => {
-		mockGetLMStudioModels.mockResolvedValue({})
+	it("posts empty models response with error message on fetch failure", async () => {
+		mockGetModels.mockRejectedValue(new Error("Connection refused"))
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestLmStudioModels",
-			values: { baseUrl: "" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
-		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "lmStudioModels",
+			lmStudioModels: {},
+			error: "Connection refused",
+		})
 	})
 })
 

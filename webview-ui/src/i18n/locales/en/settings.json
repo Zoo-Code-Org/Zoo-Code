@@ -647,6 +647,8 @@
 		"googleCloudRegion": "Google Cloud Region",
 		"lmStudio": {
 			"baseUrl": "Base URL (optional)",
+			"apiKey": "LM Studio API Key",
+			"apiKeyHelp": "Optional API key for authenticated LM Studio instances or tunneled/remote servers. Leave empty for local installations.",
 			"modelId": "Model ID",
 			"speculativeDecoding": "Enable Speculative Decoding",
 			"draftModelId": "Draft Model ID",

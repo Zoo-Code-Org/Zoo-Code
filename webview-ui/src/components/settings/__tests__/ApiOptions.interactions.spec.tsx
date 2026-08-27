@@ -304,11 +304,11 @@ describe("ApiOptions interactions", () => {
 			})
 
 			act(() => vi.advanceTimersByTime(249))
-			expect(requestLmStudioModels).not.toHaveBeenCalledWith("http://lmstudio:1234")
+			expect(requestLmStudioModels).not.toHaveBeenCalledWith("http://lmstudio:1234", undefined)
 
 			act(() => vi.advanceTimersByTime(1))
 			expect(requestLmStudioModels).toHaveBeenCalledTimes(1)
-			expect(requestLmStudioModels).toHaveBeenCalledWith("http://lmstudio:1234")
+			expect(requestLmStudioModels).toHaveBeenCalledWith("http://lmstudio:1234", undefined)
 		})
 
 		it("does not request dynamic models for a static provider", () => {

@@ -572,6 +572,7 @@ export class ClineProvider
 					await forceFullModelDetailsLoad(
 						cline.apiConfiguration.lmStudioBaseUrl ?? "http://localhost:1234",
 						cline.apiConfiguration.lmStudioModelId!,
+						cline.apiConfiguration.lmStudioApiKey,
 					)
 				}
 			} catch (error) {

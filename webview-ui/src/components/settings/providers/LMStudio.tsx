@@ -14,6 +14,7 @@ import {
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+import { Button } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
 import { ModelPicker } from "../ModelPicker"
@@ -23,12 +24,21 @@ type LMStudioProps = {
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
 }
 
+enum RefreshStatus {
+	Idle = "idle",
+	Loading = "loading",
+	Success = "success",
+	Error = "error",
+}
+
 export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudioProps) => {
 	const { t } = useAppTranslation()
 
 	const [lmStudioModels, setLmStudioModels] = useState<ModelRecord>({})
+	const [refreshStatus, setRefreshStatus] = useState(RefreshStatus.Idle)
+	const [refreshError, setRefreshError] = useState<string | undefined>()
+	const refreshStatusRef = useRef(refreshStatus)
 	const routerModels = useRouterModels()
-	const initialBaseUrlRef = useRef(apiConfiguration?.lmStudioBaseUrl)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -47,8 +57,17 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 		switch (message.type) {
 			case LmStudioModelsMessageType.lmStudioModels:
 				{
-					const newModels = message.lmStudioModels ?? {}
-					setLmStudioModels(newModels)
+					if (!message.error) {
+						const newModels = message.lmStudioModels ?? {}
+						setLmStudioModels(newModels)
+					}
+
+					if (refreshStatusRef.current === RefreshStatus.Loading) {
+						const nextStatus = message.error ? RefreshStatus.Error : RefreshStatus.Success
+						refreshStatusRef.current = nextStatus
+						setRefreshStatus(nextStatus)
+						setRefreshError(message.error)
+					}
 				}
 				break
 		}
@@ -56,10 +75,18 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 
 	useEvent("message", onMessage)
 
+	const handleRefreshModels = useCallback(() => {
+		refreshStatusRef.current = RefreshStatus.Loading
+		setRefreshStatus(RefreshStatus.Loading)
+		setRefreshError(undefined)
+		requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl, apiConfiguration?.lmStudioApiKey)
+	}, [apiConfiguration?.lmStudioBaseUrl, apiConfiguration?.lmStudioApiKey])
+
 	// Refresh models on mount
 	useEffect(() => {
 		// Request fresh models - the handler now flushes cache automatically
-		requestLmStudioModels(initialBaseUrlRef.current)
+		requestLmStudioModels(apiConfiguration?.lmStudioBaseUrl, apiConfiguration?.lmStudioApiKey)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
 
 	// Check if the selected model exists in the fetched models
@@ -118,6 +145,41 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.lmStudio.baseUrl")}</label>
 			</VSCodeTextField>
+			<VSCodeTextField
+				value={apiConfiguration?.lmStudioApiKey || ""}
+				type="password"
+				onInput={handleInputChange("lmStudioApiKey")}
+				placeholder={t("settings:placeholders.apiKey")}
+				className="w-full">
+				<label className="block font-medium mb-1">{t("settings:providers.lmStudio.apiKey")}</label>
+			</VSCodeTextField>
+			<Button
+				variant="outline"
+				onClick={handleRefreshModels}
+				disabled={refreshStatus === RefreshStatus.Loading}
+				className="w-full">
+				<div className="flex items-center gap-2">
+					{refreshStatus === RefreshStatus.Loading ? (
+						<span className="codicon codicon-loading codicon-modifier-spin" />
+					) : (
+						<span className="codicon codicon-refresh" />
+					)}
+					{t("settings:providers.refreshModels.label")}
+				</div>
+			</Button>
+			{refreshStatus === RefreshStatus.Loading && (
+				<div className="text-sm text-vscode-descriptionForeground">
+					{t("settings:providers.refreshModels.loading")}
+				</div>
+			)}
+			{refreshStatus === RefreshStatus.Success && (
+				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
+			)}
+			{refreshStatus === RefreshStatus.Error && (
+				<div className="text-sm text-vscode-errorForeground">
+					{refreshError || t("settings:providers.refreshModels.error")}
+				</div>
+			)}
 			<ModelPicker
 				apiConfiguration={apiConfiguration}
 				setApiConfigurationField={setApiConfigurationField}

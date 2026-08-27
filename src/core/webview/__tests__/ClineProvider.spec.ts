@@ -574,7 +574,7 @@ describe("ClineProvider", () => {
 			},
 		} as Task)
 
-		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model")
+		expect(forceFullModelDetailsLoad).toHaveBeenCalledWith("http://localhost:1234", "test-model", undefined)
 	})
 
 	test("does not reload full model details when the LM Studio model is already loaded", async () => {

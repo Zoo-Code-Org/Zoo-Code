@@ -89,7 +89,6 @@ import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
-import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 
@@ -1379,31 +1378,52 @@ export const webviewMessageHandler = async (
 		case LmStudioModelsMessageType.requestLmStudioModels: {
 			// Specific handler for LM Studio models only.
 			const { apiConfiguration: lmStudioApiConfig } = await provider.getState()
+			// Prefer the baseUrl/apiKey from the message values (which reflect
+			// the user's unsaved edits in the settings form) over the saved
+			// state, so the refresh uses the URL/key the user is actually
+			// looking at — not the stale ones from before they started editing.
+			const requestedBaseUrl = message.values?.baseUrl ?? lmStudioApiConfig.lmStudioBaseUrl
+			const requestedApiKey = message.values?.apiKey ?? lmStudioApiConfig.lmStudioApiKey
+			const lmStudioOptions = {
+				provider: providerIdentifiers.lmstudio,
+				baseUrl: requestedBaseUrl,
+				apiKey: requestedApiKey,
+			}
 			try {
-				const requestedBaseUrl = message.values?.baseUrl
-				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
-				let lmStudioModels: ModelRecord
-				if (hasPreviewBaseUrl) {
-					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
-				} else {
-					const lmStudioOptions = {
-						provider: providerIdentifiers.lmstudio,
-						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
-					}
-					// Flush cache and refresh to ensure fresh models.
-					await flushModels(lmStudioOptions, true)
-					lmStudioModels = await getModels(lmStudioOptions)
-				}
-
-				if (Object.keys(lmStudioModels).length > 0) {
-					await provider.postMessageToWebview({
-						type: LmStudioModelsMessageType.lmStudioModels,
-						lmStudioModels: lmStudioModels,
-					})
-				}
+				// Flush cache and refresh to ensure fresh models.
+				await flushModels(lmStudioOptions, true)
 			} catch (error) {
-				// Silently fail - user hasn't configured LM Studio yet.
-				console.debug("LM Studio models fetch failed:", error)
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				provider.log(`[requestLmStudioModels] Failed to refresh model cache: ${errorMsg}`)
+				await provider.postMessageToWebview({
+					type: LmStudioModelsMessageType.lmStudioModels,
+					lmStudioModels: {},
+					error: errorMsg,
+				})
+				break
+			}
+
+			try {
+				const lmStudioModels = await getModels(lmStudioOptions)
+
+				provider.log(
+					`[requestLmStudioModels] Successfully read ${Object.keys(lmStudioModels).length} model(s) from ${requestedBaseUrl || "http://localhost:1234"}`,
+				)
+
+				// Always post a response so the webview refresh status can
+				// transition out of "loading" — even when no models are found.
+				await provider.postMessageToWebview({
+					type: LmStudioModelsMessageType.lmStudioModels,
+					lmStudioModels,
+				})
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				provider.log(`[requestLmStudioModels] Failed to read models: ${errorMsg}`)
+				await provider.postMessageToWebview({
+					type: LmStudioModelsMessageType.lmStudioModels,
+					lmStudioModels: {},
+					error: errorMsg,
+				})
 			}
 			break
 		}
