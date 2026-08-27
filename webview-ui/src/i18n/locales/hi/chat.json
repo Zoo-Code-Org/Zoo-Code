@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "Claude Code का उपयोग करने के लिए आपको साइन इन करना होगा। सेटिंग्स में जाएं और प्रमाणित करने के लिए \"Claude Code में साइन इन करें\" पर क्लिक करें।"
 		}
 	},
+	"changeCard": {
+		"header": "इस चरण में {{count}} फ़ाइल(ें) बदली गईं",
+		"rollbackFile": "इस फ़ाइल को रोलबैक करें",
+		"rollbackStep": "चरण रोलबैक करें",
+		"rollbackWarning": "यह चरण की फ़ाइलों की पिछली सामग्री पुनर्स्थापित करता है।",
+		"confirm": "पुष्टि करें",
+		"cancel": "रद्द करें",
+		"rollingBack": "रोलबैक हो रहा है...",
+		"rolledBack": "रोलबैक हो गया",
+		"stepRolledBack": "चरण रोलबैक हो गया",
+		"rollbackFailed": "रोलबैक विफल"
+	},
 	"checkpoint": {
 		"regular": "चेकपॉइंट",
 		"initializingWarning": "चेकपॉइंट अभी भी आरंभ हो रहा है... अगर यह बहुत समय ले रहा है, तो आप <settingsLink>सेटिंग्स</settingsLink> में चेकपॉइंट को अक्षम कर सकते हैं और अपने कार्य को पुनः आरंभ कर सकते हैं।",

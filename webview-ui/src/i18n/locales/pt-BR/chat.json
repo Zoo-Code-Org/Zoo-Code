@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "Você precisa fazer login para usar o Claude Code. Vá para Configurações e clique em \"Entrar no Claude Code\" para autenticar."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} arquivo(s) alterado(s) nesta etapa",
+		"rollbackFile": "Reverter este arquivo",
+		"rollbackStep": "Reverter etapa",
+		"rollbackWarning": "Restaura o conteúdo anterior dos arquivos desta etapa.",
+		"confirm": "Confirmar",
+		"cancel": "Cancelar",
+		"rollingBack": "Revertendo...",
+		"rolledBack": "Revertido",
+		"stepRolledBack": "Etapa revertida",
+		"rollbackFailed": "Falha na reversão"
+	},
 	"checkpoint": {
 		"regular": "Ponto de verificação",
 		"initializingWarning": "Ainda inicializando ponto de verificação... Se isso demorar muito, você pode desativar os pontos de verificação nas <settingsLink>configurações</settingsLink> e reiniciar sua tarefa.",

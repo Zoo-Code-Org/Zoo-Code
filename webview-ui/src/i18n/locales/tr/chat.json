@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "Claude Code'u kullanmak için oturum açmanız gerekiyor. Ayarlar'a gidin ve kimlik doğrulaması yapmak için \"Claude Code'da Oturum Aç\" seçeneğine tıklayın."
 		}
 	},
+	"changeCard": {
+		"header": "Bu adımda {{count}} dosya değiştirildi",
+		"rollbackFile": "Bu dosyayı geri al",
+		"rollbackStep": "Adımı geri al",
+		"rollbackWarning": "Bu adımın dosyalarının önceki içeriğini geri yükler.",
+		"confirm": "Onayla",
+		"cancel": "İptal",
+		"rollingBack": "Geri alınıyor...",
+		"rolledBack": "Geri alındı",
+		"stepRolledBack": "Adım geri alındı",
+		"rollbackFailed": "Geri alma başarısız"
+	},
 	"checkpoint": {
 		"regular": "Kontrol Noktası",
 		"initializingWarning": "Kontrol noktası hala başlatılıyor... Bu çok uzun sürerse, <settingsLink>ayarlar</settingsLink> bölümünden kontrol noktalarını devre dışı bırakabilir ve görevinizi yeniden başlatabilirsiniz.",

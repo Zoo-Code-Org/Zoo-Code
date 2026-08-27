@@ -19,6 +19,8 @@ import {
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
+	checkpointRollbackFilePayloadSchema,
+	checkpointRollbackStepPayloadSchema,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
@@ -1593,6 +1595,85 @@ export const webviewMessageHandler = async (
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
 				} catch (error) {
 					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				}
+			}
+
+			break
+		}
+		case "checkpointRollbackFile": {
+			// B3b: restore one change-card file to its step checkpoint and report
+			// the outcome back to the requesting card (correlated by cardTs).
+			const result = checkpointRollbackFilePayloadSchema.safeParse(message.payload)
+
+			if (result.success) {
+				const task = provider.getCurrentTask()
+
+				if (task) {
+					// Lazy import: the rollback module pulls the checkpoint service and the
+					// editor integrations (DiffViewProvider) into the import graph. Loading it
+					// only when a rollback is requested keeps specs that mock `vscode` minimally
+					// from executing editor module-scope code at import time.
+					const { rollbackFile } = await import("../checkpoints/rollback")
+					const outcome = await rollbackFile(task, result.data.checkpointId, result.data.filePath)
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							filePath: outcome.filePath,
+							success: outcome.success,
+							...(outcome.error ? { error: outcome.error } : {}),
+						},
+					})
+				} else {
+					// No active task: the rollback cannot run. Post the correlated
+					// failure so the requesting card can clear its pending state
+					// instead of waiting on a result that will never arrive.
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							filePath: result.data.filePath,
+							success: false,
+							error: "No active task to roll back from.",
+						},
+					})
+				}
+			}
+
+			break
+		}
+		case "checkpointRollbackStep": {
+			// B3b: restore every file of a change-card step to the step checkpoint.
+			const result = checkpointRollbackStepPayloadSchema.safeParse(message.payload)
+
+			if (result.success) {
+				const task = provider.getCurrentTask()
+
+				if (task) {
+					// Lazy import (see the checkpointRollbackFile case above).
+					const { rollbackStep } = await import("../checkpoints/rollback")
+					const outcome = await rollbackStep(task, result.data.filePaths, result.data.checkpointId)
+					const firstFailure = outcome.files.find((file) => !file.success)
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							success: outcome.files.every((file) => file.success),
+							...(firstFailure ? { error: firstFailure.error } : {}),
+							files: outcome.files,
+						},
+					})
+				} else {
+					// No active task: post the correlated failure so the requesting
+					// card can clear its pending state.
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							success: false,
+							error: "No active task to roll back from.",
+						},
+					})
 				}
 			}
 

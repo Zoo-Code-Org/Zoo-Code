@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "Has d'iniciar sessió per utilitzar Claude Code. Vés a Configuració i fes clic a \"Iniciar sessió a Claude Code\" per autenticar-te."
 		}
 	},
+	"changeCard": {
+		"header": "{{count}} fitxer(s) canviat(s) en aquest pas",
+		"rollbackFile": "Revertir aquest fitxer",
+		"rollbackStep": "Revertir el pas",
+		"rollbackWarning": "Restaura el contingut anterior dels fitxers d'aquest pas.",
+		"confirm": "Confirmar",
+		"cancel": "Cancel·lar",
+		"rollingBack": "Revertint...",
+		"rolledBack": "Revertit",
+		"stepRolledBack": "Pas revertit",
+		"rollbackFailed": "La revertida ha fallat"
+	},
 	"checkpoint": {
 		"regular": "Punt de control",
 		"initializingWarning": "Encara s'està inicialitzant el punt de control... Si això triga massa, pots desactivar els punts de control a la <settingsLink>configuració</settingsLink> i reiniciar la teva tasca.",
