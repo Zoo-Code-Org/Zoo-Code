@@ -13,6 +13,7 @@ import {
 describe("opencode-go registry", () => {
 	const anthropicFormatModels = [
 		"qwen3.8-max",
+		"qwen3.8-flash",
 		"qwen3.7-max",
 		"qwen3.7-plus",
 		"qwen3.6-plus",
