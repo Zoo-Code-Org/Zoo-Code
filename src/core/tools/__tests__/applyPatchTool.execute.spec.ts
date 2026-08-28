@@ -4,12 +4,36 @@ import type { MockedFunction } from "vitest"
 
 import { fileExistsAtPath } from "../../../utils/fs"
 import { isPathOutsideWorkspace } from "../../../utils/pathUtils"
+import path from "path"
+import * as fsPromises from "fs/promises"
 import type { Task } from "../../task/Task"
+import { ObservationRegistry } from "../../task/observationRegistry"
 import { ApplyPatchTool } from "../ApplyPatchTool"
+
+// The vi.mock factory exposes the fs/promises functions under a `default`
+// property (matching the SUT's default import), which the static module type
+// does not declare; cast once at this boundary rather than at each call site.
+const mockedFsPromises = vi.mocked(
+	fsPromises as unknown as {
+		default: {
+			stat: ReturnType<typeof vi.fn>
+			unlink: MockedFunction<typeof fsPromises.unlink>
+		}
+	},
+)
 
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
+		// Stable on-disk version for the S2 self-read observation (the hunk
+		// read now stats before and after; equal tokens record the observe).
+		stat: vi.fn().mockResolvedValue({
+			dev: 7n,
+			ino: 4242n,
+			size: 1234n,
+			mtimeNs: 1_700_000_000_123_456_789n,
+			ctimeNs: 1_700_000_000_789_999_999n,
+		}),
 		unlink: vi.fn().mockResolvedValue(undefined),
 	},
 }))
@@ -38,6 +62,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 		| "say"
 		| "processQueuedMessages"
 		| "didEditFile"
+		| "observationRegistry"
 	>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
 	let mockHandleError: MockedFunction<(...args: unknown[]) => Promise<void>>
@@ -52,6 +77,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 		mockTask = {
 			cwd: "/workspace/project",
 			consecutiveMistakeCount: 0,
+			observationRegistry: new ObservationRegistry(),
 			recordToolUsage: vi.fn(),
 			recordToolError: vi.fn(),
 			rooIgnoreController: {
@@ -112,6 +138,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "diffViewProvider"
 		| "providerRef"
 		| "fileContextTracker"
+		| "observationRegistry"
 	>
 	let mockSaveDirectly: MockedFunction<(...args: unknown[]) => Promise<unknown>>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
@@ -163,6 +190,7 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		mockTask = {
 			cwd: "/workspace/project",
 			consecutiveMistakeCount: 0,
+			observationRegistry: new ObservationRegistry(),
 			recordToolError: vi.fn(),
 			rooIgnoreController: {
 				validateAccess: vi.fn().mockReturnValue(true),
@@ -214,6 +242,43 @@ describe("ApplyPatchTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("update: observes the hunk read so the guarded publish is not unobserved", async () => {
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		// The hunk read doubles as the S2 observation (ReadFileTool contract):
+		// stable pre/post stats record the version token, so the in-place modify
+		// publish is not rejected as an unobserved write.
+		const observed = mockTask.observationRegistry.get(path.resolve("/workspace/project", "src/thing.ts"))
+		expect(observed?.version).toBe("7:4242:1234:1700000000123456789:1700000000789999999")
+	})
+
+	it("update: does not observe when the pre- and post-read tokens disagree", async () => {
+		// The file changed mid-read: pre/post stats differ, so no observation is
+		// recorded and the guarded publish surfaces the unobserved-existing
+		// remediation instead of publishing against a stale version.
+		const statMock = mockedFsPromises.default.stat
+		statMock.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 1234n, mtimeNs: 1n, ctimeNs: 2n })
+		statMock.mockResolvedValueOnce({ dev: 7n, ino: 4242n, size: 9999n, mtimeNs: 3n, ctimeNs: 4n })
+
+		const guardError = new Error(
+			"File already exists at /workspace/project/src/thing.ts and was not read before this write -- read the file first, then retry.",
+		)
+		mockSaveDirectly.mockRejectedValue(guardError)
+
+		await tool.execute({ patch: updatePatch }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockTask.observationRegistry.has(path.resolve("/workspace/project", "src/thing.ts"))).toBe(false)
+		expect(mockHandleError).toHaveBeenCalled()
 	})
 
 	it("add: publishes the new file through the guarded saveDirectly with create kind", async () => {
