@@ -10,6 +10,38 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
+type OpenAiExtraBodyParseResult = ReturnType<typeof parseOpenAiExtraBody>
+type OpenAiExtraBodyTranslationKey = `settings:validation.openAiExtraBody.${
+	| "invalidJson"
+	| "objectRequired"
+	| "reservedKeys"}`
+type OpenAiExtraBodyTranslationFunction = (key: OpenAiExtraBodyTranslationKey, options?: { keys: string }) => string
+
+export function formatOpenAiExtraBodyValidationError(
+	result: OpenAiExtraBodyParseResult,
+	t: OpenAiExtraBodyTranslationFunction,
+): string | undefined {
+	if (result.success) {
+		return undefined
+	}
+
+	if (result.reason === "reservedKeys") {
+		return t("settings:validation.openAiExtraBody.reservedKeys", {
+			keys: result.reservedKeys?.join(", ") ?? "",
+		})
+	}
+
+	return t(`settings:validation.openAiExtraBody.${result.reason}`)
+}
+
+function validateOpenAiExtraBody(apiConfiguration: ProviderSettings): string | undefined {
+	if (apiConfiguration.apiProvider !== providerIdentifiers.openai) {
+		return undefined
+	}
+
+	return formatOpenAiExtraBodyValidationError(parseOpenAiExtraBody(apiConfiguration.openAiExtraBody), i18next.t)
+}
+
 export function validateApiConfiguration(
 	apiConfiguration: ProviderSettings,
 	routerModels?: RouterModels,
@@ -20,6 +52,12 @@ export function validateApiConfiguration(
 
 	if (keysAndIdsPresentErrorMessage) {
 		return keysAndIdsPresentErrorMessage
+	}
+
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
+
+	if (extraBodyError) {
+		return extraBodyError
 	}
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(
@@ -312,17 +350,10 @@ export function validateApiConfigurationExcludingModelErrors(
 		}
 	}
 
-	if (apiConfiguration.apiProvider === providerIdentifiers.openai) {
-		const extraBodyResult = parseOpenAiExtraBody(apiConfiguration.openAiExtraBody)
-		if (!extraBodyResult.success) {
-			if (extraBodyResult.reason === "reservedKeys") {
-				return i18next.t("settings:validation.openAiExtraBody.reservedKeys", {
-					keys: extraBodyResult.reservedKeys?.join(", ") ?? "",
-				})
-			}
+	const extraBodyError = validateOpenAiExtraBody(apiConfiguration)
 
-			return i18next.t(`settings:validation.openAiExtraBody.${extraBodyResult.reason}`)
-		}
+	if (extraBodyError) {
+		return extraBodyError
 	}
 
 	const organizationAllowListError = validateProviderAgainstOrganizationSettings(

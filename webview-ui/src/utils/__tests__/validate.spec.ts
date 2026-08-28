@@ -244,6 +244,10 @@ describe("Model Validation Functions", () => {
 			["not json", "settings:validation.openAiExtraBody.invalidJson"],
 			["[]", "settings:validation.openAiExtraBody.objectRequired"],
 			[JSON.stringify({ model: "override" }), "settings:validation.openAiExtraBody.reservedKeys keys=model"],
+			[
+				JSON.stringify({ response_format: { type: "json_object" } }),
+				"settings:validation.openAiExtraBody.reservedKeys keys=response_format",
+			],
 		])("rejects invalid OpenAI-compatible Extra Body input", (openAiExtraBody, expectedError) => {
 			const config: ProviderSettings = {
 				apiProvider: providerIdentifiers.openai,
@@ -255,6 +259,58 @@ describe("Model Validation Functions", () => {
 
 			expect(validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)).toBe(
 				expectedError,
+			)
+		})
+	})
+
+	describe("validateApiConfiguration OpenAI-compatible Extra Body validation", () => {
+		const createConfig = (openAiExtraBody: string): ProviderSettings => ({
+			apiProvider: providerIdentifiers.openai,
+			openAiBaseUrl: "https://api.sailresearch.com/v1",
+			openAiApiKey: "valid-key",
+			openAiModelId: "zai-org/GLM-5.2-FP8",
+			openAiExtraBody,
+		})
+
+		it("accepts a valid Extra Body object through both validation entry points", () => {
+			const config = createConfig(JSON.stringify({ metadata: { completion_window: "balanced" } }))
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBeUndefined()
+			expect(
+				validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization),
+			).toBeUndefined()
+		})
+
+		it.each([
+			["invalid JSON", "not json", "settings:validation.openAiExtraBody.invalidJson"],
+			["non-object JSON", "[]", "settings:validation.openAiExtraBody.objectRequired"],
+			[
+				"a reserved request API key",
+				JSON.stringify({ model: "override" }),
+				"settings:validation.openAiExtraBody.reservedKeys keys=model",
+			],
+			[
+				"a reserved security key",
+				'{"constructor":{"prototype":{"polluted":true}}}',
+				"settings:validation.openAiExtraBody.reservedKeys keys=constructor",
+			],
+			[
+				"response_format",
+				JSON.stringify({ response_format: { type: "json_object" } }),
+				"settings:validation.openAiExtraBody.reservedKeys keys=response_format",
+			],
+		])("rejects %s with the localized error", (_name, openAiExtraBody, expectedError) => {
+			const config = createConfig(openAiExtraBody)
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(expectedError)
+		})
+
+		it("returns required-field errors before Extra Body errors", () => {
+			const config = createConfig("not json")
+			config.openAiApiKey = undefined
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(
+				"settings:validation.openAi",
 			)
 		})
 	})

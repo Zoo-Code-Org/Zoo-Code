@@ -6,17 +6,19 @@ import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinit
 
 export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
 
-export const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
+const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
+	// Prototype-pollution defenses; remaining keys are request-owned, including tool-call protocol controls.
 	"__proto__",
 	"constructor",
+	"prototype",
 	"max_completion_tokens",
 	"max_tokens",
 	"messages",
 	"model",
 	"parallel_tool_calls",
-	"prototype",
 	"reasoning",
 	"reasoning_effort",
+	"response_format",
 	"stream",
 	"stream_options",
 	"temperature",

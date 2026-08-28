@@ -437,6 +437,25 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 	})
 
 	describe("Extra Body", () => {
+		it("renders an undefined value as an editable empty field without a validation error", () => {
+			render(
+				<OpenAICompatible
+					apiConfiguration={{ openAiExtraBody: undefined } as ProviderSettings}
+					setApiConfigurationField={mockSetApiConfigurationField}
+					organizationAllowList={mockOrganizationAllowList}
+				/>,
+			)
+
+			const input = screen.getByTestId("openai-extra-body-input")
+			expect(input).toHaveValue("")
+			expect(input).not.toHaveAttribute("aria-invalid", "true")
+			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+
+			fireEvent.change(input, { target: { value: '{"store":false}' } })
+
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiExtraBody", '{"store":false}')
+		})
+
 		it("renders the saved JSON and updates the cached provider field", () => {
 			const openAiExtraBody = JSON.stringify({ metadata: { completion_window: "balanced" } }, null, 2)
 

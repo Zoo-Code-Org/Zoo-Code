@@ -2,6 +2,7 @@ import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, provi
 import {
 	getApiProtocol,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
+	parseOpenAiExtraBody,
 	PROVIDER_SETTINGS_KEYS,
 	providerSettingsSchema,
 	providerSettingsSchemaDiscriminated,
@@ -42,17 +43,62 @@ describe("OpenAI-compatible extra body settings", () => {
 		).toBe(false)
 	})
 
-	it.each(["model", "messages", "stream", "tools", "max_tokens", "__proto__"])(
-		"rejects the reserved request key %s",
-		(reservedKey) => {
-			expect(
-				providerSettingsSchemaDiscriminated.safeParse({
-					apiProvider: providerIdentifiers.openai,
-					openAiExtraBody: JSON.stringify({ [reservedKey]: "override" }),
-				}).success,
-			).toBe(false)
-		},
-	)
+	it.each([
+		"__proto__",
+		"constructor",
+		"prototype",
+		"max_completion_tokens",
+		"max_tokens",
+		"messages",
+		"model",
+		"parallel_tool_calls",
+		"reasoning",
+		"reasoning_effort",
+		"response_format",
+		"stream",
+		"stream_options",
+		"temperature",
+		"tool_choice",
+		"tools",
+	])("rejects the reserved extra-body key %s", (reservedKey) => {
+		expect(
+			providerSettingsSchemaDiscriminated.safeParse({
+				apiProvider: providerIdentifiers.openai,
+				openAiExtraBody: JSON.stringify({ [reservedKey]: "override" }),
+			}).success,
+		).toBe(false)
+	})
+
+	it("reports and filters reserved keys while preserving allowed nested fields", () => {
+		const result = parseOpenAiExtraBody(
+			JSON.stringify({
+				metadata: { completion_window: "balanced" },
+				model: "overridden-model",
+				response_format: { type: "json_object" },
+				stream: false,
+			}),
+		)
+
+		expect(result).toEqual({
+			success: false,
+			reason: "reservedKeys",
+			reservedKeys: ["model", "response_format", "stream"],
+			data: { metadata: { completion_window: "balanced" } },
+		})
+	})
+
+	it("accepts stop and n as provider-specific request fields", () => {
+		const settings = {
+			apiProvider: providerIdentifiers.openai,
+			openAiExtraBody: JSON.stringify({ stop: ["DONE"], n: 2 }),
+		}
+
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+		expect(parseOpenAiExtraBody(settings.openAiExtraBody)).toEqual({
+			success: true,
+			data: { stop: ["DONE"], n: 2 },
+		})
+	})
 })
 
 describe("OpenAI Codex provider settings", () => {

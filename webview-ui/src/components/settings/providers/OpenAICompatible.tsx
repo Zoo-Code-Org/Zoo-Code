@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, type FormEvent } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { useEvent } from "react-use"
 import { Checkbox } from "vscrui"
 import { VSCodeButton, VSCodeTextArea, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
@@ -18,6 +18,7 @@ import {
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Button, StandardTooltip } from "@src/components/ui"
+import { formatOpenAiExtraBodyValidationError } from "@src/utils/validate"
 
 import { convertHeadersToObject } from "../utils/headers"
 import { inputEventTransform, noTransform } from "../transforms"
@@ -56,13 +57,7 @@ export const OpenAICompatible = ({
 		return Object.entries(headers)
 	})
 	const extraBodyResult = parseOpenAiExtraBody(apiConfiguration.openAiExtraBody)
-	const extraBodyError = extraBodyResult.success
-		? undefined
-		: extraBodyResult.reason === "reservedKeys"
-			? t("settings:validation.openAiExtraBody.reservedKeys", {
-					keys: extraBodyResult.reservedKeys?.join(", ") ?? "",
-				})
-			: t(`settings:validation.openAiExtraBody.${extraBodyResult.reason}`)
+	const extraBodyError = formatOpenAiExtraBodyValidationError(extraBodyResult, t)
 
 	const handleAddCustomHeader = useCallback(() => {
 		// Only update the local state to show the new row in the UI.
@@ -118,14 +113,6 @@ export const OpenAICompatible = ({
 			(event: E | Event) => {
 				setApiConfigurationField(field, transform(event as E))
 			},
-		[setApiConfigurationField],
-	)
-
-	const handleExtraBodyChange = useCallback(
-		(event: Event | FormEvent<HTMLElement>) => {
-			const target = event.currentTarget as (HTMLElement & { value?: string }) | null
-			setApiConfigurationField("openAiExtraBody", target?.value ?? "")
-		},
 		[setApiConfigurationField],
 	)
 
@@ -279,7 +266,7 @@ export const OpenAICompatible = ({
 					resize="vertical"
 					rows={5}
 					value={apiConfiguration.openAiExtraBody ?? ""}
-					onInput={handleExtraBodyChange}
+					onInput={handleInputChange("openAiExtraBody")}
 					placeholder={'{\n  "metadata": {\n    "completion_window": "balanced"\n  }\n}'}
 					className="w-full font-mono"
 					aria-labelledby="openai-extra-body-label"

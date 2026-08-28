@@ -171,6 +171,20 @@ describe("OpenAiHandler", () => {
 		})
 	})
 
+	describe("withExtraBody", () => {
+		it("gives request-owned options precedence when an allowed Extra Body field collides", () => {
+			const extraBodyHandler = new OpenAiHandler({
+				...mockOptions,
+				openAiExtraBody: JSON.stringify({ service_tier: "flex" }),
+			})
+
+			expect(extraBodyHandler["withExtraBody"]({})).toEqual({ service_tier: "flex" })
+			expect(extraBodyHandler["withExtraBody"]({ service_tier: "default" })).toEqual({
+				service_tier: "default",
+			})
+		})
+	})
+
 	describe("createMessage", () => {
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [
