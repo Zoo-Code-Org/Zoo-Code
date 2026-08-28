@@ -11,9 +11,15 @@ import {
 	type RouterModels,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_WRITE_DELAY_MS,
 } from "@roo-code/types"
 
-import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import {
+	ExtensionStateContextProvider,
+	useExtensionState,
+	mergeExtensionState,
+	createInitialExtensionState,
+} from "../ExtensionStateContext"
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -210,6 +216,18 @@ describe("ExtensionStateContext", () => {
 		)
 
 		expect(JSON.parse(screen.getByTestId("show-rooignored-files").textContent!)).toBe(true)
+	})
+
+	it("initializes the checkpoint keys and write delay to the pre-hydration defaults", () => {
+		// The initializer itself (not a merge fixture) must carry the series
+		// defaults: a regression that dropped them from createInitialExtensionState
+		// would otherwise stay hidden because the merge tests supply the keys
+		// manually.
+		const state = createInitialExtensionState()
+
+		expect(state.perWriteCheckpoints).toBe(true)
+		expect(state.changeCardDetail).toBe("summary")
+		expect(state.writeDelayMs).toBe(DEFAULT_WRITE_DELAY_MS)
 	})
 
 	it("initializes shadowed context fields from initialState", () => {

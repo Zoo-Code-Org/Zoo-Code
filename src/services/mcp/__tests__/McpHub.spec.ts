@@ -56,7 +56,12 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 					// Mirror the production safeWriteJson merge contract: only ENOENT
 					// and SyntaxError are recoverable; an EACCES or I/O failure must
 					// reject before the merge callback runs.
-					const code = (error as { code?: string })?.code
+					// unknown-safe narrowing: no cast on the caught value (the "in"
+					// check narrows to object & Record<"code", unknown>).
+					const code =
+						error && typeof error === "object" && "code" in error && typeof error.code === "string"
+							? error.code
+							: undefined
 					if (!(error instanceof SyntaxError) && code !== "ENOENT") {
 						throw error
 					}

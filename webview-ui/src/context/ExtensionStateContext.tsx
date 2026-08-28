@@ -197,7 +197,7 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	}
 }
 
-const createInitialExtensionState = (): ExtensionState => ({
+export const createInitialExtensionState = (): ExtensionState => ({
 	apiConfiguration: {},
 	version: "",
 	clineMessages: [],
