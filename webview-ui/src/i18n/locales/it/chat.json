@@ -180,7 +180,8 @@
 		"rollingBack": "Annullamento...",
 		"rolledBack": "Annullato",
 		"stepRolledBack": "Passaggio annullato",
-		"rollbackFailed": "Annullamento non riuscito"
+		"rollbackFailed": "Annullamento non riuscito",
+		"openFile": "Apri file"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

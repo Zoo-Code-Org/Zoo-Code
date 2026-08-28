@@ -199,7 +199,8 @@
 		"rollingBack": "Rolling back...",
 		"rolledBack": "Rolled back",
 		"stepRolledBack": "Step rolled back",
-		"rollbackFailed": "Rollback failed"
+		"rollbackFailed": "Rollback failed",
+		"openFile": "Open file"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

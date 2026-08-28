@@ -177,7 +177,8 @@
 		"rollingBack": "되돌리는 중...",
 		"rolledBack": "되돌림",
 		"stepRolledBack": "단계가 되돌려졌음",
-		"rollbackFailed": "되돌리기 실패"
+		"rollbackFailed": "되돌리기 실패",
+		"openFile": "파일 열기"
 	},
 	"checkpoint": {
 		"regular": "체크포인트",

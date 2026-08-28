@@ -177,7 +177,8 @@
 		"rollingBack": "Cofanie...",
 		"rolledBack": "Cofnięto",
 		"stepRolledBack": "Krok cofnięty",
-		"rollbackFailed": "Cofnięcie nie powiodło się"
+		"rollbackFailed": "Cofnięcie nie powiodło się",
+		"openFile": "Otwórz plik"
 	},
 	"checkpoint": {
 		"regular": "Punkt kontrolny",

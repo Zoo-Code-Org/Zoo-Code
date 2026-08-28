@@ -177,7 +177,8 @@
 		"rollingBack": "Revertendo...",
 		"rolledBack": "Revertido",
 		"stepRolledBack": "Etapa revertida",
-		"rollbackFailed": "Falha na reversão"
+		"rollbackFailed": "Falha na reversão",
+		"openFile": "Abrir arquivo"
 	},
 	"checkpoint": {
 		"regular": "Ponto de verificação",

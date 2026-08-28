@@ -177,7 +177,8 @@
 		"rollingBack": "正在回退...",
 		"rolledBack": "已回退",
 		"stepRolledBack": "步骤已回退",
-		"rollbackFailed": "回退失败"
+		"rollbackFailed": "回退失败",
+		"openFile": "打开文件"
 	},
 	"checkpoint": {
 		"regular": "检查点",
