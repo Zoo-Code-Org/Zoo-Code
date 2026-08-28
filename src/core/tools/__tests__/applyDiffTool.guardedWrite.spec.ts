@@ -2,15 +2,33 @@
 
 import type { MockedFunction } from "vitest"
 
+import * as fsPromises from "fs/promises"
+import path from "path"
+
 import { fileExistsAtPath } from "../../../utils/fs"
 import type { Task } from "../../task/Task"
 import { ApplyDiffTool } from "../ApplyDiffTool"
 
-vi.mock("fs/promises", () => ({
-	default: {
-		readFile: vi.fn().mockResolvedValue("original file content\n"),
-	},
-}))
+vi.mock("fs/promises", () => {
+	// BigInt stats so the S4b observation (ReadFileTool contract) can build a
+	// deterministic version token. Stable values = pre/post tokens agree. The
+	// named `stat` export is the same double as `default.stat` (the tool imports
+	// the default namespace; the spec asserts through the named one).
+	const statMock = vi.fn().mockResolvedValue({
+		dev: 7n,
+		ino: 4242n,
+		size: 1234n,
+		mtimeNs: 1_700_000_000_123_456_789n,
+		ctimeNs: 1_700_000_000_789_999_999n,
+	})
+	return {
+		default: {
+			readFile: vi.fn().mockResolvedValue("original file content\n"),
+			stat: statMock,
+		},
+		stat: statMock,
+	}
+})
 
 vi.mock("../../../utils/fs", () => ({
 	fileExistsAtPath: vi.fn().mockResolvedValue(true),
@@ -49,8 +67,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		| "diffViewProvider"
 		| "providerRef"
 		| "fileContextTracker"
+		| "observationRegistry"
 	>
 	let mockSaveDirectly: MockedFunction<(...args: unknown[]) => Promise<unknown>>
+	let mockObserve: MockedFunction<(...args: unknown[]) => void>
 	let mockAskApproval: MockedFunction<(...args: unknown[]) => Promise<boolean>>
 	let mockHandleError: MockedFunction<(...args: unknown[]) => Promise<void>>
 	let mockPushToolResult: MockedFunction<(...args: unknown[]) => void>
@@ -65,6 +85,10 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			userEdits: undefined,
 			finalContent: "new content",
 		})
+
+		// S2 observation registry double: the tool records its own read here before
+		// the guarded edit publish (S4b trial addendum).
+		mockObserve = vi.fn()
 
 		// Structural stubs for the guarded-write path: the real DiffViewProvider is
 		// out of scope here, so vi.fn() doubles stand in for the members the tool
@@ -110,6 +134,9 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			fileContextTracker: {
 				trackFileContext: vi.fn().mockResolvedValue(undefined),
 			} as unknown as Task["fileContextTracker"],
+			observationRegistry: {
+				observe: mockObserve,
+			} as unknown as Task["observationRegistry"],
 		}
 
 		mockAskApproval = vi.fn().mockResolvedValue(true)
@@ -134,9 +161,36 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 			1000,
 			"edit",
 		)
+		// S4b (trial addendum): the tool's own read is recorded as an observation so
+		// the guarded edit publish can CAS against the observed token.
+		expect(mockObserve).toHaveBeenCalledTimes(1)
+		expect(mockObserve.mock.calls[0]?.[0]).toBe(path.resolve(mockTask.cwd, "src/thing.ts"))
+		expect(mockObserve.mock.calls[0]?.[1]).toBe("7:4242:1234:1700000000123456789:1700000000789999999")
 		expect(mockPushToolResult).toHaveBeenCalledWith("Saved file")
 		expect(mockTask.didEditFile).toBe(true)
 		expect(mockHandleError).not.toHaveBeenCalled()
+	})
+
+	it("does not observe when the pre- and post-read tokens disagree", async () => {
+		// A mutation between the two stats means the content the diff was applied
+		// to is not the on-disk state: leave the target unobserved (ReadFileTool
+		// contract) so the guarded write gets a stale rejection, not a false match.
+		const preStats = { dev: 7n, ino: 4242n, size: 1234n, mtimeNs: 1n, ctimeNs: 2n }
+		const postStats = { dev: 7n, ino: 4242n, size: 9999n, mtimeNs: 3n, ctimeNs: 4n }
+		const mockedStat = vi.mocked(fsPromises.stat)
+		mockedStat.mockResolvedValueOnce(preStats as unknown as Awaited<ReturnType<typeof fsPromises.stat>>)
+		mockedStat.mockResolvedValueOnce(postStats as unknown as Awaited<ReturnType<typeof fsPromises.stat>>)
+
+		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+		})
+
+		expect(mockObserve).not.toHaveBeenCalled()
+		// The publish still runs (the saveDirectly double stands in for the guard);
+		// the registry simply carries no observation for this path.
+		expect(mockSaveDirectly).toHaveBeenCalled()
 	})
 
 	it("surfaces the unobserved edit remediation as a tool error", async () => {

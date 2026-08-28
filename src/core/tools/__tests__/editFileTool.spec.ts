@@ -182,6 +182,10 @@ describe("editFileTool", () => {
 			isPartial?: boolean
 			accessAllowed?: boolean
 			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// (perWriteCheckpoints, auto-approval settings, ...) so the helper's
+			// providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -196,7 +200,11 @@ describe("editFileTool", () => {
 			getState: vi.fn().mockResolvedValue({
 				diagnosticsEnabled: true,
 				writeDelayMs: 1000,
-				experiments: options.experiments ?? {},
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true. Tests exercising
+				// the chat-diff branch opt in via the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
 			}),
 		})
 
@@ -601,16 +609,10 @@ describe("editFileTool", () => {
 		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// No stored experiment value: the default (flipped to true in L2) resolves
-			// to the chat-diff path.
-			mockTask.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: {},
-				}),
-			})
-
-			await executeEditFileTool()
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeEditFileTool({}, { experiments: {} })
 
 			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
@@ -621,15 +623,8 @@ describe("editFileTool", () => {
 		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// Explicit stored true: same chat-diff routing as the default.
-			mockTask.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: { preventFocusDisruption: true },
-				}),
-			})
-
-			await executeEditFileTool()
+			// Trial addendum: threaded through the helper's experiments option.
+			await executeEditFileTool({}, { experiments: { preventFocusDisruption: true } })
 
 			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
@@ -944,16 +939,9 @@ describe("editFileTool", () => {
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
-			mockTask.providerRef.deref = vi.fn().mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: {},
-					perWriteCheckpoints: false,
-				}),
-			})
-
-			await executeEditFileTool({})
+			// Trial addendum: thread the state through the helper (its providerRef pin
+			// would otherwise clobber this test's extension state).
+			await executeEditFileTool({}, { state: { perWriteCheckpoints: false } })
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
@@ -1000,17 +988,8 @@ describe("editFileTool", () => {
 		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {
 			// B3a: when the step is auto-approved the checkpoint write carries
 			// autoApproved so checkpointSave can force the compact change card.
-			mockTask.providerRef.deref = vi.fn().mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: {},
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-				}),
-			})
-
-			await executeEditFileTool({})
+			// Trial addendum: thread the auto-approval state through the helper.
+			await executeEditFileTool({}, { state: { autoApprovalEnabled: true, alwaysAllowWrite: true } })
 
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask, false, true, {
 				path: testFilePath,

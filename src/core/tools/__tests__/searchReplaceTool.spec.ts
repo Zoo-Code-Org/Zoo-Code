@@ -169,6 +169,9 @@ describe("searchReplaceTool", () => {
 			isPartial?: boolean
 			accessAllowed?: boolean
 			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// so the helper's providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -183,7 +186,11 @@ describe("searchReplaceTool", () => {
 			getState: vi.fn().mockResolvedValue({
 				diagnosticsEnabled: true,
 				writeDelayMs: 1000,
-				experiments: options.experiments ?? {},
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true. Tests exercising
+				// the chat-diff branch opt in via the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
 			}),
 		})
 
@@ -344,16 +351,10 @@ describe("searchReplaceTool", () => {
 		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// No stored experiment value: the default (flipped to true in L2) resolves
-			// to the chat-diff path.
-			mockCline.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: {},
-				}),
-			})
-
-			await executeSearchReplaceTool()
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeSearchReplaceTool({}, { experiments: {} })
 
 			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
@@ -364,15 +365,8 @@ describe("searchReplaceTool", () => {
 		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// Explicit stored true: same chat-diff routing as the default.
-			mockCline.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: { preventFocusDisruption: true },
-				}),
-			})
-
-			await executeSearchReplaceTool()
+			// Trial addendum: threaded through the helper's experiments option.
+			await executeSearchReplaceTool({}, { experiments: { preventFocusDisruption: true } })
 
 			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()

@@ -13,6 +13,7 @@ import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
+import { versionTokenOfStat } from "../../utils/versionToken"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
@@ -68,7 +69,21 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// S4b (trial addendum): apply_diff reads the file itself to apply the patch.
+			// Record that read as an S2 observation under the ReadFileTool contract
+			// (observed only when the pre- and post-read tokens agree) so the guarded
+			// edit publish in the prevent-focus-disruption branch can compare-and-swap
+			// against the token this tool observed, instead of being rejected as an
+			// unobserved edit.
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					task.observationRegistry.observe(absolutePath, preReadToken)
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(

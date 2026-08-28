@@ -172,6 +172,9 @@ describe("editTool", () => {
 			isPartial?: boolean
 			accessAllowed?: boolean
 			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// so the helper's providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -186,7 +189,11 @@ describe("editTool", () => {
 			getState: vi.fn().mockResolvedValue({
 				diagnosticsEnabled: true,
 				writeDelayMs: 1000,
-				experiments: options.experiments ?? {},
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true. Tests exercising
+				// the chat-diff branch opt in via the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
 			}),
 		})
 
@@ -375,16 +382,10 @@ describe("editTool", () => {
 		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// No stored experiment value: the default (flipped to true in L2) resolves
-			// to the chat-diff path.
-			mockTask.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: {},
-				}),
-			})
-
-			await executeEditTool()
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeEditTool({}, { experiments: {} })
 
 			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockTask.diffViewProvider.open).not.toHaveBeenCalled()
