@@ -52,7 +52,19 @@ vi.mock("../../../utils/safeWriteJson", () => ({
 				try {
 					const fs = await import("fs/promises")
 					existing = JSON.parse(await fs.readFile(filePath, "utf8"))
-				} catch {
+				} catch (error) {
+					// Mirror the production safeWriteJson merge contract: only ENOENT
+					// and SyntaxError are recoverable; an EACCES or I/O failure must
+					// reject before the merge callback runs.
+					// unknown-safe narrowing: no cast on the caught value (the "in"
+					// check narrows to object & Record<"code", unknown>).
+					const code =
+						error && typeof error === "object" && "code" in error && typeof error.code === "string"
+							? error.code
+							: undefined
+					if (!(error instanceof SyntaxError) && code !== "ENOENT") {
+						throw error
+					}
 					existing = null
 				}
 				value = options.merge(existing, data)
@@ -311,6 +323,41 @@ describe("McpHub", () => {
 			expect(fs.writeFile).toHaveBeenCalledTimes(1)
 			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
 			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("writes the default stub when the existing mcpServers value is an array", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			// Arrays satisfy `typeof === "object"`; an mcpServers map must be a
+			// plain object, so an array is invalid and replaced by the stub
+			// instead of being preserved and rejected by McpSettingsSchema later.
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			vi.mocked(fs.readFile).mockResolvedValueOnce(JSON.stringify({ mcpServers: [] }))
+
+			await mcpHub.getMcpSettingsFilePath()
+
+			expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			const [, writtenData] = vi.mocked(fs.writeFile).mock.calls[0]
+			expect(JSON.parse(writtenData as string)).toEqual({ mcpServers: {} })
+		})
+
+		it("rejects creation when the locked read fails with an I/O error (EACCES)", async () => {
+			const settingsPath = path.join("/mock/settings/path", "mcp_settings.json")
+
+			vi.mocked(fs.access).mockRejectedValueOnce(
+				Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+			)
+			// The locked read fails with a real I/O error (not ENOENT): the
+			// safeWriteJson mock mirrors the production contract — reject before
+			// the merge callback runs instead of treating the file as absent.
+			vi.mocked(fs.readFile).mockRejectedValueOnce(
+				Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }),
+			)
+
+			await expect(mcpHub.getMcpSettingsFilePath()).rejects.toThrow("EACCES: permission denied")
+			expect(fs.writeFile).not.toHaveBeenCalled()
 		})
 	})
 
