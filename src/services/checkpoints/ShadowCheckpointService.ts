@@ -444,6 +444,23 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 				throw new Error(`restoreFile target is outside the workspace: ${filePath}`)
 			}
 
+			// The lexical check cannot see through a symlinked ancestor: a link
+			// inside the workspace pointing outside it passes the prefix check
+			// while the real target resolves elsewhere. Re-check containment on
+			// the resolved (real) paths whenever the target file currently
+			// exists — that is the destructive case. A target that does not exist
+			// cannot be deleted, and the checkout branch only writes files the
+			// task-owned shadow repo recorded. Resolving both sides keeps a
+			// legitimate symlinked workspace root working.
+			if (await fileExistsAtPath(resolvedTarget)) {
+				const realWorkspaceRoot = await fs.realpath(this.workspaceDir)
+				const realRoot = realWorkspaceRoot.endsWith(path.sep) ? realWorkspaceRoot : realWorkspaceRoot + path.sep
+				const realTarget = await fs.realpath(resolvedTarget)
+				if (realTarget !== realWorkspaceRoot && !realTarget.startsWith(realRoot)) {
+					throw new Error(`restoreFile target resolves outside the workspace: ${filePath}`)
+				}
+			}
+
 			const start = Date.now()
 			const existed = await this.fileExistsInCommit(commitHash, gitPath)
 
@@ -466,6 +483,22 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	/** Whether `filePath` exists in the tree of `commitHash`. */
 	private async fileExistsInCommit(commitHash: string, filePath: string): Promise<boolean> {
+		// A failed lookup is not evidence the file is absent. If the commit object
+		// itself cannot be read (invalid hash, corrupt or missing shadow repo),
+		// falling through to the restoreFile delete branch would remove a live
+		// file. Verify the object first and fail the restore loudly instead.
+		//
+		// Verification must be evidence-based: simple-git's raw() only rejects
+		// when git writes a fatal to stderr, and `git cat-file -e <bad-sha>`
+		// fails *silently* (exit 1, no output) — a silent resolution would be
+		// read as "valid commit". `rev-parse --verify` emits the resolved id on
+		// success and a stderr fatal on every failure mode, so the reject is
+		// reliable.
+		try {
+			await this.git!.raw(["rev-parse", "--verify", `${commitHash}^{commit}`])
+		} catch {
+			throw new Error(`Checkpoint unavailable: ${commitHash}`)
+		}
 		try {
 			await this.git!.raw(["cat-file", "-e", `${commitHash}:${filePath}`])
 			return true
