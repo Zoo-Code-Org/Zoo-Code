@@ -566,18 +566,15 @@ export class ClineProvider
 	 * The write re-reads the map fresh and merges into the existing entry, removing the
 	 * entry entirely when nothing persistable remains, so concurrent views cannot clobber it.
 	 * The entry is keyed by the view id active when the change was made. Writes captured
-	 * while the provider still holds its temporary (pre-launch) id are not persisted:
-	 * temporary ids are session-local counters and would create orphan entries.
+	 * while the provider still holds its temporary (pre-launch) id persist under that id
+	 * and are re-keyed to the stable view id when the webview registers one, so a change
+	 * that lands before the launch message stays durable instead of being lost.
 	 */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
 		// Capture the id at change time: a write belongs to the view that was active
 		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
-			if (viewStateId === this.viewId) {
-				return
-			}
-
 			const states = this.getPersistedViewStates({ fresh: true })
 			const current = states[viewStateId] ?? {}
 			const next: PersistedViewState = { ...current }
@@ -677,6 +674,40 @@ export class ClineProvider
 	}
 
 	/**
+	 * Re-keys this provider's temporary pre-launch viewStates entry to the newly
+	 * registered stable id so pre-launch writes become durable under the stable key
+	 * instead of orphaning under a session-local temporary id. Only the provider's own
+	 * temporary id is eligible: an entry under a previously registered stable id belongs
+	 * to that webview's storage and is left alone. When the stable entry already exists
+	 * it wins and the temporary entry is dropped, because temporary ids are session
+	 * counters that can collide across window reloads. Runs through the serialized write
+	 * queue like every other viewStates mutation.
+	 */
+	private async rekeyPersistedViewStateEntry(nextViewStateId: string): Promise<void> {
+		const previousViewStateId = this.viewId
+
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			const previous = states[previousViewStateId]
+
+			if (!previous) {
+				return
+			}
+
+			delete states[previousViewStateId]
+
+			if (!states[nextViewStateId]) {
+				states[nextViewStateId] = previous
+			}
+
+			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+
+	/**
 	 * Registers this provider's stable view identifier and loads any persisted selections it owns.
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */
@@ -688,6 +719,11 @@ export class ClineProvider
 		}
 
 		this.viewStateId = normalizedViewStateId.replace(/[^A-Za-z0-9_-]/g, "_")
+
+		// Re-key any durable entry written under the temporary pre-launch id before
+		// loading, so the load sees the view's own pre-registration selections.
+		await this.rekeyPersistedViewStateEntry(this.viewStateId)
+
 		await this.loadViewState()
 	}
 
@@ -737,9 +773,9 @@ export class ClineProvider
 	}
 
 	/**
-	 * Saves a single view-local state value. The in-memory buffer is always updated; only
-	 * the non-secret subset (mode, currentApiConfigName) is persisted durably, and only
-	 * once this provider has a stable view id.
+	 * Saves a single view-local state value. The in-memory buffer is always updated; the
+	 * non-secret subset (mode, currentApiConfigName) is persisted durably under the view
+	 * id active when the change was made, re-keyed to the stable id on registration.
 	 */
 	public async saveViewState<K extends keyof ViewLocalStateValues>(
 		key: K,

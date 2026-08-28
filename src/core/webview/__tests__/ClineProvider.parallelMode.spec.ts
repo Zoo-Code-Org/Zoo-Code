@@ -1244,22 +1244,44 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		it("should not persist durable viewStates entries under the temporary pre-launch view id", async () => {
+		it("should re-key durable viewStates entries from the temporary pre-launch view id", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
+			// A change made before the stable id is registered persists under the
+			// temporary id so it is not lost; registration re-keys it to the stable id.
 			await provider.saveViewState("mode", "architect")
 
-			// The in-memory buffer is updated, but nothing durable is written while the
-			// provider still holds its temporary (session-local) id.
 			expect(provider["viewLocalState"].mode).toBe("architect")
-			expect(provider.contextProxy.getValue("viewStates")).toBeUndefined()
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				[provider.viewId]: { mode: "architect" },
+			})
 
 			await provider["setViewStateId"]("stable-sidebar-view")
 			await provider.saveViewState("mode", "debugger")
 
-			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
-				"stable-sidebar-view": { mode: "debugger" },
+			const viewStates = provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }>
+			expect(viewStates["stable-sidebar-view"]).toMatchObject({ mode: "debugger" })
+			expect(viewStates[provider.viewId]).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("should drop the temporary viewStates entry when a stable entry already exists", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			// A stable entry already exists (e.g. a previous session persisted under a
+			// colliding temporary id); it must win over the temporary entry.
+			await provider.contextProxy.setValue("viewStates", {
+				[provider.viewId]: { mode: "architect", updatedAt: 1 },
+				"stable-sidebar-view": { mode: "debugger", updatedAt: 2 },
 			})
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+
+			const viewStates = provider.contextProxy.getValue("viewStates") as Record<string, { mode?: string }>
+			expect(viewStates["stable-sidebar-view"]).toMatchObject({ mode: "debugger" })
+			expect(viewStates[provider.viewId]).toBeUndefined()
+			expect(provider["viewLocalState"].mode).toBe("debugger")
 
 			await provider.dispose()
 		})
@@ -1268,18 +1290,21 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 			const providerAccess = provider as unknown as {
 				viewId: string
-				viewLocalState: { mode?: string }
+				viewLocalState: { mode?: string; currentApiConfigName?: string }
 				loadViewState(): Promise<void>
 				setViewStateId(id: string): Promise<void>
 			}
 
-			// Seed a persisted entry under the provider's temporary id.
-			mockContext.globalState.update("viewStates", {
+			// Seed persisted entries under both ids through the proxy so the loads
+			// observe them via the cached read path: the temporary entry holds a
+			// pre-registration selection, the stable entry the post-registration one.
+			await provider.contextProxy.setValue("viewStates", {
 				[providerAccess.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
+				"stable-sidebar-view": { mode: "debug", updatedAt: 2 },
 			})
 
-			// Hang the temporary id's profile lookup so the stable id can be registered
-			// while that load is still in flight.
+			// Hang the temporary entry's profile lookup so that load is still in flight
+			// when the stable id is registered.
 			let releaseGhost!: () => void
 			const ghostLoad = new Promise<void>((resolve) => {
 				releaseGhost = resolve
@@ -1297,12 +1322,17 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			const staleLoad = providerAccess.loadViewState()
 
-			await providerAccess.setViewStateId("stable-sidebar-view")
+			// Register the stable id without awaiting its load: the re-key drops the
+			// temporary entry (the stable one already exists) and the registration's own
+			// load settles on the stable entry immediately.
+			const register = providerAccess.setViewStateId("stable-sidebar-view")
+			await register
+
 			releaseGhost()
 			await staleLoad
 
 			// The stale (temporary-id) load must not overwrite the stable id's load.
-			expect(providerAccess.viewLocalState).toEqual({})
+			expect(providerAccess.viewLocalState).toEqual({ mode: "debug" })
 
 			await provider.dispose()
 		})
