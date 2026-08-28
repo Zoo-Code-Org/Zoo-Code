@@ -22,31 +22,6 @@ export const opencodeGoDefaultModelInfo: ModelInfo = {
 export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
 
 /**
- * Limits for Go models that do not yet have a full native configuration below.
- *
- * The Go `/v1/models` endpoint currently returns only model IDs, so these
- * values prevent newly listed models from inheriting the generic 200k context
- * window. Keep this table aligned with the endpoint and models.dev metadata.
- */
-export const opencodeGoModelLimits: Record<string, Pick<ModelInfo, "contextWindow" | "maxTokens">> = {
-	"kimi-k2.7-code": { contextWindow: 262_144, maxTokens: 262_144 },
-	"longcat-2.0": { contextWindow: 1_000_000, maxTokens: 131_072 },
-	"glm-5.3-flash": { contextWindow: 1_000_000, maxTokens: 131_072 },
-	"deepseek-v4-flash-vision-exp": { contextWindow: 1_000_000, maxTokens: 384_000 },
-	"qwen3.8-flash": { contextWindow: 1_000_000, maxTokens: 131_072 },
-	"qwen3.5-plus": { contextWindow: 262_144, maxTokens: 65_536 },
-	"mimo-v2-pro": { contextWindow: 1_048_576, maxTokens: 128_000 },
-	"mimo-v2-omni": { contextWindow: 262_144, maxTokens: 128_000 },
-	"hy4-preview": { contextWindow: 1_024_000, maxTokens: 64_000 },
-	hy3: { contextWindow: 256_000, maxTokens: 64_000 },
-	"hy3-preview": { contextWindow: 256_000, maxTokens: 64_000 },
-	"gpt-5.6-luna": { contextWindow: 1_050_000, maxTokens: 128_000 },
-	"grok-4.5": { contextWindow: 500_000, maxTokens: 500_000 },
-	"grok-4.6": { contextWindow: 500_000, maxTokens: 500_000 },
-	"muse-spark-1.2-contributor": { contextWindow: 1_048_576, maxTokens: 131_072 },
-}
-
-/**
  * Native per-model configuration for the Opencode Go plan.
  *
  * The Go `/v1/models` endpoint only reliably returns `id` and (sometimes)
@@ -127,6 +102,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available via the Opencode Go plan.",
 	},
+	"glm-5.3-flash": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "high", "max"],
+		reasoningEffort: "max",
+		preserveReasoning: true,
+		inputPrice: 0.075,
+		outputPrice: 0.25,
+		cacheReadsPrice: 0.015,
+		description:
+			"GLM-5.3 Flash is Zhipu's fast multimodal coding and agent model with a 1M context window and configurable reasoning effort. Available via the Opencode Go plan.",
+	},
 	"glm-5.2": {
 		maxTokens: 131_072,
 		contextWindow: 1_000_000,
@@ -188,6 +178,36 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Kimi K2.6 is Moonshot AI's native multimodal agentic MoE model with a 256k context window, built for long-horizon coding and tool use. Available via the Opencode Go plan.",
 	},
+	"kimi-k2.7-code": {
+		maxTokens: 262_144,
+		contextWindow: 262_144,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		preserveReasoning: true,
+		defaultTemperature: 1.0,
+		inputPrice: 0.95,
+		outputPrice: 4.0,
+		cacheReadsPrice: 0.19,
+		description:
+			"Kimi K2.7 Code is Moonshot AI's coding model for long-context programming tasks, with multimodal input and a 256k context window. Available via the Opencode Go plan.",
+	},
+
+	// --- Meituan LongCat ---
+	"longcat-2.0": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningBinary: true,
+		preserveReasoning: true,
+		inputPrice: 0.3,
+		outputPrice: 1.2,
+		cacheReadsPrice: 0.006,
+		description:
+			"LongCat 2.0 is Meituan's long-context reasoning and coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
 
 	// --- Xiaomi MiMo ---
 	"mimo-v2.5": {
@@ -225,6 +245,36 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		},
 		description:
 			"MiMo V2.5 Pro - Xiaomi's flagship reasoning model with 1M context, deep thinking, and tool calling. Available via the Opencode Go plan.",
+	},
+	"mimo-v2-pro": {
+		maxTokens: 128_000,
+		contextWindow: 1_048_576,
+		supportsImages: false,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 1.0,
+		outputPrice: 3.0,
+		cacheReadsPrice: 0.2,
+		longContextPricing: {
+			thresholdTokens: 256_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"MiMo V2 Pro is Xiaomi's text reasoning and coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"mimo-v2-omni": {
+		maxTokens: 128_000,
+		contextWindow: 262_144,
+		supportsImages: true,
+		supportsPromptCache: false,
+		preserveReasoning: true,
+		inputPrice: 0.4,
+		outputPrice: 2.0,
+		cacheReadsPrice: 0.08,
+		description:
+			"MiMo V2 Omni is Xiaomi's multimodal reasoning model with a 256k context window. Available via the Opencode Go plan.",
 	},
 
 	// --- MiniMax ---
@@ -280,6 +330,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 	},
 
 	// --- Alibaba Qwen ---
+	"qwen3.5-plus": {
+		maxTokens: 65_536,
+		contextWindow: 262_144,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		preserveReasoning: true,
+		inputPrice: 0.2,
+		outputPrice: 1.2,
+		cacheReadsPrice: 0.02,
+		cacheWritesPrice: 0.25,
+		description:
+			"Qwen3.5 Plus is Alibaba's multimodal reasoning model with a 256k context window. Available via the Opencode Go plan.",
+	},
 	"qwen3.6-plus": {
 		maxTokens: 65_536,
 		contextWindow: 1_000_000,
@@ -346,6 +411,22 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Qwen3.8 Max - Alibaba's flagship multimodal reasoning model with a 1M context window, 128k max output, and long-horizon coding and agentic capabilities. Available via the Opencode Go plan.",
 	},
+	"qwen3.8-flash": {
+		maxTokens: 131_072,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		preserveReasoning: true,
+		inputPrice: 0.15,
+		outputPrice: 0.47,
+		cacheReadsPrice: 0.016,
+		cacheWritesPrice: 0.2,
+		description:
+			"Qwen3.8 Flash is Alibaba's fast multimodal reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
 
 	// --- DeepSeek ---
 	"deepseek-v4-pro": {
@@ -384,6 +465,70 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model supporting thinking and non-thinking modes. Available via the Opencode Go plan.",
 	},
+	"deepseek-v4-flash-vision-exp": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "high", "max"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.22,
+		outputPrice: 0.66,
+		cacheReadsPrice: 0.007,
+		description:
+			"DeepSeek V4 Flash Vision Experimental is a fast multimodal reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+
+	// --- Tencent Hunyuan ---
+	"hy4-preview": {
+		maxTokens: 64_000,
+		contextWindow: 1_024_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.834,
+		outputPrice: 2.501,
+		cacheReadsPrice: 0.042,
+		description:
+			"Hunyuan 4 Preview is Tencent's long-context reasoning and coding model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	hy3: {
+		maxTokens: 64_000,
+		contextWindow: 256_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.0175,
+		outputPrice: 0.0725,
+		cacheReadsPrice: 0.004375,
+		description:
+			"Hunyuan 3 is Tencent's reasoning and coding model with a 256k context window. Available via the Opencode Go plan.",
+	},
+	"hy3-preview": {
+		// The live endpoint still lists this historical alias; it shares HY3's limits and pricing.
+		maxTokens: 64_000,
+		contextWindow: 256_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "high"],
+		reasoningEffort: "high",
+		preserveReasoning: true,
+		inputPrice: 0.0175,
+		outputPrice: 0.0725,
+		cacheReadsPrice: 0.004375,
+		description:
+			"Hunyuan 3 Preview is Tencent's preview reasoning and coding model with a 256k context window. Available via the Opencode Go plan.",
+	},
+
 	// --- OpenAI Responses ---
 	// Luna is curated here because the Go gateway's model catalogue does not
 	// currently provide its capability metadata. These values intentionally
@@ -393,6 +538,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		contextWindow: 1_050_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		supportsMaxTokens: true,
 		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
 		reasoningEffort: "medium",
 		inputPrice: 0.2,
@@ -406,7 +552,62 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 			cacheWritesPriceMultiplier: 2,
 			cacheReadsPriceMultiplier: 2,
 		},
-		description: "GPT-5.6 Luna via the OpenCode Go Responses API.",
+		description:
+			"GPT-5.6 Luna is OpenAI's fast reasoning model with a 1M context window. Available via the Opencode Go plan.",
+	},
+	"grok-4.5": {
+		maxTokens: 500_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "high",
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.3,
+		longContextPricing: {
+			thresholdTokens: 200_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"Grok 4.5 is xAI's multimodal reasoning and agent model with a 500k context window. Available via the Opencode Go plan.",
+	},
+	"grok-4.6": {
+		maxTokens: 500_000,
+		contextWindow: 500_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		inputPrice: 2.0,
+		outputPrice: 6.0,
+		cacheReadsPrice: 0.5,
+		longContextPricing: {
+			thresholdTokens: 200_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description:
+			"Grok 4.6 is xAI's multimodal reasoning and agent model with a 500k context window. Available via the Opencode Go plan.",
+	},
+	"muse-spark-1.2-contributor": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.2,
+		cacheReadsPrice: 0.002,
+		description:
+			"Muse Spark 1.2 Contributor is Meta's multimodal coding model with a 1M context window. Available via the Opencode Go plan.",
 	},
 }
 
@@ -429,6 +630,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 	// --- Alibaba Qwen ---
 	"qwen3.8-max",
+	"qwen3.8-flash",
 	"qwen3.7-max",
 	"qwen3.7-plus",
 	"qwen3.6-plus",
@@ -487,12 +689,4 @@ export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
  */
 export function getOpencodeGoModelInfo(modelId: string): ModelInfo | undefined {
 	return opencodeGoModels[modelId]
-}
-
-/** Returns explicit model limits when Go omits them from `/v1/models`. */
-export function getOpencodeGoModelLimits(modelId: string): Pick<ModelInfo, "contextWindow" | "maxTokens"> | undefined {
-	const native = getOpencodeGoModelInfo(modelId)
-	return native
-		? { contextWindow: native.contextWindow, maxTokens: native.maxTokens }
-		: opencodeGoModelLimits[modelId]
 }

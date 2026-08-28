@@ -1372,6 +1372,7 @@ describe("OpencodeGoHandler", () => {
 
 	describe("isOpencodeGoAnthropicFormatModel", () => {
 		it("classifies Qwen and MiniMax Go models as Anthropic-format", () => {
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.8-flash")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-max")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.7-plus")).toBe(true)
 			expect(isOpencodeGoAnthropicFormatModel("qwen3.6-plus")).toBe(true)
@@ -1385,6 +1386,7 @@ describe("OpencodeGoHandler", () => {
 			expect(isOpencodeGoAnthropicFormatModel("kimi-k2.6")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("deepseek-v4-pro")).toBe(false)
 			expect(isOpencodeGoAnthropicFormatModel("mimo-v2.5")).toBe(false)
+			expect(isOpencodeGoAnthropicFormatModel("qwen3.5-plus")).toBe(false)
 		})
 
 		it("defaults unknown model IDs to the OpenAI-compatible format", () => {

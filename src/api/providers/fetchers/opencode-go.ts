@@ -2,7 +2,7 @@ import axios from "axios"
 import { z } from "zod"
 
 import type { ModelInfo } from "@roo-code/types"
-import { opencodeGoDefaultModelInfo, getOpencodeGoModelInfo, getOpencodeGoModelLimits } from "@roo-code/types"
+import { opencodeGoDefaultModelInfo, getOpencodeGoModelInfo } from "@roo-code/types"
 
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
 
@@ -43,11 +43,9 @@ const opencodeGoModelsResponseSchema = z.object({
  * Resolution order for a fully-populated {@link ModelInfo}:
  *   1. Use the native registry ({@link getOpencodeGoModelInfo}) when the model
  *      is curated, including its capabilities and pricing.
- *   2. Otherwise use the limit-only registry ({@link getOpencodeGoModelLimits})
- *      for models whose endpoint entry omits context and output limits.
- *   3. Override static limits and image support with live `/models` values when
+ *   2. Override static limits and image support with live `/models` values when
  *      present, keeping the gateway authoritative for volatile fields.
- *   4. Fall back to {@link opencodeGoDefaultModelInfo} for an unknown model,
+ *   3. Fall back to {@link opencodeGoDefaultModelInfo} for an unknown model,
  *      ensuring downstream consumers always receive a fully-populated object.
  *
  * @param model - Validated model entry from the `/models` response.
@@ -55,7 +53,6 @@ const opencodeGoModelsResponseSchema = z.object({
  */
 export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 	const native = getOpencodeGoModelInfo(model.id)
-	const limits = getOpencodeGoModelLimits(model.id)
 
 	// Live endpoint values take precedence over the registry for volatile fields.
 	const liveContextWindow = model.context_window ?? model.context_length
@@ -73,8 +70,8 @@ export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 	}
 
 	return {
-		maxTokens: liveMaxTokens ?? limits?.maxTokens ?? opencodeGoDefaultModelInfo.maxTokens,
-		contextWindow: liveContextWindow ?? limits?.contextWindow ?? opencodeGoDefaultModelInfo.contextWindow,
+		maxTokens: liveMaxTokens ?? opencodeGoDefaultModelInfo.maxTokens,
+		contextWindow: liveContextWindow ?? opencodeGoDefaultModelInfo.contextWindow,
 		supportsImages: liveSupportsImages ?? false,
 		supportsPromptCache: false,
 		description: model.description ?? model.name,

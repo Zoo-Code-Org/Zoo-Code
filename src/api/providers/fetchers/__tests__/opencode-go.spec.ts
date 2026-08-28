@@ -2,12 +2,7 @@
 
 import axios from "axios"
 
-import {
-	opencodeGoDefaultModelInfo,
-	opencodeGoModels,
-	getOpencodeGoModelInfo,
-	getOpencodeGoModelLimits,
-} from "@roo-code/types"
+import { opencodeGoDefaultModelInfo, opencodeGoModels, getOpencodeGoModelInfo } from "@roo-code/types"
 
 import { getOpencodeGoModels, parseOpencodeGoModel } from "../opencode-go"
 
@@ -92,7 +87,7 @@ describe("Opencode Go Fetchers", () => {
 			})
 		})
 
-		it("uses explicit limits when the endpoint returns only an OpenCode Go model ID", async () => {
+		it("uses native model info when the endpoint returns only an OpenCode Go model ID", async () => {
 			mockedAxios.get.mockResolvedValue({
 				data: {
 					data: [{ id: "gpt-5.6-luna" }, { id: "hy4-preview" }, { id: "deepseek-v4-flash-vision-exp" }],
@@ -143,7 +138,7 @@ describe("Opencode Go Fetchers", () => {
 	})
 
 	describe("parseOpencodeGoModel", () => {
-		it("has explicit limits for every model returned by OpenCode Go", () => {
+		it("has complete model info for every model returned by OpenCode Go", () => {
 			const modelIds = [
 				"minimax-m3",
 				"minimax-m2.7",
@@ -179,9 +174,19 @@ describe("Opencode Go Fetchers", () => {
 				"grok-4.6",
 				"muse-spark-1.2-contributor",
 			]
+			expect(Object.keys(opencodeGoModels).sort()).toEqual([...modelIds].sort())
 
 			for (const modelId of modelIds) {
-				expect(getOpencodeGoModelLimits(modelId), modelId).toBeDefined()
+				const info = getOpencodeGoModelInfo(modelId)
+				expect(info, modelId).toBeDefined()
+				expect(info?.contextWindow, modelId).toBeGreaterThan(0)
+				expect(info?.maxTokens, modelId).toBeGreaterThan(0)
+				expect(info?.supportsImages, modelId).toEqual(expect.any(Boolean))
+				expect(info?.supportsPromptCache, modelId).toEqual(expect.any(Boolean))
+				expect(info?.inputPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.outputPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.cacheReadsPrice, modelId).toEqual(expect.any(Number))
+				expect(info?.description, modelId).toBeTruthy()
 			}
 		})
 
