@@ -390,7 +390,10 @@ describe("safeWriteJson", () => {
 
 		// Clean up
 		await fs.unlink(lockTestFilePath).catch(() => {}) // Ignore errors if file doesn't exist
-		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
+		// A hoisted vi.unmock runs before this test's runtime vi.doMock, so it
+		// cannot remove it; doUnmock + resetModules clear the registry entry.
+		vi.doUnmock("proper-lockfile")
+		vi.resetModules()
 	})
 	test("should release lock even if an error occurs mid-operation", async () => {
 		const data = { message: "test lock release on error" }
@@ -653,7 +656,11 @@ describe("safeWriteJson", () => {
 			expect.any(Error),
 		)
 
-		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
+		// The hoisted vi.unmock runs before this test's runtime vi.doMock, so it
+		// cannot remove it; doUnmock + resetModules clear the registry entry so
+		// later test files import the real proper-lockfile.
+		vi.doUnmock("proper-lockfile")
+		vi.resetModules()
 	})
 
 	// CWE-732 regression: safeWriteJson stages the temp itself and passes it
