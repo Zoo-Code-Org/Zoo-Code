@@ -351,6 +351,16 @@ describe("ExtensionStateContext", () => {
 		}
 	})
 
+	it("initializes the change-card detail default before hydration", () => {
+		// The initializer itself (not a merge fixture) must carry the change-card
+		// detail default: a regression that dropped it from
+		// createInitialExtensionState would otherwise stay hidden because the
+		// merge tests supply the key manually.
+		const state = createInitialExtensionState()
+
+		expect(state.changeCardDetail).toBe("summary")
+	})
+
 	it("updates apiConfiguration through setApiConfiguration", () => {
 		render(
 			<ExtensionStateContextProvider>
