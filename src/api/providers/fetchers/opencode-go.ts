@@ -2,7 +2,7 @@ import axios from "axios"
 import { z } from "zod"
 
 import type { ModelInfo } from "@roo-code/types"
-import { opencodeGoDefaultModelInfo, getOpencodeGoModelInfo } from "@roo-code/types"
+import { opencodeGoDefaultModelInfo, getOpencodeGoModelInfo, getOpencodeGoModelLimits } from "@roo-code/types"
 
 const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
 
@@ -41,21 +41,21 @@ const opencodeGoModelsResponseSchema = z.object({
  * slider, and accurate cost reporting.
  *
  * Resolution order for a fully-populated {@link ModelInfo}:
- *   1. Start from the native registry ({@link getOpencodeGoModelInfo}) when the
- *      model ID is curated — this supplies correct context lengths, max tokens,
- *      capability flags, and pricing sourced from vendor specs.
- *   2. Override `contextWindow`, `maxTokens`, and `supportsImages` with values
- *      from the live `/models` payload when present, so the gateway stays the
- *      source of truth for those volatile fields.
- *   3. Fall back to {@link opencodeGoDefaultModelInfo} for any field still
- *      missing on an unknown (non-curated) model, ensuring downstream consumers
- *      always receive a fully-populated object.
+ *   1. Use the native registry ({@link getOpencodeGoModelInfo}) when the model
+ *      is curated, including its capabilities and pricing.
+ *   2. Otherwise use the limit-only registry ({@link getOpencodeGoModelLimits})
+ *      for models whose endpoint entry omits context and output limits.
+ *   3. Override static limits and image support with live `/models` values when
+ *      present, keeping the gateway authoritative for volatile fields.
+ *   4. Fall back to {@link opencodeGoDefaultModelInfo} for an unknown model,
+ *      ensuring downstream consumers always receive a fully-populated object.
  *
  * @param model - Validated model entry from the `/models` response.
  * @returns Normalised model metadata suitable for the model picker.
  */
 export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 	const native = getOpencodeGoModelInfo(model.id)
+	const limits = getOpencodeGoModelLimits(model.id)
 
 	// Live endpoint values take precedence over the registry for volatile fields.
 	const liveContextWindow = model.context_window ?? model.context_length
@@ -73,8 +73,8 @@ export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 	}
 
 	return {
-		maxTokens: liveMaxTokens ?? opencodeGoDefaultModelInfo.maxTokens,
-		contextWindow: liveContextWindow ?? opencodeGoDefaultModelInfo.contextWindow,
+		maxTokens: liveMaxTokens ?? limits?.maxTokens ?? opencodeGoDefaultModelInfo.maxTokens,
+		contextWindow: liveContextWindow ?? limits?.contextWindow ?? opencodeGoDefaultModelInfo.contextWindow,
 		supportsImages: liveSupportsImages ?? false,
 		supportsPromptCache: false,
 		description: model.description ?? model.name,

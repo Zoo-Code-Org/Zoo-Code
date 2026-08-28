@@ -3,9 +3,9 @@ import type { ModelInfo } from "../model.js"
 // Opencode "Go" plan — OpenAI-compatible gateway.
 // https://opencode.ai/docs/go/ · base URL: https://opencode.ai/zen/go/v1
 //
-// The full model list (and metadata) is fetched dynamically from
-// `https://opencode.ai/zen/go/v1/models`, so models can be switched on the fly.
-// The values below are only a fallback used before the live list resolves.
+// Model IDs are fetched dynamically from `https://opencode.ai/zen/go/v1/models`
+// so models can be switched on the fly. The endpoint currently omits metadata,
+// so Zoo Code supplies limits and capabilities from the registries below.
 export const opencodeGoDefaultModelId = "glm-5.2"
 
 export const opencodeGoDefaultModelInfo: ModelInfo = {
@@ -16,10 +16,35 @@ export const opencodeGoDefaultModelInfo: ModelInfo = {
 	// Pricing is intentionally omitted: ModelInfoView renders a `0` field as "$0.00 / 1M tokens"
 	// (implying the service is free), so we leave it unknown — consistent with the dynamically
 	// fetched models, which also leave price fields absent. See PR #319 review.
-	description: "Opencode Go plan model. Available models and metadata are resolved dynamically from /v1/models.",
+	description: "Opencode Go plan model. Model IDs are fetched dynamically; metadata uses Zoo Code's model registry.",
 }
 
 export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
+
+/**
+ * Limits for Go models that do not yet have a full native configuration below.
+ *
+ * The Go `/v1/models` endpoint currently returns only model IDs, so these
+ * values prevent newly listed models from inheriting the generic 200k context
+ * window. Keep this table aligned with the endpoint and models.dev metadata.
+ */
+export const opencodeGoModelLimits: Record<string, Pick<ModelInfo, "contextWindow" | "maxTokens">> = {
+	"kimi-k2.7-code": { contextWindow: 262_144, maxTokens: 262_144 },
+	"longcat-2.0": { contextWindow: 1_000_000, maxTokens: 131_072 },
+	"glm-5.3-flash": { contextWindow: 1_000_000, maxTokens: 131_072 },
+	"deepseek-v4-flash-vision-exp": { contextWindow: 1_000_000, maxTokens: 384_000 },
+	"qwen3.8-flash": { contextWindow: 1_000_000, maxTokens: 131_072 },
+	"qwen3.5-plus": { contextWindow: 262_144, maxTokens: 65_536 },
+	"mimo-v2-pro": { contextWindow: 1_048_576, maxTokens: 128_000 },
+	"mimo-v2-omni": { contextWindow: 262_144, maxTokens: 128_000 },
+	"hy4-preview": { contextWindow: 1_024_000, maxTokens: 64_000 },
+	hy3: { contextWindow: 256_000, maxTokens: 64_000 },
+	"hy3-preview": { contextWindow: 256_000, maxTokens: 64_000 },
+	"gpt-5.6-luna": { contextWindow: 1_050_000, maxTokens: 128_000 },
+	"grok-4.5": { contextWindow: 500_000, maxTokens: 500_000 },
+	"grok-4.6": { contextWindow: 500_000, maxTokens: 500_000 },
+	"muse-spark-1.2-contributor": { contextWindow: 1_048_576, maxTokens: 131_072 },
+}
 
 /**
  * Native per-model configuration for the Opencode Go plan.
@@ -462,4 +487,12 @@ export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
  */
 export function getOpencodeGoModelInfo(modelId: string): ModelInfo | undefined {
 	return opencodeGoModels[modelId]
+}
+
+/** Returns explicit model limits when Go omits them from `/v1/models`. */
+export function getOpencodeGoModelLimits(modelId: string): Pick<ModelInfo, "contextWindow" | "maxTokens"> | undefined {
+	const native = getOpencodeGoModelInfo(modelId)
+	return native
+		? { contextWindow: native.contextWindow, maxTokens: native.maxTokens }
+		: opencodeGoModelLimits[modelId]
 }
