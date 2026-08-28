@@ -288,25 +288,39 @@ import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistr
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("webviewMessageHandler - webviewDidLaunch", () => {
+	// Structural view of the provider members this suite reassigns at runtime: the
+	// double literal does not declare them and some are readonly on the class, so a
+	// cast of the mock target alone cannot express these reassignments without any.
+	type LaunchProviderFixture = {
+		setViewStateId: (viewStateId: string) => Promise<void>
+		workspaceTracker: { initializeFilePaths: () => Promise<void> }
+		providerSettingsManager: {
+			listConfig: () => Promise<unknown[]>
+			hasConfig: (name: string) => Promise<boolean>
+		}
+		activateProviderProfile: (options: { name: string }) => Promise<void>
+		getMcpHub: () => unknown
+		getStateToPostToWebview: () => Promise<{ telemetrySetting: string }>
+	}
+	const double = mockClineProvider as unknown as LaunchProviderFixture
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.mocked(mockClineProvider.getState).mockResolvedValue({
 			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			currentApiConfigName: "view-local-profile",
-		} as any)
-		;(mockClineProvider as any).setViewStateId = vi.fn().mockResolvedValue(undefined)
-		;(mockClineProvider as any).workspaceTracker = { initializeFilePaths: vi.fn().mockResolvedValue(undefined) }
-		;(mockClineProvider as any).providerSettingsManager = {
+		} as unknown as Awaited<ReturnType<typeof mockClineProvider.getState>>)
+		double.setViewStateId = vi.fn().mockResolvedValue(undefined)
+		double.workspaceTracker = { initializeFilePaths: vi.fn().mockResolvedValue(undefined) }
+		double.providerSettingsManager = {
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([{ name: "shared-profile", apiProvider: providerIdentifiers.anthropic }]),
 			hasConfig: vi.fn().mockResolvedValue(false),
 		}
-		;(mockClineProvider as any).activateProviderProfile = vi.fn().mockResolvedValue(undefined)
-		;(mockClineProvider as any).getMcpHub = vi.fn().mockReturnValue(undefined)
-		;(mockClineProvider as any).getStateToPostToWebview = vi
-			.fn()
-			.mockResolvedValue({ telemetrySetting: "disabled" })
+		double.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+		double.getMcpHub = vi.fn().mockReturnValue(undefined)
+		double.getStateToPostToWebview = vi.fn().mockResolvedValue({ telemetrySetting: "disabled" })
 		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue("shared-profile")
 		vi.mocked(mockClineProvider.contextProxy.setValue).mockResolvedValue(undefined)
@@ -316,11 +330,11 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
 
-		expect((mockClineProvider as any).setViewStateId).toHaveBeenCalledWith("view-1")
+		expect(double.setViewStateId).toHaveBeenCalledWith("view-1")
 
 		// The merged (view-local) name is validated first; the shared global is only
 		// consulted when the view-local name is invalid.
-		expect((mockClineProvider as any).providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
+		expect(double.providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
 		expect(mockClineProvider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("shared-profile")
 		// Both names are invalid in this setup, so the shared global is repaired.
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
