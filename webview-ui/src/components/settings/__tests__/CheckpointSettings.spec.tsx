@@ -1,5 +1,6 @@
 // npx vitest src/components/settings/__tests__/CheckpointSettings.spec.tsx
 
+import type { ReactNode } from "react"
 import { render, screen, fireEvent } from "@/utils/test-utils"
 import { CheckpointSettings } from "../CheckpointSettings"
 
@@ -29,7 +30,17 @@ vi.mock("@/components/ui", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/components/ui")>()
 	return {
 		...actual,
-		Slider: ({ defaultValue, onValueChange, "data-testid": dataTestId }: any) => (
+		// Narrow typed double: only the props CheckpointSettings consumes, so
+		// drift in the Slider contract is a compile error here, not `any`.
+		Slider: ({
+			defaultValue,
+			onValueChange,
+			"data-testid": dataTestId,
+		}: {
+			defaultValue?: number[]
+			onValueChange?: (value: number[]) => void
+			"data-testid"?: string
+		}) => (
 			<input
 				type="range"
 				value={defaultValue?.[0] ?? 0}
@@ -49,21 +60,44 @@ vi.mock("@/utils/vscode", () => ({
 }))
 
 // Mock VSCode components to behave like standard HTML elements
-vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeCheckbox: ({ checked, onChange, children, ...props }: any) => (
-		<label {...props}>
-			<input
-				type="checkbox"
-				role="checkbox"
-				checked={checked || false}
-				aria-checked={checked || false}
-				onChange={(e: any) => onChange?.({ target: { checked: e.target.checked } })}
-			/>
-			{children}
-		</label>
-	),
-	VSCodeLink: ({ children, ...props }: any) => <a {...props}>{children}</a>,
-}))
+vi.mock("@vscode/webview-ui-toolkit/react", () => {
+	// Narrow event double: the real toolkit dispatches a native Event whose
+	// currentTarget is the web component with a boolean `checked`; the mock
+	// forwards the input's checked state on both target and currentTarget so
+	// handlers can be typed against either surface.
+	type CheckboxChangeEvent = {
+		target: { checked: boolean }
+		currentTarget: { checked: boolean }
+	}
+	return {
+		VSCodeCheckbox: ({
+			checked,
+			onChange,
+			children,
+			"data-testid": dataTestId,
+		}: {
+			checked?: boolean
+			onChange?: (e: CheckboxChangeEvent) => void
+			children?: ReactNode
+			"data-testid"?: string
+		}) => (
+			<label data-testid={dataTestId}>
+				<input
+					type="checkbox"
+					role="checkbox"
+					checked={checked || false}
+					aria-checked={checked || false}
+					onChange={(e) => {
+						const value = e.currentTarget.checked
+						onChange?.({ target: { checked: value }, currentTarget: { checked: value } })
+					}}
+				/>
+				{children}
+			</label>
+		),
+		VSCodeLink: ({ children, href }: { children?: ReactNode; href?: string }) => <a href={href}>{children}</a>,
+	}
+})
 
 describe("CheckpointSettings", () => {
 	const setCachedStateField = vi.fn()
