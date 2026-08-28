@@ -506,13 +506,23 @@ export class McpHub {
 		)
 		const fileExists = await fileExistsAtPath(mcpSettingsFilePath)
 		if (!fileExists) {
-			await fs.writeFile(
+			// Create the default settings file under the advisory lock. The merge
+			// callback preserves any config a concurrent process wrote between the
+			// existence check above and the locked read, instead of blindly
+			// truncating it (see #1371).
+			await safeWriteJson(
 				mcpSettingsFilePath,
-				`{
-  "mcpServers": {
-
-  }
-}`,
+				{ mcpServers: {} },
+				{
+					prettyPrint: true,
+					merge: (existing) => {
+						const parsed = existing as { mcpServers?: unknown } | null
+						if (parsed && parsed.mcpServers && typeof parsed.mcpServers === "object") {
+							return existing
+						}
+						return { mcpServers: {} }
+					},
+				},
 			)
 		}
 		return mcpSettingsFilePath
