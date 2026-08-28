@@ -232,6 +232,10 @@ describe("writeToFileTool", () => {
 			isPartial?: boolean
 			accessAllowed?: boolean
 			experiments?: Record<string, boolean>
+			// Trial addendum: extra extension-state fields merged into the pinned state
+			// (perWriteCheckpoints, auto-approval settings, ...) so the helper's
+			// providerRef pin does not clobber per-test state.
+			state?: Record<string, unknown>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		// Configure mocks based on test scenario
@@ -245,7 +249,12 @@ describe("writeToFileTool", () => {
 			getState: vi.fn().mockResolvedValue({
 				diagnosticsEnabled: true,
 				writeDelayMs: 1000,
-				experiments: options.experiments ?? {},
+				// Trial addendum: pin the legacy diff-editor path for the pre-existing suites;
+				// the L2 default flipped preventFocusDisruption to true (chat-diff is the
+				// default approval path). Tests exercising the chat-diff branch opt in via
+				// the experiments option.
+				experiments: options.experiments ?? { preventFocusDisruption: false },
+				...options.state,
 			}),
 		})
 
@@ -403,16 +412,10 @@ describe("writeToFileTool", () => {
 		it("saves via saveDirectly without opening the diff editor when no experiment value is stored", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// No stored experiment value: the default (flipped to true in L2) resolves
-			// to the chat-diff path.
-			mockCline.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: {},
-				}),
-			})
-
-			await executeWriteFileTool()
+			// to the chat-diff path. Trial addendum: the empty experiments object is
+			// threaded through the helper (its providerRef pin would otherwise clobber
+			// this test's stored-value scenario).
+			await executeWriteFileTool({}, { experiments: {} })
 
 			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
@@ -423,15 +426,8 @@ describe("writeToFileTool", () => {
 		it("saves via saveDirectly when the user has explicitly enabled the experiment", async () => {
 			mockAskApproval.mockResolvedValue(true)
 			// Explicit stored true: same chat-diff routing as the default.
-			mockCline.providerRef.deref.mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: { preventFocusDisruption: true },
-				}),
-			})
-
-			await executeWriteFileTool()
+			// Trial addendum: threaded through the helper's experiments option.
+			await executeWriteFileTool({}, { experiments: { preventFocusDisruption: true } })
 
 			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
 			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
@@ -621,13 +617,9 @@ describe("writeToFileTool", () => {
 		})
 
 		it("does not record a checkpoint when perWriteCheckpoints is disabled", async () => {
-			mockCline.providerRef.deref = vi.fn().mockReturnValue({
-				getState: vi
-					.fn()
-					.mockResolvedValue({ diagnosticsEnabled: true, writeDelayMs: 1000, perWriteCheckpoints: false }),
-			})
-
-			await executeWriteFileTool({})
+			// Trial addendum: thread the state through the helper (its providerRef pin
+			// would otherwise clobber this test's extension state).
+			await executeWriteFileTool({}, { state: { perWriteCheckpoints: false } })
 
 			expect(mockCline.consecutiveMistakeCount).toBe(0)
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
@@ -682,15 +674,9 @@ describe("writeToFileTool", () => {
 		})
 
 		it("threads write info with approval diff stats when the prevent-focus-disruption experiment is enabled", async () => {
-			mockCline.providerRef.deref = vi.fn().mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					experiments: { preventFocusDisruption: true },
-				}),
-			})
-
-			await executeWriteFileTool({})
+			// Trial addendum: opt into the chat-diff branch via the helper's experiments
+			// option (the helper now pins the legacy path by default).
+			await executeWriteFileTool({}, { experiments: { preventFocusDisruption: true } })
 
 			// The experiment branch saves directly (no diff view) and still
 			// journals the write through the same single checkpoint hook, carrying
@@ -701,6 +687,8 @@ describe("writeToFileTool", () => {
 				false,
 				true,
 				1000,
+				// Trial addendum: S4b appends the guarded-write kind to the save call.
+				"create",
 			)
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
 				path: testFilePath,
@@ -727,16 +715,8 @@ describe("writeToFileTool", () => {
 		it("threads autoApproved into the checkpoint write for auto-approved steps", async () => {
 			// B3a: when the step is auto-approved the checkpoint write carries
 			// autoApproved so checkpointSave can force the compact change card.
-			mockCline.providerRef.deref = vi.fn().mockReturnValue({
-				getState: vi.fn().mockResolvedValue({
-					diagnosticsEnabled: true,
-					writeDelayMs: 1000,
-					autoApprovalEnabled: true,
-					alwaysAllowWrite: true,
-				}),
-			})
-
-			await executeWriteFileTool({})
+			// Trial addendum: thread the auto-approval state through the helper.
+			await executeWriteFileTool({}, { state: { autoApprovalEnabled: true, alwaysAllowWrite: true } })
 
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockCline, false, true, {
 				path: testFilePath,

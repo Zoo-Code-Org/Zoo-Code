@@ -80,7 +80,10 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			consecutiveMistakeCount: 0,
 			providerRef: {
 				deref: vi.fn().mockReturnValue({
-					getState: vi.fn().mockResolvedValue({}),
+					// Trial addendum: pin the legacy diff-editor path; the L2 default flipped
+					// preventFocusDisruption to true (chat-diff is the default approval path).
+					// The PFD-branch test below opts in explicitly.
+					getState: vi.fn().mockResolvedValue({ experiments: { preventFocusDisruption: false } }),
 				}),
 			} as unknown as Task["providerRef"],
 			recordToolUsage: vi.fn(),
