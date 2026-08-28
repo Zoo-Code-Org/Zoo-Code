@@ -6,6 +6,13 @@ import { DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { makeRange, makeTextDocument, makeTextEditor, makeUri } from "../../../test-utils/vscode"
 
+import * as fs from "fs/promises"
+
+import { computeVersionToken } from "../../../utils/versionToken"
+import { safeWriteText } from "../../../services/file-safety/safeWriteText"
+import { ObservationRegistry } from "../../../core/task/observationRegistry"
+import type { Task } from "../../../core/task/Task"
+
 // Mock delay
 vi.mock("delay", () => ({
 	default: vi.fn().mockResolvedValue(undefined),
@@ -26,6 +33,12 @@ vi.mock("../../../services/file-safety/safeWriteText", () => ({
 	safeWriteText: vi.fn().mockResolvedValue(undefined),
 }))
 
+// Mock the S1 version token (used by the S4 guarded write); the real
+// computeVersionToken needs fs.stat, which is not part of the fs/promises mock above.
+vi.mock("../../../utils/versionToken", () => ({
+	computeVersionToken: vi.fn(),
+}))
+
 // Mock utils
 vi.mock("../../../utils/fs", () => ({
 	createDirectoriesForFile: vi.fn().mockResolvedValue([]),
@@ -35,6 +48,7 @@ vi.mock("../../../utils/fs", () => ({
 vi.mock("path", () => ({
 	resolve: vi.fn((cwd, relPath) => `${cwd}/${relPath}`),
 	normalize: vi.fn((p: string) => p),
+	isAbsolute: vi.fn((p: string) => p.startsWith("/")),
 	basename: vi.fn((path) => path.split("/").pop()),
 	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
 	join: (...args: string[]) => args.join("/"),
@@ -165,8 +179,11 @@ describe("DiffViewProvider", () => {
 			return mockWorkspaceEdit as any
 		})
 
-		// Create a mock Task instance
+		// Create a mock Task instance. The guarded write (S4b) consults the task's
+		// S2 observation registry, so the mock carries a real (in-memory) instance.
 		mockTask = {
+			cwd: mockCwd,
+			observationRegistry: new ObservationRegistry(),
 			providerRef: {
 				deref: vi.fn().mockReturnValue({
 					getState: vi.fn().mockResolvedValue({
@@ -801,6 +818,13 @@ describe("DiffViewProvider", () => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue({} as any)
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+
+			// Baseline for the single-writer flow these tests encode: the file was read
+			// before the write, so the observation registry holds the version token the
+			// guarded write recomputes and compares, and the target exists on disk.
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "v1")
+			vi.mocked(computeVersionToken).mockResolvedValue("v1")
+			vi.mocked(fs.access).mockResolvedValue(undefined)
 		})
 
 		it("should write content directly to file without opening diff view", async () => {
@@ -1049,6 +1073,68 @@ describe("DiffViewProvider", () => {
 			expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining("Post-save diagnostics emit failed:"))
 
 			consoleWarnSpy.mockRestore()
+		})
+
+		describe("guarded write (S4b, epic #1375)", () => {
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
+			it("rejects an unobserved write to an existing file with the read-first remediation", async () => {
+				mockTask.observationRegistry.clear()
+
+				await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
+					"File already exists at /mock/cwd/test.ts and was not read before this write -- read the file first, then retry.",
+				)
+				expect(safeWriteText).not.toHaveBeenCalled()
+			})
+
+			it("creates an unobserved file when the target is absent", async () => {
+				mockTask.observationRegistry.clear()
+				vi.mocked(fs.access).mockRejectedValue(enoent())
+
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("rejects an observed write whose version token is stale", async () => {
+				// The file changed on disk after the read that recorded "v1".
+				vi.mocked(computeVersionToken).mockResolvedValue("v2")
+
+				const result = diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				await expect(result).rejects.toThrow("Stale version")
+				await expect(result).rejects.toThrow("re-read the file, then retry.")
+				expect(safeWriteText).not.toHaveBeenCalled()
+			})
+
+			it("rejects an unobserved edit-kind write before any I/O", async () => {
+				mockTask.observationRegistry.clear()
+
+				await expect(
+					diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0, "edit"),
+				).rejects.toThrow("File not read yet -- read the file, then retry.")
+				expect(safeWriteText).not.toHaveBeenCalled()
+				expect(fs.access).not.toHaveBeenCalled()
+			})
+
+			it("recreates an observed file that vanished after the read", async () => {
+				vi.mocked(fs.access).mockRejectedValue(enoent())
+
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)
+
+				expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, "new content")
+			})
+
+			it("fails closed when the owning task has been collected", async () => {
+				// A real WeakRef cannot be forced to deref to undefined deterministically
+				// (GC timing), so a structural stub stands in for the collected reference.
+				diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
+
+				await expect(diffViewProvider.saveDirectly("test.ts", "new content", true, false, 0)).rejects.toThrow(
+					"Cannot guard the write: the owning task is no longer available",
+				)
+				expect(safeWriteText).not.toHaveBeenCalled()
+			})
 		})
 	})
 

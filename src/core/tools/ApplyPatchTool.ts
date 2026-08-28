@@ -214,7 +214,16 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		// Save the changes
 		if (isPreventFocusDisruptionEnabled) {
-			await task.diffViewProvider.saveDirectly(relPath, newContent, true, diagnosticsEnabled, writeDelayMs)
+			// Guarded publish: the patch supplies the complete new content, so create-guard
+			// semantics apply (an unobserved existing target is rejected, not overwritten).
+			await task.diffViewProvider.saveDirectly(
+				relPath,
+				newContent,
+				true,
+				diagnosticsEnabled,
+				writeDelayMs,
+				"create",
+			)
 		} else {
 			await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 		}
@@ -408,12 +417,14 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 			// Save new content to the new path
 			if (isPreventFocusDisruptionEnabled) {
+				// The move destination is published with the complete new content.
 				await task.diffViewProvider.saveDirectly(
 					change.movePath,
 					newContent,
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"create",
 				)
 			} else {
 				// Write to new path and delete old file
@@ -433,7 +444,16 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		} else {
 			// Save changes to the same file
 			if (isPreventFocusDisruptionEnabled) {
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Guarded publish: the patched file content is complete, so create-guard
+				// semantics apply (stale observed versions are rejected with a re-read hint).
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"create",
+				)
 			} else {
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}

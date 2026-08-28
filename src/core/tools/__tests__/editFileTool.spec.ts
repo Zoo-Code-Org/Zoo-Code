@@ -170,6 +170,7 @@ describe("editFileTool", () => {
 			fileContent?: string
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -180,6 +181,13 @@ describe("editFileTool", () => {
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockedFsReadFile.mockResolvedValue(fileContent)
 		mockTask.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockTask.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				experiments: options.experiments ?? {},
+			}),
+		})
 
 		const nativeArgs: Record<string, unknown> = {
 			file_path: testFilePath,
@@ -727,6 +735,93 @@ describe("editFileTool", () => {
 			await executeEditFileTool()
 
 			expect(mockTask.fileContextTracker.trackFileContext).toHaveBeenCalledWith(testFilePath, "roo_edited")
+		})
+	})
+
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes an existing-file edit through saveDirectly with edit kind", async () => {
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"Line 1\nModified Line 2\nLine 3",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(true)
+			expect(result).toContain("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("publishes new-file creation through saveDirectly with create kind", async () => {
+			await executeEditFileTool(
+				{ old_string: "", new_string: "New file content" },
+				{ fileExists: false, experiments: focusDisruption },
+			)
+
+			expect(mockTask.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"New file content",
+				true,
+				true,
+				1000,
+				"create",
+			)
+			expect(mockTask.didEditFile).toBe(true)
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the unobserved edit remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error("File not read yet -- read the file, then retry.")
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("surfaces the stale-version remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error(
+				"Stale version -- the file changed since you read it (expected v1, current v2); re-read the file, then retry.",
+			)
+			mockTask.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeEditFileTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("edit_file", guardError)
+			expect(result).toBeUndefined()
+			expect(mockTask.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockTask.didEditFile).toBe(false)
+		})
+
+		it("still fails a literal mismatch with the existing message before the guard runs", async () => {
+			const result = await executeEditFileTool(
+				{ old_string: "NonExistent", new_string: "Whatever" },
+				{ fileExists: true, fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(result).toContain("No match found")
+			expect(result).toContain("<error_details>")
+			expect(mockTask.diffViewProvider.saveDirectly).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 	})
 

@@ -436,13 +436,16 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 
 			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
-				// Direct file write without diff view or opening the file
+				// Direct file write without diff view or opening the file. In-place edits
+				// use edit-guard semantics (a prior read is required); new-file creation
+				// keeps create-guard semantics.
 				await task.diffViewProvider.saveDirectly(
 					relPath,
 					newContent,
 					isNewFile,
 					diagnosticsEnabled,
 					writeDelayMs,
+					isNewFile ? "create" : "edit",
 				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties

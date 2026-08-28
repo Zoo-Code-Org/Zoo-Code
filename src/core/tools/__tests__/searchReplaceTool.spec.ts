@@ -168,6 +168,7 @@ describe("searchReplaceTool", () => {
 			fileContent?: string
 			isPartial?: boolean
 			accessAllowed?: boolean
+			experiments?: Record<string, boolean>
 		} = {},
 	): Promise<ToolResponse | undefined> {
 		const fileExists = options.fileExists ?? true
@@ -178,6 +179,13 @@ describe("searchReplaceTool", () => {
 		mockedFileExistsAtPath.mockResolvedValue(fileExists)
 		mockedFsReadFile.mockResolvedValue(fileContent)
 		mockCline.rooIgnoreController.validateAccess.mockReturnValue(accessAllowed)
+		mockCline.providerRef.deref.mockReturnValue({
+			getState: vi.fn().mockResolvedValue({
+				diagnosticsEnabled: true,
+				writeDelayMs: 1000,
+				experiments: options.experiments ?? {},
+			}),
+		})
 
 		const nativeArgs: Record<string, unknown> = {
 			file_path: testFilePath,
@@ -480,6 +488,44 @@ describe("searchReplaceTool", () => {
 
 			expect(mockCline.consecutiveMistakeCount).toBe(0)
 			expect(mockAskApproval).toHaveBeenCalled()
+		})
+	})
+
+	describe("guarded write (S4b, epic #1375)", () => {
+		const focusDisruption = { preventFocusDisruption: true }
+
+		it("publishes through saveDirectly with edit kind", async () => {
+			const result = await executeSearchReplaceTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				"Line 1\nModified Line 2\nLine 3",
+				false,
+				true,
+				1000,
+				"edit",
+			)
+			expect(mockCline.didEditFile).toBe(true)
+			expect(result).toBe("Tool result message")
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("surfaces the unobserved edit remediation as a tool error and publishes nothing", async () => {
+			const guardError = new Error("File not read yet -- read the file, then retry.")
+			mockCline.diffViewProvider.saveDirectly.mockRejectedValue(guardError)
+
+			const result = await executeSearchReplaceTool(
+				{ old_string: "Line 2", new_string: "Modified Line 2" },
+				{ fileContent: "Line 1\nLine 2\nLine 3", experiments: focusDisruption },
+			)
+
+			expect(mockHandleError).toHaveBeenCalledWith("search and replace", guardError)
+			expect(result).toBeUndefined()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(false)
 		})
 	})
 })
