@@ -81,7 +81,7 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
-import type { ModelRecord } from "@roo-code/types"
+import type { ModelRecord, RooCodeSettings } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
@@ -111,6 +111,7 @@ const mockFetchOpenAiCodexRateLimitInfo = vi.mocked(fetchOpenAiCodexRateLimitInf
 const mockClineProvider = {
 	getState: vi.fn(),
 	postMessageToWebview: vi.fn(),
+	saveViewState: vi.fn(),
 	customModesManager: {
 		getCustomModes: vi.fn(),
 		updateCustomMode: vi.fn(),
@@ -128,6 +129,16 @@ const mockClineProvider = {
 		setValue: vi.fn(),
 		getValue: vi.fn(),
 	},
+	// Delegates to contextProxy.setValue so existing assertions keep holding while
+	// the updateSettings flow is exercised through the provider-level mutation path.
+	setValue: vi
+		.fn()
+		.mockImplementation((key: string, value: unknown) =>
+			mockClineProvider.contextProxy.setValue(
+				key as keyof RooCodeSettings,
+				value as RooCodeSettings[keyof RooCodeSettings],
+			),
+		),
 	log: vi.fn(),
 	postStateToWebview: vi.fn(),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
@@ -306,8 +317,30 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		await new Promise((resolve) => setImmediate(resolve))
 
 		expect((mockClineProvider as any).setViewStateId).toHaveBeenCalledWith("view-1")
+
+		// The merged (view-local) name is validated first; the shared global is only
+		// consulted when the view-local name is invalid.
 		expect((mockClineProvider as any).providerSettingsManager.hasConfig).toHaveBeenCalledWith("view-local-profile")
-		expect((mockClineProvider as any).providerSettingsManager.hasConfig).not.toHaveBeenCalledWith("shared-profile")
+		expect(mockClineProvider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("shared-profile")
+		// Both names are invalid in this setup, so the shared global is repaired.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		expect(mockClineProvider.activateProviderProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+	})
+
+	it("re-pins only the view when its profile is missing but the shared global is still valid", async () => {
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+		// The view pin is re-pinned to the first available profile,
+		// and the shared global selection is left untouched: no global write, no global activation.
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(
+			"currentApiConfigName",
+			"shared-profile",
+		)
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 })
 
@@ -637,7 +670,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
 				openRouterApiKey: "openrouter-key",
-				// Deliberately no opencodeGoApiKey — the endpoint is public.
+				// Deliberately no opencodeGoApiKey ??the endpoint is public.
 			},
 		})
 

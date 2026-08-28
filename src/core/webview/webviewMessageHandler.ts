@@ -635,13 +635,28 @@ export const webviewMessageHandler = async (
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
-							// Current config name not valid, get first config in list.
+							// The merged name (which may be this view's durable pin) no longer
+							// resolves. When the shared global selection is still valid, re-pin
+							// only this view so the global selection is left untouched; only
+							// repair the global when it is invalid as well.
+							const globalConfigName = getGlobalState("currentApiConfigName")
+							const globalStillValid =
+								!!globalConfigName &&
+								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
-							await updateGlobalState("currentApiConfigName", name)
 
-							if (name) {
-								await provider.activateProviderProfile({ name })
-								return
+							if (globalStillValid && name) {
+								await provider.saveViewState("currentApiConfigName", name)
+								// Fall through: refresh listApiConfigMeta and post listApiConfig
+								// to this webview below.
+							} else {
+								// Current config name not valid, get first config in list.
+								await updateGlobalState("currentApiConfigName", name)
+
+								if (name) {
+									await provider.activateProviderProfile({ name })
+									return
+								}
 							}
 						}
 					}
@@ -859,7 +874,9 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+					// Route through provider.setValue so view-local buffer/pin sync stays
+					// consistent with the other mutation paths.
+					await provider.setValue(key as keyof RooCodeSettings, newValue)
 				}
 
 				await provider.postStateToWebview()
