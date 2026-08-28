@@ -4,6 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { safeWriteJson } from "../safeWriteJson"
+import * as lockfile from "proper-lockfile"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -577,6 +578,82 @@ describe("safeWriteJson", () => {
 
 		// the content was committed onto the referent
 		expect(await readFileContent(referentPath)).toEqual({ after: true })
+	})
+
+	// proper-lockfile with realpath:false keys the lock by the given path, so a
+	// symlink alias and its referent must coordinate through ONE lock on the
+	// resolved referent — otherwise a concurrent merge through both aliases
+	// reads the same JSON and overwrites one update. (Real symlinks are
+	// unavailable in this CI lane, so the resolution is simulated by mocking
+	// fs.realpath, the same way as the staging test above.)
+	test("acquires the lock on the resolved referent, not the caller alias", async () => {
+		vi.resetModules() // fresh module instances so the doMock below is picked up
+
+		const referentDir = path.join(tempDir, "lock-referent")
+		const linkDir = path.join(tempDir, "lock-link")
+		await fs.mkdir(referentDir, { recursive: true })
+		await fs.mkdir(linkDir, { recursive: true })
+		// caller-visible path (the link) vs the resolved referent path
+		const callerPath = path.join(linkDir, "locked.json")
+		const referentPath = path.join(referentDir, "locked.json")
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: 1 }))
+
+		vi.spyOn(fs, "realpath").mockResolvedValue(referentPath)
+
+		// Wrap the real lock in a capturing mock, and drive the two rare error paths
+		// (the onCompromised callback and a failing release) so they stay covered
+		// without real lockfile staleness. The callback rethrows by design, so
+		// the mock swallows that throw and lets the real lock proceed.
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(
+			async (
+				file: Parameters<typeof realLockfile.lock>[0],
+				options?: Parameters<typeof realLockfile.lock>[1],
+			) => {
+				try {
+					options?.onCompromised?.(new Error("lock compromised (test)"))
+				} catch {
+					// onCompromised rethrows by design; swallow so the real lock proceeds.
+				}
+				const release = await realLockfile.lock(file, options)
+				return async () => {
+					await release()
+					throw new Error("release failed (test)")
+				}
+			},
+		)
+		const lockMock = lockMockFn as unknown as typeof realLockfile.lock
+		vi.doMock("proper-lockfile", () => ({
+			...realLockfile,
+			lock: lockMock,
+		}))
+
+		// Re-import safeWriteJson so it picks up the mocked proper-lockfile.
+		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
+
+		const mergeFn = vi.fn((existing: unknown, incoming: unknown) => ({
+			...(existing as Record<string, unknown>),
+			...(incoming as Record<string, unknown>),
+		}))
+
+		// Capture the compromise + release-failure logs.
+		const consoleErrorSpy = vi.spyOn(console, "error")
+		await mockedSafeWriteJson(callerPath, { added: true }, { merge: mergeFn })
+
+		// The lock was keyed by the resolved referent — every alias shares it.
+		expect(lockMock).toHaveBeenCalledTimes(1)
+		expect(String(lockMockFn.mock.calls[0][0])).toBe(referentPath)
+		// The merge read the referent's content through that single lock.
+		expect(mergeFn).toHaveBeenCalledWith({ seed: 1 }, { added: true })
+		expect(await readFileContent(referentPath)).toEqual({ seed: 1, added: true })
+		// The compromise callback and the failed release were logged, not thrown.
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("was compromised"), expect.any(Error))
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to release lock"),
+			expect.any(Error),
+		)
+
+		vi.unmock("proper-lockfile") // Ensure the mock is removed after this test
 	})
 
 	// CWE-732 regression: safeWriteJson stages the temp itself and passes it

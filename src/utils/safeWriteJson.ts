@@ -59,12 +59,22 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		throw dirError
 	}
 
+	// Resolve the publish target BEFORE acquiring the lock: proper-lockfile keys
+	// the lock by the given path (realpath is false below because the file may
+	// not exist yet), so a symlink alias and its referent would otherwise take
+	// two distinct locks for one underlying file — a concurrent merge through
+	// both aliases could then read the same JSON and overwrite one update.
+	// Locking the resolved referent coordinates every alias through one lock.
+	// resolvePublishTarget tolerates a not-yet-existing file (it returns the
+	// given path on ENOENT), preserving the previous create-from-absent flow.
+	const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+
 	// Acquire the lock before any file operations
 	try {
-		releaseLock = await lockfile.lock(absoluteFilePath, {
+		releaseLock = await lockfile.lock(resolvedTargetPath, {
 			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
-			realpath: false, // the file may not exist yet, which is acceptable
+			realpath: false, // resolvedTargetPath is already the referent; the file may still not exist yet, which is acceptable
 			retries: {
 				// Configuration for retrying lock acquisition
 				retries: 5, // Number of retries after the initial attempt
@@ -73,7 +83,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
 			},
 			onCompromised: (err) => {
-				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
+				console.error(`Lock at ${resolvedTargetPath} was compromised:`, err)
 				throw err
 			},
 		})
@@ -81,7 +91,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		// If lock acquisition fails, we throw immediately.
 		// The releaseLock remains a no-op, so the finally block in the main file operations
 		// try-catch-finally won't try to release an unacquired lock if this path is taken.
-		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
+		console.error(`Failed to acquire lock for ${resolvedTargetPath}:`, lockError)
 		throw lockError
 	}
 
@@ -95,7 +105,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		if (options?.merge) {
 			let existing: unknown = null
 			try {
-				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+				existing = JSON.parse(await fs.readFile(resolvedTargetPath, "utf8"))
 			} catch (error: unknown) {
 				const code =
 					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
@@ -108,9 +118,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Step 1: Write data to a new temporary file via JSON streaming.
 		// Stage it beside the *resolved* target (the symlink referent when the path is
-		// a symlink): safeWriteText commits by renaming onto that referent, and a
-		// rename across filesystems would fail with EXDEV.
-		const resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		// a symlink; resolvedTargetPath above): safeWriteText commits by renaming
+		// onto that referent, and a rename across filesystems would fail with EXDEV.
 		actualTempNewFilePath = path.join(
 			path.dirname(resolvedTargetPath),
 			".new_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp",
@@ -129,13 +138,13 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			backup: true,
 		}
 
-		await safeWriteText(absoluteFilePath, "", textOptions)
+		await safeWriteText(resolvedTargetPath, "", textOptions)
 
 		// If we reach here, the new file is successfully in place and any
 		// backup has already been handled by safeWriteText.
 		actualTempNewFilePath = null
 	} catch (originalError) {
-		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
+		console.error(`Operation failed for ${resolvedTargetPath}: [Original Error Caught]`, originalError)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
 
@@ -160,7 +169,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		try {
 			await releaseLock()
 		} catch (unlockError) {
-			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+			console.error(`Failed to release lock for ${resolvedTargetPath}:`, unlockError)
 		}
 	}
 }
