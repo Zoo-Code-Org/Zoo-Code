@@ -57,3 +57,6 @@ qdrant_storage/
 plans/
 
 roo-cli-*.tar.gz*
+
+# Husky-generated hook shims are machine-local (created by husky/git-lfs install)
+.husky/_/
