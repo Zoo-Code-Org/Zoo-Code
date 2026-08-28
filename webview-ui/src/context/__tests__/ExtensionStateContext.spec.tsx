@@ -409,7 +409,9 @@ describe("mergeExtensionState", () => {
 			enableCheckpoints: true,
 			perWriteCheckpoints: true,
 			changeCardDetail: "summary",
-			writeDelayMs: 1000,
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],
@@ -495,7 +497,9 @@ describe("mergeExtensionState", () => {
 			enableCheckpoints: true,
 			perWriteCheckpoints: true,
 			changeCardDetail: "summary",
-			writeDelayMs: 1000,
+			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
+			// must not disagree with the extension's own fallback).
+			writeDelayMs: 0,
 			mode: "default",
 			experiments: {} as Record<ExperimentId, boolean>,
 			customModes: [],

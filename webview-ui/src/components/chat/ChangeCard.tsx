@@ -90,6 +90,11 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 				setStepRollback(
 					result.success ? successState : { status: "error", error: firstFailure?.error ?? result.error },
 				)
+			} else if (filePath === undefined) {
+				// Step-level result with no per-file payload (for example the
+				// missing-task response: success: false, no files). Without this the
+				// step button would stay in the in-progress state forever.
+				setStepRollback(result.success ? successState : { status: "error", error: result.error })
 			}
 		}
 		window.addEventListener("message", handler)
@@ -274,13 +279,13 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 				<span className="text-sm font-medium" data-testid="change-card-header">
 					{t("chat:changeCard.header", { count: card.totalFiles })}
 				</span>
-				<span className="flex-grow" />
+				<span className="grow" />
 				{stepRollbackControls()}
 			</div>
 			<div className="flex flex-col gap-1 pl-6 pb-2">
 				{card.files.map((file, index) => (
 					<div key={file.path} className="flex items-start gap-2">
-						<div className="flex-grow min-w-0">
+						<div className="grow min-w-0">
 							{file.diff != null ? (
 								<CodeAccordion
 									path={file.path}
@@ -295,7 +300,7 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 									<span className="whitespace-nowrap overflow-hidden text-ellipsis font-mono text-sm text-vscode-descriptionForeground">
 										{formatPathTooltip(file.path)}
 									</span>
-									<span className="flex-grow" />
+									<span className="grow" />
 									{diffBadges(file.additions, file.deletions)}
 								</div>
 							)}

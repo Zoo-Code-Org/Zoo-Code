@@ -243,6 +243,23 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				)
 			})
 
+			it("rejects an unavailable checkpoint instead of deleting the live file", async () => {
+				// A corrupt journal entry can hand the rollback service a checkpoint
+				// id that does not resolve to a shadow-repo object. The lookup
+				// failure must not be read as "file absent at the checkpoint" —
+				// that would route the restore into the delete branch and remove a
+				// live file. The restore must fail loudly and leave the file intact.
+				await fs.writeFile(testFile, "Ahoy, world!")
+				await service.saveCheckpoint("First checkpoint")
+
+				await expect(
+					service.restoreFile("0000000000000000000000000000000000000000", "test.txt"),
+				).rejects.toThrow("Checkpoint unavailable")
+
+				expect(await fileExistsAtPath(testFile)).toBe(true)
+				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
+			})
+
 			it("emits a restore event when a file is restored", async () => {
 				const restoreListener = vi.fn()
 				service.on("restore", restoreListener)

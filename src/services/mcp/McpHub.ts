@@ -517,7 +517,16 @@ export class McpHub {
 					prettyPrint: true,
 					merge: (existing) => {
 						const parsed = existing as { mcpServers?: unknown } | null
-						if (parsed && parsed.mcpServers && typeof parsed.mcpServers === "object") {
+						// Arrays satisfy `typeof === "object"` but are not a valid
+						// mcpServers map; preserve only a plain object, otherwise the
+						// file would be rewritten with a value McpSettingsSchema
+						// rejects on the next load.
+						if (
+							parsed &&
+							parsed.mcpServers &&
+							!Array.isArray(parsed.mcpServers) &&
+							typeof parsed.mcpServers === "object"
+						) {
 							return existing
 						}
 						return { mcpServers: {} }

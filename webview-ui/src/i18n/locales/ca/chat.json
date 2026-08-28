@@ -177,7 +177,7 @@
 		"rollingBack": "Revertint...",
 		"rolledBack": "Revertit",
 		"stepRolledBack": "Pas revertit",
-		"rollbackFailed": "La revertida ha fallat"
+		"rollbackFailed": "La reversió ha fallat"
 	},
 	"checkpoint": {
 		"regular": "Punt de control",

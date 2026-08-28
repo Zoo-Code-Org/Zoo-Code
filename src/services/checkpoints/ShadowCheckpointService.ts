@@ -466,6 +466,22 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	/** Whether `filePath` exists in the tree of `commitHash`. */
 	private async fileExistsInCommit(commitHash: string, filePath: string): Promise<boolean> {
+		// A failed lookup is not evidence the file is absent. If the commit object
+		// itself cannot be read (invalid hash, corrupt or missing shadow repo),
+		// falling through to the restoreFile delete branch would remove a live
+		// file. Verify the object first and fail the restore loudly instead.
+		//
+		// Verification must be evidence-based: simple-git's raw() only rejects
+		// when git writes a fatal to stderr, and `git cat-file -e <bad-sha>`
+		// fails *silently* (exit 1, no output) — a silent resolution would be
+		// read as "valid commit". `rev-parse --verify` emits the resolved id on
+		// success and a stderr fatal on every failure mode, so the reject is
+		// reliable.
+		try {
+			await this.git!.raw(["rev-parse", "--verify", `${commitHash}^{commit}`])
+		} catch {
+			throw new Error(`Checkpoint unavailable: ${commitHash}`)
+		}
 		try {
 			await this.git!.raw(["cat-file", "-e", `${commitHash}:${filePath}`])
 			return true

@@ -251,6 +251,46 @@ describe("ChangeCard", () => {
 		expect(screen.getByTestId("change-card-file-success-0")).toBeInTheDocument()
 	})
 
+	it("resolves the step state from a failure result that carries no files", async () => {
+		// The missing-task response is a step-level result with success: false
+		// and no per-file payload (no files, no filePath). Without handling the
+		// empty shape the step button would stay in the pending state forever.
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		fireEvent.click(screen.getByTestId("change-card-step-rollback"))
+		fireEvent.click(screen.getByText("Confirm"))
+		expect(screen.getByTestId("change-card-step-pending")).toBeInTheDocument()
+
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: {
+				cardTs: 1000,
+				success: false,
+				error: "Checkpoints are not enabled for this task",
+			},
+		})
+
+		// The error detail rides in the tooltip content; the visible state is
+		// the rollback-failed label. The assertion that matters here is that the
+		// step left the pending state at all (previously it would stay pending).
+		expect(await screen.findByTestId("change-card-step-error")).toHaveTextContent("Rollback failed")
+	})
+
+	it("keeps the step in the pending state until a no-files success resolves it", async () => {
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		fireEvent.click(screen.getByTestId("change-card-step-rollback"))
+		fireEvent.click(screen.getByText("Confirm"))
+		expect(screen.getByTestId("change-card-step-pending")).toBeInTheDocument()
+
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: { cardTs: 1000, success: true },
+		})
+
+		expect(await screen.findByTestId("change-card-step-success")).toBeInTheDocument()
+	})
+
 	it("ignores rollback results for other change cards", () => {
 		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
 

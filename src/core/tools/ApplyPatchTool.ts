@@ -13,6 +13,7 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -99,10 +100,25 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				return
 			}
 
-			// Process each hunk
+			// Process each hunk. The read doubles as the S2 observation for the
+			// guarded publish (ReadFileTool contract: stat before and after the
+			// read, observe only when the on-disk version is unchanged between the
+			// two stats). Without it, the in-place modify publish is an unobserved
+			// write and the composed chat-diff default rejects it ("File already
+			// exists ... and was not read before this write") even though this tool
+			// just read the exact content the patch was applied to.
 			const readFile = async (filePath: string): Promise<string> => {
 				const absolutePath = path.resolve(task.cwd, filePath)
-				return await fs.readFile(absolutePath, "utf8")
+				const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				const content: string = await fs.readFile(absolutePath, "utf8")
+				const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+				if (preReadStats && postReadStats) {
+					const preReadToken = versionTokenOfStat(preReadStats)
+					if (preReadToken === versionTokenOfStat(postReadStats)) {
+						task.observationRegistry.observe(absolutePath, preReadToken)
+					}
+				}
+				return content
 			}
 
 			let changes: ApplyPatchFileChange[]
