@@ -39,7 +39,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			<input
 				type="checkbox"
 				checked={checked}
-				onChange={(e) => onChange({ target: { checked: e.target.checked } })}
+				onChange={(e) => {
+					// Mirror the real web component: the change event carries the
+					// checked state on both target and currentTarget.
+					const value = e.currentTarget.checked
+					onChange({ target: { checked: value }, currentTarget: { checked: value } })
+				}}
 				aria-label={typeof children === "string" ? children : undefined}
 				data-testid={dataTestId}
 			/>
