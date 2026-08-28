@@ -261,3 +261,45 @@ describe("API task controls", () => {
 		})
 	})
 })
+
+describe("API task controls - per-view review fixes", () => {
+	let outputChannel: vscode.OutputChannel
+	let sidebarProvider: ProviderDouble
+	let api: API
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		sidebarProvider = createProvider("sidebar-task")
+		api = new API(outputChannel, asClineProvider(sidebarProvider))
+	})
+
+	it("keeps the new registration when a replaced task instance tears down", async () => {
+		const staleTask = createTask("replaced-task")
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, staleTask)
+
+		// A new instance reusing the same taskId replaces the stale registration.
+		const freshTask = createTask("replaced-task")
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, freshTask)
+
+		// The stale instance teardown must not drop the new registration.
+		staleTask.emit(RooCodeEventName.TaskAborted)
+		await expect(api.approveTaskAsk("replaced-task")).resolves.toBe(true)
+
+		freshTask.emit(RooCodeEventName.TaskUnfocused)
+		await expect(api.approveTaskAsk("replaced-task")).resolves.toBe(false)
+	})
+
+	it("still delivers the follow-up answer when the mode switch fails", async () => {
+		const task = createTask("task-failing-switch")
+		sidebarProvider.handleModeSwitch.mockRejectedValueOnce(new Error("persist failed"))
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+		await expect(
+			api.selectTaskFollowupSuggestion({ taskId: task.taskId, answer: "Deliver anyway", mode: "architect" }),
+		).resolves.toBe(true)
+
+		expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+		expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Deliver anyway")
+	})
+})

@@ -14,6 +14,7 @@ import {
 	type ProviderSettings,
 	type ProviderSettingsEntry,
 	type TaskEvent,
+	type TaskLike,
 	type CreateTaskOptions,
 	type WebviewThemeFixture,
 	RooCodeEventName,
@@ -366,13 +367,24 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 
 		if (mode) {
-			const { customModes } = await entry.provider.getState()
-			const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
+			try {
+				const { customModes } = await entry.provider.getState()
+				const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
 
-			if (isValidMode) {
-				await entry.provider.handleModeSwitch(mode)
-			} else {
-				this.log(`[API#selectTaskFollowupSuggestion] ignoring unknown mode "${mode}" for task ${taskId}`)
+				if (isValidMode) {
+					// entry.task is the registered Task instance (TaskAskController narrows it
+					// to the ask-response surface); pass it explicitly so the switch is scoped to
+					// this task rather than the provider's currently focused task.
+					await entry.provider.handleModeSwitch(mode, entry.task as Task)
+				} else {
+					this.log(`[API#selectTaskFollowupSuggestion] ignoring unknown mode "${mode}" for task ${taskId}`)
+				}
+			} catch (error) {
+				// A failed mode switch must not swallow the follow-up answer: the task's
+				// pending ask would otherwise stay unanswered.
+				this.log(
+					`[API#selectTaskFollowupSuggestion] mode switch failed for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
 			}
 		}
 
@@ -406,6 +418,21 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		}
 	}
 
+	/**
+	 * Removes a task's registration only if the registered entry still belongs to this
+	 * task instance: a replaced instance reusing the same taskId must not be dropped by
+	 * the previous instance's teardown events.
+	 */
+	private removeRegisteredTask(task: TaskLike): void {
+		const entry = this.tasksById.get(task.taskId)
+
+		// The stored controller is this exact instance (registered above with a cast to
+		// the ask-response surface), so reference equality is the right identity check.
+		if (entry?.task === (task as unknown as TaskAskController)) {
+			this.tasksById.delete(task.taskId)
+		}
+	}
+
 	private registerListeners(provider: ClineProvider) {
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
 			this.tasksById.set(task.taskId, { task: task as unknown as TaskAskController, provider })
@@ -421,7 +448,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
 					isSubtask: !!task.parentTaskId,
 				})
-				this.tasksById.delete(task.taskId)
+				this.removeRegisteredTask(task)
 
 				await this.fileLog(
 					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
@@ -430,7 +457,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskAborted, () => {
 				this.emit(RooCodeEventName.TaskAborted, task.taskId)
-				this.tasksById.delete(task.taskId)
+				this.removeRegisteredTask(task)
 			})
 
 			task.on(RooCodeEventName.TaskFocused, () => {
@@ -439,7 +466,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 
 			task.on(RooCodeEventName.TaskUnfocused, () => {
 				this.emit(RooCodeEventName.TaskUnfocused, task.taskId)
-				this.tasksById.delete(task.taskId)
+				this.removeRegisteredTask(task)
 			})
 
 			task.on(RooCodeEventName.TaskActive, () => {

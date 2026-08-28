@@ -1026,7 +1026,7 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 16
+			"count": 12
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
@@ -1036,7 +1036,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.parallelMode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 139
+			"count": 137
 		}
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
@@ -1046,7 +1046,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 37
+			"count": 36
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {
