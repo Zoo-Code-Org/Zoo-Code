@@ -260,6 +260,38 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
 			})
 
+			it("rejects a target that escapes the workspace through a symlinked ancestor", async () => {
+				// A lexical prefix check passes for a path that goes through a
+				// symlink inside the workspace pointing outside it; the resolved
+				// (real) target must be contained as well, or the delete/checkout
+				// branch would mutate a file the task never owned (CWE-22).
+				if (process.platform === "win32") {
+					// Creating symlinks needs elevated privileges on Windows; the
+					// lexical-containment test above still covers the portable case.
+					return
+				}
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const outsideDir = path.join(tmpDir, `outside-${Date.now()}`)
+				await fs.mkdir(outsideDir, { recursive: true })
+				const outsideFile = path.join(outsideDir, "sneaky.txt")
+				await fs.writeFile(outsideFile, "outside")
+
+				// A directory link inside the workspace pointing at the outside dir:
+				// lexically `link/sneaky.txt` is inside the workspace.
+				await fs.symlink(outsideDir, path.join(service.workspaceDir, "link"), "dir")
+
+				await expect(service.restoreFile(commit1!.commit, path.join("link", "sneaky.txt"))).rejects.toThrow(
+					/outside the workspace/,
+				)
+
+				// The outside file survives: the restore failed before any mutation.
+				expect(await fileExistsAtPath(outsideFile)).toBe(true)
+				expect(await fs.readFile(outsideFile, "utf-8")).toBe("outside")
+			})
+
 			it("emits a restore event when a file is restored", async () => {
 				const restoreListener = vi.fn()
 				service.on("restore", restoreListener)
