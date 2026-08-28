@@ -11,6 +11,12 @@ import { ApplyDiffTool } from "../ApplyDiffTool"
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue("original file content\n"),
+		// The trial aggregate adds the S4b stat-pair self-observation around this
+		// read (ApplyDiffTool records its own read under the ReadFileTool contract);
+		// its `.catch(() => undefined)` fallback keeps the observation no-op when
+		// stat rejects, so this spec stays green on both the component branch and
+		// the trial aggregate.
+		stat: vi.fn().mockRejectedValue(new Error("stat unavailable in this spec")),
 	},
 }))
 
