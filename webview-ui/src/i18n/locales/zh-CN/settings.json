@@ -701,6 +701,14 @@
 		"enable": {
 			"label": "启用自动存档点",
 			"description": "开启后自动创建任务存档点，方便回溯修改。 <0>了解更多</0>"
+		},
+		"perWrite": {
+			"label": "每次文件写入后创建存档点",
+			"description": "智能体每次成功写入文件后都会记录一个存档点快照"
+		},
+		"changeCardDetail": {
+			"label": "在变更卡片中显示完整 diff",
+			"description": "在逐步变更卡片中为每个文件内嵌完整 unified diff。关闭时，卡片仅显示文件列表与新增/删除行数。"
 		}
 	},
 	"notifications": {

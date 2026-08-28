@@ -701,6 +701,14 @@
 		"enable": {
 			"label": "Ativar pontos de verificação automáticos",
 			"description": "Quando ativado, o Zoo criará automaticamente pontos de verificação durante a execução de tarefas, facilitando a revisão de alterações ou o retorno a estados anteriores. <0>Saiba mais</0>"
+		},
+		"perWrite": {
+			"label": "Ponto de verificação após cada gravação de arquivo",
+			"description": "Registra um snapshot de ponto de verificação após cada gravação de arquivo bem-sucedida pelo agente"
+		},
+		"changeCardDetail": {
+			"label": "Mostrar diff completo nos cartões de alterações",
+			"description": "Inclui a diff unificada completa em linha para cada arquivo nos cartões de alterações por etapa. Quando desativado, os cartões mostram apenas a lista de arquivos com linhas adicionadas/removidas."
 		}
 	},
 	"notifications": {

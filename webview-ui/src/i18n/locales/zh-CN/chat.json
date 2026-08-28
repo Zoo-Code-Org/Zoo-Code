@@ -167,6 +167,18 @@
 			"claudeCodeNotAuthenticated": "你需要登录才能使用 Claude Code。前往设置并点击「登录到 Claude Code」进行身份验证。"
 		}
 	},
+	"changeCard": {
+		"header": "此步骤中更改了 {{count}} 个文件",
+		"rollbackFile": "回退此文件",
+		"rollbackStep": "回退此步骤",
+		"rollbackWarning": "将恢复此步骤文件的上一版本内容。",
+		"confirm": "确认",
+		"cancel": "取消",
+		"rollingBack": "正在回退...",
+		"rolledBack": "已回退",
+		"stepRolledBack": "步骤已回退",
+		"rollbackFailed": "回退失败"
+	},
 	"checkpoint": {
 		"regular": "检查点",
 		"initializingWarning": "正在初始化检查点...如果耗时过长，你可以在<settingsLink>设置</settingsLink>中禁用检查点并重新启动任务。",

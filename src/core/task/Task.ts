@@ -316,6 +316,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public lastMessageTs?: number
 	private autoApprovalTimeoutRef?: NodeJS.Timeout
 
+	// B1: task-start baseline, recorded at most once (initiateTaskLoop also runs on resume).
+	private taskStartBaselineDone = false
+
 	// Tool Use
 	consecutiveMistakeCount: number = 0
 	consecutiveMistakeLimit: number
@@ -2502,6 +2505,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// returned promise cannot reject. `void` is sufficient — no `.catch`
 		// arm needed.
 		void getCheckpointService(this)
+
+		// B1 task-start baseline: a suppressed pre-task root commit (default-on).
+		if (!this.taskStartBaselineDone) {
+			this.taskStartBaselineDone = true
+			const baselineEnabled = (await this.providerRef.deref()?.getState())?.perWriteCheckpoints
+			if (baselineEnabled !== false) {
+				// allowEmpty=true so a clean workspace still produces the baseline
+				// commit; awaited so the first per-write checkpoint cannot interleave.
+				await this.checkpointSave(true, true)
+			}
+		}
 
 		let nextUserContent = userContent
 		let includeFileDetails = true

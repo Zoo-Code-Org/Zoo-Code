@@ -701,6 +701,14 @@
 		"enable": {
 			"label": "Activer les points de contrôle automatiques",
 			"description": "Lorsque cette option est activée, Zoo créera automatiquement des points de contrôle pendant l'exécution des tâches, facilitant la révision des modifications ou le retour à des états antérieurs. <0>En savoir plus</0>"
+		},
+		"perWrite": {
+			"label": "Point de contrôle après chaque écriture de fichier",
+			"description": "Enregistre un instantané de point de contrôle après chaque écriture de fichier réussie par l’agent"
+		},
+		"changeCardDetail": {
+			"label": "Afficher la diff complète dans les cartes de modifications",
+			"description": "Inclut la diff unifiée complète en ligne pour chaque fichier dans les cartes de modifications par étape. Désactivée, les cartes n'affichent que la liste des fichiers avec les lignes ajoutées/retirées."
 		}
 	},
 	"notifications": {

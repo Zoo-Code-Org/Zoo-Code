@@ -5,7 +5,7 @@ import type { ProviderSettings, ProviderSettingsEntry } from "./provider-setting
 import type { HistoryItem } from "./history.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
-import type { ClineMessage, QueuedMessage } from "./message.js"
+import type { ChangeCardDetail, ClineMessage, QueuedMessage } from "./message.js"
 import type { MarketplaceItem, MarketplaceInstalledMetadata, InstallMarketplaceItemOptions } from "./marketplace.js"
 import type { TodoItem } from "./todo.js"
 import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
@@ -108,6 +108,7 @@ export interface ExtensionMessage {
 		| "fileContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
+		| "checkpointRollbackResult"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -254,6 +255,28 @@ export interface ExtensionMessage {
 	copyProgressItemName?: string
 	// folderSelected
 	path?: string
+	/** For checkpointRollbackResult: outcome of a change-card rollback request (B3b). */
+	checkpointRollbackResult?: CheckpointRollbackResult
+}
+
+/**
+ * CheckpointRollbackResult
+ *
+ * Outcome of a change-card rollback request (B3b), posted back to the webview
+ * that sent `checkpointRollbackFile` / `checkpointRollbackStep`. `cardTs`
+ * echoes the change-card message timestamp so the requesting card can
+ * correlate the result: per-file results carry `filePath`, per-step results
+ * carry the per-file outcomes in `files`.
+ */
+export interface CheckpointRollbackResult {
+	/** The `ts` of the change_card message the result belongs to. */
+	cardTs: number
+	/** Per-file scope: the file that was restored. */
+	filePath?: string
+	success: boolean
+	error?: string
+	/** Per-step scope: the per-file outcomes. */
+	files?: { filePath: string; success: boolean; error?: string }[]
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -348,6 +371,8 @@ export type ExtensionState = Pick<
 
 	enableCheckpoints: boolean
 	checkpointTimeout: number // Timeout for checkpoint initialization in seconds (default: 15)
+	perWriteCheckpoints: boolean
+	changeCardDetail: ChangeCardDetail
 	maxOpenTabsContext: number // Maximum number of VSCode open tabs to include in context (0-500)
 	maxWorkspaceFiles: number // Maximum number of files to include in current working directory details (0-500)
 	showRooIgnoredFiles: boolean // Whether to show .rooignore'd files in listings
@@ -544,6 +569,8 @@ export interface WebviewMessage {
 		| "openCustomModesSettings"
 		| "checkpointDiff"
 		| "checkpointRestore"
+		| "checkpointRollbackFile"
+		| "checkpointRollbackStep"
 		| "completionCheckpointDiff"
 		| "completionCheckpointRestore"
 		| "deleteMcpServer"
@@ -786,6 +813,32 @@ export const checkoutRestorePayloadSchema = z.object({
 
 export type CheckpointRestorePayload = z.infer<typeof checkoutRestorePayloadSchema>
 
+/**
+ * Payload of the `checkpointRollbackFile` webview message (B3b): restore one
+ * change-card file to the checkpoint commit the card was keyed by.
+ */
+export const checkpointRollbackFilePayloadSchema = z.object({
+	/** The `ts` of the change_card message the request comes from (echoed on the result). */
+	cardTs: z.number(),
+	checkpointId: z.string(),
+	filePath: z.string(),
+})
+
+export type CheckpointRollbackFilePayload = z.infer<typeof checkpointRollbackFilePayloadSchema>
+
+/**
+ * Payload of the `checkpointRollbackStep` webview message (B3b): restore
+ * every file of a change-card step to the step's checkpoint.
+ */
+export const checkpointRollbackStepPayloadSchema = z.object({
+	cardTs: z.number(),
+	/** The step's checkpoint commit (the card's first checkpointId); optional. */
+	checkpointId: z.string().optional(),
+	filePaths: z.array(z.string()).min(1),
+})
+
+export type CheckpointRollbackStepPayload = z.infer<typeof checkpointRollbackStepPayloadSchema>
+
 export interface IndexingStatusPayload {
 	state: "Standby" | "Indexing" | "Indexed" | "Error" | "Stopping"
 	message: string
@@ -799,6 +852,8 @@ export interface IndexClearedPayload {
 export type WebViewMessagePayload =
 	| CheckpointDiffPayload
 	| CheckpointRestorePayload
+	| CheckpointRollbackFilePayload
+	| CheckpointRollbackStepPayload
 	| IndexingStatusPayload
 	| IndexClearedPayload
 	| UpdateTodoListPayload

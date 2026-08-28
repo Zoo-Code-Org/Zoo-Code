@@ -11,6 +11,8 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { checkpointSave } from "../../core/checkpoints"
+import { checkAutoApproval } from "../auto-approval"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -392,6 +394,7 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			const state = await provider?.getState()
 			const diagnosticsEnabled = state?.diagnosticsEnabled ?? true
 			const writeDelayMs = state?.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS
+			const perWriteCheckpoints = state?.perWriteCheckpoints ?? true
 			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
@@ -465,6 +468,34 @@ export class EditFileTool extends BaseTool<"edit_file"> {
 			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, isNewFile)
 
 			pushToolResult(message + replacementInfo)
+
+			if (perWriteCheckpoints) {
+				// B2: the change-journal entry for this edit is appended inside
+				// checkpointSave (the hook stays a single call site), keyed by the
+				// checkpoint commit that call produces. B3a threads the approval
+				// diff (for the change card) and whether the step was auto-
+				// approved (auto-approved steps always get the compact card).
+				const autoApproved =
+					(
+						await checkAutoApproval({
+							state,
+							cwd: task.cwd,
+							ask: "tool",
+							text: completeMessage,
+							isProtected: isWriteProtected,
+						})
+					).decision === "approve"
+				// Awaited: a later tool block must not interleave with this edit's
+				// staging/commit/journal/change-card work. checkpointSave never
+				// rejects (service call wrapped in try/catch upstream).
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: isNewFile ? "create" : "update",
+					diffStats: diffStats ? { additions: diffStats.added, deletions: diffStats.removed } : undefined,
+					...(sanitizedDiff ? { diff: sanitizedDiff } : {}),
+					...(autoApproved ? { autoApproved: true } : {}),
+				})
+			}
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()

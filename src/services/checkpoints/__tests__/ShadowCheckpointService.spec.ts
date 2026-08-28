@@ -165,6 +165,118 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 			})
 		})
 
+		describe(`${klass.name}#restoreFile`, () => {
+			it("restores a modified file to a previous checkpoint without touching other files", async () => {
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const newFile = path.join(service.workspaceDir, "new.txt")
+				await fs.writeFile(newFile, "New file content")
+				const commit2 = await service.saveCheckpoint("Second checkpoint")
+				expect(commit2?.commit).toBeTruthy()
+
+				// Drift both files, then roll back only test.txt to commit 1.
+				await fs.writeFile(testFile, "Changed after checkpoint")
+				await fs.writeFile(newFile, "Also changed")
+
+				await service.restoreFile(commit1!.commit, "test.txt")
+
+				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
+				// new.txt is not part of the restore and keeps its drifted content.
+				expect(await fs.readFile(newFile, "utf-8")).toBe("Also changed")
+			})
+
+			it("deletes a file that did not exist at the checkpoint", async () => {
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const newFile = path.join(service.workspaceDir, "new.txt")
+				await fs.writeFile(newFile, "Created after the checkpoint")
+
+				await service.restoreFile(commit1!.commit, "new.txt")
+
+				expect(await fileExistsAtPath(newFile)).toBe(false)
+				// The untouched file keeps its checkpoint-1 content.
+				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
+			})
+
+			it("accepts a native backslashed path on Windows (git pathspecs are POSIX)", async () => {
+				if (process.platform !== "win32") {
+					// Off-Windows the journal paths are already POSIX, so there is
+					// nothing to normalize; the toPosix() call is still exercised
+					// as a no-op by every other restoreFile test.
+					return
+				}
+
+				// A nested file, so the relative path actually contains a
+				// separator that Windows writes as a backslash.
+				const subFile = path.join(path.dirname(testFile), "subdir", "inner.txt")
+				await fs.mkdir(path.dirname(subFile), { recursive: true })
+				await fs.writeFile(subFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				await fs.writeFile(subFile, "Drifted")
+
+				// The change journal and the webview hand backslashed paths to the
+				// rollback service on Windows; restoreFile must normalize them for
+				// the git calls. Without the normalization, `cat-file -e` would
+				// never match and the delete branch would remove a file the
+				// checkpoint actually contains.
+				await service.restoreFile(commit1!.commit, "subdir" + path.sep + "inner.txt")
+
+				expect(await fs.readFile(subFile, "utf-8")).toBe("Ahoy, world!")
+			})
+
+			it("rejects a restore target that escapes the workspace", async () => {
+				// `..` segments must be normalized and contained, so neither the
+				// checkout nor the delete branch can touch a file outside the
+				// workspace (CWE-22).
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				await expect(service.restoreFile(commit1!.commit, path.join("..", "escape.txt"))).rejects.toThrow(
+					/outside the workspace/,
+				)
+			})
+
+			it("emits a restore event when a file is restored", async () => {
+				const restoreListener = vi.fn()
+				service.on("restore", restoreListener)
+
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("First checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				await fs.writeFile(testFile, "Drifted")
+				await service.restoreFile(commit1!.commit, "test.txt")
+
+				expect(restoreListener).toHaveBeenCalledWith(
+					expect.objectContaining({ type: "restore", commitHash: commit1!.commit }),
+				)
+			})
+
+			it("throws and emits an error event when the shadow repo is not initialized", async () => {
+				// A service that never ran initShadowGit has no git handle; restoreFile
+				// must fail cleanly and surface the error event.
+				const raw = await klass.create({
+					taskId,
+					shadowDir: path.join(tmpDir, `noinit-${Date.now()}`),
+					workspaceDir: path.join(tmpDir, `ws-noinit-${Date.now()}`),
+					log: () => {},
+				})
+
+				const errorListener = vi.fn()
+				raw.on("error", errorListener)
+
+				await expect(raw.restoreFile("sha-x", "test.txt")).rejects.toThrow("Shadow git repo not initialized")
+				expect(errorListener).toHaveBeenCalledWith(expect.objectContaining({ type: "error" }))
+			})
+		})
+
 		describe(`${klass.name}#saveCheckpoint`, () => {
 			it("creates a checkpoint if there are pending changes", async () => {
 				await fs.writeFile(testFile, "Ahoy, world!")
