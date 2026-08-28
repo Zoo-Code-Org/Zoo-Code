@@ -57,22 +57,23 @@ export const CheckpointSettings = ({
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
 						{t("settings:checkpoints.perWrite.description")}
 					</div>
-					<SearchableSetting
-						settingId="checkpoints-changeCardDetail"
-						section="checkpoints"
-						label={t("settings:checkpoints.changeCardDetail.label")}>
-						<VSCodeCheckbox
-							checked={(changeCardDetail ?? DEFAULT_CHANGE_CARD_DETAIL) === "full"}
-							onChange={(e: any) => {
-								setCachedStateField("changeCardDetail", e.target.checked ? "full" : "summary")
-							}}
-							data-testid="change-card-detail-checkbox">
-							<span className="font-medium">{t("settings:checkpoints.changeCardDetail.label")}</span>
-						</VSCodeCheckbox>
-						<div className="text-vscode-descriptionForeground text-sm mt-1">
-							{t("settings:checkpoints.changeCardDetail.description")}
-						</div>
-					</SearchableSetting>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="checkpoints-changeCardDetail"
+					section="checkpoints"
+					label={t("settings:checkpoints.changeCardDetail.label")}>
+					<VSCodeCheckbox
+						checked={(changeCardDetail ?? DEFAULT_CHANGE_CARD_DETAIL) === "full"}
+						onChange={(e: any) => {
+							setCachedStateField("changeCardDetail", e.target.checked ? "full" : "summary")
+						}}
+						data-testid="change-card-detail-checkbox">
+						<span className="font-medium">{t("settings:checkpoints.changeCardDetail.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:checkpoints.changeCardDetail.description")}
+					</div>
 				</SearchableSetting>
 
 				<SearchableSetting
