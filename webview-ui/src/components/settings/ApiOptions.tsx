@@ -7,6 +7,7 @@ import { ExternalLinkIcon } from "@radix-ui/react-icons"
 import {
 	type ProviderName,
 	type ProviderSettings,
+	isDynamicProvider,
 	isRetiredProvider,
 	providerIdentifiers,
 	DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
@@ -180,8 +181,13 @@ const ApiOptions = ({
 		: selectedProvider
 	const isRetiredSelectedProvider =
 		typeof apiConfiguration.apiProvider === "string" && isRetiredProvider(apiConfiguration.apiProvider)
+	const routerProvider =
+		activeSelectedProvider && isDynamicProvider(activeSelectedProvider) ? activeSelectedProvider : undefined
 
-	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels()
+	const { data: routerModels, refetch: refetchRouterModels } = useRouterModels({
+		enabled: !!routerProvider,
+		provider: routerProvider,
+	})
 	useZooGatewayRouterModelsSync()
 
 	const { data: openRouterModelProviders } = useOpenRouterModelProviders(
@@ -242,12 +248,16 @@ const ApiOptions = ({
 				vscode.postMessage({
 					type: RouterModelsMessageType.requestRouterModels,
 					values: {
+						provider: providerIdentifiers.litellm,
 						litellmApiKey: apiConfiguration?.litellmApiKey,
 						litellmBaseUrl: apiConfiguration?.litellmBaseUrl,
 					},
 				})
 			} else if (selectedProvider === providerIdentifiers.poe) {
-				vscode.postMessage({ type: RouterModelsMessageType.requestRouterModels })
+				vscode.postMessage({
+					type: RouterModelsMessageType.requestRouterModels,
+					values: { provider: providerIdentifiers.poe },
+				})
 			}
 		},
 		250,

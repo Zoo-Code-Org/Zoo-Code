@@ -3,9 +3,10 @@ import { screen } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
 
-import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
+import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
+import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import ApiOptions from "../ApiOptions"
@@ -36,10 +37,10 @@ vi.mock("@src/utils/vscode", () => ({
 
 // Mock the router models hook
 vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
-	useRouterModels: () => ({
+	useRouterModels: vi.fn(() => ({
 		data: null,
 		refetch: vi.fn(),
-	}),
+	})),
 }))
 
 // Mock the selected model hook
@@ -112,6 +113,61 @@ describe("ApiOptions Provider Filtering", () => {
 	const renderWithProviders = (props = defaultProps) => {
 		return renderWithExtensionState(<ApiOptions {...props} />)
 	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(useSelectedModel).mockReturnValue({
+			provider: "anthropic",
+			id: "claude-3-5-sonnet-20241022",
+			info: undefined,
+			isLoading: false,
+			isError: false,
+		})
+	})
+
+	it("does not request router models for a static provider", () => {
+		renderWithProviders()
+
+		expect(useRouterModels).toHaveBeenCalledWith({ enabled: false, provider: undefined })
+	})
+
+	it("requests router models only for the selected dynamic provider", () => {
+		vi.mocked(useSelectedModel).mockReturnValue({
+			provider: "kenari",
+			id: "glm-5-2",
+			info: undefined,
+			isLoading: false,
+			isError: false,
+		})
+
+		renderWithProviders({
+			...defaultProps,
+			apiConfiguration: { apiProvider: "kenari" } as ProviderSettings,
+		})
+
+		expect(useRouterModels).toHaveBeenCalledWith({ enabled: true, provider: "kenari" })
+	})
+
+	it.each([providerIdentifiers.ollama, providerIdentifiers.lmstudio])(
+		"does not make an aggregate router request for local provider %s",
+		(provider) => {
+			vi.mocked(useSelectedModel).mockReturnValue({
+				provider,
+				id: "local-model",
+				info: undefined,
+				isLoading: false,
+				isError: false,
+			})
+
+			renderWithProviders({
+				...defaultProps,
+				apiConfiguration: { apiProvider: provider } as ProviderSettings,
+			})
+
+			expect(useRouterModels).toHaveBeenCalledWith({ provider })
+			expect(useRouterModels).not.toHaveBeenCalledWith()
+		},
+	)
 
 	it("should show all providers when no organization allow list is provided", () => {
 		renderWithProviders()
