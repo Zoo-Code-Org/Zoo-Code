@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest"
 import { providerIdentifiers } from "@roo-code/types"
 
 import { API } from "../api"
+import type { ClineProvider } from "../../core/webview/ClineProvider"
+import type { OutputChannel } from "vscode"
 
 vi.mock("@roo-code/ipc", () => ({
 	IpcServer: class {},
@@ -34,8 +36,8 @@ describe("API.setConfiguration", () => {
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
-		} as any
-		const api = new API({ appendLine: vi.fn() } as any, provider)
+		} as unknown as ClineProvider
+		const api = new API({ appendLine: vi.fn() } as unknown as OutputChannel, provider)
 		const configuration = {
 			apiProvider: providerIdentifiers.bedrock,
 			currentApiConfigName: "default",

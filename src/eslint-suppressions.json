@@ -1149,11 +1149,6 @@
 			"count": 7
 		}
 	},
-	"extension/__tests__/api-set-configuration.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"extension/api.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 9
