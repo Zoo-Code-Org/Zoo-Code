@@ -177,7 +177,8 @@
 		"rollingBack": "Réinitialisation...",
 		"rolledBack": "Réinitialisé",
 		"stepRolledBack": "Étape réinitialisée",
-		"rollbackFailed": "Échec de la réinitialisation"
+		"rollbackFailed": "Échec de la réinitialisation",
+		"openFile": "Ouvrir le fichier"
 	},
 	"checkpoint": {
 		"regular": "Point de contrôle",

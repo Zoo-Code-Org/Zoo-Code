@@ -202,7 +202,8 @@
 		"rollingBack": "Mengembalikan...",
 		"rolledBack": "Dikembalikan",
 		"stepRolledBack": "Langkah dikembalikan",
-		"rollbackFailed": "Pembalikan gagal"
+		"rollbackFailed": "Pembalikan gagal",
+		"openFile": "Buka file"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

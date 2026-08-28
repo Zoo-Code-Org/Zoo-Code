@@ -27,6 +27,7 @@ vi.mock("react-i18next", () => ({
 				"chat:changeCard.rolledBack": "Rolled back",
 				"chat:changeCard.stepRolledBack": "Step rolled back",
 				"chat:changeCard.rollbackFailed": "Rollback failed",
+				"chat:changeCard.openFile": "Open file",
 			}
 			return map[key] || key
 		},
@@ -324,6 +325,45 @@ describe("ChangeCard", () => {
 		fireEvent.click(screen.getByTestId("change-card-step-cancel"))
 		expect(screen.getByTestId("change-card-step-rollback")).toBeInTheDocument()
 		expect(mockPostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "checkpointRollbackStep" }))
+	})
+
+	it("posts an openFile message from both the diff-row jump icon and the no-diff-row button", () => {
+		renderWithExtensionState(
+			<ChangeCard
+				message={makeCardMessage({
+					detail: "full",
+					files: [
+						{ path: "src/a.ts", additions: 1, deletions: 1, diff: DIFF_A },
+						{ path: "src/b.ts", additions: 1, deletions: 1 },
+					],
+					totalFiles: 2,
+				})}
+			/>,
+		)
+
+		// Diff row: the CodeAccordion header jump icon (own aria-label).
+		fireEvent.click(screen.getByLabelText("Open file: src/a.ts"))
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "./src/a.ts" })
+		mockPostMessage.mockClear()
+
+		// No-diff row: the open control on the plain path row.
+		fireEvent.click(screen.getByTestId("change-card-file-open-1"))
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "./src/b.ts" })
+	})
+
+	it("does not double-prefix paths that already carry the ./ marker", () => {
+		renderWithExtensionState(
+			<ChangeCard
+				message={makeCardMessage({
+					detail: "summary",
+					files: [{ path: "./src/c.ts", additions: 1, deletions: 1 }],
+					totalFiles: 1,
+				})}
+			/>,
+		)
+
+		fireEvent.click(screen.getByTestId("change-card-file-open-0"))
+		expect(mockPostMessage).toHaveBeenCalledWith({ type: "openFile", text: "./src/c.ts" })
 	})
 })
 
