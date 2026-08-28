@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+﻿import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
 import { API } from "../api"
@@ -63,5 +63,39 @@ describe("API - configuration", () => {
 
 		expect(setModeConfig).not.toHaveBeenCalled()
 		expect(postStateToWebview).toHaveBeenCalledOnce()
+	})
+
+	it("flattens the nested view-local apiConfiguration and strips its secrets", () => {
+		const getValues = vi.fn().mockReturnValue({
+			mode: "architect",
+			currentApiConfigName: "view-profile",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4o",
+				apiKey: "nested-secret-key",
+				openRouterApiKey: "nested-openrouter-secret",
+			},
+		})
+		// Structural double: API.getConfiguration() only reads sidebarProvider.getValues()
+		// from the provider; the double assertion adapts this minimal shape to the
+		// constructor's ClineProvider parameter (same pattern as the tests above).
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getValues,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider)
+
+		const configuration = api.getConfiguration()
+
+		expect(getValues).toHaveBeenCalledOnce()
+		expect(configuration.mode).toBe("architect")
+		expect(configuration.currentApiConfigName).toBe("view-profile")
+		expect(configuration.apiProvider).toBe(providerIdentifiers.openrouter)
+		expect(configuration.openRouterModelId).toBe("openai/gpt-4o")
+		expect(configuration).not.toHaveProperty("apiConfiguration")
+		expect(configuration).not.toHaveProperty("apiKey")
+		expect(configuration).not.toHaveProperty("openRouterApiKey")
 	})
 })
