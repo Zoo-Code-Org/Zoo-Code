@@ -140,9 +140,9 @@ suite("Roo Code View State", function () {
 	})
 	test("three panels keep follow-up option mode switches isolated across ten staggered rounds", async () => {
 		const plan = getFollowupModeIsolationPlan()
+		const rounds = plan.reduce((max, taskPlan) => Math.max(max, taskPlan.rounds.length), 0)
 		const modeEvents: Array<{ taskId: string; mode: string }> = []
 		const taskIds = new Map<string, string>()
-		const taskNamesById = new Map<string, string>()
 		const pendingSuggestions = new Map<string, { answer: string; mode?: string }>()
 		const answeredSuggestions = new Set<string>()
 		const suggestionKey = (taskId: string, answer: string) => `${taskId}:${answer}`
@@ -227,13 +227,12 @@ suite("Roo Code View State", function () {
 					preserveOpenTabs: index > 0,
 				})
 				taskIds.set(taskPlan.taskName, taskId)
-				taskNamesById.set(taskId, taskPlan.taskName)
 				maybeReleaseRound()
 			}
 
 			await waitFor(
 				() => {
-					const expectedSwitches = plan.length * 10
+					const expectedSwitches = plan.length * rounds
 					return modeEvents.length >= expectedSwitches
 				},
 				{ timeout: 30_000 },
@@ -247,7 +246,7 @@ suite("Roo Code View State", function () {
 				)
 			})
 
-			for (let roundIndex = 0; roundIndex < 10; roundIndex++) {
+			for (let roundIndex = 0; roundIndex < rounds; roundIndex++) {
 				const actualRoundModes = plan.map((taskPlan) => {
 					const taskId = taskIds.get(taskPlan.taskName)
 					assert.ok(taskId, `Expected task id for task ${taskPlan.taskName}`)

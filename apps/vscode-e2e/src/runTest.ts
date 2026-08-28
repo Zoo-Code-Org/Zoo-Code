@@ -147,6 +147,10 @@ async function main() {
 				addDeepSeekV4Fixtures(mock)
 				addViewStateFixtures(mock)
 
+				// Model-agnostic predicate fixtures for the view-state suite's post-switch
+				// turns. They coexist with the legacy model-scoped regex fixture below
+				// (shared response id call_modes_post_switch_001) so the modes suite keeps
+				// its OpenRouter-scoped match while view-state runs under any default model.
 				mock.addFixture({
 					match: {
 						predicate: (req) => toolResultContains(req, "call_modes_switch_001", []),
