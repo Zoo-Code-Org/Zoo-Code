@@ -13,6 +13,7 @@ import {
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
+	type HistoryItem,
 	type TaskLike,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -27,6 +28,9 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import * as taskMetadataModule from "../../task-persistence/taskMetadata"
+import * as taskMessagesModule from "../../task-persistence/taskMessages"
+import { getApiMetrics } from "../../../shared/getApiMetrics"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -4295,5 +4299,78 @@ describe("pushToolResultToUserContent", () => {
 		expect(task.userMessageContent[0].type).toBe("text")
 		expect(task.userMessageContent[1].type).toBe("image")
 		expect(task.userMessageContent[2]).toEqual(toolResult)
+	})
+})
+
+describe("saveClineMessages abandoned guard (#1021)", () => {
+	beforeEach(() => {
+		if (!TelemetryService.hasInstance()) {
+			TelemetryService.createInstance([])
+		}
+	})
+
+	it("persists messages but does not update task history when the task was abandoned", async () => {
+		// The history item carries the stale link: a fire-and-forget save that
+		// reaches updateTaskHistory() after abandonSubtask's atomicUpdatePair()
+		// cleared parentTaskId/rootTaskId would silently reattach the severed
+		// parent-child link.
+		const staleHistoryItem: HistoryItem = {
+			id: "orphan-subtask",
+			number: 7,
+			ts: Date.now(),
+			task: "orphan subtask",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+			rootTaskId: "stale-root",
+			parentTaskId: "stale-parent",
+		}
+		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue(undefined)
+		const metaSpy = vi
+			.spyOn(taskMetadataModule, "taskMetadata")
+			.mockResolvedValue({ historyItem: staleHistoryItem, tokenUsage: getApiMetrics([]) })
+
+		try {
+			const mockProvider = {
+				context: {
+					globalStorageUri: { fsPath: "/test/storage" },
+					globalState: {
+						get: vi.fn().mockImplementation(() => undefined),
+						update: vi.fn().mockResolvedValue(undefined),
+						keys: vi.fn().mockReturnValue([]),
+					},
+				},
+				getState: vi.fn().mockResolvedValue({
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
+					mcpEnabled: false,
+				}),
+				getMcpHub: vi.fn().mockReturnValue(undefined),
+				postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+				updateTaskHistory: vi.fn().mockResolvedValue(undefined),
+				// Task receives a full ClineProvider at runtime; this focused unit test only
+				// exercises these methods, so the partial double is cast (same pattern as the
+				// "Subtask Rate Limiting" block above).
+			} as unknown as MockedClineProvider
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
+				task: "orphan subtask",
+				startTask: false,
+			})
+
+			// abandonSubtask severs the link, then aborts the subtask with
+			// isAbandoned=true; an in-flight fire-and-forget save lands here.
+			task.abandoned = true
+
+			const saved = await getTaskTestAccess(task).saveClineMessages()
+
+			expect(saved).toBe(false)
+			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled() // history link is not reattached
+		} finally {
+			saveSpy.mockRestore()
+			metaSpy.mockRestore()
+		}
 	})
 })

@@ -1130,6 +1130,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// - Final state is emitted when updates stop (trailing: true)
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
+			// Guard: don't update the history item for abandoned tasks. Fire-and-forget
+			// saveClineMessages() calls can reach updateTaskHistory() after
+			// abandonSubtask's atomicUpdatePair() has already cleared
+			// parentTaskId/rootTaskId; writing this live Task's stale values would
+			// silently reattach the severed parent-child link.
+			if (this.abandoned) {
+				return false
+			}
+
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
