@@ -310,16 +310,21 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 									</span>
 									<span className="grow" />
 									{diffBadges(file.additions, file.deletions)}
-									<span
-										className="codicon codicon-link-external cursor-pointer"
-										style={{ fontSize: 13.5 }}
-										role="button"
-										tabIndex={0}
+									{/* Native button (not a span) so keyboard users can open the
+									file from a compact row: Enter/Space activate it for free. */}
+									<Button
+										variant="ghost"
+										size="icon"
 										aria-label={t("chat:changeCard.openFile")}
 										title={t("chat:changeCard.openFile")}
 										data-testid={`change-card-file-open-${index}`}
-										onClick={() => openFileInEditor(file.path)}
-									/>
+										onClick={() => openFileInEditor(file.path)}>
+										<span
+											className="codicon codicon-link-external"
+											style={{ fontSize: 13.5 }}
+											aria-hidden
+										/>
+									</Button>
 								</div>
 							)}
 						</div>
