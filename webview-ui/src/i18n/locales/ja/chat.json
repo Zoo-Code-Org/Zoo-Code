@@ -177,7 +177,8 @@
 		"rollingBack": "ロールバック中...",
 		"rolledBack": "ロールバック済み",
 		"stepRolledBack": "ステップをロールバックしました",
-		"rollbackFailed": "ロールバックに失敗しました"
+		"rollbackFailed": "ロールバックに失敗しました",
+		"openFile": "ファイルを開く"
 	},
 	"checkpoint": {
 		"regular": "チェックポイント",

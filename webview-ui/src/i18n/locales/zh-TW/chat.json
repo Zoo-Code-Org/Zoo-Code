@@ -199,7 +199,8 @@
 		"rollingBack": "正在還原...",
 		"rolledBack": "已還原",
 		"stepRolledBack": "步驟已還原",
-		"rollbackFailed": "還原失敗"
+		"rollbackFailed": "還原失敗",
+		"openFile": "開啟檔案"
 	},
 	"checkpoint": {
 		"regular": "檢查點",

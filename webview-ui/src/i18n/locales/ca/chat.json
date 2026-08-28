@@ -177,7 +177,8 @@
 		"rollingBack": "Revertint...",
 		"rolledBack": "Revertit",
 		"stepRolledBack": "Pas revertit",
-		"rollbackFailed": "La reversió ha fallat"
+		"rollbackFailed": "La reversió ha fallat",
+		"openFile": "Obre el fitxer"
 	},
 	"checkpoint": {
 		"regular": "Punt de control",

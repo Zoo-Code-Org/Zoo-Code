@@ -177,7 +177,8 @@
 		"rollingBack": "Geri alınıyor...",
 		"rolledBack": "Geri alındı",
 		"stepRolledBack": "Adım geri alındı",
-		"rollbackFailed": "Geri alma başarısız"
+		"rollbackFailed": "Geri alma başarısız",
+		"openFile": "Dosyayı aç"
 	},
 	"checkpoint": {
 		"regular": "Kontrol Noktası",

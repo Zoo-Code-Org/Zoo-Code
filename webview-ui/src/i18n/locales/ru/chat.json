@@ -172,7 +172,8 @@
 		"rollingBack": "Выполняется откат...",
 		"rolledBack": "Откат выполнен",
 		"stepRolledBack": "Шаг откатен",
-		"rollbackFailed": "Ошибка отката"
+		"rollbackFailed": "Ошибка отката",
+		"openFile": "Открыть файл"
 	},
 	"checkpoint": {
 		"regular": "Точка сохранения",

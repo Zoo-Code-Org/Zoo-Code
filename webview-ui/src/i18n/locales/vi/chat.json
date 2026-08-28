@@ -177,7 +177,8 @@
 		"rollingBack": "Đang hoàn tác...",
 		"rolledBack": "Đã hoàn tác",
 		"stepRolledBack": "Đã hoàn tác bước",
-		"rollbackFailed": "Hoàn tác thất bại"
+		"rollbackFailed": "Hoàn tác thất bại",
+		"openFile": "Mở tệp"
 	},
 	"checkpoint": {
 		"regular": "Điểm kiểm tra",
