@@ -1,6 +1,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI, { AzureOpenAI } from "openai"
 import axios from "axios"
+import { Agent, fetch as undiciFetch } from "undici"
 
 import {
 	type ModelInfo,
@@ -21,7 +22,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
-import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED, DEFAULT_TIMEOUT_MS } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -49,32 +50,70 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			...(this.options.openAiHeaders || {}),
 		}
 
+		function resolveTimeoutMs(configuredMs: number | undefined): number {
+			if (configuredMs === undefined || configuredMs === 0) {
+				return DEFAULT_TIMEOUT_MS
+			}
+			return configuredMs
+		}
+
+		// VS Code bundles its own undici with a 5-minute `bodyTimeout` default.
+		// For streaming LLM requests (especially with local models that take >5 min
+		// to generate long tool calls or reasoning chains), that default terminates
+		// the connection with: `TypeError: terminated` / `UND_ERR_BODY_TIMEOUT`
+		//
+		// We bypass the VS Code-bundled undici by injecting our own Agent-backed
+		// fetch into the OpenAI SDK. The timeout is driven by the user-configurable
+		// zoo-code.apiRequestTimeout` setting, so users control it from the settings panel
+		const timeoutMs = resolveTimeoutMs(this.timeoutMs)
+
+		const agent = new Agent({
+			headersTimeout: timeoutMs,
+			bodyTimeout: timeoutMs,
+			keepAliveTimeout: timeoutMs,
+			keepAliveMaxTimeout: timeoutMs,
+			connect: {
+				timeout: Math.min(timeoutMs, 60_000),
+			},
+		})
+
+		// Our own fetch that bypasses the VS Code-bundled undici dispatcher
+		// `AbortSignal` is preserved: the OpenAI SDK passes `init.signal` through,
+		// and we spread `init` so user-initiated cancellations still work
+		const customFetch = (url: any, init?: any): Promise<Response> =>
+			undiciFetch(url, { ...init, dispatcher: agent } as any) as unknown as Promise<Response>
+
+		const timeoutConfig = {
+			timeout: timeoutMs,
+			fetch: customFetch as unknown as typeof fetch,
+		}
+
 		if (isAzureAiInference) {
-			// Azure AI Inference Service (e.g., for DeepSeek) uses a different path structure
 			this.client = new OpenAI({
 				baseURL,
 				apiKey,
 				defaultHeaders: headers,
 				defaultQuery: { "api-version": this.options.azureApiVersion || "2024-05-01-preview" },
-				timeout: this.timeoutMs,
+				...timeoutConfig,
 			})
 		} else if (isAzureOpenAi) {
 			// Azure API shape slightly differs from the core API shape:
 			// https://github.com/openai/openai-node?tab=readme-ov-file#microsoft-azure-openai
+
 			const azureBaseURL = `${baseURL.replace(/\/openai\/?$/i, "").replace(/\/$/, "")}/openai`
 			this.client = new AzureOpenAI({
 				baseURL: azureBaseURL,
 				apiKey,
 				apiVersion: this.options.azureApiVersion || azureOpenAiDefaultApiVersion,
 				defaultHeaders: headers,
-				timeout: this.timeoutMs,
+				...timeoutConfig,
 			})
 		} else {
 			this.client = new OpenAI({
 				baseURL,
 				apiKey,
 				defaultHeaders: headers,
-				timeout: this.timeoutMs,
+				...timeoutConfig,
 			})
 		}
 	}
@@ -161,8 +200,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				// otherwise omit it so the server's own default applies instead of forcing 0.
 				...(modelInfo.supportsTemperature !== false &&
 					(this.options.modelTemperature != null || deepseekReasoner) && {
-						temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
-					}),
+					temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
+				}),
 				messages: convertedMessages,
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),

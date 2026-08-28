@@ -7,3 +7,6 @@ export const DEFAULT_HEADERS = {
 }
 
 export const NOT_PROVIDED = "not-provided"
+
+// 50 min default request timeout
+export const DEFAULT_TIMEOUT_MS = 60 * 60 * 1000
