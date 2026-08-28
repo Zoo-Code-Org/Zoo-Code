@@ -348,6 +348,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask)
 
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Switch mode
 			await provider.handleModeSwitch("architect")
 
@@ -355,7 +358,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith(
 				"viewStates",
 				expect.objectContaining({
-					[provider.viewId]: expect.objectContaining({ mode: "architect" }),
+					["stable-test-view"]: expect.objectContaining({ mode: "architect" }),
 				}),
 			)
 
@@ -477,14 +480,14 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Saved mode
 			}
 
-			// Mock updateGlobalState to track mode updates
-			const updateGlobalStateSpy = vi.spyOn(provider as any, "updateGlobalState").mockResolvedValue(undefined)
+			await provider["setViewStateId"]("stable-test-view")
 
 			// Initialize task with history item
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify mode was restored via updateGlobalState
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was restored into the view-local pin (no shared global write)
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
 		it("should use current mode if history item has no saved mode", async () => {
@@ -685,6 +688,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask)
 
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Switch mode - should not throw
 			await expect(provider.handleModeSwitch("architect")).resolves.not.toThrow()
 
@@ -692,7 +698,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith(
 				"viewStates",
 				expect.objectContaining({
-					[provider.viewId]: expect.objectContaining({ mode: "architect" }),
+					["stable-test-view"]: expect.objectContaining({ mode: "architect" }),
 				}),
 			)
 		})
@@ -858,6 +864,9 @@ describe("ClineProvider - Sticky Mode", () => {
 				return Promise.resolve([])
 			})
 
+			// Register a stable view id so the durable per-view writes are persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Clear previous calls to globalState.update
 			vi.mocked(mockContext.globalState.update).mockClear()
 
@@ -878,7 +887,7 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Verify the last mode switch wins
 			expect(lastViewStateCall?.[1]).toMatchObject({
-				[provider.viewId]: { mode: "code" },
+				["stable-test-view"]: { mode: "code" },
 			})
 
 			// Verify task history was updated with final mode
@@ -966,6 +975,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Clear previous calls
 			vi.mocked(mockContext.globalState.update).mockClear()
 
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Try to switch to invalid mode - it will actually switch
 			await provider.handleModeSwitch("invalid-mode" as any)
 
@@ -973,7 +985,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith(
 				"viewStates",
 				expect.objectContaining({
-					[provider.viewId]: expect.objectContaining({ mode: "invalid-mode" }),
+					["stable-test-view"]: expect.objectContaining({ mode: "invalid-mode" }),
 				}),
 			)
 		})
@@ -1237,13 +1249,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Wait for initialization to complete
 			await initPromise
 
-			// Check all mode update calls
-			const modeCalls = vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode")
-
-			// Based on the actual behavior, the mode switch to "code" happens and persists
-			// The history mode restoration doesn't override it
-			const lastModeCall = modeCalls[modeCalls.length - 1]
-			expect(lastModeCall).toEqual(["mode", "code"])
+			// Both mutations now land in the view-local buffer. The history restore runs
+			// early (before the slow getTaskWithId), so the mid-init switch to "code" wins.
+			expect(provider["viewLocalState"].mode).toBe("code")
 		})
 
 		it("should handle rapid task switches during mode changes", async () => {

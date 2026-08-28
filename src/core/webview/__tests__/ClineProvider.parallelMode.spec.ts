@@ -16,6 +16,8 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { ClineProvider } from "../ClineProvider"
 import { TelemetryService } from "@roo-code/telemetry"
 
+import type { Task } from "../../task/Task"
+
 // Mock p-wait-for
 vi.mock("p-wait-for", () => ({
 	__esModule: true,
@@ -269,26 +271,43 @@ vi.mock("../../config/ContextProxy", () => {
 		public globalStorageUri: { fsPath: string }
 		public extensionUri: { fsPath: string }
 		public extensionMode = 1
+		/**
+		 * Mirrors the real ContextProxy state cache: seeded from the store in the
+		 * constructor (like initialize()), then mutated only through setValue, so
+		 * getValue can return a stale value that diverges from direct store writes.
+		 */
+		private stateCache: Record<string, unknown> = {}
 
 		constructor(public context: any) {
 			this.globalStorageUri = context?.globalStorageUri ?? { fsPath: "/test/storage/path" }
 			this.extensionUri = context?.extensionUri ?? { fsPath: "/test/path" }
+
+			for (const key of this.context?.globalState?.keys?.() ?? []) {
+				const value = this.context?.globalState?.get(key)
+				if (value !== undefined) {
+					this.stateCache[key] = value
+				}
+			}
 		}
 
 		getValues = vi.fn().mockImplementation(() => ({
 			...defaultState,
-			mode: this.context?.globalState?.get("mode") ?? defaultState.mode,
-			currentApiConfigName:
-				this.context?.globalState?.get("currentApiConfigName") ?? defaultState.currentApiConfigName,
-			apiConfiguration: this.context?.globalState?.get("apiConfiguration") ?? defaultState.apiConfiguration,
-			customModePrompts: this.context?.globalState?.get("customModePrompts") ?? defaultState.customModePrompts,
-			modeApiConfigs: this.context?.globalState?.get("modeApiConfigs") ?? defaultState.modeApiConfigs,
-			listApiConfigMeta: this.context?.globalState?.get("listApiConfigMeta") ?? defaultState.listApiConfigMeta,
-			pinnedApiConfigs: this.context?.globalState?.get("pinnedApiConfigs") ?? defaultState.pinnedApiConfigs,
+			mode: this.stateCache.mode ?? defaultState.mode,
+			currentApiConfigName: this.stateCache.currentApiConfigName ?? defaultState.currentApiConfigName,
+			apiConfiguration: this.stateCache.apiConfiguration ?? defaultState.apiConfiguration,
+			customModePrompts: this.stateCache.customModePrompts ?? defaultState.customModePrompts,
+			modeApiConfigs: this.stateCache.modeApiConfigs ?? defaultState.modeApiConfigs,
+			listApiConfigMeta: this.stateCache.listApiConfigMeta ?? defaultState.listApiConfigMeta,
+			pinnedApiConfigs: this.stateCache.pinnedApiConfigs ?? defaultState.pinnedApiConfigs,
 		}))
-		getValue = vi.fn().mockImplementation((key: string) => this.context?.globalState?.get(key))
+		getValue = vi.fn().mockImplementation((key: string) => this.stateCache[key])
 		getProviderSettings = vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic })
 		setValue = vi.fn().mockImplementation((key: string, value: any) => {
+			if (value === undefined || value === null) {
+				delete this.stateCache[key]
+			} else {
+				this.stateCache[key] = value
+			}
 			return this.context?.globalState?.update?.(key, value) ?? Promise.resolve()
 		})
 		setValues = vi.fn().mockImplementation((values: Record<string, any>) => {
@@ -701,34 +720,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await (provider2 as any).saveViewState("mode", "debugger")
 			await (provider1 as any).saveViewState("mode", "architect")
 
-			const state1 = await provider1.getState()
-			const state2 = await provider2.getState()
-
-			expect(state1.mode).toBe("architect")
-			expect(state2.mode).toBe("debugger")
-
-			await provider1.dispose()
-			await provider2.dispose()
-		})
-
-		it("should allow different modes in separate instances after saveViewState", async () => {
-			const provider1 = new ClineProvider(
-				mockContext,
-				mockOutputChannel,
-				"sidebar",
-				new ContextProxy(mockContext),
-			)
-			const provider2 = new ClineProvider(mockContext, mockOutputChannel, "editor", new ContextProxy(mockContext))
-
-			// Access private method for testing
-			const saveViewState1 = (provider1 as any).saveViewState.bind(provider1)
-			const saveViewState2 = (provider2 as any).saveViewState.bind(provider2)
-
-			// Save different modes to each provider
-			await saveViewState1("mode", "architect")
-			await saveViewState2("mode", "debugger")
-
-			// Verify isolation - each provider should have its own mode
 			const state1 = await provider1.getState()
 			const state2 = await provider2.getState()
 
@@ -1226,6 +1217,95 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			expect(provider.contextProxy.getValue("viewStates" as any)).toHaveProperty("tab-to-preserve")
 		})
+
+		it("should read viewStates fresh from storage so out-of-proxy writes are not clobbered", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider["setViewStateId"]("view-a")
+			await provider.saveViewState("mode", "architect")
+
+			// Simulate a concurrent writer (another view's provider) updating the shared
+			// map directly in storage, bypassing this proxy's cache.
+			const stored = (await mockContext.globalState.get<Record<string, unknown>>("viewStates")) ?? {}
+			mockContext.globalState.update("viewStates", {
+				...stored,
+				"view-b": { mode: "debug", updatedAt: 1 },
+			})
+
+			await provider.saveViewState("mode", "code")
+
+			// The serialized write must have merged on top of the fresh storage value, not
+			// on top of this proxy's stale cache.
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"view-a": { mode: "code" },
+				"view-b": { mode: "debug" },
+			})
+
+			await provider.dispose()
+		})
+
+		it("should not persist durable viewStates entries under the temporary pre-launch view id", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider.saveViewState("mode", "architect")
+
+			// The in-memory buffer is updated, but nothing durable is written while the
+			// provider still holds its temporary (session-local) id.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.contextProxy.getValue("viewStates")).toBeUndefined()
+
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("mode", "debugger")
+
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"stable-sidebar-view": { mode: "debugger" },
+			})
+
+			await provider.dispose()
+		})
+
+		it("should discard a stale loadViewState when a newer view id is registered during the load", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			const providerAccess = provider as unknown as {
+				viewId: string
+				viewLocalState: { mode?: string }
+				loadViewState(): Promise<void>
+				setViewStateId(id: string): Promise<void>
+			}
+
+			// Seed a persisted entry under the provider's temporary id.
+			mockContext.globalState.update("viewStates", {
+				[providerAccess.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
+			})
+
+			// Hang the temporary id's profile lookup so the stable id can be registered
+			// while that load is still in flight.
+			let releaseGhost!: () => void
+			const ghostLoad = new Promise<void>((resolve) => {
+				releaseGhost = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockReturnValue(
+				ghostLoad.then(
+					() =>
+						({
+							name: "ghost-profile",
+							id: "ghost-id",
+							apiProvider: providerIdentifiers.anthropic,
+						}) as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+				),
+			)
+
+			const staleLoad = providerAccess.loadViewState()
+
+			await providerAccess.setViewStateId("stable-sidebar-view")
+			releaseGhost()
+			await staleLoad
+
+			// The stale (temporary-id) load must not overwrite the stable id's load.
+			expect(providerAccess.viewLocalState).toEqual({})
+
+			await provider.dispose()
+		})
 	})
 
 	describe("profile mutations", () => {
@@ -1313,6 +1393,33 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		it("should re-point persisted view pins that referenced a deleted profile", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			await provider.contextProxy.setValue("listApiConfigMeta", [
+				{ id: "keeper-id", name: "keeper-profile", apiProvider: providerIdentifiers.anthropic },
+				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			// Two views have durable pins; one pins the profile about to be deleted.
+			mockContext.globalState.update("viewStates", {
+				"view-keeps": { mode: "code", currentApiConfigName: "keeper-profile", updatedAt: 1 },
+				"view-deleted": { mode: "architect", currentApiConfigName: "doomed-profile", updatedAt: 2 },
+			})
+
+			await provider.deleteProviderProfile({
+				id: "doomed-id",
+				name: "doomed-profile",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+
+			// The affected pin is re-pointed to the replacement profile; the unrelated pin survives.
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"view-keeps": { mode: "code", currentApiConfigName: "keeper-profile" },
+				"view-deleted": { mode: "architect", currentApiConfigName: "keeper-profile" },
+			})
+
+			await provider.dispose()
+		})
 		it("should clear viewLocalState when resetState resets ContextProxy", async () => {
 			vi.mocked(vscode.window.showInformationMessage).mockImplementationOnce(
 				async (_message: string, _options: unknown, confirm: unknown) => confirm as any,
@@ -1455,6 +1562,43 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			expect(modeChangedSpy).toHaveBeenCalledWith("architect")
 
+			await provider.dispose()
+		})
+
+		// A4 regression: non-focused target task
+		it("should scope mode switches for non-focused tasks to the task only", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+			await provider["resolveWebviewView"](createMockWebviewView())
+			const makeTask = (taskId: string) => ({
+				taskId,
+				_taskMode: "code",
+				emit: vi.fn(),
+				saveClineMessages: vi.fn().mockResolvedValue(undefined),
+				clineMessages: [],
+				apiConversationHistory: [],
+				updateApiConfiguration: vi.fn(),
+			})
+			await provider.addClineToStack(makeTask("focused-task") as unknown as Task)
+			const backgroundTask = makeTask("background-task")
+			await provider["setViewStateId"]("stable-sidebar-view")
+			await provider.saveViewState("mode", "code")
+			const modeChangedSpy = vi.fn()
+			provider.on(RooCodeEventName.ModeChanged, modeChangedSpy)
+			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			await provider.handleModeSwitch("architect", backgroundTask as unknown as Task)
+			// Task-scoped effects apply to the background task:
+			expect(backgroundTask.emit).toHaveBeenCalledWith(
+				RooCodeEventName.TaskModeSwitched,
+				"background-task",
+				"architect",
+			)
+			expect(backgroundTask._taskMode).toBe("architect")
+			// ...but the view-level effects (durable mode pin, broadcast, profile) stay untouched:
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(modeChangedSpy).not.toHaveBeenCalled()
+			expect(activateProfileSpy).not.toHaveBeenCalled()
 			await provider.dispose()
 		})
 	})

@@ -130,6 +130,12 @@ import { PendingEditOperationStore, type PendingEditOperationInput } from "./Pen
 type PersistedViewState = NonNullable<GlobalState["viewStates"]>[string]
 
 /**
+ * Values that can be held in a view-local state buffer (in-memory) and, for the
+ * non-secret subset, persisted durably per stable view id.
+ */
+type ViewLocalStateValues = Partial<RooCodeSettings> & Partial<ExtensionState>
+
+/**
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
@@ -559,10 +565,19 @@ export class ClineProvider
 	 * Persists this view's non-secret selections through the serialized write queue.
 	 * The write re-reads the map fresh and merges into the existing entry, removing the
 	 * entry entirely when nothing persistable remains, so concurrent views cannot clobber it.
+	 * The entry is keyed by the view id active when the change was made. Writes captured
+	 * while the provider still holds its temporary (pre-launch) id are not persisted:
+	 * temporary ids are session-local counters and would create orphan entries.
 	 */
 	private async savePersistedViewState(values: Partial<PersistedViewState>): Promise<void> {
+		// Capture the id at change time: a write belongs to the view that was active
+		// when the change was made, even if a newer id is registered while it is queued.
 		const viewStateId = this.viewStateId
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			if (viewStateId === this.viewId) {
+				return
+			}
+
 			const states = this.getPersistedViewStates({ fresh: true })
 			const current = states[viewStateId] ?? {}
 			const next: PersistedViewState = { ...current }
@@ -613,6 +628,43 @@ export class ClineProvider
 	}
 
 	/**
+	 * Re-points persisted view pins that reference a removed profile so views do not
+	 * rehydrate a missing profile name after a reload. Runs through the serialized
+	 * write queue like every other viewStates mutation.
+	 */
+	private async repointPersistedViewStates(
+		removedProfileName: string,
+		replacementProfileName: string,
+	): Promise<void> {
+		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
+			const states = this.getPersistedViewStates({ fresh: true })
+			let changed = false
+
+			for (const [viewId, entry] of Object.entries(states)) {
+				if (entry?.currentApiConfigName !== removedProfileName) {
+					continue
+				}
+
+				changed = true
+				const { currentApiConfigName: _removed, ...rest } = entry
+
+				if (rest.mode) {
+					states[viewId] = { ...rest, currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				} else {
+					states[viewId] = { currentApiConfigName: replacementProfileName, updatedAt: Date.now() }
+				}
+			}
+
+			if (changed) {
+				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			}
+		})
+
+		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
+		await write
+	}
+
+	/**
 	 * Keeps only the most recently updated entries of the persisted view states map,
 	 * bounded by MAX_PERSISTED_VIEW_STATES so the global key cannot grow unboundedly.
 	 */
@@ -644,8 +696,11 @@ export class ClineProvider
 	 * Missing entries are intentionally left unset so getState() falls back to shared ContextProxy values.
 	 */
 	private async loadViewState(): Promise<void> {
+		// Capture the id this load is for: a newer id registered while an async
+		// profile lookup is in flight must not be overwritten by this stale load.
+		const loadedForViewId = this.viewStateId
 		try {
-			const persisted = this.getPersistedViewStates()[this.viewStateId]
+			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
 
 			if (persisted?.mode) {
@@ -667,6 +722,11 @@ export class ClineProvider
 				}
 			}
 
+			if (this.viewStateId !== loadedForViewId) {
+				this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
+				return
+			}
+
 			this.viewLocalState = loadedState
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
 		} catch (error) {
@@ -677,11 +737,15 @@ export class ClineProvider
 	}
 
 	/**
-	 * Save a single view-local state value. Only non-secret selections are persisted durably.
+	 * Saves a single view-local state value. The in-memory buffer is always updated; only
+	 * the non-secret subset (mode, currentApiConfigName) is persisted durably, and only
+	 * once this provider has a stable view id.
 	 */
-	private async saveViewState(key: keyof ExtensionState, value: any): Promise<void> {
-		await this._saveViewLocalStateFromMutation({ [key]: value } as Partial<RooCodeSettings> &
-			Partial<ExtensionState>)
+	public async saveViewState<K extends keyof ViewLocalStateValues>(
+		key: K,
+		value: ViewLocalStateValues[K] | undefined,
+	): Promise<void> {
+		await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
 
 		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
 	}
@@ -1417,8 +1481,10 @@ export class ClineProvider
 				historyItem.mode = defaultModeSlug
 			}
 
-			await this.updateGlobalState("mode", historyItem.mode)
-			this.viewLocalState.mode = historyItem.mode
+			// Persist the restored mode through this view's per-view pin rather than the
+			// shared global: a global write would leak the restored mode into other views
+			// in parallel mode, and a buffer-only write would be lost after a reload.
+			await this.saveViewState("mode", historyItem.mode)
 
 			// Load the saved API config for the restored mode if it exists.
 			// Skip mode-based profile activation if historyItem.apiConfigName exists,
@@ -1875,6 +1941,9 @@ export class ClineProvider
 	 * @param newMode The mode to switch to
 	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
+	 * A task that is not this view's focused task only receives the task-scoped effects
+	 * (history entry + in-memory mode): the view's durable mode, the ModeChanged
+	 * broadcast, and profile activation keep applying to the focused task's selection.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
 		return this.enqueueProviderProfileMutation((signal) =>
@@ -1917,13 +1986,22 @@ export class ClineProvider
 			}
 		}
 
-		await this.saveViewState("mode", newMode)
+		// A mode switch requested for a task that is not this view's focused task applies
+		// only to that task (history entry + in-memory mode): pinning the view's durable
+		// mode, broadcasting ModeChanged, or activating a profile on behalf of a
+		// background task would clobber the focused task's selection.
+		const viewScopedSwitch = task === undefined || task === null || this.getCurrentTask() === task
 
-		this.emit(RooCodeEventName.ModeChanged, newMode)
+		if (viewScopedSwitch) {
+			await this.saveViewState("mode", newMode)
+			this.emit(RooCodeEventName.ModeChanged, newMode)
+		}
 
 		// If workspace lock is on, keep the current API config — don't load mode-specific config
 		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		if (lockApiConfigAcrossModes) {
+			// Keep the original post semantics: an explicit null target (pending child)
+			// posts its own state.
 			if (targetTask !== null) {
 				await this.postStateToWebview()
 			}
@@ -1931,6 +2009,9 @@ export class ClineProvider
 		}
 
 		if (signal?.aborted) return
+		if (!viewScopedSwitch) {
+			return
+		}
 
 		// Load the saved API config for the new mode if it exists.
 		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
@@ -2127,10 +2208,21 @@ export class ClineProvider
 			listApiConfigMeta: entries,
 		})
 
-		this._updateViewLocalStateFromMutation({
-			currentApiConfigName: profileToActivate,
-			listApiConfigMeta: entries,
-		})
+		// Sync this view's in-memory buffer only when it was pointing at the deleted
+		// profile (or had no pin of its own): an unrelated pin must survive the deletion.
+		if (
+			this.viewLocalState.currentApiConfigName === undefined ||
+			this.viewLocalState.currentApiConfigName === profileToDelete.name
+		) {
+			this._updateViewLocalStateFromMutation({
+				currentApiConfigName: profileToActivate,
+				listApiConfigMeta: entries,
+			})
+		}
+
+		// Re-point any persisted view pin that referenced the deleted profile so views
+		// do not rehydrate a missing profile name after a reload.
+		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 		await this.postStateToWebview()
 	}
@@ -3424,7 +3516,7 @@ export class ClineProvider
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.mode
 			} else {
-				this.viewLocalState.mode = val as any
+				this.viewLocalState.mode = val
 			}
 		}
 
@@ -3433,12 +3525,12 @@ export class ClineProvider
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.currentApiConfigName
 			} else {
-				this.viewLocalState.currentApiConfigName = val as any
+				this.viewLocalState.currentApiConfigName = val
 			}
 		}
 
 		if ("apiConfiguration" in values) {
-			const val = (values as any).apiConfiguration
+			const val = values.apiConfiguration
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.apiConfiguration
 			} else {
@@ -3521,6 +3613,10 @@ export class ClineProvider
 
 		// Clear view-local state cache so getState() falls back to ContextProxy defaults.
 		this._clearViewLocalState()
+
+		// Clear this view's persisted entry too, so the reset selections are not
+		// re-applied from the durable viewStates pin after a reload.
+		await this.clearPersistedViewState()
 
 		await this.providerSettingsManager.resetAllConfigs()
 		await this.customModesManager.resetCustomModes()
