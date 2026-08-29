@@ -160,6 +160,17 @@ describe("ChangeCard", () => {
 		expect(container.innerHTML).toBe("")
 	})
 
+	it("renders nothing for a schema-invalid card payload", () => {
+		// Syntactically valid JSON that fails changeCardSchema: the
+		// safeParse rejection path (not only the parse-failure path) must
+		// also yield an inert card row.
+		const { container } = renderWithExtensionState(
+			<ChangeCard message={{ type: "say", say: "change_card", ts: 1, text: "{}" } as ClineMessage} />,
+		)
+
+		expect(container.innerHTML).toBe("")
+	})
+
 	it("rolls back one file through the checkpointRollbackFile message and shows pending + success", async () => {
 		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
 
