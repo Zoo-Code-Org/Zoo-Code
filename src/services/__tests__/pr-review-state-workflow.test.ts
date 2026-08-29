@@ -326,6 +326,14 @@ describe("PR review-state workflow", () => {
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
+	it("reconciles fork PRs from pull_request_target", async () => {
+		const result = await runWorkflow({ eventName: "pull_request_target", fork: true })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.createCommitStatus).toHaveBeenCalled()
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
 	it("creates missing workflow labels", async () => {
 		const result = await runWorkflow({ labelLookupStatus: 404 })
 
@@ -767,6 +775,15 @@ describe("PR review-state workflow", () => {
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
 
+	it("publishes the gate and continues reconciliation when status lookup fails", async () => {
+		const result = await runWorkflow({ gateStatusLookupErrorStatus: 500 })
+
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not inspect PR review gate"))
+		expect(result.createCommitStatus).toHaveBeenCalled()
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
 	it("reports non-404 permission lookup failures", async () => {
 		const result = await runWorkflow({
 			permissionErrorStatus: 500,
@@ -793,6 +810,19 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ requiredContexts: ["tests", "reconcile"] })
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("does not exclude a reconcile check from another integration", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["reconcile"],
+			requiredIntegrationId: 999,
+			requiredRunAppId: 15368,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
 	it("fails closed when branch rules are unavailable", async () => {

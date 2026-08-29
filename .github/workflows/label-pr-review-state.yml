@@ -233,19 +233,24 @@ jobs:
 
               const state = passed ? 'success' : 'pending';
               const description = phaseMessage(phase);
+              let latestGateStatus = null;
               try {
                 const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
                   owner, repo, ref: pr.head.sha,
                 });
-                const latestGateStatus = combinedStatus.statuses
+                latestGateStatus = combinedStatus.statuses
                   .filter(status => status.context === reviewGateName)
                   .sort((a, b) => b.id - a.id)[0];
-                if (latestGateStatus?.state === state &&
-                    latestGateStatus.description === description &&
-                    latestGateStatus.target_url === pr.html_url) {
-                  return;
-                }
+              } catch (error) {
+                core.warning(`PR #${pr.number}: could not inspect ${reviewGateName}: ${error.message}`);
+              }
+              if (latestGateStatus?.state === state &&
+                  latestGateStatus.description === description &&
+                  latestGateStatus.target_url === pr.html_url) {
+                return;
+              }
 
+              try {
                 await github.rest.repos.createCommitStatus({
                   owner,
                   repo,
@@ -408,13 +413,10 @@ jobs:
                 }
 
                 // Filter to required checks only (or all checks if rules unavailable).
-                // Always exclude this workflow's own run to avoid self-referential loops.
-                const excludedCheckNames = new Set([
-                  'reconcile',
-                  reviewGateName,
-                ]);
+              // Always exclude this workflow's own run to avoid self-referential loops.
                 const requiredSpecs = (requiredChecks ?? [])
-                  .filter(check => !excludedCheckNames.has(check.context));
+                  .filter(check => check.context !== reviewGateName)
+                  .filter(check => !(check.context === 'reconcile' && check.integrationId === 15368));
                 const requiredResults = requiredSpecs.map(check => {
                   const run = check.integrationId === null
                     ? latestByName.get(check.context)
