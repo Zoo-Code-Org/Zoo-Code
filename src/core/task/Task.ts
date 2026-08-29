@@ -1842,6 +1842,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Any in-progress `progressStatus` on the message is cleared as well: the ask is being
 	 * finalized because it will NOT complete, so a stale "in progress" indicator would be
 	 * misleading (the normal completion path overwrites it with the final status instead).
+	 *
+	 * `isAnswered` is stamped true because the ask is resolved by the system rather than
+	 * by the user: ChatView only shows ask buttons for unanswered messages, so leaving it
+	 * unset would keep Save/Reject armed for a write that already failed.
 	 */
 	async finalizePartialToolAsk(text?: string): Promise<void> {
 		const partialToolAsk = findLast(
@@ -1859,6 +1863,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		partialToolAsk.partial = false
 		partialToolAsk.progressStatus = undefined
+		partialToolAsk.isAnswered = true
 		await this.saveClineMessages()
 		await this.updateClineMessage(partialToolAsk).catch((error) => {
 			console.error("[Task#finalizePartialToolAsk] updateClineMessage failed:", error)

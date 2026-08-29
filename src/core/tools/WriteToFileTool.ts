@@ -23,12 +23,29 @@ interface WriteToFileParams {
 	content: string
 }
 
+/**
+ * Per-task partial-streaming state tracked by WriteToFileTool.
+ */
+interface TaskPartialStreamState {
+	/** Last path seen during streaming; undefined until the first delta. */
+	lastSeenPartialPath: string | undefined
+	/** True once a streaming delta hit a fatal filesystem error. */
+	streamFailed: boolean
+	/** The task that owns this state; target for abort-listener deregistration. */
+	task: Task
+	/** TaskAborted listener that tears this state down; registered once per task. */
+	abortCleanup: () => void
+}
+
 export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	readonly name = "write_to_file" as const
 
 	/**
-	 * Tracks filesystem failures from diff-view streaming, keyed by task id (taskId +
-	 * instanceId).
+	 * Per-task partial-streaming state, keyed by task id (taskId + instanceId).
+	 *
+	 * All per-task fields live in one object per task so that resetTaskPartialState() /
+	 * resetPartialState() cannot clear a subset of them and leak the rest (abort
+	 * listener, failure mark, path-stabilization entry) for an abandoned stream.
 	 *
 	 * This deliberately diverges from the sibling streaming tools (ApplyDiffTool,
 	 * EditFileTool, SearchReplaceTool, EditTool), which rely on BaseTool's singleton
@@ -52,59 +69,69 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	 * Lifting this per-task keying into BaseTool for all streaming tools is a follow-up
 	 * (separate PR); it is deliberately not done here.
 	 */
-	private partialStreamFailuresByTaskId = new Set<string>()
-
-	/**
-	 * Tracks partial path stabilization, keyed by task id (taskId + instanceId), so one
-	 * task's streaming deltas cannot stabilize another task's path. Keyed per task for the
-	 * same cross-provider reason as partialStreamFailuresByTaskId (see that note; the
-	 * divergence from the sibling tools' BaseTool state is deliberate).
-	 */
-	private lastSeenPartialPathByTaskId = new Map<string, string | undefined>()
-
-	/**
-	 * Tracks abort cleanup listeners for per-task partial state so normal execute()
-	 * finalization can unregister them and abandoned streams are torn down on abort.
-	 */
-	private partialStateAbortCleanupByTaskId = new Map<string, { task: Task; cleanup: () => void }>()
+	private taskPartialStreamState = new Map<string, TaskPartialStreamState>()
 
 	private getPartialStreamFailureKey(task: Task): string {
 		return `${task.taskId}.${task.instanceId}`
 	}
 
-	private registerTaskPartialStateCleanup(task: Task): void {
+	/**
+	 * Get this task's partial stream state, creating it on first use and registering the
+	 * TaskAborted teardown listener exactly once per task.
+	 */
+	private getTaskPartialStreamState(task: Task): TaskPartialStreamState {
 		const key = this.getPartialStreamFailureKey(task)
-		if (this.partialStateAbortCleanupByTaskId.has(key)) {
-			return
+		const existing = this.taskPartialStreamState.get(key)
+		if (existing) {
+			return existing
 		}
 
-		const cleanup = () => this.resetTaskPartialState(task)
-		this.partialStateAbortCleanupByTaskId.set(key, { task, cleanup })
-		task.once(RooCodeEventName.TaskAborted, cleanup)
+		const state: TaskPartialStreamState = {
+			lastSeenPartialPath: undefined,
+			streamFailed: false,
+			task,
+			abortCleanup: () => this.resetTaskPartialState(task),
+		}
+		this.taskPartialStreamState.set(key, state)
+		task.once(RooCodeEventName.TaskAborted, state.abortCleanup)
+		return state
 	}
 
-	private hasPathStabilizedForTask(task: Task, partialPath: string | undefined): boolean {
-		const key = this.getPartialStreamFailureKey(task)
-		const lastSeenPath = this.lastSeenPartialPathByTaskId.get(key)
-		const pathHasStabilized = lastSeenPath !== undefined && lastSeenPath === partialPath
-		this.lastSeenPartialPathByTaskId.set(key, partialPath)
+	private hasPathStabilizedForTask(state: TaskPartialStreamState, partialPath: string | undefined): boolean {
+		const pathHasStabilized = state.lastSeenPartialPath !== undefined && state.lastSeenPartialPath === partialPath
+		state.lastSeenPartialPath = partialPath
 		return pathHasStabilized && !!partialPath
 	}
 
 	private resetTaskPartialState(task: Task): void {
 		const key = this.getPartialStreamFailureKey(task)
-		const abortCleanup = this.partialStateAbortCleanupByTaskId.get(key)
-		if (abortCleanup) {
-			task.off(RooCodeEventName.TaskAborted, abortCleanup.cleanup)
-			this.partialStateAbortCleanupByTaskId.delete(key)
+		const state = this.taskPartialStreamState.get(key)
+		if (!state) {
+			return
 		}
-		this.lastSeenPartialPathByTaskId.delete(key)
-		this.partialStreamFailuresByTaskId.delete(key)
+		state.task.off(RooCodeEventName.TaskAborted, state.abortCleanup)
+		this.taskPartialStreamState.delete(key)
 	}
 
 	private async resetDiffViewAfterWrite(task: Task): Promise<void> {
 		await task.diffViewProvider.reset().catch((resetError) => {
 			console.error("Error resetting write_to_file diff view:", resetError)
+		})
+	}
+
+	/**
+	 * Restore the diff editor document to its pre-streaming state and close the view.
+	 *
+	 * reset() clears the provider's state but leaves the diff document dirty with the
+	 * streamed content; a user save would then persist a write the task never completed
+	 * (denied or failed before approval). Must run BEFORE resetDiffViewAfterWrite(),
+	 * since reset() clears the state revertChanges() relies on. No-op when no diff view
+	 * is open. Failures are logged and swallowed so the remaining cleanup (reset,
+	 * per-task state teardown) always continues.
+	 */
+	private async revertDiffChangesBeforeReset(task: Task): Promise<void> {
+		await task.diffViewProvider.revertChanges().catch((revertError) => {
+			console.error("Error reverting write_to_file diff view changes:", revertError)
 		})
 	}
 
@@ -116,12 +143,10 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 
 	override resetPartialState(): void {
 		super.resetPartialState()
-		for (const { task, cleanup } of this.partialStateAbortCleanupByTaskId.values()) {
-			task.off(RooCodeEventName.TaskAborted, cleanup)
+		for (const state of this.taskPartialStreamState.values()) {
+			state.task.off(RooCodeEventName.TaskAborted, state.abortCleanup)
 		}
-		this.partialStreamFailuresByTaskId.clear()
-		this.lastSeenPartialPathByTaskId.clear()
-		this.partialStateAbortCleanupByTaskId.clear()
+		this.taskPartialStreamState.clear()
 	}
 
 	async execute(params: WriteToFileParams, task: Task, callbacks: ToolCallbacks): Promise<void> {
@@ -133,6 +158,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
+			await this.revertDiffChangesBeforeReset(task)
 			await this.resetDiffViewAfterWrite(task)
 			this.resetTaskPartialState(task)
 			return
@@ -142,6 +168,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
+			await this.revertDiffChangesBeforeReset(task)
 			await this.resetDiffViewAfterWrite(task)
 			this.resetTaskPartialState(task)
 			return
@@ -155,10 +182,14 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// handlePartial() has no rooignore guard, so streaming deltas for this denied
 			// path may already have created a partial `tool` ask (partial: true) and opened
 			// the diff view before execute() reached the access check. Denying here without
-			// cleanup would leave the UI spinner stuck (partial: true), the diff view open,
-			// and this task's abort listener / path-stabilization / failure-map entries
-			// leaked. Perform the same cleanup the try/finally path does before returning.
+			// cleanup would leave the UI spinner stuck (partial: true), the diff view open
+			// with the denied content still dirty in the editor, and this task's per-task
+			// stream state leaked. Perform the same cleanup the try/finally path does
+			// before returning.
 			await this.finalizePartialToolAskAfterFailure(task)
+			// The write was denied before approval: restore the document so a user save
+			// cannot persist the streamed content.
+			await this.revertDiffChangesBeforeReset(task)
 			await this.resetDiffViewAfterWrite(task)
 			this.resetTaskPartialState(task)
 			return
@@ -198,6 +229,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			isOutsideWorkspace,
 			isProtected: isWriteProtected,
 		}
+
+		// Tracks whether the user approved the write, so the error path only reverts the
+		// diff document when the content was never approved (an approved edit is kept in
+		// the editor so the user can save it manually after a late failure).
+		let writeApproved = false
 
 		try {
 			// Create parent directories for new files inside the try block so filesystem
@@ -243,6 +279,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
+				writeApproved = true
+
 				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
@@ -276,6 +314,8 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
+				writeApproved = true
+
 				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
 			}
 
@@ -301,6 +341,12 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			// after the error bubble appears.
 			await this.finalizePartialToolAskAfterFailure(task)
 			await handleError("writing file", error as Error)
+			// Before approval the diff document holds unapproved streamed content: restore it
+			// so a user save cannot persist it. After approval the content is the user's
+			// accepted edit -- keep it in the editor (dirty) so they can save it manually.
+			if (!writeApproved) {
+				await this.revertDiffChangesBeforeReset(task)
+			}
 			await this.resetDiffViewAfterWrite(task)
 			return
 		} finally {
@@ -317,14 +363,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 		// A prior streaming delta for this task already hit a fatal filesystem error.
 		// Skip further streaming work so we don't create a new partial tool message on every
 		// subsequent delta. execute() will report the error once when the block completes.
-		if (this.partialStreamFailuresByTaskId.has(partialStreamFailureKey)) {
+		if (this.taskPartialStreamState.get(partialStreamFailureKey)?.streamFailed) {
 			return
 		}
 
-		this.registerTaskPartialStateCleanup(task)
+		// Get (or create) this task's state; registers the TaskAborted teardown listener
+		// once, so abandoned streams are torn down even if execute() never runs.
+		const partialStreamState = this.getTaskPartialStreamState(task)
 
 		// Wait for path to stabilize before showing UI (prevents truncated paths)
-		if (!this.hasPathStabilizedForTask(task, relPath) || newContent === undefined) {
+		if (!this.hasPathStabilizedForTask(partialStreamState, relPath) || newContent === undefined) {
 			return
 		}
 
@@ -386,8 +434,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 				console.error(`Error streaming write_to_file diff view:`, error)
 				// Mark the stream as failed so later deltas don't re-attempt and spawn a new
 				// partial tool message each time.
-				this.partialStreamFailuresByTaskId.add(partialStreamFailureKey)
+				partialStreamState.streamFailed = true
 				await this.finalizePartialToolAskAfterFailure(task, partialMessage)
+				// The write was never approved: restore the document so a user save cannot
+				// persist the failed streamed content (reset() alone leaves it dirty).
+				await this.revertDiffChangesBeforeReset(task)
 				await this.resetDiffViewAfterWrite(task)
 			}
 		}

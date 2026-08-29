@@ -97,6 +97,19 @@ describe("writeToFileTool", () => {
 	const testContent = "Line 1\nLine 2\nLine 3"
 	const testContentWithMarkdown = "```javascript\nLine 1\nLine 2\n```"
 
+	// The exact payload handlePartial() streams as the partial `tool` ask for the default
+	// test scenario (new file, readable path, in-workspace, not write-protected).
+	// finalizePartialToolAsk() no-ops on a text mismatch, so finalize assertions must
+	// match this exactly: a weaker matcher (e.g. expect.any(String), which a relPath also
+	// satisfies) would pass a mutant that passes the wrong text and leaves the spinner stuck.
+	const expectedPartialToolMessage = JSON.stringify({
+		tool: "newFileCreated",
+		path: "test/path.txt",
+		content: testContent,
+		isOutsideWorkspace: false,
+		isProtected: false,
+	})
+
 	// Mocked functions with correct types
 	const mockedFileExistsAtPath = fileExistsAtPath as MockedFunction<typeof fileExistsAtPath>
 	const mockedCreateDirectoriesForFile = createDirectoriesForFile as MockedFunction<typeof createDirectoriesForFile>
@@ -264,8 +277,9 @@ describe("writeToFileTool", () => {
 			// handlePartial() has no rooignore guard, so streaming deltas for a denied path
 			// still create a partial `tool` ask (partial: true) and open the diff view before
 			// execute() reaches the access check. The denial must clean up all of that:
-			// finalize the partial ask (spinner does not stick), reset the diff view (reset
-			// failures swallowed), and clear the per-task state (abort listener + maps).
+			// finalize the partial ask (spinner does not stick), revert the diff document so a
+			// user save cannot persist the denied content, reset the diff view (reset failures
+			// swallowed), and clear the per-task stream state (abort listener + entries).
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			try {
 				let abortCleanup: (() => void) | undefined
@@ -275,7 +289,16 @@ describe("writeToFileTool", () => {
 					}
 					return mockCline
 				})
-				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+				// Record the relative order of revertChanges() and reset(): vitest mocks expose
+				// no invocationCallOrder, so the ordering assertion uses this sequence.
+				const diffViewCallOrder: string[] = []
+				mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+					diffViewCallOrder.push("revert")
+				})
+				mockCline.diffViewProvider.reset.mockImplementation(async () => {
+					diffViewCallOrder.push("reset")
+					throw new Error("reset failed")
+				})
 
 				// Stream two deltas so the path stabilizes: handlePartial registers the abort
 				// cleanup and opens the partial ask + diff view for the (soon denied) path.
@@ -289,8 +312,11 @@ describe("writeToFileTool", () => {
 				await executeWriteFileTool({}, { fileExists: false, accessAllowed: false })
 
 				expect(mockCline.say).toHaveBeenCalledWith("rooignore_error", testFilePath)
-				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
-				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				// The denial finalizes without a text match: any open partial tool ask is closed.
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+				// The denied write's streamed content must be reverted from the diff document
+				// BEFORE reset() clears the state revertChanges() relies on.
+				expect(diffViewCallOrder).toEqual(["revert", "reset"])
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					"Error resetting write_to_file diff view:",
@@ -649,6 +675,15 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.open.mockRejectedValue(
 				Object.assign(new Error("EACCES: permission denied, open '/ro/test.py'"), { code: "EACCES" }),
 			)
+			// Record the relative order of revertChanges() and reset() (vitest mocks expose
+			// no invocationCallOrder).
+			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
 
 			// First call - path not yet stabilized
 			await executeWriteFileTool({}, { isPartial: true })
@@ -657,8 +692,12 @@ describe("writeToFileTool", () => {
 			// Second call - path stabilized, open() rejects
 			await executeWriteFileTool({}, { isPartial: true })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expect.any(String))
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// Exact streamed payload: finalizePartialToolAsk() no-ops on a text mismatch, so
+			// a wrong argument (e.g. relPath) would leave the spinner stuck.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+			// The failed write's streamed content must be reverted before reset() clears the
+			// state revertChanges() relies on.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 
@@ -667,6 +706,15 @@ describe("writeToFileTool", () => {
 			mockCline.diffViewProvider.update.mockRejectedValue(
 				Object.assign(new Error("EROFS: read-only file system, write '/ro/test.py'"), { code: "EROFS" }),
 			)
+			// Record the relative order of revertChanges() and reset() (vitest mocks expose
+			// no invocationCallOrder).
+			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
 
 			// First call - path not yet stabilized
 			await executeWriteFileTool({}, { isPartial: true })
@@ -674,8 +722,12 @@ describe("writeToFileTool", () => {
 			// Second call - path stabilized, update() rejects
 			await executeWriteFileTool({}, { isPartial: true })
 
-			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expect.any(String))
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// Exact streamed payload: finalizePartialToolAsk() no-ops on a text mismatch, so
+			// a wrong argument (e.g. relPath) would leave the spinner stuck.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+			// The failed write's streamed content must be reverted before reset() clears the
+			// state revertChanges() relies on.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 
@@ -771,6 +823,53 @@ describe("writeToFileTool", () => {
 			expect(mockCline.consecutiveMistakeCount).toBe(3)
 		})
 
+		it("reverts the diff document when the write fails before approval", async () => {
+			// Regression test for the dirty-diff leak: streaming already opened the diff view
+			// with unapproved content, and the write then failed before the user could approve
+			// it. reset() alone left the diff document dirty with the streamed content -- a
+			// user save in the editor would persist a write the task never completed. The
+			// error path must revert the document (like the approval-denied path does) before
+			// resetting the provider state.
+			mockedCreateDirectoriesForFile.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
+			)
+			// Record the relative order of revertChanges() and reset() (vitest mocks expose
+			// no invocationCallOrder).
+			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
+
+			// Stream two deltas so the diff view is open with the unapproved content...
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			// ...then the completed block fails before approval
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
+		})
+
+		it("keeps approved diff content in the editor when saving fails after approval", async () => {
+			// The reverse of the previous test: once the user approved the write, the diff
+			// content is their accepted edit. A late failure (e.g. saveChanges rejecting)
+			// must NOT revert it -- the document stays dirty so the user can save it manually.
+			// Restore the factory default for directory creation: the previous test left the
+			// mock rejecting, and vi.clearAllMocks() keeps the last implementation.
+			mockedCreateDirectoriesForFile.mockResolvedValue([])
+			mockCline.diffViewProvider.saveChanges.mockRejectedValueOnce(new Error("save failed"))
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.saveChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+		})
+
 		it("continues execute error cleanup when finalizing partial ask fails", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			try {
@@ -781,8 +880,11 @@ describe("writeToFileTool", () => {
 
 				await executeWriteFileTool({}, { fileExists: false })
 
-				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+				// The execute error path finalizes without a text match: any open partial
+				// tool ask is closed.
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
 				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
 					"Error finalizing write_to_file partial tool ask:",
@@ -828,7 +930,8 @@ describe("writeToFileTool", () => {
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
-				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expect.any(String))
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -851,7 +954,8 @@ describe("writeToFileTool", () => {
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 
-				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(expectedPartialToolMessage)
+				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(consoleErrorSpy).toHaveBeenCalledWith(
@@ -925,8 +1029,11 @@ describe("writeToFileTool", () => {
 				// handleError must still be called
 				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 
-				// finalizePartialToolAsk must have been called to dismiss the spinner
-				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalled()
+				// finalizePartialToolAsk must have been called (no text: the execute error
+				// path closes whichever partial tool ask is open) to dismiss the spinner
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+				// The write was never approved, so the diff document is reverted before reset
+				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 			},
 		)
 	})

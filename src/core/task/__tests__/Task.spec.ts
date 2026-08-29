@@ -3388,10 +3388,14 @@ describe("Cline", () => {
 
 			expect(partialToolAsk.partial).toBe(false)
 			expect(partialToolAsk.progressStatus).toBeUndefined()
+			// The ask is resolved by the system, not the user: stamp isAnswered so ChatView
+			// does not keep Save/Reject armed for a write that already failed.
+			expect(task.clineMessages[0].isAnswered).toBe(true)
 			expect(saveSpy).toHaveBeenCalled()
 			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
 			expect(updateSnapshot?.partial).toBe(false)
 			expect(updateSnapshot?.progressStatus).toBeUndefined()
+			expect(updateSnapshot?.isAnswered).toBe(true)
 
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()
@@ -3422,6 +3426,7 @@ describe("Cline", () => {
 			await flushMicrotasks()
 
 			expect(task.clineMessages[0].partial).toBe(true)
+			expect(task.clineMessages[0].isAnswered).toBeUndefined()
 			expect(saveSpy).not.toHaveBeenCalled()
 			expect(updateSpy).not.toHaveBeenCalled()
 
@@ -3464,7 +3469,10 @@ describe("Cline", () => {
 			await flushMicrotasks()
 
 			expect(olderPartialToolAsk.partial).toBe(true)
+			expect(task.clineMessages[0].isAnswered).toBeUndefined()
 			expect(latestPartialToolAsk.partial).toBe(false)
+			// Only the finalized ask is stamped answered; the untouched one is not.
+			expect(task.clineMessages[1].isAnswered).toBe(true)
 			expect(saveSpy).toHaveBeenCalled()
 			expect(updateSpy).toHaveBeenCalledWith(latestPartialToolAsk)
 
@@ -3506,6 +3514,7 @@ describe("Cline", () => {
 			await flushMicrotasks()
 
 			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
 			expect(saveSpy).toHaveBeenCalled()
 			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
 			expect(consoleErrorSpy).toHaveBeenCalledWith(
