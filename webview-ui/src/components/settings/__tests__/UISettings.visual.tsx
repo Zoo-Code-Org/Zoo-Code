@@ -25,3 +25,14 @@ for (const theme of visualThemes) {
 		})
 	})
 }
+
+test("keeps long localized font-size controls bounded at the reflow width", async ({ mount, page }) => {
+	const component = mountedStory(await mount("ui-settings-long-locale"))
+	const story = component.getByTestId("ui-settings-story")
+	const resetButton = story.getByTestId("chat-font-size-reset")
+
+	await expectBoundedLayout(page, story, {
+		actionRows: [resetButton.locator("..")],
+		focusedControl: resetButton,
+	})
+})
