@@ -154,7 +154,7 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 					className={cn(
 						"inline-flex items-center gap-1.5 relative whitespace-nowrap px-1.5 py-1 text-xs",
 						selectorTriggerClassName,
-						"max-[300px]:shrink-0",
+						"max-[360px]:shrink-0",
 						disabled ? "opacity-50 cursor-not-allowed" : enabledSelectorTriggerClassName,
 						triggerClassName,
 					)}>
@@ -164,14 +164,14 @@ export const AutoApproveDropdown = ({ disabled = false, triggerClassName = "" }:
 						<CheckCheck className="size-3 flex-shrink-0" />
 					)}
 
-					<span className="hidden min-[300px]:inline truncate min-w-0">
+					<span className="hidden min-[360px]:inline truncate min-w-0">
 						{!effectiveAutoApprovalEnabled
 							? t("chat:autoApprove.triggerLabelOff")
 							: enabledCount === totalCount
 								? t("chat:autoApprove.triggerLabelAll")
 								: t("chat:autoApprove.triggerLabel", { count: enabledCount })}
 					</span>
-					<span className="inline min-[300px]:hidden min-w-0">
+					<span className="inline min-[360px]:hidden min-w-0">
 						{!effectiveAutoApprovalEnabled
 							? t("chat:autoApprove.triggerLabelOffShort")
 							: enabledCount === totalCount

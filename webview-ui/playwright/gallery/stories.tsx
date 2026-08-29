@@ -50,6 +50,21 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"layout-clipped-text": () => (
+		<div className="w-40">
+			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
+				Clipped direct text
+			</span>
+		</div>
+	),
+	"layout-screen-reader-only": () => (
+		<div>
+			<label className="sr-only">Hidden label</label>
+			<div className="sr-only">
+				<button>Hidden action</button>
+			</div>
+		</div>
+	),
 	"mermaid-gantt": async () => {
 		const { default: MermaidBlock } = await import("@/components/common/MermaidBlock")
 		return <MermaidBlock code={mermaidGantt} />

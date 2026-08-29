@@ -183,8 +183,8 @@ async function startScene(
 		await app?.close().catch(() => undefined)
 		await mock?.stop().catch(() => undefined)
 		await fs.rm(temporaryRoot, { recursive: true, force: true })
-		const message = error instanceof Error ? error.message : String(error)
-		throw new Error(message)
+		if (error instanceof Error) throw error
+		throw new Error(String(error))
 	}
 }
 

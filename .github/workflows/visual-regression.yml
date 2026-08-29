@@ -1,4 +1,4 @@
-name: Webview Visual Regression
+name: Visual Regression
 
 on:
     workflow_dispatch:
