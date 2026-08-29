@@ -34,10 +34,11 @@ export const OPENCODE_GO_DEFAULT_TEMPERATURE = 0
  * This registry encodes the native capabilities of each curated Go model,
  * sourced from the same vendor specs used by the dedicated providers
  * (zai/moonshot/mimo/minimax/deepseek/qwen) and the Go pricing table at
- * https://opencode.ai/docs/go/#usage-limits. The fetcher merges the live
- * `/models` payload on top of these defaults so that context-window and
- * max-token values stay in sync with the gateway while capability flags and
- * pricing remain correct.
+ * https://opencode.ai/docs/go/#usage-limits. It also includes explicitly
+ * curated Responses-format models whose gateway metadata is not available
+ * through `/models`. The fetcher merges the live `/models` payload on top of
+ * these defaults so that context-window and max-token values stay in sync
+ * with the gateway while capability flags and pricing remain correct.
  *
  * `supportsPromptCache` has two distinct meanings depending on the wire format:
  *
@@ -343,6 +344,31 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"DeepSeek-V4-Pro-0813 is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
 	},
+	// --- OpenAI Responses ---
+	// Luna is curated here because the Go gateway's model catalogue does not
+	// currently provide its capability metadata. These values intentionally
+	// describe the Go Responses route, not the OpenAI-native or Codex routes.
+	"gpt-5.6-luna": {
+		maxTokens: 128_000,
+		contextWindow: 1_050_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 0.2,
+		outputPrice: 1.2,
+		cacheWritesPrice: 0.25,
+		cacheReadsPrice: 0.02,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+		},
+		description: "GPT-5.6 Luna via the OpenCode Go Responses API.",
+	},
+
 	"deepseek-v4-flash": {
 		maxTokens: 384_000,
 		contextWindow: 1_000_000,
@@ -389,13 +415,45 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 ])
 
 /**
+ * OpenCode Go models that must be requested via the OpenAI Responses API
+ * (`/v1/responses`), not the OpenAI-compatible Chat Completions endpoint
+ * (`/v1/chat/completions`).
+ *
+ * The Go gateway maps every model to exactly one wire format. Some models
+ * (currently only `gpt-5.6-luna`) are Responses-only and are also explicitly
+ * curated in `opencodeGoModels`: the gateway's
+ * `/v1/chat/completions` adapter for them fails with an opaque HTTP 500
+ * (`{"type":"error","error":{"type":"error","message":"Internal server error"}}`),
+ * while `/v1/responses` succeeds (Zoo-Code-Org/Zoo-Code#1431).
+ *
+ * Drive routing from this set rather than from the model ID string so the
+ * gateway's protocol contract stays explicit, testable, and easy to extend
+ * when the next Responses-only model lands. Unknown model IDs default to the
+ * OpenAI-compatible chat completions format.
+ */
+export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
+	// --- OpenAI ---
+	"gpt-5.6-luna",
+])
+
+/**
  * Returns `true` when the given Go-plan model ID must be requested via the
  * Anthropic Messages format (`/v1/messages`) rather than the OpenAI-compatible
- * chat completions format. Unknown (non-curated) model IDs default to the
- * OpenAI-compatible format, matching the gateway's default routing.
+ * chat completions format. Unknown model IDs default to the OpenAI-compatible
+ * format, matching the gateway's default routing.
  */
 export function isOpencodeGoAnthropicFormatModel(modelId: string): boolean {
 	return OPENCODE_GO_ANTHROPIC_FORMAT_MODELS.has(modelId)
+}
+
+/**
+ * Returns `true` when the given Go-plan model ID must be requested via the
+ * OpenAI Responses API (`/v1/responses`) rather than the OpenAI-compatible
+ * chat completions format. Unknown model IDs default to the OpenAI-compatible
+ * format, matching the gateway's default routing.
+ */
+export function isOpencodeGoResponsesFormatModel(modelId: string): boolean {
+	return OPENCODE_GO_RESPONSES_FORMAT_MODELS.has(modelId)
 }
 
 /**

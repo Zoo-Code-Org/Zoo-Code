@@ -12,7 +12,12 @@ vitest.mock("vscode", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { opencodeGoDefaultModelId, opencodeGoModels, isOpencodeGoAnthropicFormatModel } from "@roo-code/types"
+import {
+	opencodeGoDefaultModelId,
+	opencodeGoModels,
+	isOpencodeGoAnthropicFormatModel,
+	isOpencodeGoResponsesFormatModel,
+} from "@roo-code/types"
 
 import { OpencodeGoHandler } from "../opencode-go"
 import { getModels } from "../fetchers/modelCache"
@@ -34,12 +39,15 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			// Anthropic-format model used to exercise the /v1/messages path.
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
+			// Responses-format model (Zoo-Code-Org/Zoo-Code#1431).
+			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 		})
 	}),
 	refreshModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
 			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
+			"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"] },
 		})
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
@@ -47,10 +55,12 @@ vitest.mock("../fetchers/modelCache", () => ({
 
 const mockCreate = vitest.fn()
 const mockAnthropicCreate = vitest.fn()
+const mockResponsesCreate = vitest.fn()
 
 ;(OpenAI as any).mockImplementation(function () {
 	return {
 		chat: { completions: { create: mockCreate } },
+		responses: { create: mockResponsesCreate },
 	}
 })
 
@@ -74,6 +84,7 @@ describe("OpencodeGoHandler", () => {
 		clearAllMocks()
 		mockCreate.mockClear()
 		mockAnthropicCreate.mockClear()
+		mockResponsesCreate.mockClear()
 	})
 
 	it("initializes the OpenAI client with the Opencode Go base URL and key", () => {
@@ -794,6 +805,289 @@ describe("OpencodeGoHandler", () => {
 			await expect(async () => {
 				await collectStream(handler.createMessage("sys", messages))
 			}).rejects.toThrow("Opencode Go completion error: rate limited")
+		})
+	})
+
+	describe("Responses-format models (gpt-5.6-luna)", () => {
+		// gpt-5.6-luna is Responses-only on the Go gateway: its chat-completions
+		// adapter fails with an opaque HTTP 500 (Zoo-Code-Org/Zoo-Code#1431),
+		// so the handler must route it through /v1/responses and never fall
+		// back to chat completions.
+		const lunaOptions: ApiHandlerOptions = {
+			opencodeGoApiKey: "test-key",
+			opencodeGoModelId: "gpt-5.6-luna",
+		}
+
+		beforeEach(() => {
+			mockResponsesCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{ type: "response.output_text.delta", delta: "Hello" },
+					{ type: "response.reasoning_summary_text.delta", delta: "thinking" },
+					{
+						type: "response.completed",
+						response: {
+							usage: {
+								input_tokens: 10,
+								output_tokens: 5,
+							},
+						},
+					},
+				]),
+			)
+		})
+
+		it("routes the request through responses.create, not chat completions or Anthropic messages", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			expect(mockResponsesCreate).toHaveBeenCalledTimes(1)
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockAnthropicCreate).not.toHaveBeenCalled()
+		})
+
+		it("streams text and reasoning chunks from the Responses event stream", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			expect(chunks).toContainEqual({ type: "text", text: "Hello" })
+			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking" })
+		})
+
+		it("sends the system prompt as top-level instructions with stream/store flags", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.model).toBe("gpt-5.6-luna")
+			expect(callArgs.instructions).toBe("sys")
+			expect(callArgs.stream).toBe(true)
+			expect(callArgs.store).toBe(false)
+			const input = callArgs.input as unknown[]
+			expect(input.some((item) => (item as { role?: string }).role === "system")).toBe(false)
+			// The gateway rejects temperature for Responses-format models.
+			expect(callArgs.temperature).toBeUndefined()
+			// No tools were provided, so no tools/tool_choice are sent.
+			expect(callArgs.tools).toBeUndefined()
+		})
+
+		it("converts messages to the Responses input shape for a tool_use/tool_result round-trip", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "List the files" },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file contents" }],
+				},
+			]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.input).toEqual([
+				{ role: "user", content: [{ type: "input_text", text: "List the files" }] },
+				{ type: "function_call", call_id: "toolu_1", name: "read_file", arguments: '{"path":"a.ts"}' },
+				{ type: "function_call_output", call_id: "toolu_1", output: "file contents" },
+			])
+		})
+
+		it("flattens Chat Completions-shaped tools into Responses function tools", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "read a file",
+						parameters: { type: "object", properties: { path: { type: "string" } } },
+					},
+				},
+			]
+
+			await collectStream(handler.createMessage("sys", messages, { taskId: "test-task", tools }))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.tools).toEqual([
+				{
+					type: "function",
+					name: "read_file",
+					description: "read a file",
+					parameters: expect.objectContaining({
+						type: "object",
+						additionalProperties: false,
+						required: ["path"],
+					}),
+					strict: true,
+				},
+			])
+			expect(callArgs.tool_choice).toBe("auto")
+			expect(callArgs.parallel_tool_calls).toBe(true)
+		})
+
+		it("streams tool-call partials and emits unstreamed calls from output_item.done", async () => {
+			mockResponsesCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "response.function_call_arguments.delta",
+						call_id: "call_1",
+						name: "read_file",
+						delta: '{"path":',
+						index: 0,
+					},
+					{
+						type: "response.output_item.done",
+						item: {
+							type: "function_call",
+							call_id: "call_1",
+							name: "read_file",
+							arguments: '{"path":"a.ts"}',
+						},
+					},
+					{
+						type: "response.output_item.done",
+						item: { type: "function_call", call_id: "call_2", name: "list_files", arguments: "{}" },
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			const partials = chunks.filter((c) => c.type === "tool_call_partial")
+			expect(partials).toHaveLength(1)
+			expect(partials[0]).toMatchObject({ id: "call_1", name: "read_file", arguments: '{"path":' })
+
+			// call_1 was streamed via deltas, so output_item.done must not
+			// duplicate it; call_2 only appeared in output_item.done.
+			const completes = chunks.filter((c) => c.type === "tool_call")
+			expect(completes).toHaveLength(1)
+			expect(completes[0]).toMatchObject({ id: "call_2", name: "list_files", arguments: "{}" })
+		})
+
+		it("emits a usage chunk with cache tokens and cost from response.completed", async () => {
+			mockResponsesCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "response.completed",
+						response: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 50,
+								input_tokens_details: { cached_tokens: 40 },
+								output_tokens_details: { reasoning_tokens: 20 },
+							},
+						},
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			const usageChunk = chunks.find((c) => c.type === "usage")
+			if (!usageChunk || usageChunk.type !== "usage") {
+				throw new Error("Expected usage chunk")
+			}
+			expect(usageChunk.inputTokens).toBe(100)
+			expect(usageChunk.outputTokens).toBe(50)
+			expect(usageChunk.cacheReadTokens).toBe(40)
+			expect(usageChunk.reasoningTokens).toBe(20)
+			// Luna Go pricing: https://opencode.ai/docs/zen/#pricing
+			// input $0.20/M, output $1.20/M, cache reads $0.02/M.
+			// 60 non-cached input + 40 cached reads + 50 output tokens (under 272k).
+			expect(usageChunk.totalCost).toBeCloseTo((60 * 0.2 + 40 * 0.02 + 50 * 1.2) / 1_000_000, 10)
+		})
+
+		it("maps the model default reasoning effort to reasoning.effort", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.reasoning).toEqual({ effort: "medium" })
+		})
+
+		it("omits reasoning when the user disables reasoning effort", async () => {
+			const handler = new OpencodeGoHandler({ ...lunaOptions, reasoningEffort: "disable" })
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.reasoning).toBeUndefined()
+		})
+
+		it("maps max tokens to max_output_tokens (GPT-5 models bypass the 20% clamp)", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_output_tokens).toBe(128_000)
+		})
+
+		it("honors includeMaxTokens/modelMaxTokens override for max_output_tokens", async () => {
+			const handler = new OpencodeGoHandler({ ...lunaOptions, includeMaxTokens: true, modelMaxTokens: 5_000 })
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_output_tokens).toBe(5_000)
+		})
+
+		it("completePrompt calls responses.create and returns output_text", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			const result = await handler.completePrompt("ping")
+
+			expect(result).toBe("Hello!")
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.model).toBe("gpt-5.6-luna")
+			expect(callArgs.store).toBe(false)
+			// completePrompt has no system prompt, so no instructions are sent.
+			expect(callArgs.instructions).toBeUndefined()
+			expect(callArgs.input).toEqual([{ role: "user", content: [{ type: "input_text", text: "ping" }] }])
+			expect(callArgs.temperature).toBeUndefined()
+		})
+
+		it("completePrompt wraps errors with an Opencode Go-specific message", async () => {
+			mockResponsesCreate.mockRejectedValue(new Error("boom"))
+			const handler = new OpencodeGoHandler(lunaOptions)
+			await expect(handler.completePrompt("ping")).rejects.toThrow("Opencode Go completion error: boom")
+		})
+
+		it("wraps pre-stream responses.create errors from createMessage with an Opencode Go-specific message", async () => {
+			mockResponsesCreate.mockRejectedValue(new Error("internal server error"))
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			await expect(async () => {
+				await collectStream(handler.createMessage("sys", messages))
+			}).rejects.toThrow("Opencode Go completion error: internal server error")
+		})
+
+		it("classifies gpt-5.6-luna as Responses-format and other models as not", () => {
+			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("glm-5.3")).toBe(false)
+			expect(isOpencodeGoResponsesFormatModel("qwen3.7-max")).toBe(false)
+			expect(isOpencodeGoResponsesFormatModel("some-unknown-model")).toBe(false)
 		})
 	})
 
