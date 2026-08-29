@@ -23,7 +23,17 @@ vi.mock("@/components/ui", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/components/ui")>()
 	return {
 		...actual,
-		Slider: ({ defaultValue, onValueChange, "data-testid": dataTestId }: any) => (
+		// Narrow typed double: only the props CheckpointSettings consumes, so
+		// drift in the Slider contract is a compile error here, not `any`.
+		Slider: ({
+			defaultValue,
+			onValueChange,
+			"data-testid": dataTestId,
+		}: {
+			defaultValue?: number[]
+			onValueChange?: (value: number[]) => void
+			"data-testid"?: string
+		}) => (
 			<input
 				type="range"
 				value={defaultValue?.[0] ?? 0}
