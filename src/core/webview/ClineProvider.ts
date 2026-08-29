@@ -602,7 +602,14 @@ export class ClineProvider
 				states[viewStateId] = next
 			}
 
-			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
+			const pruned = this.prunePersistedViewStates(states)
+			// TEMP-DIAG: e2e viewStates visibility debugging; remove before merge.
+			this.log(
+				`[DIAG-VS-WRITE] viewStateId=${viewStateId} values=${JSON.stringify(values)} map=${
+					JSON.stringify(pruned)?.slice(0, 500) ?? String(pruned)
+				}`,
+			)
+			await this.contextProxy.setValue("viewStates", pruned)
 		})
 
 		ClineProvider.persistedViewStateWriteQueue = write.catch(() => {})
@@ -617,6 +624,10 @@ export class ClineProvider
 		const write = ClineProvider.persistedViewStateWriteQueue.then(async () => {
 			const states = this.getPersistedViewStates({ fresh: true })
 			delete states[viewStateId]
+			// TEMP-DIAG: e2e viewStates visibility debugging; remove before merge.
+			this.log(
+				`[DIAG-VS-CLEAR] viewStateId=${viewStateId} map=${JSON.stringify(states)?.slice(0, 500) ?? String(states)}`,
+			)
 			await this.contextProxy.setValue("viewStates", states)
 		})
 
@@ -700,6 +711,12 @@ export class ClineProvider
 				states[nextViewStateId] = previous
 			}
 
+			// TEMP-DIAG: e2e viewStates visibility debugging; remove before merge.
+			this.log(
+				`[DIAG-VS-REKEY] from=${previousViewStateId} to=${nextViewStateId} map=${
+					JSON.stringify(this.prunePersistedViewStates(states))?.slice(0, 500) ?? ""
+				}`,
+			)
 			await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
 		})
 

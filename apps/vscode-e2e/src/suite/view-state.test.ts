@@ -93,6 +93,18 @@ suite("Roo Code View State", function () {
 			// before the tasks complete, but a just-resolved globalState write can momentarily
 			// lag a synchronous globalState.get in the extension host. Poll until both
 			// persisted selections are visible before asserting on them.
+			// TEMP-DIAG: e2e viewStates visibility debugging; remove before merge.
+			const diagSnapshot = () => {
+				try {
+					return (
+						JSON.stringify(globalThis.api.getGlobalState("viewStates"))?.slice(0, 800) ??
+						String(globalThis.api.getGlobalState("viewStates"))
+					)
+				} catch (error) {
+					return `snapshot error: ${String(error)}`
+				}
+			}
+			console.log(`[DIAG-VS-READ-START] viewStates=${diagSnapshot()}`)
 			await waitFor(
 				() => {
 					const persisted = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
@@ -109,7 +121,10 @@ suite("Roo Code View State", function () {
 					)
 				},
 				{ timeout: 15_000 },
-			)
+			).catch((error) => {
+				console.log(`[DIAG-VS-READ-TIMEOUT] viewStates=${diagSnapshot()}`)
+				throw error
+			})
 
 			const viewStates = globalThis.api.getGlobalState("viewStates") as GlobalState["viewStates"]
 			assert.ok(viewStates, "Expected persisted viewStates to exist")
