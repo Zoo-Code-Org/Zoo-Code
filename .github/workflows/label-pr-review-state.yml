@@ -39,6 +39,7 @@ jobs:
               'awaiting-author',
               'awaiting-review-trigger',
               'awaiting-coderabbit',
+              'awaiting-ready',
               'awaiting-maintainer',
               'awaiting-review', // Legacy label removed during reconciliation.
               'has-conflicts',
@@ -53,6 +54,11 @@ jobs:
                 name: 'awaiting-coderabbit',
                 color: '5319e7',
                 description: 'Waiting for CodeRabbit to approve the latest commit',
+              },
+              {
+                name: 'awaiting-ready',
+                color: '1d76db',
+                description: 'CodeRabbit approved; waiting for the draft to be marked ready',
               },
               {
                 name: 'awaiting-maintainer',
@@ -81,6 +87,7 @@ jobs:
                 const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
                 return pr;
               }));
+              prs = prs.filter(pr => pr.state === 'open');
             } else if (context.eventName === 'workflow_run' || context.eventName === 'issue_comment') {
               prs = [];
             } else {
@@ -159,6 +166,34 @@ jobs:
               );
             }
 
+            async function permissionFor(username) {
+              try {
+                const result = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner, repo, username,
+                });
+                return result.data.permission;
+              } catch (error) {
+                if (error.status === 404) return 'none';
+                throw error;
+              }
+            }
+
+            function phaseMessage(phase, acceptedTrigger) {
+              const messages = {
+                conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
+                'ci-pending': 'Wait for the required CI checks to finish.',
+                'ci-failed': 'Fix the failing required CI checks and push an update.',
+                trigger: 'Comment `@coderabbitai review` to start the AI review.',
+                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Request another review for the new commit.',
+                coderabbit: `CodeRabbit review was requested by @${acceptedTrigger?.actor}. Wait for it to approve the latest commit.`,
+                'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready for maintainer review.',
+                'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
+                maintainer: 'CodeRabbit approved the latest commit. A maintainer must now review and approve it.',
+                approved: 'CodeRabbit and a maintainer approved the latest commit. The PR is ready for the remaining merge requirements.',
+              };
+              return messages[phase];
+            }
+
             async function updateReviewGate(pr, phase, passed, acceptedTrigger = null) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
@@ -177,7 +212,7 @@ jobs:
                 details_url: pr.html_url,
                 output: {
                   title: passed ? 'Review sequence complete' : 'Review sequence incomplete',
-                  summary: reviewGuideBody(pr, phase, acceptedTrigger).split('**Current step:** ')[1],
+                  summary: phaseMessage(phase, acceptedTrigger),
                 },
               };
 
@@ -198,7 +233,7 @@ jobs:
               return { sha: match[1], actor: match[2], requestedAt: Number(match[3]) };
             }
 
-            async function resolveAcceptedTrigger(pr, existingGuide) {
+            async function resolveAcceptedTrigger(pr, existingGuide, ciCompletedAt) {
               let acceptedTrigger = parseAcceptedTrigger(existingGuide, pr.head.sha);
               const isRequestEvent = context.eventName === 'issue_comment' &&
                 context.payload.action === 'created' &&
@@ -211,10 +246,7 @@ jobs:
               let permission = 'none';
               const botAuthored = pr.user?.type === 'Bot';
               if (actor?.type !== 'Bot' && botAuthored) {
-                const result = await github.rest.repos.getCollaboratorPermissionLevel({
-                  owner, repo, username: actor.login,
-                });
-                permission = result.data.permission;
+                permission = await permissionFor(actor.login);
               }
               const allowed = actor?.type !== 'Bot' &&
                 (!botAuthored || ['admin', 'maintain', 'write'].includes(permission));
@@ -226,10 +258,21 @@ jobs:
                 return acceptedTrigger;
               }
 
+              const requestedAt = Date.parse(context.payload.comment.created_at);
+              if (requestedAt < ciCompletedAt) {
+                core.warning(`PR #${pr.number}: rejected review request made before CI completed`);
+                return acceptedTrigger;
+              }
+
+              if (acceptedTrigger) {
+                core.info(`PR #${pr.number}: trigger already accepted for ${pr.head.sha}`);
+                return acceptedTrigger;
+              }
+
               acceptedTrigger = {
                 sha: pr.head.sha,
                 actor: actor.login,
-                requestedAt: Date.parse(context.payload.comment.created_at),
+                requestedAt,
               };
               core.info(`PR #${pr.number}: accepted CodeRabbit trigger from ${actor.login}`);
               return acceptedTrigger;
@@ -241,19 +284,6 @@ jobs:
                 ? 'This PR was opened by an automated account. A human maintainer must verify the change intent, provenance, and validation before merging.'
                 : 'Thanks for contributing. This comment tracks the review sequence and the next action.';
 
-              const phaseCopy = {
-                draft: 'Mark the PR ready for review when it is complete. CodeRabbit does not automatically review drafts.',
-                conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
-                'ci-pending': 'Wait for the required CI checks to finish.',
-                'ci-failed': 'Fix the failing required CI checks and push an update.',
-                trigger: 'A human must comment `@coderabbitai review` to start the AI review.',
-                'coderabbit-changes': 'Address CodeRabbit findings and push an update. A human must request another review for the new commit.',
-                coderabbit: `CodeRabbit review was requested by @${acceptedTrigger?.actor}. Wait for it to approve the latest commit.`,
-                'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
-                maintainer: 'CodeRabbit approved the latest commit. A human maintainer must now review and approve it.',
-                approved: 'CodeRabbit and a human maintainer approved the latest commit. The PR is ready for the remaining merge requirements.',
-              };
-
               const triggerMarker = acceptedTrigger
                 ? `\n${triggerMarkerPrefix}${acceptedTrigger.sha}:${acceptedTrigger.actor}:${acceptedTrigger.requestedAt} -->`
                 : '';
@@ -263,7 +293,7 @@ jobs:
                 '2. A human explicitly requests CodeRabbit review.\n' +
                 '3. CodeRabbit reviews and approves the latest commit.\n' +
                 '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
-                `**Current step:** ${phaseCopy[phase]}${triggerMarker}`;
+                `**Current step:** ${phaseMessage(phase, acceptedTrigger)}${triggerMarker}`;
             }
 
             async function updateReviewGuide(pr, phase, acceptedTrigger, existingGuide = null) {
@@ -288,7 +318,7 @@ jobs:
 
             // Fetch required status check names from the branch ruleset.
             // Uses the public /rules/branches endpoint — no admin token needed.
-            // Falls back to blocking on all checks if the endpoint is unavailable.
+            // Fails closed if the endpoint is unavailable.
             let requiredChecks = null;
             try {
               const rules = await github.paginate(
@@ -316,7 +346,7 @@ jobs:
                 );
               }
             } catch (err) {
-              core.warning(`Could not fetch branch rules, falling back to all checks: ${err.message}`);
+              core.warning(`Could not fetch branch rules; review gate remains pending: ${err.message}`);
             }
 
             const failures = [];
@@ -326,15 +356,6 @@ jobs:
                 const existingGuide = await findReviewGuide(pr);
                 let acceptedTrigger = parseAcceptedTrigger(existingGuide, pr.head.sha);
                 if (acceptedTrigger?.sha !== pr.head.sha) acceptedTrigger = null;
-
-                // Draft PRs never get a state label.
-                if (pr.draft) {
-                  core.info(`PR #${pr.number}: draft — stripping state labels`);
-                  await reconcileLabels(pr, null);
-                  await updateReviewGuide(pr, 'draft', null, existingGuide);
-                  await updateReviewGate(pr, 'draft', false);
-                  continue;
-                }
 
                 // `mergeable`/`mergeable_state` are only returned by the single-PR GET
                 // endpoint, and are computed asynchronously by GitHub — a PR fetched via
@@ -402,13 +423,12 @@ jobs:
                 // Filter to required checks only (or all checks if rules unavailable).
                 // Always exclude this workflow's own run to avoid self-referential loops.
                 const excludedCheckNames = new Set([
-                  'Reconcile PR review state labels',
+                  'reconcile',
                   reviewGateName,
                 ]);
-                const requiredSpecs = requiredChecks === null
-                  ? null
-                  : requiredChecks.filter(check => !excludedCheckNames.has(check.context));
-                const requiredResults = requiredSpecs?.map(check => {
+                const requiredSpecs = (requiredChecks ?? [])
+                  .filter(check => !excludedCheckNames.has(check.context));
+                const requiredResults = requiredSpecs.map(check => {
                   const run = check.integrationId === null
                     ? latestByName.get(check.context)
                     : latestByNameAndApp.get(`${check.context}:${check.integrationId}`);
@@ -417,19 +437,13 @@ jobs:
                     : null;
                   return { check, run, status };
                 });
-                const relevantRuns = requiredSpecs === null
-                  ? [...latestByName.values()].filter(run => !excludedCheckNames.has(run.name))
-                  : requiredResults.map(result => result.run).filter(Boolean);
-                const relevantStatuses = requiredSpecs === null
-                  ? [...latestStatusByContext.values()]
-                  : requiredResults.map(result => result.status).filter(Boolean);
-                const missingRequiredChecks = requiredSpecs === null
-                  ? []
-                  : requiredResults
-                    .filter(result => !result.run && !result.status)
-                    .map(result =>
-                      `${result.check.context}${result.check.integrationId ? `@${result.check.integrationId}` : ''}`
-                    );
+                const relevantRuns = requiredResults.map(result => result.run).filter(Boolean);
+                const relevantStatuses = requiredResults.map(result => result.status).filter(Boolean);
+                const missingRequiredChecks = requiredResults
+                  .filter(result => !result.run && !result.status)
+                  .map(result =>
+                    `${result.check.context}${result.check.integrationId ? `@${result.check.integrationId}` : ''}`
+                  );
 
                 core.debug(
                   `PR #${pr.number}: ${relevantRuns.length} check run(s), ` +
@@ -457,6 +471,12 @@ jobs:
                   )
                 );
 
+                const ciCompletedAt = Math.max(
+                  0,
+                  ...relevantRuns.map(run => Date.parse(run.completed_at ?? run.started_at)),
+                  ...relevantStatuses.map(status => Date.parse(status.updated_at ?? status.created_at)),
+                );
+
                 // While CI is running or has failed, remove state labels and move on.
                 // CI failure is its own signal; the label would add noise, not clarity.
                 if (ciPending || ciFailed) {
@@ -474,7 +494,7 @@ jobs:
 
                 // A review request is accepted only after CI passes. The accepted request is
                 // bound to this head SHA in the managed guide comment.
-                acceptedTrigger = await resolveAcceptedTrigger(pr, existingGuide);
+                acceptedTrigger = await resolveAcceptedTrigger(pr, existingGuide, ciCompletedAt);
 
                 // CI is passing. Now determine review state.
                 const reviews = await github.paginate(github.rest.pulls.listReviews, {
@@ -505,10 +525,7 @@ jobs:
                       review.user?.login === pr.user?.login) {
                     continue;
                   }
-                  const permissionResult = await github.rest.repos.getCollaboratorPermissionLevel({
-                    owner, repo, username: review.user.login,
-                  });
-                  if (['admin', 'maintain', 'write'].includes(permissionResult.data.permission)) {
+                  if (['admin', 'maintain', 'write'].includes(await permissionFor(review.user.login))) {
                     freshMaintainerReviews.push(review);
                   }
                 }
@@ -537,6 +554,9 @@ jobs:
                 } else if (!codeRabbitApproved) {
                   desiredLabel = 'awaiting-coderabbit';
                   phase = 'coderabbit';
+                } else if (pr.draft) {
+                  desiredLabel = 'awaiting-ready';
+                  phase = 'draft-approved';
                 } else if (maintainerChangeRequest) {
                   desiredLabel = 'awaiting-author';
                   phase = 'maintainer-changes';

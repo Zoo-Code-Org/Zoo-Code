@@ -134,18 +134,18 @@ pnpm install
 
 ### Review Process
 
-Ready-for-review PRs move through these gates in order:
+Draft and ready-for-review PRs move through these gates in order:
 
 1. Required CI checks must pass.
-2. The PR author or another human comments `@coderabbitai review` to start CodeRabbit. For bot-authored PRs, this request must come from a human maintainer with write access.
+2. The PR author or another account GitHub identifies as non-bot comments `@coderabbitai review` to start CodeRabbit. For bot-authored PRs, this request must come from a non-bot maintainer account with write access.
 3. CodeRabbit reviews the latest commit. Address any findings and request another review after pushing updates.
-4. After CodeRabbit approval, a human maintainer performs the final review and approval.
+4. Draft PRs are marked ready after CodeRabbit approval, then a non-author maintainer account with write access performs the final review and approval.
 
-An automated comment on each PR shows the current gate and next action. The `awaiting-review-trigger`, `awaiting-coderabbit`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates the trigger and approvals, so a human must request CodeRabbit again before the final maintainer review.
+An automated comment on each PR shows the current gate and next action. The `awaiting-review-trigger`, `awaiting-coderabbit`, `awaiting-ready`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates the trigger and approvals, so CodeRabbit must be requested again before the final maintainer review.
 
 The `PR review gate` check passes only after the sequence completes. Repository administrators should configure it as a required status check on `main`; the labels and comment explain the state, while the required check enforces it.
 
-PRs opened by bots or other automated accounts follow the same sequence. Automated authorship never substitutes for human accountability: a maintainer must verify the change's intent, provenance, and validation before merging.
+PRs opened by bots or other automated accounts follow the same sequence. GitHub identifies actor accounts as `User` or `Bot`; it cannot distinguish a person's action from automation using that person's token. Final approval therefore requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation before merging.
 
 - **Daily Triage:** Quick checks by maintainers.
 - **Weekly In-depth Review:** Comprehensive assessment.
