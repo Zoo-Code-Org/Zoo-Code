@@ -1,18 +1,14 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: en-US
+tone_instructions: >-
+    Be direct and evidence-first. Report only concrete, actionable findings grounded in changed code.
+    Prioritize correctness, security, data loss, lifecycle, and regressions; avoid speculative style
+    comments and unrelated refactors.
 
 reviews:
     profile: assertive
     request_changes_workflow: true
     high_level_summary: true
-    high_level_summary_instructions: >-
-        Act as an adversarial second-opinion reviewer. Verify PR claims against implementation,
-        contracts, and tests. Trace changed inputs through normal, boundary, error, cancellation,
-        retry, and default paths and their consumers. Seek plausible counterexamples and regressions
-        from removed safeguards. Report only concrete, actionable findings grounded in changed code
-        and repository conventions. Prioritize correctness, security, data loss, lifecycle, and test
-        gaps. Avoid speculative style comments and unrelated refactors. Search for existing helpers
-        before suggesting abstractions, and distinguish actual defects from unsupported checks.
     high_level_summary_in_walkthrough: true
     review_status: true
     review_details: true
@@ -33,10 +29,19 @@ reviews:
         - "!**/.turbo/**"
         - "!apps/vscode-e2e/.vscode-test/**"
         - "!bin/*.vsix"
-        - "!pnpm-lock.yaml"
         - "!webview-ui/**/__screenshots__/**"
 
     path_instructions:
+        - path: "**/*"
+          instructions: >-
+              Act as an adversarial second-opinion reviewer. Verify PR claims against implementation,
+              contracts, and tests. Trace changed inputs through normal, boundary, error, cancellation,
+              retry, and default paths and their consumers. Seek plausible counterexamples and regressions
+              from removed safeguards. Report only concrete, actionable findings grounded in changed code
+              and repository conventions. Prioritize correctness, security, data loss, lifecycle, and test
+              gaps. Avoid speculative style comments and unrelated refactors. Search for existing helpers
+              before suggesting abstractions, and distinguish actual defects from unsupported checks.
+
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
               Check strict typing and exhaustive behavior across normal, boundary, error,
@@ -44,15 +49,7 @@ reviews:
               existing helpers are reused, and new code introduces no `any`, unjustified double
               assertions, floating promises, duplicated helpers, or increased lint suppressions.
 
-        - path: "**/*.{test,spec}.{ts,tsx,js,jsx}"
-          instructions: >-
-              Require regression coverage at the lowest valid harness with behavior-focused
-              assertions, including relevant negative, error, false/unset, and boundary cases.
-              Check cleanup and deterministic async behavior and prefer shared typed test helpers.
-              Visible webview changes require a durable Playwright component snapshot; behavior-only
-              changes do not.
-
-        - path: "**/__tests__/**"
+        - path: "{**/*.{test,spec}.{ts,tsx,js,jsx},**/__tests__/**}"
           instructions: >-
               Require regression coverage at the lowest valid harness with behavior-focused
               assertions, including relevant negative, error, false/unset, and boundary cases.
