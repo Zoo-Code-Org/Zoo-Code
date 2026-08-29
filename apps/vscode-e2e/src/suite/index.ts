@@ -35,7 +35,9 @@ export async function run() {
 	// for a button that the webview routes to "start new task" rather than "yes".
 	api.on(RooCodeEventName.Message, ({ message }) => {
 		if (message.type === "ask" && message.ask === "completion_result") {
-			api.approveCurrentAsk()
+			void api.approveCurrentAsk().catch((error) => {
+				console.error("Failed to approve completion result", error)
+			})
 		}
 	})
 
