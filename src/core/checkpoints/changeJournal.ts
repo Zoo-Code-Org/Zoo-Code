@@ -56,7 +56,9 @@ export async function appendChange(
  *
  * Torn-tail repair: if the final line is truncated (JSON.parse fails), it is
  * silently discarded.  The rest of the file is returned in order.  An absent
- * or empty journal returns [].
+ * or empty journal returns [] — but only an ABSENT file. Any other read
+ * failure (permissions, I/O) is rethrown: a journal that cannot be read must
+ * not be indistinguishable from one that is legitimately empty.
  */
 export async function loadChanges(
 	globalStorageDir: string,
@@ -67,9 +69,14 @@ export async function loadChanges(
 	let content: string
 	try {
 		content = await fs.readFile(filePath, "utf8")
-	} catch {
-		// File absent or unreadable → empty journal.
-		return []
+	} catch (error) {
+		// A missing journal is a legitimate empty history; any other read
+		// failure (permissions, I/O) must propagate. Swallowing it would let
+		// a rollback report a no-op success without reading the history.
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return []
+		}
+		throw error
 	}
 
 	if (!content.trim()) {

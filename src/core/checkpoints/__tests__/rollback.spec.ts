@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { Task } from "../../task/Task"
 import type { ChangeJournalEntry } from "../changeJournal"
 import { getCheckpointService } from "../index"
-import { appendChange } from "../changeJournal"
+import * as changeJournal from "../changeJournal"
+import { appendChange, journalPath } from "../changeJournal"
 import { restoreLatestFile, rollbackFile, rollbackStep } from "../rollback"
 
 vi.mock("../index", () => ({
@@ -96,6 +97,48 @@ describe("rollbackFile (B3c: undo the step's write to the file)", () => {
 
 		expect(outcome.success).toBe(true)
 		expect(service.restoreFile).toHaveBeenCalledWith("sha-1", "src/a.ts")
+	})
+
+	it("rejects rolling back a step that is not the file's latest change", async () => {
+		// The file was written again by a later step (sha-2): rolling back the
+		// older step (sha-1) would overwrite the newer state, so it is
+		// rejected instead of silently destroying it.
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
+
+		expect(outcome).toEqual({
+			filePath: "src/a.ts",
+			success: false,
+			error: "File was modified in a later step; roll back the latest change card first",
+		})
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("fails when the journal location is unavailable (no global storage)", async () => {
+		// No context on the provider double → the journal cannot even be
+		// located: a clear failure, not a silent miss on the file lookup.
+		const task = {
+			taskId: "task-rollback",
+			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
+		} as unknown as Task
+
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackFile(task, "sha-1", "src/a.ts")
+
+		expect(outcome).toEqual({
+			filePath: "src/a.ts",
+			success: false,
+			error: "Change journal is unavailable for this task",
+		})
+		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
 
 	it("fails cleanly when the file is not part of the given step checkpoint", async () => {
@@ -231,6 +274,28 @@ describe("rollbackStep (B3c: undo every file of the step)", () => {
 		expect(service.restoreFile).toHaveBeenCalledTimes(1)
 	})
 
+	it("rejects the stale file of a step while restoring the others", async () => {
+		// src/a.ts was written again after this step's checkpoint, so its
+		// sha-2 entry is no longer the file's latest: only src/b.ts (whose
+		// latest entry IS sha-2) is restored.
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+			{ path: "src/b.ts", operation: "create", checkpointId: "sha-2" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-3" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/b.ts"], "sha-2")
+
+		expect(outcome.files[0].success).toBe(false)
+		expect(outcome.files[0].error).toBe("File was modified in a later step; roll back the latest change card first")
+		expect(outcome.files[1]).toEqual({ filePath: "src/b.ts", success: true })
+		expect(service.restoreFile).toHaveBeenCalledTimes(1)
+		expect(service.restoreFile).toHaveBeenCalledWith("base-0", "src/b.ts")
+	})
+
 	it("falls back to the latest journal entry per file without a step checkpoint id", async () => {
 		await seedJournal([
 			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
@@ -258,8 +323,10 @@ describe("rollbackStep (B3c: undo every file of the step)", () => {
 		expect(outcome.files[1].error).toBe("No change journal entry for this file")
 	})
 
-	it("treats a missing global storage directory as an empty journal", async () => {
-		// No context on the provider double → no journal location to read.
+	it("fails per file when the journal location is unavailable (no global storage)", async () => {
+		// No context on the provider double → the journal cannot even be
+		// located. That is a failure, not an empty journal: reporting the
+		// step as merely "not part of this checkpoint" would be misleading.
 		const task = {
 			taskId: "task-rollback",
 			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
@@ -272,7 +339,7 @@ describe("rollbackStep (B3c: undo every file of the step)", () => {
 
 		expect(outcome.checkpointId).toBe("sha-2")
 		expect(outcome.files[0].success).toBe(false)
-		expect(outcome.files[0].error).toBe("File is not part of this step's checkpoint")
+		expect(outcome.files[0].error).toBe("Change journal is unavailable for this task")
 		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
 
@@ -312,6 +379,53 @@ describe("restoreLatestFile (B3c: forward direction)", () => {
 		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
 
 		expect(outcome).toEqual({ filePath: "src/a.ts", success: true, noOp: true })
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("fails when the journal location is unavailable (no global storage)", async () => {
+		// An unavailable journal is not "the task wrote nothing": a no-op
+		// success would claim a restore that never happened.
+		const task = {
+			taskId: "task-rollback",
+			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
+		} as unknown as Task
+
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(task, "src/a.ts")
+
+		expect(outcome).toEqual({
+			filePath: "src/a.ts",
+			success: false,
+			error: "Change journal is unavailable for this task",
+		})
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("fails when the journal cannot be read (an I/O error is not an empty journal)", async () => {
+		// A directory at the journal path makes readFile fail with EISDIR —
+		// a stand-in for any permission or I/O failure (EACCES etc.).
+		await fs.mkdir(journalPath(globalStorageDir, "task-rollback"), { recursive: true })
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome.success).toBe(false)
+		expect(outcome.error).toContain("Change journal could not be read")
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("stringifies a non-Error journal read failure into the outcome", async () => {
+		vi.spyOn(changeJournal, "loadChanges").mockRejectedValueOnce("raw journal failure")
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome.success).toBe(false)
+		expect(outcome.error).toBe("Change journal could not be read: raw journal failure")
 		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
 
