@@ -1,11 +1,12 @@
 import fs from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 
 import { describe, expect, it, vi } from "vitest"
 import { parse } from "yaml"
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
-const repositoryRoot = path.resolve(process.cwd(), "..")
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..")
 const workflow = parse(
 	fs.readFileSync(path.join(repositoryRoot, ".github/workflows/label-pr-review-state.yml"), "utf8"),
 )
@@ -20,10 +21,13 @@ type ReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED"
 interface HarnessOptions {
 	prState?: "open" | "closed"
 	draft?: boolean
+	conflict?: boolean
 	eventName?: string
 	existingGuide?: boolean
 	existingGuideHead?: string
+	existingGate?: boolean
 	labels?: string[]
+	removeLabelStatus?: number
 	reviews?: Array<{
 		login: string
 		type: "Bot" | "User"
@@ -32,9 +36,13 @@ interface HarnessOptions {
 		commitId?: string
 	}>
 	permissions?: Record<string, string>
+	permissionErrorStatus?: number
 	requiredContexts?: string[]
+	requiredIntegrationId?: number | null
 	requiredStatus?: "queued" | "in_progress" | "completed"
 	requiredConclusion?: "success" | "failure"
+	omitRequiredRuns?: boolean
+	commitStatusContexts?: string[]
 	includeFailedCodecov?: boolean
 	branchRulesFail?: boolean
 }
@@ -49,11 +57,11 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		head: { sha: SHA, repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 		labels: (options.labels ?? []).map((name) => ({ name })),
-		mergeable: true,
-		mergeable_state: "clean",
+		mergeable: options.conflict ? false : true,
+		mergeable_state: options.conflict ? "dirty" : "clean",
 	}
 	const requiredContexts = options.requiredContexts ?? ["tests"]
-	const requiredRuns = requiredContexts
+	const requiredRuns = (options.omitRequiredRuns ? [] : requiredContexts)
 		.filter((name) => name !== "reconcile")
 		.map((name, index) => ({
 			id: index + 1,
@@ -104,13 +112,20 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			: []
 
 	const addLabels = vi.fn(async (_args: unknown) => undefined)
-	const removeLabel = vi.fn(async (_args: unknown) => undefined)
+	const removeLabel = vi.fn(async (_args: unknown) => {
+		if (options.removeLabelStatus) {
+			throw Object.assign(new Error("Remove label failed"), { status: options.removeLabelStatus })
+		}
+	})
 	const createComment = vi.fn(async (_args: unknown) => undefined)
 	const updateComment = vi.fn(async (_args: unknown) => undefined)
 	const createCheck = vi.fn(async (_args: unknown) => undefined)
 	const updateCheck = vi.fn(async (_args: unknown) => undefined)
 	const setFailed = vi.fn()
 	const permissionFor = vi.fn(async ({ username }: { username: string }) => {
+		if (options.permissionErrorStatus) {
+			throw Object.assign(new Error("Permission lookup failed"), { status: options.permissionErrorStatus })
+		}
 		const permission = options.permissions?.[username]
 		if (!permission) throw Object.assign(new Error("Not Found"), { status: 404 })
 		return { data: { permission } }
@@ -126,7 +141,8 @@ async function runWorkflow(options: HarnessOptions = {}) {
 						parameters: {
 							required_status_checks: requiredContexts.map((context) => ({
 								context,
-								integration_id: 15368,
+								integration_id:
+									options.requiredIntegrationId === undefined ? 15368 : options.requiredIntegrationId,
 							})),
 						},
 					},
@@ -151,28 +167,46 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				updateComment,
 			},
 			checks: {
-				listForRef: vi.fn(async (args: { check_name?: string }) => (args.check_name ? [] : checkRuns)),
+				listForRef: vi.fn(async (args: { check_name?: string }) =>
+					args.check_name
+						? options.existingGate
+							? [{ id: 500, name: "PR review gate", app: { slug: "github-actions" } }]
+							: []
+						: checkRuns,
+				),
 				create: createCheck,
 				update: updateCheck,
 			},
 			repos: {
-				listCommitStatusesForRef: vi.fn(async () => []),
+				listCommitStatusesForRef: vi.fn(async () =>
+					(options.commitStatusContexts ?? []).map((context, index) => ({
+						id: index + 1,
+						context,
+						state: "success",
+						created_at: "2026-08-29T15:00:00Z",
+						updated_at: "2026-08-29T15:01:00Z",
+					})),
+				),
 				getCollaboratorPermissionLevel: permissionFor,
 			},
 		},
 	}
 	const eventName = options.eventName ?? "pull_request_target"
+	const pullRequestPayload = {
+		number: 1437,
+		head: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+		base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+	}
 	const context = {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
-		payload: {
-			action: "ready_for_review",
-			pull_request: {
-				number: 1437,
-				head: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
-				base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
-			},
-		},
+		payload:
+			eventName === "schedule"
+				? {}
+				: {
+						action: "ready_for_review",
+						pull_request: pullRequestPayload,
+					},
 	}
 	const core = {
 		info: vi.fn(),
@@ -192,6 +226,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		createCheck,
 		updateCheck,
 		setFailed,
+		listPullRequests: github.rest.pulls.list,
 	}
 }
 
@@ -213,10 +248,15 @@ function latestCheck(result: Awaited<ReturnType<typeof runWorkflow>>) {
 
 describe("PR review-state workflow", () => {
 	it("ignores events for closed pull requests", async () => {
-		const result = await runWorkflow({ prState: "closed" })
+		const result = await runWorkflow({ prState: "closed", existingGate: true })
 
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.removeLabel).not.toHaveBeenCalled()
 		expect(result.createComment).not.toHaveBeenCalled()
+		expect(result.updateComment).not.toHaveBeenCalled()
 		expect(result.createCheck).not.toHaveBeenCalled()
+		expect(result.updateCheck).not.toHaveBeenCalled()
+		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
 	it("does not start automatic review for drafts", async () => {
@@ -261,6 +301,17 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
+	it("tolerates an already-removed CodeRabbit label while recycling", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: OLD_SHA,
+			removeLabelStatus: 404,
+		})
+
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
 	it("keeps a CodeRabbit label already bound to the current head", async () => {
 		const result = await runWorkflow({
 			labels: ["coderabbit-review-active"],
@@ -277,6 +328,26 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ includeFailedCodecov: true })
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("uses a legacy commit status for an unpinned required context", async () => {
+		const result = await runWorkflow({
+			requiredIntegrationId: null,
+			omitRequiredRuns: true,
+			commitStatusContexts: ["tests"],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("removes CodeRabbit activation when the PR has conflicts", async () => {
+		const result = await runWorkflow({
+			conflict: true,
+			labels: ["coderabbit-review-active"],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
 	it("routes CodeRabbit change requests back to the author", async () => {
@@ -371,6 +442,35 @@ describe("PR review-state workflow", () => {
 		expect(latestCheck(result)?.conclusion).toBe("success")
 	})
 
+	it("updates an existing review-gate check run", async () => {
+		const result = await runWorkflow({ existingGate: true })
+
+		expect(result.updateCheck).toHaveBeenCalledWith(expect.objectContaining({ check_run_id: 500 }))
+		expect(result.createCheck).not.toHaveBeenCalled()
+	})
+
+	it("reports non-404 permission lookup failures", async () => {
+		const result = await runWorkflow({
+			permissionErrorStatus: 500,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT + 1_000,
+				},
+			],
+		})
+
+		expect(result.setFailed).toHaveBeenCalled()
+	})
+
 	it("excludes the reconciliation job from required checks", async () => {
 		const result = await runWorkflow({ requiredContexts: ["tests", "reconcile"] })
 
@@ -382,6 +482,13 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).not.toHaveBeenCalled()
 		expect(latestCheck(result)?.output?.summary).toContain("required CI checks")
+	})
+
+	it("lists open PRs during scheduled reconciliation", async () => {
+		const result = await runWorkflow({ eventName: "schedule" })
+
+		expect(result.listPullRequests).toHaveBeenCalled()
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("ignores CodeRabbit reviews from an older head", async () => {

@@ -211,6 +211,7 @@ CompleteCI(result) ==
 
 CodeRabbitReview(result) ==
     /\ result \in {"changes", "approved"}
+    /\ crHead # head
     /\ \/ draft
        \/ (~draft /\ ci = "passed" /\ crLabelHead = head)
     /\ crHead' = head
@@ -275,7 +276,9 @@ Next ==
     \/ \E result \in {"changes", "approved"} : MaintainerReview(result)
     \/ Reconcile
 
-Spec == Init /\ [][Next]_vars
+Spec == Init /\ [][Next]_vars /\ WF_vars(Reconcile)
+
+EventualReconciliation == []<>(~dirty)
 
 TypeOK ==
     /\ head \in Heads

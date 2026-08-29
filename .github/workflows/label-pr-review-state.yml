@@ -167,9 +167,13 @@ jobs:
 
               const hasLabel = pr.labels.some(label => label.name === codeRabbitActiveLabel);
               if (enabled && hasLabel && recycle) {
-                await github.rest.issues.removeLabel({
-                  owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
-                });
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
+                  });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
                 pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
               }
               if (enabled && (!hasLabel || recycle)) {
@@ -190,7 +194,8 @@ jobs:
             }
 
             function codeRabbitLabelHead(comment) {
-              const match = comment?.body?.match(/<!-- coderabbit-review-label:([a-f0-9]{40}) -->/);
+              const markerPattern = new RegExp(`${codeRabbitLabelMarkerPrefix}([a-f0-9]{40}) -->`);
+              const match = comment?.body?.match(markerPattern);
               return match?.[1] ?? null;
             }
 

@@ -23,8 +23,8 @@ Download the pinned TLA+ tools release, then run TLC from this directory:
 
 ```bash
 curl -fsSLO https://github.com/tlaplus/tlaplus/releases/download/v1.7.4/tla2tools.jar
-printf '%s  %s\n' bee4a54f3ee3d4afc347c3240ec2d9e93b075104 tla2tools.jar | sha1sum --check
+printf '%s  %s\n' 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e88 tla2tools.jar | sha256sum --check
 java -cp tla2tools.jar tlc2.TLC -config PrReviewLabels.cfg PrReviewLabels.tla
 ```
 
-The JAR is a local tool and must not be committed.
+The JAR is a local tool and must not be committed. Weak fairness on reconciliation checks that metadata eventually converges after asynchronous GitHub events; the model does not claim that CI or reviewers must eventually approve a PR.

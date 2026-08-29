@@ -168,7 +168,7 @@ Maintainers may close PRs that are incomplete, too broad, inactive, not aligned 
 PRs are also closed automatically by bot:
 
 - **60-day inactivity:** A PR with no activity for 60 days is marked stale and closed after a further 7 days if there is still no activity. Any new comment, commit, or review resets the timer.
-- **14-day author inactivity:** After CodeRabbit or a maintainer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. After an update, required CI and CodeRabbit rerun automatically; after CodeRabbit approval, the PR moves to `awaiting-maintainer`. These waiting states are not eligible for automatic closure under this policy.
+- **14-day author inactivity:** After CodeRabbit or a maintainer requests changes, the PR is labelled `awaiting-author`. If there is no author activity for 14 days, it is marked stale and closes 7 days later without new activity. Author activity resets that timer. After an update, required CI and CodeRabbit rerun automatically; after CodeRabbit approval, the PR moves to `awaiting-maintainer`, which remains subject to the general 60-day inactivity plus 7-day closure policy.
 
 To opt a PR out of automatic closure, apply the `do-not-close`, `pinned`, or `work-in-progress` label.
 
