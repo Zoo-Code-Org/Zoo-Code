@@ -1,9 +1,4 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { AppProviders } from "../../../../playwright/AppProviders"
-
-import Announcement from "../Announcement"
 
 test("announcement links open exactly once through the extension host", async ({ mount, page }) => {
 	// The webview's vscode.postMessage falls back to console.log in a plain
@@ -18,20 +13,7 @@ test("announcement links open exactly once through the extension host", async ({
 		})
 	})
 
-	await mount(
-		<AppProviders>
-			<div className="w-[520px] p-4 bg-vscode-editor-background">
-				{/* Negative control: a bare anchor with an href is what VS Code
-				    intercepts. The announcement links must never reach it. The
-				    fragment keeps the browser on this document, so the seeded
-				    state survives the click. */}
-				<a id="control-link" href="#control">
-					control
-				</a>
-				<Announcement hideAnnouncement={() => undefined} />
-			</div>
-		</AppProviders>,
-	)
+	await mount("announcement-links")
 
 	// Mirrors VS Code's webview bootstrap (handleInnerClick): a document-level
 	// bubble listener that walks the composed path for any anchor with an href

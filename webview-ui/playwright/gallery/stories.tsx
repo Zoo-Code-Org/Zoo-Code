@@ -17,6 +17,22 @@ export const stories: Record<string, Story> = {
 			await import("@/components/ui/__tests__/AccessibilityContrast.visual.fixture")
 		return <AccessibilityContrastGallery />
 	},
+	"announcement-links": async () => {
+		const [{ AppProviders }, { default: Announcement }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/Announcement"),
+		])
+		return (
+			<AppProviders>
+				<div className="w-[520px] p-4 bg-vscode-editor-background">
+					<a id="control-link" href="#control">
+						control
+					</a>
+					<Announcement hideAnnouncement={() => undefined} />
+				</div>
+			</AppProviders>
+		)
+	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />
