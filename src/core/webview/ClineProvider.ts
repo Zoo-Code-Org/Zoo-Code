@@ -1980,8 +1980,17 @@ export class ClineProvider
 	 * A task that is not this view's focused task only receives the task-scoped effects
 	 * (history entry + in-memory mode): the view's durable mode, the ModeChanged
 	 * broadcast, and profile activation keep applying to the focused task's selection.
+	 * Unknown mode slugs are ignored (logged + no-op) so unvalidated callers (the webview
+	 * "mode" message sends message.text as Mode) cannot persist invalid modes.
 	 */
 	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+		const targetMode = getModeBySlug(newMode, await this.customModesManager.getCustomModes())
+
+		if (!targetMode) {
+			this.log(`[ClineProvider#handleModeSwitch] ignoring unknown mode "${newMode}"`)
+			return
+		}
+
 		return this.enqueueProviderProfileMutation((signal) =>
 			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
 		)
@@ -4326,7 +4335,8 @@ export class ClineProvider
 		//    The mode switch must happen before createTask() because the Task constructor
 		//    initializes its mode from provider.getState() during initializeTaskMode().
 		try {
-			await this.handleModeSwitch(mode as any)
+			// handleModeSwitch validates the slug and no-ops on unknown modes.
+			await this.handleModeSwitch(mode)
 		} catch (e) {
 			this.log(
 				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${

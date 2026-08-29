@@ -1231,6 +1231,7 @@ describe("Cline", () => {
 					getMcpHub: vi.fn().mockReturnValue(undefined),
 					getSkillsManager: vi.fn().mockReturnValue(undefined),
 					say: vi.fn(),
+					handleModeSwitch: vi.fn().mockResolvedValue(undefined),
 					postStateToWebview: vi.fn().mockResolvedValue(undefined),
 					postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
 					postStateToWebviewThrottled: vi.fn().mockResolvedValue(undefined),
@@ -1786,7 +1787,7 @@ describe("Cline", () => {
 					mode: "ask",
 					mcpEnabled: false,
 				} as unknown as ProviderState)
-				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
+				vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -1807,7 +1808,7 @@ describe("Cline", () => {
 
 				await task.attemptApiRequest().next()
 
-				expect(mockProvider.setMode).toHaveBeenCalledWith("code")
+				expect(mockProvider.handleModeSwitch).toHaveBeenCalledWith("code", task)
 				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
 			})
 

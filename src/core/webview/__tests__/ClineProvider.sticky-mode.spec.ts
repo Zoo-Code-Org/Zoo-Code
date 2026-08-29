@@ -215,6 +215,18 @@ describe("ClineProvider - Sticky Mode", () => {
 	beforeEach(async () => {
 		vi.clearAllMocks()
 
+		// The "mode deletion between sessions" test overrides the module-level
+		// getModeBySlug mock to return undefined; vi.clearAllMocks() does not clear
+		// mock implementations, so restore the factory default per-test. handleModeSwitch
+		// validates slugs through getModeBySlug, so later tests rely on the default.
+		const { getModeBySlug } = await import("../../../shared/modes")
+		vi.mocked(getModeBySlug).mockReturnValue({
+			slug: "code",
+			name: "Code Mode",
+			roleDefinition: "You are a code assistant",
+			groups: ["read", "edit"],
+		})
+
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
 		}
@@ -954,11 +966,9 @@ describe("ClineProvider - Sticky Mode", () => {
 	})
 
 	describe("Mode switch failure scenarios", () => {
-		it("should handle invalid mode gracefully", async () => {
+		it("should ignore invalid modes", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 
-			// The provider actually does switch to invalid modes
-			// This test should verify that behavior
 			const mockTask = {
 				taskId: "test-task-id",
 				_taskMode: "code",
@@ -972,22 +982,23 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Add task to provider stack
 			await provider.addClineToStack(mockTask as any)
 
+			// Register a stable view id so a durable write would be observable
+			await provider["setViewStateId"]("stable-test-view")
+
 			// Clear previous calls
 			vi.mocked(mockContext.globalState.update).mockClear()
 
-			// Register a stable view id so the durable per-view write is persisted
-			await provider["setViewStateId"]("stable-test-view")
+			// Simulate an unknown slug: the module mock resolves nothing for it.
+			// (The outer beforeEach restores the mock's default return per test, so
+			// this override does not leak into later tests.)
+			const { getModeBySlug } = await import("../../../shared/modes")
+			vi.mocked(getModeBySlug).mockReturnValue(undefined)
 
-			// Try to switch to invalid mode - it will actually switch
-			await provider.handleModeSwitch("invalid-mode" as any)
+			// An unknown mode slug is ignored: no durable write and no in-memory change
+			await provider.handleModeSwitch("invalid-mode")
 
-			// The mode WILL be updated to invalid-mode (this is the actual behavior)
-			expect(mockContext.globalState.update).toHaveBeenCalledWith(
-				"viewStates",
-				expect.objectContaining({
-					["stable-test-view"]: expect.objectContaining({ mode: "invalid-mode" }),
-				}),
-			)
+			expect(mockContext.globalState.update).not.toHaveBeenCalled()
+			expect((mockTask as any)._taskMode).toBe("code")
 		})
 
 		it("should handle errors during mode switch gracefully", async () => {
@@ -1242,6 +1253,12 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// Start initialization
 			const initPromise = provider.createTaskWithHistoryItem(historyItem)
+
+			// Let the restore's early durable mode write settle first (its custom-mode
+			// resolution completes in microtasks with the mocked fs). In production the
+			// user's switch is issued after the restore's early write, and both durable
+			// writes then land in that order, so the mid-init switch wins.
+			await new Promise((resolve) => setTimeout(resolve, 10))
 
 			// Try to switch mode during initialization
 			await provider.handleModeSwitch("code")
