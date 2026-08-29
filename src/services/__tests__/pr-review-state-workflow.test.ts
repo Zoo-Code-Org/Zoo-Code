@@ -49,6 +49,15 @@ interface HarnessOptions {
 	requiredConclusion?: "success" | "failure"
 	omitRequiredRuns?: boolean
 	commitStatuses?: Array<{ context: string; state: "pending" | "success" | "failure" | "error"; id?: number }>
+	gateStatuses?: Array<{
+		context: string
+		state: "pending" | "success" | "failure" | "error"
+		description: string
+		targetUrl: string
+		id?: number
+	}>
+	gateStatusLookupErrorStatus?: number
+	createCommitStatusErrorStatus?: number
 	includeFailedCodecov?: boolean
 	branchRulesFail?: boolean
 }
@@ -134,8 +143,19 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	const createComment = vi.fn(async (args: { body: string }) => ({
 		data: { id: 11, user: { login: "github-actions[bot]" }, body: args.body },
 	}))
-	const updateComment = vi.fn(async (_args: unknown) => undefined)
-	const createCommitStatus = vi.fn(async (_args: unknown) => undefined)
+	const updateComment = vi.fn(async (args: { comment_id: number; body: string }) => ({
+		data: { id: args.comment_id, user: { login: "github-actions[bot]" }, body: args.body },
+	}))
+	const createCommitStatus = vi.fn(
+		async (args: { sha: string; state: string; context: string; description: string; target_url: string }) => {
+			if (options.createCommitStatusErrorStatus) {
+				throw Object.assign(new Error("Commit status failed"), {
+					status: options.createCommitStatusErrorStatus,
+				})
+			}
+			return { data: args }
+		},
+	)
 	const createLabel = vi.fn(async (_args: unknown) => undefined)
 	const setFailed = vi.fn()
 	const permissionFor = vi.fn(async ({ username }: { username: string }) => {
@@ -201,6 +221,24 @@ async function runWorkflow(options: HarnessOptions = {}) {
 						updated_at: "2026-08-29T15:01:00Z",
 					})),
 				),
+				getCombinedStatusForRef: vi.fn(async () => {
+					if (options.gateStatusLookupErrorStatus) {
+						throw Object.assign(new Error("Gate status lookup failed"), {
+							status: options.gateStatusLookupErrorStatus,
+						})
+					}
+					return {
+						data: {
+							statuses: (options.gateStatuses ?? []).map((status, index) => ({
+								id: status.id ?? index + 1,
+								context: status.context,
+								state: status.state,
+								description: status.description,
+								target_url: status.targetUrl,
+							})),
+						},
+					}
+				}),
 				getCollaboratorPermissionLevel: permissionFor,
 			},
 		},
@@ -247,6 +285,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		createCommitStatus,
 		createLabel,
 		setFailed,
+		warning: core.warning,
 		listPullRequests: github.rest.pulls.list,
 		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
 	}
@@ -254,16 +293,14 @@ async function runWorkflow(options: HarnessOptions = {}) {
 
 /** Returns the most recently created or updated managed guidance comment body. */
 function latestGuide(result: Awaited<ReturnType<typeof runWorkflow>>) {
-	const created = result.createComment.mock.calls.at(-1)?.[0] as { body?: string } | undefined
-	const updated = result.updateComment.mock.calls.at(-1)?.[0] as { body?: string } | undefined
+	const created = result.createComment.mock.calls.at(-1)?.[0]
+	const updated = result.updateComment.mock.calls.at(-1)?.[0]
 	return updated?.body ?? created?.body ?? ""
 }
 
 /** Returns the latest advisory gate commit-status payload. */
 function latestGateStatus(result: Awaited<ReturnType<typeof runWorkflow>>) {
-	return result.createCommitStatus.mock.calls.at(-1)?.[0] as
-		| { state?: string; description?: string; context?: string; sha?: string }
-		| undefined
+	return result.createCommitStatus.mock.calls.at(-1)?.[0]
 }
 
 describe("PR review-state workflow", () => {
@@ -703,6 +740,31 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)).toEqual(
 			expect.objectContaining({ context: "PR review gate", sha: SHA, state: "pending" }),
 		)
+	})
+
+	it("does not republish an unchanged review gate status", async () => {
+		const result = await runWorkflow({
+			gateStatuses: [
+				{
+					context: "PR review gate",
+					state: "pending",
+					description: "Required CI passed. Wait for CodeRabbit to approve the latest commit.",
+					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
+				},
+			],
+		})
+
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+	})
+
+	it("continues metadata reconciliation when gate publication fails", async () => {
+		const result = await runWorkflow({ createCommitStatusErrorStatus: 500 })
+
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish PR review gate"))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
 
 	it("reports non-404 permission lookup failures", async () => {

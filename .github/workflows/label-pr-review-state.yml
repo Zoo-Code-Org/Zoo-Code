@@ -231,15 +231,33 @@ jobs:
             async function updateReviewGate(pr, phase, passed) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
-              await github.rest.repos.createCommitStatus({
-                owner,
-                repo,
-                sha: pr.head.sha,
-                state: passed ? 'success' : 'pending',
-                context: reviewGateName,
-                description: phaseMessage(phase),
-                target_url: pr.html_url,
-              });
+              const state = passed ? 'success' : 'pending';
+              const description = phaseMessage(phase);
+              try {
+                const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
+                  owner, repo, ref: pr.head.sha,
+                });
+                const latestGateStatus = combinedStatus.statuses
+                  .filter(status => status.context === reviewGateName)
+                  .sort((a, b) => b.id - a.id)[0];
+                if (latestGateStatus?.state === state &&
+                    latestGateStatus.description === description &&
+                    latestGateStatus.target_url === pr.html_url) {
+                  return;
+                }
+
+                await github.rest.repos.createCommitStatus({
+                  owner,
+                  repo,
+                  sha: pr.head.sha,
+                  state,
+                  context: reviewGateName,
+                  description,
+                  target_url: pr.html_url,
+                });
+              } catch (error) {
+                core.warning(`PR #${pr.number}: could not publish ${reviewGateName}: ${error.message}`);
+              }
             }
 
             function reviewGuideBody(pr, phase, activationPending = false) {
