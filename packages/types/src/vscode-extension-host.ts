@@ -262,11 +262,13 @@ export interface ExtensionMessage {
 /**
  * CheckpointRollbackResult
  *
- * Outcome of a change-card rollback request (B3b), posted back to the webview
- * that sent `checkpointRollbackFile` / `checkpointRollbackStep`. `cardTs`
- * echoes the change-card message timestamp so the requesting card can
- * correlate the result: per-file results carry `filePath`, per-step results
- * carry the per-file outcomes in `files`.
+ * Outcome of a change-card restore request (B3b), posted back to the webview
+ * that sent `checkpointRollbackFile` / `checkpointRollbackStep` /
+ * `checkpointRestoreLatestFile`. `cardTs` echoes the change-card message
+ * timestamp so the requesting card can correlate the result: per-file results
+ * carry `filePath`, per-step results carry the per-file outcomes in
+ * `files`, and `kind` tells a per-file result which control it belongs to
+ * (absent = rollback, so results posted before `kind` existed still route).
  */
 export interface CheckpointRollbackResult {
 	/** The `ts` of the change_card message the result belongs to. */
@@ -277,6 +279,10 @@ export interface CheckpointRollbackResult {
 	error?: string
 	/** Per-step scope: the per-file outcomes. */
 	files?: { filePath: string; success: boolean; error?: string }[]
+	/** Per-file scope: which control the result belongs to. Absent = rollback. */
+	kind?: "rollback" | "restore-latest"
+	/** Per-file scope: true when a restore-latest found no recorded write and left the file as-is. */
+	noOp?: boolean
 }
 
 export interface OpenAiCodexRateLimitsMessage {
@@ -571,6 +577,7 @@ export interface WebviewMessage {
 		| "checkpointRestore"
 		| "checkpointRollbackFile"
 		| "checkpointRollbackStep"
+		| "checkpointRestoreLatestFile"
 		| "completionCheckpointDiff"
 		| "completionCheckpointRestore"
 		| "deleteMcpServer"
@@ -839,6 +846,20 @@ export const checkpointRollbackStepPayloadSchema = z.object({
 
 export type CheckpointRollbackStepPayload = z.infer<typeof checkpointRollbackStepPayloadSchema>
 
+/**
+ * Payload of the `checkpointRestoreLatestFile` webview message (B3b): restore
+ * one change-card file to the latest recorded version of that file (the
+ * content of its most recent write checkpoint — the forward direction to a
+ * rollback).
+ */
+export const checkpointRestoreLatestFilePayloadSchema = z.object({
+	/** The `ts` of the change_card message the request comes from (echoed on the result). */
+	cardTs: z.number(),
+	filePath: z.string(),
+})
+
+export type CheckpointRestoreLatestFilePayload = z.infer<typeof checkpointRestoreLatestFilePayloadSchema>
+
 export interface IndexingStatusPayload {
 	state: "Standby" | "Indexing" | "Indexed" | "Error" | "Stopping"
 	message: string
@@ -854,6 +875,7 @@ export type WebViewMessagePayload =
 	| CheckpointRestorePayload
 	| CheckpointRollbackFilePayload
 	| CheckpointRollbackStepPayload
+	| CheckpointRestoreLatestFilePayload
 	| IndexingStatusPayload
 	| IndexClearedPayload
 	| UpdateTodoListPayload

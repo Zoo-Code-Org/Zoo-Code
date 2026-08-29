@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "{{count}} Datei(en) in diesem Schritt geändert",
 		"rollbackFile": "Diese Datei zurücksetzen",
+		"rollbackFileWarning": "Stellt diese Datei auf den Inhalt vor diesem Schritt wieder her.",
+		"restoreLatest": "Letzte Version wiederherstellen",
+		"restoreLatestWarning": "Stellt diese Datei auf die zuletzt aufgezeichnete Version wieder her.",
+		"restored": "Letzte Version wiederhergestellt",
+		"restoreFailed": "Wiederherstellung fehlgeschlagen",
 		"rollbackStep": "Schritt zurücksetzen",
 		"rollbackWarning": "Stellt den vorherigen Inhalt der Dateien dieses Schritts wieder her.",
 		"confirm": "Bestätigen",

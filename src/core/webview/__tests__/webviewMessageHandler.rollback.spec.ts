@@ -4,7 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest"
 import type { ExtensionMessage, WebviewMessage } from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
-import { rollbackFile, rollbackStep } from "../../checkpoints/rollback"
+import { restoreLatestFile, rollbackFile, rollbackStep } from "../../checkpoints/rollback"
 import type { Task } from "../../task/Task"
 import type { ClineProvider } from "../ClineProvider"
 
@@ -14,6 +14,7 @@ import type { ClineProvider } from "../ClineProvider"
 vi.mock("../../checkpoints/rollback", () => ({
 	rollbackFile: vi.fn(),
 	rollbackStep: vi.fn(),
+	restoreLatestFile: vi.fn(),
 }))
 
 vi.mock("vscode", () => ({
@@ -197,10 +198,104 @@ describe("webviewMessageHandler - change card rollback", () => {
 				type: "checkpointRollbackStep",
 				payload: { cardTs: 1000, filePaths: [] },
 			})
+			await webviewMessageHandler(provider, {
+				type: "checkpointRestoreLatestFile",
+				payload: { cardTs: 1000 } as unknown as WebviewMessage["payload"],
+			})
 
 			expect(rollbackFile).not.toHaveBeenCalled()
 			expect(rollbackStep).not.toHaveBeenCalled()
+			expect(restoreLatestFile).not.toHaveBeenCalled()
 			expect(postMessageToWebview).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("checkpointRestoreLatestFile", () => {
+		it("restores the file to its latest recorded version and posts the success outcome", async () => {
+			vi.mocked(restoreLatestFile).mockResolvedValueOnce({ filePath: "src/a.ts", success: true })
+
+			await webviewMessageHandler(provider, {
+				type: "checkpointRestoreLatestFile",
+				payload: { cardTs: 1000, filePath: "src/a.ts" },
+			})
+
+			expect(restoreLatestFile).toHaveBeenCalledWith(mockTask, "src/a.ts")
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					kind: "restore-latest",
+					filePath: "src/a.ts",
+					success: true,
+				},
+			})
+		})
+
+		it("flags a no-op restore-latest so the card can report it", async () => {
+			vi.mocked(restoreLatestFile).mockResolvedValueOnce({ filePath: "src/a.ts", success: true, noOp: true })
+
+			await webviewMessageHandler(provider, {
+				type: "checkpointRestoreLatestFile",
+				payload: { cardTs: 1000, filePath: "src/a.ts" },
+			})
+
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					kind: "restore-latest",
+					filePath: "src/a.ts",
+					success: true,
+					noOp: true,
+				},
+			})
+		})
+
+		it("posts the error outcome when the restore fails", async () => {
+			vi.mocked(restoreLatestFile).mockResolvedValueOnce({
+				filePath: "src/a.ts",
+				success: false,
+				error: "Checkpoints are not enabled for this task",
+			})
+
+			await webviewMessageHandler(provider, {
+				type: "checkpointRestoreLatestFile",
+				payload: { cardTs: 1000, filePath: "src/a.ts" },
+			})
+
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					kind: "restore-latest",
+					filePath: "src/a.ts",
+					success: false,
+					error: "Checkpoints are not enabled for this task",
+				},
+			})
+		})
+
+		it("posts a correlated failure result when there is no current task", async () => {
+			const emptyProvider = makeProvider(undefined)
+
+			await webviewMessageHandler(emptyProvider, {
+				type: "checkpointRestoreLatestFile",
+				payload: { cardTs: 1000, filePath: "src/a.ts" },
+			})
+
+			expect(restoreLatestFile).not.toHaveBeenCalled()
+			// The requesting card must clear its pending state, so the handler
+			// posts a correlated failure instead of nothing.
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					kind: "restore-latest",
+					filePath: "src/a.ts",
+					success: false,
+					error: "No active task to restore from.",
+				},
+			})
 		})
 	})
 })

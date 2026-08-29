@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "{{count}} plik(ów) zmienionych w tym kroku",
 		"rollbackFile": "Cofnij ten plik",
+		"rollbackFileWarning": "Przywraca ten plik do zawartości sprzed tego kroku.",
+		"restoreLatest": "Przywróć najnowszą wersję",
+		"restoreLatestWarning": "Przywraca ten plik do najnowszej zarejestrowanej wersji.",
+		"restored": "Przywrócono najnowszą wersję",
+		"restoreFailed": "Przywracanie nie powiodło się",
 		"rollbackStep": "Cofnij krok",
 		"rollbackWarning": "Przywraca poprzednią zawartość plików tego kroku.",
 		"confirm": "Potwierdź",

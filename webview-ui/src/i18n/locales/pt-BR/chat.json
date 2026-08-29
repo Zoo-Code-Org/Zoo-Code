@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "{{count}} arquivo(s) alterado(s) nesta etapa",
 		"rollbackFile": "Reverter este arquivo",
+		"rollbackFileWarning": "Restaura este arquivo para o conteúdo que tinha antes desta etapa.",
+		"restoreLatest": "Restaurar última versão",
+		"restoreLatestWarning": "Restaura este arquivo para a última versão registrada.",
+		"restored": "Última versão restaurada",
+		"restoreFailed": "Falha ao restaurar",
 		"rollbackStep": "Reverter etapa",
 		"rollbackWarning": "Restaura o conteúdo anterior dos arquivos desta etapa.",
 		"confirm": "Confirmar",

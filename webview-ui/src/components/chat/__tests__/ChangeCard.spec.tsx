@@ -19,6 +19,11 @@ vi.mock("react-i18next", () => ({
 			const map: Record<string, string> = {
 				"chat:changeCard.header": `${options?.count ?? 0} file(s) changed this step`,
 				"chat:changeCard.rollbackFile": "Rollback this file",
+				"chat:changeCard.rollbackFileWarning": "Restores this file to the content it had before this step.",
+				"chat:changeCard.restoreLatest": "Restore latest version",
+				"chat:changeCard.restoreLatestWarning": "Restores this file to the latest recorded version.",
+				"chat:changeCard.restored": "Restored latest version",
+				"chat:changeCard.restoreFailed": "Restore failed",
 				"chat:changeCard.rollbackStep": "Rollback step",
 				"chat:changeCard.rollbackWarning": "Restores the previous content of this step's files.",
 				"chat:changeCard.confirm": "Confirm",
@@ -385,6 +390,115 @@ describe("ChangeCard", () => {
 		const control = screen.getByTestId("change-card-file-open-0")
 		expect(control.tagName).toBe("BUTTON")
 		expect(control).toHaveAttribute("aria-label", "Open file")
+	})
+
+	it("restores one file to the latest version through checkpointRestoreLatestFile and shows pending + success", async () => {
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		// Open the confirm step for the restore-latest control.
+		fireEvent.click(screen.getByTestId("change-card-file-restore-0"))
+		expect(screen.getByTestId("change-card-file-restore-confirm-0")).toBeInTheDocument()
+		expect(screen.getByText("Restores this file to the latest recorded version.")).toBeInTheDocument()
+
+		// Confirm sends the webview->extension message and goes pending.
+		fireEvent.click(screen.getByText("Confirm"))
+		expect(mockPostMessage).toHaveBeenCalledWith({
+			type: "checkpointRestoreLatestFile",
+			payload: { cardTs: 1000, filePath: "src/a.ts" },
+		})
+		expect(screen.getByTestId("change-card-file-restore-pending-0")).toBeInTheDocument()
+
+		// The extension ack (kind "restore-latest") resolves the pending state.
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: {
+				cardTs: 1000,
+				kind: "restore-latest",
+				filePath: "src/a.ts",
+				success: true,
+			},
+		})
+		expect(await screen.findByTestId("change-card-file-restore-success-0")).toHaveTextContent(
+			"Restored latest version",
+		)
+	})
+
+	it("shows the restore-latest error state on a failed ack", async () => {
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		fireEvent.click(screen.getByTestId("change-card-file-restore-1"))
+		fireEvent.click(screen.getByText("Confirm"))
+
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: {
+				cardTs: 1000,
+				kind: "restore-latest",
+				filePath: "src/b.ts",
+				success: false,
+				error: "checkpoint not found",
+			},
+		})
+
+		expect(await screen.findByTestId("change-card-file-restore-error-1")).toHaveTextContent("Restore failed")
+	})
+
+	it("treats a no-op restore-latest (no recorded write) as a success", async () => {
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		fireEvent.click(screen.getByTestId("change-card-file-restore-0"))
+		fireEvent.click(screen.getByText("Confirm"))
+
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: {
+				cardTs: 1000,
+				kind: "restore-latest",
+				filePath: "src/a.ts",
+				success: true,
+				noOp: true,
+			},
+		})
+
+		expect(await screen.findByTestId("change-card-file-restore-success-0")).toBeInTheDocument()
+	})
+
+	it("keeps the rollback and restore-latest controls independent on correlated results", async () => {
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		// A rollback result (no kind: the legacy shape) updates only the
+		// rollback control of the file.
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: { cardTs: 1000, filePath: "src/a.ts", success: true },
+		})
+		expect(await screen.findByTestId("change-card-file-success-0")).toBeInTheDocument()
+		expect(screen.getByTestId("change-card-file-restore-0")).toBeInTheDocument()
+
+		// A restore-latest result updates only the restore control.
+		fireRollbackResult({
+			type: "checkpointRollbackResult",
+			checkpointRollbackResult: {
+				cardTs: 1000,
+				kind: "restore-latest",
+				filePath: "src/a.ts",
+				success: true,
+			},
+		})
+		expect(await screen.findByTestId("change-card-file-restore-success-0")).toBeInTheDocument()
+		// The rollback control keeps its own success state (not overwritten).
+		expect(screen.getByTestId("change-card-file-success-0")).toBeInTheDocument()
+	})
+
+	it("cancels the file restore-latest confirmation without sending a message", () => {
+		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
+
+		fireEvent.click(screen.getByTestId("change-card-file-restore-0"))
+		fireEvent.click(screen.getByTestId("change-card-file-restore-cancel-0"))
+		expect(screen.getByTestId("change-card-file-restore-0")).toBeInTheDocument()
+		expect(mockPostMessage).not.toHaveBeenCalledWith(
+			expect.objectContaining({ type: "checkpointRestoreLatestFile" }),
+		)
 	})
 })
 

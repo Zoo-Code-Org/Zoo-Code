@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "이 단계에서 {{count}}개 파일이 변경됨",
 		"rollbackFile": "이 파일 되돌리기",
+		"rollbackFileWarning": "이 파일을 이 단계 실행 전 내용으로 복원합니다.",
+		"restoreLatest": "최신 버전 복원",
+		"restoreLatestWarning": "이 파일을 최신 기록 버전으로 복원합니다.",
+		"restored": "최신 버전이 복원됨",
+		"restoreFailed": "복원 실패",
 		"rollbackStep": "단계 되돌리기",
 		"rollbackWarning": "이 단계 파일의 이전 콘텐츠로 복원합니다.",
 		"confirm": "확인",
