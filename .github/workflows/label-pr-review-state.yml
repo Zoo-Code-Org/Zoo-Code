@@ -17,8 +17,8 @@ on:
 permissions:
   pull-requests: write
   issues: write
-  checks: write
-  statuses: read
+  checks: read
+  statuses: write
 
 concurrency:
   group: label-pr-review-state
@@ -230,32 +230,15 @@ jobs:
             async function updateReviewGate(pr, phase, passed) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
-              const checkRuns = await github.paginate(github.rest.checks.listForRef, {
-                owner, repo, ref: pr.head.sha, check_name: reviewGateName, per_page: 100,
-              });
-              const existing = checkRuns
-                .filter(run => run.name === reviewGateName && run.app?.slug === 'github-actions')
-                .sort((a, b) => b.id - a.id)[0];
-              const params = {
+              await github.rest.repos.createCommitStatus({
                 owner,
                 repo,
-                name: reviewGateName,
-                status: 'completed',
-                conclusion: passed ? 'success' : 'action_required',
-                details_url: pr.html_url,
-                output: {
-                  title: passed ? 'Review sequence complete' : 'Review sequence incomplete',
-                  summary: phaseMessage(phase),
-                },
-              };
-
-              if (existing) {
-                await github.rest.checks.update({
-                  owner, repo, check_run_id: existing.id, ...params,
-                });
-              } else {
-                await github.rest.checks.create({ ...params, head_sha: pr.head.sha });
-              }
+                sha: pr.head.sha,
+                state: passed ? 'success' : 'failure',
+                context: reviewGateName,
+                description: phaseMessage(phase),
+                target_url: pr.html_url,
+              });
             }
 
             function reviewGuideBody(pr, phase) {
@@ -347,10 +330,10 @@ jobs:
 
                 if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
                   core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                  await updateReviewGate(pr, 'conflict', false);
                   await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, 'has-conflicts');
                   await updateReviewGuide(pr, 'conflict', existingGuide);
-                  await updateReviewGate(pr, 'conflict', false);
                   continue;
                 }
 
@@ -454,6 +437,7 @@ jobs:
                 // CI failure is its own signal; the label would add noise, not clarity.
                 if (ciPending || ciFailed) {
                   core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                  await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                   await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, null);
                   await updateReviewGuide(
@@ -461,7 +445,6 @@ jobs:
                     ciPending ? 'ci-pending' : 'ci-failed',
                     existingGuide
                   );
-                  await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                   continue;
                 }
 
@@ -511,35 +494,31 @@ jobs:
 
                 let desiredLabel;
                 let phase;
+                let activateCodeRabbit = false;
+                let recycleCodeRabbitLabel = false;
                 if (freshCodeRabbitReview?.state === 'CHANGES_REQUESTED') {
-                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-author';
                   phase = 'coderabbit-changes';
                 } else if (!codeRabbitApproved) {
                   if (pr.draft) {
-                    await setCodeRabbitReviewActive(pr, false);
                     desiredLabel = null;
                     phase = 'draft';
                   } else {
-                    const recycleLabel = codeRabbitLabelHead(existingGuide) !== pr.head.sha;
-                    await setCodeRabbitReviewActive(pr, true, recycleLabel);
+                    activateCodeRabbit = true;
+                    recycleCodeRabbitLabel = codeRabbitLabelHead(existingGuide) !== pr.head.sha;
                     desiredLabel = 'awaiting-coderabbit';
                     phase = 'coderabbit';
                   }
                 } else if (pr.draft) {
-                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-ready';
                   phase = 'draft-approved';
                 } else if (maintainerChangeRequest) {
-                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-author';
                   phase = 'maintainer-changes';
                 } else if (!maintainerApprovedAfterCodeRabbit) {
-                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-maintainer';
                   phase = 'maintainer';
                 } else {
-                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = null;
                   phase = 'approved';
                 }
@@ -550,9 +529,15 @@ jobs:
                   `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
                 );
 
+                if (phase !== 'approved') {
+                  await updateReviewGate(pr, phase, false);
+                }
+                await setCodeRabbitReviewActive(pr, activateCodeRabbit, recycleCodeRabbitLabel);
                 await reconcileLabels(pr, desiredLabel);
                 await updateReviewGuide(pr, phase, existingGuide);
-                await updateReviewGate(pr, phase, phase === 'approved');
+                if (phase === 'approved') {
+                  await updateReviewGate(pr, phase, true);
+                }
               } catch (error) {
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
