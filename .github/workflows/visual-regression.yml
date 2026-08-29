@@ -95,8 +95,11 @@ jobs:
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e themes:check
 
     extension-host-visual:
-        runs-on: ubuntu-24.04
+        runs-on: ubuntu-latest
         timeout-minutes: 20
+        container:
+            image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+            options: --ipc=host
         env:
             LANG: en_US.UTF-8
             LC_ALL: en_US.UTF-8
@@ -110,8 +113,6 @@ jobs:
               uses: ./.github/actions/setup-node-pnpm
               with:
                   install-args: "--frozen-lockfile"
-            - name: Install visual test system dependencies
-              run: sudo apt-get install -y xvfb fonts-ubuntu fonts-droid-fallback
             - name: Get pinned VS Code version
               id: vscode-version
               run: |

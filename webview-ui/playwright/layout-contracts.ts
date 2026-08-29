@@ -107,6 +107,7 @@ export async function expectBoundedLayout(
 				),
 			).filter((control) => control.getClientRects().length > 0)
 			return {
+				controlCount: controls.length,
 				overflows: row.scrollWidth > row.clientWidth + 1,
 				controlsContained: controls.every((control) => {
 					const rect = control.getBoundingClientRect()
@@ -114,7 +115,8 @@ export async function expectBoundedLayout(
 				}),
 			}
 		})
-		expect(containment).toEqual({ overflows: false, controlsContained: true })
+		expect(containment).toEqual({ controlCount: expect.any(Number), overflows: false, controlsContained: true })
+		expect(containment.controlCount).toBeGreaterThan(0)
 	}
 
 	await focusedControl.focus()
