@@ -249,6 +249,18 @@ describe("DeepSeekHandler", () => {
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")
 		})
 
+		it("should return vision model info for deepseek-v4-flash-vision-exp", () => {
+			const handlerWithVision = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+			})
+			const model = handlerWithVision.getModel()
+			expect(model.id).toBe("deepseek-v4-flash-vision-exp")
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect((model.info as ModelInfo).preserveReasoning).toBe(true)
+		})
+
 		it("should return provided model ID with default model info if model does not exist", () => {
 			const handlerWithInvalidModel = new DeepSeekHandler({
 				...mockOptions,
@@ -411,6 +423,35 @@ describe("DeepSeekHandler", () => {
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
+		})
+
+		it("enables thinking and forwards image_url for the vision model", async () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+			})
+			const withImage: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Describe:" },
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: "abc" } },
+					],
+				},
+			]
+
+			await collectStream(visionHandler.createMessage(systemPrompt, withImage))
+
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs.thinking).toEqual({ type: "enabled" })
+			expect(callArgs.messages).toEqual(
+				expect.arrayContaining([
+					expect.objectContaining({
+						role: "user",
+						content: expect.arrayContaining([expect.objectContaining({ type: "image_url" })]),
+					}),
+				]),
+			)
 		})
 	})
 
@@ -681,6 +722,36 @@ describe("DeepSeekHandler", () => {
 				},
 				{
 					modelId: "deepseek-v4-pro",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "medium",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
 					rawReasoningEffort: "max",
 					mappedReasoningEffort: "max",
 				},
