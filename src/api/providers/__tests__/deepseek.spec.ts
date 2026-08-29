@@ -448,7 +448,14 @@ describe("DeepSeekHandler", () => {
 				expect.arrayContaining([
 					expect.objectContaining({
 						role: "user",
-						content: expect.arrayContaining([expect.objectContaining({ type: "image_url" })]),
+						content: expect.arrayContaining([
+							expect.objectContaining({
+								type: "image_url",
+								image_url: expect.objectContaining({
+									url: "data:image/png;base64,abc",
+								}),
+							}),
+						]),
 					}),
 				]),
 			)
