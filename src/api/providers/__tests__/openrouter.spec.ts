@@ -17,7 +17,7 @@ const MOCK_TIMEOUT_MS = 300_000
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { providerIdentifiers } from "@roo-code/types"
+import { ApiProviderError, extractApiProviderErrorProperties, providerIdentifiers } from "@roo-code/types"
 
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
@@ -382,6 +382,29 @@ describe("OpenRouterHandler", () => {
 					operation: "createMessage",
 				}),
 			)
+		})
+
+		it("pins provider casing at the telemetry/user boundary (#1302)", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockRejectedValue(new Error("casing drift"))
+			// Structural cast (not `as any`): the auto-mocked OpenAI client exposes no
+			// typed surface for overriding the shared prototype every test here uses.
+			;(OpenAI as { prototype: { chat: { completions: { create: unknown } } } }).prototype.chat = {
+				completions: { create: mockCreate },
+			}
+
+			const generator = handler.createMessage("test", [])
+			// The user-facing message keeps the display label (providerName).
+			await expect(generator.next()).rejects.toThrow("OpenRouter completion error: casing drift")
+
+			// The serialized telemetry event must carry the canonical lowercase
+			// identifier. This is a literal pin (not providerIdentifiers.openrouter
+			// on both sides) so a future casing drift on either sink fails here.
+			const captured = mockCaptureException.mock.calls.at(-1)?.[0]
+			expect(captured).toBeInstanceOf(ApiProviderError)
+			const properties = extractApiProviderErrorProperties(captured as ApiProviderError)
+			expect(properties.provider).toBe("openrouter")
+			expect(properties.provider).not.toBe("OpenRouter")
 		})
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
