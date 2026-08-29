@@ -1,29 +1,79 @@
 import React from "react"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import { ChatTextAreaStory } from "./ChatTextArea.visual.fixture"
+import { ChatToolbarFixture } from "./ChatTextArea.visual.fixture"
 
-for (const theme of visualThemes) {
-	test(`renders the production chat composer in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
-		await applyVisualTheme(page, theme)
-		// The full provider bundle leaves a bare Zod reference after CT tree-shaking.
-		await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
-		const component = await mount(<ChatTextAreaStory />)
-		const story = component.getByTestId("chat-text-area-story")
-		const editor = story.getByRole("textbox")
-		await expect(editor).toBeVisible()
-		await expect(story).toHaveScreenshot(`chat-composer-resting-${theme.name}.png`)
+// Visual baseline for the compact chat-input toolbar row the PR changes by
+// adding the reasoning-effort selector. webview-ui/AGENTS.md requires a
+// *.visual.tsx snapshot for at-a-glance layout changes; this covers the full
+// toolbar — the left cluster [Select mode] [Select API configuration]
+// [Model reasoning effort] [Auto-approval] and the right cluster [Codebase
+// indexing] [Sign in to Zoo Code] — so the snapshot captures how the new
+// control sits alongside every existing one, in both the default and
+// narrow-width states (the narrow state exercises the row's min-w-0 /
+// text-ellipsis / flex-shrink overflow behavior, the compact toolbar's
+// primary concern) and in both VS Code dark and light themes.
+//
+// Baselines were generated with `pnpm test:visual:docker:update` from webview-ui/
+// (host-rendered screenshots are not the source of truth). To update, re-run
+// that command and commit the resulting __screenshots__ PNGs.
 
-		await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
-		for (
-			let index = 0;
-			index < 10 && !(await editor.evaluate((element) => element === document.activeElement));
-			index++
-		) {
-			await page.keyboard.press("Tab")
-		}
-		await expect(editor).toBeFocused()
-		await expect(story).toHaveScreenshot(`chat-composer-focus-${theme.name}.png`)
-	})
+const themes = [
+	{
+		name: "dark",
+		bodyClass: "vscode-dark",
+		themeId: "Default Dark Modern",
+	},
+	{
+		name: "light",
+		bodyClass: "vscode-light",
+		themeId: "Default Light Modern",
+	},
+] as const
+
+// Default chat-input toolbar width and a narrow width that forces the row into
+// its overflow/flex-shrink layout: wide enough that mode truncates but leaves
+// room for bits of api-config and reasoning to peek through (the behavior the
+// compact toolbar's min-w-0 / text-ellipsis / flex-shrink classes exist for).
+const WIDTHS = [
+	{ name: "default", width: 520 },
+	{ name: "narrow", width: 380 },
+] as const
+
+for (const theme of themes) {
+	for (const { name: widthName, width } of WIDTHS) {
+		test(`renders the compact chat-input toolbar at ${widthName} width in the VS Code ${theme.name} theme`, async ({
+			mount,
+		}) => {
+			const component = await mount(<ChatToolbarFixture width={width} />)
+
+			const trigger = component.getByTestId("reasoning-effort-trigger")
+			await trigger.evaluate((element, { bodyClass, themeId }) => {
+				const { document } = element.ownerDocument.defaultView!
+				document.documentElement.className = bodyClass
+				document.body.className = bodyClass
+				document.body.dataset.vscodeThemeId = themeId
+			}, theme)
+
+			// Confirm the theme class was applied before snapshotting. We assert
+			// only the documentClass (not the resolved --vscode-editor-background
+			// hex), because the token's exact value varies across Playwright image
+			// revisions and is not what this baseline guards; the screenshot itself
+			// proves the theme rendered.
+			await expect
+				.poll(() =>
+					trigger.evaluate((element) => ({
+						documentClass: element.ownerDocument.documentElement.className,
+					})),
+				)
+				.toEqual({ documentClass: theme.bodyClass })
+
+			await component.evaluate(async () => {
+				await document.fonts.ready
+				await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+			})
+
+			await expect(component).toHaveScreenshot(`chat-toolbar-${widthName}-${theme.name}.png`)
+		})
+	}
 }

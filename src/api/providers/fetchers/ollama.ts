@@ -29,6 +29,73 @@ const OllamaModelInfoResponseSchema = z.object({
 	capabilities: z.array(z.string()).optional(),
 })
 
+// Reasoning-effort levels a thinking-capable Ollama model advertises. These are
+// model-specific, not a single constant: Ollama's generic `think` API documents
+// low/medium/high/max (https://docs.ollama.com/capabilities/thinking), but
+// gpt-oss only accepts low/medium/high (see https://ollama.com/library/gpt-oss:
+// "Easily adjust the reasoning effort (low, medium, high) ..."). Advertising
+// "max" for gpt-oss surfaces a choice the model rejects at request time, so the
+// fetcher must pick the array per model rather than from the boolean capability.
+//
+// Whether reasoning can be turned *off* is also model-specific. Ollama's native
+// `think` parameter has no string "none" level — disabling thinking is `think:
+// false`. Most thinking models (qwen3, deepseek-r1, ...) honor `think: false`,
+// but gpt-oss ignores it and always reasons, so it must not advertise a
+// "disable"/"None" option. We model off-support explicitly by including the
+// "disable" UI sentinel in the capability array for models that honor
+// `think: false`, and omitting it for gpt-oss. The shared
+// `getReasoningEffortSelection` then respects explicit arrays verbatim (it
+// only auto-adds "disable" for `supportsReasoningEffort === true`), so the
+// settings page and chat selector render exactly what the model advertises
+// without a UI-side "none" prepend.
+//
+// `getOllamaThinkingEfforts` resolves the advertised levels from model metadata
+// when present, falling back to a family-based heuristic. Tests cover both the
+// gpt-oss regression (no "max", no "disable") and the default thinking-model
+// case (low/medium/high/max plus "disable").
+const GPT_OSS_THINKING_EFFORTS = ["low", "medium", "high"] as const
+const DEFAULT_THINKING_EFFORTS = ["disable", "low", "medium", "high", "max"] as const
+
+// gpt-oss reports family "gptoss" and architecture "gptoss" in model_info /
+// details (Ollama strips the hyphen from the model id "gpt-oss" for these
+// fields — see https://ollama.com/library/gpt-oss, which lists arch "gptoss").
+// The model id itself keeps the hyphen ("gpt-oss:20b" / "gpt-oss:120b"), so we
+// match on the id too. Detect on any of id / family / architecture, comparing
+// a hyphen/underscore-normalized form so "gpt-oss", "gptoss", and "gpt_oss" all
+// match regardless of which field Ollama populates for a given tag.
+function isGptOssModel(rawModel: OllamaModelInfoResponse, modelId?: string): boolean {
+	const normalize = (value: unknown): string =>
+		typeof value === "string" ? value.toLowerCase().replace(/[-_]/g, "") : ""
+
+	if (normalize(modelId).startsWith("gptoss")) {
+		return true
+	}
+
+	if (normalize(rawModel.details.family) === "gptoss") {
+		return true
+	}
+
+	const architecture = rawModel.model_info["general.architecture"]
+	if (normalize(architecture) === "gptoss") {
+		return true
+	}
+
+	return false
+}
+
+// Resolve the reasoning-effort levels a thinking-capable Ollama model advertises,
+// including the "disable" UI sentinel when the model honors `think: false`.
+// gpt-oss only accepts low/medium/high and ignores `think: false`, so it omits
+// "disable"; other thinking models (qwen3, etc. on Ollama Cloud) accept the full
+// low/medium/high/max set and honor `think: false`, so they include "disable".
+// Exported for tests.
+export function getOllamaThinkingEfforts(
+	rawModel: OllamaModelInfoResponse,
+	modelId?: string,
+): readonly ("disable" | "low" | "medium" | "high" | "max")[] {
+	return isGptOssModel(rawModel, modelId) ? GPT_OSS_THINKING_EFFORTS : DEFAULT_THINKING_EFFORTS
+}
+
 const OllamaModelsResponseSchema = z.object({
 	models: z.array(OllamaModelSchema),
 })
@@ -37,7 +104,7 @@ type OllamaModelsResponse = z.infer<typeof OllamaModelsResponseSchema>
 
 type OllamaModelInfoResponse = z.infer<typeof OllamaModelInfoResponseSchema>
 
-export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo | null => {
+export const parseOllamaModel = (rawModel: OllamaModelInfoResponse, modelId?: string): ModelInfo | null => {
 	const contextKey = Object.keys(rawModel.model_info).find((k) => k.includes("context_length"))
 	const contextWindow =
 		contextKey && typeof rawModel.model_info[contextKey] === "number" ? rawModel.model_info[contextKey] : undefined
@@ -58,6 +125,24 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 		// reserve 20% of the window for output, triggering premature condensing.
 		// Inherit the sane default (4096) from ollamaDefaultModelInfo instead.
 	})
+
+	// Models that advertise the "thinking" capability expose a native
+	// reasoning-effort control. Thinking levels — and whether reasoning can be
+	// turned off at all — are model-specific, not a single constant:
+	// - gpt-oss accepts only low/medium/high and ignores `think: false`, so it
+	//   advertises exactly ["low","medium","high"] (no "max", no "disable").
+	// - Other thinking models (qwen3, etc. on Ollama Cloud) accept the full
+	//   low/medium/high/max set and honor `think: false`, so they advertise
+	//   ["disable","low","medium","high","max"].
+	// (see https://docs.ollama.com/capabilities/thinking and
+	// https://ollama.com/library/gpt-oss). Including the "disable" UI sentinel
+	// explicitly means off-support is part of the capability array the selector
+	// respects verbatim, rather than a UI-side "none" prepend that would also
+	// offer an un-disableable "None" for gpt-oss.
+	if (rawModel.capabilities?.includes("thinking")) {
+		modelInfo.supportsReasoningEffort = [...getOllamaThinkingEfforts(rawModel, modelId)]
+		modelInfo.reasoningEffort = "medium"
+	}
 
 	return modelInfo
 }
@@ -98,7 +183,7 @@ export async function getOllamaModels(
 							{ headers },
 						)
 						.then((ollamaModelInfo) => {
-							const modelInfo = parseOllamaModel(ollamaModelInfo.data)
+							const modelInfo = parseOllamaModel(ollamaModelInfo.data, ollamaModel.model)
 							// Only include models that support native tools
 							if (modelInfo) {
 								models[ollamaModel.name] = modelInfo

@@ -12,7 +12,9 @@ import {
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import { Button } from "@src/components/ui"
+import { getOllamaReasoningModelInfo } from "@src/utils/reasoning-effort"
 import { vscode } from "@src/utils/vscode"
 
 import { inputEventTransform } from "../transforms"
@@ -39,6 +41,16 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 	const [refreshError, setRefreshError] = useState<string | undefined>()
 	const refreshStatusRef = useRef(refreshStatus)
 	const routerModels = useRouterModels()
+	// Use the same modelInfo source as the chat bar / top-of-tab selector so the
+	// reasoning-effort dropdown advertises the model's real levels. The shared
+	// `getOllamaReasoningModelInfo` helper is the single Ollama normalization:
+	// it passes the model's advertised capability array through verbatim (the
+	// fetcher already includes "disable" for models that honor think: false and
+	// omits it for models that don't, e.g. gpt-oss), and falls back to a
+	// synthesized [disable, low, medium, high] set when no model info has loaded
+	// yet so the dropdown is still usable on app boot. No UI-side "none" prepend.
+	const { info: selectedModelInfo } = useSelectedModel(apiConfiguration)
+	const reasoningModelInfo = getOllamaReasoningModelInfo(selectedModelInfo, ollamaDefaultModelInfo)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
@@ -206,39 +218,50 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 
 						if (checked) {
 							// Restore the last selected effort level if one was
-							// previously chosen; otherwise default to "medium" so
-							// the request actually enables Ollama's native think
-							// parameter. Without a value, the ThinkingBudget Select
-							// would show "None" (disable) and getOllamaThinkParam()
-							// would return undefined, sending no think parameter
-							// despite the checkbox being on. Preserving the prior
-							// value avoids wiping the user's effort choice when
+							// previously chosen; otherwise default to "medium" so the
+							// request actually sends Ollama's native `think` parameter.
+							// The request handler reads the *stored* `reasoningEffort`
+							// (not the clamped display value), and when it is `undefined`
+							// it returns `undefined` (no think param) — leaving the
+							// model/Modelfile to decide whether to think, rather than
+							// explicitly enabling it. Defaulting to "medium" sends an
+							// explicit `think: "medium"`. Ollama has no native string
+							// "none" thinking level; "disable" is a UI-only sentinel that
+							// the handler maps to `think: false`. Preserving the prior
+							// value also avoids wiping the user's effort choice when
 							// toggling the checkbox off and back on.
 							setApiConfigurationField("reasoningEffort", apiConfiguration.reasoningEffort ?? "medium")
 						}
 						// When unchecked, leave reasoningEffort untouched so the
 						// user's prior selection is preserved across toggles. The
-						// handler gates on enableReasoningEffort === true, so a
+						// request handler gates on enableReasoningEffort === true, so a
 						// stale reasoningEffort value will not emit a think param
 						// while the checkbox is off.
 					}}>
 					{t("settings:providers.ollama.thinking")}
 				</Checkbox>
-				<div className="text-xs text-vscode-descriptionForeground mt-1">
-					{t("settings:providers.ollama.thinkingHelp")}
-				</div>
-				{!!apiConfiguration.enableReasoningEffort && (
-					<ThinkingBudget
-						apiConfiguration={apiConfiguration}
-						setApiConfigurationField={setApiConfigurationField}
-						// Ollama models don't advertise reasoning capabilities, so
-						// synthesize a model info that exposes the effort levels
-						// Ollama's native `think` parameter supports (low/medium/high).
-						modelInfo={{
-							...ollamaDefaultModelInfo,
-							supportsReasoningEffort: true,
-						}}
-					/>
+				{/* Help text and the effort dropdown only appear when thinking is
+					enabled. The chat bar selector (in ChatTextArea) reads the same
+					enableReasoningEffort flag via useExtensionState, so unticking
+					the checkbox and saving collapses both surfaces together. */}
+				{apiConfiguration.enableReasoningEffort && (
+					<>
+						<div className="text-xs text-vscode-descriptionForeground mt-1">
+							{t("settings:providers.ollama.thinkingHelp")}
+						</div>
+						<ThinkingBudget
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							// Use the shared Ollama modelInfo normalization so the
+							// dropdown advertises the model's real levels verbatim
+							// (e.g. qwen3 → ["disable","low","medium","high","max"],
+							// gpt-oss → ["low","medium","high"]). The fallback exposes
+							// the levels the Ollama native `think` parameter supports by
+							// default so the dropdown still works for models that do not
+							// advertise the capability.
+							modelInfo={reasoningModelInfo}
+						/>
+					</>
 				)}
 			</div>
 			<div className="text-sm text-vscode-descriptionForeground">

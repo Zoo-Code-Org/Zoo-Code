@@ -35,7 +35,7 @@ Notes:
 import { useEffect } from "react"
 import { Checkbox } from "vscrui"
 
-import { type ProviderSettings, type ModelInfo, type ReasoningEffortExtended, reasoningEfforts } from "@roo-code/types"
+import { type ProviderSettings, type ModelInfo, type ReasoningEffortExtended } from "@roo-code/types"
 
 import {
 	DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS,
@@ -47,6 +47,11 @@ import {
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Slider, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
+import {
+	getReasoningEffortSelection,
+	getReasoningEffortTranslationKey,
+	type ReasoningEffortOption,
+} from "@src/utils/reasoning-effort"
 
 interface ThinkingBudgetProps {
 	apiConfiguration: ProviderSettings
@@ -70,51 +75,17 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 	const isReasoningSupported = !!modelInfo && modelInfo.supportsReasoningBinary
 	const isReasoningBudgetSupported = !!modelInfo && modelInfo.supportsReasoningBudget
 	const isReasoningBudgetRequired = !!modelInfo && modelInfo.requiredReasoningBudget
-	const isReasoningEffortSupported = !!modelInfo && modelInfo.supportsReasoningEffort
 	// Models that advertise a user-configurable max output budget (e.g. Z.ai GLM) but do not
 	// use the reasoning-budget slider. The reasoning-budget branch already renders its own
 	// max-tokens control, so only surface this standalone slider when that branch is inactive.
 	const isMaxTokensConfigurable = !!modelInfo && modelInfo.supportsMaxTokens && !isReasoningBudgetSupported
 
+	// Effort selection is shared with the top-of-tab selector and the chat input
+	// bar selector so every control agrees on the option set and clamped value.
 	// "disable" turns off reasoning entirely; "none" is a valid reasoning level.
 	// Both display as "None" in the UI but behave differently.
-	// Arrays from supportsReasoningEffort may include "disable" (e.g. Z.ai GLM), so type the
-	// full option set as ReasoningEffortExtended | "disable" from the start to avoid casts.
-	type ReasoningEffortOption = ReasoningEffortExtended | "disable"
-	const supports = modelInfo?.supportsReasoningEffort
-	const baseAvailableOptions: ReadonlyArray<ReasoningEffortOption> =
-		supports === true
-			? (reasoningEfforts as readonly ReasoningEffortOption[])
-			: Array.isArray(supports)
-				? (supports as ReadonlyArray<ReasoningEffortOption>)
-				: (reasoningEfforts as readonly ReasoningEffortOption[])
-
-	// Add "disable" option only when:
-	// 1. requiredReasoningEffort is not true, AND
-	// 2. supportsReasoningEffort is boolean true (not an explicit array)
-	// When the model provides an explicit array, respect those exact values.
-	const shouldAutoAddDisable =
-		!modelInfo?.requiredReasoningEffort && supports === true && !baseAvailableOptions.includes("disable")
-	const availableOptions: ReadonlyArray<ReasoningEffortOption> = shouldAutoAddDisable
-		? ["disable", ...baseAvailableOptions]
-		: baseAvailableOptions
-
-	// Default reasoning effort - use model's default if available
-	// GPT-5 models have "medium" as their default in the model configuration
-	const modelDefaultReasoningEffort = modelInfo?.reasoningEffort as ReasoningEffortExtended | undefined
-	const defaultReasoningEffort: ReasoningEffortOption = modelInfo?.requiredReasoningEffort
-		? modelDefaultReasoningEffort || "medium"
-		: "disable"
-	// Current reasoning effort from settings, or fall back to default.
-	// Clamp to availableOptions so the Select trigger always renders a valid option.
-	const storedReasoningEffort = apiConfiguration.reasoningEffort as ReasoningEffortOption | undefined
-	const rawReasoningEffort: ReasoningEffortOption = storedReasoningEffort || defaultReasoningEffort
-	const fallbackReasoningEffort = availableOptions.includes(defaultReasoningEffort)
-		? defaultReasoningEffort
-		: (availableOptions[0] ?? rawReasoningEffort)
-	const currentReasoningEffort: ReasoningEffortOption = availableOptions.includes(rawReasoningEffort)
-		? rawReasoningEffort
-		: fallbackReasoningEffort
+	const { isReasoningEffortSupported, availableOptions, currentReasoningEffort, storedReasoningEffort } =
+		getReasoningEffortSelection(apiConfiguration, modelInfo)
 
 	// Set default reasoning effort when model supports it and no value is set
 	useEffect(() => {
@@ -294,9 +265,7 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 						<SelectValue
 							placeholder={
 								currentReasoningEffort
-									? currentReasoningEffort === "none" || currentReasoningEffort === "disable"
-										? t("settings:providers.reasoningEffort.none")
-										: t(`settings:providers.reasoningEffort.${currentReasoningEffort}`)
+									? t(getReasoningEffortTranslationKey(currentReasoningEffort))
 									: t("settings:common.select")
 							}
 						/>
@@ -304,9 +273,7 @@ export const ThinkingBudget = ({ apiConfiguration, setApiConfigurationField, mod
 					<SelectContent>
 						{availableOptions.map((value) => (
 							<SelectItem key={value} value={value}>
-								{value === "none" || value === "disable"
-									? t("settings:providers.reasoningEffort.none")
-									: t(`settings:providers.reasoningEffort.${value}`)}
+								{t(getReasoningEffortTranslationKey(value))}
 							</SelectItem>
 						))}
 					</SelectContent>

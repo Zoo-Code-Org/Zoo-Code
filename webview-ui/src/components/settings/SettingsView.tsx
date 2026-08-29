@@ -775,11 +775,17 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 										listApiConfigMeta={listApiConfigMeta}
 										onSelectConfig={(configName: string) =>
 											checkUnsaveChanges(() =>
-												vscode.postMessage({ type: "loadApiConfiguration", text: configName }),
+												vscode.postMessage({
+													type: "loadApiConfiguration",
+													text: configName,
+												}),
 											)
 										}
 										onDeleteConfig={(configName: string) =>
-											vscode.postMessage({ type: "deleteApiConfiguration", text: configName })
+											vscode.postMessage({
+												type: "deleteApiConfiguration",
+												text: configName,
+											})
 										}
 										onRenameConfig={(oldName: string, newName: string) => {
 											vscode.postMessage({
