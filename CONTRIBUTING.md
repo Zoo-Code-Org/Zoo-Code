@@ -143,7 +143,7 @@ Ready-for-review PRs move through these gates in order:
 
 An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
 
-The `PR review gate` check passes only after the sequence completes. Repository administrators should configure it as a required status check on `main`; the labels and comment explain the state, while the required check enforces it.
+The `PR review gate` check passes only after the sequence completes. It is advisory by default; repository administrators can make it required on `main` if enforcement is desired. The labels and managed comment remain the maintainer-facing review queue either way.
 
 Optional checks such as Codecov do not delay CodeRabbit unless repository rules make them required. Draft PRs are not reviewed automatically, but authors can still request an early review with `@coderabbitai review`.
 
