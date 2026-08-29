@@ -210,7 +210,12 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 			case "error":
 				return (
 					<StandardTooltip content={state.error ?? t("chat:changeCard.rollbackFailed")}>
+						{/* Focusable status so the error detail is reachable by keyboard and
+							screen-reader users, not only via the hover tooltip. */}
 						<span
+							tabIndex={0}
+							role="status"
+							aria-label={state.error ?? t("chat:changeCard.rollbackFailed")}
 							className="flex items-center gap-1 text-xs font-medium text-vscode-charts-red"
 							data-testid={`change-card-file-error-${index}`}>
 							<X className="size-3" aria-hidden />
@@ -280,7 +285,11 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 			case "error":
 				return (
 					<StandardTooltip content={state.error ?? t("chat:changeCard.restoreFailed")}>
+						{/* Focusable status (see the file-rollback error span above). */}
 						<span
+							tabIndex={0}
+							role="status"
+							aria-label={state.error ?? t("chat:changeCard.restoreFailed")}
 							className="flex items-center gap-1 text-xs font-medium text-vscode-charts-red"
 							data-testid={`change-card-file-restore-error-${index}`}>
 							<X className="size-3" aria-hidden />
@@ -349,7 +358,11 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 			case "error":
 				return (
 					<StandardTooltip content={stepRollback.error ?? t("chat:changeCard.rollbackFailed")}>
+						{/* Focusable status (see the file-rollback error span above). */}
 						<span
+							tabIndex={0}
+							role="status"
+							aria-label={stepRollback.error ?? t("chat:changeCard.rollbackFailed")}
 							className="flex items-center gap-1 text-xs font-medium text-vscode-charts-red"
 							data-testid="change-card-step-error">
 							<X className="size-3" aria-hidden />
@@ -407,8 +420,8 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 									<Button
 										variant="ghost"
 										size="icon"
-										aria-label={t("chat:changeCard.openFile")}
-										title={t("chat:changeCard.openFile")}
+										aria-label={t("chat:changeCard.openFile", { path: file.path })}
+										title={t("chat:changeCard.openFile", { path: file.path })}
 										data-testid={`change-card-file-open-${index}`}
 										onClick={() => openFileInEditor(file.path)}>
 										<span

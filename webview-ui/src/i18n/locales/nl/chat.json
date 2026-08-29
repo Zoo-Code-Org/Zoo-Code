@@ -178,7 +178,7 @@
 		"rolledBack": "Teruggezet",
 		"stepRolledBack": "Stap teruggezet",
 		"rollbackFailed": "Terugzetten mislukt",
-		"openFile": "Bestand openen"
+		"openFile": "Bestand openen: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

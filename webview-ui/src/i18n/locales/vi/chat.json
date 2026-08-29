@@ -183,7 +183,7 @@
 		"rolledBack": "Đã hoàn tác",
 		"stepRolledBack": "Đã hoàn tác bước",
 		"rollbackFailed": "Hoàn tác thất bại",
-		"openFile": "Mở tệp"
+		"openFile": "Mở tệp: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Điểm kiểm tra",

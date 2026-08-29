@@ -186,7 +186,7 @@
 		"rolledBack": "Annullato",
 		"stepRolledBack": "Passaggio annullato",
 		"rollbackFailed": "Annullamento non riuscito",
-		"openFile": "Apri file"
+		"openFile": "Apri file: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

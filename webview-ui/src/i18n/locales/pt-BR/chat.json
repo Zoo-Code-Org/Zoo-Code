@@ -183,7 +183,7 @@
 		"rolledBack": "Revertido",
 		"stepRolledBack": "Etapa revertida",
 		"rollbackFailed": "Falha na reversão",
-		"openFile": "Abrir arquivo"
+		"openFile": "Abrir arquivo: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Ponto de verificação",

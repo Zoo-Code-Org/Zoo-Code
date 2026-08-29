@@ -15,7 +15,7 @@ vi.mock("@src/utils/vscode", () => ({
 // Mock i18n (same pattern as the other ChatRow specs)
 vi.mock("react-i18next", () => ({
 	useTranslation: () => ({
-		t: (key: string, options?: { count?: number }) => {
+		t: (key: string, options?: { count?: number; path?: string }) => {
 			const map: Record<string, string> = {
 				"chat:changeCard.header": `${options?.count ?? 0} file(s) changed this step`,
 				"chat:changeCard.rollbackFile": "Rollback this file",
@@ -32,9 +32,12 @@ vi.mock("react-i18next", () => ({
 				"chat:changeCard.rolledBack": "Rolled back",
 				"chat:changeCard.stepRolledBack": "Step rolled back",
 				"chat:changeCard.rollbackFailed": "Rollback failed",
-				"chat:changeCard.openFile": "Open file",
+				"chat:changeCard.openFile": "Open file: {{path}}",
 			}
-			return map[key] || key
+			// {{path}} interpolation: the compact row labels embed the file path
+			// (aria-label / title), mirroring the CodeAccordion label format.
+			const value = map[key] || key
+			return value.replace(/{{path}}/g, String(options?.path ?? ""))
 		},
 	}),
 	initReactI18next: { type: "3rdParty", init: () => {} },
@@ -255,6 +258,15 @@ describe("ChangeCard", () => {
 		expect(await screen.findByTestId("change-card-step-error")).toHaveTextContent("Rollback failed")
 		expect(screen.getByTestId("change-card-file-error-1")).toBeInTheDocument()
 		expect(screen.getByTestId("change-card-file-success-0")).toBeInTheDocument()
+
+		// The error detail is exposed to assistive technology: each failed
+		// control is a focusable status element (not just hover tooltip text).
+		const fileError = screen.getByTestId("change-card-file-error-1")
+		expect(fileError).toHaveAttribute("role", "status")
+		expect(fileError).toHaveAttribute("tabindex", "0")
+		expect(fileError).toHaveAttribute("aria-label", "boom")
+		expect(screen.getByTestId("change-card-step-error")).toHaveAttribute("role", "status")
+		expect(screen.getByTestId("change-card-step-error")).toHaveAttribute("tabindex", "0")
 	})
 
 	it("resolves the step state from a failure result that carries no files", async () => {
@@ -279,10 +291,15 @@ describe("ChangeCard", () => {
 		// The error detail rides in the tooltip content; the visible state is
 		// the rollback-failed label. The assertion that matters here is that the
 		// step left the pending state at all (previously it would stay pending).
-		expect(await screen.findByTestId("change-card-step-error")).toHaveTextContent("Rollback failed")
+		const stepError = await screen.findByTestId("change-card-step-error")
+		expect(stepError).toHaveTextContent("Rollback failed")
+		// Focusable status with the actual error as its accessible name.
+		expect(stepError).toHaveAttribute("role", "status")
+		expect(stepError).toHaveAttribute("tabindex", "0")
+		expect(stepError).toHaveAttribute("aria-label", "Checkpoints are not enabled for this task")
 	})
 
-	it("keeps the step in the pending state until a no-files success resolves it", async () => {
+	it("resolves the step state from a success result that carries no files", async () => {
 		renderWithExtensionState(<ChangeCard message={makeCardMessage()} />)
 
 		fireEvent.click(screen.getByTestId("change-card-step-rollback"))
@@ -389,7 +406,10 @@ describe("ChangeCard", () => {
 		// the element itself; the mouse path is covered by the click tests above.)
 		const control = screen.getByTestId("change-card-file-open-0")
 		expect(control.tagName).toBe("BUTTON")
-		expect(control).toHaveAttribute("aria-label", "Open file")
+		// The label names the target file, so users can tell which row's
+		// control they have focused (CodeAccordion uses the same format).
+		expect(control).toHaveAttribute("aria-label", "Open file: src/b.ts")
+		expect(control).toHaveAttribute("title", "Open file: src/b.ts")
 	})
 
 	it("restores one file to the latest version through checkpointRestoreLatestFile and shows pending + success", async () => {
@@ -440,7 +460,12 @@ describe("ChangeCard", () => {
 			},
 		})
 
-		expect(await screen.findByTestId("change-card-file-restore-error-1")).toHaveTextContent("Restore failed")
+		const restoreError = await screen.findByTestId("change-card-file-restore-error-1")
+		expect(restoreError).toHaveTextContent("Restore failed")
+		// Focusable status with the actual error as its accessible name.
+		expect(restoreError).toHaveAttribute("role", "status")
+		expect(restoreError).toHaveAttribute("tabindex", "0")
+		expect(restoreError).toHaveAttribute("aria-label", "checkpoint not found")
 	})
 
 	it("treats a no-op restore-latest (no recorded write) as a success", async () => {

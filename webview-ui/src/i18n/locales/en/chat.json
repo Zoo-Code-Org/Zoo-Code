@@ -205,7 +205,7 @@
 		"rolledBack": "Rolled back",
 		"stepRolledBack": "Step rolled back",
 		"rollbackFailed": "Rollback failed",
-		"openFile": "Open file"
+		"openFile": "Open file: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

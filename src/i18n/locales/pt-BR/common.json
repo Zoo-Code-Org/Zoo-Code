@@ -103,6 +103,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Nenhuma tarefa ativa para excluir mensagens",
+			"no_active_task_to_roll_back": "Nenhuma tarefa ativa para desfazer",
+			"no_active_task_to_restore": "Nenhuma tarefa ativa para restaurar",
 			"invalid_timestamp_for_deletion": "Timestamp da mensagem inválido para exclusão",
 			"cannot_delete_missing_timestamp": "Não é possível excluir mensagem: timestamp ausente",
 			"cannot_delete_invalid_timestamp": "Não é possível excluir mensagem: timestamp inválido",

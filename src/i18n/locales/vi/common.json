@@ -99,6 +99,8 @@
 		},
 		"message": {
 			"no_active_task_to_delete": "Không có nhiệm vụ hoạt động để xóa tin nhắn",
+			"no_active_task_to_roll_back": "Không có tác vụ hoạt động để hoàn tác",
+			"no_active_task_to_restore": "Không có tác vụ hoạt động để khôi phục",
 			"invalid_timestamp_for_deletion": "Dấu thời gian tin nhắn không hợp lệ để xóa",
 			"cannot_delete_missing_timestamp": "Không thể xóa tin nhắn: thiếu dấu thời gian",
 			"cannot_delete_invalid_timestamp": "Không thể xóa tin nhắn: dấu thời gian không hợp lệ",
