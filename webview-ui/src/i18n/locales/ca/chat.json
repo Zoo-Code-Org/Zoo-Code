@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "{{count}} fitxer(s) canviat(s) en aquest pas",
 		"rollbackFile": "Revertir aquest fitxer",
+		"rollbackFileWarning": "Restaura aquest fitxer al contingut que tenia abans d'aquest pas.",
+		"restoreLatest": "Restaura l'última versió",
+		"restoreLatestWarning": "Restaura aquest fitxer a l'última versió registrada.",
+		"restored": "Última versió restaurada",
+		"restoreFailed": "Error en restaurar",
 		"rollbackStep": "Revertir el pas",
 		"rollbackWarning": "Restaura el contingut anterior dels fitxers d'aquest pas.",
 		"confirm": "Confirmar",

@@ -192,6 +192,11 @@
 	"changeCard": {
 		"header": "{{count}} file(s) changed this step",
 		"rollbackFile": "Rollback this file",
+		"rollbackFileWarning": "Restores this file to the content it had before this step.",
+		"restoreLatest": "Restore latest version",
+		"restoreLatestWarning": "Restores this file to the latest recorded version.",
+		"restored": "Restored latest version",
+		"restoreFailed": "Restore failed",
 		"rollbackStep": "Rollback step",
 		"rollbackWarning": "Restores the previous content of this step's files.",
 		"confirm": "Confirm",

@@ -195,6 +195,11 @@
 	"changeCard": {
 		"header": "{{count}} file diubah pada langkah ini",
 		"rollbackFile": "Kembalikan file ini",
+		"rollbackFileWarning": "Memulihkan file ini ke konten yang ada sebelum langkah ini.",
+		"restoreLatest": "Pulihkan versi terbaru",
+		"restoreLatestWarning": "Memulihkan file ini ke versi terbaru yang tercatat.",
+		"restored": "Versi terbaru dipulihkan",
+		"restoreFailed": "Gagal memulihkan",
 		"rollbackStep": "Kembalikan langkah",
 		"rollbackWarning": "Memulihkan konten sebelumnya dari file pada langkah ini.",
 		"confirm": "Konfirmasi",

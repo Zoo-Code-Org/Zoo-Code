@@ -192,6 +192,11 @@
 	"changeCard": {
 		"header": "此步驟中變更了 {{count}} 個檔案",
 		"rollbackFile": "還原此檔案",
+		"rollbackFileWarning": "將此檔案還原到此步驟執行前的內容。",
+		"restoreLatest": "還原至最新版本",
+		"restoreLatestWarning": "將此檔案還原至最近一次記錄的版本。",
+		"restored": "已還原至最新版本",
+		"restoreFailed": "還原失敗",
 		"rollbackStep": "還原此步驟",
 		"rollbackWarning": "將還原此步驟檔案的上一版內容。",
 		"confirm": "確認",

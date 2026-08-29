@@ -21,6 +21,7 @@ import {
 	ExperimentId,
 	checkpointRollbackFilePayloadSchema,
 	checkpointRollbackStepPayloadSchema,
+	checkpointRestoreLatestFilePayloadSchema,
 	checkoutDiffPayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
@@ -1672,6 +1673,49 @@ export const webviewMessageHandler = async (
 							cardTs: result.data.cardTs,
 							success: false,
 							error: "No active task to roll back from.",
+						},
+					})
+				}
+			}
+
+			break
+		}
+		case "checkpointRestoreLatestFile": {
+			// B3b: restore one change-card file to the latest recorded version of
+			// that file (the forward direction to a rollback) and report the
+			// outcome back to the requesting card (correlated by cardTs, kind
+			// "restore-latest").
+			const result = checkpointRestoreLatestFilePayloadSchema.safeParse(message.payload)
+
+			if (result.success) {
+				const task = provider.getCurrentTask()
+
+				if (task) {
+					// Lazy import (see the checkpointRollbackFile case above).
+					const { restoreLatestFile } = await import("../checkpoints/rollback")
+					const outcome = await restoreLatestFile(task, result.data.filePath)
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							kind: "restore-latest",
+							filePath: outcome.filePath,
+							success: outcome.success,
+							...(outcome.noOp ? { noOp: true } : {}),
+							...(outcome.error ? { error: outcome.error } : {}),
+						},
+					})
+				} else {
+					// No active task: post the correlated failure so the requesting
+					// card can clear its pending state.
+					await provider.postMessageToWebview({
+						type: "checkpointRollbackResult",
+						checkpointRollbackResult: {
+							cardTs: result.data.cardTs,
+							kind: "restore-latest",
+							filePath: result.data.filePath,
+							success: false,
+							error: "No active task to restore from.",
 						},
 					})
 				}

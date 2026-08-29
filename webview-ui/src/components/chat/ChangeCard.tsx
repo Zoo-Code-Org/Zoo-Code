@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { VSCodeProgressRing } from "@vscode/webview-ui-toolkit/react"
-import { Check, FileDiff, RotateCcw, X } from "lucide-react"
+import { Check, FileDiff, History, RotateCcw, X } from "lucide-react"
 import { safeJsonParse } from "@roo/core"
 
 import { changeCardSchema, type ClineMessage, type ExtensionMessage } from "@roo-code/types"
@@ -25,10 +25,14 @@ const successState: RollbackState = { status: "success" }
 
 /**
  * Per-step change card (B3a payload, B3b UI): header with the file count, a
- * per-file list with +/− diff badges, and per-file / per-step rollback
+ * per-file list with +/− diff badges, and per-file / per-step restore
  * controls wired to the extension host through the
- * `checkpointRollbackFile` / `checkpointRollbackStep` messages. Diffs come from
- * the payload's per-file `diff` field: `full` cards expand by default,
+ * `checkpointRollbackFile` / `checkpointRollbackStep` /
+ * `checkpointRestoreLatestFile` messages. A rollback restores a file to the
+ * state it had BEFORE the step (undoing the step's write); a restore-latest
+ * brings the file back to its most recent recorded version (the forward
+ * direction, available from every card of the task). Diffs come from the
+ * payload's per-file `diff` field: `full` cards expand by default,
  * `summary` cards expand lazily on toggle, compact cards carry no diff.
  */
 export const ChangeCard = ({ message }: { message: ClineMessage }) => {
@@ -58,11 +62,12 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 	})
 
 	const [fileRollbacks, setFileRollbacks] = useState<Record<string, RollbackState>>({})
+	const [fileRestores, setFileRestores] = useState<Record<string, RollbackState>>({})
 	const [stepRollback, setStepRollback] = useState<RollbackState>(IDLE)
 
 	const checkpointId = card?.checkpointIds[0]
 
-	// Correlate extension rollback results with this card by message ts.
+	// Correlate extension restore results with this card by message ts.
 	useEffect(() => {
 		const handler = (event: MessageEvent) => {
 			const data = event.data as ExtensionMessage | undefined
@@ -75,10 +80,16 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 			}
 			const filePath = result.filePath
 			if (filePath !== undefined) {
-				setFileRollbacks((prev) => ({
-					...prev,
-					[filePath]: result.success ? successState : { status: "error", error: result.error },
-				}))
+				// Per-file results route to the control that requested them:
+				// restore-latest results update the restore control; everything
+				// else (including results posted before `kind` existed) the
+				// rollback control.
+				const state: RollbackState = result.success ? successState : { status: "error", error: result.error }
+				if (result.kind === "restore-latest") {
+					setFileRestores((prev) => ({ ...prev, [filePath]: state }))
+				} else {
+					setFileRollbacks((prev) => ({ ...prev, [filePath]: state }))
+				}
 			}
 			if (result.files) {
 				const fileUpdates: Record<string, RollbackState> = {}
@@ -125,6 +136,14 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 		setFileRollbacks((prev) => ({ ...prev, [path]: { status: "pending" } }))
 	}
 
+	const requestFileRestoreLatest = (path: string) => {
+		vscode.postMessage({
+			type: "checkpointRestoreLatestFile",
+			payload: { cardTs: message.ts, filePath: path },
+		})
+		setFileRestores((prev) => ({ ...prev, [path]: { status: "pending" } }))
+	}
+
 	const requestStepRollback = () => {
 		vscode.postMessage({
 			type: "checkpointRollbackStep",
@@ -157,6 +176,9 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 			case "confirming":
 				return (
 					<span className="flex items-center gap-1" data-testid={confirmTestId}>
+						<span className="text-xs font-medium text-vscode-descriptionForeground">
+							{t("chat:changeCard.rollbackFileWarning")}
+						</span>
 						<Button variant="primary" size="sm" onClick={() => requestFileRollback(path)}>
 							<Check className="size-3" aria-hidden />
 							{t("chat:changeCard.confirm")}
@@ -206,6 +228,76 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 							data-testid={`change-card-file-rollback-${index}`}
 							onClick={() => setFileRollbacks((prev) => ({ ...prev, [path]: { status: "confirming" } }))}>
 							<RotateCcw className="size-3.5" aria-hidden />
+						</Button>
+					</StandardTooltip>
+				)
+		}
+	}
+
+	// Per-file forward direction: restore the file to its most recent recorded
+	// version. Independent of the rollback control so a user can undo a
+	// rollback (or a manual edit) from any card of the task.
+	const fileRestoreLatestControls = (path: string, index: number) => {
+		const state = fileRestores[path] ?? IDLE
+		const confirmTestId = `change-card-file-restore-confirm-${index}`
+		const cancelTestId = `change-card-file-restore-cancel-${index}`
+
+		switch (state.status) {
+			case "confirming":
+				return (
+					<span className="flex items-center gap-1" data-testid={confirmTestId}>
+						<span className="text-xs font-medium text-vscode-descriptionForeground">
+							{t("chat:changeCard.restoreLatestWarning")}
+						</span>
+						<Button variant="primary" size="sm" onClick={() => requestFileRestoreLatest(path)}>
+							<Check className="size-3" aria-hidden />
+							{t("chat:changeCard.confirm")}
+						</Button>
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={() => setFileRestores((prev) => ({ ...prev, [path]: IDLE }))}
+							data-testid={cancelTestId}>
+							{t("chat:changeCard.cancel")}
+						</Button>
+					</span>
+				)
+			case "pending":
+				return (
+					<span data-testid={`change-card-file-restore-pending-${index}`}>
+						<VSCodeProgressRing className="size-4" />
+					</span>
+				)
+			case "success":
+				return (
+					<span
+						className="flex items-center gap-1 text-xs font-medium text-vscode-charts-green"
+						data-testid={`change-card-file-restore-success-${index}`}>
+						<Check className="size-3" aria-hidden />
+						{t("chat:changeCard.restored")}
+					</span>
+				)
+			case "error":
+				return (
+					<StandardTooltip content={state.error ?? t("chat:changeCard.restoreFailed")}>
+						<span
+							className="flex items-center gap-1 text-xs font-medium text-vscode-charts-red"
+							data-testid={`change-card-file-restore-error-${index}`}>
+							<X className="size-3" aria-hidden />
+							{t("chat:changeCard.restoreFailed")}
+						</span>
+					</StandardTooltip>
+				)
+			default:
+				return (
+					<StandardTooltip content={t("chat:changeCard.restoreLatest")}>
+						<Button
+							variant="ghost"
+							size="icon"
+							aria-label={t("chat:changeCard.restoreLatest")}
+							data-testid={`change-card-file-restore-${index}`}
+							onClick={() => setFileRestores((prev) => ({ ...prev, [path]: { status: "confirming" } }))}>
+							<History className="size-3.5" aria-hidden />
 						</Button>
 					</StandardTooltip>
 				)
@@ -328,7 +420,10 @@ export const ChangeCard = ({ message }: { message: ClineMessage }) => {
 								</div>
 							)}
 						</div>
-						<div className="shrink-0 pt-1">{fileRollbackControls(file.path, index)}</div>
+						<div className="flex items-center gap-1 shrink-0 pt-1">
+							{fileRollbackControls(file.path, index)}
+							{fileRestoreLatestControls(file.path, index)}
+						</div>
 					</div>
 				))}
 			</div>

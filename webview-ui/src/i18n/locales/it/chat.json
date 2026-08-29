@@ -173,6 +173,11 @@
 	"changeCard": {
 		"header": "{{count}} file modificati in questo passaggio",
 		"rollbackFile": "Annulla modifiche a questo file",
+		"rollbackFileWarning": "Ripristina questo file al contenuto che aveva prima di questo passaggio.",
+		"restoreLatest": "Ripristina l'ultima versione",
+		"restoreLatestWarning": "Ripristina questo file all'ultima versione registrata.",
+		"restored": "Ultima versione ripristinata",
+		"restoreFailed": "Ripristino non riuscito",
 		"rollbackStep": "Annulla modifiche del passaggio",
 		"rollbackWarning": "Ripristina il contenuto precedente dei file di questo passaggio.",
 		"confirm": "Conferma",

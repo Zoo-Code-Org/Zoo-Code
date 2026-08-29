@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "此步骤中更改了 {{count}} 个文件",
 		"rollbackFile": "回退此文件",
+		"rollbackFileWarning": "将此文件还原到此步骤执行前的内容。",
+		"restoreLatest": "还原至最新版本",
+		"restoreLatestWarning": "将此文件还原至最近一次记录的版本。",
+		"restored": "已还原至最新版本",
+		"restoreFailed": "还原失败",
 		"rollbackStep": "回退此步骤",
 		"rollbackWarning": "将恢复此步骤文件的上一版本内容。",
 		"confirm": "确认",

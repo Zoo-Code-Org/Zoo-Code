@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "Bu adımda {{count}} dosya değiştirildi",
 		"rollbackFile": "Bu dosyayı geri al",
+		"rollbackFileWarning": "Bu dosyayı bu adım öncesi içeriğine geri yükler.",
+		"restoreLatest": "Son sürümü geri yükle",
+		"restoreLatestWarning": "Bu dosyayı son kaydedilmiş sürüme geri yükler.",
+		"restored": "Son sürüm geri yüklendi",
+		"restoreFailed": "Geri yükleme başarısız",
 		"rollbackStep": "Adımı geri al",
 		"rollbackWarning": "Bu adımın dosyalarının önceki içeriğini geri yükler.",
 		"confirm": "Onayla",

@@ -170,6 +170,11 @@
 	"changeCard": {
 		"header": "{{count}} tệp đã thay đổi trong bước này",
 		"rollbackFile": "Hoàn tác tệp này",
+		"rollbackFileWarning": "Khôi phục tệp này về nội dung trước bước này.",
+		"restoreLatest": "Khôi phục phiên bản mới nhất",
+		"restoreLatestWarning": "Khôi phục tệp này về phiên bản được ghi lại gần nhất.",
+		"restored": "Đã khôi phục phiên bản mới nhất",
+		"restoreFailed": "Khôi phục thất bại",
 		"rollbackStep": "Hoàn tác bước",
 		"rollbackWarning": "Khôi phục nội dung trước đó của các tệp trong bước này.",
 		"confirm": "Xác nhận",
