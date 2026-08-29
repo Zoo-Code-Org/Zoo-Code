@@ -235,7 +235,7 @@ jobs:
                 owner,
                 repo,
                 sha: pr.head.sha,
-                state: passed ? 'success' : 'failure',
+                state: passed ? 'success' : 'pending',
                 context: reviewGateName,
                 description: phaseMessage(phase),
                 target_url: pr.html_url,

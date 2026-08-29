@@ -335,7 +335,7 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ addLabelsStatus: 500 })
 
 		expect(result.setFailed).toHaveBeenCalled()
-		expect(latestGateStatus(result)?.state).toBe("failure")
+		expect(latestGateStatus(result)?.state).toBe("pending")
 		expect(result.createCommitStatus.mock.invocationCallOrder[0]).toBeLessThan(
 			result.addLabels.mock.invocationCallOrder[0],
 		)
@@ -598,7 +598,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
-		expect(latestGateStatus(result)?.state).toBe("failure")
+		expect(latestGateStatus(result)?.state).toBe("pending")
 	})
 
 	it("keeps awaiting-author when any maintainer requests changes", async () => {
@@ -627,7 +627,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
-		expect(latestGateStatus(result)?.state).toBe("failure")
+		expect(latestGateStatus(result)?.state).toBe("pending")
 	})
 
 	it("keeps draft PRs awaiting the author when a maintainer requests changes", async () => {
@@ -701,7 +701,7 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow()
 
 		expect(latestGateStatus(result)).toEqual(
-			expect.objectContaining({ context: "PR review gate", sha: SHA, state: "failure" }),
+			expect.objectContaining({ context: "PR review gate", sha: SHA, state: "pending" }),
 		)
 	})
 
