@@ -134,18 +134,20 @@ pnpm install
 
 ### Review Process
 
-Draft and ready-for-review PRs move through these gates in order:
+Ready-for-review PRs move through these gates in order:
 
 1. Required CI checks must pass.
-2. The PR author or another account GitHub identifies as non-bot comments `@coderabbitai review` to start CodeRabbit. For bot-authored PRs, this request must come from a non-bot maintainer account with write access.
-3. CodeRabbit reviews the latest commit. Address any findings and request another review after pushing updates.
-4. Draft PRs are marked ready after CodeRabbit approval, then a non-author maintainer account with write access performs the final review and approval.
+2. The workflow automatically starts CodeRabbit review for the latest commit.
+3. Address any CodeRabbit findings and push updates; review restarts automatically after required CI passes again.
+4. After CodeRabbit approval, a non-author maintainer account with write access performs the final review and approval.
 
-An automated comment on each PR shows the current gate and next action. The `awaiting-review-trigger`, `awaiting-coderabbit`, `awaiting-ready`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates the trigger and approvals, so CodeRabbit must be requested again before the final maintainer review.
+An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
 
 The `PR review gate` check passes only after the sequence completes. Repository administrators should configure it as a required status check on `main`; the labels and comment explain the state, while the required check enforces it.
 
-PRs opened by bots or other automated accounts follow the same sequence. GitHub identifies actor accounts as `User` or `Bot`; it cannot distinguish a person's action from automation using that person's token. Final approval therefore requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation before merging.
+Optional checks such as Codecov do not delay CodeRabbit unless repository rules make them required. Draft PRs are not reviewed automatically, but authors can still request an early review with `@coderabbitai review`.
+
+PRs opened by bots or other automated accounts follow the same CI and CodeRabbit gates. Final approval requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation before merging.
 
 - **Daily Triage:** Quick checks by maintainers.
 - **Weekly In-depth Review:** Comprehensive assessment.
@@ -166,7 +168,7 @@ Maintainers may close PRs that are incomplete, too broad, inactive, not aligned 
 PRs are also closed automatically by bot:
 
 - **60-day inactivity:** A PR with no activity for 60 days is marked stale and closed after a further 7 days if there is still no activity. Any new comment, commit, or review resets the timer.
-- **14-day author inactivity:** After CodeRabbit or a maintainer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. After an update, the PR moves to `awaiting-review-trigger`; after a human starts CodeRabbit and it approves, the PR moves to `awaiting-maintainer`. These waiting labels are not eligible for automatic closure under this policy.
+- **14-day author inactivity:** After CodeRabbit or a maintainer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. After an update, required CI and CodeRabbit rerun automatically; after CodeRabbit approval, the PR moves to `awaiting-maintainer`. These waiting states are not eligible for automatic closure under this policy.
 
 To opt a PR out of automatic closure, apply the `do-not-close`, `pinned`, or `work-in-progress` label.
 

@@ -10,8 +10,6 @@ on:
     types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled, unlabeled]
   pull_request_review:
     types: [submitted, dismissed]
-  issue_comment:
-    types: [created]
   workflow_run:
     workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
     types: [completed]
@@ -37,7 +35,6 @@ jobs:
             const { owner, repo } = context.repo;
             const stateLabels = [
               'awaiting-author',
-              'awaiting-review-trigger',
               'awaiting-coderabbit',
               'awaiting-ready',
               'awaiting-maintainer',
@@ -45,11 +42,6 @@ jobs:
               'has-conflicts',
             ];
             const labelDefinitions = [
-              {
-                name: 'awaiting-review-trigger',
-                color: 'fbca04',
-                description: 'CI passed; waiting for a human to request CodeRabbit',
-              },
               {
                 name: 'awaiting-coderabbit',
                 color: '5319e7',
@@ -65,10 +57,16 @@ jobs:
                 color: '0e8a16',
                 description: 'CodeRabbit approved; waiting for a human maintainer',
               },
+              {
+                name: 'coderabbit-review-active',
+                color: '5319e7',
+                description: 'Required CI passed; CodeRabbit review is active',
+              },
             ];
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
-            const triggerMarkerPrefix = '<!-- coderabbit-review-trigger:';
+            const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
             const codeRabbitLogin = 'coderabbitai[bot]';
+            const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'PR review gate';
 
             // When triggered by a single PR event, only reconcile that PR.
@@ -77,8 +75,6 @@ jobs:
             let eventPrNumbers = [];
             if (context.payload.pull_request?.number) {
               eventPrNumbers = [context.payload.pull_request.number];
-            } else if (context.payload.issue?.pull_request) {
-              eventPrNumbers = [context.payload.issue.number];
             } else if (context.payload.workflow_run?.pull_requests) {
               eventPrNumbers = context.payload.workflow_run.pull_requests.map(pr => pr.number);
             }
@@ -88,7 +84,7 @@ jobs:
                 return pr;
               }));
               prs = prs.filter(pr => pr.state === 'open');
-            } else if (context.eventName === 'workflow_run' || context.eventName === 'issue_comment') {
+            } else if (context.eventName === 'workflow_run') {
               prs = [];
             } else {
               prs = await github.paginate(github.rest.pulls.list, {
@@ -166,6 +162,38 @@ jobs:
               );
             }
 
+            async function setCodeRabbitReviewActive(pr, enabled, recycle = false) {
+              if (isReadOnlyRun && isForkPR(pr)) return;
+
+              const hasLabel = pr.labels.some(label => label.name === codeRabbitActiveLabel);
+              if (enabled && hasLabel && recycle) {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
+                });
+                pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
+              }
+              if (enabled && (!hasLabel || recycle)) {
+                await github.rest.issues.addLabels({
+                  owner, repo, issue_number: pr.number, labels: [codeRabbitActiveLabel],
+                });
+                pr.labels.push({ name: codeRabbitActiveLabel });
+              } else if (!enabled && hasLabel) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
+                  });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+                pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
+              }
+            }
+
+            function codeRabbitLabelHead(comment) {
+              const match = comment?.body?.match(/<!-- coderabbit-review-label:([a-f0-9]{40}) -->/);
+              return match?.[1] ?? null;
+            }
+
             async function permissionFor(username) {
               try {
                 const result = await github.rest.repos.getCollaboratorPermissionLevel({
@@ -178,14 +206,14 @@ jobs:
               }
             }
 
-            function phaseMessage(phase, acceptedTrigger) {
+            function phaseMessage(phase) {
               const messages = {
+                draft: 'Mark the PR ready to start CodeRabbit after required CI passes.',
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
                 'ci-pending': 'Wait for the required CI checks to finish.',
                 'ci-failed': 'Fix the failing required CI checks and push an update.',
-                trigger: 'Comment `@coderabbitai review` to start the AI review.',
-                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Request another review for the new commit.',
-                coderabbit: `CodeRabbit review was requested by @${acceptedTrigger?.actor}. Wait for it to approve the latest commit.`,
+                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after required CI passes.',
+                coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
                 'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready for maintainer review.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
                 maintainer: 'CodeRabbit approved the latest commit. A maintainer must now review and approve it.',
@@ -194,7 +222,7 @@ jobs:
               return messages[phase];
             }
 
-            async function updateReviewGate(pr, phase, passed, acceptedTrigger = null) {
+            async function updateReviewGate(pr, phase, passed) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
               const checkRuns = await github.paginate(github.rest.checks.listForRef, {
@@ -212,7 +240,7 @@ jobs:
                 details_url: pr.html_url,
                 output: {
                   title: passed ? 'Review sequence complete' : 'Review sequence incomplete',
-                  summary: phaseMessage(phase, acceptedTrigger),
+                  summary: phaseMessage(phase),
                 },
               };
 
@@ -225,84 +253,31 @@ jobs:
               }
             }
 
-            function parseAcceptedTrigger(comment, headSha) {
-              const match = comment?.body?.match(
-                /<!-- coderabbit-review-trigger:([a-f0-9]{40}):([^:]+):(\d+) -->/
-              );
-              if (!match || match[1] !== headSha) return null;
-              return { sha: match[1], actor: match[2], requestedAt: Number(match[3]) };
-            }
-
-            async function resolveAcceptedTrigger(pr, existingGuide, ciCompletedAt) {
-              let acceptedTrigger = parseAcceptedTrigger(existingGuide, pr.head.sha);
-              const isRequestEvent = context.eventName === 'issue_comment' &&
-                context.payload.action === 'created' &&
-                Boolean(context.payload.issue?.pull_request) &&
-                /^@coderabbitai\s+(?:full\s+)?review\b/im.test(context.payload.comment?.body ?? '');
-
-              if (!isRequestEvent) return acceptedTrigger;
-
-              const actor = context.payload.sender;
-              let permission = 'none';
-              const botAuthored = pr.user?.type === 'Bot';
-              if (actor?.type !== 'Bot' && botAuthored) {
-                permission = await permissionFor(actor.login);
-              }
-              const allowed = actor?.type !== 'Bot' &&
-                (!botAuthored || ['admin', 'maintain', 'write'].includes(permission));
-
-              if (!allowed) {
-                core.warning(
-                  `PR #${pr.number}: rejected CodeRabbit trigger from ${actor?.login ?? 'unknown'} (${permission})`
-                );
-                return acceptedTrigger;
-              }
-
-              const requestedAt = Date.parse(context.payload.comment.created_at);
-              if (requestedAt < ciCompletedAt) {
-                core.warning(`PR #${pr.number}: rejected review request made before CI completed`);
-                return acceptedTrigger;
-              }
-
-              if (acceptedTrigger) {
-                core.info(`PR #${pr.number}: trigger already accepted for ${pr.head.sha}`);
-                return acceptedTrigger;
-              }
-
-              acceptedTrigger = {
-                sha: pr.head.sha,
-                actor: actor.login,
-                requestedAt,
-              };
-              core.info(`PR #${pr.number}: accepted CodeRabbit trigger from ${actor.login}`);
-              return acceptedTrigger;
-            }
-
-            function reviewGuideBody(pr, phase, acceptedTrigger) {
+            function reviewGuideBody(pr, phase) {
               const automatedAuthor = pr.user?.type === 'Bot';
               const authorNote = automatedAuthor
                 ? 'This PR was opened by an automated account. A human maintainer must verify the change intent, provenance, and validation before merging.'
                 : 'Thanks for contributing. This comment tracks the review sequence and the next action.';
 
-              const triggerMarker = acceptedTrigger
-                ? `\n${triggerMarkerPrefix}${acceptedTrigger.sha}:${acceptedTrigger.actor}:${acceptedTrigger.requestedAt} -->`
+              const labelMarker = phase === 'coderabbit'
+                ? `\n${codeRabbitLabelMarkerPrefix}${pr.head.sha} -->`
                 : '';
 
               return `${guideMarker}\n### Review process\n\n${authorNote}\n\n` +
                 '1. Required CI checks pass.\n' +
-                '2. A human explicitly requests CodeRabbit review.\n' +
+                '2. The workflow starts CodeRabbit automatically.\n' +
                 '3. CodeRabbit reviews and approves the latest commit.\n' +
                 '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
-                `**Current step:** ${phaseMessage(phase, acceptedTrigger)}${triggerMarker}`;
+                `**Current step:** ${phaseMessage(phase)}${labelMarker}`;
             }
 
-            async function updateReviewGuide(pr, phase, acceptedTrigger, existingGuide = null) {
+            async function updateReviewGuide(pr, phase, existingGuide = null) {
               if (isReadOnlyRun && isForkPR(pr)) {
                 core.info(`PR #${pr.number}: fork PR on a read-only run — skipping guide update`);
                 return;
               }
 
-              const body = reviewGuideBody(pr, phase, acceptedTrigger);
+              const body = reviewGuideBody(pr, phase);
               const existing = existingGuide ?? await findReviewGuide(pr);
 
               if (!existing) {
@@ -354,8 +329,6 @@ jobs:
             for (const pr of prs) {
               try {
                 const existingGuide = await findReviewGuide(pr);
-                let acceptedTrigger = parseAcceptedTrigger(existingGuide, pr.head.sha);
-                if (acceptedTrigger?.sha !== pr.head.sha) acceptedTrigger = null;
 
                 // `mergeable`/`mergeable_state` are only returned by the single-PR GET
                 // endpoint, and are computed asynchronously by GitHub — a PR fetched via
@@ -369,8 +342,9 @@ jobs:
 
                 if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
                   core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                  await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, 'has-conflicts');
-                  await updateReviewGuide(pr, 'conflict', acceptedTrigger, existingGuide);
+                  await updateReviewGuide(pr, 'conflict', existingGuide);
                   await updateReviewGate(pr, 'conflict', false);
                   continue;
                 }
@@ -471,30 +445,20 @@ jobs:
                   )
                 );
 
-                const ciCompletedAt = Math.max(
-                  0,
-                  ...relevantRuns.map(run => Date.parse(run.completed_at ?? run.started_at)),
-                  ...relevantStatuses.map(status => Date.parse(status.updated_at ?? status.created_at)),
-                );
-
                 // While CI is running or has failed, remove state labels and move on.
                 // CI failure is its own signal; the label would add noise, not clarity.
                 if (ciPending || ciFailed) {
                   core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                  await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, null);
                   await updateReviewGuide(
                     pr,
                     ciPending ? 'ci-pending' : 'ci-failed',
-                    acceptedTrigger,
                     existingGuide
                   );
                   await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
                   continue;
                 }
-
-                // A review request is accepted only after CI passes. The accepted request is
-                // bound to this head SHA in the managed guide comment.
-                acceptedTrigger = await resolveAcceptedTrigger(pr, existingGuide, ciCompletedAt);
 
                 // CI is passing. Now determine review state.
                 const reviews = await github.paginate(github.rest.pulls.listReviews, {
@@ -532,10 +496,7 @@ jobs:
                 const maintainerChangeRequest = freshMaintainerReviews.find(
                   review => review.state === 'CHANGES_REQUESTED'
                 );
-                const codeRabbitReviewAfterTrigger = acceptedTrigger && freshCodeRabbitReview &&
-                  Date.parse(freshCodeRabbitReview.submitted_at) > acceptedTrigger.requestedAt;
-                const codeRabbitApproved = codeRabbitReviewAfterTrigger &&
-                  freshCodeRabbitReview.state === 'APPROVED';
+                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED';
                 const maintainerApproval = freshMaintainerReviews
                   .filter(review => review.state === 'APPROVED')
                   .sort((a, b) => Date.parse(b.submitted_at) - Date.parse(a.submitted_at))[0];
@@ -545,25 +506,35 @@ jobs:
 
                 let desiredLabel;
                 let phase;
-                if (codeRabbitReviewAfterTrigger && freshCodeRabbitReview.state === 'CHANGES_REQUESTED') {
+                if (freshCodeRabbitReview?.state === 'CHANGES_REQUESTED') {
+                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-author';
                   phase = 'coderabbit-changes';
-                } else if (!acceptedTrigger) {
-                  desiredLabel = 'awaiting-review-trigger';
-                  phase = 'trigger';
                 } else if (!codeRabbitApproved) {
-                  desiredLabel = 'awaiting-coderabbit';
-                  phase = 'coderabbit';
+                  if (pr.draft) {
+                    await setCodeRabbitReviewActive(pr, false);
+                    desiredLabel = null;
+                    phase = 'draft';
+                  } else {
+                    const recycleLabel = codeRabbitLabelHead(existingGuide) !== pr.head.sha;
+                    await setCodeRabbitReviewActive(pr, true, recycleLabel);
+                    desiredLabel = 'awaiting-coderabbit';
+                    phase = 'coderabbit';
+                  }
                 } else if (pr.draft) {
+                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-ready';
                   phase = 'draft-approved';
                 } else if (maintainerChangeRequest) {
+                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-author';
                   phase = 'maintainer-changes';
                 } else if (!maintainerApprovedAfterCodeRabbit) {
+                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = 'awaiting-maintainer';
                   phase = 'maintainer';
                 } else {
+                  await setCodeRabbitReviewActive(pr, false);
                   desiredLabel = null;
                   phase = 'approved';
                 }
@@ -575,8 +546,8 @@ jobs:
                 );
 
                 await reconcileLabels(pr, desiredLabel);
-                await updateReviewGuide(pr, phase, acceptedTrigger, existingGuide);
-                await updateReviewGate(pr, phase, phase === 'approved', acceptedTrigger);
+                await updateReviewGuide(pr, phase, existingGuide);
+                await updateReviewGate(pr, phase, phase === 'approved');
               } catch (error) {
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`

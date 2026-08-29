@@ -12,8 +12,7 @@ const workflow = parse(
 const workflowScript = workflow.jobs.reconcile.steps[0].with.script as string
 
 const SHA = "a".repeat(40)
-const CI_COMPLETED_AT = Date.parse("2026-08-29T15:00:00Z")
-const REQUESTED_AT = Date.parse("2026-08-29T15:01:00Z")
+const OLD_SHA = "b".repeat(40)
 const REVIEWED_AT = Date.parse("2026-08-29T15:02:00Z")
 
 type ReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED"
@@ -21,11 +20,10 @@ type ReviewState = "APPROVED" | "CHANGES_REQUESTED" | "COMMENTED" | "DISMISSED"
 interface HarnessOptions {
 	prState?: "open" | "closed"
 	draft?: boolean
-	authorType?: "Bot" | "User"
 	eventName?: string
-	commentCreatedAt?: number
-	senderType?: "Bot" | "User"
-	existingGuide?: string
+	existingGuide?: boolean
+	existingGuideHead?: string
+	labels?: string[]
 	reviews?: Array<{
 		login: string
 		type: "Bot" | "User"
@@ -35,15 +33,10 @@ interface HarnessOptions {
 	}>
 	permissions?: Record<string, string>
 	requiredContexts?: string[]
+	requiredStatus?: "queued" | "in_progress" | "completed"
+	requiredConclusion?: "success" | "failure"
+	includeFailedCodecov?: boolean
 	branchRulesFail?: boolean
-}
-
-function triggerMarker(requestedAt = REQUESTED_AT, actor = "maintainer") {
-	return `<!-- coderabbit-review-trigger:${SHA}:${actor}:${requestedAt} -->`
-}
-
-function guideWithTrigger(requestedAt = REQUESTED_AT) {
-	return `<!-- zoo-code-pr-review-process -->\n${triggerMarker(requestedAt)}\n**Current step:** Waiting`
 }
 
 async function runWorkflow(options: HarnessOptions = {}) {
@@ -52,25 +45,42 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		state: options.prState ?? "open",
 		draft: options.draft ?? false,
 		html_url: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
-		user: { login: options.authorType === "User" ? "author" : "zoomote[bot]", type: options.authorType ?? "Bot" },
+		user: { login: "zoomote[bot]", type: "Bot" },
 		head: { sha: SHA, repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
-		labels: [] as Array<{ name: string }>,
+		labels: (options.labels ?? []).map((name) => ({ name })),
 		mergeable: true,
 		mergeable_state: "clean",
 	}
 	const requiredContexts = options.requiredContexts ?? ["tests"]
-	const checkRuns = requiredContexts
+	const requiredRuns = requiredContexts
 		.filter((name) => name !== "reconcile")
 		.map((name, index) => ({
 			id: index + 1,
 			name,
-			status: "completed",
-			conclusion: "success",
-			started_at: new Date(CI_COMPLETED_AT - 1_000).toISOString(),
-			completed_at: new Date(CI_COMPLETED_AT).toISOString(),
+			status: options.requiredStatus ?? "completed",
+			conclusion:
+				(options.requiredStatus ?? "completed") === "completed"
+					? (options.requiredConclusion ?? "success")
+					: null,
+			started_at: "2026-08-29T15:00:00Z",
+			completed_at: (options.requiredStatus ?? "completed") === "completed" ? "2026-08-29T15:01:00Z" : null,
 			app: { id: 15368, slug: "github-actions" },
 		}))
+	const checkRuns = options.includeFailedCodecov
+		? [
+				...requiredRuns,
+				{
+					id: 100,
+					name: "codecov/patch",
+					status: "completed",
+					conclusion: "failure",
+					started_at: "2026-08-29T15:00:00Z",
+					completed_at: "2026-08-29T15:01:00Z",
+					app: { id: 254, slug: "codecov" },
+				},
+			]
+		: requiredRuns
 	const reviews = (options.reviews ?? []).map((review, index) => ({
 		id: index + 1,
 		state: review.state,
@@ -78,11 +88,23 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		submitted_at: new Date(review.submittedAt).toISOString(),
 		user: { login: review.login, type: review.type },
 	}))
-	const existingComments = options.existingGuide
-		? [{ id: 10, user: { login: "github-actions[bot]" }, body: options.existingGuide }]
-		: []
+	const existingComments =
+		options.existingGuide || options.existingGuideHead
+			? [
+					{
+						id: 10,
+						user: { login: "github-actions[bot]" },
+						body:
+							"<!-- zoo-code-pr-review-process -->\n**Current step:** Waiting" +
+							(options.existingGuideHead
+								? `\n<!-- coderabbit-review-label:${options.existingGuideHead} -->`
+								: ""),
+					},
+				]
+			: []
 
 	const addLabels = vi.fn(async (_args: unknown) => undefined)
+	const removeLabel = vi.fn(async (_args: unknown) => undefined)
 	const createComment = vi.fn(async (_args: unknown) => undefined)
 	const updateComment = vi.fn(async (_args: unknown) => undefined)
 	const createCheck = vi.fn(async (_args: unknown) => undefined)
@@ -90,9 +112,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	const setFailed = vi.fn()
 	const permissionFor = vi.fn(async ({ username }: { username: string }) => {
 		const permission = options.permissions?.[username]
-		if (!permission) {
-			throw Object.assign(new Error("Not Found"), { status: 404 })
-		}
+		if (!permission) throw Object.assign(new Error("Not Found"), { status: 404 })
 		return { data: { permission } }
 	})
 
@@ -124,7 +144,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			issues: {
 				getLabel: vi.fn(async () => ({ data: {} })),
 				createLabel: vi.fn(async () => undefined),
-				removeLabel: vi.fn(async () => undefined),
+				removeLabel,
 				addLabels,
 				listComments: vi.fn(async () => existingComments),
 				createComment,
@@ -141,17 +161,17 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			},
 		},
 	}
+	const eventName = options.eventName ?? "pull_request_target"
 	const context = {
-		eventName: options.eventName ?? "issue_comment",
+		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
 		payload: {
-			action: "created",
-			issue: { number: 1437, pull_request: {} },
-			comment: {
-				body: "@coderabbitai review",
-				created_at: new Date(options.commentCreatedAt ?? REQUESTED_AT).toISOString(),
+			action: "ready_for_review",
+			pull_request: {
+				number: 1437,
+				head: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 			},
-			sender: { login: "maintainer", type: options.senderType ?? "User" },
 		},
 	}
 	const core = {
@@ -166,12 +186,12 @@ async function runWorkflow(options: HarnessOptions = {}) {
 
 	return {
 		addLabels,
+		removeLabel,
 		createComment,
 		updateComment,
 		createCheck,
 		updateCheck,
 		setFailed,
-		permissionFor,
 	}
 }
 
@@ -192,86 +212,76 @@ function latestCheck(result: Awaited<ReturnType<typeof runWorkflow>>) {
 }
 
 describe("PR review-state workflow", () => {
-	it("ignores comment events for closed pull requests", async () => {
+	it("ignores events for closed pull requests", async () => {
 		const result = await runWorkflow({ prState: "closed" })
 
 		expect(result.createComment).not.toHaveBeenCalled()
 		expect(result.createCheck).not.toHaveBeenCalled()
 	})
 
-	it("records draft review requests and waits for CodeRabbit", async () => {
-		const result = await runWorkflow({ draft: true, permissions: { maintainer: "write" } })
+	it("does not start automatic review for drafts", async () => {
+		const result = await runWorkflow({ draft: true })
 
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(latestGuide(result)).toContain("Mark the PR ready")
+	})
+
+	it("removes the CodeRabbit label while required CI is pending", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			requiredStatus: "in_progress",
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(latestCheck(result)?.output?.summary).toContain("required CI checks")
+	})
+
+	it("does not start CodeRabbit when required CI fails", async () => {
+		const result = await runWorkflow({ requiredConclusion: "failure" })
+
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(latestCheck(result)?.output?.summary).toContain("Fix the failing required CI checks")
+	})
+
+	it("starts CodeRabbit automatically after required CI passes", async () => {
+		const result = await runWorkflow()
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
-		expect(latestGuide(result)).toContain(triggerMarker())
-		expect(latestCheck(result)?.output?.summary).not.toContain("coderabbit-review-trigger")
+		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
 
-	it("moves approved draft reviews to awaiting-ready", async () => {
+	it("recycles a CodeRabbit label left over from an older head", async () => {
 		const result = await runWorkflow({
-			draft: true,
-			permissions: { maintainer: "write" },
-			reviews: [
-				{
-					login: "coderabbitai[bot]",
-					type: "Bot",
-					state: "APPROVED",
-					submittedAt: REVIEWED_AT,
-				},
-			],
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: OLD_SHA,
 		})
 
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-ready"] }))
-		expect(latestGuide(result)).toContain("Mark the draft ready for maintainer review")
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
-	it("keeps the first accepted trigger for repeated commands", async () => {
+	it("keeps a CodeRabbit label already bound to the current head", async () => {
 		const result = await runWorkflow({
-			draft: true,
-			commentCreatedAt: REVIEWED_AT + 1_000,
-			existingGuide: guideWithTrigger(),
-			permissions: { maintainer: "write" },
-			reviews: [
-				{
-					login: "coderabbitai[bot]",
-					type: "Bot",
-					state: "APPROVED",
-					submittedAt: REVIEWED_AT,
-				},
-			],
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: SHA,
 		})
 
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-ready"] }))
-		expect(latestGuide(result)).toContain(triggerMarker())
-		expect(latestGuide(result)).not.toContain(String(REVIEWED_AT + 1_000))
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
 	})
 
-	it("rejects commands created before required CI completed", async () => {
-		const result = await runWorkflow({
-			draft: true,
-			commentCreatedAt: CI_COMPLETED_AT - 1,
-			permissions: { maintainer: "write" },
-		})
+	it("ignores a failed optional Codecov check", async () => {
+		const result = await runWorkflow({ includeFailedCodecov: true })
 
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-review-trigger"] }))
-		expect(latestGuide(result)).not.toContain("coderabbit-review-trigger")
-	})
-
-	it("rejects bot-authored review commands", async () => {
-		const result = await runWorkflow({
-			draft: true,
-			senderType: "Bot",
-			permissions: { maintainer: "write" },
-		})
-
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-review-trigger"] }))
-		expect(latestGuide(result)).not.toContain("coderabbit-review-trigger")
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("routes CodeRabbit change requests back to the author", async () => {
 		const result = await runWorkflow({
-			draft: true,
-			permissions: { maintainer: "write" },
+			labels: ["coderabbit-review-active"],
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -282,14 +292,43 @@ describe("PR review-state workflow", () => {
 			],
 		})
 
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+	})
+
+	it("moves approved ready PRs to maintainer review", async () => {
+		const result = await runWorkflow({
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+	})
+
+	it("preserves manual draft approvals until the PR is ready", async () => {
+		const result = await runWorkflow({
+			draft: true,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-ready"] }))
 	})
 
 	it("treats non-collaborator reviews as non-maintainer input", async () => {
 		const result = await runWorkflow({
-			authorType: "User",
-			eventName: "pull_request_review",
-			existingGuide: guideWithTrigger(),
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -310,17 +349,8 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
 	})
 
-	it("excludes the reconciliation job from required checks", async () => {
-		const result = await runWorkflow({ requiredContexts: ["tests", "reconcile"] })
-
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-review-trigger"] }))
-	})
-
 	it("passes only after a later non-author maintainer approval", async () => {
 		const result = await runWorkflow({
-			authorType: "User",
-			eventName: "pull_request_review",
-			existingGuide: guideWithTrigger(),
 			permissions: { maintainer: "write" },
 			reviews: [
 				{
@@ -339,7 +369,12 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(latestCheck(result)?.conclusion).toBe("success")
-		expect(result.addLabels).not.toHaveBeenCalled()
+	})
+
+	it("excludes the reconciliation job from required checks", async () => {
+		const result = await runWorkflow({ requiredContexts: ["tests", "reconcile"] })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
 	it("fails closed when branch rules are unavailable", async () => {
@@ -347,5 +382,21 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).not.toHaveBeenCalled()
 		expect(latestCheck(result)?.output?.summary).toContain("required CI checks")
+	})
+
+	it("ignores CodeRabbit reviews from an older head", async () => {
+		const result = await runWorkflow({
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+					commitId: OLD_SHA,
+				},
+			],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 })
