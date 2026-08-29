@@ -3372,6 +3372,7 @@ describe("Cline", () => {
 				ask: "tool" as const,
 				text: "partial tool message",
 				partial: true,
+				progressStatus: { text: "Generating…", icon: "sync" },
 			}
 
 			task.clineMessages.push(partialToolAsk)
@@ -3386,9 +3387,11 @@ describe("Cline", () => {
 			await flushMicrotasks()
 
 			expect(partialToolAsk.partial).toBe(false)
+			expect(partialToolAsk.progressStatus).toBeUndefined()
 			expect(saveSpy).toHaveBeenCalled()
 			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
 			expect(updateSnapshot?.partial).toBe(false)
+			expect(updateSnapshot?.progressStatus).toBeUndefined()
 
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()

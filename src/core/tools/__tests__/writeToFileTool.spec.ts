@@ -704,6 +704,40 @@ describe("writeToFileTool", () => {
 			expect(mockCline.diffViewProvider.open).toHaveBeenCalledTimes(1)
 		})
 
+		it("finalizes any open partial tool ask when final args cannot be parsed", async () => {
+			// Regression test: a write_to_file block whose final args fail to parse (e.g. the
+			// tool call was truncated mid-JSON by the output token limit) never reaches
+			// execute(). A streaming delta for that block may already have opened a partial
+			// `tool` ask (partial: true) -- BaseTool.handle must finalize it, otherwise the
+			// UI spinner stays stuck even though the parse error bubble was shown.
+			// Delta 1 - stabilize path (no ask yet)
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			// Delta 2 - path stabilized, partial ask issued once
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.finalizePartialToolAsk).not.toHaveBeenCalled()
+
+			// Final block arrives but its native args cannot be parsed, so execute() is skipped.
+			const toolUse: ToolUse = {
+				type: "tool_use",
+				name: "write_to_file",
+				params: {
+					path: testFilePath,
+					content: testContent,
+				},
+				partial: false,
+			}
+			await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// The parse error is still reported, and the open partial ask is finalized first.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+		})
+
 		it("reports a filesystem error only once across the streaming and execute phases", async () => {
 			// Regression test for the double-error UX defect: a single write_to_file call to a
 			// read-only path failed twice -- once in handlePartial ("handling partial write_to_file")
