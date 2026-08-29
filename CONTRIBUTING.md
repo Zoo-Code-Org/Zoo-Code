@@ -137,15 +137,17 @@ pnpm install
 Ready-for-review PRs move through these gates in order:
 
 1. Required CI checks must pass.
-2. The workflow automatically starts CodeRabbit review for the latest commit.
+2. The workflow automatically applies the managed `coderabbit-review-active` label to start CodeRabbit review for the latest commit. Contributors and maintainers should not manage this label manually.
 3. Address any CodeRabbit findings and push updates; review restarts automatically after required CI passes again.
 4. After CodeRabbit approval, a non-author maintainer account with write access performs the final review and approval.
 
-An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
+An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-ready`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
 
 The `PR review gate` commit status passes only after the sequence completes. It is advisory by default; repository administrators can make it required on `main` if enforcement is desired. The labels and managed comment remain the maintainer-facing review queue either way.
 
 Optional checks such as Codecov do not delay CodeRabbit unless repository rules make them required. Draft PRs are not reviewed automatically, but authors can still request an early review with `@coderabbitai review`.
+
+The workflow reads required checks from the `main` branch ruleset. If those rules cannot be read, the gate fails closed and waits for the hourly reconciliation or a manual workflow run after the ruleset is available again.
 
 PRs opened by bots or other automated accounts follow the same CI and CodeRabbit gates. Final approval requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation before merging.
 
