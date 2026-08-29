@@ -5,9 +5,10 @@ import path from "path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { Task } from "../../task/Task"
+import type { ChangeJournalEntry } from "../changeJournal"
 import { getCheckpointService } from "../index"
 import { appendChange } from "../changeJournal"
-import { rollbackFile, rollbackStep } from "../rollback"
+import { restoreLatestFile, rollbackFile, rollbackStep } from "../rollback"
 
 vi.mock("../index", () => ({
 	getCheckpointService: vi.fn(),
@@ -27,10 +28,22 @@ function makeTask(): Task {
 	} as unknown as Task
 }
 
+/** A checkpoint-service double with a recording restoreFile and a baseline. */
+function serviceWith(baseHash: string | undefined) {
+	const restoreFile = vi.fn().mockResolvedValue(undefined)
+	return { baseHash, restoreFile }
+}
+
+async function seedJournal(entries: ChangeJournalEntry[]): Promise<void> {
+	for (const entry of entries) {
+		await appendChange(globalStorageDir, "task-rollback", entry)
+	}
+}
+
 let globalStorageDir: string
 
 beforeEach(async () => {
-	globalStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b3a-rollback-"))
+	globalStorageDir = await fs.mkdtemp(path.join(os.tmpdir(), "b3c-rollback-"))
 	mockedGetCheckpointService.mockReset()
 })
 
@@ -38,15 +51,81 @@ afterEach(async () => {
 	await fs.rm(globalStorageDir, { recursive: true, force: true })
 })
 
-describe("rollbackFile (B3a)", () => {
-	it("restores the file through the task's checkpoint service", async () => {
-		const restoreFile = vi.fn().mockResolvedValue(undefined)
-		mockedGetCheckpointService.mockResolvedValue({ restoreFile })
+describe("rollbackFile (B3c: undo the step's write to the file)", () => {
+	it("restores the file to the PREVIOUS step's checkpoint when an earlier entry exists", async () => {
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackFile(makeTask(), "sha-2", "src/a.ts")
+
+		expect(outcome).toEqual({ filePath: "src/a.ts", success: true })
+		// The pre-step state is the previous step's post-write checkpoint — not
+		// the step's own (post-write) checkpoint.
+		expect(service.restoreFile).toHaveBeenCalledTimes(1)
+		expect(service.restoreFile).toHaveBeenCalledWith("sha-1", "src/a.ts")
+	})
+
+	it("restores from the task-start baseline when the file has no earlier entry", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
 
 		expect(outcome).toEqual({ filePath: "src/a.ts", success: true })
-		expect(restoreFile).toHaveBeenCalledWith("sha-1", "src/a.ts")
+		expect(service.restoreFile).toHaveBeenCalledWith("base-0", "src/a.ts")
+	})
+
+	it("resolves through the first entry of a multi-write step", async () => {
+		// One patch writes the same file twice: two entries share the step
+		// checkpoint. The pre-step state is still the entry before the first
+		// one of the step.
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackFile(makeTask(), "sha-2", "src/a.ts")
+
+		expect(outcome.success).toBe(true)
+		expect(service.restoreFile).toHaveBeenCalledWith("sha-1", "src/a.ts")
+	})
+
+	it("fails cleanly when the file is not part of the given step checkpoint", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackFile(makeTask(), "sha-2", "src/a.ts")
+
+		expect(outcome).toEqual({
+			filePath: "src/a.ts",
+			success: false,
+			error: "File is not part of this step's checkpoint",
+		})
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("fails cleanly when no earlier checkpoint exists and the baseline is unavailable", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith(undefined)
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
+
+		expect(outcome).toEqual({
+			filePath: "src/a.ts",
+			success: false,
+			error: "No checkpoint available to restore",
+		})
+		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
 
 	it("fails cleanly when checkpoints are not enabled", async () => {
@@ -62,107 +141,118 @@ describe("rollbackFile (B3a)", () => {
 	})
 
 	it("reports the service error without throwing", async () => {
-		mockedGetCheckpointService.mockResolvedValue({
-			restoreFile: vi.fn().mockRejectedValue(new Error("pathspec did not match")),
-		})
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		service.restoreFile.mockRejectedValue(new Error("pathspec did not match"))
+		mockedGetCheckpointService.mockResolvedValue(service)
 
-		const outcome = await rollbackFile(makeTask(), "sha-bad", "src/a.ts")
+		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
 
 		expect(outcome.success).toBe(false)
 		expect(outcome.error).toContain("pathspec did not match")
 	})
 
 	it("stringifies non-Error rejections into the outcome", async () => {
-		mockedGetCheckpointService.mockResolvedValue({
-			restoreFile: vi.fn().mockRejectedValue("raw failure"),
-		})
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		service.restoreFile.mockRejectedValue("raw failure")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
-		const outcome = await rollbackFile(makeTask(), "sha-bad", "src/a.ts")
+		const outcome = await rollbackFile(makeTask(), "sha-1", "src/a.ts")
 
 		expect(outcome).toEqual({ filePath: "src/a.ts", success: false, error: "raw failure" })
 	})
 })
 
-describe("rollbackStep (B3a)", () => {
-	it("restores every step file from the step's checkpoint via the journal", async () => {
-		await appendChange(globalStorageDir, "task-rollback", {
-			path: "src/a.ts",
-			operation: "create",
-			checkpointId: "sha-step",
-		})
-		await appendChange(globalStorageDir, "task-rollback", {
-			path: "src/b.ts",
-			operation: "update",
-			checkpointId: "sha-step",
-		})
+describe("rollbackStep (B3c: undo every file of the step)", () => {
+	it("restores every step file to its pre-step state", async () => {
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+			{ path: "src/b.ts", operation: "update", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
-		const restoreFile = vi.fn().mockResolvedValue(undefined)
-		mockedGetCheckpointService.mockResolvedValue({ restoreFile })
+		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/b.ts"], "sha-2")
 
-		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/b.ts"], "sha-step")
-
-		expect(outcome.checkpointId).toBe("sha-step")
+		expect(outcome.checkpointId).toBe("sha-2")
 		expect(outcome.files).toEqual([
 			{ filePath: "src/a.ts", success: true },
 			{ filePath: "src/b.ts", success: true },
 		])
-		expect(restoreFile).toHaveBeenCalledTimes(2)
-		expect(restoreFile).toHaveBeenNthCalledWith(1, "sha-step", "src/a.ts")
-		expect(restoreFile).toHaveBeenNthCalledWith(2, "sha-step", "src/b.ts")
+		expect(service.restoreFile).toHaveBeenCalledTimes(2)
+		expect(service.restoreFile).toHaveBeenNthCalledWith(1, "sha-1", "src/a.ts")
+		// src/b.ts has no earlier entry: its pre-step state is the baseline.
+		expect(service.restoreFile).toHaveBeenNthCalledWith(2, "base-0", "src/b.ts")
+	})
+
+	it("keeps per-file failures isolated from the other step files", async () => {
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+			{ path: "src/b.ts", operation: "create", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		service.restoreFile.mockRejectedValueOnce(new Error("pathspec did not match"))
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/b.ts"], "sha-2")
+
+		expect(outcome.files[0].success).toBe(false)
+		expect(outcome.files[0].error).toContain("pathspec did not match")
+		expect(outcome.files[1]).toEqual({ filePath: "src/b.ts", success: true })
+	})
+
+	it("fails the file cleanly when no earlier checkpoint exists and the baseline is unavailable", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-2" }])
+		const service = serviceWith(undefined)
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await rollbackStep(makeTask(), ["src/a.ts"], "sha-2")
+
+		expect(outcome.checkpointId).toBe("sha-2")
+		expect(outcome.files).toEqual([
+			{ filePath: "src/a.ts", success: false, error: "No checkpoint available to restore" },
+		])
+		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
 
 	it("rejects a file that is not part of the given step checkpoint", async () => {
-		await appendChange(globalStorageDir, "task-rollback", {
-			path: "src/a.ts",
-			operation: "create",
-			checkpointId: "sha-step",
-		})
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-2" }])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
-		const restoreFile = vi.fn().mockResolvedValue(undefined)
-		mockedGetCheckpointService.mockResolvedValue({ restoreFile })
-
-		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/other.ts"], "sha-step")
+		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/other.ts"], "sha-2")
 
 		expect(outcome.files[0]).toEqual({ filePath: "src/a.ts", success: true })
 		expect(outcome.files[1].success).toBe(false)
 		expect(outcome.files[1].error).toBe("File is not part of this step's checkpoint")
-		expect(restoreFile).toHaveBeenCalledTimes(1)
+		expect(service.restoreFile).toHaveBeenCalledTimes(1)
 	})
 
 	it("falls back to the latest journal entry per file without a step checkpoint id", async () => {
-		await appendChange(globalStorageDir, "task-rollback", {
-			path: "src/a.ts",
-			operation: "create",
-			checkpointId: "sha-1",
-		})
-		await appendChange(globalStorageDir, "task-rollback", {
-			path: "src/a.ts",
-			operation: "update",
-			checkpointId: "sha-2",
-		})
-
-		const restoreFile = vi.fn().mockResolvedValue(undefined)
-		mockedGetCheckpointService.mockResolvedValue({ restoreFile })
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await rollbackStep(makeTask(), ["src/a.ts"])
 
-		expect(outcome.checkpointId).toBe("sha-2")
-		expect(restoreFile).toHaveBeenCalledWith("sha-2", "src/a.ts")
+		expect(outcome.checkpointId).toBeUndefined()
+		expect(outcome.files).toEqual([{ filePath: "src/a.ts", success: true }])
+		expect(service.restoreFile).toHaveBeenCalledWith("sha-2", "src/a.ts")
 	})
 
-	it("fails listed files without journal entries and keeps the checkpoint when resolvable", async () => {
-		await appendChange(globalStorageDir, "task-rollback", {
-			path: "src/a.ts",
-			operation: "create",
-			checkpointId: "sha-1",
-		})
-
-		const restoreFile = vi.fn().mockResolvedValue(undefined)
-		mockedGetCheckpointService.mockResolvedValue({ restoreFile })
+	it("fails listed files without journal entries", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
 		const outcome = await rollbackStep(makeTask(), ["src/a.ts", "src/missing.ts"])
 
-		expect(outcome.checkpointId).toBe("sha-1")
 		expect(outcome.files[0]).toEqual({ filePath: "src/a.ts", success: true })
 		expect(outcome.files[1].success).toBe(false)
 		expect(outcome.files[1].error).toBe("No change journal entry for this file")
@@ -175,24 +265,77 @@ describe("rollbackStep (B3a)", () => {
 			providerRef: { deref: vi.fn().mockReturnValue(undefined) },
 		} as unknown as Task
 
-		const restoreFile = vi.fn().mockResolvedValue(undefined)
-		mockedGetCheckpointService.mockResolvedValue({ restoreFile })
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
 
-		const outcome = await rollbackStep(task, ["src/a.ts"], "sha-step")
+		const outcome = await rollbackStep(task, ["src/a.ts"], "sha-2")
 
-		expect(outcome.checkpointId).toBe("sha-step")
+		expect(outcome.checkpointId).toBe("sha-2")
 		expect(outcome.files[0].success).toBe(false)
 		expect(outcome.files[0].error).toBe("File is not part of this step's checkpoint")
-		expect(restoreFile).not.toHaveBeenCalled()
+		expect(service.restoreFile).not.toHaveBeenCalled()
 	})
+
 	it("fails every file when checkpoints are not enabled", async () => {
 		mockedGetCheckpointService.mockResolvedValue(undefined)
 
-		const outcome = await rollbackStep(makeTask(), ["src/a.ts"], "sha-step")
+		const outcome = await rollbackStep(makeTask(), ["src/a.ts"], "sha-2")
 
-		expect(outcome.checkpointId).toBe("sha-step")
+		expect(outcome.checkpointId).toBe("sha-2")
 		expect(outcome.files).toEqual([
 			{ filePath: "src/a.ts", success: false, error: "Checkpoints are not enabled for this task" },
 		])
+	})
+})
+
+describe("restoreLatestFile (B3c: forward direction)", () => {
+	it("restores the file to its most recent recorded write checkpoint", async () => {
+		await seedJournal([
+			{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" },
+			{ path: "src/b.ts", operation: "update", checkpointId: "sha-1" },
+			{ path: "src/a.ts", operation: "update", checkpointId: "sha-2" },
+		])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome).toEqual({ filePath: "src/a.ts", success: true })
+		expect(service.restoreFile).toHaveBeenCalledWith("sha-2", "src/a.ts")
+	})
+
+	it("is a successful no-op for a file the task never wrote", async () => {
+		await seedJournal([{ path: "src/b.ts", operation: "update", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome).toEqual({ filePath: "src/a.ts", success: true, noOp: true })
+		expect(service.restoreFile).not.toHaveBeenCalled()
+	})
+
+	it("fails cleanly when checkpoints are not enabled", async () => {
+		mockedGetCheckpointService.mockResolvedValue(undefined)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome).toEqual({
+			filePath: "src/a.ts",
+			success: false,
+			error: "Checkpoints are not enabled for this task",
+		})
+	})
+
+	it("reports the service error without throwing", async () => {
+		await seedJournal([{ path: "src/a.ts", operation: "create", checkpointId: "sha-1" }])
+		const service = serviceWith("base-0")
+		service.restoreFile.mockRejectedValue(new Error("index.lock held"))
+		mockedGetCheckpointService.mockResolvedValue(service)
+
+		const outcome = await restoreLatestFile(makeTask(), "src/a.ts")
+
+		expect(outcome.success).toBe(false)
+		expect(outcome.error).toContain("index.lock")
 	})
 })
