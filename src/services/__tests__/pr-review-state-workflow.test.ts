@@ -248,6 +248,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		createLabel,
 		setFailed,
 		listPullRequests: github.rest.pulls.list,
+		listCommitStatusesForRef: github.rest.repos.listCommitStatusesForRef,
 	}
 }
 
@@ -426,6 +427,7 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(
 			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
 		)
+		expect(result.listCommitStatusesForRef).not.toHaveBeenCalled()
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 

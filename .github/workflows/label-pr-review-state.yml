@@ -31,6 +31,7 @@ jobs:
       - name: Reconcile PR review state labels
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const { owner, repo } = context.repo;
             const stateLabels = [
@@ -343,14 +344,17 @@ jobs:
                 // Check CI status for required checks on the PR's head commit only.
                 // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
                 // incorrectly blocking label assignment on otherwise-ready PRs.
-                const [checkRuns, commitStatuses] = await Promise.all([
-                  github.paginate(github.rest.checks.listForRef, {
+                const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                  owner, repo, ref: pr.head.sha, per_page: 100,
+                });
+                const needsLegacyStatuses = requiredChecks?.some(
+                  check => check.integrationId === null
+                );
+                const commitStatuses = needsLegacyStatuses
+                  ? await github.paginate(github.rest.repos.listCommitStatusesForRef, {
                     owner, repo, ref: pr.head.sha, per_page: 100,
-                  }),
-                  github.paginate(github.rest.repos.listCommitStatusesForRef, {
-                    owner, repo, ref: pr.head.sha, per_page: 100,
-                  }),
-                ]);
+                  })
+                  : [];
 
                 // listForRef returns every check run ever recorded on the ref, including
                 // stale superseded ones (e.g. a failed run later re-run green). Branch
