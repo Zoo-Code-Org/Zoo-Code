@@ -213,7 +213,7 @@ suite("Roo Code Subtasks", function () {
 			const parentAskCount = asks[parentTaskId]?.length ?? 0
 
 			await api.clearCurrentTask()
-			api.resumeTask(parentTaskId)
+			await api.resumeTask(parentTaskId)
 			await waitFor(() => hasToolAsk(parentTaskId, "newTask", parentAskCount))
 			assert.ok(
 				!asks[parentTaskId]?.slice(parentAskCount).some(({ ask }) => ask === "resume_task"),
@@ -235,7 +235,7 @@ suite("Roo Code Subtasks", function () {
 			const childAskCount = asks[childTaskId!]?.length ?? 0
 
 			await api.clearCurrentTask()
-			api.resumeTask(childTaskId!)
+			await api.resumeTask(childTaskId!)
 			await waitFor(() => hasToolAsk(childTaskId!, "finishTask", childAskCount))
 			assert.ok(
 				!asks[childTaskId!]
