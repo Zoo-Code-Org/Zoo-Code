@@ -26,6 +26,20 @@ vi.mock("vscode", () => ({
 	},
 }))
 
+// The no-task failure posts localized copy; the extension i18n loader only
+// populates resources outside tests, so the spec pins the English values the
+// handler asks for (path is relative to this file: ../../../i18n = src/i18n).
+vi.mock("../../../i18n", () => ({
+	changeLanguage: vi.fn(),
+	t: (key: string) => {
+		const values: Record<string, string> = {
+			"common:errors.message.no_active_task_to_roll_back": "No active task to roll back from",
+			"common:errors.message.no_active_task_to_restore": "No active task to restore from",
+		}
+		return values[key] ?? key
+	},
+}))
+
 // Structural mock: the handler only needs the task identity for these cases.
 const mockTask = {} as Task
 const postMessageToWebview = vi.fn(async (_message: ExtensionMessage) => undefined)
@@ -103,7 +117,28 @@ describe("webviewMessageHandler - change card rollback", () => {
 					cardTs: 1000,
 					filePath: "src/a.ts",
 					success: false,
-					error: "No active task to roll back from.",
+					error: "No active task to roll back from",
+				},
+			})
+		})
+
+		it("posts a correlated failure when the rollback itself throws", async () => {
+			vi.mocked(rollbackFile).mockRejectedValueOnce(new Error("git restore failed"))
+
+			await webviewMessageHandler(provider, {
+				type: "checkpointRollbackFile",
+				payload: { cardTs: 1000, checkpointId: "abc123", filePath: "src/a.ts" },
+			})
+
+			// The card must not stay pending: the handler turns the throw into a
+			// correlated failure result instead of dropping the message.
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					filePath: "src/a.ts",
+					success: false,
+					error: "Rollback failed: git restore failed",
 				},
 			})
 		})
@@ -182,7 +217,25 @@ describe("webviewMessageHandler - change card rollback", () => {
 				checkpointRollbackResult: {
 					cardTs: 1000,
 					success: false,
-					error: "No active task to roll back from.",
+					error: "No active task to roll back from",
+				},
+			})
+		})
+
+		it("posts a correlated failure when the step rollback itself throws", async () => {
+			vi.mocked(rollbackStep).mockRejectedValueOnce(new Error("journal unreadable"))
+
+			await webviewMessageHandler(provider, {
+				type: "checkpointRollbackStep",
+				payload: { cardTs: 1000, filePaths: ["src/a.ts"] },
+			})
+
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					success: false,
+					error: "Rollback failed: journal unreadable",
 				},
 			})
 		})
@@ -293,7 +346,27 @@ describe("webviewMessageHandler - change card rollback", () => {
 					kind: "restore-latest",
 					filePath: "src/a.ts",
 					success: false,
-					error: "No active task to restore from.",
+					error: "No active task to restore from",
+				},
+			})
+		})
+
+		it("posts a correlated failure when the restore itself throws", async () => {
+			vi.mocked(restoreLatestFile).mockRejectedValueOnce(new Error("git checkout failed"))
+
+			await webviewMessageHandler(provider, {
+				type: "checkpointRestoreLatestFile",
+				payload: { cardTs: 1000, filePath: "src/a.ts" },
+			})
+
+			expect(postMessageToWebview).toHaveBeenCalledWith({
+				type: "checkpointRollbackResult",
+				checkpointRollbackResult: {
+					cardTs: 1000,
+					kind: "restore-latest",
+					filePath: "src/a.ts",
+					success: false,
+					error: "Restore failed: git checkout failed",
 				},
 			})
 		})

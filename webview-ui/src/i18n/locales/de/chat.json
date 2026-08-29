@@ -183,7 +183,7 @@
 		"rolledBack": "Zurückgesetzt",
 		"stepRolledBack": "Schritt zurückgesetzt",
 		"rollbackFailed": "Zurücksetzen fehlgeschlagen",
-		"openFile": "Datei öffnen"
+		"openFile": "Datei öffnen: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

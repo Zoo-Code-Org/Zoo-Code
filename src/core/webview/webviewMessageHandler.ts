@@ -1614,17 +1614,32 @@ export const webviewMessageHandler = async (
 					// editor integrations (DiffViewProvider) into the import graph. Loading it
 					// only when a rollback is requested keeps specs that mock `vscode` minimally
 					// from executing editor module-scope code at import time.
-					const { rollbackFile } = await import("../checkpoints/rollback")
-					const outcome = await rollbackFile(task, result.data.checkpointId, result.data.filePath)
-					await provider.postMessageToWebview({
-						type: "checkpointRollbackResult",
-						checkpointRollbackResult: {
-							cardTs: result.data.cardTs,
-							filePath: outcome.filePath,
-							success: outcome.success,
-							...(outcome.error ? { error: outcome.error } : {}),
-						},
-					})
+					try {
+						const { rollbackFile } = await import("../checkpoints/rollback")
+						const outcome = await rollbackFile(task, result.data.checkpointId, result.data.filePath)
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								filePath: outcome.filePath,
+								success: outcome.success,
+								...(outcome.error ? { error: outcome.error } : {}),
+							},
+						})
+					} catch (error) {
+						// Correlated failure: a throw between the request and the result post
+						// (import, journal read, git restore) would otherwise leave the
+						// requesting card pending forever.
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								filePath: result.data.filePath,
+								success: false,
+								error: `Rollback failed: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						})
+					}
 				} else {
 					// No active task: the rollback cannot run. Post the correlated
 					// failure so the requesting card can clear its pending state
@@ -1635,7 +1650,7 @@ export const webviewMessageHandler = async (
 							cardTs: result.data.cardTs,
 							filePath: result.data.filePath,
 							success: false,
-							error: "No active task to roll back from.",
+							error: t("common:errors.message.no_active_task_to_roll_back"),
 						},
 					})
 				}
@@ -1652,18 +1667,30 @@ export const webviewMessageHandler = async (
 
 				if (task) {
 					// Lazy import (see the checkpointRollbackFile case above).
-					const { rollbackStep } = await import("../checkpoints/rollback")
-					const outcome = await rollbackStep(task, result.data.filePaths, result.data.checkpointId)
-					const firstFailure = outcome.files.find((file) => !file.success)
-					await provider.postMessageToWebview({
-						type: "checkpointRollbackResult",
-						checkpointRollbackResult: {
-							cardTs: result.data.cardTs,
-							success: outcome.files.every((file) => file.success),
-							...(firstFailure ? { error: firstFailure.error } : {}),
-							files: outcome.files,
-						},
-					})
+					try {
+						const { rollbackStep } = await import("../checkpoints/rollback")
+						const outcome = await rollbackStep(task, result.data.filePaths, result.data.checkpointId)
+						const firstFailure = outcome.files.find((file) => !file.success)
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								success: outcome.files.every((file) => file.success),
+								...(firstFailure ? { error: firstFailure.error } : {}),
+								files: outcome.files,
+							},
+						})
+					} catch (error) {
+						// Correlated failure (see the checkpointRollbackFile case).
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								success: false,
+								error: `Rollback failed: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						})
+					}
 				} else {
 					// No active task: post the correlated failure so the requesting
 					// card can clear its pending state.
@@ -1672,7 +1699,7 @@ export const webviewMessageHandler = async (
 						checkpointRollbackResult: {
 							cardTs: result.data.cardTs,
 							success: false,
-							error: "No active task to roll back from.",
+							error: t("common:errors.message.no_active_task_to_roll_back"),
 						},
 					})
 				}
@@ -1692,19 +1719,33 @@ export const webviewMessageHandler = async (
 
 				if (task) {
 					// Lazy import (see the checkpointRollbackFile case above).
-					const { restoreLatestFile } = await import("../checkpoints/rollback")
-					const outcome = await restoreLatestFile(task, result.data.filePath)
-					await provider.postMessageToWebview({
-						type: "checkpointRollbackResult",
-						checkpointRollbackResult: {
-							cardTs: result.data.cardTs,
-							kind: "restore-latest",
-							filePath: outcome.filePath,
-							success: outcome.success,
-							...(outcome.noOp ? { noOp: true } : {}),
-							...(outcome.error ? { error: outcome.error } : {}),
-						},
-					})
+					try {
+						const { restoreLatestFile } = await import("../checkpoints/rollback")
+						const outcome = await restoreLatestFile(task, result.data.filePath)
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								kind: "restore-latest",
+								filePath: outcome.filePath,
+								success: outcome.success,
+								...(outcome.noOp ? { noOp: true } : {}),
+								...(outcome.error ? { error: outcome.error } : {}),
+							},
+						})
+					} catch (error) {
+						// Correlated failure (see the checkpointRollbackFile case).
+						await provider.postMessageToWebview({
+							type: "checkpointRollbackResult",
+							checkpointRollbackResult: {
+								cardTs: result.data.cardTs,
+								kind: "restore-latest",
+								filePath: result.data.filePath,
+								success: false,
+								error: `Restore failed: ${error instanceof Error ? error.message : String(error)}`,
+							},
+						})
+					}
 				} else {
 					// No active task: post the correlated failure so the requesting
 					// card can clear its pending state.
@@ -1715,7 +1756,7 @@ export const webviewMessageHandler = async (
 							kind: "restore-latest",
 							filePath: result.data.filePath,
 							success: false,
-							error: "No active task to restore from.",
+							error: t("common:errors.message.no_active_task_to_restore"),
 						},
 					})
 				}

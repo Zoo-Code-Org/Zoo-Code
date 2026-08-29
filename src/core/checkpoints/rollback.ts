@@ -16,6 +16,12 @@
  *   the content of its most recent recorded write (a successful no-op when
  *   the task never wrote the file).
  *
+ * A file is only rolled back from the card of its most recent step: undoing
+ * an older step for a file that a later step wrote again would overwrite the
+ * newer state, so such a rollback is rejected (a full checkpoint restore
+ * still reaches any older state). A journal that cannot be located or read
+ * fails the restore instead of masquerading as "the task wrote nothing".
+ *
  * Restores reuse the existing shadow-git service (`getCheckpointService` →
  * `RepoPerTaskCheckpointService.restoreFile`, the same instance whose
  * `restoreCheckpoint` the checkpoints UI uses) — nothing is forked. Only the
@@ -45,17 +51,45 @@ const NOT_ENABLED_ERROR = "Checkpoints are not enabled for this task"
 const NO_TARGET_ERROR = "No checkpoint available to restore"
 const NOT_IN_STEP_ERROR = "File is not part of this step's checkpoint"
 const NO_ENTRY_ERROR = "No change journal entry for this file"
+const NO_JOURNAL_ERROR = "Change journal is unavailable for this task"
+const NOT_LATEST_ERROR = "File was modified in a later step; roll back the latest change card first"
 
 type CheckpointService = NonNullable<Awaited<ReturnType<typeof getCheckpointService>>>
 
-/**
- * Load the task's change journal. `loadChanges` never throws: an absent or
- * unreadable file and a torn tail resolve to the readable prefix (or `[]`).
- */
-async function loadTaskEntries(task: Task): Promise<ChangeJournalEntry[]> {
+/** A readable journal (possibly legitimately empty) or the reason it could not be loaded. */
+type LoadedJournal = { entries: ChangeJournalEntry[] } | { error: string }
+
+// `undefined` = the journal cannot be located (provider reference gone); read failures (permissions, I/O) propagate.
+async function loadTaskEntries(task: Task): Promise<ChangeJournalEntry[] | undefined> {
 	const globalStorageDir = task.providerRef.deref()?.context.globalStorageUri.fsPath
 
-	return globalStorageDir ? loadChanges(globalStorageDir, task.taskId) : []
+	return globalStorageDir ? loadChanges(globalStorageDir, task.taskId) : undefined
+}
+
+// Single discriminated result for callers: a readable journal (possibly empty) or a failure.
+async function loadTaskJournal(task: Task): Promise<LoadedJournal> {
+	try {
+		const entries = await loadTaskEntries(task)
+
+		if (entries === undefined) {
+			return { error: NO_JOURNAL_ERROR }
+		}
+
+		return { entries }
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error)
+		return { error: `Change journal could not be read: ${message}` }
+	}
+}
+
+/** The most recent journal entry recorded for `filePath`, if any. */
+function latestEntry(entries: ChangeJournalEntry[], filePath: string): ChangeJournalEntry | undefined {
+	for (let i = entries.length - 1; i >= 0; i--) {
+		if (entries[i].path === filePath) {
+			return entries[i]
+		}
+	}
+	return undefined
 }
 
 /**
@@ -74,6 +108,16 @@ function preStepRestoreTarget(
 	if (stepIndex === -1) {
 		return { error: NOT_IN_STEP_ERROR }
 	}
+
+	// Only the file's most recent step may be rolled back: restoring an older
+	// state would overwrite the file's newer writes. A multi-write step shares
+	// one checkpoint id, so compare on the latest entry's checkpoint id.
+	const latest = fileEntries[fileEntries.length - 1]
+
+	if (latest.checkpointId !== stepCheckpointId) {
+		return { error: NOT_LATEST_ERROR }
+	}
+
 	if (stepIndex === 0) {
 		return { baseline: true }
 	}
@@ -114,8 +158,13 @@ export async function rollbackFile(
 		return { filePath, success: false, error: NOT_ENABLED_ERROR }
 	}
 
-	const entries = await loadTaskEntries(task)
-	const resolved = preStepRestoreTarget(entries, filePath, stepCheckpointId)
+	const journal = await loadTaskJournal(task)
+
+	if ("error" in journal) {
+		return { filePath, success: false, error: journal.error }
+	}
+
+	const resolved = preStepRestoreTarget(journal.entries, filePath, stepCheckpointId)
 
 	if (resolved.error) {
 		return { filePath, success: false, error: resolved.error }
@@ -153,8 +202,18 @@ export async function rollbackStep(
 		}
 	}
 
-	const entries = await loadTaskEntries(task)
+	const journal = await loadTaskJournal(task)
 	const files: RollbackFileOutcome[] = []
+
+	if ("error" in journal) {
+		const journalError = journal.error
+		return {
+			checkpointId: stepCheckpointId,
+			files: stepFiles.map((filePath) => ({ filePath, success: false, error: journalError })),
+		}
+	}
+
+	const entries = journal.entries
 
 	for (const filePath of stepFiles) {
 		if (stepCheckpointId) {
@@ -176,7 +235,7 @@ export async function rollbackStep(
 			continue
 		}
 
-		const latest = [...entries].reverse().find((entry) => entry.path === filePath)
+		const latest = latestEntry(entries, filePath)
 
 		if (!latest) {
 			files.push({ filePath, success: false, error: NO_ENTRY_ERROR })
@@ -202,8 +261,13 @@ export async function restoreLatestFile(task: Task, filePath: string): Promise<R
 		return { filePath, success: false, error: NOT_ENABLED_ERROR }
 	}
 
-	const entries = await loadTaskEntries(task)
-	const latest = [...entries].reverse().find((entry) => entry.path === filePath)
+	const journal = await loadTaskJournal(task)
+
+	if ("error" in journal) {
+		return { filePath, success: false, error: journal.error }
+	}
+
+	const latest = latestEntry(journal.entries, filePath)
 
 	if (!latest) {
 		return { filePath, success: true, noOp: true }

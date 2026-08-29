@@ -183,7 +183,7 @@
 		"rolledBack": "Revertit",
 		"stepRolledBack": "Pas revertit",
 		"rollbackFailed": "La reversió ha fallat",
-		"openFile": "Obre el fitxer"
+		"openFile": "Obre el fitxer: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Punt de control",

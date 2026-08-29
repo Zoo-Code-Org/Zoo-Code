@@ -183,7 +183,7 @@
 		"rolledBack": "Réinitialisé",
 		"stepRolledBack": "Étape réinitialisée",
 		"rollbackFailed": "Échec de la réinitialisation",
-		"openFile": "Ouvrir le fichier"
+		"openFile": "Ouvrir le fichier: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Point de contrôle",

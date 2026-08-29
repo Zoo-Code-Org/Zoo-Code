@@ -62,6 +62,16 @@ describe("changeJournal", () => {
 			expect(await loadChanges(tmpRoot, taskId)).toEqual([])
 		})
 
+		it("propagates non-ENOENT read failures instead of reporting an empty journal", async () => {
+			// A directory at the journal path makes readFile fail with EISDIR —
+			// a stand-in for any permission or I/O failure (EACCES etc.). Such a
+			// failure must not be swallowed into "no changes": it would let a
+			// rollback report a no-op success without reading the history.
+			await fs.mkdir(journalPath(tmpRoot, taskId), { recursive: true })
+
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toMatchObject({ code: "EISDIR" })
+		})
+
 		it("parses all entries in order with a clean tail", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "y" }))

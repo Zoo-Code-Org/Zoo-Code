@@ -183,7 +183,7 @@
 		"rolledBack": "Geri alındı",
 		"stepRolledBack": "Adım geri alındı",
 		"rollbackFailed": "Geri alma başarısız",
-		"openFile": "Dosyayı aç"
+		"openFile": "Dosyayı aç: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Kontrol Noktası",

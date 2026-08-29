@@ -183,7 +183,7 @@
 		"rolledBack": "ロールバック済み",
 		"stepRolledBack": "ステップをロールバックしました",
 		"rollbackFailed": "ロールバックに失敗しました",
-		"openFile": "ファイルを開く"
+		"openFile": "ファイルを開く: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "チェックポイント",

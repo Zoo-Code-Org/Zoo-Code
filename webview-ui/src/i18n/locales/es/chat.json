@@ -179,11 +179,11 @@
 		"rollbackWarning": "Restaura el contenido anterior de los archivos de este paso.",
 		"confirm": "Confirmar",
 		"cancel": "Cancelar",
-		"rollingBack": "Revertiendo...",
+		"rollingBack": "Revirtiendo...",
 		"rolledBack": "Revertido",
 		"stepRolledBack": "Paso revertido",
 		"rollbackFailed": "La reversión falló",
-		"openFile": "Abrir archivo"
+		"openFile": "Abrir archivo: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Punto de control",

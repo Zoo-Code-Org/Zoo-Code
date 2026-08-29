@@ -283,8 +283,11 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				// lexically `link/sneaky.txt` is inside the workspace.
 				await fs.symlink(outsideDir, path.join(service.workspaceDir, "link"), "dir")
 
+				// "resolves outside the workspace" is the real-path (symlink)
+				// guard's message; the bare "outside the workspace" would also
+				// match the lexical guard's error.
 				await expect(service.restoreFile(commit1!.commit, path.join("link", "sneaky.txt"))).rejects.toThrow(
-					/outside the workspace/,
+					/resolves outside the workspace/,
 				)
 
 				// The outside file survives: the restore failed before any mutation.

@@ -182,11 +182,11 @@
 		"rollbackWarning": "Ripristina il contenuto precedente dei file di questo passaggio.",
 		"confirm": "Conferma",
 		"cancel": "Annulla",
-		"rollingBack": "Annullamento...",
-		"rolledBack": "Annullato",
-		"stepRolledBack": "Passaggio annullato",
-		"rollbackFailed": "Annullamento non riuscito",
-		"openFile": "Apri file"
+		"rollingBack": "Ripristino in corso...",
+		"rolledBack": "Ripristinato",
+		"stepRolledBack": "Passaggio ripristinato",
+		"rollbackFailed": "Ripristino non riuscito",
+		"openFile": "Apri file: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",

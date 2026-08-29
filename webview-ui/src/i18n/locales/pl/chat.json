@@ -183,7 +183,7 @@
 		"rolledBack": "Cofnięto",
 		"stepRolledBack": "Krok cofnięty",
 		"rollbackFailed": "Cofnięcie nie powiodło się",
-		"openFile": "Otwórz plik"
+		"openFile": "Otwórz plik: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Punkt kontrolny",

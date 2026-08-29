@@ -208,7 +208,7 @@
 		"rolledBack": "Dikembalikan",
 		"stepRolledBack": "Langkah dikembalikan",
 		"rollbackFailed": "Pembalikan gagal",
-		"openFile": "Buka file"
+		"openFile": "Buka file: {{path}}"
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",
