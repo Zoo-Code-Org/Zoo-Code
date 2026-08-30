@@ -1,6 +1,6 @@
 // npx vitest run core/tools/__tests__/mcpServerRestriction.spec.ts
 
-import type { Task } from "../../task/Task"
+import type { CurrentRequestToolPolicy, Task } from "../../task/Task"
 import { isMcpServerAllowed, getAllowedMcpServersForTask, ensureMcpServerAllowed } from "../mcpServerRestriction"
 
 vi.mock("../../../shared/modes", async (importOriginal) => {
@@ -16,7 +16,7 @@ import { getModeBySlug } from "../../../shared/modes"
 
 const toolError = (error: string) => `ERR:${error}`
 
-function makeTask(state: any): Task {
+function makeTask(state: any, requestPolicy?: CurrentRequestToolPolicy): Task {
 	return {
 		providerRef: {
 			deref: () => ({
@@ -26,6 +26,7 @@ function makeTask(state: any): Task {
 		consecutiveMistakeCount: 0,
 		didToolFailInCurrentTurn: false,
 		recordToolError: vi.fn(),
+		...(requestPolicy ? { getCurrentRequestToolPolicy: () => requestPolicy } : {}),
 	} as unknown as Task
 }
 
@@ -62,6 +63,22 @@ describe("getAllowedMcpServersForTask", () => {
 		} as any)
 		const task = makeTask({ mode: "code", customModes: [] })
 		await expect(getAllowedMcpServersForTask(task)).resolves.toEqual(["srv-a"])
+	})
+
+	it("prefers the request policy over the live focused mode", async () => {
+		const task = makeTask(
+			{ mode: "code", customModes: [] },
+			{
+				effectiveToolNames: new Set(["access_mcp_resource"]),
+				mode: "architect",
+				customModes: [],
+				experiments: {},
+				allowedMcpServers: ["request-server"],
+			},
+		)
+
+		await expect(getAllowedMcpServersForTask(task)).resolves.toEqual(["request-server"])
+		expect(getModeBySlug).not.toHaveBeenCalled()
 	})
 
 	it("returns undefined when the mode does not restrict servers", async () => {

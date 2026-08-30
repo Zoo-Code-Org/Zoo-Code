@@ -32,6 +32,11 @@ export function isMcpServerAllowed(serverName: string, allowedMcpServers?: strin
  * @returns The mode's `allowedMcpServers` allowlist, or `undefined` when unrestricted.
  */
 export async function getAllowedMcpServersForTask(task: Task): Promise<string[] | undefined> {
+	const requestPolicy = task.getCurrentRequestToolPolicy?.()
+	if (requestPolicy) {
+		return requestPolicy.allowedMcpServers
+	}
+
 	const provider = task.providerRef.deref()
 
 	// Be defensive: provider may be gone, or `getState` may be unavailable (e.g. in tests).

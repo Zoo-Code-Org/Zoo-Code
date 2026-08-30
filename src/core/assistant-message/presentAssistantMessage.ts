@@ -40,6 +40,7 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
+import { isMcpTool, toolNamesMatch } from "../../utils/mcp-name"
 
 /**
  * Maps a raw, potentially model-controlled tool name to a safe analytics key.
@@ -289,6 +290,58 @@ export async function presentAssistantMessage(cline: Task) {
 				},
 			}
 
+			if (!mcpBlock.partial) {
+				const requestPolicy = cline.getCurrentRequestToolPolicy?.()
+				const state = requestPolicy ? undefined : await cline.providerRef.deref()?.getState()
+				const mode = requestPolicy?.mode ?? (await cline.getTaskMode?.()) ?? state?.mode ?? defaultModeSlug
+				const customModes = requestPolicy?.customModes ?? state?.customModes
+				const experiments = requestPolicy?.experiments ?? state?.experiments
+				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
+				const unavailableTools = requestPolicy
+					? []
+					: [
+							...(state?.disabledTools ?? []),
+							...(cline.api.getModel().info.excludedTools ?? []),
+							...(state?.mcpEnabled === false ? ["use_mcp_tool", "access_mcp_resource"] : []),
+						]
+				const toolRequirements = unavailableTools.reduce((acc: Record<string, boolean>, toolName: string) => {
+					acc[toolName] = false
+					acc[resolveToolAlias(toolName)] = false
+					return acc
+				}, {})
+
+				try {
+					if (
+						requestPolicy &&
+						!Array.from(requestPolicy.effectiveToolNames).some(
+							(toolName) => isMcpTool(toolName) && toolNamesMatch(toolName, mcpBlock.name),
+						)
+					) {
+						throw new Error(`Tool "${mcpBlock.name}" is not available for this request.`)
+					}
+					if (
+						!requestPolicy &&
+						unavailableTools.some((toolName) => toolNamesMatch(toolName, mcpBlock.name))
+					) {
+						throw new Error(`Tool "${mcpBlock.name}" is not available for this model.`)
+					}
+					validateToolUse(
+						"use_mcp_tool",
+						mode,
+						customModes ?? [],
+						toolRequirements,
+						syntheticToolUse.params,
+						experiments,
+						requestPolicy ? Array.from(requestPolicy.effectiveToolNames) : undefined,
+					)
+				} catch (error) {
+					cline.consecutiveMistakeCount++
+					cline.recordToolError("use_mcp_tool", error.message)
+					pushToolResult(formatResponse.toolError(error.message))
+					break
+				}
+			}
+
 			await useMcpToolTool.handle(cline, syntheticToolUse, {
 				askApproval,
 				handleError,
@@ -342,9 +395,13 @@ export async function presentAssistantMessage(cline: Task) {
 				break
 			}
 
-			// Fetch state early so it's available for toolDescription and validation
-			const state = await cline.providerRef.deref()?.getState()
+			// Prefer the request snapshot so validation does not depend on mutable focused state.
+			const requestPolicy = cline.getCurrentRequestToolPolicy?.()
+			const state = requestPolicy ? undefined : await cline.providerRef.deref()?.getState()
 			const { mode, customModes, experiments: stateExperiments, disabledTools } = state ?? {}
+			const effectiveMode = requestPolicy?.mode ?? (await cline.getTaskMode?.()) ?? mode ?? defaultModeSlug
+			const effectiveCustomModes = requestPolicy?.customModes ?? customModes
+			const effectiveExperiments = requestPolicy?.experiments ?? stateExperiments
 
 			const toolDescription = (): string => {
 				switch (block.name) {
@@ -396,7 +453,7 @@ export async function presentAssistantMessage(cline: Task) {
 					case "new_task": {
 						const mode = block.params.mode ?? defaultModeSlug
 						const message = block.params.message ?? "(no message)"
-						const modeName = getModeBySlug(mode, customModes)?.name ?? mode
+						const modeName = getModeBySlug(mode, effectiveCustomModes)?.name ?? mode
 						return `[${block.name} in ${modeName} mode: '${message}']`
 					}
 					case "run_slash_command":
@@ -438,8 +495,8 @@ export async function presentAssistantMessage(cline: Task) {
 			// This avoids executing an invalid tool_use block and prevents duplicate/fragmented
 			// error reporting.
 			if (!block.partial) {
-				const customTool = stateExperiments?.customTools ? customToolRegistry.get(block.name) : undefined
-				const isKnownTool = isValidToolName(String(block.name), stateExperiments)
+				const customTool = effectiveExperiments?.customTools ? customToolRegistry.get(block.name) : undefined
+				const isKnownTool = isValidToolName(String(block.name), effectiveExperiments)
 				if (isKnownTool && !block.nativeArgs && !customTool) {
 					const errorMessage =
 						`Invalid tool call for '${block.name}': missing nativeArgs. ` +
@@ -447,7 +504,10 @@ export async function presentAssistantMessage(cline: Task) {
 
 					cline.consecutiveMistakeCount++
 					try {
-						cline.recordToolError(toTelemetryToolName(block.name, false, stateExperiments), errorMessage)
+						cline.recordToolError(
+							toTelemetryToolName(block.name, false, effectiveExperiments),
+							errorMessage,
+						)
 					} catch {
 						// Best-effort only
 					}
@@ -599,29 +659,37 @@ export async function presentAssistantMessage(cline: Task) {
 				// e.g., "edit_file" should resolve to "apply_diff"
 				const rawIncludedTools = modelInfo?.info?.includedTools
 				const { resolveToolAlias } = await import("../prompts/tools/filter-tools-for-mode")
-				const includedTools = rawIncludedTools?.map((tool) => resolveToolAlias(tool))
+				const includedTools = requestPolicy
+					? Array.from(requestPolicy.effectiveToolNames)
+					: rawIncludedTools?.map((tool) => resolveToolAlias(tool))
 
-				const isCustomTool = Boolean(stateExperiments?.customTools && customToolRegistry.has(block.name))
+				const isCustomTool = Boolean(effectiveExperiments?.customTools && customToolRegistry.has(block.name))
 
 				try {
-					const toolRequirements =
-						disabledTools?.reduce(
-							(acc: Record<string, boolean>, tool: string) => {
-								acc[tool] = false
-								const resolvedToolName = resolveToolAlias(tool)
-								acc[resolvedToolName] = false
-								return acc
-							},
-							{} as Record<string, boolean>,
-						) ?? {}
+					const unavailableTools = requestPolicy
+						? []
+						: [
+								...(disabledTools ?? []),
+								...(modelInfo?.info?.excludedTools ?? []),
+								...(state?.mcpEnabled === false ? ["use_mcp_tool", "access_mcp_resource"] : []),
+							]
+					const toolRequirements = unavailableTools.reduce((acc: Record<string, boolean>, tool: string) => {
+						acc[tool] = false
+						acc[resolveToolAlias(tool)] = false
+						return acc
+					}, {})
+					const canonicalToolName = resolveToolAlias(block.name)
+					if (requestPolicy && !requestPolicy.effectiveToolNames.has(canonicalToolName)) {
+						throw new Error(`Tool "${block.name}" is not available for this request.`)
+					}
 
 					validateToolUse(
 						block.name as ToolName,
-						mode ?? defaultModeSlug,
-						customModes ?? [],
+						effectiveMode,
+						effectiveCustomModes ?? [],
 						toolRequirements,
 						block.params,
-						stateExperiments,
+						effectiveExperiments,
 						includedTools,
 					)
 				} catch (error) {
@@ -643,7 +711,7 @@ export async function presentAssistantMessage(cline: Task) {
 					// Record a safe failure key. Never key telemetry on the raw,
 					// model-controlled tool name.
 					cline.recordToolError(
-						toTelemetryToolName(block.name, isCustomTool, stateExperiments),
+						toTelemetryToolName(block.name, isCustomTool, effectiveExperiments),
 						error.message,
 					)
 
@@ -653,7 +721,7 @@ export async function presentAssistantMessage(cline: Task) {
 				// Validation passed: record exactly one attempt at this single
 				// central point. Individual tool handlers must not also record
 				// usage, or the attempt would be double-counted.
-				const recordName = toTelemetryToolName(block.name, isCustomTool, stateExperiments)
+				const recordName = toTelemetryToolName(block.name, isCustomTool, effectiveExperiments)
 				cline.recordToolUsage(recordName)
 				TelemetryService.instance.captureToolUsage(cline.taskId, recordName)
 
@@ -904,7 +972,9 @@ export async function presentAssistantMessage(cline: Task) {
 						break
 					}
 
-					const customTool = stateExperiments?.customTools ? customToolRegistry.get(block.name) : undefined
+					const customTool = effectiveExperiments?.customTools
+						? customToolRegistry.get(block.name)
+						: undefined
 
 					if (customTool) {
 						try {
@@ -924,7 +994,7 @@ export async function presentAssistantMessage(cline: Task) {
 							}
 
 							const result = await customTool.execute(customToolArgs, {
-								mode: mode ?? defaultModeSlug,
+								mode: effectiveMode,
 								task: cline,
 							})
 
