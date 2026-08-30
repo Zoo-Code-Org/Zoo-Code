@@ -289,7 +289,6 @@ jobs:
                 'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
                 coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
                 'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
-                'fork-approved': 'Fork review completed. Native GitHub review protections remain authoritative.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
                 maintainer: 'Ready for human maintainer review and approval.',
                 approved: 'The required review sequence passed. Remaining merge requirements apply.',
@@ -676,11 +675,7 @@ jobs:
                 }
                 await reconcileLabels(pr, desiredLabel);
                 if (readyForMaintainer) {
-                  if (isForkPR(pr)) {
-                    await updateReviewGate(pr, 'fork-approved', false);
-                  } else {
-                    await updateReviewGate(pr, phase, true);
-                  }
+                  await updateReviewGate(pr, phase, true);
                 }
               } catch (error) {
                 let invalidationError = null;

@@ -1386,11 +1386,10 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
-	it("keeps fork review gates pending after approval", async () => {
+	it("passes fork review gates at the maintainer handoff", async () => {
 		const result = await runWorkflow({
 			eventName: "schedule",
 			fork: true,
-			permissions: { maintainer: "write" },
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -1398,17 +1397,11 @@ describe("PR review-state workflow", () => {
 					state: "APPROVED",
 					submittedAt: REVIEWED_AT,
 				},
-				{
-					login: "maintainer",
-					type: "User",
-					state: "APPROVED",
-					submittedAt: REVIEWED_AT + 1_000,
-				},
 			],
 		})
 
-		expect(latestGateStatus(result)?.state).toBe("pending")
-		expect(latestGateStatus(result)?.description).toContain("Native GitHub review protections")
+		expect(latestGateStatus(result)?.state).toBe("success")
+		expect(latestGateStatus(result)?.description).toContain("Ready for human maintainer")
 	})
 
 	it("fails closed when branch rules are unavailable", async () => {
