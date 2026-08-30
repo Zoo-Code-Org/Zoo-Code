@@ -18,6 +18,7 @@ export function sourcemapPlugin(): Plugin {
 				console.log("Ensuring source maps are included in build...")
 
 				const mode = process.env.NODE_ENV
+				/* c8 ignore next -- build-time output selection is exercised by the Vite build */
 				const outDir = path.resolve("../src/webview-ui/build")
 
 				const assetsDir = path.join(outDir, "assets")
