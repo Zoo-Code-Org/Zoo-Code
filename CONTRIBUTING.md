@@ -138,10 +138,12 @@ Ready-for-review PRs move through these gates in order:
 
 1. Required CI checks must pass.
 2. The workflow automatically applies the managed `coderabbit-review-active` label to start CodeRabbit review for the latest commit. Contributors and maintainers should not manage this label manually.
-3. Address any CodeRabbit findings and push updates; review restarts automatically after required CI passes again.
-4. After CodeRabbit approval, a non-author maintainer account with write access performs the final review and approval.
+3. Address CodeRabbit findings and every error in its persistent **Pre-merge checks** summary. Warnings are advisory unless repository policy says otherwise. Review restarts automatically after required CI passes again.
+4. After CodeRabbit approves the current commit and its blocking pre-merge checks pass, a non-author maintainer account with write access performs the final review and approval.
 
 An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-ready`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
+
+CodeRabbit's green commit status only means its review completed; it does not prove that custom pre-merge checks passed. Contributors, maintainers, and automated PR fixers must inspect CodeRabbit's persistent summary comment, resolve all **Error** entries under **Pre-merge checks**, and report that state explicitly in PR update comments.
 
 The `PR review gate` commit status passes only after the sequence completes. It is advisory by default; repository administrators can make it required on `main` if enforcement is desired. The labels and managed comment remain the maintainer-facing review queue either way.
 

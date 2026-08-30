@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 * * * *" # hourly fallback
   workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request number to reconcile
+        required: true
+        type: number
   # This workflow only reads PR metadata and never checks out or executes PR code.
   # pull_request_target gives fork PRs a token that can update labels and comments.
   pull_request_target:
@@ -65,6 +70,7 @@ jobs:
               },
             ];
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
+            const codeRabbitSummaryMarker = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->';
             const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
             const codeRabbitLogin = 'coderabbitai[bot]';
             const codeRabbitActiveLabel = 'coderabbit-review-active';
@@ -76,6 +82,8 @@ jobs:
             let eventPrNumbers = [];
             if (context.payload.pull_request?.number) {
               eventPrNumbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'workflow_dispatch') {
+              eventPrNumbers = [Number(context.payload.inputs.pull_request_number)];
             } else if (context.payload.workflow_run?.pull_requests) {
               eventPrNumbers = context.payload.workflow_run.pull_requests.map(pr => pr.number);
             }
@@ -163,6 +171,28 @@ jobs:
               );
             }
 
+            async function findCodeRabbitSummary(pr) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: pr.number, per_page: 100,
+              });
+              return comments.find(comment =>
+                comment.user?.login?.toLowerCase() === codeRabbitLogin &&
+                comment.body?.includes(codeRabbitSummaryMarker)
+              );
+            }
+
+            function codeRabbitPreMergeState(comment, headSha) {
+              const body = comment?.body ?? '';
+              const reviewedHead = body.match(/Merge Risk:[\s\S]{0,200}?up to `([a-f0-9]{5,40})`/i)?.[1];
+              if (!reviewedHead || !headSha.startsWith(reviewedHead) ||
+                  !body.includes('<!-- pre_merge_checks_walkthrough_start -->')) {
+                return 'pending';
+              }
+
+              const errorCount = Number(body.match(/Failed checks \((\d+) errors?/i)?.[1] ?? 0);
+              return errorCount > 0 ? 'failed' : 'passed';
+            }
+
             async function setCodeRabbitReviewActive(pr, enabled, recycle = false) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
@@ -218,17 +248,17 @@ jobs:
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
                 'ci-pending': 'Wait for the required CI checks to finish.',
                 'ci-failed': 'Fix the failing required CI checks and push an update.',
-                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after required CI passes.',
-                coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
-                'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready for maintainer review.',
+                'coderabbit-changes': 'Address CodeRabbit findings and blocking pre-merge checks, then push an update.',
+                coderabbit: 'Wait for CodeRabbit approval and blocking pre-merge checks to pass.',
+                'draft-approved': 'CodeRabbit approval and blocking pre-merge checks passed. Mark the draft ready.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
-                maintainer: 'CodeRabbit approved the latest commit. A maintainer must now review and approve it.',
-                approved: 'CodeRabbit and a maintainer approved the latest commit. The PR is ready for the remaining merge requirements.',
+                maintainer: 'CodeRabbit approval and blocking pre-merge checks passed. A maintainer must now approve.',
+                approved: 'CodeRabbit pre-merge checks and both required approvals passed. Remaining merge requirements apply.',
               };
               return messages[phase];
             }
 
-            async function updateReviewGate(pr, phase, passed) {
+            async function updateReviewGate(pr, phase, passed, required = false) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
               const state = passed ? 'success' : 'pending';
@@ -261,6 +291,7 @@ jobs:
                   target_url: pr.html_url,
                 });
               } catch (error) {
+                if (required) throw error;
                 core.warning(`PR #${pr.number}: could not publish ${reviewGateName}: ${error.message}`);
               }
             }
@@ -278,7 +309,7 @@ jobs:
               return `${guideMarker}\n### Review process\n\n${authorNote}\n\n` +
                 '1. Required CI checks pass.\n' +
                 '2. The workflow starts CodeRabbit automatically.\n' +
-                '3. CodeRabbit reviews and approves the latest commit.\n' +
+                '3. CodeRabbit approves the latest commit with no blocking pre-merge check errors.\n' +
                 '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
                 `**Current step:** ${phaseMessage(phase)}${labelMarker}`;
             }
@@ -476,6 +507,8 @@ jobs:
                 }
 
                 // CI is passing. Now determine review state.
+                const codeRabbitSummary = await findCodeRabbitSummary(pr);
+                const codeRabbitPreMerge = codeRabbitPreMergeState(codeRabbitSummary, pr.head.sha);
                 const reviews = await github.paginate(github.rest.pulls.listReviews, {
                   owner, repo, pull_number: pr.number, per_page: 100,
                 });
@@ -512,7 +545,10 @@ jobs:
                 const maintainerChangeRequest = freshMaintainerReviews.find(
                   review => review.state === 'CHANGES_REQUESTED'
                 );
-                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED';
+                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED' &&
+                  codeRabbitPreMerge === 'passed';
+                const codeRabbitChangesRequested = freshCodeRabbitReview?.state === 'CHANGES_REQUESTED' ||
+                  codeRabbitPreMerge === 'failed';
                 const maintainerApproval = freshMaintainerReviews
                   .filter(review => review.state === 'APPROVED')
                   .sort((a, b) => b.id - a.id)[0];
@@ -524,7 +560,7 @@ jobs:
                 let phase;
                 let activateCodeRabbit = false;
                 let recycleCodeRabbitLabel = false;
-                if (freshCodeRabbitReview?.state === 'CHANGES_REQUESTED') {
+                if (codeRabbitChangesRequested) {
                   desiredLabel = 'awaiting-author';
                   phase = 'coderabbit-changes';
                 } else if (!codeRabbitApproved) {
@@ -553,7 +589,7 @@ jobs:
 
                 core.info(
                   `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
-                  `coderabbit=${freshCodeRabbitReview?.state ?? 'pending'}, ` +
+                  `coderabbit=${freshCodeRabbitReview?.state ?? 'pending'}/${codeRabbitPreMerge}, ` +
                   `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
                 );
 
@@ -577,11 +613,30 @@ jobs:
                   await updateReviewGate(pr, phase, true);
                 }
               } catch (error) {
+                let invalidationError = null;
+                let metadataError = null;
+                try {
+                  await updateReviewGate(pr, 'ci-pending', false, true);
+                } catch (gateError) {
+                  invalidationError = gateError;
+                }
+                try {
+                  await setCodeRabbitReviewActive(pr, false);
+                  await reconcileLabels(pr, null);
+                } catch (cleanupError) {
+                  metadataError = cleanupError;
+                }
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
                   : error.message;
-                failures.push(`#${pr.number}: ${detail}`);
-                core.error(`Failed to reconcile PR #${pr.number}: ${detail}`);
+                const gateDetail = invalidationError
+                  ? `; could not invalidate ${reviewGateName}: ${invalidationError.message}`
+                  : '';
+                const metadataDetail = metadataError
+                  ? `; could not clear review metadata: ${metadataError.message}`
+                  : '';
+                failures.push(`#${pr.number}: ${detail}${gateDetail}${metadataDetail}`);
+                core.error(`Failed to reconcile PR #${pr.number}: ${detail}${gateDetail}${metadataDetail}`);
               }
             }
 
