@@ -36,6 +36,9 @@ interface HarnessOptions {
 	addLabelsStatus?: number
 	labelLookupStatus?: number
 	createLabelStatus?: number
+	listCommentsErrorStatus?: number
+	createCommentErrorStatus?: number
+	updateCommentErrorStatus?: number
 	removeLabelStatus?: number
 	reviews?: Array<{
 		login: string
@@ -163,12 +166,18 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			throw Object.assign(new Error("Remove label failed"), { status: options.removeLabelStatus })
 		}
 	})
-	const createComment = vi.fn(async (args: { body: string }) => ({
-		data: { id: 11, user: { login: "github-actions[bot]" }, body: args.body },
-	}))
-	const updateComment = vi.fn(async (args: { comment_id: number; body: string }) => ({
-		data: { id: args.comment_id, user: { login: "github-actions[bot]" }, body: args.body },
-	}))
+	const createComment = vi.fn(async (args: { body: string }) => {
+		if (options.createCommentErrorStatus) {
+			throw Object.assign(new Error("Create comment failed"), { status: options.createCommentErrorStatus })
+		}
+		return { data: { id: 11, user: { login: "github-actions[bot]" }, body: args.body } }
+	})
+	const updateComment = vi.fn(async (args: { comment_id: number; body: string }) => {
+		if (options.updateCommentErrorStatus) {
+			throw Object.assign(new Error("Update comment failed"), { status: options.updateCommentErrorStatus })
+		}
+		return { data: { id: args.comment_id, user: { login: "github-actions[bot]" }, body: args.body } }
+	})
 	const createCommitStatus = vi.fn(
 		async (args: { sha: string; state: string; context: string; description: string; target_url: string }) => {
 			if (options.createCommitStatusErrorStatus) {
@@ -230,7 +239,14 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				createLabel,
 				removeLabel,
 				addLabels,
-				listComments: vi.fn(async () => existingComments),
+				listComments: vi.fn(async () => {
+					if (options.listCommentsErrorStatus) {
+						throw Object.assign(new Error("List comments failed"), {
+							status: options.listCommentsErrorStatus,
+						})
+					}
+					return existingComments
+				}),
 				createComment,
 				updateComment,
 			},
@@ -959,6 +975,43 @@ describe("PR review-state workflow", () => {
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish PR review gate"))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
+	})
+
+	it("fails closed when a successful gate cannot be invalidated", async () => {
+		const result = await runWorkflow({
+			createCommitStatusErrorStatus: 500,
+			gateStatuses: [
+				{
+					context: "PR review gate",
+					state: "success",
+					description: "Approved",
+					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
+				},
+			],
+		})
+
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not invalidate PR review gate"))
+	})
+
+	it("fails closed when review-guide comments cannot be listed", async () => {
+		const result = await runWorkflow({ listCommentsErrorStatus: 500 })
+
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("List comments failed"))
+		expect(latestGateStatus(result)?.state).toBe("pending")
+	})
+
+	it("fails closed when the review-guide comment cannot be created", async () => {
+		const result = await runWorkflow({ createCommentErrorStatus: 500 })
+
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Create comment failed"))
+		expect(latestGateStatus(result)?.state).toBe("pending")
+	})
+
+	it("fails closed when the review-guide comment cannot be updated", async () => {
+		const result = await runWorkflow({ existingGuide: true, updateCommentErrorStatus: 500 })
+
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Update comment failed"))
+		expect(latestGateStatus(result)?.state).toBe("pending")
 	})
 
 	it("publishes a pending gate and continues reconciliation when status lookup fails", async () => {

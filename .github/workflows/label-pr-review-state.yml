@@ -260,6 +260,8 @@ jobs:
                   latestGateStatus.target_url === pr.html_url) {
                 return;
               }
+              const mustInvalidateSuccess = !passed &&
+                (!lookupSucceeded || latestGateStatus?.state === 'success');
 
               try {
                 await github.rest.repos.createCommitStatus({
@@ -272,7 +274,7 @@ jobs:
                   target_url: pr.html_url,
                 });
               } catch (error) {
-                if (required) throw error;
+                if (required || mustInvalidateSuccess) throw error;
                 core.warning(`PR #${pr.number}: could not publish ${reviewGateName}: ${error.message}`);
               }
             }
