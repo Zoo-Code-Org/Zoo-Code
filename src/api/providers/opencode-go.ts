@@ -21,7 +21,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getModelParams } from "../transform/model-params"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
-import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
+import { processResponsesApiStream } from "../transform/responses-api-stream"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { RouterProvider } from "./router-provider"
@@ -378,7 +378,7 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
 		try {
-			stream = await this.client.responses.create(requestBody)
+			stream = await this.client.responses.create(requestBody, { signal: metadata?.abortSignal })
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
@@ -417,7 +417,23 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 					.totalCost,
 			}
 		}
-		yield* processResponsesApiStream(stream, normalizeUsage)
+
+		// Capture the iterator handle. If the consumer exits early (e.g., via a timeout
+		// or cancellation), we must explicitly close this specific instance to release
+		// the open HTTP connection and stop the provider from generating.
+		const streamIterator = stream[Symbol.asyncIterator]()
+
+		try {
+			// Pass the captured iterator to ensure early cancellation triggers the finally block.
+			yield* processResponsesApiStream({ [Symbol.asyncIterator]: () => streamIterator }, normalizeUsage)
+		} finally {
+			try {
+				// Explicitly close the iterator to drop the connection and halt work.
+				await streamIterator.return?.()
+			} catch {
+				// Swallow cleanup errors so they do not mask the primary stream or runtime error.
+			}
+		}
 	}
 
 	/**
@@ -702,32 +718,35 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		if (format === "responses") {
 			try {
-				const response = await this.client.responses.create({
-					model: modelId,
-					input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
-					store: false,
-					// OpenCode Go Responses models currently reject temperature.
-					// Honour the same includeMaxTokens/modelMaxTokens override
-					// logic as the chat-completions path.
-					...(maxTokens !== undefined
-						? {
-								max_output_tokens:
-									this.options.includeMaxTokens === true
-										? this.options.modelMaxTokens || maxTokens
-										: maxTokens,
-							}
-						: {}),
-					// The gateway accepts extended effort values ("none"/"xhigh"/
-					// "max") that postdate the SDK's narrower ReasoningEffort
-					// union; the wire value is a plain string, so this cast is safe.
-					...(reasoningEffort
-						? {
-								reasoning: {
-									effort: reasoningEffort,
-								} as OpenAI.Responses.ResponseCreateParamsNonStreaming["reasoning"],
-							}
-						: {}),
-				})
+				const response = await this.client.responses.create(
+					{
+						model: modelId,
+						input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
+						store: false,
+						// OpenCode Go Responses models currently reject temperature.
+						// Honour the same includeMaxTokens/modelMaxTokens override
+						// logic as the chat-completions path.
+						...(maxTokens !== undefined
+							? {
+									max_output_tokens:
+										this.options.includeMaxTokens === true
+											? this.options.modelMaxTokens || maxTokens
+											: maxTokens,
+								}
+							: {}),
+						// The gateway accepts extended effort values ("none"/"xhigh"/
+						// "max") that postdate the SDK's narrower ReasoningEffort
+						// union; the wire value is a plain string, so this cast is safe.
+						...(reasoningEffort
+							? {
+									reasoning: {
+										effort: reasoningEffort,
+									} as OpenAI.Responses.ResponseCreateParamsNonStreaming["reasoning"],
+								}
+							: {}),
+					},
+					{ signal: options?.abortSignal },
+				)
 				return response.output_text || ""
 			} catch (error) {
 				if (error instanceof Error) {

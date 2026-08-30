@@ -836,6 +836,113 @@ describe("OpencodeGoHandler", () => {
 			)
 		})
 
+		it("forwards the abort signal to the streaming Responses request", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const controller = new AbortController()
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(
+				handler.createMessage("sys", messages, { taskId: "test-task", abortSignal: controller.signal }),
+			)
+
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+		})
+
+		it("closes the Responses iterator when the consumer stops early", async () => {
+			const iterator = {
+				next: vitest.fn().mockResolvedValueOnce({
+					done: false,
+					value: { type: "response.output_text.delta", delta: "partial" },
+				}),
+				return: vitest.fn().mockResolvedValue({ done: true, value: undefined }),
+				[Symbol.asyncIterator]() {
+					return this
+				},
+			}
+			mockResponsesCreate.mockResolvedValue(iterator)
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			const responseStream = handler.createMessage("sys", messages)
+
+			await expect(responseStream.next()).resolves.toEqual({
+				done: false,
+				value: { type: "text", text: "partial" },
+			})
+			await responseStream.return(undefined)
+
+			expect(iterator.return).toHaveBeenCalledTimes(2)
+		})
+
+		it("preserves the stream error when iterator cleanup fails", async () => {
+			const circular: { self?: unknown } = {}
+			circular.self = circular
+			const iterator = {
+				next: vitest.fn().mockResolvedValueOnce({
+					done: false,
+					value: {
+						type: "response.output_item.done",
+						item: { type: "function_call", call_id: "call_1", name: "read_file", arguments: circular },
+					},
+				}),
+				return: vitest.fn().mockRejectedValue(new Error("cleanup failed")),
+				[Symbol.asyncIterator]() {
+					return this
+				},
+			}
+			mockResponsesCreate.mockResolvedValue(iterator)
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toThrow("circular")
+			expect(iterator.return).toHaveBeenCalled()
+		})
+
+		it("stops an in-flight Responses iterator when its abort signal rejects the read", async () => {
+			const controller = new AbortController()
+			let rejectNext: ((reason?: unknown) => void) | undefined
+			const iterator = {
+				next: vitest.fn().mockImplementation(
+					() =>
+						new Promise((_resolve, reject) => {
+							rejectNext = reject
+							controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), {
+								once: true,
+							})
+						}),
+				),
+				return: vitest.fn().mockResolvedValue({ done: true, value: undefined }),
+				[Symbol.asyncIterator]() {
+					return this
+				},
+			}
+			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
+				options.signal?.addEventListener("abort", () => rejectNext?.(new Error("request aborted")), {
+					once: true,
+				})
+				return iterator
+			})
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			const responseStream = handler.createMessage("sys", messages, {
+				taskId: "test-task",
+				abortSignal: controller.signal,
+			})
+			const nextPromise = responseStream.next()
+			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
+			controller.abort()
+
+			await expect(nextPromise).rejects.toThrow("request aborted")
+			expect(iterator.return).toHaveBeenCalled()
+		})
+
+		it("rethrows non-Error Responses streaming failures unchanged", async () => {
+			mockResponsesCreate.mockRejectedValue("stream failure")
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await expect(collectStream(handler.createMessage("sys", messages))).rejects.toBe("stream failure")
+		})
+
 		it("routes the request through responses.create, not chat completions or Anthropic messages", async () => {
 			const handler = new OpencodeGoHandler(lunaOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -1012,6 +1119,85 @@ describe("OpencodeGoHandler", () => {
 			expect(usageChunk.totalCost).toBeCloseTo((60 * 0.2 + 40 * 0.02 + 50 * 1.2) / 1_000_000, 10)
 		})
 
+		it("supports named and string tool choices and disables parallel calls", async () => {
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
+				{ type: "function", function: { name: "read_file", parameters: { type: "object" } } },
+			]
+
+			await collectStream(
+				handler.createMessage("sys", messages, {
+					taskId: "test-task",
+					tools,
+					tool_choice: { type: "function", function: { name: "read_file" } },
+					parallelToolCalls: false,
+				}),
+			)
+			let callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.tool_choice).toEqual({ type: "function", name: "read_file" })
+			expect(callArgs.parallel_tool_calls).toBe(false)
+
+			mockResponsesCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "response.completed", response: { usage: { input_tokens: 1, output_tokens: 1 } } },
+				]),
+			)
+			await collectStream(
+				handler.createMessage("sys", messages, {
+					taskId: "test-task",
+					tools,
+					tool_choice: "required",
+				}),
+			)
+			callArgs = mockResponsesCreate.mock.calls[1][0] as Record<string, unknown>
+			expect(callArgs.tool_choice).toBe("required")
+		})
+
+		it("omits max_output_tokens when no max token limit is available", async () => {
+			mockResponsesCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ type: "response.completed", response: { usage: { input_tokens: 1, output_tokens: 1 } } },
+				]),
+			)
+			vitest.mocked(getModels).mockResolvedValueOnce({
+				"gpt-5.6-luna": { ...opencodeGoModels["gpt-5.6-luna"], maxTokens: undefined },
+			})
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_output_tokens).toBeUndefined()
+		})
+
+		it.each(["cache_creation_input_tokens", "cache_write_tokens"] as const)(
+			"normalizes %s as cache-write usage and includes it in the total cost",
+			async (cacheWriteField) => {
+				mockResponsesCreate.mockImplementationOnce(async () =>
+					asyncStreamFrom([
+						{
+							type: "response.completed",
+							response: {
+								usage: {
+									input_tokens: 100,
+									output_tokens: 50,
+									[cacheWriteField]: 20,
+								},
+							},
+						},
+					]),
+				)
+				const handler = new OpencodeGoHandler(lunaOptions)
+				const chunks = await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
+				const usageChunk = chunks.find((chunk) => chunk.type === "usage")
+				if (!usageChunk || usageChunk.type !== "usage") throw new Error("Expected usage chunk")
+				expect(usageChunk.cacheWriteTokens).toBe(20)
+				expect(usageChunk.totalCost).toBeCloseTo((80 * 0.2 + 50 * 1.2 + 20 * 0.25) / 1_000_000, 10)
+			},
+		)
+
 		it("maps the model default reasoning effort to reasoning.effort", async () => {
 			const handler = new OpencodeGoHandler(lunaOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
@@ -1052,6 +1238,38 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.max_output_tokens).toBe(5_000)
 		})
 
+		it.each([{ output_text: "" }, {}])(
+			"returns an empty string when completePrompt output_text is empty or absent",
+			async (response) => {
+				mockResponsesCreate.mockResolvedValue(response)
+				const handler = new OpencodeGoHandler(lunaOptions)
+
+				await expect(handler.completePrompt("ping")).resolves.toBe("")
+			},
+		)
+
+		it("rethrows non-Error completePrompt failures unchanged", async () => {
+			mockResponsesCreate.mockRejectedValue("completion failure")
+			const handler = new OpencodeGoHandler(lunaOptions)
+
+			await expect(handler.completePrompt("ping")).rejects.toBe("completion failure")
+		})
+
+		it("rejects non-streaming Responses completion when the abort signal fires", async () => {
+			const controller = new AbortController()
+			const request = new Promise<never>((_resolve, reject) => {
+				controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true })
+			})
+			mockResponsesCreate.mockReturnValue(request)
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const completion = handler.completePrompt("ping", { abortSignal: controller.signal })
+
+			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
+			controller.abort()
+
+			await expect(completion).rejects.toThrow("request aborted")
+		})
+
 		it("completePrompt calls responses.create and returns output_text", async () => {
 			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
 			const handler = new OpencodeGoHandler(lunaOptions)
@@ -1059,6 +1277,7 @@ describe("OpencodeGoHandler", () => {
 			const result = await handler.completePrompt("ping")
 
 			expect(result).toBe("Hello!")
+			expect(mockCreate).not.toHaveBeenCalled()
 			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
 			expect(callArgs.model).toBe("gpt-5.6-luna")
 			expect(callArgs.store).toBe(false)
@@ -1066,6 +1285,38 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.instructions).toBeUndefined()
 			expect(callArgs.input).toEqual([{ role: "user", content: [{ type: "input_text", text: "ping" }] }])
 			expect(callArgs.temperature).toBeUndefined()
+		})
+
+		it("forwards Responses-specific max_output_tokens and reasoning in completePrompt", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler({ ...lunaOptions, includeMaxTokens: true, modelMaxTokens: 7_500 })
+
+			await handler.completePrompt("ping")
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.max_output_tokens).toBe(7_500)
+			expect(callArgs.reasoning).toEqual({ effort: "medium" })
+		})
+
+		it("omits reasoning in completePrompt when reasoning effort is disabled", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler({ ...lunaOptions, reasoningEffort: "disable" })
+
+			await handler.completePrompt("ping")
+
+			const callArgs = mockResponsesCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.reasoning).toBeUndefined()
+		})
+
+		it("forwards the abort signal to the non-streaming Responses request", async () => {
+			mockResponsesCreate.mockResolvedValue({ output_text: "Hello!" })
+			const handler = new OpencodeGoHandler(lunaOptions)
+			const controller = new AbortController()
+
+			await handler.completePrompt("ping", { abortSignal: controller.signal })
+
+			expect(mockResponsesCreate.mock.calls[0][1]).toEqual({ signal: controller.signal })
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("completePrompt wraps errors with an Opencode Go-specific message", async () => {

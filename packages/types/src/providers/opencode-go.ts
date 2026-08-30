@@ -344,6 +344,21 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"DeepSeek-V4-Pro-0813 is DeepSeek's strongest V4 model for reasoning, coding, long-context, and agentic workloads. Available via the Opencode Go plan.",
 	},
+	"deepseek-v4-flash": {
+		maxTokens: 384_000,
+		contextWindow: 1_000_000,
+		supportsImages: false,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
+		preserveReasoning: true,
+		reasoningEffort: "high",
+		inputPrice: 0.14,
+		outputPrice: 0.28,
+		cacheReadsPrice: 0.0028,
+		description:
+			"DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model supporting thinking and non-thinking modes. Available via the Opencode Go plan.",
+	},
 	// --- OpenAI Responses ---
 	// Luna is curated here because the Go gateway's model catalogue does not
 	// currently provide its capability metadata. These values intentionally
@@ -367,22 +382,6 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 			cacheReadsPriceMultiplier: 2,
 		},
 		description: "GPT-5.6 Luna via the OpenCode Go Responses API.",
-	},
-
-	"deepseek-v4-flash": {
-		maxTokens: 384_000,
-		contextWindow: 1_000_000,
-		supportsImages: false,
-		supportsPromptCache: true,
-		supportsMaxTokens: true,
-		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
-		preserveReasoning: true,
-		reasoningEffort: "high",
-		inputPrice: 0.14,
-		outputPrice: 0.28,
-		cacheReadsPrice: 0.0028,
-		description:
-			"DeepSeek-V4-Flash is DeepSeek's fast, cost-efficient V4 model supporting thinking and non-thinking modes. Available via the Opencode Go plan.",
 	},
 }
 
