@@ -36,6 +36,12 @@ vitest.mock("../fetchers/modelCache", () => ({
 			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
 		})
 	}),
+	refreshModels: vitest.fn().mockImplementation(function () {
+		return Promise.resolve({
+			"glm-5.1": { ...opencodeGoModels["glm-5.1"] },
+			"qwen3.7-max": { ...opencodeGoModels["qwen3.7-max"] },
+		})
+	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
 }))
 

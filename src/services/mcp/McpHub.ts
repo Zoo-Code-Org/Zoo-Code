@@ -176,7 +176,9 @@ export class McpHub {
 		if (secretStorage) {
 			this.secretStorage = secretStorage
 		}
-		this.watchMcpSettingsFile()
+		void this.watchMcpSettingsFile().catch((error) => {
+			console.error("[McpHub] Failed to watch MCP settings file:", error)
+		})
 		this.watchProjectMcpFile().catch(console.error)
 		this.setupWorkspaceFoldersWatcher()
 		this.initializationPromise = Promise.all([

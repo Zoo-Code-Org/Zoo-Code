@@ -24,11 +24,6 @@
 			"count": 6
 		}
 	},
-	"__tests__/extension.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"__tests__/history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 72
@@ -396,7 +391,7 @@
 	},
 	"api/providers/openai-codex.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 35
+			"count": 34
 		}
 	},
 	"api/providers/openai-native.ts": {
@@ -476,7 +471,7 @@
 	},
 	"api/transform/__tests__/gemini-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/transform/__tests__/mistral-format.spec.ts": {
@@ -836,7 +831,7 @@
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 32
+			"count": 18
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {

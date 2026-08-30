@@ -30,6 +30,7 @@ import {
 	type TerminalActionId,
 	type TerminalActionPromptType,
 	type HistoryItem,
+	type PendingTaskAction,
 	type CloudUserInfo,
 	type CloudOrganizationMembership,
 	type CreateTaskOptions,
@@ -37,6 +38,7 @@ import {
 	type ToolUsage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type WebviewThemeFixture,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -178,6 +180,15 @@ export class ClineProvider
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
+	private pendingThemeFixtureProbes = new Map<
+		string,
+		{
+			resolve: (fixture: WebviewThemeFixture) => void
+			reject: (error: Error) => void
+			timeout: ReturnType<typeof setTimeout>
+		}
+	>()
+	private nextThemeFixtureProbeId = 0
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
@@ -293,7 +304,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.78.0-models-nanogpt-reliability" // v3.78.0 new models, NanoGPT, and provider/task reliability
+	public readonly latestAnnouncementId = "aug-2026-v3.80.1-gateway-promo-models-fixes" // v3.80.1 Zoo Gateway promo, GLM-5.3-Flash, and reliability fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -717,6 +728,40 @@ export class ClineProvider
 		return this.taskRegistry.taskIds
 	}
 
+	public async setPendingTaskAction(taskId: string, pendingAction: PendingTaskAction): Promise<void> {
+		await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => ({
+			...historyItem,
+			pendingAction,
+		}))
+		this.recentTasksCache = undefined
+	}
+
+	public async clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean> {
+		let cleared = false
+		try {
+			await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => {
+				if (historyItem.pendingAction?.actionId !== actionId) {
+					return historyItem
+				}
+
+				cleared = true
+				return { ...historyItem, pendingAction: undefined }
+			})
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message === `[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`
+			) {
+				return false
+			}
+			throw error
+		}
+		if (cleared) {
+			this.recentTasksCache = undefined
+		}
+		return cleared
+	}
+
 	// Pending Edit Operations Management
 
 	/**
@@ -753,6 +798,7 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -965,7 +1011,8 @@ export class ClineProvider
 		}
 
 		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development
+			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
 				? await this.getHMRHtmlContent(webviewView.webview)
 				: await this.getHtmlContent(webviewView.webview)
 
@@ -1406,6 +1453,43 @@ export class ClineProvider
 		} catch {
 			// View disposed, drop message silently
 		}
+	}
+
+	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
+		if (process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1") {
+			return Promise.reject(new Error("Theme fixture probing is disabled"))
+		}
+
+		const requestId = `theme-fixture-${++this.nextThemeFixtureProbeId}`
+
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				this.pendingThemeFixtureProbes.delete(requestId)
+				reject(new Error(`Theme fixture probe timed out after ${timeoutMs}ms`))
+			}, timeoutMs)
+
+			this.pendingThemeFixtureProbes.set(requestId, { resolve, reject, timeout })
+			void this.postMessageToWebview({ type: "themeFixtureProbeRequest", requestId })
+		})
+	}
+
+	public resolveWebviewThemeFixtureProbe(requestId: string, fixture: WebviewThemeFixture): void {
+		const pending = this.pendingThemeFixtureProbes.get(requestId)
+		if (!pending) {
+			return
+		}
+
+		clearTimeout(pending.timeout)
+		this.pendingThemeFixtureProbes.delete(requestId)
+		pending.resolve(fixture)
+	}
+
+	private rejectPendingThemeFixtureProbes(error: Error): void {
+		for (const pending of this.pendingThemeFixtureProbes.values()) {
+			clearTimeout(pending.timeout)
+			pending.reject(error)
+		}
+		this.pendingThemeFixtureProbes.clear()
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -2486,9 +2570,11 @@ export class ClineProvider
 			customInstructions,
 			alwaysAllowReadOnly,
 			alwaysAllowReadOnlyOutsideWorkspace,
+			allowedReadFiles,
 			alwaysAllowWrite,
 			alwaysAllowWriteOutsideWorkspace,
 			alwaysAllowWriteProtected,
+			allowedWriteFiles,
 			alwaysAllowExecute,
 			destructiveCommandGuardEnabled,
 			allowedCommands,
@@ -2593,6 +2679,7 @@ export class ClineProvider
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
+		const vscodeTelemetryEnabled = vscode.env.isTelemetryEnabled
 		const mergedAllowedCommands = this.mergeAllowedCommands(allowedCommands)
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
@@ -2635,9 +2722,11 @@ export class ClineProvider
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,
+			allowedReadFiles: allowedReadFiles ?? [],
 			alwaysAllowWrite: alwaysAllowWrite ?? false,
 			alwaysAllowWriteOutsideWorkspace: alwaysAllowWriteOutsideWorkspace ?? false,
 			alwaysAllowWriteProtected: alwaysAllowWriteProtected ?? false,
+			allowedWriteFiles: allowedWriteFiles ?? [],
 			alwaysAllowExecute: alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled,
 			alwaysAllowMcp: alwaysAllowMcp ?? false,
@@ -2696,6 +2785,7 @@ export class ClineProvider
 			telemetrySetting,
 			telemetryKey,
 			machineId,
+			vscodeTelemetryEnabled,
 			showRooIgnoredFiles: showRooIgnoredFiles ?? false,
 			enableSubfolderRules: enableSubfolderRules ?? false,
 			language: language ?? formatLanguage(vscode.env.language),
@@ -2870,9 +2960,11 @@ export class ClineProvider
 			apiModelId: stateValues.apiModelId,
 			alwaysAllowReadOnly: stateValues.alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: stateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
+			allowedReadFiles: stateValues.allowedReadFiles ?? [],
 			alwaysAllowWrite: stateValues.alwaysAllowWrite ?? false,
 			alwaysAllowWriteOutsideWorkspace: stateValues.alwaysAllowWriteOutsideWorkspace ?? false,
 			alwaysAllowWriteProtected: stateValues.alwaysAllowWriteProtected ?? false,
+			allowedWriteFiles: stateValues.allowedWriteFiles ?? [],
 			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled:
 				stateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
@@ -3712,8 +3804,9 @@ export class ClineProvider
 		message: string
 		initialTodos: TodoItem[]
 		mode: string
+		pendingActionId?: string
 	}): Promise<Task> {
-		const { parentTaskId, message, initialTodos, mode } = params
+		const { parentTaskId, message, initialTodos, mode, pendingActionId } = params
 
 		// Metadata-driven delegation is always enabled
 
@@ -3726,6 +3819,14 @@ export class ClineProvider
 			throw new Error(
 				`[delegateParentAndOpenChild] Parent mismatch: expected ${parentTaskId}, current ${parent.taskId}`,
 			)
+		}
+		if (pendingActionId) {
+			const parentHistory = this.taskHistoryStore.get(parentTaskId)
+			if (parentHistory?.pendingAction?.actionId !== pendingActionId) {
+				throw new Error(
+					`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${parentHistory?.pendingAction?.actionId}`,
+				)
+			}
 		}
 		// 2) Flush pending tool results to API history BEFORE disposing the parent.
 		//    This is critical: when tools are called before new_task,
@@ -3822,6 +3923,11 @@ export class ClineProvider
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
 				let base = historyItem
+				if (pendingActionId && base.pendingAction?.actionId !== pendingActionId) {
+					throw new Error(
+						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${base.pendingAction?.actionId}`,
+					)
+				}
 				if (historyItem.status === "delegated") {
 					// Re-read the awaited child's current status under the store lock.
 					const awaitedChildStatus = historyItem.awaitingChildId
@@ -3852,6 +3958,7 @@ export class ClineProvider
 					delegatedToId: child.taskId,
 					awaitingChildId: child.taskId,
 					childIds,
+					pendingAction: base.pendingAction?.actionId === pendingActionId ? undefined : base.pendingAction,
 				}
 			})
 			this.recentTasksCache = undefined
@@ -3922,13 +4029,21 @@ export class ClineProvider
 		parentTaskId: string
 		childTaskId: string
 		completionResultSummary: string
+		pendingActionId?: string
 	}): Promise<boolean> {
-		const { parentTaskId, childTaskId, completionResultSummary } = params
+		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
 		return this.runDelegationTransition(parentTaskId, async () => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
 			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			const childHistory = this.taskHistoryStore.get(childTaskId)
+			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
+				this.log(
+					`[reopenParentFromDelegation] Aborting: child ${childTaskId} pending action does not match ${pendingActionId}`,
+				)
+				return false
+			}
 
 			// Guard: re-validate delegation state after the async approval gap.
 			// cancelTask() or removeClineFromStack() may have already detached the parent
@@ -4095,8 +4210,17 @@ export class ClineProvider
 				childTaskId,
 				parentTaskId,
 				(child) => {
+					if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
+						throw new Error(`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`)
+					}
 					assertValidTransition(child.status, "completed")
-					return { ...child, status: "completed" as const, completionResultSummary }
+					return {
+						...child,
+						status: "completed" as const,
+						completionResultSummary,
+						pendingAction:
+							child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
+					}
 				},
 				(parent) => {
 					if (parent.status !== "active") {

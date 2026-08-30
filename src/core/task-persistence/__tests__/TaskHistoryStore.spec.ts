@@ -8,6 +8,7 @@ import type { HistoryItem } from "@roo-code/types"
 
 import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
+import { ClineProvider } from "../../webview/ClineProvider"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
@@ -89,6 +90,43 @@ describe("TaskHistoryStore", () => {
 			const item = makeHistoryItem({ id: "task-get" })
 			await store.upsert(item)
 			expect(store.get("task-get")).toMatchObject({ id: "task-get" })
+		})
+	})
+
+	describe("pending action persistence", () => {
+		it("persists set and clear operations across store reinitialization", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "pending-action-task" }))
+			const provider = { taskHistoryStore: store, recentTasksCache: undefined } as unknown as ClineProvider
+			const pendingAction = {
+				kind: "finish_subtask" as const,
+				actionId: "finish-action",
+				approvalText: JSON.stringify({ tool: "finishTask" }),
+				parentTaskId: "parent-1",
+				result: "Done",
+			}
+
+			await ClineProvider.prototype.setPendingTaskAction.call(provider, "pending-action-task", pendingAction)
+			store.dispose()
+			store = new TaskHistoryStore(tmpDir)
+			await store.initialize()
+			expect(store.get("pending-action-task")?.pendingAction).toEqual(pendingAction)
+
+			const reloadedProvider = {
+				taskHistoryStore: store,
+				recentTasksCache: undefined,
+			} as unknown as ClineProvider
+			await expect(
+				ClineProvider.prototype.clearPendingTaskAction.call(
+					reloadedProvider,
+					"pending-action-task",
+					"finish-action",
+				),
+			).resolves.toBe(true)
+			store.dispose()
+			store = new TaskHistoryStore(tmpDir)
+			await store.initialize()
+			expect(store.get("pending-action-task")?.pendingAction).toBeUndefined()
 		})
 	})
 
