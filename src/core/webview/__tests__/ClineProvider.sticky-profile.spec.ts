@@ -5,6 +5,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import type { HistoryItem } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
@@ -363,12 +364,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "new-profile",
 				id: "new-profile-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "new-profile", id: "new-profile-id", apiProvider: "anthropic" },
+				{ name: "new-profile", id: "new-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			// Switch provider profile
@@ -428,12 +429,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "new-profile",
 				id: "new-profile-id",
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			})
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "new-profile", id: "new-profile-id", apiProvider: "openrouter" },
+				{ name: "new-profile", id: "new-profile-id", apiProvider: providerIdentifiers.openrouter },
 			])
 
 			// Switch provider profile
@@ -471,11 +472,11 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "new-profile",
 				id: "new-profile-id",
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			})
 
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "new-profile", id: "new-profile-id", apiProvider: "openrouter" },
+				{ name: "new-profile", id: "new-profile-id", apiProvider: providerIdentifiers.openrouter },
 			])
 
 			await provider.activateProviderProfile({ name: "new-profile" })
@@ -513,7 +514,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "saved-profile", id: "saved-profile-id", apiProvider: "anthropic" },
+				{ name: "saved-profile", id: "saved-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			// Initialize task with history item
@@ -579,7 +580,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			const logSpy = vi.spyOn(provider, "log")
 
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "saved-profile", id: "saved-profile-id", apiProvider: "anthropic" },
+				{ name: "saved-profile", id: "saved-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			await provider.createTaskWithHistoryItem(historyItem)
@@ -613,7 +614,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-config-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "mode-profile", id: "mode-config-id", apiProvider: "anthropic" },
+				{ name: "mode-profile", id: "mode-config-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			await provider.createTaskWithHistoryItem(historyItem)
@@ -683,8 +684,8 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			// Mock providerSettingsManager methods
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-config-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "mode-preferred-profile", id: "mode-config-id", apiProvider: "anthropic" },
-				{ name: "task-specific-profile", id: "task-profile-id", apiProvider: "openai" },
+				{ name: "mode-preferred-profile", id: "mode-config-id", apiProvider: providerIdentifiers.anthropic },
+				{ name: "task-specific-profile", id: "task-profile-id", apiProvider: providerIdentifiers.openai },
 			])
 
 			// Initialize task with history item
@@ -768,12 +769,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "new-profile",
 				id: "new-profile-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "new-profile", id: "new-profile-id", apiProvider: "anthropic" },
+				{ name: "new-profile", id: "new-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			// Trigger a profile switch
@@ -869,14 +870,14 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "profile-c",
 				id: "profile-c-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "profile-a", id: "profile-a-id", apiProvider: "anthropic" },
-				{ name: "profile-b", id: "profile-b-id", apiProvider: "openai" },
-				{ name: "profile-c", id: "profile-c-id", apiProvider: "anthropic" },
+				{ name: "profile-a", id: "profile-a-id", apiProvider: providerIdentifiers.anthropic },
+				{ name: "profile-b", id: "profile-b-id", apiProvider: providerIdentifiers.openai },
+				{ name: "profile-c", id: "profile-c-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			// Switch task 1's profile to profile C
@@ -928,12 +929,12 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "new-profile",
 				id: "new-profile-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			})
 
 			// Mock providerSettingsManager.listConfig
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "new-profile", id: "new-profile-id", apiProvider: "anthropic" },
+				{ name: "new-profile", id: "new-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			// Mock log to verify error is logged
@@ -996,7 +997,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 
 			// Mock providerSettingsManager.listConfig to return the profile
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
-				{ name: "failing-profile", id: "failing-profile-id", apiProvider: "anthropic" },
+				{ name: "failing-profile", id: "failing-profile-id", apiProvider: providerIdentifiers.anthropic },
 			])
 
 			// Mock activateProviderProfile to throw error

@@ -247,28 +247,340 @@ describe("OpenAiCodexHandler.completePrompt service tier", () => {
 	it.each<[string, OpenAiCodexServiceTier | undefined, typeof OpenAiCodexServiceTier.Priority | undefined]>([
 		["Fast", OpenAiCodexServiceTier.Priority, OpenAiCodexServiceTier.Priority],
 		["Standard", undefined, undefined],
-	])("uses the %s preference in non-streaming requests", async (_mode, configuredTier, expectedTier) => {
+	])("uses the %s preference in completion requests", async (_mode, configuredTier, expectedTier) => {
 		const handler = new OpenAiCodexHandler({
 			apiModelId: "gpt-5.6-sol",
 			...(configuredTier ? { [OPEN_AI_CODEX_SERVICE_TIER_KEY]: configuredTier } : {}),
 		})
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		const mockFetch = vitest.fn().mockResolvedValue({
-			ok: true,
-			json: vitest.fn().mockResolvedValue({ text: "Complete" }),
-		})
-		vitest.stubGlobal("fetch", mockFetch)
+		const create = vitest.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "Complete" },
+				{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+			]),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
 
 		await expect(handler.completePrompt("Hello")).resolves.toBe("Complete")
 
-		const body = JSON.parse(mockFetch.mock.calls[0][1].body)
-		expect(body.stream).toBe(false)
+		const body = create.mock.calls[0][0]
+		// The Codex subscription endpoint rejects `stream: false` outright.
+		expect(body.stream).toBe(true)
 		if (expectedTier) {
 			expect(body[SERVICE_TIER_KEY]).toBe(expectedTier)
 		} else {
 			expect(body).not.toHaveProperty(SERVICE_TIER_KEY)
 		}
+	})
+})
+
+describe("OpenAiCodexHandler.completePrompt streaming", () => {
+	function createHandler() {
+		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-sol" })
+		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
+		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		return handler
+	}
+
+	function injectStream(handler: OpenAiCodexHandler, events: unknown[]) {
+		const create = vitest.fn().mockResolvedValue(asyncStreamFrom(events))
+		Reflect.set(handler, "client", { responses: { create } })
+		return create
+	}
+
+	afterEach(() => {
+		vitest.restoreAllMocks()
+		vitest.unstubAllGlobals()
+	})
+
+	it("joins consecutive text deltas into one string", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "feat: " },
+			{ type: "response.output_text.delta", delta: "add commit messages" },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("feat: add commit messages")
+	})
+
+	// The enhanced prompt is written straight into the input box, so reasoning must never become
+	// part of it.
+	it("omits reasoning from the completion", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.reasoning_summary_text.delta", delta: "Thinking about the diff" },
+			{ type: "response.output_text.delta", delta: "fix: correct the parser" },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		const result = await handler.completePrompt("Hello")
+
+		expect(result).toBe("fix: correct the parser")
+		expect(result).not.toContain("Thinking")
+	})
+
+	it("omits usage and tool calls from the completion", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "chore: tidy" },
+			{
+				type: "response.output_item.done",
+				item: { type: "function_call", call_id: "call_1", name: "read_file", arguments: "{}" },
+			},
+			{
+				type: "response.completed",
+				response: {
+					id: "r1",
+					status: "completed",
+					output: [],
+					usage: { input_tokens: 10, output_tokens: 5 },
+				},
+			},
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("chore: tidy")
+	})
+
+	// A refusal is streamed as text so the chat can show it, but the non-streaming request this
+	// replaced read `output_text`, which never carries refusals. Keeping them would paste
+	// "[Refusal] ..." into the prompt enhancer's input box as if the model had answered.
+	it("omits refusals from the completion", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.refusal.delta", delta: "I cannot help " },
+			{ type: "response.refusal.delta", delta: "with that request." },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("")
+	})
+
+	it("keeps the answer when a refusal arrives alongside output text", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.output_text.delta", delta: "docs: update the readme" },
+			{ type: "response.refusal.delta", delta: "I cannot help with the rest." },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("docs: update the readme")
+	})
+
+	// The SSE transport parses its own events, so it has a second refusal branch to keep aligned.
+	it("omits refusals streamed over the SSE fallback", async () => {
+		const handler = createHandler()
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
+		vitest.stubGlobal(
+			"fetch",
+			vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.refusal.delta","delta":"I cannot help with that."}\n\n',
+							),
+						)
+						controller.close()
+					},
+				}),
+			}),
+		)
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("")
+	})
+
+	// Dropping the refusal is specific to the one-shot completion: a chat still has to show it.
+	it("still surfaces refusals to the chat stream", async () => {
+		const handler = createHandler()
+		injectStream(handler, [
+			{ type: "response.refusal.delta", delta: "I cannot help with that." },
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		const chunks = await collectStream(handler.createMessage("system", [{ role: "user", content: "Hello" }]))
+
+		expect(chunks).toContainEqual({ type: "text", text: "[Refusal] I cannot help with that." })
+	})
+
+	// The SDK path swallows its own errors into the SSE fallback, so an auth failure only reaches
+	// the retry loop from the fallback - the same shape the streaming Luna retry test relies on.
+	it("retries once with a refreshed token when the first attempt is unauthorized", async () => {
+		const handler = createHandler()
+		const refresh = vitest
+			.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+			.mockResolvedValue("fresh-token")
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
+		const mockFetch = vitest
+			.fn()
+			.mockResolvedValueOnce({
+				ok: false,
+				status: 401,
+				text: vitest.fn().mockResolvedValue('{"error":{"message":"Codex API invalid token"}}'),
+			})
+			.mockResolvedValueOnce({
+				ok: true,
+				body: new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_text.delta","delta":"docs: update"}\n\n',
+							),
+						)
+						controller.close()
+					},
+				}),
+			})
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).resolves.toBe("docs: update")
+		expect(refresh).toHaveBeenCalled()
+		expect(mockFetch).toHaveBeenCalledTimes(2)
+	})
+
+	// The caller's signal is linked to the internal controller rather than passed through, so what
+	// matters is that aborting the caller's one aborts the signal the request is actually using.
+	// The stream then ends quietly, so rejecting is the only thing that tells the caller apart a
+	// cancelled generation from a finished one.
+	it("rejects and stops the request when cancelled mid-stream", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		let signalDuringRequest: AbortSignal | undefined
+
+		const create = vitest.fn().mockImplementation((_body: unknown, options: { signal: AbortSignal }) => {
+			signalDuringRequest = options.signal
+			// Abort mid-flight, while `executeRequest`'s listener is still attached.
+			controller.abort()
+			return Promise.resolve(
+				asyncStreamFrom([
+					{ type: "response.output_text.delta", delta: "feat: half a" },
+					{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+				]),
+			)
+		})
+		Reflect.set(handler, "client", { responses: { create } })
+
+		await expect(handler.completePrompt("Hello", { abortSignal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+
+		expect(signalDuringRequest).toBeInstanceOf(AbortSignal)
+		expect(signalDuringRequest!.aborted).toBe(true)
+	})
+
+	it("rejects when the caller's signal is already aborted", async () => {
+		const handler = createHandler()
+		const create = injectStream(handler, [
+			{ type: "response.completed", response: { id: "r1", status: "completed", output: [] } },
+		])
+
+		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+
+		expect(create.mock.calls[0][1].signal.aborted).toBe(true)
+	})
+
+	// The SSE fallback is for an SDK that could not be used at all. Replaying the request after the
+	// SDK has already produced output would append a second generation to the first.
+	it("does not replay over SSE when the SDK fails after emitting", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockResolvedValue(
+			(async function* () {
+				yield { type: "response.output_text.delta", delta: "feat: add" }
+				throw new Error("stream broke")
+			})(),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).rejects.toThrow(/completionError|stream broke/)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// The service has accepted the request by the time it emits, so refreshing the token and
+	// sending it again would bill a second generation and hand the caller both.
+	it("does not retry with a refreshed token when the SDK fails after emitting", async () => {
+		const handler = createHandler()
+		const refresh = vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken")
+		const create = vitest.fn().mockResolvedValue(
+			(async function* () {
+				yield { type: "response.output_text.delta", delta: "feat: add" }
+				throw new Error("Codex API invalid token")
+			})(),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello")).rejects.toThrow(/completionError|invalid token/)
+		expect(refresh).not.toHaveBeenCalled()
+		expect(create).toHaveBeenCalledTimes(1)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// An abort is not a transport failure, so spending a second request on an already-aborted
+	// signal only turns the cancellation into a connection error.
+	it("does not fall back to SSE when the SDK fails because the caller aborted", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("Request was aborted"))
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		await expect(handler.completePrompt("Hello", { abortSignal: AbortSignal.abort() })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	// The abort arrives while the request is still in flight, before any event, which is the case
+	// that only works if the caller's signal is genuinely linked to the internal controller. A
+	// broken link would leave the request hanging on a signal that never fires.
+	it("aborts the in-flight request when the caller cancels before any event", async () => {
+		const handler = createHandler()
+		const controller = new AbortController()
+		let signalDuringRequest: AbortSignal | undefined
+
+		const create = vitest.fn().mockImplementation(
+			(_body: unknown, options: { signal: AbortSignal }) =>
+				new Promise((_resolve, reject) => {
+					signalDuringRequest = options.signal
+					// Reject the way the SDK does once the signal it was handed aborts.
+					options.signal.addEventListener("abort", () => reject(new Error("Request was aborted")), {
+						once: true,
+					})
+				}),
+		)
+		Reflect.set(handler, "client", { responses: { create } })
+		const mockFetch = vitest.fn()
+		vitest.stubGlobal("fetch", mockFetch)
+
+		const completion = handler.completePrompt("Hello", { abortSignal: controller.signal })
+		// The token lookup and the listener that links the two signals are both async, so aborting
+		// synchronously here would fire before anything is listening.
+		await vitest.waitFor(() => expect(create).toHaveBeenCalled())
+		controller.abort()
+
+		await expect(completion).rejects.toMatchObject({ name: "AbortError" })
+		expect(signalDuringRequest!.aborted).toBe(true)
+		expect(mockFetch).not.toHaveBeenCalled()
+	})
+
+	it("wraps failures from both transports as a completion error", async () => {
+		const handler = createHandler()
+		const create = vitest.fn().mockRejectedValue(new Error("sdk down"))
+		Reflect.set(handler, "client", { responses: { create } })
+		vitest.stubGlobal("fetch", vitest.fn().mockRejectedValue(new Error("network down")))
+
+		await expect(handler.completePrompt("Hello")).rejects.toThrow(/completionError|network down/)
 	})
 })
 
@@ -601,15 +913,20 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna", reasoningEffort: "disable" })
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
+		// Forcing the SDK path to fail exercises the SSE fallback, which is where the request body
+		// and the Codex-specific headers are assembled by hand.
+		Reflect.set(handler, "client", {
+			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
+		})
 		const mockFetch = vitest.fn().mockResolvedValue({
 			ok: true,
-			json: vitest.fn().mockResolvedValue({
-				output: [
-					{
-						type: "message",
-						content: [{ type: "output_text", text: "Complete" }],
-					},
-				],
+			body: new ReadableStream({
+				start(controller) {
+					controller.enqueue(
+						new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Complete"}\n\n'),
+					)
+					controller.close()
+				},
 			}),
 		})
 		vitest.stubGlobal("fetch", mockFetch)
@@ -622,7 +939,7 @@ describe("OpenAiCodexHandler Luna Responses Lite requests", () => {
 		expect(sessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
 		expect(body).toMatchObject({
 			model: "gpt-5.6-luna",
-			stream: false,
+			stream: true,
 			tool_choice: "auto",
 			parallel_tool_calls: false,
 			reasoning: { context: "all_turns" },

@@ -12,7 +12,9 @@
 	},
 	"telemetry": {
 		"helpImprove": "Giúp cải thiện Zoo Code",
-		"helpImproveMessage": "Zoo Code thu thập dữ liệu lỗi và sử dụng để giúp chúng tôi sửa lỗi và cải thiện tiện ích mở rộng. Dữ liệu từ xa này không thu thập mã, lời nhắc hoặc thông tin cá nhân. Bạn có thể vô hiệu hóa nó trong <settingsLink>cài đặt</settingsLink>."
+		"helpImproveMessage": "Zoo Code thu thập dữ liệu lỗi và sử dụng, được liên kết với một mã định danh cài đặt, để giúp chúng tôi sửa lỗi và cải thiện tiện ích mở rộng. Dữ liệu từ xa này không thu thập mã nguồn hoặc lời nhắc của bạn. Bạn có thể vô hiệu hóa nó trong <settingsLink>cài đặt</settingsLink>.",
+		"accept": "Chấp nhận",
+		"decline": "Từ chối"
 	},
 	"importSettings": "Nhập Cài đặt"
 }
