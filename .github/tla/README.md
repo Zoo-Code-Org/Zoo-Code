@@ -1,11 +1,13 @@
 # PR review label model
 
-`PrReviewLabels.tla` models the review workflow as two independently scheduled systems:
+`PrReviewLabels.tla` is a bounded policy/interleaving model with two independently scheduled systems:
 
 - GitHub changes the PR head, draft state, conflicts, required CI, and reviews.
 - The metadata workflow reconciles those facts into one state label, the CodeRabbit activation label, and the advisory review gate.
 
-The `dirty` variable allows webhook delivery and reconciliation to lag. Label and advisory-gate consistency are required whenever reconciliation has settled. The model intentionally does not treat the custom check as an instantaneous enforcement boundary: GitHub's native CI and review state can change before the metadata workflow processes the corresponding webhook.
+The `dirty` variable allows source state and reconciliation to lag. Label and advisory-gate consistency are required whenever reconciliation has settled. `Reconcile` deliberately abstracts metadata writes as one successful atomic action, so this model verifies policy precedence rather than the GitHub API adapter.
+
+The model assumes review events have already been normalized and metadata writes succeed. It does not model token permissions, API errors or limits, webhook delivery guarantees, integration identity, check-run ordering, or changes to third-party comment/status formats. Those boundaries are covered by the executable workflow harness and live branch validation. Weak fairness means reconciliation becomes clean infinitely often; it does not claim permanent convergence while GitHub continues changing the PR.
 
 The finite model checks two head commits and covers:
 
@@ -14,6 +16,9 @@ The finite model checks two head commits and covers:
 - conflicts;
 - required CI pending, failure, success, and reruns;
 - automatic and manual-draft CodeRabbit reviews;
+- bot-authored PRs that bypass required CodeRabbit review;
+- fork PRs whose advisory gate never passes;
+- same-head CodeRabbit approval replacement or retraction;
 - maintainer reviews before and after CodeRabbit;
 - delayed or out-of-order reconciliation.
 
@@ -27,4 +32,4 @@ printf '%s  %s\n' 936a262061c914694dfd669a543be24573c45d5aa0ff20a8b96b23d01e050e
 java -cp tla2tools.jar tlc2.TLC -config PrReviewLabels.cfg PrReviewLabels.tla
 ```
 
-The JAR is a local tool and must not be committed. Weak fairness on reconciliation checks that metadata eventually converges after asynchronous GitHub events; the model does not claim that CI or reviewers must eventually approve a PR.
+The JAR is a local tool and must not be committed. The model does not claim that CI or reviewers eventually approve a PR, or that external APIs eventually accept a metadata write.

@@ -23,6 +23,8 @@ StateLabels == {
 
 VARIABLES
     head,
+    botAuthor,
+    forkPR,
     draft,
     conflict,
     ci,
@@ -38,6 +40,8 @@ VARIABLES
 
 vars == <<
     head,
+    botAuthor,
+    forkPR,
     draft,
     conflict,
     ci,
@@ -58,16 +62,19 @@ CurrentMaintChanges == maintHead = head /\ maintState = "changes"
 ValidMaintApproval ==
     maintHead = head /\
     maintState = "approved" /\
-    maintAfterCR
+    (botAuthor \/ maintAfterCR)
 
 DesiredStateLabel ==
     CASE conflict -> "has-conflicts"
       [] ci # "passed" -> "none"
       [] CurrentCRChanges -> "awaiting-author"
+      [] CurrentMaintChanges -> "awaiting-author"
+      [] botAuthor /\ draft -> "none"
+      [] botAuthor /\ ~ValidMaintApproval -> "awaiting-maintainer"
+      [] botAuthor -> "none"
       [] draft /\ CurrentCRApproved -> "awaiting-ready"
       [] draft -> "none"
       [] ~CurrentCRApproved -> "awaiting-coderabbit"
-      [] CurrentMaintChanges -> "awaiting-author"
       [] ~ValidMaintApproval -> "awaiting-maintainer"
       [] OTHER -> "none"
 
@@ -75,6 +82,7 @@ DesiredCRLabelHead ==
     IF ~conflict /\
        ci = "passed" /\
        ~draft /\
+       ~botAuthor /\
        ~CurrentCRApproved /\
        ~CurrentCRChanges
     THEN head
@@ -84,11 +92,15 @@ DesiredGatePassed ==
     ~conflict /\
     ci = "passed" /\
     ~draft /\
-    CurrentCRApproved /\
+    ~forkPR /\
+    ~CurrentCRChanges /\
+    (botAuthor \/ CurrentCRApproved) /\
     ValidMaintApproval
 
 Init ==
     /\ head = 1
+    /\ botAuthor \in BOOLEAN
+    /\ forkPR \in BOOLEAN
     /\ draft = TRUE
     /\ conflict = FALSE
     /\ ci = "pending"
@@ -109,6 +121,8 @@ Push ==
     /\ gatePassed' = FALSE
     /\ dirty' = TRUE
     /\ UNCHANGED <<
+        botAuthor,
+        forkPR,
         draft,
         conflict,
         crHead,
@@ -126,6 +140,8 @@ MarkReady ==
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         conflict,
         ci,
         crHead,
@@ -145,6 +161,8 @@ ConvertToDraft ==
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         conflict,
         ci,
         crHead,
@@ -163,6 +181,8 @@ SetConflict(value) ==
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         draft,
         ci,
         crHead,
@@ -180,6 +200,8 @@ RestartCI ==
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         draft,
         conflict,
         crHead,
@@ -198,6 +220,8 @@ CompleteCI(result) ==
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         draft,
         conflict,
         crHead,
@@ -211,14 +235,16 @@ CompleteCI(result) ==
 
 CodeRabbitReview(result) ==
     /\ result \in {"changes", "approved"}
-    /\ crHead # head
-    /\ \/ draft
+    /\ \/ botAuthor
+       \/ draft
        \/ (~draft /\ ci = "passed" /\ crLabelHead = head)
     /\ crHead' = head
     /\ crState' = result
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         draft,
         conflict,
         ci,
@@ -238,6 +264,8 @@ MaintainerReview(result) ==
     /\ dirty' = TRUE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         draft,
         conflict,
         ci,
@@ -255,6 +283,8 @@ Reconcile ==
     /\ dirty' = FALSE
     /\ UNCHANGED <<
         head,
+        botAuthor,
+        forkPR,
         draft,
         conflict,
         ci,
@@ -282,6 +312,8 @@ EventualReconciliation == []<>(~dirty)
 
 TypeOK ==
     /\ head \in Heads
+    /\ botAuthor \in BOOLEAN
+    /\ forkPR \in BOOLEAN
     /\ draft \in BOOLEAN
     /\ conflict \in BOOLEAN
     /\ ci \in CIStates
@@ -306,26 +338,33 @@ SettledControlLabelConsistency ==
 
 AwaitingCodeRabbitSafety ==
     (~dirty /\ stateLabel = "awaiting-coderabbit") =>
-        (~draft /\ ci = "passed" /\ ~conflict /\ ~CurrentCRApproved /\ ~CurrentCRChanges)
+        (~botAuthor /\ ~draft /\ ci = "passed" /\ ~conflict /\ ~CurrentCRApproved /\ ~CurrentCRChanges)
 
 AwaitingMaintainerSafety ==
     (~dirty /\ stateLabel = "awaiting-maintainer") =>
-        (~draft /\ ci = "passed" /\ CurrentCRApproved /\ ~ValidMaintApproval)
+        (~draft /\ ci = "passed" /\ (botAuthor \/ CurrentCRApproved) /\ ~ValidMaintApproval)
 
 AwaitingReadySafety ==
     (~dirty /\ stateLabel = "awaiting-ready") =>
-        (draft /\ ci = "passed" /\ CurrentCRApproved)
+        (~botAuthor /\ draft /\ ci = "passed" /\ CurrentCRApproved)
 
 AwaitingAuthorSafety ==
     (~dirty /\ stateLabel = "awaiting-author") =>
-        (CurrentCRChanges \/ (CurrentCRApproved /\ CurrentMaintChanges))
+        (CurrentCRChanges \/ CurrentMaintChanges)
 
 ConflictLabelSafety ==
     (~dirty /\ stateLabel = "has-conflicts") => conflict
 
 CodeRabbitActivationSafety ==
     (~dirty /\ crLabelHead # 0) =>
-        (crLabelHead = head /\ ~draft /\ ci = "passed" /\ ~conflict)
+        (crLabelHead = head /\ ~botAuthor /\ ~draft /\ ci = "passed" /\ ~conflict)
+
+BotNeverAwaitsCodeRabbit ==
+    (~dirty /\ botAuthor) =>
+        (stateLabel # "awaiting-coderabbit" /\ crLabelHead = 0)
+
+ForkGateNeverPasses ==
+    forkPR => ~gatePassed
 
 ApprovedStateHasNoLabel ==
     gatePassed => stateLabel = "none"
