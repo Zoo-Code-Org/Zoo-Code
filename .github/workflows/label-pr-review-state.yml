@@ -76,7 +76,6 @@ jobs:
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'Zoo Code / PR review gate';
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
-            const githubActionsIntegrationId = 15368;
 
             // When triggered by a single PR event, only reconcile that PR.
             // The hourly schedule and workflow_dispatch reconcile all open PRs.
@@ -137,30 +136,54 @@ jobs:
                 return;
               }
               const currentLabels = new Set(pr.labels.map(l => l.name));
+              const labelErrors = [];
               for (const label of stateLabels) {
                 if (label !== desiredLabel && currentLabels.has(label)) {
                   try {
                     await github.rest.issues.removeLabel({
                       owner, repo, issue_number: pr.number, name: label,
                     });
+                    currentLabels.delete(label);
+                    pr.labels = pr.labels.filter(current => current.name !== label);
                   } catch (err) {
-                    if (err.status !== 404) throw err; // 404 = already gone, benign
+                    if (err.status === 404) {
+                      currentLabels.delete(label);
+                      pr.labels = pr.labels.filter(current => current.name !== label);
+                    } else {
+                      labelErrors.push(err);
+                    }
                   }
                 }
               }
               if (desiredLabel && !currentLabels.has(desiredLabel)) {
-                await github.rest.issues.addLabels({
-                  owner, repo, issue_number: pr.number, labels: [desiredLabel],
-                });
+                try {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
+                  });
+                  currentLabels.add(desiredLabel);
+                  pr.labels.push({ name: desiredLabel });
+                } catch (err) {
+                  labelErrors.push(err);
+                }
               }
               if (desiredLabel !== 'awaiting-author' && currentLabels.has('stale-awaiting-author')) {
                 try {
                   await github.rest.issues.removeLabel({
                     owner, repo, issue_number: pr.number, name: 'stale-awaiting-author',
                   });
+                  currentLabels.delete('stale-awaiting-author');
+                  pr.labels = pr.labels.filter(current => current.name !== 'stale-awaiting-author');
                 } catch (err) {
-                  if (err.status !== 404) throw err;
+                  if (err.status === 404) {
+                    currentLabels.delete('stale-awaiting-author');
+                    pr.labels = pr.labels.filter(current => current.name !== 'stale-awaiting-author');
+                  } else {
+                    labelErrors.push(err);
+                  }
                 }
+              }
+              if (labelErrors.length > 0) {
+                throw new Error(`Could not reconcile labels: ${labelErrors.map(err => err.message).join('; ')}`);
               }
             }
 
@@ -228,6 +251,7 @@ jobs:
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
                 'ci-pending': 'Wait for the required CI checks to finish.',
                 'ci-failed': 'Fix the failing required CI checks and push an update.',
+                'configuration-error': 'Repository rules must not require this advisory workflow\'s own gate or reconciliation job.',
                 'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
                 coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
                 'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
@@ -359,7 +383,25 @@ jobs:
             const failures = [];
 
             for (const pr of prs) {
+              let failurePhase = 'ci-pending';
               try {
+                const selfReferentialRequirements = (requiredChecks ?? []).filter(check =>
+                  check.context === reviewGateName || check.context === reconciliationCheckName
+                );
+                if (selfReferentialRequirements.length > 0) {
+                  failurePhase = 'configuration-error';
+                  const contexts = selfReferentialRequirements.map(check => check.context).join(', ');
+                  core.warning(
+                    `PR #${pr.number}: unsupported self-referential required check configuration: ${contexts}`
+                  );
+                  await updateReviewGate(pr, 'configuration-error', false, true);
+                  const existingGuide = await findReviewGuide(pr);
+                  await setCodeRabbitReviewActive(pr, false);
+                  await reconcileLabels(pr, null);
+                  await updateReviewGuide(pr, 'configuration-error', existingGuide);
+                  continue;
+                }
+
                 let existingGuide = await findReviewGuide(pr);
 
                 // `mergeable`/`mergeable_state` are only returned by the single-PR GET
@@ -429,19 +471,14 @@ jobs:
                   }
                 }
 
-                // Filter to required checks only (or all checks if rules unavailable).
-                // Exclude only this workflow's GitHub Actions checks. A same-named check
-                // from another or unpinned integration remains a real requirement.
-                const requiredSpecs = (requiredChecks ?? [])
-                  .filter(check => !(
-                    check.integrationId === githubActionsIntegrationId &&
-                    (check.context === reviewGateName || check.context === reconciliationCheckName)
-                  ));
+                // Evaluate every required rule exactly as GitHub reports it. Workflow
+                // ownership cannot be inferred from the shared GitHub Actions app ID.
+                const requiredSpecs = requiredChecks ?? [];
                 const requiredResults = requiredSpecs.map(check => {
                   const run = check.integrationId === null
                     ? latestByName.get(check.context)
                     : latestByNameAndApp.get(`${check.context}:${check.integrationId}`);
-                  const status = check.integrationId === null && !run
+                  const status = check.integrationId === null
                     ? latestStatusByContext.get(check.context)
                     : null;
                   return { check, run, status };
@@ -463,20 +500,20 @@ jobs:
                   core.debug(`  check: "${run.name}" status=${run.status} conclusion=${run.conclusion}`);
                 }
 
-                const ciPending = requiredChecks === null || missingRequiredChecks.length > 0 || relevantRuns.some(
-                  run => run.status !== 'completed',
-                ) || relevantStatuses.some(
-                  status => status.state === 'pending'
-                );
-
-                const ciFailed = !ciPending && (
-                  relevantRuns.some(
+                const ciFailed = relevantRuns.some(
                     run => run.status === 'completed' &&
                            run.conclusion !== 'success' &&
                            run.conclusion !== 'skipped' &&
                            run.conclusion !== 'neutral',
                   ) || relevantStatuses.some(
                     status => status.state === 'failure' || status.state === 'error'
+                  );
+
+                const ciPending = !ciFailed && (
+                  requiredChecks === null || missingRequiredChecks.length > 0 || relevantRuns.some(
+                    run => run.status !== 'completed',
+                  ) || relevantStatuses.some(
+                    status => status.state === 'pending'
                   )
                 );
 
@@ -612,17 +649,21 @@ jobs:
                 }
               } catch (error) {
                 let invalidationError = null;
-                let metadataError = null;
+                const metadataErrors = [];
                 try {
-                  await updateReviewGate(pr, 'ci-pending', false, true);
+                  await updateReviewGate(pr, failurePhase, false, true);
                 } catch (gateError) {
                   invalidationError = gateError;
                 }
                 try {
                   await setCodeRabbitReviewActive(pr, false);
+                } catch (cleanupError) {
+                  metadataErrors.push(cleanupError);
+                }
+                try {
                   await reconcileLabels(pr, null);
                 } catch (cleanupError) {
-                  metadataError = cleanupError;
+                  metadataErrors.push(cleanupError);
                 }
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
@@ -630,8 +671,8 @@ jobs:
                 const gateDetail = invalidationError
                   ? `; could not invalidate ${reviewGateName}: ${invalidationError.message}`
                   : '';
-                const metadataDetail = metadataError
-                  ? `; could not clear review metadata: ${metadataError.message}`
+                const metadataDetail = metadataErrors.length > 0
+                  ? `; could not clear review metadata: ${metadataErrors.map(err => err.message).join('; ')}`
                   : '';
                 failures.push(`#${pr.number}: ${detail}${gateDetail}${metadataDetail}`);
                 core.error(`Failed to reconcile PR #${pr.number}: ${detail}${gateDetail}${metadataDetail}`);

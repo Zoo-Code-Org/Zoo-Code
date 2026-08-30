@@ -40,6 +40,7 @@ interface HarnessOptions {
 	createCommentErrorStatus?: number
 	updateCommentErrorStatus?: number
 	removeLabelStatus?: number
+	removeLabelFailOnceName?: string
 	reviews?: Array<{
 		login: string
 		type: "Bot" | "User"
@@ -161,7 +162,12 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			throw Object.assign(new Error("Add labels failed"), { status: options.addLabelsStatus })
 		}
 	})
-	const removeLabel = vi.fn(async (_args: unknown) => {
+	let removeLabelFailedOnce = false
+	const removeLabel = vi.fn(async (args: { name: string }) => {
+		if (options.removeLabelFailOnceName === args.name && !removeLabelFailedOnce) {
+			removeLabelFailedOnce = true
+			throw Object.assign(new Error("Remove label failed once"), { status: 500 })
+		}
 		if (options.removeLabelStatus) {
 			throw Object.assign(new Error("Remove label failed"), { status: options.removeLabelStatus })
 		}
@@ -177,6 +183,12 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			throw Object.assign(new Error("Update comment failed"), { status: options.updateCommentErrorStatus })
 		}
 		return { data: { id: args.comment_id, user: { login: "github-actions[bot]" }, body: args.body } }
+	})
+	const listComments = vi.fn(async () => {
+		if (options.listCommentsErrorStatus) {
+			throw Object.assign(new Error("List comments failed"), { status: options.listCommentsErrorStatus })
+		}
+		return existingComments
 	})
 	const createCommitStatus = vi.fn(
 		async (args: { sha: string; state: string; context: string; description: string; target_url: string }) => {
@@ -239,14 +251,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				createLabel,
 				removeLabel,
 				addLabels,
-				listComments: vi.fn(async () => {
-					if (options.listCommentsErrorStatus) {
-						throw Object.assign(new Error("List comments failed"), {
-							status: options.listCommentsErrorStatus,
-						})
-					}
-					return existingComments
-				}),
+				listComments,
 				createComment,
 				updateComment,
 			},
@@ -327,6 +332,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		removeLabel,
 		createComment,
 		updateComment,
+		listComments,
 		createCommitStatus,
 		createLabel,
 		setFailed,
@@ -616,6 +622,50 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("blocks an unpinned context when its check passes but its status fails", async () => {
+		const result = await runWorkflow({
+			requiredIntegrationId: null,
+			commitStatuses: [{ context: "tests", state: "failure" }],
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
+	})
+
+	it("keeps an unpinned context pending when its check passes but its status is pending", async () => {
+		const result = await runWorkflow({
+			requiredIntegrationId: null,
+			commitStatuses: [{ context: "tests", state: "pending" }],
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("reports failure when an unpinned check is pending but its status failed", async () => {
+		const result = await runWorkflow({
+			requiredIntegrationId: null,
+			requiredStatus: "in_progress",
+			commitStatuses: [{ context: "tests", state: "failure" }],
+		})
+
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
+	})
+
+	it("reports failure when an unpinned check failed but its status is pending", async () => {
+		const result = await runWorkflow({
+			requiredIntegrationId: null,
+			requiredConclusion: "failure",
+			commitStatuses: [{ context: "tests", state: "pending" }],
+		})
+
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
 	})
 
 	it("does not use a legacy status for an integration-pinned check", async () => {
@@ -1141,15 +1191,19 @@ describe("PR review-state workflow", () => {
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 	})
 
-	it("excludes the reconciliation job from required checks", async () => {
+	it("fails closed when repository rules require the advisory reconciliation job", async () => {
 		const result = await runWorkflow({
 			requiredContexts: ["tests", "Zoo Code / reconcile PR review state"],
 		})
 
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("self-referential required check"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
 	})
 
-	it("does not exclude the reserved reconciliation name from another integration", async () => {
+	it("fails closed for a self-referential reconciliation rule from any integration", async () => {
 		const result = await runWorkflow({
 			requiredContexts: ["Zoo Code / reconcile PR review state"],
 			requiredIntegrationId: 999,
@@ -1159,7 +1213,84 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(
 			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
 		)
-		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("self-referential required check"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
+	})
+
+	it("fails closed when repository rules require the advisory review gate", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["Zoo Code / PR review gate"],
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("self-referential required check"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
+	})
+
+	it("reports self-referential configuration before merge conflicts", async () => {
+		const result = await runWorkflow({
+			conflict: true,
+			labels: ["coderabbit-review-active", "awaiting-maintainer"],
+			requiredContexts: ["Zoo Code / PR review gate"],
+		})
+
+		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("self-referential required check"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	it("preserves configuration-error when review-guide lookup fails", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["Zoo Code / PR review gate"],
+			listCommentsErrorStatus: 500,
+		})
+
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("List comments failed"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
+		expect(result.createCommitStatus.mock.invocationCallOrder[0]).toBeLessThan(
+			result.listComments.mock.invocationCallOrder[0],
+		)
+	})
+
+	it("preserves configuration-error when metadata cleanup fails", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["Zoo Code / PR review gate"],
+			labels: ["coderabbit-review-active", "awaiting-maintainer"],
+			removeLabelStatus: 500,
+		})
+
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not clear review metadata"))
+		expect(latestGateStatus(result)?.description).toContain("must not require")
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+	})
+
+	it("attempts every stale label removal when one cleanup fails", async () => {
+		const result = await runWorkflow({
+			permissionErrorStatus: 500,
+			labels: ["awaiting-coderabbit", "awaiting-maintainer", "stale-awaiting-author"],
+			removeLabelStatus: 500,
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "stale-awaiting-author" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not clear review metadata"))
+	})
+
+	it("outer cleanup removes a label added before partial reconciliation failure", async () => {
+		const result = await runWorkflow({
+			labels: ["has-conflicts"],
+			removeLabelFailOnceName: "has-conflicts",
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Remove label failed once"))
 	})
 
 	it("does not exclude a reconcile check from another integration", async () => {
