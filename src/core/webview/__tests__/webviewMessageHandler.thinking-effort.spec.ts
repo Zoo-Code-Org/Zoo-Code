@@ -81,16 +81,26 @@ describe("webviewMessageHandler setTaskThinkingEffort (DTE series 4/5)", () => {
 		expect(options).toEqual({ isNonInteractive: true })
 	})
 
-	it("accepts boolean/adaptive-class capability", async () => {
-		const provider = makeProvider(makeTask(true))
+	it("applies a task-local effort when the capability is boolean/adaptive-class (DTE regression)", async () => {
+		// Boolean `true` is the adaptive class: it advertises the full canonical
+		// effort set, so an active-task "high" selection applies exactly like the
+		// array path. ("adaptive" itself is display-only in the composer — it is
+		// not a canonical effort value and is never applied.)
+		const task = makeTask(true)
+		const provider = makeProvider(task)
 
-		await apply(provider, { type: "setTaskThinkingEffort", effort: "medium" })
+		await apply(provider, { type: "setTaskThinkingEffort", effort: "high" })
 
+		expect(task.setRuntimeThinkingEffort).toHaveBeenCalledWith("high", "you")
 		expect(provider.postStateToWebviewWithoutTaskHistory).toHaveBeenCalledTimes(1)
 	})
 
 	it.each([
 		["an unsupported level", ["low", "medium", "high"], { effort: "max" }],
+		// The capability array schema may advertise the UI-only "disable"
+		// sentinel, but it is rejected by the canonical enum before the
+		// capability check (DTE regression).
+		["the advertised disable sentinel", ["disable", "low", "high", "max"], { effort: "disable" }],
 		["an effort outside the canonical enum", ["low", "medium", "high"], { effort: "bogus" }],
 		["a missing effort", ["low", "medium", "high"], {}],
 		["a model without effort support", false, { effort: "high" }],
@@ -117,6 +127,9 @@ describe("webviewMessageHandler setTaskThinkingEffort (DTE series 4/5)", () => {
 	it.each([
 		["an effort outside the canonical enum", { effort: "bogus" }],
 		["a missing effort", {}],
+		// "disable" is a UI sentinel, not a settable task-local effort: it must
+		// never be parked for the next task either (DTE regression).
+		["the disable sentinel", { effort: "disable" }],
 	])("does not park %s when there is no current task", async (_name, message) => {
 		const provider = makeProvider(undefined)
 

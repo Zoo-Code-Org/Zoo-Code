@@ -975,8 +975,8 @@
 			"toolParameters": "Parameters"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"name": "Dynamische denkinspanning",
+			"description": "Laat het model de denkinspanning per stap bepalen en pas deze aan in de chat. (experimenteel)"
 		}
 	},
 	"promptCaching": {

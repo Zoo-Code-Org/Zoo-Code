@@ -975,8 +975,8 @@
 			"toolParameters": "Thông số"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"name": "Nỗ lực suy luận động",
+			"description": "Để mô hình tự quyết định nỗ lực suy luận ở mỗi bước và bạn có thể điều chỉnh trong chat. (thử nghiệm)"
 		}
 	},
 	"promptCaching": {

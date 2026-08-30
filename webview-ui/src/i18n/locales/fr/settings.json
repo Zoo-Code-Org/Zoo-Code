@@ -975,8 +975,8 @@
 			"toolParameters": "Paramètres"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
-			"name": "Dynamic thinking effort",
-			"description": "Let the model decide its thinking effort per step, and let you adjust it in-chat. (experimental)"
+			"name": "Effort de raisonnement dynamique",
+			"description": "Laissez le modèle déterminer son effort de raisonnement à chaque étape et réglez-le dans la conversation. (expérimental)"
 		}
 	},
 	"promptCaching": {

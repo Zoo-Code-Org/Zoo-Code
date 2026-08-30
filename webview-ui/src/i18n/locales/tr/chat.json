@@ -481,9 +481,9 @@
 		"sourceYou": "sen",
 		"toggleTitle": "Düşünme çabası",
 		"adaptiveHint": "Bu model çabasını otomatik olarak belirler — seçiminiz yalnızca yumuşak bir yönergedir.",
-		"applied": "Thinking effort: {{effort}} (Zoo) — {{reason}}",
-		"escalationCapRefused": "Thinking effort unchanged: escalation limit of 3 upward changes per task reached",
-		"oscillationRefused": "Thinking effort unchanged: oscillation between levels detected"
+		"applied": "Düşünme çabası: {{effort}} (Zoo) — {{reason}}",
+		"escalationCapRefused": "Düşünme çabası değişmedi: görev başına 3 artış ölçeklendirme sınırına ulaşıldı",
+		"oscillationRefused": "Düşünme çabası değişmedi: seviyeler arasında salınım algılandı"
 	},
 	"todo": {
 		"partial": "{{total}} yapılacaklar listesinden {{completed}} tanesi tamamlandı",
