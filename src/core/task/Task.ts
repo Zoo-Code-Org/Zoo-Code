@@ -9,7 +9,6 @@ import { AskIgnoredError } from "./AskIgnoredError"
 import { RateLimitClock, createRateLimitClock } from "./RateLimitClock"
 
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
 import debounce from "lodash.debounce"
 import delay from "delay"
 import pWaitFor from "p-wait-for"
@@ -97,7 +96,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
-import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
+import { buildNativeToolsArrayWithRestrictions, type BuildToolsResult } from "./build-tools"
 
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
@@ -194,6 +193,23 @@ export interface TaskOptions extends CreateTaskOptions {
 	diffFuzzyThreshold?: number
 }
 
+type TaskProviderState = Awaited<ReturnType<ClineProvider["getState"]>>
+
+interface ResolvedPromptTools {
+	state: TaskProviderState
+	mode: string
+	mcpHub?: McpHub
+	toolsResult: BuildToolsResult
+}
+
+export interface CurrentRequestToolPolicy {
+	effectiveToolNames: ReadonlySet<string>
+	mode: string
+	customModes?: TaskProviderState["customModes"]
+	experiments?: TaskProviderState["experiments"]
+	allowedMcpServers?: string[]
+}
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -205,6 +221,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly metadata: TaskMetadata
 
 	todoList?: TodoItem[]
+	private currentRequestToolPolicy?: CurrentRequestToolPolicy
 
 	readonly rootTask: Task | undefined = undefined
 	readonly parentTask: Task | undefined = undefined
@@ -790,6 +807,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public async getTaskMode(): Promise<string> {
 		await this.taskModeReady
 		return this._taskMode || defaultModeSlug
+	}
+
+	/** Tool policy used to generate and validate the currently streaming request. */
+	public getCurrentRequestToolPolicy(): CurrentRequestToolPolicy | undefined {
+		return this.currentRequestToolPolicy
 	}
 
 	/**
@@ -1708,35 +1730,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// to ensure tool_use/tool_result pairs are complete in history
 		await this.flushPendingToolResultsToHistory()
 
-		const systemPrompt = await this.getSystemPrompt()
-
-		// Get condensing configuration
-		const state = await this.providerRef.deref()?.getState()
-		const customCondensingPrompt = state?.customSupportPrompts?.CONDENSE
-		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
-		const mode = await this.getTaskMode()
-		const apiConfiguration = this.apiConfiguration
+		await this.safeEnsureModelFetched()
+		const resolvedPromptTools = await this.resolvePromptTools()
+		const systemPrompt = await this.getSystemPrompt(resolvedPromptTools)
+		const { state, mode, toolsResult } = resolvedPromptTools
+		const customCondensingPrompt = state.customSupportPrompts?.CONDENSE
 
 		const { contextTokens: prevContextTokens } = this.getTokenUsage()
 
-		// Build tools for condensing metadata (same tools used for normal API calls)
-		const provider = this.providerRef.deref()
-		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
-		if (provider) {
-			const modelInfo = this.api.getModel().info
-			const toolsResult = await buildNativeToolsArrayWithRestrictions({
-				provider,
-				cwd: this.cwd,
-				mode,
-				customModes: state?.customModes,
-				experiments: state?.experiments,
-				apiConfiguration,
-				disabledTools: state?.disabledTools,
-				modelInfo,
-				includeAllToolsWithRestrictions: false,
-			})
-			allTools = toolsResult.tools
-		}
+		// Reuse the exact policy that generated the condensing system prompt.
+		const allTools = toolsResult.tools
 
 		// Build metadata with tools and taskId for the condensing API call
 		const metadata: ApiHandlerCreateMessageMetadata = {
@@ -4014,76 +4017,96 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return false
 	}
 
-	private async getSystemPrompt(): Promise<string> {
-		const { mcpEnabled } = (await this.providerRef.deref()?.getState()) ?? {}
-		let mcpHub: McpHub | undefined
-		if (mcpEnabled ?? true) {
-			const provider = this.providerRef.deref()
-
-			if (!provider) {
-				throw new Error("Provider reference lost during view transition")
-			}
-
-			// Wait for MCP hub initialization through McpServerManager
-			mcpHub = await McpServerManager.getInstance(provider.context, provider)
-
-			if (!mcpHub) {
-				throw new Error("Failed to get MCP hub from server manager")
-			}
-
-			// Wait for MCP servers to be connected before generating system prompt
-			await pWaitFor(() => !mcpHub!.isConnecting, { timeout: 10_000 }).catch(() => {
-				console.error("MCP servers failed to connect in time")
-			})
+	private async getMcpHubForPrompt(state: TaskProviderState): Promise<McpHub | undefined> {
+		if (!(state.mcpEnabled ?? true)) {
+			return undefined
 		}
 
-		const rooIgnoreInstructions = this.rooIgnoreController?.getInstructions()
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new Error("Provider reference lost during view transition")
+		}
 
-		const state = await this.providerRef.deref()?.getState()
+		const mcpHub = await McpServerManager.getInstance(provider.context, provider)
+		if (!mcpHub) {
+			throw new Error("Failed to get MCP hub from server manager")
+		}
+
+		await pWaitFor(() => !mcpHub.isConnecting, { timeout: 10_000 }).catch(() => {
+			console.error("MCP servers failed to connect in time")
+		})
+
+		return mcpHub
+	}
+
+	private async resolvePromptTools(options?: {
+		state?: TaskProviderState
+		mode?: string
+		includeAllToolsWithRestrictions?: boolean
+	}): Promise<ResolvedPromptTools> {
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new Error("Provider not available")
+		}
+
+		const state = options?.state ?? (await provider.getState())
+		const mode = options?.mode ?? (await this.getTaskMode())
+		const mcpHub = await this.getMcpHubForPrompt(state)
+		const toolsResult = await buildNativeToolsArrayWithRestrictions({
+			provider,
+			cwd: this.cwd,
+			mode,
+			customModes: state.customModes,
+			experiments: state.experiments,
+			apiConfiguration: this.apiConfiguration,
+			disabledTools: state.disabledTools,
+			modelInfo: this.api.getModel().info,
+			mcpEnabled: state.mcpEnabled,
+			includeAllToolsWithRestrictions: options?.includeAllToolsWithRestrictions,
+		})
+
+		return { state, mode, mcpHub, toolsResult }
+	}
+
+	private async getSystemPrompt(resolved?: ResolvedPromptTools): Promise<string> {
+		const promptTools = resolved ?? (await this.resolvePromptTools())
+		const { state, mode, mcpHub, toolsResult } = promptTools
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new Error("Provider not available")
+		}
 
 		const { customModes, customModePrompts, customInstructions, experiments, language, enableSubfolderRules } =
-			state ?? {}
-		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
-		const mode = await this.getTaskMode()
-		const apiConfiguration = this.apiConfiguration
+			state
+		const modelInfo = this.api.getModel().info
 
-		return await (async () => {
-			const provider = this.providerRef.deref()
-
-			if (!provider) {
-				throw new Error("Provider not available")
-			}
-
-			const modelInfo = this.api.getModel().info
-
-			return SYSTEM_PROMPT(
-				provider.context,
-				this.cwd,
-				false,
-				mcpHub,
-				this.diffStrategy,
-				mode ?? defaultModeSlug,
-				customModePrompts,
-				customModes,
-				customInstructions,
-				experiments,
-				language,
-				rooIgnoreInstructions,
-				{
-					todoListEnabled: apiConfiguration?.todoListEnabled ?? true,
-					useAgentRules:
-						vscode.workspace.getConfiguration(Package.name).get<boolean>("useAgentRules") ?? true,
-					enableSubfolderRules: enableSubfolderRules ?? false,
-					newTaskRequireTodos: vscode.workspace
-						.getConfiguration(Package.name)
-						.get<boolean>("newTaskRequireTodos", false),
-					isStealthModel: modelInfo?.isStealthModel,
-				},
-				undefined, // todoList
-				this.api.getModel().id,
-				provider.getSkillsManager(),
-			)
-		})()
+		return SYSTEM_PROMPT(
+			provider.context,
+			this.cwd,
+			false,
+			mcpHub,
+			this.diffStrategy,
+			mode ?? defaultModeSlug,
+			customModePrompts,
+			customModes,
+			customInstructions,
+			experiments,
+			language,
+			this.rooIgnoreController?.getInstructions(),
+			{
+				todoListEnabled: this.apiConfiguration?.todoListEnabled ?? true,
+				useAgentRules: vscode.workspace.getConfiguration(Package.name).get<boolean>("useAgentRules") ?? true,
+				enableSubfolderRules: enableSubfolderRules ?? false,
+				newTaskRequireTodos: vscode.workspace
+					.getConfiguration(Package.name)
+					.get<boolean>("newTaskRequireTodos", false),
+				isStealthModel: modelInfo?.isStealthModel,
+			},
+			undefined, // todoList
+			this.api.getModel().id,
+			provider.getSkillsManager(),
+			{ availableToolNames: toolsResult.effectiveToolNames },
+		)
 	}
 
 	private getCurrentProfileId(state: any): string {
@@ -4114,7 +4137,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const { profileThresholds = {} } = state ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
 		const mode = await this.getTaskMode()
-		const apiConfiguration = this.apiConfiguration
 
 		const { contextTokens } = this.getTokenUsage()
 		await this.safeEnsureModelFetched()
@@ -4143,23 +4165,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Send condenseTaskContextStarted to show in-progress indicator
 		await this.providerRef.deref()?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
 
-		// Build tools for condensing metadata (same tools used for normal API calls)
-		const provider = this.providerRef.deref()
-		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
-		if (provider) {
-			const toolsResult = await buildNativeToolsArrayWithRestrictions({
-				provider,
-				cwd: this.cwd,
-				mode,
-				customModes: state?.customModes,
-				experiments: state?.experiments,
-				apiConfiguration,
-				disabledTools: state?.disabledTools,
-				modelInfo,
-				includeAllToolsWithRestrictions: false,
-			})
-			allTools = toolsResult.tools
-		}
+		const resolvedPromptTools = await this.resolvePromptTools({ state, mode })
+		const allTools = resolvedPromptTools.toolsResult.tools
 
 		// Build metadata with tools and taskId for the condensing API call
 		const metadata: ApiHandlerCreateMessageMetadata = {
@@ -4192,7 +4199,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(),
+				systemPrompt: await this.getSystemPrompt(resolvedPromptTools),
 				taskId: this.taskId,
 				profileThresholds,
 				currentProfileId,
@@ -4313,13 +4320,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// in the caller.
 		this.rateLimitClock.recordRequest()
 
-		const systemPrompt = await this.getSystemPrompt()
+		await this.safeEnsureModelFetched()
+		const modelInfo = this.api.getModel().info
+		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === providerIdentifiers.gemini
+		const resolvedPromptTools = await this.resolvePromptTools({
+			state,
+			mode,
+			includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
+		})
+		const resolvedState = resolvedPromptTools.state
+		const allowedMcpServers = getModeBySlug(mode, resolvedState.customModes)?.allowedMcpServers
+		this.currentRequestToolPolicy = {
+			effectiveToolNames: new Set(resolvedPromptTools.toolsResult.effectiveToolNames),
+			mode,
+			customModes: resolvedState.customModes,
+			experiments: resolvedState.experiments ? { ...resolvedState.experiments } : undefined,
+			allowedMcpServers: allowedMcpServers ? [...allowedMcpServers] : undefined,
+		}
+		const systemPrompt = await this.getSystemPrompt(resolvedPromptTools)
 		const { contextTokens } = this.getTokenUsage()
 
 		if (contextTokens) {
-			await this.safeEnsureModelFetched()
-			const modelInfo = this.api.getModel().info
-
 			const maxTokens = getModelMaxOutputTokens({
 				modelId: this.api.getModel().id,
 				model: modelInfo,
@@ -4366,26 +4387,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
 			}
 
-			// Build tools for condensing metadata (same tools used for normal API calls)
-			// This ensures the condensing API call includes tool definitions for providers that need them
-			let contextMgmtTools: import("openai").default.Chat.ChatCompletionTool[] = []
-			{
-				const provider = this.providerRef.deref()
-				if (provider) {
-					const toolsResult = await buildNativeToolsArrayWithRestrictions({
-						provider,
-						cwd: this.cwd,
-						mode,
-						customModes: state?.customModes,
-						experiments: state?.experiments,
-						apiConfiguration,
-						disabledTools: state?.disabledTools,
-						modelInfo,
-						includeAllToolsWithRestrictions: false,
-					})
-					contextMgmtTools = toolsResult.tools
-				}
-			}
+			// Reuse the main request's declarations and logical restrictions so the
+			// condensing prompt and metadata cannot drift while settings change.
+			const { tools: contextMgmtTools, allowedFunctionNames: contextMgmtAllowedFunctionNames } =
+				resolvedPromptTools.toolsResult
 
 			// Build metadata with tools and taskId for the condensing API call
 			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
@@ -4401,6 +4406,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							tools: contextMgmtTools,
 							tool_choice: "auto",
 							parallelToolCalls: true,
+							...(contextMgmtAllowedFunctionNames
+								? { allowedFunctionNames: contextMgmtAllowedFunctionNames }
+								: {}),
 						}
 					: {}),
 			}
@@ -4519,43 +4527,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error("Auto-approval limit reached and user did not approve continuation")
 		}
 
-		// Whether we include tools is determined by whether we have any tools to send.
-		const modelInfo = this.api.getModel().info
-
 		// Build complete tools array: native tools + dynamic MCP tools
 		// When includeAllToolsWithRestrictions is true, returns all tools but provides
-		// allowedFunctionNames for providers (like Gemini) that need to see all tool
-		// definitions in history while restricting callable tools for the current mode.
-		// Only Gemini currently supports this - other providers filter tools normally.
-		let allTools: OpenAI.Chat.ChatCompletionTool[] = []
-		let allowedFunctionNames: string[] | undefined
-
-		// Gemini requires all tool definitions to be present for history compatibility,
-		// but uses allowedFunctionNames to restrict which tools can be called.
-		// Other providers (Anthropic, OpenAI, etc.) don't support this feature yet,
-		// so they continue to receive only the filtered tools for the current mode.
-		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === providerIdentifiers.gemini
-
-		{
-			const provider = this.providerRef.deref()
-			if (!provider) {
-				throw new Error("Provider reference lost during tool building")
-			}
-
-			const toolsResult = await buildNativeToolsArrayWithRestrictions({
-				provider,
-				cwd: this.cwd,
-				mode,
-				customModes: state?.customModes,
-				experiments: state?.experiments,
-				apiConfiguration,
-				disabledTools: state?.disabledTools,
-				modelInfo,
-				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
-			})
-			allTools = toolsResult.tools
-			allowedFunctionNames = toolsResult.allowedFunctionNames
-		}
+		// allowedFunctionNames for providers (like Gemini) that need all definitions
+		// for history compatibility. Runtime validation enforces the same logical set.
+		const { tools: allTools, allowedFunctionNames } = resolvedPromptTools.toolsResult
 
 		const shouldIncludeTools = allTools.length > 0
 
@@ -4574,8 +4550,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						tools: allTools,
 						tool_choice: "auto",
 						parallelToolCalls: true,
-						// When mode restricts tools, provide allowedFunctionNames so providers
-						// like Gemini can see all tools in history but only call allowed ones
+						// Keep logical allowed names alongside compatibility declarations.
 						...(allowedFunctionNames ? { allowedFunctionNames } : {}),
 					}
 				: {}),

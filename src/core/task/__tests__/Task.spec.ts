@@ -578,9 +578,35 @@ describe("Cline", () => {
 			await getTaskTestAccess(task).getSystemPrompt()
 
 			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
-			const [, , , , , mode, , , , , , , settings] = systemPromptCall
+			const [, , , , , mode, , , , , , , settings, , , , promptContext] = systemPromptCall
 			expect(mode).toBe("architect")
 			expect(settings).toMatchObject({ todoListEnabled: true })
+			expect(promptContext?.availableToolNames).not.toContain("execute_command")
+		})
+
+		it("passes disabled tools through the effective prompt context", async () => {
+			const providerState = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...providerState,
+				mode: "code",
+				mcpEnabled: false,
+				disabledTools: ["execute_command"],
+			})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await getTaskTestAccess(task).getSystemPrompt()
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			const promptContext = systemPromptCall[16]
+			expect(promptContext?.availableToolNames).not.toContain("execute_command")
+			expect(promptContext?.availableToolNames).toContain("read_file")
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {
@@ -599,12 +625,20 @@ describe("Cline", () => {
 				mode: "code",
 				mcpEnabled: false,
 			} as unknown as ProviderState)
-			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
 
 			await task.condenseContext()
 
 			const [options] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			const promptToolNames = systemPromptCall[16]?.availableToolNames
+			const metadataToolNames = new Set(
+				(options.metadata?.tools ?? []).flatMap((tool) =>
+					"function" in tool && tool.function ? [tool.function.name] : [],
+				),
+			)
 			expect(options.metadata?.mode).toBe("architect")
+			expect(metadataToolNames).toEqual(promptToolNames)
 		})
 
 		it("uses the task mode in request metadata when focused provider state differs", async () => {
@@ -641,6 +675,49 @@ describe("Cline", () => {
 
 			const metadata = requireDefined(createMessage.mock.calls[0])[2]
 			expect(metadata?.mode).toBe("ask")
+		})
+
+		it("shares one effective tool policy across prompt, API metadata, and runtime validation", async () => {
+			const providerState = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue({
+				...providerState,
+				mode: "code",
+				mcpEnabled: false,
+				autoApprovalEnabled: true,
+				requestDelaySeconds: 0,
+				disabledTools: ["execute_command"],
+			})
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+			const stream = (async function* () {
+				yield { type: "text", text: "response" } as ApiStreamChunk
+			})()
+			const createMessage = vi.spyOn(task.api, "createMessage").mockReturnValue(stream)
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+
+			await task.attemptApiRequest().next()
+
+			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
+			const promptToolNames = systemPromptCall[16]?.availableToolNames
+			const metadata = requireDefined(createMessage.mock.calls[0])[2]
+			const apiToolNames = new Set(
+				(metadata?.tools ?? []).flatMap((tool) =>
+					"function" in tool && tool.function ? [tool.function.name] : [],
+				),
+			)
+			const requestPolicy = requireDefined(task.getCurrentRequestToolPolicy())
+
+			expect(promptToolNames).toEqual(requestPolicy.effectiveToolNames)
+			expect(apiToolNames).toEqual(requestPolicy.effectiveToolNames)
+			expect(requestPolicy.effectiveToolNames).not.toContain("execute_command")
 		})
 	})
 

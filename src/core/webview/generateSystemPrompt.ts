@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import type { ModelInfo } from "@roo-code/types"
 import { WebviewMessage } from "../../shared/WebviewMessage"
 import { defaultModeSlug } from "../../shared/modes"
 import { buildApiHandler } from "../../api"
@@ -6,6 +7,7 @@ import { buildApiHandler } from "../../api"
 import { SYSTEM_PROMPT } from "../prompts/system"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import { Package } from "../../shared/package"
+import { buildNativeToolsArrayWithRestrictions } from "../task/build-tools"
 
 import { ClineProvider } from "./ClineProvider"
 
@@ -18,6 +20,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		experiments,
 		language,
 		enableSubfolderRules,
+		disabledTools,
 	} = await provider.getState()
 
 	const diffStrategy = new MultiSearchReplaceDiffStrategy()
@@ -31,19 +34,37 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 
 	// Create a temporary API handler to check model info for stealth mode.
 	// This avoids relying on an active Cline instance which might not exist during preview.
-	let modelInfo: { isStealthModel?: boolean } | undefined
+	let modelInfo: ModelInfo | undefined
 	try {
 		const tempApiHandler = buildApiHandler(apiConfiguration)
+		try {
+			await tempApiHandler.ensureModelFetched?.()
+		} catch (error) {
+			console.error("Error fetching full model info for system prompt preview:", error)
+		}
 		modelInfo = tempApiHandler.getModel().info
 	} catch (error) {
-		console.error("Error fetching model info for system prompt preview:", error)
+		console.error("Error reading model info for system prompt preview:", error)
 	}
+
+	const toolsResult = await buildNativeToolsArrayWithRestrictions({
+		provider,
+		cwd,
+		mode,
+		customModes,
+		experiments,
+		apiConfiguration,
+		disabledTools,
+		modelInfo,
+		mcpEnabled,
+		includeAllToolsWithRestrictions: false,
+	})
 
 	const systemPrompt = await SYSTEM_PROMPT(
 		provider.context,
 		cwd,
 		false, // supportsComputerUse — browser removed
-		mcpEnabled ? provider.getMcpHub() : undefined,
+		(mcpEnabled ?? true) ? provider.getMcpHub() : undefined,
 		diffStrategy,
 		mode,
 		customModePrompts,
@@ -64,6 +85,7 @@ export const generateSystemPrompt = async (provider: ClineProvider, message: Web
 		undefined, // todoList
 		undefined, // modelId
 		provider.getSkillsManager(),
+		{ availableToolNames: toolsResult.effectiveToolNames },
 	)
 
 	return systemPrompt
