@@ -1180,6 +1180,27 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
+	it("does not publish success when gate status lookup fails at the maintainer handoff", async () => {
+		const result = await runWorkflow({
+			gateStatusLookupErrorStatus: 500,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(result.warning).toHaveBeenCalledWith(
+			expect.stringContaining("could not inspect Zoo Code / PR review gate"),
+		)
+		expect(result.createCommitStatus).not.toHaveBeenCalledWith(expect.objectContaining({ state: "success" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+	})
+
 	it("forces gate invalidation after a reconciliation failure even when status lookup fails", async () => {
 		const result = await runWorkflow({
 			gateStatusLookupErrorStatus: 500,
