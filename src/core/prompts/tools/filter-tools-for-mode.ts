@@ -1,7 +1,7 @@
 import type OpenAI from "openai"
 import type { ModeConfig, ToolName, ToolGroup, ModelInfo } from "@roo-code/types"
 import { getModeBySlug, getToolsForMode } from "../../../shared/modes"
-import { TOOL_GROUPS, ALWAYS_AVAILABLE_TOOLS, TOOL_ALIASES } from "../../../shared/tools"
+import { TOOL_GROUPS, ALWAYS_AVAILABLE_TOOLS, TOOL_ALIASES, isRequiredToolForMode } from "../../../shared/tools"
 import { defaultModeSlug } from "../../../shared/modes"
 import type { CodeIndexManager } from "../../../services/code-index/manager"
 import type { McpHub } from "../../../services/mcp/McpHub"
@@ -305,6 +305,14 @@ export function filterNativeToolsForMode(
 		}
 	}
 
+	// The task loop cannot safely ask for required input or finish without its lifecycle tools.
+	// Orchestrator likewise cannot perform its core workflow without new_task.
+	for (const toolName of allToolsForMode) {
+		if (isRequiredToolForMode(toolName, modeSlug)) {
+			allowedToolNames.add(resolveToolAlias(toolName))
+		}
+	}
+
 	// Conditionally exclude access_mcp_resource if MCP is not enabled or there are no resources.
 	// When the mode restricts MCP servers via allowedMcpServers, only resources from allowed
 	// servers count — otherwise a restricted mode could still read resources from disallowed servers.
@@ -449,6 +457,7 @@ export function getAvailableToolsInGroup(
  * @param mode - Current mode slug
  * @param customModes - Custom mode configurations
  * @param experiments - Experiment flags
+ * @param settings - Request-specific disabled tools and model exclusions
  * @returns Filtered array of MCP tools if use_mcp_tool is allowed, empty array otherwise
  */
 export function filterMcpToolsForMode(
@@ -456,6 +465,7 @@ export function filterMcpToolsForMode(
 	mode: string | undefined,
 	customModes: ModeConfig[] | undefined,
 	experiments: Record<string, boolean> | undefined,
+	settings?: { disabledTools?: string[]; modelInfo?: ModelInfo },
 ): OpenAI.Chat.ChatCompletionTool[] {
 	const modeSlug = mode ?? defaultModeSlug
 
@@ -469,5 +479,23 @@ export function filterMcpToolsForMode(
 		experiments ?? {},
 	)
 
-	return isMcpAllowed ? mcpTools : []
+	if (!isMcpAllowed) {
+		return []
+	}
+
+	const excludedToolNames = new Set(
+		[...(settings?.disabledTools ?? []), ...(settings?.modelInfo?.excludedTools ?? [])].map(resolveToolAlias),
+	)
+
+	if (excludedToolNames.has("use_mcp_tool")) {
+		return []
+	}
+
+	return mcpTools.filter((tool) => {
+		if (!("function" in tool) || !tool.function) {
+			return false
+		}
+
+		return !excludedToolNames.has(resolveToolAlias(tool.function.name))
+	})
 }

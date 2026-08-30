@@ -17,7 +17,7 @@ import {
 } from "../prompts/tools/filter-tools-for-mode"
 
 interface BuildToolsOptions {
-	provider: ClineProvider
+	provider: Pick<ClineProvider, "context" | "getMcpHub">
 	cwd: string
 	mode: string | undefined
 	customModes: ModeConfig[] | undefined
@@ -25,6 +25,8 @@ interface BuildToolsOptions {
 	apiConfiguration: ProviderSettings | undefined
 	disabledTools?: string[]
 	modelInfo?: ModelInfo
+	/** Whether MCP tools and resources are enabled globally for this request. */
+	mcpEnabled?: boolean
 	/**
 	 * If true, returns all tools without mode filtering, but also includes
 	 * the list of allowed tool names for use with allowedFunctionNames.
@@ -34,13 +36,15 @@ interface BuildToolsOptions {
 	includeAllToolsWithRestrictions?: boolean
 }
 
-interface BuildToolsResult {
+export interface BuildToolsResult {
 	/**
 	 * The tools to pass to the model.
 	 * If includeAllToolsWithRestrictions is true, this includes ALL tools.
 	 * Otherwise, it includes only mode-filtered tools.
 	 */
 	tools: OpenAI.Chat.ChatCompletionTool[]
+	/** Canonical names of tools that are logically available for this request. */
+	effectiveToolNames: ReadonlySet<string>
 	/**
 	 * The names of tools that are allowed to be called based on mode restrictions.
 	 * Only populated when includeAllToolsWithRestrictions is true.
@@ -90,10 +94,12 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		apiConfiguration,
 		disabledTools,
 		modelInfo,
+		mcpEnabled,
 		includeAllToolsWithRestrictions,
 	} = options
 
 	const mcpHub = provider.getMcpHub()
+	const effectiveMcpHub = mcpEnabled === false ? undefined : mcpHub
 
 	// Get CodeIndexManager for feature checking.
 	const { CodeIndexManager } = await import("../../services/code-index/manager")
@@ -128,13 +134,14 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		experiments,
 		codeIndexManager,
 		filterSettings,
-		mcpHub,
+		effectiveMcpHub,
 		allowedMcpServers,
 	)
 
 	// Filter MCP tools based on mode restrictions.
-	const mcpTools = getMcpServerTools(mcpHub, allowedMcpServers)
-	const filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments)
+	const allMcpTools = getMcpServerTools(mcpHub, allowedMcpServers)
+	const mcpTools = mcpEnabled === false ? [] : allMcpTools
+	const filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments, filterSettings)
 
 	// Add custom tools if they are available and the experiment is enabled.
 	let nativeCustomTools: OpenAI.Chat.ChatCompletionFunctionTool[] = []
@@ -151,12 +158,13 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 
 	// Combine filtered tools (for backward compatibility and for allowedFunctionNames)
 	const filteredTools = [...filteredNativeTools, ...filteredMcpTools, ...nativeCustomTools]
+	const effectiveToolNames = new Set(filteredTools.map((tool) => resolveToolAlias(getToolName(tool))))
 
 	// If includeAllToolsWithRestrictions is true, return ALL tools but provide
 	// allowed names based on mode filtering
 	if (includeAllToolsWithRestrictions) {
 		// Combine ALL tools (unfiltered native + all MCP + custom)
-		const allTools = [...nativeTools, ...mcpTools, ...nativeCustomTools]
+		const allTools = [...nativeTools, ...allMcpTools, ...nativeCustomTools]
 
 		// Extract names of tools that are allowed based on mode filtering.
 		// Resolve any alias names to canonical names to ensure consistency with allTools
@@ -167,11 +175,13 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 		return {
 			tools: allTools,
 			allowedFunctionNames,
+			effectiveToolNames,
 		}
 	}
 
 	// Default behavior: return only filtered tools
 	return {
 		tools: filteredTools,
+		effectiveToolNames,
 	}
 }

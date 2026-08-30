@@ -325,6 +325,17 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"skill",
 ] as const
 
+/** Tools required by the task lifecycle or by a built-in mode's core workflow. */
+export function isRequiredToolForMode(toolName: string, mode: string): boolean {
+	const canonicalToolName = TOOL_ALIASES[toolName] ?? toolName
+
+	return (
+		canonicalToolName === "ask_followup_question" ||
+		canonicalToolName === "attempt_completion" ||
+		(mode === "orchestrator" && canonicalToolName === "new_task")
+	)
+}
+
 /**
  * Central registry of tool aliases.
  * Maps alias name -> canonical tool name.
