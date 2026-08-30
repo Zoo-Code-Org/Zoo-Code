@@ -121,6 +121,7 @@ Otherwise, if you have not completed the task and do not need additional informa
 		rooIgnoreController: RooIgnoreController | undefined,
 		showRooIgnoredFiles: boolean,
 		rooProtectedController?: RooProtectedController,
+		includeListFilesHint: boolean = true,
 	): string => {
 		const sorted = files
 			.map((file) => {
@@ -180,9 +181,10 @@ Otherwise, if you have not completed the task and do not need additional informa
 			}
 		}
 		if (didHitLimit) {
-			return `${rooIgnoreParsed.join(
-				"\n",
-			)}\n\n(File list truncated. Use list_files on specific subdirectories if you need to explore further.)`
+			const hint = includeListFilesHint
+				? " Use list_files on specific subdirectories if you need to explore further."
+				: ""
+			return `${rooIgnoreParsed.join("\n")}\n\n(File list truncated.${hint})`
 		} else if (rooIgnoreParsed.length === 0 || (rooIgnoreParsed.length === 1 && rooIgnoreParsed[0] === "")) {
 			return "No files found."
 		} else {
