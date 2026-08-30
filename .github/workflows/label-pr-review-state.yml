@@ -291,7 +291,7 @@ jobs:
                 'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
                 'fork-approved': 'Fork review completed. Native GitHub review protections remain authoritative.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
-                maintainer: 'A human maintainer must now review and approve the latest commit.',
+                maintainer: 'Ready for human maintainer review and approval.',
                 approved: 'The required review sequence passed. Remaining merge requirements apply.',
               };
               return messages[phase];
@@ -658,7 +658,8 @@ jobs:
                   `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
                 );
 
-                if (phase !== 'approved') {
+                const readyForMaintainer = phase === 'maintainer' || phase === 'approved';
+                if (!readyForMaintainer) {
                   await updateReviewGate(pr, phase, false);
                 }
                 const recyclingActiveLabel = activateCodeRabbit && recycleCodeRabbitLabel &&
@@ -674,7 +675,7 @@ jobs:
                   await updateReviewGuide(pr, phase, existingGuide);
                 }
                 await reconcileLabels(pr, desiredLabel);
-                if (phase === 'approved') {
+                if (readyForMaintainer) {
                   if (isForkPR(pr)) {
                     await updateReviewGate(pr, 'fork-approved', false);
                   } else {

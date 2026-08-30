@@ -438,6 +438,8 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).not.toHaveBeenCalledWith(
 			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
 		)
+		expect(latestGateStatus(result)?.state).toBe("success")
+		expect(latestGateStatus(result)?.description).toContain("Ready for human maintainer")
 	})
 
 	it("completes bot-authored PR review after human maintainer approval", async () => {
@@ -471,6 +473,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		expect(latestGateStatus(result)?.state).toBe("pending")
 	})
 
 	it("removes the CodeRabbit label while required CI is pending", async () => {
@@ -946,7 +949,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
-		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.state).toBe("success")
 	})
 
 	it("ignores maintainer approvals from an older head", async () => {
@@ -970,7 +973,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
-		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.state).toBe("success")
 	})
 
 	it("keeps awaiting-author when any maintainer requests changes", async () => {
@@ -1069,7 +1072,7 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)?.state).toBe("success")
 	})
 
-	it("requires maintainer approval after CodeRabbit approval", async () => {
+	it("passes once CodeRabbit approval makes the PR ready for maintainer review", async () => {
 		const result = await runWorkflow({
 			permissions: { maintainer: "write" },
 			reviews: [
@@ -1089,7 +1092,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
-		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.state).toBe("success")
 	})
 
 	it("publishes the review gate as a standalone commit status", async () => {
