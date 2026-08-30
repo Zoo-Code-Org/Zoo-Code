@@ -86,8 +86,7 @@
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {
-		"@playwright/experimental-ct-react": "1.60.0",
-		"@playwright/test": "1.60.0",
+		"@playwright/test": "1.62.1",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@testing-library/jest-dom": "6.9.1",

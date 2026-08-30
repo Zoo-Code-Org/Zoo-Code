@@ -13,6 +13,7 @@ vi.mock("@roo-code/telemetry", () => ({
 
 import { GeminiHandler } from "../gemini"
 import type { ApiHandlerOptions } from "../../../shared/api"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("GeminiHandler backend support", () => {
 	beforeEach(() => {
@@ -24,7 +25,7 @@ describe("GeminiHandler backend support", () => {
 		// in Gemini API, so createMessage only uses function declarations.
 		// URL context/grounding are only added in completePrompt.
 		const options = {
-			apiProvider: "gemini",
+			apiProvider: providerIdentifiers.gemini,
 			enableUrlContext: true,
 			enableGrounding: true,
 		} as ApiHandlerOptions
@@ -41,7 +42,7 @@ describe("GeminiHandler backend support", () => {
 
 	it("completePrompt passes config overrides without tools when URL context and grounding disabled", async () => {
 		const options = {
-			apiProvider: "gemini",
+			apiProvider: providerIdentifiers.gemini,
 			enableUrlContext: false,
 			enableGrounding: false,
 		} as ApiHandlerOptions
@@ -96,7 +97,7 @@ describe("GeminiHandler backend support", () => {
 	describe("error scenarios", () => {
 		it("should handle grounding metadata extraction failure gracefully", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 				enableGrounding: true,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
@@ -131,7 +132,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should handle malformed grounding metadata", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 				enableGrounding: true,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
@@ -182,7 +183,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should handle API errors when tools are enabled", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 				enableUrlContext: true,
 				enableGrounding: true,
 			} as ApiHandlerOptions
@@ -230,7 +231,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should ignore allowedFunctionNames because Gemini rejects larger restriction lists", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -251,7 +252,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should include all tools when allowedFunctionNames is provided", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -274,7 +275,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should not pass large allowedFunctionNames lists to Gemini", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -305,7 +306,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should not pass allowedFunctionNames even when history includes tool calls", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -342,7 +343,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should fall back to tool_choice when allowedFunctionNames is provided", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -365,7 +366,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should fall back to tool_choice when allowedFunctionNames is empty", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -389,7 +390,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should not set toolConfig when allowedFunctionNames is undefined and no tool_choice", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -412,7 +413,7 @@ describe("GeminiHandler backend support", () => {
 	describe("Gemini schema compatibility", () => {
 		it("should strip broad JSON Schema metadata from function declarations", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -473,7 +474,7 @@ describe("GeminiHandler backend support", () => {
 
 		it("should collapse composition and type arrays in function declaration schemas", async () => {
 			const options = {
-				apiProvider: "gemini",
+				apiProvider: providerIdentifiers.gemini,
 			} as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
@@ -533,7 +534,7 @@ describe("GeminiHandler backend support", () => {
 		})
 
 		it("should deep-merge allOf fragments instead of overwriting earlier properties", async () => {
-			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const options = { apiProvider: providerIdentifiers.gemini } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
 			// @ts-ignore access private client
@@ -578,7 +579,7 @@ describe("GeminiHandler backend support", () => {
 		})
 
 		it("should resolve $ref entries before dropping $defs", async () => {
-			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const options = { apiProvider: providerIdentifiers.gemini } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
 			// @ts-ignore access private client
@@ -627,7 +628,7 @@ describe("GeminiHandler backend support", () => {
 		})
 
 		it("should preserve top-level properties and required entries when allOf is also present", async () => {
-			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const options = { apiProvider: providerIdentifiers.gemini } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
 			// @ts-ignore access private client
@@ -669,7 +670,7 @@ describe("GeminiHandler backend support", () => {
 		})
 
 		it("should stop recursive $ref expansion before the sanitized schema becomes cyclic", async () => {
-			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const options = { apiProvider: providerIdentifiers.gemini } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
 			// @ts-ignore access private client
@@ -721,7 +722,7 @@ describe("GeminiHandler backend support", () => {
 		})
 
 		it("should preserve parameter names that collide with stripped schema keywords", async () => {
-			const options = { apiProvider: "gemini" } as ApiHandlerOptions
+			const options = { apiProvider: providerIdentifiers.gemini } as ApiHandlerOptions
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
 			// @ts-ignore access private client

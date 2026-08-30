@@ -5,6 +5,7 @@ import * as vscode from "vscode"
 import type { ProviderSettings } from "@roo-code/types"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
@@ -104,7 +105,7 @@ vi.mock("delay", () => ({
 describe("Task - sticky provider profile init race", () => {
 	it("does not overwrite task apiConfigName if set during async initialization", async () => {
 		const apiConfig: ProviderSettings = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiModelId: "claude-3-5-sonnet-20241022",
 			apiKey: "test-api-key",
 		} as any

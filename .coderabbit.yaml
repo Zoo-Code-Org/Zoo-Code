@@ -1,0 +1,141 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+tone_instructions: >-
+    Be direct and evidence-first. Report only concrete, actionable findings grounded in changed code.
+    Prioritize correctness, security, data loss, lifecycle, and regressions; avoid speculative style
+    comments and unrelated refactors.
+
+reviews:
+    profile: assertive
+    request_changes_workflow: true
+    high_level_summary: true
+    high_level_summary_in_walkthrough: true
+    review_status: true
+    review_details: true
+    collapse_walkthrough: true
+    changed_files_summary: true
+    poem: false
+
+    auto_review:
+        enabled: true
+        drafts: false
+        auto_incremental_review: true
+
+    path_filters:
+        - "!**/node_modules/**"
+        - "!**/dist/**"
+        - "!**/out/**"
+        - "!**/coverage/**"
+        - "!**/.turbo/**"
+        - "!apps/vscode-e2e/.vscode-test/**"
+        - "!bin/*.vsix"
+        - "!webview-ui/**/__screenshots__/**"
+
+    path_instructions:
+        - path: "**/*"
+          instructions: >-
+              Act as an adversarial second-opinion reviewer. Verify PR claims against implementation,
+              contracts, and tests. Trace changed inputs through normal, boundary, error, cancellation,
+              retry, and default paths and their consumers. Seek plausible counterexamples and regressions
+              from removed safeguards. Report only concrete, actionable findings grounded in changed code
+              and repository conventions. Prioritize correctness, security, data loss, lifecycle, and test
+              gaps. Avoid speculative style comments and unrelated refactors. Search for existing helpers
+              before suggesting abstractions, and distinguish actual defects from unsupported checks.
+
+        - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
+          instructions: >-
+              Check strict typing and exhaustive behavior across normal, boundary, error,
+              cancellation, retry, and compatibility paths. Verify promises and errors are handled,
+              existing helpers are reused, and new code introduces no `any`, unjustified double
+              assertions, floating promises, duplicated helpers, or increased lint suppressions.
+
+        - path: "{**/*.{test,spec}.{ts,tsx,js,jsx},**/__tests__/**}"
+          instructions: >-
+              Require regression coverage at the lowest valid harness with behavior-focused
+              assertions, including relevant negative, error, false/unset, and boundary cases.
+              Check cleanup and deterministic async behavior and prefer shared typed test helpers.
+              Visible webview changes require a durable Playwright component snapshot; behavior-only
+              changes do not.
+
+        - path: "apps/vscode-e2e/**"
+          instructions: >-
+              Reserve end-to-end coverage for behavior that requires the real VS Code host, workspace
+              APIs, extension activation, webview messaging, file watchers, or a full workflow. Keep
+              detailed protocol, parsing, storage, retry, and edge cases at lower test layers.
+
+        - path: "{packages/types/src/**,webview-ui/src/components/settings/**,src/core/config/**,src/core/webview/**}"
+          instructions: >-
+              For persisted settings, verify the complete schema/storage/runtime/webview round trip,
+              shared default semantics, and focused true plus false/unset tests. SettingsView controls
+              must read and update local `cachedState`, include the value in the explicit save payload,
+              and receive the persisted value back from extension state.
+
+        - path: "src/**"
+          instructions: >-
+              Verify extension/webview contracts, cancellation and error propagation, VS Code
+              lifecycle correctness, and behavior under retries and partial failure. Check listeners,
+              resources, and providers are disposed without stale state or duplicate work.
+
+        - path: "webview-ui/**"
+          instructions: >-
+              Check React state and effect dependencies, cleanup, accessibility, i18n, and light/dark
+              theme behavior. New markup should use Tailwind; add VS Code CSS variables to
+              `src/index.css` before Tailwind use. Use Vitest for behavior and Playwright component
+              snapshots only for durable visible changes.
+
+        - path: "{src/api/**,src/core/prompts/**,src/core/tools/**,src/services/mcp/**,src/services/destructive-command-guard/**}"
+          instructions: >-
+              Treat model, provider, MCP, path, command, and tool data as untrusted. Check approval and
+              allowlist bypasses, injection and traversal risks, secrets/PII exposure in logs, abort and
+              stream behavior, retries, provider compatibility, and enforcement at execution time—not
+              only at presentation or planning time.
+
+        - path: "{src/**/{state,history,task,tasks,service,services,cache,caches,worktree,worktrees}/**,packages/**/{state,history,task,tasks,service,services,cache,caches,worktree,worktrees}/**,webview-ui/src/**/{state,history,task,tasks,service,services,cache,caches,worktree,worktrees}/**}"
+          instructions: >-
+              Check persistence and lifecycle invariants: awaited atomic writes, rollback or explicit
+              partial-failure behavior, cross-window state consistency, stale listeners/watchers,
+              cancellation, idempotency, and safe restart/resume without lost or duplicated state.
+
+        - path: ".github/**"
+          instructions: >-
+              Require full commit SHA pins, least-privilege permissions, safe expression and shell
+              interpolation, and trusted metadata handling. Privileged workflows must never check out,
+              execute, install from, or otherwise trust a fork PR head.
+
+        - path: "{AGENTS.md,**/AGENTS.md,CONTRIBUTING.md,.changeset/**,CHANGELOG.md,src/CHANGELOG.md}"
+          instructions: >-
+              Enforce repository policy: routine PRs must not add changesets or edit changelogs except
+              during release preparation. Verify documentation describes real behavior and contracts,
+              and deprioritize prose-only nits that do not affect correctness or usability.
+
+    pre_merge_checks:
+        custom_checks:
+            - name: Regression evidence
+              mode: warning
+              instructions: >-
+                  Fail only when a concrete changed behavior lacks focused coverage at the lowest valid
+                  test layer, tests merely mirror implementation, an affected error/negative/unset branch
+                  is omitted, or a durable visible UI change lacks its required Playwright component
+                  snapshot. Do not demand tests for unchanged behavior, mechanical configuration, or every
+                  branch without a plausible regression scenario. Cite the changed behavior and missing
+                  evidence.
+            - name: Trust and persistence invariants
+              mode: error
+              instructions: >-
+                  Fail only for a concrete changed path that leaks secrets or PII, trusts or executes
+                  unvalidated input, bypasses approval or allowlist controls, can lose persisted state due
+                  to a missing await, non-atomic write, or omitted default propagation, or leaks lifecycle
+                  resources. Cite the path and a plausible triggering scenario; pass when no such changed
+                  path exists.
+
+    tools:
+        eslint:
+            enabled: true
+        actionlint:
+            enabled: true
+        shellcheck:
+            enabled: true
+        gitleaks:
+            enabled: true
+        semgrep:
+            enabled: true

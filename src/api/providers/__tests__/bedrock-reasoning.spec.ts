@@ -5,6 +5,7 @@ import { BedrockRuntimeClient, ConverseStreamCommand } from "@aws-sdk/client-bed
 import { logger } from "../../../utils/logging"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock the AWS SDK
 vi.mock("@aws-sdk/client-bedrock-runtime")
@@ -45,7 +46,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 	describe("Extended Thinking Support", () => {
 		it("should include thinking parameter for Claude Sonnet 4 when reasoning is enabled", async () => {
 			handler = new AwsBedrockHandler({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-sonnet-4-20250514-v1:0",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
@@ -113,7 +114,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 
 		it("should pass thinking parameters from metadata", async () => {
 			handler = new AwsBedrockHandler({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-3-7-sonnet-20250219-v1:0",
 				awsRegion: "us-east-1",
 			})
@@ -156,7 +157,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 
 		it("should log when extended thinking is enabled", async () => {
 			handler = new AwsBedrockHandler({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-opus-4-20250514-v1:0",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true,
@@ -188,7 +189,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 
 		it("should not include topP when thinking is disabled (global removal)", async () => {
 			handler = new AwsBedrockHandler({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-3-7-sonnet-20250219-v1:0",
 				awsRegion: "us-east-1",
 				// Note: no enableReasoningEffort = true, so thinking is disabled
@@ -234,7 +235,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 
 		it("should enable reasoning when enableReasoningEffort is true in settings", async () => {
 			handler = new AwsBedrockHandler({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-sonnet-4-20250514-v1:0",
 				awsRegion: "us-east-1",
 				enableReasoningEffort: true, // This should trigger reasoning
@@ -288,7 +289,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 
 		it("should support API key authentication", async () => {
 			handler = new AwsBedrockHandler({
-				apiProvider: "bedrock",
+				apiProvider: providerIdentifiers.bedrock,
 				apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
 				awsRegion: "us-east-1",
 				awsUseApiKey: true,

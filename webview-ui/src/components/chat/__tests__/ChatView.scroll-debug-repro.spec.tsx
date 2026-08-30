@@ -89,6 +89,9 @@ vi.mock("./WorktreeSelector", () => ({ WorktreeSelector: () => null }))
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeLink: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+	VSCodeButton: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
+		<button onClick={onClick}>{children}</button>
+	),
 }))
 
 vi.mock("@/components/ui", async (importOriginal) => {

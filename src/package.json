@@ -3,7 +3,7 @@
 	"displayName": "%extension.displayName%",
 	"description": "%extension.description%",
 	"publisher": "ZooCodeOrganization",
-	"version": "3.78.0",
+	"version": "3.80.1",
 	"icon": "assets/icons/icon.png",
 	"galleryBanner": {
 		"color": "#617A91",
@@ -529,6 +529,7 @@
 	},
 	"devDependencies": {
 		"@ai-sdk/openai-compatible": "2.0.56",
+		"@typescript-eslint/parser": "8.32.1",
 		"@roo-code/build": "workspace:^",
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",

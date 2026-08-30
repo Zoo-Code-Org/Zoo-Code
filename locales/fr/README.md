@@ -47,13 +47,12 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.78.0
+## Nouveautés de la v3.80.1
 
-- **Trois nouveaux modèles majeurs sont arrivés** — utilise les tout nouveaux Gemini 3.7 Flash, GLM 5.3 et Qwen3.8 Max, ainsi que les améliorations du raisonnement, des tarifs et de la couverture des providers de DeepSeek V4.
-- **Connecte-toi à NanoGPT** — profite de la découverte dynamique des modèles, du streaming et de la complétion des prompts, avec des préférences de routage pour la vitesse, le prix, la latence, le débit, la prise en charge des outils et le cache.
-- **Providers et tâches plus fiables** — les correctifs améliorent la configuration des endpoints Azure OpenAI, les limites de sortie de Kimi Code, la conservation des titres dans l'historique des tâches et l'import/export des paramètres Zoo.
-- Destructive Command Guard prend désormais en charge les Mac équipés d'un processeur Intel.
-- Des mises à jour de sécurité corrigent des vulnérabilités dans `undici` et Mermaid.
+🤖 Essaie GLM-5.3-Flash et Gemini 3.7 Flash à 50 % de réduction pendant 2 semaines, et MiniMax M3 totalement GRATUIT pour les utilisateurs avec un solde sur le nouveau Zoo Gateway. https://zoocode.dev/models
+
+- **Nouveau modèle** — GLM-5.3-Flash est désormais disponible via Z AI.
+- **Correctifs de fiabilité** — approbations de sous-tâches restaurées, sortie d'outils vide de Vertex Gemini 3.7, échecs de démarrage du terminal, erreurs du service en arrière-plan et la lisibilité des thèmes d'IDE.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

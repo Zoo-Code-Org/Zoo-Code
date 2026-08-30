@@ -155,6 +155,7 @@ vi.mock("../../../utils/fs", () => ({
 
 // Import Task AFTER all vi.mock() calls - Vitest hoists mocks so this works
 import { Task } from "../Task"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 describe("Task grounding sources handling", () => {
 	let mockProvider: Partial<ClineProvider>
@@ -179,7 +180,7 @@ describe("Task grounding sources handling", () => {
 		}
 
 		mockApiConfiguration = {
-			apiProvider: "gemini",
+			apiProvider: providerIdentifiers.gemini,
 			geminiApiKey: "test-key",
 		} as ProviderSettings
 	})
