@@ -5,6 +5,7 @@ import type { ProviderSettings } from "@roo-code/types"
 import { singleCompletionHandler } from "../single-completion-handler"
 import { buildApiHandler, SingleCompletionHandler } from "../../api"
 import { supportPrompt } from "../../shared/support-prompt"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock the API handler
 vi.mock("../../api", () => ({
@@ -13,7 +14,7 @@ vi.mock("../../api", () => ({
 
 describe("enhancePrompt", () => {
 	const mockApiConfig: ProviderSettings = {
-		apiProvider: "openai",
+		apiProvider: providerIdentifiers.openai,
 		openAiApiKey: "test-key",
 		openAiBaseUrl: "https://api.openai.com/v1",
 		enableReasoningEffort: false,
@@ -98,7 +99,7 @@ describe("enhancePrompt", () => {
 
 	it("uses appropriate model based on provider", async () => {
 		const openRouterConfig: ProviderSettings = {
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: "test-key",
 			openRouterModelId: "test-model",
 			enableReasoningEffort: false,

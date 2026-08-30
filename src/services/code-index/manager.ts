@@ -227,11 +227,17 @@ export class CodeIndexManager {
 				(needsServiceRecreation && (!this._orchestrator || this._orchestrator.state !== "Indexing"))
 
 			if (shouldStartOrRestartIndexing) {
-				this._orchestrator?.startIndexing()
+				this.startIndexingInBackground()
 			}
 		}
 
 		return { requiresRestart }
+	}
+
+	private startIndexingInBackground(): void {
+		void this._orchestrator?.startIndexing().catch((error) => {
+			console.error("[CodeIndexManager] Background indexing failed:", error)
+		})
 	}
 
 	/**

@@ -15,6 +15,16 @@ export interface SafeWriteJsonOptions {
 	 * @default false
 	 */
 	prettyPrint?: boolean
+
+	/**
+	 * When provided, the current file is read under the advisory lock
+	 * and passed to this function along with the incoming data. The
+	 * return value replaces `data` for the write. This turns a blind
+	 * overwrite into an atomic read-modify-write, preventing cross-process
+	 * lost updates. `existing` is null when the file does not exist or
+	 * cannot be parsed.
+	 */
+	merge?: (existing: unknown, incoming: unknown) => unknown
 }
 
 /**
@@ -54,7 +64,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	// Acquire the lock before any file operations
 	try {
 		releaseLock = await lockfile.lock(absoluteFilePath, {
-			stale: 31000, // Stale after 31 seconds
+			stale: LOCK_STALE_MS,
 			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
 			realpath: false, // the file may not exist yet, which is acceptable
 			retries: {
@@ -83,6 +93,23 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	let actualTempBackupFilePath: string | null = null
 
 	try {
+		// If a merge callback was provided, read the current file under the lock
+		// and let the caller merge before we write. Must be inside try/finally
+		// so a throwing merge still releases the lock.
+		if (options?.merge) {
+			let existing: unknown = null
+			try {
+				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
+			} catch (error: unknown) {
+				const code =
+					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
+					throw error
+				}
+			}
+			data = options.merge(existing, data)
+		}
+
 		// Step 1: Write data to a new temporary file.
 		actualTempNewFilePath = path.join(
 			path.dirname(absoluteFilePath),
@@ -219,5 +246,7 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		stringifyStream.pipe(fileWriteStream)
 	})
 }
+
+export const LOCK_STALE_MS = 31_000
 
 export { safeWriteJson }
