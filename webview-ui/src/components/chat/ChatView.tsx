@@ -1641,7 +1641,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		vscode.postMessage({ type: "condenseTaskContextRequest", text: taskId })
 	}
 
-	const areButtonsVisible = showScrollToBottom || primaryButtonText || secondaryButtonText
+	const hasApprovalButtons = Boolean(primaryButtonText || secondaryButtonText)
+	const areButtonsVisible = showScrollToBottom || hasApprovalButtons
 	const currentTaskAggregatedCosts = currentTaskId ? aggregatedCostsMap.get(currentTaskId) : undefined
 
 	return (
@@ -1735,17 +1736,23 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							className={`flex h-9 items-center mb-1 px-[15px] ${
 								showScrollToBottom ? "opacity-100" : enableButtons ? "opacity-100" : "opacity-50"
 							}`}>
-							{showScrollToBottom ? (
+							{showScrollToBottom && (
 								<>
 									<StandardTooltip content={t("chat:scrollToBottom")}>
 										<Button
 											variant="secondary"
-											className={hasLatestCheckpoint ? "flex-1 mr-[6px]" : "flex-[2]"}
+											className={
+												hasApprovalButtons
+													? "w-9 shrink-0 mr-[6px]"
+													: hasLatestCheckpoint
+														? "flex-1 mr-[6px]"
+														: "flex-[2]"
+											}
 											onClick={handleScrollToBottomAndResetCheckpointCursor}>
 											<span className="codicon codicon-chevron-down"></span>
 										</Button>
 									</StandardTooltip>
-									{hasLatestCheckpoint && (
+									{hasLatestCheckpoint && !hasApprovalButtons && (
 										<StandardTooltip content={t("chat:scrollToLatestCheckpoint")}>
 											<Button
 												variant="secondary"
@@ -1757,63 +1764,61 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 										</StandardTooltip>
 									)}
 								</>
-							) : (
-								<>
-									{primaryButtonText && (
-										<StandardTooltip
-											content={
-												primaryButtonText === t("chat:retry.title")
-													? t("chat:retry.tooltip")
-													: primaryButtonText === t("chat:save.title")
-														? t("chat:save.tooltip")
-														: primaryButtonText === t("chat:approve.title")
-															? t("chat:approve.tooltip")
-															: primaryButtonText === t("chat:runCommand.title")
-																? t("chat:runCommand.tooltip")
-																: primaryButtonText === t("chat:startNewTask.title")
-																	? t("chat:startNewTask.tooltip")
-																	: primaryButtonText === t("chat:resumeTask.title")
-																		? t("chat:resumeTask.tooltip")
-																		: primaryButtonText ===
-																			  t("chat:proceedAnyways.title")
-																			? t("chat:proceedAnyways.tooltip")
-																			: primaryButtonText ===
-																				  t("chat:proceedWhileRunning.title")
-																				? t("chat:proceedWhileRunning.tooltip")
-																				: undefined
-											}>
-											<Button
-												variant="primary"
-												disabled={!enableButtons}
-												className={secondaryButtonText ? "flex-1 mr-[6px]" : "flex-[2] mr-0"}
-												onClick={() => handlePrimaryButtonClick(inputValue, selectedImages)}>
-												{primaryButtonText}
-											</Button>
-										</StandardTooltip>
-									)}
-									{secondaryButtonText && (
-										<StandardTooltip
-											content={
-												secondaryButtonText === t("chat:startNewTask.title")
-													? t("chat:startNewTask.tooltip")
-													: secondaryButtonText === t("chat:reject.title")
-														? t("chat:reject.tooltip")
-														: secondaryButtonText === t("chat:terminate.title")
-															? t("chat:terminate.tooltip")
-															: secondaryButtonText === t("chat:killCommand.title")
-																? t("chat:killCommand.tooltip")
-																: undefined
-											}>
-											<Button
-												variant="secondary"
-												disabled={!enableButtons}
-												className="flex-1 ml-[6px]"
-												onClick={() => handleSecondaryButtonClick(inputValue, selectedImages)}>
-												{secondaryButtonText}
-											</Button>
-										</StandardTooltip>
-									)}
-								</>
+							)}
+							{primaryButtonText && (
+								<StandardTooltip
+									content={
+										primaryButtonText === t("chat:retry.title")
+											? t("chat:retry.tooltip")
+											: primaryButtonText === t("chat:save.title")
+												? t("chat:save.tooltip")
+												: primaryButtonText === t("chat:approve.title")
+													? t("chat:approve.tooltip")
+													: primaryButtonText === t("chat:runCommand.title")
+														? t("chat:runCommand.tooltip")
+														: primaryButtonText === t("chat:startNewTask.title")
+															? t("chat:startNewTask.tooltip")
+															: primaryButtonText === t("chat:resumeTask.title")
+																? t("chat:resumeTask.tooltip")
+																: primaryButtonText === t("chat:proceedAnyways.title")
+																	? t("chat:proceedAnyways.tooltip")
+																	: primaryButtonText ===
+																		  t("chat:proceedWhileRunning.title")
+																		? t("chat:proceedWhileRunning.tooltip")
+																		: primaryButtonText
+									}>
+									<Button
+										variant="primary"
+										disabled={!enableButtons}
+										className={
+											secondaryButtonText ? "min-w-0 flex-1 mr-[6px]" : "min-w-0 flex-[2] mr-0"
+										}
+										onClick={() => handlePrimaryButtonClick(inputValue, selectedImages)}>
+										<span className="min-w-0 truncate">{primaryButtonText}</span>
+									</Button>
+								</StandardTooltip>
+							)}
+							{secondaryButtonText && (
+								<StandardTooltip
+									content={
+										secondaryButtonText === t("chat:startNewTask.title")
+											? t("chat:startNewTask.tooltip")
+											: secondaryButtonText === t("chat:reject.title")
+												? t("chat:reject.tooltip")
+												: secondaryButtonText === t("chat:terminate.title")
+													? t("chat:terminate.tooltip")
+													: secondaryButtonText === t("chat:killCommand.title")
+														? t("chat:killCommand.tooltip")
+														: secondaryButtonText
+									}>
+									<Button
+										variant="secondary"
+										disabled={!enableButtons}
+										className="min-w-0 flex-1 ml-[6px]"
+										onClick={() => handleSecondaryButtonClick(inputValue, selectedImages)}>
+										<span className="min-w-0 truncate">{secondaryButtonText}</span>
+									</Button>
+								</StandardTooltip>
 							)}
 						</div>
 					)}

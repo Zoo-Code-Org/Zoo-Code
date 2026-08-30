@@ -502,6 +502,41 @@ describe("ChatView scroll behavior regression coverage", () => {
 		await expectChevronVisible()
 	})
 
+	it("keeps pending approval controls visible while browsing history", async () => {
+		const baseTs = Date.now() - 3_000
+		const initialMessages = buildMessagesWithCheckpoint(baseTs)
+		await hydrate(2, initialMessages)
+		await waitForCalls(2)
+		await waitForCallsSettled()
+
+		const scrollable = getScrollable()
+		await act(async () => {
+			fireEvent.wheel(scrollable, { deltaY: -120 })
+		})
+		await expectChevronVisible()
+
+		await act(async () => {
+			postState([
+				...initialMessages,
+				{
+					type: "ask",
+					ask: "tool",
+					ts: baseTs + 4,
+					text: JSON.stringify({ tool: "finishTask" }),
+				},
+			])
+		})
+		await flushEffects()
+
+		expect(document.querySelector(".codicon-chevron-down")).toBeTruthy()
+		expect(document.querySelector("button[aria-label='chat:scrollToLatestCheckpoint']")).toBeNull()
+		expect(
+			Array.from(document.querySelectorAll("button")).some(
+				(button) => button.textContent === "chat:completeSubtaskAndReturn",
+			),
+		).toBe(true)
+	})
+
 	it("hydration completion cannot override user escape hatch", async () => {
 		await hydrate(Number.POSITIVE_INFINITY)
 		await waitForCalls(1)
