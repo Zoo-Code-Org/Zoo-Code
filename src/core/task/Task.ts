@@ -32,6 +32,7 @@ import {
 	type ClineAsk,
 	type ToolProgressStatus,
 	type HistoryItem,
+	type PendingTaskAction,
 	type CreateTaskOptions,
 	type ModelInfo,
 	type ClineApiReqCancelReason,
@@ -139,6 +140,34 @@ import { shouldAddUserMessageToHistory } from "./messageCounting"
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+const QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS = [250, 1_000, 4_000] as const
+
+type QueuedAskResolution = { response: ClineAskResponse; requiresDurableAck: boolean }
+
+function queuedResponseForAsk(type: ClineAsk, text?: string): QueuedAskResolution | undefined {
+	if (type === "command_output") {
+		return undefined
+	}
+
+	if (type === "tool") {
+		try {
+			const tool = JSON.parse(text || "{}") as { tool?: string }
+			if (tool.tool === "newTask" || tool.tool === "finishTask") {
+				return { response: "messageResponse", requiresDurableAck: true }
+			}
+		} catch {
+			// Malformed tool asks retain the existing approve-with-feedback behavior.
+		}
+
+		return { response: "yesButtonClicked", requiresDurableAck: false }
+	}
+	if (type === "command" || type === "use_mcp_server") {
+		return { response: "yesButtonClicked", requiresDurableAck: false }
+	}
+
+	return { response: "messageResponse", requiresDurableAck: type === "completion_result" }
+}
+
 const FORCED_CONTEXT_REDUCTION_PERCENT = 75 // Keep 75% of context (remove 25%) on context window errors
 const MAX_CONTEXT_WINDOW_RETRIES = 3 // Maximum retries for context window errors
 
@@ -454,6 +483,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Initial status for the task's history item (set at creation time to avoid race conditions)
 	private readonly initialStatus?: "active" | "delegated" | "completed" | "interrupted"
+	private pendingAction?: PendingTaskAction
 
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
@@ -542,6 +572,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
 		this.initialStatus = initialStatus
+		this.pendingAction = historyItem?.pendingAction
 
 		// Store the task's mode and API config name when it's created.
 		// For history items, use the stored values; for new tasks, we'll set them
@@ -861,6 +892,69 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this._taskApiConfigName = apiConfigName
 	}
 
+	public setPendingTaskAction(pendingAction: PendingTaskAction): void {
+		this.pendingAction = pendingAction
+	}
+
+	public async persistQueuedFeedbackAndAcknowledge(
+		messageId: string,
+		text?: string,
+		images?: string[],
+	): Promise<boolean> {
+		await this.say("user_feedback", text ?? "", images)
+		for (let attempt = 0; attempt <= QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length; attempt++) {
+			if (this.abort) {
+				this.messageQueueService.releaseMessage(messageId)
+				return false
+			}
+			if (await this.saveClineMessages()) {
+				return this.messageQueueService.removeMessage(messageId)
+			}
+			if (attempt < QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length) {
+				await delay(QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS[attempt])
+			}
+		}
+		console.error(
+			`[Task#persistQueuedFeedbackAndAcknowledge] Failed to durably save queued feedback ${messageId} after ${QUEUED_FEEDBACK_SAVE_RETRY_DELAYS_MS.length + 1} attempts`,
+		)
+		this.messageQueueService.releaseMessage(messageId)
+		return false
+	}
+
+	private async clearPendingActionAfterDurableResult(actionId: string): Promise<void> {
+		if (this.pendingAction?.actionId !== actionId) {
+			return
+		}
+
+		const provider = this.providerRef.deref()
+		const cleared = await provider?.clearPendingTaskAction(this.taskId, actionId)
+		if (cleared) {
+			if (this.pendingAction?.actionId === actionId) {
+				this.pendingAction = undefined
+			}
+			return
+		}
+
+		const storedPendingAction = provider?.taskHistoryStore.get(this.taskId)?.pendingAction
+		if (this.pendingAction?.actionId !== actionId) {
+			return
+		}
+		if (!storedPendingAction) {
+			this.pendingAction = undefined
+		} else if (storedPendingAction.actionId !== actionId) {
+			this.pendingAction = storedPendingAction
+		}
+	}
+
+	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
+		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
+		if (resolution.requiresDurableAck) {
+			return message.id
+		}
+		this.messageQueueService.removeMessage(message.id)
+		return undefined
+	}
+
 	static create(options: TaskOptions): [Task, Promise<void>] {
 		const instance = new Task({ ...options, startTask: false })
 		const { images, task, historyItem } = options
@@ -886,6 +980,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string) {
+		const resolvesPendingAction =
+			this.pendingAction &&
+			message.role === "user" &&
+			Array.isArray(message.content) &&
+			message.content.some(
+				(block) => block.type === "tool_result" && block.tool_use_id === this.pendingAction?.actionId,
+			)
 		this.apiConversationHistory.push(
 			prepareApiConversationMessage({
 				message,
@@ -896,7 +997,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}),
 		)
 
-		await this.saveApiConversationHistory()
+		let saved = await this.saveApiConversationHistory()
+		if (!saved && resolvesPendingAction) {
+			saved = await this.retrySaveApiConversationHistory()
+		}
+		if (saved && resolvesPendingAction && this.pendingAction) {
+			try {
+				await this.clearPendingActionAfterDurableResult(this.pendingAction.actionId)
+			} catch (error) {
+				console.error(
+					`[Task#addToApiConversationHistory] Failed to clear pending action for ${this.taskId}:`,
+					error,
+				)
+			}
+		}
 	}
 
 	// NOTE: We intentionally do NOT mutate stored messages to merge consecutive user turns.
@@ -1159,7 +1273,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		partial?: boolean,
 		progressStatus?: ToolProgressStatus,
 		isProtected?: boolean,
-	): Promise<{ response: ClineAskResponse; text?: string; images?: string[] }> {
+	): Promise<{ response: ClineAskResponse; text?: string; images?: string[]; queuedMessageId?: string }> {
 		// If this Cline instance was aborted by the provider, then the only
 		// thing keeping us alive is a promise still running in the background,
 		// in which case we don't want to send its result to the webview as it
@@ -1182,11 +1296,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// rendered, leaving them stuck on-screen).
 		const provider = this.providerRef.deref()
 		const state = provider ? await provider.getState() : undefined
+		const queuedMessage =
+			partial === true || type === "command_output" ? undefined : this.messageQueueService.claimNextMessage()
+		const queuedAskResolution = queuedMessage ? queuedResponseForAsk(type, text) : undefined
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
 		// currently reports.
-		const approval = await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
+		const approval = queuedAskResolution
+			? ({ decision: "ask" } as const)
+			: await checkAutoApproval({ state, cwd: this.cwd, ask: type, text, isProtected })
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
 
@@ -1321,6 +1440,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const shouldDrainQueuedMessageForAsk = type !== "command_output"
 		const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
 
+		let queuedMessageId: string | undefined
 		if (isStatusMutable) {
 			const statusMutationTimeout = 2_000
 
@@ -1362,21 +1482,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}, statusMutationTimeout),
 				)
 			}
-		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk) {
-			const message = this.messageQueueService.dequeueMessage()
-
-			if (message) {
-				// Check if this is a tool approval ask that needs to be handled.
-				if (type === "tool" || type === "command" || type === "use_mcp_server") {
-					// For tool approvals, we need to approve first, then send
-					// the message if there's text/images.
-					this.handleWebviewAskResponse("yesButtonClicked", message.text, message.images)
-				} else {
-					// For other ask types (like followup or command_output), fulfill the ask
-					// directly.
-					this.handleWebviewAskResponse("messageResponse", message.text, message.images)
-				}
-			}
+		} else if (isMessageQueued && shouldDrainQueuedMessageForAsk && queuedMessage && queuedAskResolution) {
+			queuedMessageId = this.handleQueuedAskResponse(queuedMessage, queuedAskResolution)
 		}
 
 		// Wait for askResponse to be set
@@ -1390,15 +1497,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// suggestion click that was incorrectly queued due to UI state), consume it
 				// immediately so the task doesn't hang.
 				if (shouldDrainQueuedMessageForAsk && !this.messageQueueService.isEmpty()) {
-					const message = this.messageQueueService.dequeueMessage()
-					if (message) {
-						// If this is a tool approval ask, we need to approve first (yesButtonClicked)
-						// and include any queued text/images.
-						if (type === "tool" || type === "command" || type === "use_mcp_server") {
-							this.handleWebviewAskResponse("yesButtonClicked", message.text, message.images)
-						} else {
-							this.handleWebviewAskResponse("messageResponse", message.text, message.images)
-						}
+					const message = this.messageQueueService.claimNextMessage()
+					const resolution = message ? queuedResponseForAsk(type, text) : undefined
+					if (message && resolution) {
+						queuedMessageId = this.handleQueuedAskResponse(message, resolution)
 					}
 				}
 
@@ -1409,6 +1511,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		/* v8 ignore next 3 -- abort-while-waiting path; covered by e2e standalone-resume test */
 		if (this.abort) {
+			if (queuedMessageId) {
+				this.messageQueueService.releaseMessage(queuedMessageId)
+			}
 			throw new Error(`[ZooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
@@ -1416,10 +1521,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Could happen if we send multiple asks in a row i.e. with
 			// command_output. It's important that when we know an ask could
 			// fail, it is handled gracefully.
+			if (queuedMessageId) {
+				this.messageQueueService.releaseMessage(queuedMessageId)
+			}
 			throw new AskIgnoredError("superseded")
 		}
 
-		const result = { response: this.askResponse!, text: this.askResponseText, images: this.askResponseImages }
+		const result = {
+			response: this.askResponse!,
+			text: this.askResponseText,
+			images: this.askResponseImages,
+			queuedMessageId,
+		}
 		this.askResponse = undefined
 		this.askResponseText = undefined
 		this.askResponseImages = undefined
@@ -2014,6 +2127,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
+			if (this.pendingAction) {
+				const pendingAskIndex = findLastIndex(
+					modifiedClineMessages,
+					(message) =>
+						message.type === "ask" &&
+						message.ask === "tool" &&
+						message.isAnswered !== true &&
+						message.text === this.pendingAction?.approvalText,
+				)
+				if (pendingAskIndex !== -1) {
+					modifiedClineMessages.splice(pendingAskIndex, 1)
+				}
+			}
+
 			// Since we don't use `api_req_finished` anymore, we need to check if the
 			// last `api_req_started` has a cost value, if it doesn't and no
 			// cancellation reason to present, then we remove it since it indicates
@@ -2042,6 +2169,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// This is important in case the user deletes messages without resuming
 			// the task first.
 			this.apiConversationHistory = await this.getSavedApiConversationHistory()
+			if (
+				this.pendingAction &&
+				this.apiConversationHistory.some(
+					(message) =>
+						message.role === "user" &&
+						Array.isArray(message.content) &&
+						message.content.some(
+							(block) =>
+								block.type === "tool_result" && block.tool_use_id === this.pendingAction?.actionId,
+						),
+				)
+			) {
+				await this.clearPendingActionAfterDurableResult(this.pendingAction.actionId)
+			}
+
+			if (this.pendingAction) {
+				this.isInitialized = true
+				await this.resumePendingTaskAction(this.pendingAction)
+				return
+			}
 
 			const lastClineMessage = this.clineMessages
 				.slice()
@@ -2230,6 +2377,68 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 			throw error
 		}
+	}
+
+	private async resumePendingTaskAction(action: PendingTaskAction): Promise<void> {
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			throw new Error(`[Task#resumePendingTaskAction] Provider unavailable for task ${this.taskId}`)
+		}
+
+		let { response, text, images, queuedMessageId } = await this.ask("tool", action.approvalText, false)
+
+		if (response === "yesButtonClicked") {
+			if (action.kind === "create_subtask") {
+				await provider.delegateParentAndOpenChild({
+					parentTaskId: this.taskId,
+					message: action.message,
+					initialTodos: action.todos,
+					mode: action.mode,
+					pendingActionId: action.actionId,
+				})
+				return
+			}
+
+			const didReopen = await provider.reopenParentFromDelegation({
+				parentTaskId: action.parentTaskId,
+				childTaskId: this.taskId,
+				completionResultSummary: action.result,
+				pendingActionId: action.actionId,
+			})
+			if (didReopen) {
+				return
+			}
+
+			await this.clearPendingActionAfterDurableResult(action.actionId)
+			if (this.pendingAction) {
+				await this.resumePendingTaskAction(this.pendingAction)
+				return
+			}
+			;({ response, text, images, queuedMessageId } = await this.ask("completion_result", "", false))
+			if (response === "yesButtonClicked") {
+				return
+			}
+		}
+
+		if (queuedMessageId) {
+			const persisted = await this.persistQueuedFeedbackAndAcknowledge(queuedMessageId, text, images)
+			if (!persisted) {
+				throw new Error(
+					`[Task#resumePendingTaskAction] Failed to persist queued feedback ${queuedMessageId}; task loop was not resumed`,
+				)
+			}
+		} else if (text || images?.length) {
+			await this.say("user_feedback", text ?? "", images)
+		}
+
+		const deniedContent = text ? formatResponse.toolDeniedWithFeedback(text) : formatResponse.toolDenied()
+		await this.initiateTaskLoop([
+			{
+				type: "tool_result",
+				tool_use_id: action.actionId,
+				content: formatResponse.toolResult(deniedContent, images),
+			},
+		])
 	}
 
 	/**
