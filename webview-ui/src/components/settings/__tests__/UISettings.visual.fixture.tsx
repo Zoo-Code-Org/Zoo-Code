@@ -45,7 +45,7 @@ export function UISettingsStory() {
 		<AppProviders>
 			<div
 				data-testid="ui-settings-story"
-				className="w-[488px] rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
+				className="w-[488px] max-w-full rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">
 				<UISettings {...state} setCachedStateField={setCachedStateField} />
 			</div>
 		</AppProviders>

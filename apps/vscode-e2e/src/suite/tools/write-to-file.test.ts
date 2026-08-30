@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
-import { waitUntilCompleted, sleep } from "../utils"
+import { isCompletedAsk, waitUntilCompleted, sleep } from "../utils"
 import { setDefaultSuiteTimeout } from "../test-utils"
 
 const TEST_DIR_NAME = "write-to-file-tool-fixture"
@@ -120,7 +120,7 @@ suite("Roo Code write_to_file Tool", function () {
 
 			const toolApprovalMessage = messages.find(
 				(message) =>
-					message.type === "ask" &&
+					isCompletedAsk(message) &&
 					message.ask === "tool" &&
 					message.text?.includes("write-to-file-smoke.txt"),
 			)
@@ -168,7 +168,7 @@ suite("Roo Code write_to_file Tool", function () {
 
 			const toolApprovalMessage = messages.find(
 				(message) =>
-					message.type === "ask" &&
+					isCompletedAsk(message) &&
 					message.ask === "tool" &&
 					message.text?.includes("write-to-file-nested-smoke.txt"),
 			)

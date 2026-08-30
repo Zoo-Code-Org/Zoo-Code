@@ -17,9 +17,11 @@ reviews:
     poem: false
 
     auto_review:
-        enabled: true
+        enabled: false
         drafts: false
-        auto_incremental_review: true
+        auto_incremental_review: false
+        labels:
+            - "coderabbit-review-active"
 
     path_filters:
         - "!**/node_modules/**"

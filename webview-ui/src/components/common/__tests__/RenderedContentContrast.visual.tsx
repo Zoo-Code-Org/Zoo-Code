@@ -1,19 +1,12 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { AppProviders } from "../../../../playwright/AppProviders"
 import { expectContrast } from "../../../../playwright/contrast"
+import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import { RenderedContentContrastFixture } from "./RenderedContentContrast.visual.fixture"
 
 for (const theme of visualThemes) {
 	test(`audits rendered content in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("rendered-content-contrast"))
 		await applyVisualTheme(page, theme)
-		const component = await mount(
-			<AppProviders>
-				<RenderedContentContrastFixture />
-			</AppProviders>,
-		)
 
 		const code = component.getByTestId("code-block").locator("code")
 		await expect(code).toContainText("Hello, Zoo Code", { timeout: 20_000 })

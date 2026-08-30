@@ -1,5 +1,5 @@
 /* v8 ignore file -- Playwright component fixture is covered by the visual test. */
-import React from "react"
+import React, { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
 import { type ProviderSettings } from "@roo-code/types"
@@ -25,12 +25,6 @@ function flattenTranslations(obj: Record<string, unknown>, prefix = "settings:")
 
 const translations = flattenTranslations(enSettings as Record<string, unknown>)
 
-const queryClient = new QueryClient({
-	defaultOptions: {
-		queries: { retry: false },
-	},
-})
-
 const apiConfiguration: ProviderSettings = {
 	apiProvider: "openai",
 	openAiBaseUrl: "",
@@ -38,29 +32,38 @@ const apiConfiguration: ProviderSettings = {
 	openAiUseAzure: true,
 }
 
-export const OpenAICompatibleAzureFixture = () => (
-	<PlaywrightTranslationContext.Provider
-		value={{
-			t: (key) => translations[key] ?? key,
-			i18n: null as unknown as typeof import("../../../../i18n/setup").default,
-		}}>
-		<AppTranslationContext.Provider
+export const OpenAICompatibleAzureFixture = () => {
+	const [queryClient] = useState(
+		() =>
+			new QueryClient({
+				defaultOptions: { queries: { retry: false } },
+			}),
+	)
+
+	return (
+		<PlaywrightTranslationContext.Provider
 			value={{
 				t: (key) => translations[key] ?? key,
 				i18n: null as unknown as typeof import("../../../../i18n/setup").default,
 			}}>
-			<QueryClientProvider client={queryClient}>
-				<TooltipProvider>
-					<div className="w-[480px] max-w-full bg-vscode-editor-background p-4 text-vscode-foreground">
-						<OpenAICompatible
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={() => {}}
-							organizationAllowList={{ allowAll: true, providers: {} }}
-							simplifySettings
-						/>
-					</div>
-				</TooltipProvider>
-			</QueryClientProvider>
-		</AppTranslationContext.Provider>
-	</PlaywrightTranslationContext.Provider>
-)
+			<AppTranslationContext.Provider
+				value={{
+					t: (key) => translations[key] ?? key,
+					i18n: null as unknown as typeof import("../../../../i18n/setup").default,
+				}}>
+				<QueryClientProvider client={queryClient}>
+					<TooltipProvider>
+						<div className="w-[480px] max-w-full bg-vscode-editor-background p-4 text-vscode-foreground">
+							<OpenAICompatible
+								apiConfiguration={apiConfiguration}
+								setApiConfigurationField={() => {}}
+								organizationAllowList={{ allowAll: true, providers: {} }}
+								simplifySettings
+							/>
+						</div>
+					</TooltipProvider>
+				</QueryClientProvider>
+			</AppTranslationContext.Provider>
+		</PlaywrightTranslationContext.Provider>
+	)
+}

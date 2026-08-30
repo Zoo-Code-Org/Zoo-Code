@@ -1,12 +1,10 @@
-import React from "react"
-
 import { expect, test } from "../../../../../playwright/coverage-fixture"
-import { OpenAICompatibleAzureFixture } from "./OpenAICompatible.visual.fixture"
+import { mountedStory } from "../../../../../playwright/mounted-story"
 
 test("renders Azure OpenAI endpoint and deployment guidance in the VS Code dark theme", async ({ mount, page }) => {
-	// The full provider bundle leaves a bare Zod reference after CT tree-shaking.
+	// The full provider bundle leaves a bare Zod reference after gallery tree-shaking.
 	await page.evaluate(() => Object.assign(globalThis, { z: undefined }))
-	const component = await mount(<OpenAICompatibleAzureFixture />)
+	const component = mountedStory(await mount("openai-compatible-azure"))
 
 	await component.evaluate((element) => {
 		const { document } = element.ownerDocument.defaultView!
