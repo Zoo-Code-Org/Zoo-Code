@@ -145,6 +145,37 @@ export const geminiModels = {
 		outputPrice: 3.0,
 		cacheReadsPrice: 0.05,
 	},
+	// 3.x Flash Lite models
+	"gemini-3.5-flash-lite": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high"],
+		// Matches the documented API default thinking level (On (minimal)).
+		reasoningEffort: "minimal",
+		inputPrice: 0.3,
+		outputPrice: 2.5,
+		cacheReadsPrice: 0.03,
+		cacheWritesPrice: 1.0,
+		supportsReasoningBudget: false,
+	},
+	"gemini-3.1-flash-lite": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high"],
+		// Lowest level of the supported set: keeps the cheap/free tier's
+		// default latency and cost in line with the Flash Lite tier.
+		reasoningEffort: "minimal",
+		inputPrice: 0.25,
+		outputPrice: 1.5,
+		cacheReadsPrice: 0.025,
+		cacheWritesPrice: 1.0,
+		supportsReasoningBudget: false,
+	},
+
 	// 2.5 Pro models
 	"gemini-2.5-pro": {
 		maxTokens: 64_000,

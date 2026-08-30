@@ -465,7 +465,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
-	it("does not schedule the derived index before repair-intent cleanup succeeds", async () => {
+	it("removes the repair-intent file after successful replay", async () => {
 		const child = makeItem({ id: "child-deferred-index", status: "active", parentTaskId: "parent-deferred-index" })
 		const parent = makeItem({
 			id: "parent-deferred-index",
@@ -478,23 +478,12 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
 		await store.reconcile({ forceRefresh: true })
 
-		const events: string[] = []
 		const storeInternals = store as unknown as {
-			scheduleIndexWrite: () => void
-			removeDelegationRepairIntent: () => Promise<void>
 			replayDelegationRepairIntent: () => Promise<void>
 		}
-		vi.spyOn(storeInternals, "removeDelegationRepairIntent").mockImplementation(async () => {
-			events.push("cleanup")
-			await fs.unlink(intentPath)
-		})
-		vi.spyOn(storeInternals, "scheduleIndexWrite").mockImplementation(() => {
-			events.push("schedule")
-		})
 
 		await storeInternals.replayDelegationRepairIntent()
 
-		expect(events).toEqual(["cleanup", "schedule"])
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 

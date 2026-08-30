@@ -91,6 +91,33 @@ jobs:
             - name: Check types
               run: pnpm check-types
 
+    build-vsix:
+        name: Build test VSIX
+        if: github.event_name == 'pull_request'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  persist-credentials: false
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+            - name: Build workspace packages
+              run: |
+                  pnpm --filter @roo-code/build build
+                  pnpm --filter @roo-code/vscode-webview build
+            - name: Package extension
+              run: pnpm --filter ./src vsix
+            - name: Upload test VSIX
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: zoo-code-vsix-pr-${{ github.event.pull_request.number }}
+                  path: bin/*.vsix
+                  if-no-files-found: error
+                  retention-days: 7
+
     unit-test:
         name: platform-unit-test (${{ matrix.name }})
         runs-on: ${{ matrix.os }}

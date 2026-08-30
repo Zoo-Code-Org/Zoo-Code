@@ -6,6 +6,7 @@ import { Task } from "../../task/Task"
 import { TaskRegistry } from "../../task/TaskRegistry"
 import { ContextProxy } from "../../config/ContextProxy"
 import type { ProviderSettings, HistoryItem } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 type MockTask = Partial<Task> &
 	Pick<Task, "taskId" | "instanceId"> & {
@@ -284,7 +285,7 @@ describe("ClineProvider flicker-free cancel", () => {
 	let consoleErrorSpy: ReturnType<typeof vi.spyOn>
 
 	const mockApiConfig: ProviderSettings = {
-		apiProvider: "anthropic",
+		apiProvider: providerIdentifiers.anthropic,
 		apiKey: "test-key",
 	} as ProviderSettings
 
