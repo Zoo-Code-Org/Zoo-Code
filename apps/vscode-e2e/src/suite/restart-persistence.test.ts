@@ -87,7 +87,10 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		assert.ok(historyItem, "Task history item should be available after restart")
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
 		const conversationLength = await api.getTaskApiConversationHistoryLength(taskId)
-		assert.ok(conversationLength > 0, "Completion should make API conversation history available to a fresh host")
+		assert.ok(
+			conversationLength >= 2,
+			"Completion should make the user and assistant API conversation turns available to a fresh host",
+		)
 
 		await api.resumeTask(taskId)
 		await waitFor(() => taskMessages.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task"))
