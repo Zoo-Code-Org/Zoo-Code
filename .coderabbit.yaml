@@ -128,11 +128,7 @@ reviews:
                   unvalidated input, bypasses approval or allowlist controls, can lose persisted state due
                   to a missing await, non-atomic write, or omitted default propagation, or leaks lifecycle
                   resources. Cite the path and a plausible triggering scenario; pass when no such changed
-                  path exists. For advisory PR state labels and guidance comments, drift is not an error
-                  when native merge requirements remain intact and the review gate remains pending. Still
-                  fail PR-review automation defects that meet the trust violations above, including native
-                  enforcement bypass, a false-success gate, sensitive-data exposure, or authoritative
-                  review-state loss.
+                  path exists.
 
     tools:
         eslint:
