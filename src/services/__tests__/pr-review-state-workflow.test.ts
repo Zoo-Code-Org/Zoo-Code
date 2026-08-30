@@ -631,6 +631,33 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
+	it("keeps an external same-name review gate pending when it has not reported", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["PR review gate"],
+			requiredIntegrationId: 999,
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("keeps an external same-name review gate blocked when it fails", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["PR review gate"],
+			requiredIntegrationId: 999,
+			requiredRunAppId: 999,
+			requiredConclusion: "failure",
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
+	})
+
 	it("keeps the gate pending when a required check has not reported", async () => {
 		const result = await runWorkflow({ omitRequiredRuns: true })
 

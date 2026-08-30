@@ -74,6 +74,7 @@ jobs:
             const codeRabbitLogin = 'coderabbitai[bot]';
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'PR review gate';
+            const githubActionsIntegrationId = 15368;
 
             // When triggered by a single PR event, only reconcile that PR.
             // The hourly schedule and workflow_dispatch reconcile all open PRs.
@@ -427,10 +428,13 @@ jobs:
                 }
 
                 // Filter to required checks only (or all checks if rules unavailable).
-              // Always exclude this workflow's own run to avoid self-referential loops.
+                // Exclude only this workflow's GitHub Actions checks. A same-named check
+                // from another or unpinned integration remains a real requirement.
                 const requiredSpecs = (requiredChecks ?? [])
-                  .filter(check => check.context !== reviewGateName)
-                  .filter(check => !(check.context === 'reconcile' && check.integrationId === 15368));
+                  .filter(check => !(
+                    check.integrationId === githubActionsIntegrationId &&
+                    (check.context === reviewGateName || check.context === 'reconcile')
+                  ));
                 const requiredResults = requiredSpecs.map(check => {
                   const run = check.integrationId === null
                     ? latestByName.get(check.context)
