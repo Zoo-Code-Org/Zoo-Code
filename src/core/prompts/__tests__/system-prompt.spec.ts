@@ -192,6 +192,32 @@ const createMockMcpHub = (withServers: boolean = false): McpHub =>
 		connections: [],
 	}) as unknown as McpHub
 
+const generatePromptWithTools = (
+	toolNames: string[],
+	mode: Mode = defaultModeSlug,
+	customModePrompts?: Parameters<typeof SYSTEM_PROMPT>[6],
+	customModes?: ModeConfig[],
+) =>
+	SYSTEM_PROMPT(
+		mockContext,
+		"/test/path",
+		false,
+		undefined,
+		undefined,
+		mode,
+		customModePrompts,
+		customModes,
+		undefined,
+		{},
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		undefined,
+		{ availableToolNames: new Set(toolNames) },
+	)
+
 describe("SYSTEM_PROMPT", () => {
 	let mockMcpHub: McpHub
 	let experiments: Record<string, boolean> | undefined
@@ -575,6 +601,55 @@ describe("SYSTEM_PROMPT", () => {
 		expect(prompt).toContain("RULES")
 		expect(prompt).toContain("SYSTEM INFORMATION")
 		expect(prompt).toContain("OBJECTIVE")
+	})
+
+	it("should omit system-owned guidance for unavailable tools", async () => {
+		const prompt = await generatePromptWithTools(["read_file", "ask_followup_question", "attempt_completion"])
+
+		expect(prompt).toContain("read files")
+		expect(prompt).not.toContain("execute_command")
+		expect(prompt).not.toContain("list_files")
+		expect(prompt).not.toContain("write and edit files")
+	})
+
+	it("should apply Architect tool availability and edit restrictions to built-in instructions", async () => {
+		const prompt = await generatePromptWithTools(
+			["read_file", "write_to_file", "ask_followup_question", "attempt_completion"],
+			"architect",
+		)
+
+		expect(prompt).toContain("write the plan to a markdown file")
+		expect(prompt).toContain('The active mode can only edit files matching "\\.md$" (Markdown files only)')
+		expect(prompt).not.toContain("update_todo_list")
+		expect(prompt).not.toContain("switch_mode")
+	})
+
+	it("should preserve user-authored references to unavailable tools", async () => {
+		const userInstruction = "Document why execute_command is disabled for this workflow."
+		const prompt = await generatePromptWithTools(
+			["read_file", "ask_followup_question", "attempt_completion"],
+			defaultModeSlug,
+			{
+				[defaultModeSlug]: { customInstructions: userInstruction },
+			},
+		)
+
+		expect(prompt).toContain(userInstruction)
+	})
+
+	it("should still gate stored built-in instructions when they equal the default", async () => {
+		const architectInstructions = modes.find((mode) => mode.slug === "architect")?.customInstructions
+		const prompt = await generatePromptWithTools(
+			["read_file", "ask_followup_question", "attempt_completion"],
+			"architect",
+			{
+				architect: { customInstructions: architectInstructions },
+			},
+		)
+
+		expect(prompt).toContain("present the plan directly in your response")
+		expect(prompt).not.toContain("update_todo_list")
+		expect(prompt).not.toContain("switch_mode")
 	})
 
 	describe("allowedMcpServers filtering in system prompt", () => {

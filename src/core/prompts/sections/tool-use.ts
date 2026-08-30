@@ -1,4 +1,10 @@
-export function getSharedToolUseSection(): string {
+import type { SystemPromptContext } from "../types"
+
+export function getSharedToolUseSection(context?: SystemPromptContext): string {
+	if (context && context.availableToolNames.size === 0) {
+		return ""
+	}
+
 	return `====
 
 TOOL USE

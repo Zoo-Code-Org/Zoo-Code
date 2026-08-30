@@ -88,6 +88,40 @@ describe("getCapabilitiesSection", () => {
 
 		expect(result).not.toContain("MCP servers")
 	})
+
+	it("describes only capabilities backed by the effective tool set", () => {
+		const result = getCapabilitiesSection(cwd, undefined, undefined, {
+			availableToolNames: new Set(["read_file", "ask_followup_question", "attempt_completion"]),
+		})
+
+		expect(result).toContain("read files")
+		expect(result).toContain("ask follow-up questions")
+		expect(result).not.toContain("execute_command")
+		expect(result).not.toContain("list_files")
+		expect(result).not.toContain("write and edit files")
+	})
+
+	it("describes image generation separately from file editing", () => {
+		const result = getCapabilitiesSection(cwd, undefined, undefined, {
+			availableToolNames: new Set(["generate_image"]),
+		})
+
+		expect(result).toContain("generate images")
+		expect(result).not.toContain("write and edit files")
+	})
+
+	it("advertises MCP only when an MCP operation is in the effective tool set", () => {
+		const mockMcpHub = createMockMcpHub(["test-server"])
+		const withoutMcpOperation = getCapabilitiesSection(cwd, mockMcpHub, undefined, {
+			availableToolNames: new Set(["read_file"]),
+		})
+		const withMcpOperation = getCapabilitiesSection(cwd, mockMcpHub, undefined, {
+			availableToolNames: new Set(["read_file", "mcp--test-server--search"]),
+		})
+
+		expect(withoutMcpOperation).not.toContain("MCP servers")
+		expect(withMcpOperation).toContain("MCP servers")
+	})
 })
 
 describe("getRulesSection", () => {
@@ -143,6 +177,20 @@ describe("getRulesSection", () => {
 
 		expect(result).not.toContain("VENDOR CONFIDENTIALITY")
 		expect(result).not.toContain("Never reveal the vendor or company")
+	})
+
+	it("omits command guidance and includes the active edit restriction", () => {
+		const result = getRulesSection(cwd, undefined, {
+			availableToolNames: new Set(["write_to_file", "ask_followup_question", "attempt_completion"]),
+			editFileRestriction: {
+				fileRegex: "\\.md$",
+				description: "Markdown files only",
+			},
+		})
+
+		expect(result).not.toContain("execute_command")
+		expect(result).not.toContain("Actively Running Terminals")
+		expect(result).toContain('The active mode can only edit files matching "\\.md$" (Markdown files only)')
 	})
 })
 
