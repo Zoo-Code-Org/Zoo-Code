@@ -73,7 +73,7 @@ jobs:
             const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
             const codeRabbitLogin = 'coderabbitai[bot]';
             const codeRabbitActiveLabel = 'coderabbit-review-active';
-            const reviewGateName = 'PR review gate';
+            const reviewGateName = 'Zoo Code / PR review gate';
             const githubActionsIntegrationId = 15368;
 
             // When triggered by a single PR event, only reconcile that PR.

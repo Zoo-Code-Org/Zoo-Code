@@ -634,7 +634,7 @@ describe("PR review-state workflow", () => {
 	it("keeps an external same-name review gate pending when it has not reported", async () => {
 		const result = await runWorkflow({
 			requiredContexts: ["PR review gate"],
-			requiredIntegrationId: 999,
+			requiredIntegrationId: 15368,
 			omitRequiredRuns: true,
 		})
 
@@ -647,8 +647,8 @@ describe("PR review-state workflow", () => {
 	it("keeps an external same-name review gate blocked when it fails", async () => {
 		const result = await runWorkflow({
 			requiredContexts: ["PR review gate"],
-			requiredIntegrationId: 999,
-			requiredRunAppId: 999,
+			requiredIntegrationId: 15368,
+			requiredRunAppId: 15368,
 			requiredConclusion: "failure",
 		})
 
@@ -975,7 +975,7 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow()
 
 		expect(latestGateStatus(result)).toEqual(
-			expect.objectContaining({ context: "PR review gate", sha: SHA, state: "pending" }),
+			expect.objectContaining({ context: "Zoo Code / PR review gate", sha: SHA, state: "pending" }),
 		)
 	})
 
@@ -983,7 +983,7 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({
 			gateStatuses: [
 				{
-					context: "PR review gate",
+					context: "Zoo Code / PR review gate",
 					state: "pending",
 					description: "Required CI passed. Wait for CodeRabbit to approve the latest commit.",
 					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
@@ -999,7 +999,9 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ createCommitStatusErrorStatus: 500 })
 
 		expect(result.setFailed).not.toHaveBeenCalled()
-		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not publish PR review gate"))
+		expect(result.warning).toHaveBeenCalledWith(
+			expect.stringContaining("could not publish Zoo Code / PR review gate"),
+		)
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
@@ -1009,7 +1011,7 @@ describe("PR review-state workflow", () => {
 			createCommitStatusErrorStatus: 500,
 			gateStatuses: [
 				{
-					context: "PR review gate",
+					context: "Zoo Code / PR review gate",
 					state: "success",
 					description: "Approved",
 					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
@@ -1017,7 +1019,9 @@ describe("PR review-state workflow", () => {
 			],
 		})
 
-		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("could not invalidate PR review gate"))
+		expect(result.setFailed).toHaveBeenCalledWith(
+			expect.stringContaining("could not invalidate Zoo Code / PR review gate"),
+		)
 	})
 
 	it("fails closed when review-guide comments cannot be listed", async () => {
@@ -1045,7 +1049,9 @@ describe("PR review-state workflow", () => {
 		const result = await runWorkflow({ gateStatusLookupErrorStatus: 500 })
 
 		expect(result.setFailed).not.toHaveBeenCalled()
-		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not inspect PR review gate"))
+		expect(result.warning).toHaveBeenCalledWith(
+			expect.stringContaining("could not inspect Zoo Code / PR review gate"),
+		)
 		expect(latestGateStatus(result)?.state).toBe("pending")
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
@@ -1079,7 +1085,7 @@ describe("PR review-state workflow", () => {
 			labels: ["awaiting-maintainer", "coderabbit-review-active"],
 			gateStatuses: [
 				{
-					context: "PR review gate",
+					context: "Zoo Code / PR review gate",
 					state: "success",
 					description: "Approved",
 					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
