@@ -192,17 +192,7 @@ importers:
         specifier: 6.0.1
         version: 6.0.1
 
-  apps/vscode-nightly:
-    devDependencies:
-      '@roo-code/build':
-        specifier: workspace:^
-        version: link:../../packages/build
-
   packages/build:
-    dependencies:
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -213,9 +203,6 @@ importers:
       '@types/node':
         specifier: 22.20.1
         version: 22.20.1
-      vitest:
-        specifier: 4.1.9
-        version: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@22.20.1)(@vitest/coverage-v8@4.1.9)(@vitest/ui@4.1.9)(jsdom@26.1.0)(vite@8.1.0(@types/node@22.20.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4)(yaml@2.9.0))
 
   packages/cloud:
     dependencies:

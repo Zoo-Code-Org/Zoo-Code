@@ -971,7 +971,7 @@
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 31
+			"count": 26
 		}
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
