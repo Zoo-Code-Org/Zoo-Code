@@ -13,6 +13,12 @@ vi.mock("@/i18n/TranslationContext", () => ({
 			if (key === "settings:checkpoints.perWrite.description") {
 				return "Record a checkpoint snapshot after every successful file write by the agent"
 			}
+			if (key === "settings:checkpoints.changeCardDetail.label") {
+				return "Show full diff in change cards"
+			}
+			if (key === "settings:checkpoints.changeCardDetail.description") {
+				return "Include the full unified diff inline for every file in per-step change cards"
+			}
 			return key
 		},
 	}),
@@ -121,5 +127,68 @@ describe("CheckpointSettings", () => {
 		fireEvent.click(checkbox)
 
 		expect(setCachedStateField).toHaveBeenCalledWith("perWriteCheckpoints", false)
+	})
+
+	it("renders the change card detail checkbox unchecked by default when the value is unset", () => {
+		render(<CheckpointSettings enableCheckpoints={false} setCachedStateField={setCachedStateField} />)
+
+		const checkbox = screen.getByRole("checkbox", { name: "Show full diff in change cards" })
+		expect(checkbox).not.toBeChecked()
+	})
+
+	it("renders the change card detail checkbox checked when the saved value is full", () => {
+		render(
+			<CheckpointSettings
+				enableCheckpoints={false}
+				changeCardDetail="full"
+				setCachedStateField={setCachedStateField}
+			/>,
+		)
+
+		const checkbox = screen.getByRole("checkbox", { name: "Show full diff in change cards" })
+		expect(checkbox).toBeChecked()
+	})
+
+	it("renders the change card detail checkbox unchecked when the saved value is summary", () => {
+		render(
+			<CheckpointSettings
+				enableCheckpoints={false}
+				changeCardDetail="summary"
+				setCachedStateField={setCachedStateField}
+			/>,
+		)
+
+		const checkbox = screen.getByRole("checkbox", { name: "Show full diff in change cards" })
+		expect(checkbox).not.toBeChecked()
+	})
+
+	it("caches the changeCardDetail full value when the user checks the box", () => {
+		render(
+			<CheckpointSettings
+				enableCheckpoints={false}
+				changeCardDetail="summary"
+				setCachedStateField={setCachedStateField}
+			/>,
+		)
+
+		const checkbox = screen.getByRole("checkbox", { name: "Show full diff in change cards" })
+		fireEvent.click(checkbox)
+
+		expect(setCachedStateField).toHaveBeenCalledWith("changeCardDetail", "full")
+	})
+
+	it("caches the changeCardDetail summary value when the user unchecks the box", () => {
+		render(
+			<CheckpointSettings
+				enableCheckpoints={false}
+				changeCardDetail="full"
+				setCachedStateField={setCachedStateField}
+			/>,
+		)
+
+		const checkbox = screen.getByRole("checkbox", { name: "Show full diff in change cards" })
+		fireEvent.click(checkbox)
+
+		expect(setCachedStateField).toHaveBeenCalledWith("changeCardDetail", "summary")
 	})
 })

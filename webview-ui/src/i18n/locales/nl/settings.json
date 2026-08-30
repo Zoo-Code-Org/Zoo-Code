@@ -708,7 +708,7 @@
 		},
 		"changeCardDetail": {
 			"label": "Volledige diff tonen in wijzigingskaarten",
-			"description": "Bevat de volledige unified diff inline voor elk bestand in wijzigingskaarten per stap. Bij uitgeschakeld tonen de kaarten alleen de bestandslijst met toegevoegde/verwijderde regels."
+			"description": "Bevat de volledige unified diff inline voor elk bestand in wijzigingskaarten per stap. Wanneer deze optie is uitgeschakeld, tonen de kaarten alleen de bestandslijst met toegevoegde/verwijderde regels."
 		}
 	},
 	"notifications": {
