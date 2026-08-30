@@ -59,6 +59,7 @@ export default [
 			"core/tools/**/*.ts",
 			"core/webview/**/*.ts",
 			"integrations/**/*.ts",
+			"services/**/*.ts",
 		],
 		languageOptions: {
 			parserOptions: {

@@ -345,9 +345,9 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Yenilikler:",
-			"highlight1": "Daha güvenli dosya erişimi — Zoo Code'un hangi yollara erişebileceğini kontrol etmek için ayrı Okuma ve Yazma izin listeleri kullan.",
-			"highlight2": "Daha fazla model seçeneği — GLM 5.3 artık Z.ai üzerinden kullanılabilir; Gemini 3.5 Flash Lite ve Gemini 3.1 Flash Lite da Gemini provider'ına eklendi.",
-			"highlight3": "Daha güvenilir günlük iş akışları — iyileştirmeler görev kurtarma ve geçmişini, provider streaming ve araç kullanımını, ayar içe aktarmayı ve IDE temalarındaki okunabilirliği güçlendiriyor."
+			"highlight1": "🤖 Yeni Zoo Gateway'de bakiyesi olan kullanıcılar GLM-5.3-Flash ve Gemini 3.7 Flash'ı 2 hafta boyunca %50 indirimle, MiniMax M3'ü ise tamamen ÜCRETSİZ deneyebilir: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "Yeni model — GLM-5.3-Flash artık Z AI üzerinden kullanılabilir.",
+			"highlight3": "Güvenilirlik düzeltmeleri — alt görev onayları geri getirildi, Vertex Gemini 3.7 boş araç çıktısı, terminal başlatma hataları ve arka plan servis hataları giderildi, IDE temalarındaki okunabilirlik iyileştirildi."
 		},
 		"cloudAgents": {
 			"heading": "Cloud'daki yenilikler:",

@@ -344,9 +344,9 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "新機能:",
-			"highlight1": "より安全なファイルアクセス — 読み取り用と書き込み用の許可リストを分けて、Zoo Code がアクセスできるパスを制御できます。",
-			"highlight2": "モデルの選択肢がさらに充実 — GLM 5.3 が Z.ai で利用可能になり、Gemini プロバイダーに Gemini 3.5 Flash Lite と Gemini 3.1 Flash Lite が追加されました。",
-			"highlight3": "日常のワークフローをより確実に — タスクの復元と履歴、プロバイダーのストリーミングとツール使用、設定のインポート、IDE テーマ全体での読みやすさを改善しました。"
+			"highlight1": "🤖 新しい Zoo Gateway に残高があるユーザーは、GLM-5.3-Flash と Gemini 3.7 Flash を 2 週間 50% 割引で、MiniMax M3 を完全無料でお試しいただけます: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "新しいモデル — GLM-5.3-Flash が Z AI で利用可能になりました。",
+			"highlight3": "信頼性の修正 — サブタスクの承認を復元し、Vertex Gemini 3.7 のツール出力が空になる問題、ターミナルの起動失敗、バックグラウンドサービスのエラー、テーマでの読みやすさを修正しました。"
 		},
 		"cloudAgents": {
 			"heading": "クラウドの新機能:",

@@ -182,6 +182,7 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 
 export interface RooCodeTestAPI extends RooCodeAPI {
 	captureWebviewThemeFixture(): Promise<WebviewThemeFixture>
+	getLatestAnnouncementId(): string
 }
 
 export interface RooCodeIpcServer extends EventEmitter<IpcServerEvents> {
