@@ -1,6 +1,6 @@
-import { memo, useState } from "react"
+import { memo } from "react"
 import { Trans } from "react-i18next"
-import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeButton, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 
 import type { TelemetrySetting } from "@roo-code/types"
 
@@ -9,11 +9,13 @@ import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 const TelemetryBanner = () => {
 	const { t } = useAppTranslation()
-	const [isDismissed, setIsDismissed] = useState(false)
 
-	const handleClose = () => {
-		setIsDismissed(true)
+	const handleAccept = () => {
 		vscode.postMessage({ type: "telemetrySetting", text: "enabled" satisfies TelemetrySetting })
+	}
+
+	const handleDecline = () => {
+		vscode.postMessage({ type: "telemetrySetting", text: "disabled" satisfies TelemetrySetting })
 	}
 
 	const handleOpenSettings = () => {
@@ -24,28 +26,24 @@ const TelemetryBanner = () => {
 		})
 	}
 
-	if (isDismissed) {
-		return null
-	}
-
 	return (
-		<div className="relative px-4 py-2.5 pr-10 bg-vscode-banner-background border-b border-vscode-panel-border text-sm leading-normal text-vscode-foreground">
-			{/* Close button (X) */}
-			<button
-				onClick={handleClose}
-				className="absolute top-1.5 right-2 bg-transparent border-none text-vscode-foreground cursor-pointer text-2xl p-1 opacity-70 hover:opacity-100 transition-opacity duration-200 leading-none"
-				aria-label="Close">
-				×
-			</button>
-
+		<div className="px-4 py-2.5 bg-vscode-banner-background border-b border-vscode-panel-border text-sm leading-normal text-vscode-foreground">
 			<div className="mb-0.5 font-bold">{t("welcome:telemetry.helpImprove")}</div>
-			<div>
+			<div className="mb-2">
 				<Trans
 					i18nKey="welcome:telemetry.helpImproveMessage"
 					components={{
 						settingsLink: <VSCodeLink href="#" onClick={handleOpenSettings} />,
 					}}
 				/>
+			</div>
+			<div className="flex gap-2">
+				<VSCodeButton appearance="primary" onClick={handleAccept}>
+					{t("welcome:telemetry.accept")}
+				</VSCodeButton>
+				<VSCodeButton appearance="secondary" onClick={handleDecline}>
+					{t("welcome:telemetry.decline")}
+				</VSCodeButton>
 			</div>
 		</div>
 	)
