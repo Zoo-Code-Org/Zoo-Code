@@ -51,6 +51,28 @@ function createProvider(mcpHub: McpHub): Pick<ClineProvider, "context" | "getMcp
 }
 
 describe("buildNativeToolsArrayWithRestrictions", () => {
+	it.each([
+		{ mode: "code", hasCommand: true, hasRead: true, hasEdit: true },
+		{ mode: "debug", hasCommand: true, hasRead: true, hasEdit: true },
+		{ mode: "architect", hasCommand: false, hasRead: true, hasEdit: true },
+		{ mode: "ask", hasCommand: false, hasRead: true, hasEdit: false },
+		{ mode: "orchestrator", hasCommand: false, hasRead: false, hasEdit: false },
+	])("resolves the built-in $mode mode tool policy", async ({ mode, hasCommand, hasRead, hasEdit }) => {
+		const result = await buildNativeToolsArrayWithRestrictions({
+			provider: createProvider(createMcpHub(false)),
+			cwd: "/test/path",
+			mode,
+			customModes: undefined,
+			experiments: {},
+			apiConfiguration,
+		})
+
+		expect(result.effectiveToolNames.has("execute_command")).toBe(hasCommand)
+		expect(result.effectiveToolNames.has("read_file")).toBe(hasRead)
+		expect(result.effectiveToolNames.has("list_files")).toBe(hasRead)
+		expect(result.effectiveToolNames.has("write_to_file")).toBe(hasEdit)
+	})
+
 	it("returns canonical names for the request's logical tool set", async () => {
 		const result = await buildNativeToolsArrayWithRestrictions({
 			provider: createProvider(createMcpHub(false)),
