@@ -370,6 +370,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}}のドキュメント",
+		"commitMessageModel": {
+			"label": "コミットメッセージ用モデル",
+			"description": "ソース管理パネルからコミットメッセージを生成するために使用するプロファイル。通常は小さく高速なモデルで十分です。未選択のままにすると、現在アクティブなプロファイルが使用されます。",
+			"useCurrentConfig": "現在選択されている API 構成を使用"
+		},
+		"commitMessageTimeout": {
+			"label": "コミットメッセージのタイムアウト",
+			"description": "コミットメッセージを待つ秒数。低速またはリモートのモデルで時間がかかる場合は増やしてください。"
+		},
 		"configProfile": "設定プロファイル",
 		"description": "異なるAPI設定を保存して、プロバイダーと設定をすばやく切り替えることができます。",
 		"apiProvider": "APIプロバイダー",

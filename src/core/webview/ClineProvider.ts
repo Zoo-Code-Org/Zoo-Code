@@ -2611,6 +2611,8 @@ export class ClineProvider
 			customModePrompts,
 			customSupportPrompts,
 			enhancementApiConfigId,
+			commitMessageApiConfigId,
+			commitMessageTimeout,
 			autoApprovalEnabled,
 			customModes,
 			experiments,
@@ -2774,6 +2776,10 @@ export class ClineProvider
 			customModePrompts: customModePrompts ?? {},
 			customSupportPrompts: customSupportPrompts ?? {},
 			enhancementApiConfigId,
+			commitMessageApiConfigId,
+			// Left undefined when unset so the webview shows its own default rather than a value
+			// the user never chose.
+			commitMessageTimeout,
 			autoApprovalEnabled: autoApprovalEnabled ?? false,
 			customModes,
 			experiments: experiments ?? experimentDefault,
@@ -3010,6 +3016,8 @@ export class ClineProvider
 			customModePrompts: stateValues.customModePrompts ?? {},
 			customSupportPrompts: stateValues.customSupportPrompts ?? {},
 			enhancementApiConfigId: stateValues.enhancementApiConfigId,
+			commitMessageApiConfigId: stateValues.commitMessageApiConfigId,
+			commitMessageTimeout: stateValues.commitMessageTimeout,
 			experiments: stateValues.experiments ?? experimentDefault,
 			autoApprovalEnabled: stateValues.autoApprovalEnabled ?? false,
 			customModes,

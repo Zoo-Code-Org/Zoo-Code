@@ -835,10 +835,22 @@ export const webviewMessageHandler = async (
 						Terminal.setExecaShellPath(value as string | undefined)
 					} else if (key === "mcpEnabled") {
 						newValue = value ?? true
-						const mcpHub = provider.getMcpHub()
 
-						if (mcpHub) {
-							await mcpHub.handleMcpEnabledChange(newValue as boolean)
+						// Settings are written one after another, so every key after this one waits
+						// for whatever it does. Reconnecting every MCP server takes seconds, and
+						// saving the panel is not a request to restart them - only a change is.
+						if (newValue !== getGlobalState("mcpEnabled")) {
+							// The hub reads the flag back out of state to decide what to reconcile
+							// to, so it has to be stored before the servers are told about it -
+							// otherwise disabling MCP reconnects the servers it just closed. The
+							// write at the end of the loop then repeats it harmlessly.
+							await provider.contextProxy.setValue("mcpEnabled", newValue as boolean)
+
+							const mcpHub = provider.getMcpHub()
+
+							if (mcpHub) {
+								await mcpHub.handleMcpEnabledChange(newValue as boolean)
+							}
 						}
 					} else if (key === "experiments") {
 						if (!value) {

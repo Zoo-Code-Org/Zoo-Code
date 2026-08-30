@@ -370,6 +370,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}} documentatie",
+		"commitMessageModel": {
+			"label": "Model voor commitberichten",
+			"description": "Profiel dat wordt gebruikt om commitberichten te genereren vanuit het paneel Broncodebeheer. Een klein, snel model volstaat meestal. Laat leeg om het actieve profiel te gebruiken.",
+			"useCurrentConfig": "Momenteel geselecteerde API-configuratie gebruiken"
+		},
+		"commitMessageTimeout": {
+			"label": "Time-out commitbericht",
+			"description": "Seconden wachten op een commitbericht voordat het wordt opgegeven. Verhoog dit als een traag of extern model meer tijd nodig heeft."
+		},
 		"configProfile": "Configuratieprofiel",
 		"description": "Sla verschillende API-configuraties op om snel te wisselen tussen providers en instellingen.",
 		"apiProvider": "API-provider",

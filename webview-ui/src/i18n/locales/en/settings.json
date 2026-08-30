@@ -450,6 +450,15 @@
 	},
 	"providers": {
 		"providerDocumentation": "{{provider}} documentation",
+		"commitMessageModel": {
+			"label": "Commit Message Model",
+			"description": "Profile used to generate commit messages from the Source Control panel. A small, fast model is usually enough. Leave unselected to use the currently active profile.",
+			"useCurrentConfig": "Use currently selected API configuration"
+		},
+		"commitMessageTimeout": {
+			"label": "Commit Message Timeout",
+			"description": "Seconds to wait for a commit message before giving up. Raise this if a slow or remote model needs longer."
+		},
 		"configProfile": "Configuration Profile",
 		"description": "Save different API configurations to quickly switch between providers and settings.",
 		"apiProvider": "API Provider",

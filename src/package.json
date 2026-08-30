@@ -169,6 +169,21 @@
 				"command": "zoo-code.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
+			},
+			{
+				"command": "zoo-code.generateCommitMessage",
+				"title": "%command.generateCommitMessage.title%",
+				"category": "%configuration.title%",
+				"icon": {
+					"light": "assets/icons/panel_light.png",
+					"dark": "assets/icons/panel_dark.png"
+				}
+			},
+			{
+				"command": "zoo-code.stopGeneratingCommitMessage",
+				"title": "%command.stopGeneratingCommitMessage.title%",
+				"category": "%configuration.title%",
+				"icon": "$(debug-stop)"
 			}
 		],
 		"menus": {
@@ -264,6 +279,30 @@
 					"command": "zoo-code.popoutButtonClicked",
 					"group": "overflow@2",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
+				}
+			],
+			"scm/title": [
+				{
+					"command": "zoo-code.generateCommitMessage",
+					"group": "navigation@1",
+					"when": "scmProvider == git && !zoo-code.generatingCommitMessage"
+				},
+				{
+					"command": "zoo-code.stopGeneratingCommitMessage",
+					"group": "navigation@1",
+					"when": "scmProvider == git && zoo-code.generatingCommitMessage"
+				}
+			],
+			"scm/inputBox": [
+				{
+					"command": "zoo-code.generateCommitMessage",
+					"when": "scmProvider == git"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "zoo-code.stopGeneratingCommitMessage",
+					"when": "zoo-code.generatingCommitMessage"
 				}
 			]
 		},
