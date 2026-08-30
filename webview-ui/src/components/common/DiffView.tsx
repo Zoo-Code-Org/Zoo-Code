@@ -198,7 +198,7 @@ const DiffView = memo(({ source, filePath }: DiffViewProps) => {
 										? "bg-[var(--vscode-diffEditor-insertedTextBackground)]"
 										: line.type === "deletion"
 											? "bg-[var(--vscode-diffEditor-removedTextBackground)]"
-											: "bg-[var(--vscode-editorGroup-border)]"
+											: "bg-[var(--vscode-diffEditor-unchangedCodeBackground,var(--vscode-editor-background))]"
 
 								const contentBgClass =
 									line.type === "addition"
@@ -210,7 +210,7 @@ const DiffView = memo(({ source, filePath }: DiffViewProps) => {
 								const sign = line.type === "addition" ? "+" : line.type === "deletion" ? "-" : ""
 
 								return (
-									<tr key={globalIndex}>
+									<tr key={globalIndex} data-line-type={line.type}>
 										{/* Old line number */}
 										<td
 											className={`w-[45px] text-right pr-1 pl-1 select-none align-top whitespace-nowrap ${gutterBgClass}`}>

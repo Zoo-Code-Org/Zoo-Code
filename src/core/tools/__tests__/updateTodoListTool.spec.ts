@@ -1,6 +1,43 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { parseMarkdownChecklist } from "../UpdateTodoListTool"
+import { parseMarkdownChecklist, setPendingTodoList, updateTodoListTool } from "../UpdateTodoListTool"
 import { TodoItem } from "@roo-code/types"
+import type { Task } from "../../task/Task"
+import type { ToolCallbacks } from "../BaseTool"
+
+describe("UpdateTodoListTool", () => {
+	it("persists the edited todo list even if the say notification fails", async () => {
+		const editedTodos: TodoItem[] = [{ id: "edited", content: "Edited task", status: "in_progress" }]
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+		const task = {
+			consecutiveMistakeCount: 0,
+			recordToolError: vi.fn(),
+			didToolFailInCurrentTurn: false,
+			todoList: [],
+			say: vi.fn().mockRejectedValue(new Error("say failed")),
+		} as unknown as Task
+		const callbacks = {
+			pushToolResult: vi.fn(),
+			handleError: vi.fn(),
+			askApproval: vi.fn().mockImplementation(async () => {
+				setPendingTodoList(editedTodos)
+				return true
+			}),
+		} as unknown as ToolCallbacks
+
+		await updateTodoListTool.execute({ todos: "[ ] Original task" }, task, callbacks)
+		await new Promise<void>((resolve) => setImmediate(resolve))
+
+		// Notification is fire-and-forget: persistence happens regardless, and the
+		// rejection is logged rather than routed to handleError (which would abort).
+		expect(task.todoList).toEqual(editedTodos)
+		expect(callbacks.handleError).not.toHaveBeenCalled()
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			"[UpdateTodoListTool] Failed to post user_edit_todos:",
+			expect.any(Error),
+		)
+		consoleErrorSpy.mockRestore()
+	})
+})
 
 describe("parseMarkdownChecklist", () => {
 	describe("standard checkbox format (without dash prefix)", () => {

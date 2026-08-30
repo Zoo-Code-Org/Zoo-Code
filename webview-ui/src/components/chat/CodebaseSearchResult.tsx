@@ -30,15 +30,15 @@ const CodebaseSearchResult: React.FC<CodebaseSearchResultProps> = ({ filePath, s
 		<StandardTooltip content={t("codebaseSearch.resultTooltip", { score: score.toFixed(3) })}>
 			<div
 				onClick={handleClick}
-				className="p-2 border border-[var(--vscode-editorGroup-border)] cursor-pointer hover:bg-secondary hover:text-white">
+				className="group p-2 border border-vscode-editorGroup-border cursor-pointer hover:bg-vscode-list-hoverBackground">
 				<div className="flex gap-2 items-center overflow-hidden">
-					<span className="text-primary-300 whitespace-nowrap flex-shrink-0">
+					<span className="text-vscode-textLink-foreground group-hover:text-vscode-list-hoverForeground whitespace-nowrap flex-shrink-0">
 						{filePath.split("/").at(-1)}:{startLine === endLine ? startLine : `${startLine}-${endLine}`}
 					</span>
-					<span className="text-gray-500 truncate min-w-0 flex-1">
+					<span className="text-vscode-descriptionForeground group-hover:text-vscode-list-hoverForeground truncate min-w-0 flex-1">
 						{filePath.split("/").slice(0, -1).join("/")}
 					</span>
-					<span className="text-xs text-vscode-descriptionForeground whitespace-nowrap ml-auto opacity-60">
+					<span className="text-xs text-vscode-descriptionForeground group-hover:text-vscode-list-hoverForeground whitespace-nowrap ml-auto opacity-60">
 						{score.toFixed(3)}
 					</span>
 				</div>

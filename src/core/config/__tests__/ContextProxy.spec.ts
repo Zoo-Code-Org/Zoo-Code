@@ -8,6 +8,7 @@ import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
 
 import { ContextProxy } from "../ContextProxy"
+import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
 	Uri: {
@@ -270,7 +271,7 @@ describe("ContextProxy", () => {
 			// Test with multiple values
 			await proxy.setValues({
 				apiModelId: "gpt-4",
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				mode: "test-mode",
 			})
 
@@ -310,7 +311,7 @@ describe("ContextProxy", () => {
 	describe("setProviderSettings", () => {
 		it("stores and returns the complete NanoGPT configuration across secret and global state", async () => {
 			await proxy.setProviderSettings({
-				apiProvider: "nanogpt",
+				apiProvider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: "nanogpt-secret",
 				nanoGptModelId: "openai/model",
 				nanoGptRoutingPreference: "throughput",
@@ -320,7 +321,7 @@ describe("ContextProxy", () => {
 			expect(mockGlobalState.update).toHaveBeenCalledWith("nanoGptModelId", "openai/model")
 			expect(mockGlobalState.update).toHaveBeenCalledWith("nanoGptRoutingPreference", "throughput")
 			expect(proxy.getProviderSettings()).toMatchObject({
-				apiProvider: "nanogpt",
+				apiProvider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: "nanogpt-secret",
 				nanoGptModelId: "openai/model",
 				nanoGptRoutingPreference: "throughput",
@@ -339,7 +340,7 @@ describe("ContextProxy", () => {
 			// Call setProviderSettings with new configuration
 			await proxy.setProviderSettings({
 				apiModelId: "new-model",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				// Note: openAiBaseUrl is not included in the new config
 			})
 
@@ -349,7 +350,7 @@ describe("ContextProxy", () => {
 			expect(setValuesSpy).toHaveBeenCalledWith(
 				expect.objectContaining({
 					apiModelId: "new-model",
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					openAiBaseUrl: undefined,
 					modelTemperature: undefined,
 				}),
@@ -565,7 +566,7 @@ describe("ContextProxy", () => {
 
 		it("should preserve retired apiProvider and provider fields", async () => {
 			await proxy.setValues({
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 				apiModelId: "llama3-70b",
 				openAiBaseUrl: "https://api.retired-provider.example/v1",
 				apiKey: "retired-provider-key",

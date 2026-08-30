@@ -74,6 +74,8 @@ describe("attemptCompletionTool", () => {
 			apiConfiguration: { apiProvider: "test" } as any,
 			api: { getModel: vi.fn().mockReturnValue({ id: "test-model", info: {} }) } as any,
 			flushTelemetryInstallment: vi.fn(),
+			setPendingTaskAction: vi.fn(),
+			persistQueuedFeedbackAndAcknowledge: vi.fn().mockResolvedValue(true),
 		}
 	})
 
@@ -496,6 +498,8 @@ describe("attemptCompletionTool", () => {
 						}
 						throw new Error(`unexpected task id ${id}`)
 					}),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					clearPendingTaskAction: vi.fn().mockResolvedValue(true),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
 				}
 
@@ -512,15 +516,24 @@ describe("attemptCompletionTool", () => {
 					pushToolResult: mockPushToolResult,
 					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
 					toolDescription: mockToolDescription,
+					toolCallId: "call-attempt-completion",
 				}
 
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
 
 				expect(mockAskFinishSubTaskApproval).toHaveBeenCalled()
+				expect(mockProvider.setPendingTaskAction).toHaveBeenCalledWith("child-1", {
+					kind: "finish_subtask",
+					actionId: "call-attempt-completion",
+					approvalText: JSON.stringify({ tool: "finishTask" }),
+					parentTaskId: "parent-1",
+					result: "9",
+				})
 				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
 					parentTaskId: "parent-1",
 					childTaskId: "child-1",
 					completionResultSummary: "9",
+					pendingActionId: "call-attempt-completion",
 				})
 				expect(mockTask.ask).not.toHaveBeenCalled()
 				expect(mockPushToolResult).toHaveBeenCalledWith("")
@@ -547,6 +560,8 @@ describe("attemptCompletionTool", () => {
 						}
 						throw new Error(`unexpected task id ${id}`)
 					}),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					clearPendingTaskAction: vi.fn().mockResolvedValue(true),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(false),
 				}
 
@@ -564,6 +579,7 @@ describe("attemptCompletionTool", () => {
 					pushToolResult: mockPushToolResult,
 					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
 					toolDescription: mockToolDescription,
+					toolCallId: "call-stale-completion",
 				}
 
 				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
@@ -572,7 +588,9 @@ describe("attemptCompletionTool", () => {
 					parentTaskId: "parent-1",
 					childTaskId: "child-1",
 					completionResultSummary: "9",
+					pendingActionId: "call-stale-completion",
 				})
+				expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", "call-stale-completion")
 				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 				expect(mockPushToolResult).not.toHaveBeenCalledWith("")
 				// Flush once per validated attempt_completion call, before delegation is
@@ -801,6 +819,137 @@ describe("attemptCompletionTool", () => {
 					expect.anything(),
 				)
 				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("<user_message>"))
+			})
+
+			it("durably persists queued completion feedback before continuing", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "One more change",
+					queuedMessageId: "queued-1",
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.persistQueuedFeedbackAndAcknowledge).toHaveBeenCalledWith(
+					"queued-1",
+					"One more change",
+					undefined,
+				)
+				expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("One more change"))
+			})
+
+			it("does not continue when queued completion feedback persistence fails", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "One more change",
+					queuedMessageId: "queued-1",
+				})
+				mockTask.persistQueuedFeedbackAndAcknowledge = vi.fn().mockResolvedValue(false)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).toHaveBeenCalledWith(
+					"inspecting site",
+					expect.objectContaining({ message: expect.stringContaining("queued-1") }),
+				)
+				expect(mockPushToolResult).not.toHaveBeenCalled()
+			})
+
+			it("records image-only completion feedback before continuing", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					images: ["data:image/png;base64,feedback"],
+				})
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "", ["data:image/png;base64,feedback"])
+				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			})
+
+			it("does not clear pending metadata when stale delegation continues without an action id", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "delegated", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn(),
+					clearPendingTaskAction: vi.fn(),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(false),
+				}
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockProvider.reopenParentFromDelegation).toHaveBeenCalledWith({
+					parentTaskId: "parent-1",
+					childTaskId: "child-1",
+					completionResultSummary: "Done",
+				})
+				expect(mockProvider.clearPendingTaskAction).not.toHaveBeenCalled()
+				expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
 			})
 		})
 	})

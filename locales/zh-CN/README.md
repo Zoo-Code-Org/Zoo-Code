@@ -43,13 +43,12 @@ Zoo Code 基于 Roo Code 打下的基础持续扩展，新增了：
 - **更可靠的终端和编辑工作流** — 修复终端过早完成、任务状态竞争、上下文管理、差异更新编辑和提供商专用工具调用等问题。
 - **更全面的工作区控制** — 支持规则管理、按模式限制 MCP、多根工作区路径控制、模型推理选项和完成后的变更审查操作。
 
-## v3.78.0 新增内容
+## v3.80.1 新增内容
 
-- **三款重磅新模型现已推出** — 使用全新的 Gemini 3.7 Flash、GLM 5.3 和 Qwen3.8 Max 模型，以及更新后的 DeepSeek V4 推理、定价和提供商覆盖。
-- **连接 NanoGPT** — 使用动态模型发现、流式传输和 Prompt 补全，并按速度、价格、延迟、吞吐量、工具支持和缓存设置路由偏好。
-- **更可靠的提供商和任务** — 修复改进了 Azure OpenAI endpoint 设置、Kimi Code 输出限制、任务历史标题保留以及 Zoo 设置的导入/导出。
-- Destructive Command Guard 现在支持基于 Intel 的 Mac。
-- 安全更新修复了 `undici` 和 Mermaid 中的漏洞。
+🤖 在全新的 Zoo Gateway 上，有余额的用户可在 2 周内以 5 折优惠试用 GLM-5.3-Flash 和 Gemini 3.7 Flash，并可完全免费使用 MiniMax M3。https://zoocode.dev/models
+
+- **新模型** — GLM-5.3-Flash 现已通过 Z AI 提供。
+- **可靠性修复** — 恢复了子任务批准，解决了 Vertex Gemini 3.7 工具输出为空、终端启动失败和后台服务错误问题，并提升了不同 IDE 主题下的可读性。
 
 ## Zoo Code 能为您做什么？
 
