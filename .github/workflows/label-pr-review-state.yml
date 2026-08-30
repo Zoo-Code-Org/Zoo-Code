@@ -211,11 +211,44 @@ jobs:
                 pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
               }
               if (enabled && (!hasLabel || recycle)) {
-                await github.rest.issues.addLabels({
-                  owner, repo, issue_number: pr.number, labels: [codeRabbitActiveLabel],
-                });
-                pr.labels.push({ name: codeRabbitActiveLabel });
-              } else if (!enabled && hasLabel) {
+                let addError = null;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                  try {
+                    await github.rest.issues.addLabels({
+                      owner, repo, issue_number: pr.number, labels: [codeRabbitActiveLabel],
+                    });
+                    if (!pr.labels.some(label => label.name === codeRabbitActiveLabel)) {
+                      pr.labels.push({ name: codeRabbitActiveLabel });
+                    }
+                    delete pr.codeRabbitActivationUncertain;
+                    return;
+                  } catch (error) {
+                    addError = error;
+                    if (attempt === 1) {
+                      core.warning(`PR #${pr.number}: retrying CodeRabbit activation label: ${error.message}`);
+                    }
+                  }
+                }
+
+                pr.codeRabbitActivationUncertain = true;
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner, repo, issue_number: pr.number,
+                  });
+                  pr.labels = issue.labels.map(label =>
+                    typeof label === 'string' ? { name: label } : label
+                  );
+                  if (pr.labels.some(label => label.name === codeRabbitActiveLabel)) {
+                    delete pr.codeRabbitActivationUncertain;
+                    return;
+                  }
+                } catch (verificationError) {
+                  core.warning(
+                    `PR #${pr.number}: could not verify CodeRabbit activation label: ${verificationError.message}`
+                  );
+                }
+                throw addError;
+              } else if (!enabled && (hasLabel || pr.codeRabbitActivationUncertain)) {
                 try {
                   await github.rest.issues.removeLabel({
                     owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
@@ -224,6 +257,7 @@ jobs:
                   if (error.status !== 404) throw error;
                 }
                 pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
+                delete pr.codeRabbitActivationUncertain;
               }
             }
 

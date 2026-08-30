@@ -34,6 +34,7 @@ interface HarnessOptions {
 	labels?: string[]
 	prAuthor?: { login: string; type: "Bot" | "User" }
 	addLabelsStatus?: number
+	addLabelsFailOnceName?: string
 	labelLookupStatus?: number
 	createLabelStatus?: number
 	listCommentsErrorStatus?: number
@@ -156,11 +157,22 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				]
 			: []),
 	]
+	const remoteLabels = new Set(pr.labels.map((label) => label.name))
 
-	const addLabels = vi.fn(async (_args: unknown) => {
+	let addLabelsFailedOnce = false
+	const addLabels = vi.fn(async (args: { labels: string[] }) => {
+		if (
+			options.addLabelsFailOnceName &&
+			args.labels.includes(options.addLabelsFailOnceName) &&
+			!addLabelsFailedOnce
+		) {
+			addLabelsFailedOnce = true
+			throw Object.assign(new Error("Add label failed once"), { status: 500 })
+		}
 		if (options.addLabelsStatus) {
 			throw Object.assign(new Error("Add labels failed"), { status: options.addLabelsStatus })
 		}
+		for (const label of args.labels) remoteLabels.add(label)
 	})
 	let removeLabelFailedOnce = false
 	const removeLabel = vi.fn(async (args: { name: string }) => {
@@ -171,6 +183,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		if (options.removeLabelStatus) {
 			throw Object.assign(new Error("Remove label failed"), { status: options.removeLabelStatus })
 		}
+		remoteLabels.delete(args.name)
 	})
 	const createComment = vi.fn(async (args: { body: string }) => {
 		if (options.createCommentErrorStatus) {
@@ -242,6 +255,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 				listReviews: vi.fn(async () => reviews),
 			},
 			issues: {
+				get: vi.fn(async () => ({ data: { labels: [...remoteLabels].map((name) => ({ name })) } })),
 				getLabel: vi.fn(async () => {
 					if (options.labelLookupStatus) {
 						throw Object.assign(new Error("Label lookup failed"), { status: options.labelLookupStatus })
@@ -541,6 +555,36 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA} -->`)
 		expect(latestGuide(result)).not.toContain(":pending")
+	})
+
+	it("recovers a recycled CodeRabbit activation label after one failed add", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: OLD_SHA,
+			addLabelsFailOnceName: "coderabbit-review-active",
+		})
+
+		expect(
+			result.addLabels.mock.calls.filter(([args]) => args.labels.includes("coderabbit-review-active")),
+		).toHaveLength(2)
+		expect(result.setFailed).not.toHaveBeenCalled()
+		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA} -->`)
+		expect(latestGuide(result)).not.toContain(":pending")
+	})
+
+	it("fails closed when a recycled CodeRabbit activation label cannot be restored", async () => {
+		const result = await runWorkflow({
+			labels: ["coderabbit-review-active"],
+			existingGuideHead: OLD_SHA,
+			addLabelsStatus: 500,
+		})
+
+		expect(
+			result.addLabels.mock.calls.filter(([args]) => args.labels.includes("coderabbit-review-active")),
+		).toHaveLength(2)
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Add labels failed"))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}:pending -->`)
 	})
 
 	it("tolerates an already-removed CodeRabbit label while recycling", async () => {
