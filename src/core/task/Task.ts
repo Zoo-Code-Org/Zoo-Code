@@ -1759,7 +1759,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				: {}),
 		}
 		// Generate environment details to include in the condensed summary
-		const environmentDetails = await getEnvironmentDetails(this, true)
+		const environmentDetails = await getEnvironmentDetails(this, true, toolsResult.effectiveToolNames)
 
 		const filesReadByRoo = await this.getFilesReadByRooSafely("condenseContext")
 
@@ -2658,7 +2658,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// Add environment details to the existing last user message (which contains the tool_result)
 		// This avoids creating a new user message which would cause consecutive user messages
-		const environmentDetails = await getEnvironmentDetails(this, true)
+		await this.safeEnsureModelFetched()
+		const resolvedPromptTools = await this.resolvePromptTools()
+		const environmentDetails = await getEnvironmentDetails(
+			this,
+			true,
+			resolvedPromptTools.toolsResult.effectiveToolNames,
+		)
 		let lastUserMsgIndex = -1
 		for (let i = this.apiConversationHistory.length - 1; i >= 0; i--) {
 			if (this.apiConversationHistory[i].role === "user") {
@@ -2855,7 +2861,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
+			await this.safeEnsureModelFetched()
+			const supportsAllowedFunctionNames = this.apiConfiguration?.apiProvider === providerIdentifiers.gemini
+			const resolvedPromptTools = await this.resolvePromptTools({
+				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
+			})
+			const environmentDetails = await getEnvironmentDetails(
+				this,
+				currentIncludeFileDetails,
+				resolvedPromptTools.toolsResult.effectiveToolNames,
+			)
 
 			// Remove any existing environment_details blocks before adding fresh ones.
 			// This prevents duplicate environment details when resuming tasks,
@@ -3008,8 +3023,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				await this.diffViewProvider.reset()
 
-				await this.safeEnsureModelFetched()
-
 				// Cache model info once per API request to avoid repeated calls during streaming
 				// This is especially important for tools and background usage collection
 				this.cachedStreamingModel = this.api.getModel()
@@ -3019,7 +3032,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
 				// limit error, which gets thrown on the first chunk).
-				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, { skipProviderRateLimit: true })
+				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, {
+					skipProviderRateLimit: true,
+					resolvedPromptTools,
+				})
 				let assistantMessage = ""
 				let reasoningMessage = ""
 				const pendingGroundingSources: GroundingSource[] = []
@@ -4188,7 +4204,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		try {
 			// Generate environment details to include in the condensed summary
-			const environmentDetails = await getEnvironmentDetails(this, true)
+			const environmentDetails = await getEnvironmentDetails(
+				this,
+				true,
+				resolvedPromptTools.toolsResult.effectiveToolNames,
+			)
 
 			// Force aggressive truncation by keeping only 75% of the conversation history
 			const truncateResult = await manageContext({
@@ -4289,9 +4309,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public async *attemptApiRequest(
 		retryAttempt: number = 0,
-		options: { skipProviderRateLimit?: boolean } = {},
+		options: { skipProviderRateLimit?: boolean; resolvedPromptTools?: ResolvedPromptTools } = {},
 	): ApiStream {
-		const state = await this.providerRef.deref()?.getState()
+		const state = options.resolvedPromptTools?.state ?? (await this.providerRef.deref()?.getState())
 
 		const {
 			autoApprovalEnabled,
@@ -4301,7 +4321,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			profileThresholds = {},
 		} = state ?? {}
 		// Use task-local values, not provider state, to prevent cross-task configuration leaks.
-		const mode = await this.getTaskMode()
+		const mode = options.resolvedPromptTools?.mode ?? (await this.getTaskMode())
 		const apiConfiguration = this.apiConfiguration
 
 		// Get condensing configuration for automatic triggers.
@@ -4320,14 +4340,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// in the caller.
 		this.rateLimitClock.recordRequest()
 
-		await this.safeEnsureModelFetched()
+		if (!options.resolvedPromptTools) {
+			await this.safeEnsureModelFetched()
+		}
 		const modelInfo = this.api.getModel().info
 		const supportsAllowedFunctionNames = apiConfiguration?.apiProvider === providerIdentifiers.gemini
-		const resolvedPromptTools = await this.resolvePromptTools({
-			state,
-			mode,
-			includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
-		})
+		const resolvedPromptTools =
+			options.resolvedPromptTools ??
+			(await this.resolvePromptTools({
+				state,
+				mode,
+				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
+			}))
 		const resolvedState = resolvedPromptTools.state
 		const allowedMcpServers = getModeBySlug(mode, resolvedState.customModes)?.allowedMcpServers
 		this.currentRequestToolPolicy = {
@@ -4417,7 +4441,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// getEnvironmentDetails(this, true) triggers a recursive workspace listing which
 			// adds overhead - avoid this for the common case where context is below threshold.
 			const contextMgmtEnvironmentDetails = contextManagementWillRun
-				? await getEnvironmentDetails(this, true)
+				? await getEnvironmentDetails(this, true, resolvedPromptTools.toolsResult.effectiveToolNames)
 				: undefined
 
 			// Get files read by Roo for code folding - only when context management will run

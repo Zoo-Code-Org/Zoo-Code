@@ -178,6 +178,8 @@ describe("getEnvironmentDetails", () => {
 			false,
 			mockCline.rooIgnoreController,
 			false,
+			undefined,
+			true,
 		)
 	})
 
@@ -185,6 +187,18 @@ describe("getEnvironmentDetails", () => {
 		await getEnvironmentDetails(mockCline as Task, false)
 		expect(listFiles).not.toHaveBeenCalled()
 		expect(formatResponse.formatFilesList).not.toHaveBeenCalled()
+	})
+
+	it("should not advertise list_files when it is unavailable", async () => {
+		mockProvider.getState.mockResolvedValue({
+			...mockState,
+			maxWorkspaceFiles: 0,
+		})
+
+		const result = await getEnvironmentDetails(mockCline as Task, true, new Set(["read_file"]))
+
+		expect(result).toContain("Workspace files context disabled")
+		expect(result).not.toContain("list_files")
 	})
 
 	it("should handle desktop directory specially", async () => {
@@ -373,6 +387,19 @@ describe("getEnvironmentDetails", () => {
 		const cline = { ...mockCline, todoList: [{ content: "test", status: "pending" }] }
 		const result = await getEnvironmentDetails(cline as Task)
 		expect(result).not.toContain("REMINDERS")
+	})
+
+	it("should not advertise update_todo_list when it is unavailable", async () => {
+		mockProvider.getState.mockResolvedValue({
+			...mockState,
+			apiConfiguration: { todoListEnabled: true },
+		})
+		const cline = { ...mockCline, todoList: [{ content: "test", status: "pending" }] }
+
+		const result = await getEnvironmentDetails(cline as Task, false, new Set(["read_file"]))
+
+		expect(result).not.toContain("REMINDERS")
+		expect(result).not.toContain("update_todo_list")
 	})
 
 	it("should include REMINDERS section when todoListEnabled is undefined", async () => {

@@ -193,6 +193,24 @@ describe("RooIgnore Response Formatting", () => {
 			expect(result).toMatch(/use list_files on specific subdirectories/i)
 		})
 
+		it("should omit the list_files hint when the tool is unavailable", async () => {
+			const controller = new RooIgnoreController(TEST_CWD)
+			await controller.initialize()
+
+			const result = formatResponse.formatFilesList(
+				TEST_CWD,
+				["file1.txt", "file2.txt"],
+				true,
+				controller,
+				true,
+				undefined,
+				false,
+			)
+
+			expect(result).toContain("File list truncated")
+			expect(result).not.toContain("list_files")
+		})
+
 		/**
 		 * Tests formatFilesList handles empty results
 		 */

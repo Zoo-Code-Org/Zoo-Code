@@ -21,6 +21,7 @@ import { Task } from "../Task"
 import { SYSTEM_PROMPT } from "../../prompts/system"
 import { createRateLimitClock } from "../RateLimitClock"
 import { summarizeConversation } from "../../condense"
+import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -639,6 +640,7 @@ describe("Cline", () => {
 			)
 			expect(options.metadata?.mode).toBe("architect")
 			expect(metadataToolNames).toEqual(promptToolNames)
+			expect(vi.mocked(getEnvironmentDetails)).toHaveBeenCalledWith(task, true, promptToolNames)
 		})
 
 		it("uses the task mode in request metadata when focused provider state differs", async () => {
@@ -3286,7 +3288,9 @@ describe("Cline", () => {
 				mode: undefined,
 			})
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
-			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+			vi.spyOn(task, "attemptApiRequest").mockImplementation((_retryAttempt, options) => {
+				const environmentToolNames = vi.mocked(getEnvironmentDetails).mock.calls.at(-1)?.[2]
+				expect(environmentToolNames).toEqual(options?.resolvedPromptTools?.toolsResult.effectiveToolNames)
 				throw new Error("stop after model metadata fetch")
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)

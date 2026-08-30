@@ -20,8 +20,14 @@ import { getGitStatus } from "../../utils/git"
 import { Task } from "../task/Task"
 import { formatReminderSection } from "./reminder"
 
-export async function getEnvironmentDetails(cline: Task, includeFileDetails: boolean = false) {
+export async function getEnvironmentDetails(
+	cline: Task,
+	includeFileDetails: boolean = false,
+	availableToolNames?: ReadonlySet<string>,
+) {
 	let details = ""
+	const canListFiles = availableToolNames?.has("list_files") ?? true
+	const canUpdateTodoList = availableToolNames?.has("update_todo_list") ?? true
 
 	const clineProvider = cline.providerRef.deref()
 	const state = await clineProvider?.getState()
@@ -233,13 +239,17 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 		if (isDesktop) {
 			// Don't want to immediately access desktop since it would show
 			// permission popup.
-			details += "(Desktop files not shown automatically. Use list_files to explore if needed.)"
+			details += canListFiles
+				? "(Desktop files not shown automatically. Use list_files to explore if needed.)"
+				: "(Desktop files not shown automatically.)"
 		} else {
 			const maxFiles = maxWorkspaceFiles ?? 200
 
 			// Early return for limit of 0
 			if (maxFiles === 0) {
-				details += "(Workspace files context disabled. Use list_files to explore if needed.)"
+				details += canListFiles
+					? "(Workspace files context disabled. Use list_files to explore if needed.)"
+					: "(Workspace files context disabled.)"
 			} else {
 				try {
 					const [files, didHitLimit] = await listFiles(cline.cwd, true, maxFiles)
@@ -251,6 +261,8 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 						didHitLimit,
 						cline.rooIgnoreController,
 						showRooIgnoredFiles,
+						undefined,
+						canListFiles,
 					)
 
 					details += result
@@ -265,6 +277,6 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 		state && typeof state.apiConfiguration?.todoListEnabled === "boolean"
 			? state.apiConfiguration.todoListEnabled
 			: true
-	const reminderSection = todoListEnabled ? formatReminderSection(cline.todoList) : ""
+	const reminderSection = todoListEnabled && canUpdateTodoList ? formatReminderSection(cline.todoList) : ""
 	return `<environment_details>\n${details.trim()}\n${reminderSection}\n</environment_details>`
 }
