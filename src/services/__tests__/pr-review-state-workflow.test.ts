@@ -31,8 +31,6 @@ interface HarnessOptions {
 	existingGuide?: boolean
 	existingGuideHead?: string
 	existingGuidePendingHead?: string
-	codeRabbitSummaryHead?: string | null
-	codeRabbitPreMergeErrors?: number
 	labels?: string[]
 	prAuthor?: { login: string; type: "Bot" | "User" }
 	addLabelsStatus?: number
@@ -82,7 +80,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		state: options.prState ?? "open",
 		draft: options.draft ?? false,
 		html_url: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
-		user: options.prAuthor ?? { login: "zoomote[bot]", type: "Bot" },
+		user: options.prAuthor ?? { login: "contributor", type: "User" },
 		head: { sha: SHA, repo: { full_name: headRepository } },
 		base: { ref: "main", repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
 		labels: (options.labels ?? []).map((name) => ({ name })),
@@ -152,19 +150,6 @@ async function runWorkflow(options: HarnessOptions = {}) {
 					},
 				]
 			: []),
-		...(options.codeRabbitSummaryHead === null
-			? []
-			: [
-					{
-						id: 20,
-						user: { login: "coderabbitai[bot]" },
-						body:
-							"<!-- This is an auto-generated comment: summarize by coderabbit.ai -->\n" +
-							`**Merge Risk:** Moderate · up to \`${options.codeRabbitSummaryHead ?? SHA}\`\n` +
-							"<!-- pre_merge_checks_walkthrough_start -->\n" +
-							`### ❌ Failed checks (${options.codeRabbitPreMergeErrors ?? 0} errors, 0 warnings)`,
-					},
-				]),
 	]
 
 	const addLabels = vi.fn(async (_args: unknown) => {
@@ -365,6 +350,13 @@ describe("PR review-state workflow", () => {
 		expect(result.setFailed).not.toHaveBeenCalled()
 	})
 
+	it("reconciles same-repository review events", async () => {
+		const result = await runWorkflow({ eventName: "pull_request_review" })
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.createCommitStatus).toHaveBeenCalled()
+	})
+
 	it("reconciles fork PRs from pull_request_target", async () => {
 		const result = await runWorkflow({ eventName: "pull_request_target", fork: true })
 
@@ -388,6 +380,50 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).not.toHaveBeenCalled()
 		expect(latestGuide(result)).toContain("Mark the PR ready")
+	})
+
+	it("routes bot-authored PRs directly to maintainer review", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+	})
+
+	it("completes bot-authored PR review after human maintainer approval", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(latestGateStatus(result)?.state).toBe("success")
+	})
+
+	it("honors manually requested CodeRabbit changes on bot-authored PRs", async () => {
+		const result = await runWorkflow({
+			prAuthor: { login: "zoomote[bot]", type: "Bot" },
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "CHANGES_REQUESTED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
 	})
 
 	it("removes the CodeRabbit label while required CI is pending", async () => {
@@ -593,39 +629,6 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
-	})
-
-	it("routes blocking CodeRabbit pre-merge errors back to the author", async () => {
-		const result = await runWorkflow({
-			codeRabbitPreMergeErrors: 1,
-			reviews: [
-				{
-					login: "coderabbitai[bot]",
-					type: "Bot",
-					state: "APPROVED",
-					submittedAt: REVIEWED_AT,
-				},
-			],
-		})
-
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
-		expect(latestGateStatus(result)?.description).toContain("blocking pre-merge checks")
-	})
-
-	it("ignores CodeRabbit pre-merge results from an older head", async () => {
-		const result = await runWorkflow({
-			codeRabbitSummaryHead: OLD_SHA,
-			reviews: [
-				{
-					login: "coderabbitai[bot]",
-					type: "Bot",
-					state: "APPROVED",
-					submittedAt: REVIEWED_AT,
-				},
-			],
-		})
-
-		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
 	})
 
 	it("recognizes CodeRabbit regardless of login casing", async () => {
@@ -867,6 +870,29 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)?.state).toBe("success")
 	})
 
+	it("requires maintainer approval after CodeRabbit approval", async () => {
+		const result = await runWorkflow({
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT + 1_000,
+				},
+			],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(latestGateStatus(result)?.state).toBe("pending")
+	})
+
 	it("publishes the review gate as a standalone commit status", async () => {
 		const result = await runWorkflow()
 
@@ -881,7 +907,7 @@ describe("PR review-state workflow", () => {
 				{
 					context: "PR review gate",
 					state: "pending",
-					description: "Wait for CodeRabbit approval and blocking pre-merge checks to pass.",
+					description: "Required CI passed. Wait for CodeRabbit to approve the latest commit.",
 					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
 				},
 			],
@@ -900,13 +926,37 @@ describe("PR review-state workflow", () => {
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
 
-	it("publishes the gate and continues reconciliation when status lookup fails", async () => {
+	it("skips gate publication and continues reconciliation when status lookup fails", async () => {
 		const result = await runWorkflow({ gateStatusLookupErrorStatus: 500 })
 
 		expect(result.setFailed).not.toHaveBeenCalled()
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not inspect PR review gate"))
-		expect(result.createCommitStatus).toHaveBeenCalled()
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("forces gate invalidation after a reconciliation failure even when status lookup fails", async () => {
+		const result = await runWorkflow({
+			gateStatusLookupErrorStatus: 500,
+			permissionErrorStatus: 500,
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT + 1_000,
+				},
+			],
+		})
+
+		expect(result.setFailed).toHaveBeenCalled()
+		expect(latestGateStatus(result)?.state).toBe("pending")
 	})
 
 	it("reports non-404 permission lookup failures", async () => {

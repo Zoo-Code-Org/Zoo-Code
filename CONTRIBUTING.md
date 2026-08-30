@@ -137,13 +137,13 @@ pnpm install
 Ready-for-review PRs move through these gates in order:
 
 1. Required CI checks must pass.
-2. The workflow automatically applies the managed `coderabbit-review-active` label to start CodeRabbit review for the latest commit. Contributors and maintainers should not manage this label manually.
-3. Address CodeRabbit findings and every error in its persistent **Pre-merge checks** summary. Warnings are advisory unless repository policy says otherwise. Review restarts automatically after required CI passes again.
-4. After CodeRabbit approves the current commit and its blocking pre-merge checks pass, a non-author maintainer account with write access performs the final review and approval.
+2. For eligible human-authored PRs, the workflow automatically applies the managed `coderabbit-review-active` label to start CodeRabbit review for the latest commit. Contributors and maintainers should not manage this label manually.
+3. Address CodeRabbit findings and every error in its persistent **Pre-merge checks** summary. Warnings are advisory unless repository policy says otherwise. CodeRabbit's error-mode checks use its native changes-requested review to block merging.
+4. After CodeRabbit approves an eligible human-authored PR, a non-author maintainer account with write access performs the final review and approval.
 
 An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-ready`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
 
-CodeRabbit's green commit status only means its review completed; it does not prove that custom pre-merge checks passed. Contributors, maintainers, and automated PR fixers must inspect CodeRabbit's persistent summary comment, resolve all **Error** entries under **Pre-merge checks**, and report that state explicitly in PR update comments.
+CodeRabbit's green commit status only means its review completed; it does not prove that custom pre-merge checks passed. Contributors, maintainers, and automated PR fixers must inspect CodeRabbit's persistent summary comment, resolve all **Error** entries under **Pre-merge checks**, and report that state explicitly in PR update comments. Use `@coderabbitai run pre-merge checks` to rerun those checks and `@coderabbitai approve` to resolve CodeRabbit threads and request its approval after fixes.
 
 The `PR review gate` commit status passes only after the sequence completes. It is advisory by default; repository administrators can make it required on `main` if enforcement is desired. The labels and managed comment remain the maintainer-facing review queue either way.
 
@@ -151,7 +151,7 @@ Optional checks such as Codecov do not delay CodeRabbit unless repository rules 
 
 The workflow reads required checks from the `main` branch ruleset. If those rules cannot be read, the gate fails closed and waits for the hourly reconciliation or a manual workflow run after the ruleset is available again.
 
-PRs opened by bots or other automated accounts follow the same CI and CodeRabbit gates. Final approval requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation before merging.
+PRs opened by bots skip automatic CodeRabbit activation because author exclusions take precedence over label opt-in. They move from required CI directly to human maintainer review. A human may optionally request an incremental `@coderabbitai review` or a fresh `@coderabbitai full review`; once CodeRabbit requests changes, that native review must be resolved or dismissed before merge. Final approval still requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation.
 
 - **Daily Triage:** Quick checks by maintainers.
 - **Weekly In-depth Review:** Comprehensive assessment.

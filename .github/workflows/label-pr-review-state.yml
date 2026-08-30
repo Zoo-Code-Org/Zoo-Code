@@ -70,7 +70,6 @@ jobs:
               },
             ];
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
-            const codeRabbitSummaryMarker = '<!-- This is an auto-generated comment: summarize by coderabbit.ai -->';
             const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
             const codeRabbitLogin = 'coderabbitai[bot]';
             const codeRabbitActiveLabel = 'coderabbit-review-active';
@@ -171,28 +170,6 @@ jobs:
               );
             }
 
-            async function findCodeRabbitSummary(pr) {
-              const comments = await github.paginate(github.rest.issues.listComments, {
-                owner, repo, issue_number: pr.number, per_page: 100,
-              });
-              return comments.find(comment =>
-                comment.user?.login?.toLowerCase() === codeRabbitLogin &&
-                comment.body?.includes(codeRabbitSummaryMarker)
-              );
-            }
-
-            function codeRabbitPreMergeState(comment, headSha) {
-              const body = comment?.body ?? '';
-              const reviewedHead = body.match(/Merge Risk:[\s\S]{0,200}?up to `([a-f0-9]{5,40})`/i)?.[1];
-              if (!reviewedHead || !headSha.startsWith(reviewedHead) ||
-                  !body.includes('<!-- pre_merge_checks_walkthrough_start -->')) {
-                return 'pending';
-              }
-
-              const errorCount = Number(body.match(/Failed checks \((\d+) errors?/i)?.[1] ?? 0);
-              return errorCount > 0 ? 'failed' : 'passed';
-            }
-
             async function setCodeRabbitReviewActive(pr, enabled, recycle = false) {
               if (isReadOnlyRun && isForkPR(pr)) return;
 
@@ -248,12 +225,12 @@ jobs:
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
                 'ci-pending': 'Wait for the required CI checks to finish.',
                 'ci-failed': 'Fix the failing required CI checks and push an update.',
-                'coderabbit-changes': 'Address CodeRabbit findings and blocking pre-merge checks, then push an update.',
-                coderabbit: 'Wait for CodeRabbit approval and blocking pre-merge checks to pass.',
-                'draft-approved': 'CodeRabbit approval and blocking pre-merge checks passed. Mark the draft ready.',
+                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
+                coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
+                'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
-                maintainer: 'CodeRabbit approval and blocking pre-merge checks passed. A maintainer must now approve.',
-                approved: 'CodeRabbit pre-merge checks and both required approvals passed. Remaining merge requirements apply.',
+                maintainer: 'A human maintainer must now review and approve the latest commit.',
+                approved: 'The required review sequence passed. Remaining merge requirements apply.',
               };
               return messages[phase];
             }
@@ -264,16 +241,19 @@ jobs:
               const state = passed ? 'success' : 'pending';
               const description = phaseMessage(phase);
               let latestGateStatus = null;
+              let lookupSucceeded = false;
               try {
                 const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
                   owner, repo, ref: pr.head.sha,
                 });
+                lookupSucceeded = true;
                 latestGateStatus = combinedStatus.statuses
                   .filter(status => status.context === reviewGateName)
                   .sort((a, b) => b.id - a.id)[0];
               } catch (error) {
                 core.warning(`PR #${pr.number}: could not inspect ${reviewGateName}: ${error.message}`);
               }
+              if (!lookupSucceeded && !required) return;
               if (latestGateStatus?.state === state &&
                   latestGateStatus.description === description &&
                   latestGateStatus.target_url === pr.html_url) {
@@ -309,7 +289,7 @@ jobs:
               return `${guideMarker}\n### Review process\n\n${authorNote}\n\n` +
                 '1. Required CI checks pass.\n' +
                 '2. The workflow starts CodeRabbit automatically.\n' +
-                '3. CodeRabbit approves the latest commit with no blocking pre-merge check errors.\n' +
+                '3. For eligible human-authored PRs, CodeRabbit reviews and approves the latest commit.\n' +
                 '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
                 `**Current step:** ${phaseMessage(phase)}${labelMarker}`;
             }
@@ -507,8 +487,6 @@ jobs:
                 }
 
                 // CI is passing. Now determine review state.
-                const codeRabbitSummary = await findCodeRabbitSummary(pr);
-                const codeRabbitPreMerge = codeRabbitPreMergeState(codeRabbitSummary, pr.head.sha);
                 const reviews = await github.paginate(github.rest.pulls.listReviews, {
                   owner, repo, pull_number: pr.number, per_page: 100,
                 });
@@ -545,10 +523,9 @@ jobs:
                 const maintainerChangeRequest = freshMaintainerReviews.find(
                   review => review.state === 'CHANGES_REQUESTED'
                 );
-                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED' &&
-                  codeRabbitPreMerge === 'passed';
-                const codeRabbitChangesRequested = freshCodeRabbitReview?.state === 'CHANGES_REQUESTED' ||
-                  codeRabbitPreMerge === 'failed';
+                const automatedAuthor = pr.user?.type === 'Bot';
+                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED';
+                const codeRabbitChangesRequested = freshCodeRabbitReview?.state === 'CHANGES_REQUESTED';
                 const maintainerApproval = freshMaintainerReviews
                   .filter(review => review.state === 'APPROVED')
                   .sort((a, b) => b.id - a.id)[0];
@@ -560,9 +537,20 @@ jobs:
                 let phase;
                 let activateCodeRabbit = false;
                 let recycleCodeRabbitLabel = false;
-                if (codeRabbitChangesRequested) {
+                if (codeRabbitChangesRequested || maintainerChangeRequest) {
                   desiredLabel = 'awaiting-author';
-                  phase = 'coderabbit-changes';
+                  phase = codeRabbitChangesRequested ? 'coderabbit-changes' : 'maintainer-changes';
+                } else if (automatedAuthor) {
+                  if (pr.draft) {
+                    desiredLabel = null;
+                    phase = 'draft';
+                  } else if (!maintainerApproval) {
+                    desiredLabel = 'awaiting-maintainer';
+                    phase = 'maintainer';
+                  } else {
+                    desiredLabel = null;
+                    phase = 'approved';
+                  }
                 } else if (!codeRabbitApproved) {
                   if (pr.draft) {
                     desiredLabel = null;
@@ -573,9 +561,6 @@ jobs:
                     desiredLabel = 'awaiting-coderabbit';
                     phase = 'coderabbit';
                   }
-                } else if (maintainerChangeRequest) {
-                  desiredLabel = 'awaiting-author';
-                  phase = 'maintainer-changes';
                 } else if (pr.draft) {
                   desiredLabel = 'awaiting-ready';
                   phase = 'draft-approved';
@@ -589,7 +574,7 @@ jobs:
 
                 core.info(
                   `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
-                  `coderabbit=${freshCodeRabbitReview?.state ?? 'pending'}/${codeRabbitPreMerge}, ` +
+                  `coderabbit=${freshCodeRabbitReview?.state ?? (automatedAuthor ? 'optional' : 'pending')}, ` +
                   `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
                 );
 
