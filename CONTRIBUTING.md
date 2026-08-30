@@ -134,26 +134,9 @@ pnpm install
 
 ### Review Process
 
-Ready-for-review PRs move through these gates in order:
+Ready-for-review PRs must pass required CI checks, address actionable review feedback, and receive maintainer approval. Automated review may add a guidance comment and managed state labels; contributors should follow the indicated next step rather than editing those labels directly. New commits may reset the review state for the updated code.
 
-1. Required CI checks must pass.
-2. For eligible human-authored PRs, the workflow automatically applies the managed `coderabbit-review-active` label to start CodeRabbit review for the latest commit. Contributors and maintainers should not manage this label manually.
-3. Address CodeRabbit findings and every error in its persistent **Pre-merge checks** summary. Warnings are advisory unless repository policy says otherwise. CodeRabbit's error-mode checks use its native changes-requested review to block merging.
-4. After CodeRabbit approves an eligible human-authored PR, a non-author maintainer account with write access performs the final review and approval.
-
-An automated comment on each PR shows the current gate and next action. The `awaiting-coderabbit`, `awaiting-ready`, `awaiting-maintainer`, `awaiting-author`, and `has-conflicts` labels make the same state visible in the PR list. A new commit invalidates prior approvals; required CI and CodeRabbit rerun for that commit before maintainer review.
-
-CodeRabbit's green commit status only means its review completed; it does not prove that custom pre-merge checks passed. Contributors, maintainers, and automated PR fixers must inspect CodeRabbit's persistent summary comment, resolve all **Error** entries under **Pre-merge checks**, and report that state explicitly in PR update comments. Use `@coderabbitai run pre-merge checks` to rerun those checks and `@coderabbitai approve` to resolve CodeRabbit threads and request its approval after fixes.
-
-The repository-reserved `Zoo Code / PR review gate` commit status reports whether the sequence completes, but it is advisory. Do not configure it or the `Zoo Code / reconcile PR review state` job as a required status check: GitHub rules expose only a check name and app ID, all Actions workflows share the same app ID, and requiring either output would create an ambiguous self-reference. The reconciler fails closed and reports a configuration warning if either context appears in the required rules. Use native required CI checks and review protections for hard merge enforcement. A future hard custom gate requires a dedicated GitHub App with its own integration identity. Generic or externally owned contexts such as `PR review gate` or `reconcile` remain independent requirements. The labels and managed comment remain the maintainer-facing review queue.
-
-Fork PRs keep the advisory gate pending even after review completes because GitHub gives fork-originated review events a read-only token that cannot reliably invalidate persisted metadata. Native GitHub required-review and required-check protections remain authoritative for merging forks.
-
-Optional checks such as Codecov do not delay CodeRabbit unless repository rules make them required. Draft PRs are not reviewed automatically, but authors can still request an early review with `@coderabbitai review`.
-
-The workflow reads required checks from the `main` branch ruleset. If those rules cannot be read, the gate fails closed and waits for the hourly reconciliation or a manual workflow run after the ruleset is available again.
-
-PRs opened by bots skip automatic CodeRabbit activation because author exclusions take precedence over label opt-in. They move from required CI directly to human maintainer review. A human may optionally request an incremental `@coderabbitai review` or a fresh `@coderabbitai full review`; once CodeRabbit requests changes, that native review must be resolved or dismissed before merge. Final approval still requires a non-author, non-bot account with write access, and maintainers remain responsible for verifying the change's intent, provenance, and validation.
+Automated review supports maintainers but does not replace their judgment. Warnings are advisory unless repository policy says otherwise, and native GitHub required-check and review protections remain authoritative for merging.
 
 - **Daily Triage:** Quick checks by maintainers.
 - **Weekly In-depth Review:** Comprehensive assessment.
@@ -174,7 +157,7 @@ Maintainers may close PRs that are incomplete, too broad, inactive, not aligned 
 PRs are also closed automatically by bot:
 
 - **60-day inactivity:** A PR with no activity for 60 days is marked stale and closed after a further 7 days if there is still no activity. Any new comment, commit, or review resets the timer.
-- **14-day author inactivity:** After CodeRabbit or a maintainer requests changes, the PR is labelled `awaiting-author`. If there is no author activity for 14 days, it is marked stale and closes 7 days later without new activity. Author activity resets that timer. After an update, required CI and CodeRabbit rerun automatically; after CodeRabbit approval, the PR moves to `awaiting-maintainer`, which remains subject to the general 60-day inactivity plus 7-day closure policy.
+- **14-day author inactivity:** After a reviewer requests changes, the PR is labelled `awaiting-author`. Author activity resets the inactivity timer. Once the changes are ready, re-request review from the reviewer.
 
 To opt a PR out of automatic closure, apply the `do-not-close`, `pinned`, or `work-in-progress` label.
 
