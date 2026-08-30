@@ -153,6 +153,66 @@ export const stories: Record<string, Story> = {
 			</div>
 		)
 	},
+	"task-header-markdown": async () => {
+		const [{ AppProviders }, { default: TaskHeader }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/TaskHeader"),
+		])
+		// Representative user-authored prompt: heading, bold, inline code, a
+		// bullet list, an external link, soft breaks (single newlines), and the
+		// three mention kinds (path, @problems, @terminal). The length keeps the
+		// expanded prompt box (max-h-80) overflowing so the scrollbar surface is
+		// captured by the snapshot.
+		const prompt = [
+			"# Refactor the billing module",
+			"",
+			"Update the invoice total in `src/billing/invoice.ts` so that",
+			"refunds apply before tax. Keep the **public API** stable while",
+			"moving the rounding logic into a shared helper.",
+			"",
+			"- Recalculate totals in `calculateInvoiceTotal`",
+			"- Emit the warning listed in @problems after the first failing assertion",
+			"- Re-run the demo script with @terminal",
+			"- Keep the behavior documented in the [billing design notes](https://example.com/docs/billing)",
+			"",
+			"Watch the edge cases in @/src/billing/invoice.ts, especially",
+			"the package-style exports and the cached total memo.",
+			"",
+			"The refactor should ship behind a feature flag and the",
+			"rollback path must stay one command away.",
+		].join("\n")
+		const ts = 1755000000000
+		return (
+			<AppProviders
+				initialState={{
+					apiConfiguration: { apiProvider: "anthropic", apiModelId: "claude-sonnet-4-5" },
+					currentTaskItem: {
+						id: "task-header-markdown",
+						number: 1,
+						ts,
+						task: prompt,
+						tokensIn: 1248,
+						tokensOut: 342,
+						totalCost: 0.0084,
+						status: "active",
+					},
+				}}>
+				<div className="w-[480px] bg-vscode-editor-background">
+					<TaskHeader
+						task={{ type: "say", ts, text: prompt, images: [] }}
+						tokensIn={1248}
+						tokensOut={342}
+						totalCost={0.0084}
+						cacheWrites={120}
+						cacheReads={8032}
+						contextTokens={24576}
+						buttonsDisabled={false}
+						handleCondenseContext={() => undefined}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
