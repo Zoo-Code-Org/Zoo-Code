@@ -611,4 +611,90 @@ describe("safeWriteText", () => {
 			expect(fs.rename).not.toHaveBeenCalled()
 		})
 	})
+
+	// ── Test 9: pre-commit verification (verifyBeforeCommit, A4a guarded write) ──
+
+	describe("pre-commit verification (verifyBeforeCommit)", () => {
+		it("rejects publication when the hook fails: no commit rename, temp discarded, error propagated", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const guard = new Error("stale version")
+
+			await expect(
+				safeWriteText(targetPath, "data", {
+					platform: "linux",
+					verifyBeforeCommit: async () => {
+						throw guard
+					},
+				}),
+			).rejects.toBe(guard)
+
+			// the commit rename never happened
+			expect(fs.rename).not.toHaveBeenCalled()
+			// the staged temp was discarded
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+
+		it("runs the hook exactly once, immediately before the commit rename", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const hook = vi.fn(async () => {})
+			const order: string[] = []
+			vi.mocked(fs.rename).mockImplementation(async () => {
+				order.push("rename")
+			})
+
+			await safeWriteText(targetPath, "data", {
+				platform: "linux",
+				verifyBeforeCommit: async () => {
+					order.push("verify")
+					return hook()
+				},
+			})
+
+			expect(hook).toHaveBeenCalledTimes(1)
+			expect(order).toEqual(["verify", "rename"])
+			expect(fs.rename).toHaveBeenCalledTimes(1)
+		})
+
+		it("publishes normally when the hook succeeds", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await safeWriteText(targetPath, "data", {
+				platform: "linux",
+				verifyBeforeCommit: async () => {},
+			})
+
+			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
+		})
+
+		it("rolls the backup back to the target when the hook fails after the backup rename (backup:true)", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const guard = new Error("stale")
+
+			await expect(
+				safeWriteText(targetPath, "data", {
+					backup: true,
+					platform: "linux",
+					verifyBeforeCommit: async () => {
+						throw guard
+					},
+				}),
+			).rejects.toBe(guard)
+
+			// rename 1: target -> backup (step 3); rename 2: backup -> target
+			// (rollback in the catch) -- the commit rename never happened
+			expect(fs.rename).toHaveBeenCalledTimes(2)
+			expect(fs.rename).toHaveBeenNthCalledWith(1, targetPath, expect.stringContaining("safeWriteText.bak_"))
+			expect(fs.rename).toHaveBeenNthCalledWith(2, expect.stringContaining("safeWriteText.bak_"), targetPath)
+			// the staged temp was discarded
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
+		})
+	})
 })

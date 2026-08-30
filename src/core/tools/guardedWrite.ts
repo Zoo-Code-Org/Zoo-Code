@@ -13,6 +13,22 @@
  * A per-absolute-path FIFO chain of tail promises orders concurrent
  * in-process writes to the same path: the first matching write wins, the rest
  * fail stale. Observations come from the task's S2 ObservationRegistry.
+ *
+ * Check-to-publication window (CodeRabbit review, PRs #1405 / #1413): every
+ * guard predicate is enforced TWICE -- once at entry and once at publication
+ * time. The publication-time re-verification runs inside safeWriteText
+ * immediately before the atomic commit rename (its verifyBeforeCommit
+ * option), while the per-path FIFO chain holds the serialization across the
+ * whole verify+publish window, so the predicate is re-checked against the
+ * state the rename will actually replace and concurrent in-process writers
+ * stay fully ordered.
+ *
+ * Residual cross-process window: an external writer (another process) can
+ * still create or modify the target in the short interval between the
+ * pre-commit re-verification and the commit rename. A cross-platform atomic
+ * conditional publication would require an OS-level primitive beyond
+ * fs.promises (or a shared lock protocol every writer honors) and is tracked
+ * as a follow-up of epic #1375.
  */
 
 import * as fs from "fs/promises"
@@ -104,8 +120,46 @@ async function fileIsAbsent(absolutePath: string): Promise<boolean> {
 	}
 }
 
+/** Build the read-first remediation error for an existing target. */
+function alreadyExistsError(absolutePath: string): GuardRejectedError {
+	return new GuardRejectedError(
+		"File already exists at " +
+			absolutePath +
+			" and was not read before this write -- read the file first, then retry.",
+		absolutePath,
+	)
+}
+
+/** Build the stale-version remediation error. */
+function staleVersionError(absolutePath: string, expectedVersion: string, currentVersion: string): GuardRejectedError {
+	return new GuardRejectedError(
+		"Stale version -- the file changed since you read it (expected " +
+			expectedVersion +
+			", current " +
+			currentVersion +
+			"); re-read the file, then retry.",
+		absolutePath,
+	)
+}
+
+/** Build the deleted-after-read remediation error. */
+function deletedAfterReadError(absolutePath: string, expectedVersion: string): GuardRejectedError {
+	return new GuardRejectedError(
+		"File was deleted after it was read -- the version recorded at read time (" +
+			expectedVersion +
+			") no longer exists; re-read the file, then retry.",
+		absolutePath,
+	)
+}
+
 /**
  * Publish content only if the target file does not exist.
+ *
+ * The absence predicate is enforced at entry AND at publication time: the
+ * pre-commit re-check (verifyBeforeCommit, run by safeWriteText immediately
+ * before the commit rename) rejects with the same remediation when an
+ * external writer created the file in the check-to-rename window, instead of
+ * overwriting it.
  *
  * Rejects with a loud remediation error when the file already exists: the
  * write was issued for a file that was never read, so the caller must read
@@ -119,21 +173,44 @@ export async function createIfAbsent(absolutePath: string, content: string): Pro
 			// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
 			throw error
 		}
-		await safeWriteText(absolutePath, content)
+		// Absent at entry. safeWriteText re-verifies absence at the last
+		// moment before the commit rename (see verifyStillAbsent) so a writer
+		// that creates the file in the check-to-rename window is rejected,
+		// not overwritten.
+		await safeWriteText(absolutePath, content, {
+			verifyBeforeCommit: () => verifyStillAbsent(absolutePath),
+		})
 		return
 	}
 
-	throw new GuardRejectedError(
-		"File already exists at " +
-			absolutePath +
-			" and was not read before this write -- read the file first, then retry.",
-		absolutePath,
-	)
+	throw alreadyExistsError(absolutePath)
+}
+
+/**
+ * Pre-commit absence check for createIfAbsent (publication-time re-
+ * verification): rejects with the standard read-first remediation when the
+ * target exists at publication time. ENOENT (still absent) passes; any other
+ * I/O error is rethrown verbatim (a real failure, not a guard verdict).
+ */
+async function verifyStillAbsent(absolutePath: string): Promise<void> {
+	try {
+		await fs.access(absolutePath)
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") return
+		throw error
+	}
+	throw alreadyExistsError(absolutePath)
 }
 
 /**
  * Publish content only if the current on-disk version token equals
  * expectedVersion (the token observed at read time).
+ *
+ * The version predicate is enforced at entry AND at publication time: the
+ * pre-commit re-check (verifyBeforeCommit, run by safeWriteText immediately
+ * before the commit rename) rejects stale with the same remediation when an
+ * external writer modified the file in the check-to-rename window, instead
+ * of overwriting it.
  *
  * On a match the content is published via the S3 safeWriteText primitive; on
  * a mismatch the write is rejected stale with a re-read-then-retry
@@ -149,30 +226,45 @@ export async function replaceIfVersion(absolutePath: string, expectedVersion: st
 			// at read time no longer exists on disk. Normalize the raw ENOENT
 			// into the guard's re-read-then-retry contract so the caller gets a
 			// remediation it can act on, not a raw errno.
-			throw new GuardRejectedError(
-				"File was deleted after it was read -- the version recorded at read time (" +
-					expectedVersion +
-					") no longer exists; re-read the file, then retry.",
-				absolutePath,
-			)
+			throw deletedAfterReadError(absolutePath, expectedVersion)
 		}
 		// A real I/O failure (EACCES, EIO, ...) -- not a guard verdict.
 		throw error
 	}
 
-	if (currentVersion === expectedVersion) {
-		await safeWriteText(absolutePath, content)
-		return
+	if (currentVersion !== expectedVersion) {
+		throw staleVersionError(absolutePath, expectedVersion, currentVersion)
 	}
 
-	throw new GuardRejectedError(
-		"Stale version -- the file changed since you read it (expected " +
-			expectedVersion +
-			", current " +
-			currentVersion +
-			"); re-read the file, then retry.",
-		absolutePath,
-	)
+	// Match at entry. safeWriteText re-verifies the token at the last moment
+	// before the commit rename (see verifyVersionUnchanged) so a writer that
+	// modifies the file in the check-to-rename window is rejected stale, not
+	// overwritten.
+	await safeWriteText(absolutePath, content, {
+		verifyBeforeCommit: () => verifyVersionUnchanged(absolutePath, expectedVersion),
+	})
+}
+
+/**
+ * Pre-commit version check for replaceIfVersion (publication-time re-
+ * verification): rejects with the standard stale / deleted-after-read
+ * remediation when the on-disk token no longer matches expectedVersion at
+ * publication time. Any other I/O error is rethrown verbatim (a real failure,
+ * not a guard verdict).
+ */
+async function verifyVersionUnchanged(absolutePath: string, expectedVersion: string): Promise<void> {
+	let currentVersion: string
+	try {
+		currentVersion = await computeVersionToken(absolutePath)
+	} catch (error: unknown) {
+		if (errorCode(error) === "ENOENT") {
+			throw deletedAfterReadError(absolutePath, expectedVersion)
+		}
+		throw error
+	}
+	if (currentVersion !== expectedVersion) {
+		throw staleVersionError(absolutePath, expectedVersion, currentVersion)
+	}
 }
 
 /**
@@ -212,7 +304,11 @@ function resolveAbsolutePath(task: Task, relPathOrAbsolute: string): string {
  *    - observed otherwise: replaceIfVersion (CAS on the S1 version token);
  *    - unobserved + edit: unobservedEditGuard.
  * 3. Runs the chosen guard on the per-path FIFO chain so concurrent writes to
- *    the same path are deterministically ordered.
+ *    the same path are deterministically ordered. The chain holds the
+ *    serialization across the whole verify+publish window, and the guard's
+ *    publication-time re-verification (inside safeWriteText, immediately
+ *    before the commit rename) closes the check-to-rename window for writers
+ *    serialized by the chain.
  */
 export async function guardedWrite(
 	task: Task,
