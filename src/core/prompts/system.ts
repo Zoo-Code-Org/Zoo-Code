@@ -11,7 +11,7 @@ import { McpHub } from "../../services/mcp/McpHub"
 import { CodeIndexManager } from "../../services/code-index/manager"
 import { SkillsManager } from "../../services/skills/SkillsManager"
 
-import type { SystemPromptSettings } from "./types"
+import type { SystemPromptContext, SystemPromptSettings } from "./types"
 import {
 	getRulesSection,
 	getSystemInfoSection,
@@ -23,6 +23,7 @@ import {
 	addCustomInstructions,
 	markdownFormattingSection,
 	getSkillsSection,
+	getBuiltInModeInstructions,
 } from "./sections"
 
 // Helper function to get prompt component, filtering out empty objects
@@ -55,14 +56,37 @@ async function generatePrompt(
 	todoList?: TodoItem[],
 	modelId?: string,
 	skillsManager?: SkillsManager,
+	promptContext?: SystemPromptContext,
 ): Promise<string> {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
 	}
 
 	// Get the full mode config to ensure we have the role definition (used for groups, etc.)
-	const modeConfig = getModeBySlug(mode, customModeConfigs) || modes.find((m) => m.slug === mode) || modes[0]
+	const builtInMode = modes.find((candidate) => candidate.slug === mode)
+	const modeConfig = getModeBySlug(mode, customModeConfigs) || builtInMode || modes[0]
 	const { roleDefinition, baseInstructions } = getModeSelection(mode, promptComponent, customModeConfigs)
+	const editGroup = modeConfig.groups.find((groupEntry) => getGroupName(groupEntry) === "edit")
+	const editFileRestriction =
+		Array.isArray(editGroup) && editGroup[1].fileRegex
+			? {
+					fileRegex: editGroup[1].fileRegex,
+					description: editGroup[1].description,
+				}
+			: undefined
+	const effectivePromptContext = promptContext
+		? {
+				availableToolNames: promptContext.availableToolNames,
+				...(editFileRestriction ? { editFileRestriction } : {}),
+			}
+		: undefined
+	const hasUserAuthoredModeInstructions =
+		customModeConfigs?.some((customMode) => customMode.slug === mode) === true ||
+		(Boolean(promptComponent?.customInstructions) &&
+			promptComponent?.customInstructions !== builtInMode?.customInstructions)
+	const effectiveBaseInstructions = hasUserAuthoredModeInstructions
+		? baseInstructions
+		: getBuiltInModeInstructions(mode, baseInstructions, effectivePromptContext)
 
 	// Check if MCP functionality should be included
 	const hasMcpGroup = modeConfig.groups.some((groupEntry) => getGroupName(groupEntry) === "mcp")
@@ -86,7 +110,9 @@ async function generatePrompt(
 
 	const [modesSection, skillsSection] = await Promise.all([
 		getModesSection(context),
-		getSkillsSection(skillsManager, mode as string),
+		effectivePromptContext?.availableToolNames.has("skill") === false
+			? Promise.resolve("")
+			: getSkillsSection(skillsManager, mode as string),
 	])
 
 	// Tools catalog is not included in the system prompt.
@@ -94,11 +120,11 @@ async function generatePrompt(
 
 	const basePrompt = `${roleDefinition}
 
-${markdownFormattingSection()}
+${markdownFormattingSection(effectivePromptContext)}
 
-${getSharedToolUseSection()}${toolsCatalog}
+${getSharedToolUseSection(effectivePromptContext)}${toolsCatalog}
 
-	${getToolUseGuidelinesSection()}
+	${getToolUseGuidelinesSection(effectivePromptContext)}
 
 ${
 	// Forward the hub only when the mode actually exposes the MCP group, and pass the per-mode
@@ -107,18 +133,18 @@ ${
 	// the capability text consistent with the tools exposed in mixed cases (e.g. one allowed +
 	// one disallowed server), preventing the section from advertising MCP based on a disallowed
 	// server. `shouldIncludeMcp` is still used to short-circuit when no allowed server exists.
-	getCapabilitiesSection(cwd, hasMcpGroup ? mcpHub : undefined, allowedMcpServers)
+	getCapabilitiesSection(cwd, hasMcpGroup ? mcpHub : undefined, allowedMcpServers, effectivePromptContext)
 }
 
 ${modesSection}
 ${skillsSection ? `\n${skillsSection}` : ""}
-${getRulesSection(cwd, settings)}
+${getRulesSection(cwd, settings, effectivePromptContext)}
 
-${getSystemInfoSection(cwd)}
+${getSystemInfoSection(cwd, effectivePromptContext)}
 
-${getObjectiveSection()}
+${getObjectiveSection(effectivePromptContext)}
 
-${await addCustomInstructions(baseInstructions, globalCustomInstructions || "", cwd, mode, {
+${await addCustomInstructions(effectiveBaseInstructions, globalCustomInstructions || "", cwd, mode, {
 	language: language ?? formatLanguage(vscode.env.language),
 	rooIgnoreInstructions,
 	settings,
@@ -144,6 +170,7 @@ export const SYSTEM_PROMPT = async (
 	todoList?: TodoItem[],
 	modelId?: string,
 	skillsManager?: SkillsManager,
+	promptContext?: SystemPromptContext,
 ): Promise<string> => {
 	if (!context) {
 		throw new Error("Extension context is required for generating system prompt")
@@ -172,5 +199,6 @@ export const SYSTEM_PROMPT = async (
 		todoList,
 		modelId,
 		skillsManager,
+		promptContext,
 	)
 }

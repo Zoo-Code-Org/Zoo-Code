@@ -1,4 +1,11 @@
-import type { SystemPromptSettings } from "../types"
+import { isMcpTool } from "../../../utils/mcp-name"
+import {
+	FILE_EDIT_TOOL_NAMES,
+	hasAnyPromptTool,
+	isPromptToolAvailable,
+	type SystemPromptContext,
+	type SystemPromptSettings,
+} from "../types"
 
 import { getShell } from "../../../utils/shell"
 
@@ -62,12 +69,13 @@ When asked about your creator, vendor, or company, respond with:
 - "I don't have information about specific vendors"`
 }
 
-export function getRulesSection(cwd: string, settings?: SystemPromptSettings): string {
+export function getRulesSection(cwd: string, settings?: SystemPromptSettings, context?: SystemPromptContext): string {
 	// Get shell-appropriate command chaining operator
 	const chainOp = getCommandChainOperator()
 	const chainNote = getCommandChainNote()
 
-	return `====
+	if (!context) {
+		return `====
 
 RULES
 
@@ -92,4 +100,118 @@ RULES
 - Before executing commands, check the "Actively Running Terminals" section in environment_details. If present, consider how these active processes might impact your task. For example, if a local development server is already running, you wouldn't need to start it again. If no active terminals are listed, proceed with command execution as normal.
 - MCP operations should be used one at a time, similar to other tool usage. Wait for confirmation of success before proceeding with additional operations.
 - It is critical you wait for the user's response after each tool use, in order to confirm the success of the tool use. For example, if asked to make a todo app, you would create a file, wait for the user's response it was created successfully, then create another file if needed, wait for the user's response it was created successfully, etc.${settings?.isStealthModel ? getVendorConfidentialitySection() : ""}`
+	}
+
+	const hasCommandTool = context.availableToolNames.has("execute_command")
+	const hasListTool = context.availableToolNames.has("list_files")
+	const hasReadTool = context.availableToolNames.has("read_file")
+	const hasEditTool = hasAnyPromptTool(context, FILE_EDIT_TOOL_NAMES)
+	const hasQuestionTool = isPromptToolAvailable(context, "ask_followup_question")
+	const hasCompletionTool = isPromptToolAvailable(context, "attempt_completion")
+	const hasMcpOperations =
+		context.availableToolNames.has("access_mcp_resource") || Array.from(context.availableToolNames).some(isMcpTool)
+	const hasAnyTools = context.availableToolNames.size > 0
+	const rules = [
+		`- The project base directory is: ${cwd.toPosix()}`,
+		`- All file paths must be relative to this directory.${hasCommandTool ? " However, commands may change directories in terminals, so respect working directory specified by the response to execute_command." : ""}`,
+		`- You cannot \`cd\` into a different directory to complete a task. You are stuck operating from '${cwd.toPosix()}', so be sure to pass in the correct 'path' parameter when using tools that require a path.`,
+		"- Do not use the ~ character or $HOME to refer to the home directory.",
+	]
+
+	if (hasCommandTool) {
+		rules.push(
+			`- Before using the execute_command tool, you must first think about the SYSTEM INFORMATION context provided to understand the user's environment and tailor your commands to ensure they are compatible with their system. You must also consider if the command you need to run should be executed in a specific directory outside of the current working directory '${cwd.toPosix()}', and if so prepend with \`cd\`'ing into that directory ${chainOp} then executing the command (as one command since you are stuck operating from '${cwd.toPosix()}'). For example, if you needed to run \`npm install\` in a project outside of '${cwd.toPosix()}', you would need to prepend with a \`cd\` i.e. pseudocode for this would be \`cd (path to project) ${chainOp} (command, in this case npm install)\`.${chainNote ? ` ${chainNote}` : ""}`,
+		)
+	}
+
+	if (hasEditTool) {
+		const restriction = context.editFileRestriction
+		rules.push(
+			"- Some modes have restrictions on which files they can edit. If you attempt to edit a restricted file, the operation will be rejected with a FileRestrictionError that will specify which file patterns are allowed for the current mode.",
+		)
+		if (restriction) {
+			rules.push(
+				`  * The active mode can only edit files matching "${restriction.fileRegex}"${restriction.description ? ` (${restriction.description})` : ""}.`,
+			)
+		}
+	}
+
+	rules.push(
+		"- Be sure to consider the type of project (e.g. Python, JavaScript, web application) when determining the appropriate structure and files to include. Also consider what files may be most relevant to accomplishing the task, for example looking at a project's manifest file would help you understand the project's dependencies, which you could incorporate into any code you write.",
+		"- When making changes to code, always consider the context in which the code is being used. Ensure that your changes are compatible with the existing codebase and that they follow the project's coding standards and best practices.",
+	)
+
+	const toolGuidance = hasAnyTools
+		? " Use the tools provided to accomplish the user's request efficiently and effectively."
+		: ""
+	const completionGuidance = hasCompletionTool
+		? " When you've completed your task, you must use the attempt_completion tool to present the result to the user."
+		: ""
+	rules.push(
+		`- Do not ask for more information than necessary.${toolGuidance}${completionGuidance} The user may provide feedback, which you can use to make improvements and try again.`,
+	)
+
+	if (hasQuestionTool) {
+		const listExample = hasListTool
+			? " However if you can use the available tools to avoid having to ask the user questions, you should do so. For example, if the user mentions a file that may be in an outside directory like the Desktop, you should use the list_files tool to list the files in the Desktop and check if the file they are talking about is there, rather than asking the user to provide the file path themselves."
+			: ""
+		rules.push(
+			`- You are only allowed to ask the user questions using the ask_followup_question tool. Use this tool only when you need additional details to complete a task, and be sure to use a clear and concise question that will help you move forward with the task. When you ask a question, provide the user with 2-4 suggested answers based on your question so they don't need to do so much typing. The suggestions should be specific, actionable, and directly related to the completed task. They should be ordered by priority or logical sequence.${listExample}`,
+		)
+	}
+
+	if (hasCommandTool) {
+		rules.push(
+			hasQuestionTool
+				? "- When executing commands, if you don't see the expected output, assume the terminal executed the command successfully and proceed with the task. The user's terminal may be unable to stream the output back properly. If you absolutely need to see the actual terminal output, use the ask_followup_question tool to request the user to copy and paste it back to you."
+				: "- When executing commands, if you don't see the expected output, assume the terminal executed the command successfully and proceed with the task. The user's terminal may be unable to stream the output back properly.",
+		)
+	}
+
+	if (hasReadTool) {
+		rules.push(
+			"- The user may provide a file's contents directly in their message, in which case you shouldn't use the read_file tool to get the file contents again since you already have it.",
+		)
+	}
+
+	rules.push("- Your goal is to try to accomplish the user's task, NOT engage in a back and forth conversation.")
+
+	if (hasCompletionTool) {
+		rules.push(
+			"- NEVER end attempt_completion result with a question or request to engage in further conversation! Formulate the end of your result in a way that is final and does not require further input from the user.",
+		)
+	}
+
+	rules.push(
+		'- You are STRICTLY FORBIDDEN from starting your messages with "Great", "Certainly", "Okay", "Sure". You should NOT be conversational in your responses, but rather direct and to the point. For example you should NOT say "Great, I\'ve updated the CSS" but instead something like "I\'ve updated the CSS". It is important you be clear and technical in your messages.',
+		"- When presented with images, utilize your vision capabilities to thoroughly examine them and extract meaningful information. Incorporate these insights into your thought process as you accomplish the user's task.",
+		"- At the end of each user message, you will automatically receive environment_details. This information is not written by the user themselves, but is auto-generated to provide potentially relevant context about the project structure and environment. While this information can be valuable for understanding the project context, do not treat it as a direct part of the user's request or response. Use it to inform your actions and decisions, but don't assume the user is explicitly asking about or referring to this information unless they clearly do so in their message. When using environment_details, explain your actions clearly to ensure the user understands, as they may not be aware of these details.",
+	)
+
+	if (hasCommandTool) {
+		rules.push(
+			'- Before executing commands, check the "Actively Running Terminals" section in environment_details. If present, consider how these active processes might impact your task. For example, if a local development server is already running, you wouldn\'t need to start it again. If no active terminals are listed, proceed with command execution as normal.',
+		)
+	}
+
+	if (hasMcpOperations) {
+		rules.push(
+			"- MCP operations should be used one at a time, similar to other tool usage. Wait for confirmation of success before proceeding with additional operations.",
+		)
+	}
+
+	if (hasAnyTools) {
+		const editExample = hasEditTool
+			? " For example, if asked to make a todo app, you would create a file, wait for the user's response it was created successfully, then create another file if needed, wait for the user's response it was created successfully, etc."
+			: ""
+		rules.push(
+			`- It is critical you wait for the user's response after each tool use, in order to confirm the success of the tool use.${editExample}`,
+		)
+	}
+
+	return `====
+
+RULES
+
+${rules.join("\n")}${settings?.isStealthModel ? getVendorConfidentialitySection() : ""}`
 }
