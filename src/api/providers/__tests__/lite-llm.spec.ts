@@ -58,6 +58,10 @@ vi.mock("../fetchers/modelCache", () => ({
 			"vertex_ai/gemini-3-pro": { ...litellmDefaultModelInfo, maxTokens: 8192 },
 		})
 	}),
+	refreshModels: vi.fn(async (options) => {
+		const { getModels } = await import("../fetchers/modelCache")
+		return getModels(options)
+	}),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
 }))
 

@@ -3895,7 +3895,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 		mockProvider.postStateToWebview = vi.fn().mockResolvedValue(undefined)
 
 		mockApiConfig = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiModelId: "claude-3-5-sonnet-20241022",
 			apiKey: "test-api-key",
 		}
