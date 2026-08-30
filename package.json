@@ -34,7 +34,6 @@
 		"husky": "9.1.7",
 		"knip": "5.60.2",
 		"lint-staged": "16.4.0",
-		"mkdirp": "3.0.1",
 		"ovsx": "0.10.12",
 		"prettier": "3.8.4",
 		"rimraf": "6.0.1",
