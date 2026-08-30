@@ -76,6 +76,20 @@ describe("ModeSelector", () => {
 		expect(screen.getByTestId("mode-selector-trigger")).toBeInTheDocument()
 	})
 
+	test("disables the trigger when mode selection is unavailable", () => {
+		render(
+			<ModeSelector
+				title="Mode Selector"
+				value={"code" as Mode}
+				onChange={vi.fn()}
+				modeShortcutText="Ctrl+M"
+				disabled
+			/>,
+		)
+
+		expect(screen.getByTestId("mode-selector-trigger")).toBeDisabled()
+	})
+
 	test("shows search bar when there are more than 6 modes", () => {
 		mockModes = Array.from({ length: 7 }, (_, i) => ({
 			slug: `mode-${i}`,

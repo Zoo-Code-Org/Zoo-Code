@@ -4,6 +4,7 @@ import { EmbedderProvider } from "./interfaces/manager"
 import { CodeIndexConfig, PreviousConfigSnapshot } from "./interfaces/config"
 import { DEFAULT_SEARCH_MIN_SCORE, DEFAULT_MAX_SEARCH_RESULTS } from "./constants"
 import { getDefaultModelId, getModelDimension, getModelScoreThreshold } from "../../shared/embeddingModels"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 /**
  * Manages configuration state and validation for the code indexing feature.
@@ -11,7 +12,7 @@ import { getDefaultModelId, getModelDimension, getModelScoreThreshold } from "..
  */
 export class CodeIndexConfigManager {
 	private codebaseIndexEnabled: boolean = false
-	private embedderProvider: EmbedderProvider = "openai"
+	private embedderProvider: EmbedderProvider = providerIdentifiers.openai
 	private modelId?: string
 	private modelDimension?: number
 	private openAiOptions?: ApiHandlerOptions
@@ -48,7 +49,7 @@ export class CodeIndexConfigManager {
 		const codebaseIndexConfig = this.contextProxy?.getGlobalState("codebaseIndexConfig") ?? {
 			codebaseIndexEnabled: false,
 			codebaseIndexQdrantUrl: "http://localhost:6333",
-			codebaseIndexEmbedderProvider: "openai",
+			codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 			codebaseIndexEmbedderBaseUrl: "",
 			codebaseIndexEmbedderModelId: "",
 			codebaseIndexSearchMinScore: undefined,
@@ -106,24 +107,24 @@ export class CodeIndexConfigManager {
 		this.openAiOptions = { openAiNativeApiKey: openAiKey }
 
 		// Set embedder provider with support for openai-compatible
-		if (codebaseIndexEmbedderProvider === "ollama") {
-			this.embedderProvider = "ollama"
+		if (codebaseIndexEmbedderProvider === providerIdentifiers.ollama) {
+			this.embedderProvider = providerIdentifiers.ollama
 		} else if (codebaseIndexEmbedderProvider === "openai-compatible") {
 			this.embedderProvider = "openai-compatible"
-		} else if (codebaseIndexEmbedderProvider === "gemini") {
-			this.embedderProvider = "gemini"
-		} else if (codebaseIndexEmbedderProvider === "mistral") {
-			this.embedderProvider = "mistral"
-		} else if (codebaseIndexEmbedderProvider === "vercel-ai-gateway") {
-			this.embedderProvider = "vercel-ai-gateway"
+		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.gemini) {
+			this.embedderProvider = providerIdentifiers.gemini
+		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.mistral) {
+			this.embedderProvider = providerIdentifiers.mistral
+		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.vercelAiGateway) {
+			this.embedderProvider = providerIdentifiers.vercelAiGateway
 		} else if ((codebaseIndexEmbedderProvider as string) === "bedrock") {
-			this.embedderProvider = "bedrock"
-		} else if (codebaseIndexEmbedderProvider === "openrouter") {
-			this.embedderProvider = "openrouter"
+			this.embedderProvider = providerIdentifiers.bedrock
+		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.openrouter) {
+			this.embedderProvider = providerIdentifiers.openrouter
 		} else if (codebaseIndexEmbedderProvider === "semble") {
 			this.embedderProvider = "semble"
 		} else {
-			this.embedderProvider = "openai"
+			this.embedderProvider = providerIdentifiers.openai
 		}
 
 		this.modelId = codebaseIndexEmbedderModelId || undefined
@@ -238,11 +239,11 @@ export class CodeIndexConfigManager {
 			return true
 		}
 
-		if (this.embedderProvider === "openai") {
+		if (this.embedderProvider === providerIdentifiers.openai) {
 			const openAiKey = this.openAiOptions?.openAiNativeApiKey
 			const qdrantUrl = this.qdrantUrl
 			return !!(openAiKey && qdrantUrl)
-		} else if (this.embedderProvider === "ollama") {
+		} else if (this.embedderProvider === providerIdentifiers.ollama) {
 			// Ollama model ID has a default, so only base URL is strictly required for config
 			const ollamaBaseUrl = this.ollamaOptions?.ollamaBaseUrl
 			const qdrantUrl = this.qdrantUrl
@@ -253,28 +254,28 @@ export class CodeIndexConfigManager {
 			const qdrantUrl = this.qdrantUrl
 			const isConfigured = !!(baseUrl && apiKey && qdrantUrl)
 			return isConfigured
-		} else if (this.embedderProvider === "gemini") {
+		} else if (this.embedderProvider === providerIdentifiers.gemini) {
 			const apiKey = this.geminiOptions?.apiKey
 			const qdrantUrl = this.qdrantUrl
 			const isConfigured = !!(apiKey && qdrantUrl)
 			return isConfigured
-		} else if (this.embedderProvider === "mistral") {
+		} else if (this.embedderProvider === providerIdentifiers.mistral) {
 			const apiKey = this.mistralOptions?.apiKey
 			const qdrantUrl = this.qdrantUrl
 			const isConfigured = !!(apiKey && qdrantUrl)
 			return isConfigured
-		} else if (this.embedderProvider === "vercel-ai-gateway") {
+		} else if (this.embedderProvider === providerIdentifiers.vercelAiGateway) {
 			const apiKey = this.vercelAiGatewayOptions?.apiKey
 			const qdrantUrl = this.qdrantUrl
 			const isConfigured = !!(apiKey && qdrantUrl)
 			return isConfigured
-		} else if (this.embedderProvider === "bedrock") {
+		} else if (this.embedderProvider === providerIdentifiers.bedrock) {
 			// Only region is required for Bedrock (profile is optional)
 			const region = this.bedrockOptions?.region
 			const qdrantUrl = this.qdrantUrl
 			const isConfigured = !!(region && qdrantUrl)
 			return isConfigured
-		} else if (this.embedderProvider === "openrouter") {
+		} else if (this.embedderProvider === providerIdentifiers.openrouter) {
 			const apiKey = this.openRouterOptions?.apiKey
 			const qdrantUrl = this.qdrantUrl
 			const isConfigured = !!(apiKey && qdrantUrl)

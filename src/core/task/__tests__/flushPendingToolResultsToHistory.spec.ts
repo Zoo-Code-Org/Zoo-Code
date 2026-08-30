@@ -10,6 +10,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock delay before any imports that might use it
 vi.mock("delay", () => ({
@@ -213,7 +214,7 @@ describe("flushPendingToolResultsToHistory", () => {
 		) as any
 
 		mockApiConfig = {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiModelId: "claude-3-5-sonnet-20241022",
 			apiKey: "test-api-key",
 		}
