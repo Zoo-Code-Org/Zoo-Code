@@ -4,7 +4,13 @@ import * as os from "os"
 import * as path from "path"
 import * as vscode from "vscode"
 
-import type { ClineMessage, GlobalState, PendingTaskAction, ProviderSettings } from "@roo-code/types"
+import {
+	RooCodeEventName,
+	type ClineMessage,
+	type GlobalState,
+	type PendingTaskAction,
+	type ProviderSettings,
+} from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
@@ -12,9 +18,11 @@ import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
+import type { AttemptCompletionToolUse } from "../../../shared/tools"
 
 type TaskPersistenceAccess = {
-	addToApiConversationHistory: (message: { role: "user"; content: unknown[] }) => Promise<void>
+	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
@@ -414,6 +422,91 @@ describe("Task persistence", () => {
 			expect(callArgs.messages).not.toBe(task.apiConversationHistory)
 			// But the content should be the same
 			expect(callArgs.messages).toEqual(task.apiConversationHistory)
+		})
+
+		it("reproduces TaskCompleted emission while API history persistence is blocked", async () => {
+			// Characterizes the unsafe contract tracked by #1453. A production fix should
+			// invert this ordering so completion remains pending until the write resolves.
+			const saveDeferred = createDeferred<void>()
+			mockSaveApiMessages.mockReturnValueOnce(saveDeferred.promise)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const privateTask = getTaskPersistenceAccess(task)
+			const completionCallId = "completion-call"
+			let saveSettled = false
+			let completionEmitted = false
+
+			const saving = privateTask.addToApiConversationHistory({
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use",
+						id: completionCallId,
+						name: "attempt_completion",
+						input: { result: "done" },
+					},
+				],
+			})
+			void saving.finally(() => {
+				saveSettled = true
+			})
+
+			try {
+				await vi.waitFor(() => expect(mockSaveApiMessages).toHaveBeenCalledTimes(1))
+				const saveRequest = mockSaveApiMessages.mock.calls[0][0]
+				expect(saveRequest.taskId).toBe(task.taskId)
+				expect(saveRequest.messages).toEqual([
+					expect.objectContaining({
+						role: "assistant",
+						content: expect.arrayContaining([
+							expect.objectContaining({
+								type: "tool_use",
+								id: completionCallId,
+								name: "attempt_completion",
+							}),
+						]),
+					}),
+				])
+
+				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+				vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
+				vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
+				task.on(RooCodeEventName.TaskCompleted, () => {
+					completionEmitted = true
+				})
+
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					id: completionCallId,
+					name: "attempt_completion",
+					params: { result: "done" },
+					nativeArgs: { result: "done" },
+					partial: false,
+				}
+				const callbacks: AttemptCompletionCallbacks = {
+					askApproval: vi.fn(),
+					handleError: vi.fn(),
+					pushToolResult: vi.fn(),
+					askFinishSubTaskApproval: vi.fn(),
+					toolDescription: vi.fn(),
+					toolCallId: completionCallId,
+				}
+
+				await attemptCompletionTool.handle(task, block, callbacks)
+
+				expect(callbacks.handleError).not.toHaveBeenCalled()
+				expect(completionEmitted).toBe(true)
+				expect(saveSettled).toBe(false)
+			} finally {
+				saveDeferred.resolve(undefined)
+				await saving
+			}
 		})
 	})
 

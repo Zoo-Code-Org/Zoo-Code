@@ -16,6 +16,19 @@ The current-policy assertions search for a hypothesized, contract-permitted bad 
 
 The model is intentionally small. It establishes the missing ordering invariant but does not prove that the CI failure followed this exact trace or that every concrete runtime path maps to the abstract current-policy transition. Unrestricted stuttering also means this is a bounded safety model: it does not guarantee write completion, retries, or eventual task completion when persistence keeps failing.
 
+## Deterministic production characterization
+
+`src/core/task/__tests__/Task.persistence.spec.ts` blocks the real `saveApiMessages` boundary on a deferred promise, accepts completion on the same `Task`, and confirms that `TaskCompleted` is emitted while the write remains unresolved. This establishes the production contract gap represented by `CurrentPolicy` without relying on the intermittent extension-host timing.
+
+The test maps to the model as follows:
+
+- the captured `saveApiMessages` call for the assistant `attempt_completion` turn is `startHistoryWrite`;
+- the unresolved deferred save is `not historyDurable`;
+- accepting the matching completion call and observing `TaskCompleted` are `acceptCompletion` and `emitCompletion`;
+- resolving and awaiting the deferred in `finally` is `finishHistoryWrite`.
+
+The characterization does not prove that the failed CI run followed the same concrete stream interleaving. It intentionally records the current unsafe behavior; a production fix should invert the ordering assertion so completion stays pending until persistence succeeds.
+
 ## Code mapping
 
 - `startHistoryWrite` and `finishHistoryWrite` represent `Task.saveApiConversationHistory()` entering and completing its durable file write.
