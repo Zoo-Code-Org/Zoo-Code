@@ -66,6 +66,7 @@ Skip a visual test when the change is behavior-only (state transitions, handler 
 - Keep behavioral assertions in Vitest. A `*.visual.tsx` test should establish a deterministic state and make a focused screenshot assertion.
 - Register browser-owned stories in `playwright/gallery/stories.tsx` under a stable, descriptive ID and mount them with `mount(storyId, props)`. Props must be serializable; callbacks, React state, providers, and query clients stay inside the story so every mount starts fresh.
 - Keep gallery-wide production CSS, theme fixtures, image setup, aliases, and mocks in `playwright/gallery/main.tsx` and `playwright/vite.config.ts` rather than duplicating setup in specs.
+- Use `playwright/vscode-messages.ts` to inspect outbound `vscode.postMessage` payloads. The gallery resets captured messages before every mount; do not parse the browser console for host messages.
 - Use `playwright/layout-contracts.ts` for bounded-layout checks. Critical real stories should cover WCAG text spacing at the 320px reflow width, horizontal overflow, clipped text and controls, action-row containment, and focused-control visibility without adding snapshots for that geometry matrix.
 - Run visual comparisons with `pnpm test:visual:docker` from `webview-ui/`.
 - Update intentional baselines with `pnpm test:visual:docker:update` and commit the resulting `__screenshots__` files with the UI change.

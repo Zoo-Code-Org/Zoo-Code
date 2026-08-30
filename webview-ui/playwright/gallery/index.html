@@ -6,6 +6,18 @@
 		<title>webview-ui visual test gallery</title>
 		<script>
 			globalThis.z = undefined
+			globalThis.__vscodeMessages = []
+			globalThis.acquireVsCodeApi = () => ({
+				postMessage: (message) => globalThis.__vscodeMessages.push(message),
+				getState: () => {
+					const state = localStorage.getItem("vscodeState")
+					return state ? JSON.parse(state) : undefined
+				},
+				setState: (state) => {
+					localStorage.setItem("vscodeState", JSON.stringify(state))
+					return state
+				},
+			})
 		</script>
 	</head>
 	<body class="vscode-dark" data-vscode-theme-id="Default Dark Modern">

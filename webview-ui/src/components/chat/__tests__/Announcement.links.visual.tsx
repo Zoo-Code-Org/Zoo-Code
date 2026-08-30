@@ -1,18 +1,7 @@
 import { expect, test } from "../../../../playwright/coverage-fixture"
+import { getCapturedVscodeMessages } from "../../../../playwright/vscode-messages"
 
 test("announcement links open exactly once through the extension host", async ({ mount, page }) => {
-	// The webview's vscode.postMessage falls back to console.log in a plain
-	// browser, so host-bound openExternal messages surface as console output.
-	const hostMessages: { type?: string; url?: string }[] = []
-	page.on("console", (message) => {
-		void Promise.all(message.args().map((arg) => arg.jsonValue())).then((args) => {
-			const payload = args[0] as { type?: string; url?: string } | undefined
-			if (payload && typeof payload === "object" && payload.type === "openExternal") {
-				hostMessages.push(payload)
-			}
-		})
-	})
-
 	await mount("announcement-links")
 
 	// Mirrors VS Code's webview bootstrap (handleInnerClick): a document-level
@@ -50,6 +39,7 @@ test("announcement links open exactly once through the extension host", async ({
 	await page.locator("#control-link").click()
 
 	// Exactly one host message per link, in render order.
+	const hostMessages = (await getCapturedVscodeMessages(page)).filter((message) => message.type === "openExternal")
 	expect(hostMessages).toEqual([
 		{ type: "openExternal", url: "https://zoocode.dev/models" },
 		{ type: "openExternal", url: "https://github.com/Zoo-Code-Org/Zoo-Code" },
@@ -65,4 +55,7 @@ test("announcement links open exactly once through the extension host", async ({
 	expect(interceptedLinks).toHaveLength(1)
 	// The control href resolves to an absolute URL, so match on the fragment.
 	expect(interceptedLinks[0]).toMatch(/#control$/)
+
+	await mount("announcement-links")
+	expect(await getCapturedVscodeMessages(page)).toEqual([])
 })

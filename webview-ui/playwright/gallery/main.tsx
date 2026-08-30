@@ -45,6 +45,7 @@ window.unmount = async () => {
 	container
 		.querySelectorAll("[data-playwright-mounted]")
 		.forEach((element) => element.removeAttribute("data-playwright-mounted"))
+	window.__vscodeMessages = []
 }
 
 window.mount = async ({ story, props = {} }) => {
