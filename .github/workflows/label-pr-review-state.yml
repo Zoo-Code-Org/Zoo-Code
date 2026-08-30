@@ -31,6 +31,7 @@ concurrency:
 
 jobs:
   reconcile:
+    name: Zoo Code / reconcile PR review state
     runs-on: ubuntu-latest
     steps:
       - name: Reconcile PR review state labels
@@ -74,6 +75,7 @@ jobs:
             const codeRabbitLogin = 'coderabbitai[bot]';
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'Zoo Code / PR review gate';
+            const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
             const githubActionsIntegrationId = 15368;
 
             // When triggered by a single PR event, only reconcile that PR.
@@ -433,7 +435,7 @@ jobs:
                 const requiredSpecs = (requiredChecks ?? [])
                   .filter(check => !(
                     check.integrationId === githubActionsIntegrationId &&
-                    (check.context === reviewGateName || check.context === 'reconcile')
+                    (check.context === reviewGateName || check.context === reconciliationCheckName)
                   ));
                 const requiredResults = requiredSpecs.map(check => {
                   const run = check.integrationId === null

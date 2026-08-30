@@ -93,7 +93,7 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	}
 	const requiredContexts = options.requiredContexts ?? ["tests"]
 	const requiredRuns = (options.omitRequiredRuns ? [] : requiredContexts)
-		.filter((name) => name !== "reconcile")
+		.filter((name) => name !== "Zoo Code / reconcile PR review state")
 		.map((name, index) => ({
 			id: index + 1,
 			name,
@@ -658,6 +658,33 @@ describe("PR review-state workflow", () => {
 		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
 	})
 
+	it("keeps another workflow's reconcile check pending when it has not reported", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["reconcile"],
+			requiredIntegrationId: 15368,
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("keeps another workflow's reconcile check blocked when it fails", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["reconcile"],
+			requiredIntegrationId: 15368,
+			requiredRunAppId: 15368,
+			requiredConclusion: "failure",
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("failing required CI checks")
+	})
+
 	it("keeps the gate pending when a required check has not reported", async () => {
 		const result = await runWorkflow({ omitRequiredRuns: true })
 
@@ -1115,9 +1142,24 @@ describe("PR review-state workflow", () => {
 	})
 
 	it("excludes the reconciliation job from required checks", async () => {
-		const result = await runWorkflow({ requiredContexts: ["tests", "reconcile"] })
+		const result = await runWorkflow({
+			requiredContexts: ["tests", "Zoo Code / reconcile PR review state"],
+		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("does not exclude the reserved reconciliation name from another integration", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["Zoo Code / reconcile PR review state"],
+			requiredIntegrationId: 999,
+			omitRequiredRuns: true,
+		})
+
+		expect(result.addLabels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
+		)
+		expect(latestGateStatus(result)?.description).toContain("required CI checks")
 	})
 
 	it("does not exclude a reconcile check from another integration", async () => {
