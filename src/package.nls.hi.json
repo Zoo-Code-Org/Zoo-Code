@@ -16,6 +16,8 @@
 	"command.acceptInput.title": "इनपुट/सुझाव स्वीकारें",
 	"command.showRipgrepDiagnostic.title": "Ripgrep डायग्नोस्टिक दिखाएं",
 	"command.toggleAutoApprove.title": "ऑटो-अनुमोदन टॉगल करें",
+	"command.generateCommitMessage.title": "कमिट संदेश जनरेट करें",
+	"command.stopGeneratingCommitMessage.title": "कमिट संदेश जनरेट करना रोकें",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",

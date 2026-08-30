@@ -1591,6 +1591,85 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	describe("commit message model selection is included in state", () => {
+		// Both paths matter: the webview reads the posted state to show the current selection, and
+		// the generator reads getState() to pick a profile. Dropping either one makes a saved
+		// selection look like it reverted.
+		it("getStateToPostToWebview returns the saved commitMessageApiConfigId", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", "config-2")
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageApiConfigId).toBe("config-2")
+		})
+
+		it("getStateToPostToWebview leaves commitMessageApiConfigId unset when no profile is chosen", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageApiConfigId).toBeUndefined()
+		})
+
+		it("getState returns the saved commitMessageApiConfigId", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", "config-2")
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageApiConfigId).toBe("config-2")
+		})
+
+		it("getState leaves commitMessageApiConfigId unset when no profile is chosen", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageApiConfigId", undefined)
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageApiConfigId).toBeUndefined()
+		})
+
+		// The timeout is read from getState() to bound the request. Omitted from the returned state
+		// it reads as unset, so a configured value silently became the default instead.
+		it("getState returns the saved commitMessageTimeout", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", 120)
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageTimeout).toBe(120)
+		})
+
+		it("getState leaves commitMessageTimeout unset when no timeout is configured", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", undefined)
+
+			const state = await provider.getState()
+
+			expect(state.commitMessageTimeout).toBeUndefined()
+		})
+
+		it("getStateToPostToWebview returns the saved commitMessageTimeout", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", 120)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageTimeout).toBe(120)
+		})
+
+		it("getStateToPostToWebview leaves commitMessageTimeout unset when no timeout is configured", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			await provider.contextProxy.setValue("commitMessageTimeout", undefined)
+
+			const state = await provider.getStateToPostToWebview()
+
+			expect(state.commitMessageTimeout).toBeUndefined()
+		})
+	})
+
 	it("getStateToPostToWebview passes through defined diffFuzzyThreshold value", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setValue("diffFuzzyThreshold", 0.5)

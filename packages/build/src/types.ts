@@ -31,14 +31,16 @@ const commandsSchema = z.array(
 		command: z.string(),
 		title: z.string(),
 		category: z.string().optional(),
-		icon: z.string().optional(),
+		// Either a codicon reference (e.g. `$(edit)`) or a pair of theme-specific image paths.
+		icon: z.union([z.string(), z.object({ light: z.string(), dark: z.string() })]).optional(),
 	}),
 )
 
 export type Commands = z.infer<typeof commandsSchema>
 
 const menuItemSchema = z.object({
-	group: z.string(),
+	// Absent on menus that do not group their items, such as `commandPalette`.
+	group: z.string().optional(),
 	command: z.string().optional(),
 	submenu: z.string().optional(),
 	when: z.string().optional(),

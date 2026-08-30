@@ -104,6 +104,10 @@
 				"label": "Ulepsz podpowiedź",
 				"description": "Użyj ulepszenia podpowiedzi, aby uzyskać dostosowane sugestie lub ulepszenia dla swoich danych wejściowych. Zapewnia to, że Zoo rozumie Twoje intencje i dostarcza najlepsze możliwe odpowiedzi. Dostępne za pośrednictwem ikony ✨ w czacie."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Komunikat zatwierdzenia",
+				"description": "Podsumowuje Twoje zmiany w komunikacie zatwierdzenia. Dostępne przez ikonę Zoo Code w panelu kontroli źródła, która zapisuje wynik bezpośrednio w polu komunikatu zatwierdzenia."
+			},
 			"CONDENSE": {
 				"label": "Kondensacja kontekstu",
 				"description": "Skonfiguruj, w jaki sposób kontekst rozmowy jest kondensowany w celu zarządzania limitami tokenów. Ten monit jest używany zarówno do ręcznych, jak i automatycznych operacji kondensacji kontekstu."

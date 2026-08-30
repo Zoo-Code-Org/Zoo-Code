@@ -249,6 +249,13 @@ export const globalSettingsSchema = z.object({
 	customSupportPrompts: customSupportPromptsSchema.optional(),
 	enhancementApiConfigId: z.string().optional(),
 	includeTaskHistoryInEnhance: z.boolean().optional(),
+	commitMessageApiConfigId: z.string().optional(),
+	/**
+	 * Seconds to wait for a commit message before giving up. Most providers ignore the abort
+	 * signal, so without a bound a request that never answers leaves the indicator up until the
+	 * window is reloaded.
+	 */
+	commitMessageTimeout: z.number().int().min(10).max(600).optional(),
 	historyPreviewCollapsed: z.boolean().optional(),
 	reasoningBlockCollapsed: z.boolean().optional(),
 	/**

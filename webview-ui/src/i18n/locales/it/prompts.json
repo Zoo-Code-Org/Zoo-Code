@@ -104,6 +104,10 @@
 				"label": "Migliora prompt",
 				"description": "Utilizza il miglioramento dei prompt per ottenere suggerimenti o miglioramenti personalizzati per i tuoi input. Questo assicura che Zoo comprenda la tua intenzione e fornisca le migliori risposte possibili. Disponibile tramite l'icona ✨ nella chat."
 			},
+			"COMMIT_MESSAGE": {
+				"label": "Messaggio di commit",
+				"description": "Riassume le tue modifiche in un messaggio di commit. Disponibile tramite l'icona Zoo Code nel pannello Controllo del codice sorgente, che scrive il risultato direttamente nel campo del messaggio di commit."
+			},
 			"CONDENSE": {
 				"label": "Condensazione del contesto",
 				"description": "Configura come viene condensato il contesto della conversazione per gestire i limiti dei token. Questo prompt viene utilizzato sia per le operazioni di condensazione del contesto manuali che automatiche."

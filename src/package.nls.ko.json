@@ -16,6 +16,8 @@
 	"command.acceptInput.title": "입력/제안 수락",
 	"command.showRipgrepDiagnostic.title": "Ripgrep 진단 표시",
 	"command.toggleAutoApprove.title": "자동 승인 전환",
+	"command.generateCommitMessage.title": "커밋 메시지 생성",
+	"command.stopGeneratingCommitMessage.title": "커밋 메시지 생성 중지",
 	"views.activitybar.title": "Zoo Code",
 	"views.contextMenu.label": "Zoo Code",
 	"views.terminalMenu.label": "Zoo Code",
