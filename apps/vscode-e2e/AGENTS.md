@@ -158,6 +158,10 @@ Background API calls from the extension (usage collection, initialization) hit a
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:record` | Record mode — proxies to real API, writes `openai-*.json`          |
 | `OPENROUTER_API_KEY=<key> pnpm --filter @roo-code/vscode-e2e test:ci`     | Real-API mode — runs against live OpenRouter (for drift detection) |
 
+## Waiting for actionable messages
+
+Tool and completion asks can be emitted first as partial streaming previews. Tests that approve an ask, navigate away, or assert a durable action must wait for `message.partial !== true`; observing a matching tool name is not sufficient. Use `isCompletedAsk` from `src/suite/utils.ts` for completion-oriented message collectors. Only consume partial asks when the test explicitly covers streaming behavior.
+
 ## Tests that use a fetch interceptor instead of aimock
 
 Some suites can't redirect their provider through aimock. These suites patch `globalThis.fetch` directly — the OpenAI SDK resolves `fetch` at API client construction time (which happens lazily at task start), so installing the interceptor before `api.startNewTask()` is sufficient. Installing it before `api.setConfiguration()` (as done below) is the conservative, recommended order.

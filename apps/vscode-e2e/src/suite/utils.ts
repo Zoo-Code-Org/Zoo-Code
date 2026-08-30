@@ -1,4 +1,6 @@
-import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
+import { RooCodeEventName, type ClineMessage, type RooCodeAPI } from "@roo-code/types"
+
+export const isCompletedAsk = (message: ClineMessage) => message.type === "ask" && message.partial !== true
 
 type WaitForOptions = {
 	timeout?: number

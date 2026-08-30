@@ -4,6 +4,8 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type ClineMessage, type RooCodeTestAPI, type WebviewThemeFixture } from "@roo-code/types"
 
+import { isCompletedAsk } from "../suite/utils"
+
 const POLL_INTERVAL_MS = 100
 const SCENE_TIMEOUT_MS = 60_000
 
@@ -103,7 +105,7 @@ export async function run(): Promise<void> {
 				)
 				if (
 					(message.type === "say" && message.say === "completion_result" && message.text?.includes(result)) ||
-					(message.type === "ask" && message.ask === "completion_result" && message.text?.includes(result))
+					(isCompletedAsk(message) && message.ask === "completion_result" && message.text?.includes(result))
 				) {
 					resolve()
 				}
