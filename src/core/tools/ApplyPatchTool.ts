@@ -11,7 +11,7 @@ import { formatResponse } from "../prompts/responses"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { fileExistsAtPath } from "../../utils/fs"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
-import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
+import { sanitizeUnifiedDiff, computeDiffStats, type DiffStats } from "../diff/stats"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { parsePatch, ParseError, processAllHunks } from "./apply-patch"
@@ -26,11 +26,13 @@ interface ApplyPatchParams {
  * the whole-patch success state (and therefore the per-patch checkpoint),
  * while `wrote` records whether the operation actually wrote a file — a no-op
  * update must not produce a change-journal entry for a file that was never
- * written.
+ * written. `diffStats` carries the approval-diff statistics of a written file
+ * so the journal entry can report the size of the change.
  */
 interface ApplyPatchFileOpResult {
 	succeeded: boolean
 	wrote: boolean
+	diffStats?: DiffStats
 }
 
 export class ApplyPatchTool extends BaseTool<"apply_patch"> {
@@ -121,7 +123,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			// — a no-op update must not be journaled). A rejected approval or a
 			// failed local write never gets checkpointed as a success.
 			let patchSucceeded = true
-			const successfulChanges: ApplyPatchFileChange[] = []
+			const successfulChanges: { change: ApplyPatchFileChange; diffStats?: DiffStats }[] = []
 			for (const change of changes) {
 				const relPath = change.path
 				const absolutePath = path.resolve(task.cwd, relPath)
@@ -144,17 +146,30 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 				if (change.type === "add") {
 					// Create new file
-					const addResult = await this.handleAddFile(change, absolutePath, relPath, task, callbacks, isWriteProtected)
+					const addResult = await this.handleAddFile(
+						change,
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
 					patchSucceeded = addResult.succeeded && patchSucceeded
 					if (addResult.wrote) {
-						successfulChanges.push(change)
+						successfulChanges.push({ change, diffStats: addResult.diffStats })
 					}
 				} else if (change.type === "delete") {
 					// Delete file
-					const deleteResult = await this.handleDeleteFile(absolutePath, relPath, task, callbacks, isWriteProtected)
+					const deleteResult = await this.handleDeleteFile(
+						absolutePath,
+						relPath,
+						task,
+						callbacks,
+						isWriteProtected,
+					)
 					patchSucceeded = deleteResult.succeeded && patchSucceeded
 					if (deleteResult.wrote) {
-						successfulChanges.push(change)
+						successfulChanges.push({ change, diffStats: deleteResult.diffStats })
 					}
 				} else if (change.type === "update") {
 					// Update file (a no-op update succeeds without writing)
@@ -168,7 +183,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 					)
 					patchSucceeded = updateResult.succeeded && patchSucceeded
 					if (updateResult.wrote) {
-						successfulChanges.push(change)
+						successfulChanges.push({ change, diffStats: updateResult.diffStats })
 					}
 				}
 			}
@@ -194,22 +209,37 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				const perWriteCheckpoints = (await task.providerRef?.deref()?.getState())?.perWriteCheckpoints
 				if (perWriteCheckpoints !== false) {
 					// B2: one journal entry per file that was actually written by
-				// the patch (the simplest correct design for multi-file patches),
+					// the patch (the simplest correct design for multi-file patches),
 					// all referencing the single checkpoint above. A no-op update
 					// contributes no entry because nothing was written. `movePath`,
-					// when present, is the file's final location. diffStats is
-					// omitted: the per-file approval diffs are computed inside the
-					// handlers and are not retained after the patch completes.
-					void checkpointSave(
+					// when present, is the file's final location. Each entry
+					// carries the approval-diff statistics the handler computed.
+					// Await so the checkpoint (staging + commit + journal)
+					// completes before queued messages are processed below;
+					// otherwise a queued write's own checkpoint could interleave
+					// with this commit.
+					await checkpointSave(
 						task,
 						false,
 						true,
-						successfulChanges.map((change) => ({
+						successfulChanges.map(({ change, diffStats }) => ({
 							path: change.movePath ?? change.path,
 							operation: change.type === "add" ? "create" : change.type,
+							diffStats: diffStats
+								? { additions: diffStats.added, deletions: diffStats.removed }
+								: undefined,
 						})),
 					).catch(() => {})
 				}
+			}
+
+			// B2: deferred from the per-file handlers — a queued write must not
+			// start until the post-patch checkpoint above has persisted. The
+			// handlers used to process queued messages right after each
+			// successful write; a write happened if and only if
+			// `successfulChanges` is non-empty, so one call here preserves that.
+			if (successfulChanges.length > 0) {
+				task.processQueuedMessages()
 			}
 		} catch (error) {
 			await handleError("apply patch", error as Error)
@@ -306,8 +336,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, true)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
-		return { succeeded: true, wrote: true }
+		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
+		// so it runs only after the post-patch checkpoint has completed.
+		return { succeeded: true, wrote: true, diffStats }
 	}
 
 	private async handleDeleteFile(
@@ -364,7 +395,8 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 
 		task.didEditFile = true
 		pushToolResult(`Successfully deleted ${relPath}`)
-		task.processQueuedMessages()
+		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
+		// so it runs only after the post-patch checkpoint has completed.
 		return { succeeded: true, wrote: true }
 	}
 
@@ -544,14 +576,15 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 		const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, false)
 		pushToolResult(message)
 		await task.diffViewProvider.reset()
-		task.processQueuedMessages()
+		// B2: processQueuedMessages is deferred to execute()'s post-patch hook
+		// so it runs only after the post-patch checkpoint has completed.
 		if (!moveSucceeded) {
 			// The destination file was written on disk before the source
 			// deletion failed, so the write must still be checkpointed and
 			// journaled; the move itself is reported as failed.
-			return { succeeded: false, wrote: true }
+			return { succeeded: false, wrote: true, diffStats }
 		}
-		return { succeeded: true, wrote: true }
+		return { succeeded: true, wrote: true, diffStats }
 	}
 
 	override async handlePartial(task: Task, block: ToolUse<"apply_patch">): Promise<void> {

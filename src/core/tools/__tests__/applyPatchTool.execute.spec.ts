@@ -195,6 +195,37 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
 			expect(mockedCheckpointSave).not.toHaveBeenCalled()
 		})
+
+		it("awaits the post-patch checkpoint before processing queued messages", async () => {
+			// A pending checkpoint must not let queued messages (and the
+			// writes they trigger) start first: execute() awaits the
+			// post-patch checkpointSave and only then processes queued
+			// messages, so a queued write's own checkpoint cannot interleave
+			// with this commit.
+			const order: string[] = []
+			;(mockTask.processQueuedMessages as MockedFunction<() => void>).mockImplementation(() => {
+				order.push("processQueuedMessages")
+			})
+			mockedCheckpointSave.mockImplementationOnce(() => {
+				order.push("checkpointSave:start")
+				return new Promise<void>((resolve) => {
+					setTimeout(() => {
+						order.push("checkpointSave:done")
+						resolve()
+					}, 10)
+				}).then(() => undefined)
+			})
+
+			await tool.execute({ patch: deletePatch }, mockTask as Task, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			// The checkpoint fully completes before queued messages are
+			// processed.
+			expect(order).toEqual(["checkpointSave:start", "checkpointSave:done", "processQueuedMessages"])
+		})
 	})
 
 	describe("checkpoint only for fully successful patches (B1)", () => {
@@ -306,6 +337,11 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("File saved successfully")
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: the journal entry for a successful add carries the
+			// approval-diff statistics (two added lines, no removals).
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				{ path: "src/new.ts", operation: "create", diffStats: { additions: 2, deletions: 0 } },
+			])
 		})
 
 		it("does not record a checkpoint when the file to update does not exist", async () => {
@@ -486,6 +522,11 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 				"utf8",
 			)
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: the journal entry for a successful move is keyed by the
+			// destination path and carries the approval-diff statistics.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				{ path: "src/moved.ts", operation: "update", diffStats: { additions: 1, deletions: 1 } },
+			])
 		})
 
 		it("records a checkpoint when the in-place update succeeds", async () => {
@@ -497,12 +538,18 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 
 			expect(mockPushToolResult).toHaveBeenCalledWith("File saved successfully")
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: the journal entry for a successful update carries the
+			// approval-diff statistics.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				{ path: "src/test.ts", operation: "update", diffStats: { additions: 1, deletions: 1 } },
+			])
 		})
 
 		it("records one journal write per file change for a multi-file patch", async () => {
 			// src/a.ts does not exist (add); src/b.ts does (update).
 			mockedFileExistsAtPath.mockImplementation((filePath: string) =>
-				Promise.resolve(!String(filePath).toLowerCase().endsWith("a.ts")))
+				Promise.resolve(!String(filePath).toLowerCase().endsWith("a.ts")),
+			)
 			const multiPatch = [
 				"*** Begin Patch",
 				"*** Add File: src/a.ts",
@@ -521,9 +568,11 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			})
 
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
+			// B2: each journal entry carries the approval-diff statistics of
+			// its file change.
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
-				{ path: "src/a.ts", operation: "create" },
-				{ path: "src/b.ts", operation: "update" },
+				{ path: "src/a.ts", operation: "create", diffStats: { additions: 1, deletions: 0 } },
+				{ path: "src/b.ts", operation: "update", diffStats: { additions: 1, deletions: 1 } },
 			])
 		})
 
@@ -556,7 +605,7 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			// written, even though the whole patch succeeded.
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
-				{ path: "src/new.ts", operation: "create" },
+				{ path: "src/new.ts", operation: "create", diffStats: { additions: 1, deletions: 0 } },
 			])
 		})
 
@@ -584,10 +633,11 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 
 			// The failed operation is reported to the model...
 			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("File already exists"))
-			// ...and the successful subset is checkpointed and journaled.
+			// ...and the successful subset is checkpointed and journaled,
+			// with the written file's diff statistics.
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
 			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
-				{ path: "src/second.ts", operation: "create" },
+				{ path: "src/second.ts", operation: "create", diffStats: { additions: 1, deletions: 0 } },
 			])
 		})
 
@@ -613,14 +663,22 @@ describe("ApplyPatchTool.execute - delete file success path", () => {
 			// reported as a failed tool error - but the destination write was
 			// made on disk and must still be covered by the checkpoint/journal.
 			expect(mockedCheckpointSave).toHaveBeenCalledOnce()
-			expect(mockedCheckpointSave).toHaveBeenCalledWith(
-				mockTask as Task,
-				false,
-				true,
-				[expect.objectContaining({ path: "src/new-location.ts", operation: "update" })],
-			)
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				expect.objectContaining({ path: "src/new-location.ts", operation: "update" }),
+			])
+			// B2: even a failed move's destination write carries the
+			// approval-diff statistics in the journal payload.
+			expect(mockedCheckpointSave).toHaveBeenCalledWith(mockTask as Task, false, true, [
+				{
+					path: "src/new-location.ts",
+					operation: "update",
+					diffStats: { additions: 1, deletions: 1 },
+				},
+			])
 			expect(mockTask.recordToolError).toHaveBeenCalledWith("apply_patch")
-			expect(mockPushToolResult).toHaveBeenCalledWith(expect.stringContaining("could not delete the original file"))
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				expect.stringContaining("could not delete the original file"),
+			)
 		})
 	})
 })
