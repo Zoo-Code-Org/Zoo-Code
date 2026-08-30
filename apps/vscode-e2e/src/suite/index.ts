@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 
 import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
 
-import { waitFor } from "./utils"
+import { isCompletedAsk, waitFor } from "./utils"
 
 export async function run() {
 	const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
@@ -34,8 +34,10 @@ export async function run() {
 	// Automatically approve completion_result asks so tests don't stall waiting
 	// for a button that the webview routes to "start new task" rather than "yes".
 	api.on(RooCodeEventName.Message, ({ message }) => {
-		if (message.type === "ask" && message.ask === "completion_result") {
-			api.approveCurrentAsk()
+		if (isCompletedAsk(message) && message.ask === "completion_result") {
+			void api.approveCurrentAsk().catch((error) => {
+				console.error("Failed to approve completion result", error)
+			})
 		}
 	})
 
