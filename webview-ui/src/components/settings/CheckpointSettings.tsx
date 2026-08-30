@@ -14,19 +14,25 @@ import {
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_PER_WRITE_CHECKPOINTS,
+	DEFAULT_CHANGE_CARD_DETAIL,
+	type ChangeCardDetail,
 } from "@roo-code/types"
 
 type CheckpointSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	enableCheckpoints?: boolean
 	checkpointTimeout?: number
 	perWriteCheckpoints?: boolean
-	setCachedStateField: SetCachedStateField<"enableCheckpoints" | "checkpointTimeout" | "perWriteCheckpoints">
+	changeCardDetail?: ChangeCardDetail
+	setCachedStateField: SetCachedStateField<
+		"enableCheckpoints" | "checkpointTimeout" | "perWriteCheckpoints" | "changeCardDetail"
+	>
 }
 
 export const CheckpointSettings = ({
 	enableCheckpoints,
 	checkpointTimeout,
 	perWriteCheckpoints,
+	changeCardDetail,
 	setCachedStateField,
 	...props
 }: CheckpointSettingsProps) => {
@@ -49,6 +55,23 @@ export const CheckpointSettings = ({
 					</VSCodeCheckbox>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
 						{t("settings:checkpoints.perWrite.description")}
+					</div>
+				</SearchableSetting>
+
+				<SearchableSetting
+					settingId="checkpoints-changeCardDetail"
+					section="checkpoints"
+					label={t("settings:checkpoints.changeCardDetail.label")}>
+					<VSCodeCheckbox
+						checked={(changeCardDetail ?? DEFAULT_CHANGE_CARD_DETAIL) === "full"}
+						onChange={(e: any) => {
+							setCachedStateField("changeCardDetail", e.target.checked ? "full" : "summary")
+						}}
+						data-testid="change-card-detail-checkbox">
+						<span className="font-medium">{t("settings:checkpoints.changeCardDetail.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:checkpoints.changeCardDetail.description")}
 					</div>
 				</SearchableSetting>
 
