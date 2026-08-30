@@ -4,7 +4,7 @@ import { customToolRegistry } from "@roo-code/core"
 
 import { type Mode, FileRestrictionError, getModeBySlug, getGroupName } from "../../shared/modes"
 import { EXPERIMENT_IDS } from "../../shared/experiments"
-import { TOOL_GROUPS, ALWAYS_AVAILABLE_TOOLS, TOOL_ALIASES } from "../../shared/tools"
+import { TOOL_GROUPS, ALWAYS_AVAILABLE_TOOLS, TOOL_ALIASES, isRequiredToolForMode } from "../../shared/tools"
 
 /**
  * Checks if a tool name is a valid, known tool.
@@ -130,19 +130,20 @@ export function isToolAllowedForMode(
 	const resolvedTool = TOOL_ALIASES[tool] ?? tool
 	const resolvedIncludedTools = includedTools?.map((t) => TOOL_ALIASES[t] ?? t)
 
-	// Check tool requirements first — explicit disabling takes priority over everything,
-	// including ALWAYS_AVAILABLE_TOOLS. This ensures disabledTools works consistently
-	// at both the filtering layer and the execution-time validation layer.
-	if (toolRequirements && typeof toolRequirements === "object") {
-		if (
-			(tool in toolRequirements && !toolRequirements[tool]) ||
-			(resolvedTool in toolRequirements && !toolRequirements[resolvedTool])
-		) {
+	// Explicit disabling takes priority over ordinary always-available tools. Lifecycle
+	// and active-mode essentials remain available because the task loop has no fallback.
+	if (!isRequiredToolForMode(resolvedTool, modeSlug)) {
+		if (toolRequirements && typeof toolRequirements === "object") {
+			if (
+				(tool in toolRequirements && !toolRequirements[tool]) ||
+				(resolvedTool in toolRequirements && !toolRequirements[resolvedTool])
+			) {
+				return false
+			}
+		} else if (toolRequirements === false) {
+			// If toolRequirements is a boolean false, all non-required tools are disabled
 			return false
 		}
-	} else if (toolRequirements === false) {
-		// If toolRequirements is a boolean false, all tools are disabled
-		return false
 	}
 
 	// Always allow these tools (unless explicitly disabled above)

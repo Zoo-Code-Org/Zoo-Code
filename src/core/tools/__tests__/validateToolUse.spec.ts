@@ -160,13 +160,12 @@ describe("mode-validator", () => {
 				expect(isToolAllowedForMode("apply_diff", codeMode, [], requirements)).toBe(false)
 			})
 
-			it("prioritizes requirements over ALWAYS_AVAILABLE_TOOLS", () => {
-				// Tools in ALWAYS_AVAILABLE_TOOLS (switch_mode, new_task, etc.) should still
-				// be blockable via toolRequirements / disabledTools
+			it("keeps lifecycle tools available while allowing optional control tools to be disabled", () => {
 				const requirements = { switch_mode: false, new_task: false, attempt_completion: false }
 				expect(isToolAllowedForMode("switch_mode", codeMode, [], requirements)).toBe(false)
 				expect(isToolAllowedForMode("new_task", codeMode, [], requirements)).toBe(false)
-				expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(false)
+				expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(true)
+				expect(isToolAllowedForMode("new_task", "orchestrator", [], requirements)).toBe(true)
 			})
 		})
 	})
