@@ -142,6 +142,13 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								task.flushTelemetryInstallment("attempt_completion")
 								hasFlushedTelemetry = true
 
+								try {
+									await task.waitForCurrentAssistantMessagePersistence()
+								} catch (error) {
+									await handleError("persisting task completion", error as Error)
+									return
+								}
+
 								const delegation = await this.delegateToParent(
 									task,
 									result,
@@ -151,7 +158,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 									pushToolResult,
 								)
 								if (delegation === "delegated") {
-									this.emitPublicTaskCompleted(task)
+									await this.emitPublicTaskCompleted(task)
 								}
 								if (delegation !== "continue") return
 							} else {
@@ -207,7 +214,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				// subtask that already completed (and already emitted TaskCompleted) the first
 				// time through -- re-acknowledging it from history must not emit it again.
 				if (!isStaleHistoryReplay) {
-					this.emitPublicTaskCompleted(task)
+					await this.emitPublicTaskCompleted(task)
 				}
 				return
 			}
@@ -290,10 +297,12 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	/**
 	 * Emits the public RooCodeEventName.TaskCompleted API event. Only called once the
 	 * task is genuinely finished (user accepted, or a subtask was successfully delegated
-	 * back to its parent) -- unlike the PostHog telemetry flush, which reports on every
-	 * model-initiated attempt_completion call regardless of outcome.
+	 * back to its parent) and the matching assistant turn is restart-visible -- unlike the
+	 * PostHog telemetry flush, which reports on every model-initiated attempt_completion call.
 	 */
-	private emitPublicTaskCompleted(task: Task): void {
+	private async emitPublicTaskCompleted(task: Task): Promise<void> {
+		await task.waitForCurrentAssistantMessagePersistence()
+
 		// Force final token usage update before emitting TaskCompleted.
 		// This ensures the latest stats are captured regardless of throttle timer.
 		task.emitFinalTokenUsageUpdate()

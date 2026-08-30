@@ -43,11 +43,6 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		})
 		await waitUntilCompleted({ api, taskId })
 		assert.strictEqual(sawMarker, true, `Completion should include ${MARKER}`)
-		const historyItem = await api.getTaskHistoryItem(taskId)
-		assert.ok(historyItem, "Completed task should have a history item")
-		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should include the marker")
-		const conversationLength = await api.getTaskApiConversationHistoryLength(taskId)
-		assert.ok(conversationLength > 0, "Completed task should persist API conversation history")
 
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,
@@ -92,7 +87,7 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		assert.ok(historyItem, "Task history item should be available after restart")
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
 		const conversationLength = await api.getTaskApiConversationHistoryLength(taskId)
-		assert.ok(conversationLength > 0, "API conversation history should be available after restart")
+		assert.ok(conversationLength > 0, "Completion should make API conversation history available to a fresh host")
 
 		await api.resumeTask(taskId)
 		await waitFor(() => taskMessages.some(({ type, ask }) => type === "ask" && ask === "resume_completed_task"))

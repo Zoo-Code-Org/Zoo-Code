@@ -76,6 +76,7 @@ describe("attemptCompletionTool", () => {
 			flushTelemetryInstallment: vi.fn(),
 			setPendingTaskAction: vi.fn(),
 			persistQueuedFeedbackAndAcknowledge: vi.fn().mockResolvedValue(true),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(undefined),
 		}
 	})
 
@@ -478,6 +479,10 @@ describe("attemptCompletionTool", () => {
 
 		describe("completion lifecycle", () => {
 			it("delegates an active subtask completion when the active parent awaits that child", async () => {
+				let markPersistenceReady!: () => void
+				const persistenceReady = new Promise<void>((resolve) => {
+					markPersistenceReady = resolve
+				})
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
 					name: "attempt_completion",
@@ -507,6 +512,7 @@ describe("attemptCompletionTool", () => {
 					taskId: "child-1",
 					parentTaskId: "parent-1",
 					providerRef: { deref: () => mockProvider },
+					waitForCurrentAssistantMessagePersistence: vi.fn(() => persistenceReady),
 				})
 				mockAskFinishSubTaskApproval.mockResolvedValue(true)
 
@@ -519,7 +525,12 @@ describe("attemptCompletionTool", () => {
 					toolCallId: "call-attempt-completion",
 				}
 
-				await attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+				const handlingCompletion = attemptCompletionTool.handle(mockTask as Task, block, callbacks)
+				await vi.waitFor(() => expect(mockTask.waitForCurrentAssistantMessagePersistence).toHaveBeenCalled())
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+
+				markPersistenceReady()
+				await handlingCompletion
 
 				expect(mockAskFinishSubTaskApproval).toHaveBeenCalled()
 				expect(mockProvider.setPendingTaskAction).toHaveBeenCalledWith("child-1", {
@@ -772,6 +783,10 @@ describe("attemptCompletionTool", () => {
 				expect(mockHandleError).not.toHaveBeenCalled()
 				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledTimes(1)
 				expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("attempt_completion")
+				expect(mockTask.waitForCurrentAssistantMessagePersistence).toHaveBeenCalledTimes(1)
+				expect(
+					vi.mocked(mockTask.waitForCurrentAssistantMessagePersistence!).mock.invocationCallOrder[0],
+				).toBeLessThan(vi.mocked(mockTask.emit!).mock.invocationCallOrder[0])
 				expect(mockTask.emit).toHaveBeenCalledWith(
 					RooCodeEventName.TaskCompleted,
 					"task_1",
@@ -970,6 +985,7 @@ describe("attemptCompletionTool telemetry invariants", () => {
 			messageCounts: { user: 0, assistant: 0 },
 			taskId: "task_1",
 			flushTelemetryInstallment: vi.fn(),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(undefined),
 			...overrides,
 		}
 	}

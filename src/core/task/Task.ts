@@ -406,9 +406,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * appear BEFORE the assistant message with tool_uses, causing API errors.
 	 *
 	 * Reset to `false` at the start of each API request.
-	 * Set to `true` after the assistant message is saved in `recursivelyMakeClineRequests`.
+	 * Set to `true` only after the assistant message is durably saved.
 	 */
 	assistantMessageSavedToHistory = false
+	private assistantMessagePersistencePromise!: Promise<boolean>
+	private resolveAssistantMessagePersistence!: (saved: boolean) => void
+	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
@@ -515,6 +518,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		diffFuzzyThreshold,
 	}: TaskOptions) {
 		super()
+		this.resetAssistantMessagePersistence()
 
 		if (startTask && !task && !images && !historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
@@ -984,7 +988,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return ensureMessageIdentifiers(messages)
 	}
 
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string) {
+	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1016,6 +1020,39 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				)
 			}
 		}
+		if (message.role === "assistant") {
+			this.assistantMessageSavedToHistory = saved
+			this.resolveAssistantMessagePersistence(saved)
+		}
+	}
+
+	private resetAssistantMessagePersistence(): void {
+		this.assistantMessagePersistencePromise = new Promise<boolean>((resolve) => {
+			this.resolveAssistantMessagePersistence = resolve
+		})
+		this.completionPersistenceReadyPromise = undefined
+	}
+
+	/**
+	 * Waits until the current assistant turn is visible to a fresh extension host.
+	 * A public completion event must not be emitted before this boundary succeeds.
+	 */
+	public waitForCurrentAssistantMessagePersistence(): Promise<void> {
+		if (!this.completionPersistenceReadyPromise) {
+			const currentPersistence = this.assistantMessagePersistencePromise
+			this.completionPersistenceReadyPromise = (async () => {
+				const saved = await currentPersistence
+				if (saved) return
+
+				const retrySucceeded = await this.retrySaveApiConversationHistory()
+				if (!retrySucceeded) {
+					throw new Error("Failed to persist API conversation history before task completion")
+				}
+				this.assistantMessageSavedToHistory = true
+			})()
+		}
+
+		return this.completionPersistenceReadyPromise
 	}
 
 	// NOTE: We intentionally do NOT mutate stored messages to merge consecutive user turns.
@@ -3049,6 +3086,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.didRejectTool = false
 				this.didAlreadyUseTool = false
 				this.assistantMessageSavedToHistory = false
+				this.resetAssistantMessagePersistence()
 				// Reset tool failure flag for each new assistant turn - this ensures that tool failures
 				// only prevent attempt_completion within the same assistant message, not across turns
 				// (e.g., if a tool fails, then user sends a message saying "just complete anyway")
@@ -3821,7 +3859,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						{ role: "assistant", content: assistantContent },
 						reasoningMessage || undefined,
 					)
-					this.assistantMessageSavedToHistory = true
 
 					this.messageCounts.assistant++
 				}

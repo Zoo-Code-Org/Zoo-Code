@@ -424,9 +424,7 @@ describe("Task persistence", () => {
 			expect(callArgs.messages).toEqual(task.apiConversationHistory)
 		})
 
-		it("reproduces TaskCompleted emission while API history persistence is blocked", async () => {
-			// Characterizes the unsafe contract tracked by #1453. A production fix should
-			// invert this ordering so completion remains pending until the write resolves.
+		it("emits TaskCompleted only after API history persistence succeeds", async () => {
 			const saveDeferred = createDeferred<void>()
 			mockSaveApiMessages.mockReturnValueOnce(saveDeferred.promise)
 
@@ -440,39 +438,9 @@ describe("Task persistence", () => {
 			const completionCallId = "completion-call"
 			let saveSettled = false
 			let completionEmitted = false
-
-			const saving = privateTask.addToApiConversationHistory({
-				role: "assistant",
-				content: [
-					{
-						type: "tool_use",
-						id: completionCallId,
-						name: "attempt_completion",
-						input: { result: "done" },
-					},
-				],
-			})
-			void saving.finally(() => {
-				saveSettled = true
-			})
+			let saving: Promise<void> | undefined
 
 			try {
-				await vi.waitFor(() => expect(mockSaveApiMessages).toHaveBeenCalledTimes(1))
-				const saveRequest = mockSaveApiMessages.mock.calls[0][0]
-				expect(saveRequest.taskId).toBe(task.taskId)
-				expect(saveRequest.messages).toEqual([
-					expect.objectContaining({
-						role: "assistant",
-						content: expect.arrayContaining([
-							expect.objectContaining({
-								type: "tool_use",
-								id: completionCallId,
-								name: "attempt_completion",
-							}),
-						]),
-					}),
-				])
-
 				vi.spyOn(task, "say").mockResolvedValue(undefined)
 				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
 				vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
@@ -498,14 +466,121 @@ describe("Task persistence", () => {
 					toolCallId: completionCallId,
 				}
 
-				await attemptCompletionTool.handle(task, block, callbacks)
+				const handlingCompletion = attemptCompletionTool.handle(task, block, callbacks)
+				await vi.waitFor(() => expect(task.ask).toHaveBeenCalled())
+
+				expect(callbacks.handleError).not.toHaveBeenCalled()
+				expect(completionEmitted).toBe(false)
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+
+				saving = privateTask.addToApiConversationHistory({
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: completionCallId,
+							name: "attempt_completion",
+							input: { result: "done" },
+						},
+					],
+				})
+				void saving.finally(() => {
+					saveSettled = true
+				})
+				await vi.waitFor(() => expect(mockSaveApiMessages).toHaveBeenCalledTimes(1))
+				const saveRequest = mockSaveApiMessages.mock.calls[0][0]
+				expect(saveRequest.taskId).toBe(task.taskId)
+				expect(saveRequest.messages).toEqual([
+					expect.objectContaining({
+						role: "assistant",
+						content: expect.arrayContaining([
+							expect.objectContaining({
+								type: "tool_use",
+								id: completionCallId,
+								name: "attempt_completion",
+							}),
+						]),
+					}),
+				])
+				expect(saveSettled).toBe(false)
+
+				saveDeferred.resolve(undefined)
+				await Promise.all([saving, handlingCompletion])
 
 				expect(callbacks.handleError).not.toHaveBeenCalled()
 				expect(completionEmitted).toBe(true)
-				expect(saveSettled).toBe(false)
 			} finally {
 				saveDeferred.resolve(undefined)
 				await saving
+			}
+		})
+
+		it("does not emit TaskCompleted when API history persistence exhausts its retries", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages.mockRejectedValue(new Error("write failed"))
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const completionCallId = "failed-completion-call"
+			const privateTask = getTaskPersistenceAccess(task)
+			const callbacks: AttemptCompletionCallbacks = {
+				askApproval: vi.fn(),
+				handleError: vi.fn(),
+				pushToolResult: vi.fn(),
+				askFinishSubTaskApproval: vi.fn(),
+				toolDescription: vi.fn(),
+				toolCallId: completionCallId,
+			}
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+			vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
+			vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
+			const completionListener = vi.fn()
+			task.on(RooCodeEventName.TaskCompleted, completionListener)
+
+			try {
+				await privateTask.addToApiConversationHistory({
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: completionCallId,
+							name: "attempt_completion",
+							input: { result: "done" },
+						},
+					],
+				})
+
+				const handlingCompletion = attemptCompletionTool.handle(
+					task,
+					{
+						type: "tool_use",
+						id: completionCallId,
+						name: "attempt_completion",
+						params: { result: "done" },
+						nativeArgs: { result: "done" },
+						partial: false,
+					},
+					callbacks,
+				)
+				await vi.runAllTimersAsync()
+				await handlingCompletion
+
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(4)
+				expect(completionListener).not.toHaveBeenCalled()
+				expect(callbacks.handleError).toHaveBeenCalledWith(
+					"inspecting site",
+					expect.objectContaining({
+						message: "Failed to persist API conversation history before task completion",
+					}),
+				)
+			} finally {
+				mockSaveApiMessages.mockResolvedValue(undefined)
+				vi.useRealTimers()
 			}
 		})
 	})

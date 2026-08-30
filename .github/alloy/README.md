@@ -16,25 +16,26 @@ The current-policy assertions search for a hypothesized, contract-permitted bad 
 
 The model is intentionally small. It establishes the missing ordering invariant but does not prove that the CI failure followed this exact trace or that every concrete runtime path maps to the abstract current-policy transition. Unrestricted stuttering also means this is a bounded safety model: it does not guarantee write completion, retries, or eventual task completion when persistence keeps failing.
 
-## Deterministic production characterization
+## Deterministic production regression
 
-`src/core/task/__tests__/Task.persistence.spec.ts` blocks the real `saveApiMessages` boundary on a deferred promise, accepts completion on the same `Task`, and confirms that `TaskCompleted` is emitted while the write remains unresolved. This establishes the production contract gap represented by `CurrentPolicy` without relying on the intermittent extension-host timing.
+`src/core/task/__tests__/Task.persistence.spec.ts` blocks the real `saveApiMessages` boundary on a deferred promise and accepts completion on the same `Task`. It confirms that `TaskCompleted` remains pending while the write is unresolved, then emits after the write succeeds. A second case exhausts the bounded persistence retries and confirms that the failure is reported without emitting `TaskCompleted`.
 
 The test maps to the model as follows:
 
 - the captured `saveApiMessages` call for the assistant `attempt_completion` turn is `startHistoryWrite`;
 - the unresolved deferred save is `not historyDurable`;
-- accepting the matching completion call and observing `TaskCompleted` are `acceptCompletion` and `emitCompletion`;
-- resolving and awaiting the deferred in `finally` is `finishHistoryWrite`.
+- accepting the matching completion call is `acceptCompletion`;
+- resolving the deferred is `finishHistoryWrite`;
+- observing `TaskCompleted` afterward is `emitCompletion`.
 
-The characterization does not prove that the failed CI run followed the same concrete stream interleaving. It intentionally records the current unsafe behavior; a production fix should invert the ordering assertion so completion stays pending until persistence succeeds.
+An indefinitely delayed write keeps completion pending rather than weakening the public event contract. A failed initial write is retried with the existing bounded retry policy; if all retries fail, the completion handler reports the persistence error and does not emit `TaskCompleted`.
 
 ## Code mapping
 
 - `startHistoryWrite` and `finishHistoryWrite` represent `Task.saveApiConversationHistory()` entering and completing its durable file write.
 - `acceptCompletion` and `emitCompletion` represent completion approval followed by `AttemptCompletionTool.emitPublicTaskCompleted()`.
 - `stopHost` represents the restart E2E (or a real extension shutdown) acting on the public completion event.
-- `DurableFirstPolicy` represents an implementation contract where the public completion boundary is not crossed until the required API history write succeeds.
+- `DurableFirstPolicy` represents the production contract: the public completion boundary is not crossed until the required API history write succeeds.
 
 ## Run Alloy 6
 

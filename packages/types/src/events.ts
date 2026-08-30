@@ -14,6 +14,7 @@ export enum RooCodeEventName {
 
 	// Task Lifecycle
 	TaskStarted = "taskStarted",
+	/** Emitted after the accepted completion turn is persisted and visible to a fresh extension host. */
 	TaskCompleted = "taskCompleted",
 	TaskAborted = "taskAborted",
 	TaskFocused = "taskFocused",
