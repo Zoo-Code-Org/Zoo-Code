@@ -147,6 +147,8 @@ CodeRabbit's green commit status only means its review completed; it does not pr
 
 The `PR review gate` commit status passes only after the sequence completes. It is advisory by default; repository administrators can make it required on `main` if enforcement is desired. The labels and managed comment remain the maintainer-facing review queue either way.
 
+Fork PRs keep the advisory gate pending even after review completes because GitHub gives fork-originated review events a read-only token that cannot reliably invalidate persisted metadata. Native GitHub required-review and required-check protections remain authoritative for merging forks.
+
 Optional checks such as Codecov do not delay CodeRabbit unless repository rules make them required. Draft PRs are not reviewed automatically, but authors can still request an early review with `@coderabbitai review`.
 
 The workflow reads required checks from the `main` branch ruleset. If those rules cannot be read, the gate fails closed and waits for the hourly reconciliation or a manual workflow run after the ruleset is available again.

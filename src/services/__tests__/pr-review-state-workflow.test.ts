@@ -35,6 +35,7 @@ interface HarnessOptions {
 	prAuthor?: { login: string; type: "Bot" | "User" }
 	addLabelsStatus?: number
 	labelLookupStatus?: number
+	createLabelStatus?: number
 	removeLabelStatus?: number
 	reviews?: Array<{
 		login: string
@@ -178,7 +179,11 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			return { data: args }
 		},
 	)
-	const createLabel = vi.fn(async (_args: unknown) => undefined)
+	const createLabel = vi.fn(async (_args: unknown) => {
+		if (options.createLabelStatus) {
+			throw Object.assign(new Error("Create label failed"), { status: options.createLabelStatus })
+		}
+	})
 	const setFailed = vi.fn()
 	const permissionFor = vi.fn(async ({ username }: { username: string }) => {
 		if (options.permissionErrorStatus) {
@@ -371,6 +376,12 @@ describe("PR review-state workflow", () => {
 		expect(result.createLabel).toHaveBeenCalledTimes(4)
 	})
 
+	it("fails closed when a managed label cannot be created", async () => {
+		await expect(runWorkflow({ labelLookupStatus: 404, createLabelStatus: 500 })).rejects.toThrow(
+			"Create label failed",
+		)
+	})
+
 	it("propagates non-404 label lookup failures", async () => {
 		await expect(runWorkflow({ labelLookupStatus: 500 })).rejects.toThrow("Label lookup failed")
 	})
@@ -472,6 +483,30 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it.each(["awaiting-ready", "awaiting-maintainer"])("removes stale %s state", async (staleLabel) => {
+		const result = await runWorkflow({ labels: [staleLabel] })
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: staleLabel }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+	})
+
+	it("removes stale awaiting-coderabbit after CodeRabbit approval", async () => {
+		const result = await runWorkflow({
+			labels: ["awaiting-coderabbit"],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-coderabbit" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
 	})
 
 	it("retries a CodeRabbit label recycle left in the pending state", async () => {
@@ -926,12 +961,12 @@ describe("PR review-state workflow", () => {
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
 	})
 
-	it("skips gate publication and continues reconciliation when status lookup fails", async () => {
+	it("publishes a pending gate and continues reconciliation when status lookup fails", async () => {
 		const result = await runWorkflow({ gateStatusLookupErrorStatus: 500 })
 
 		expect(result.setFailed).not.toHaveBeenCalled()
 		expect(result.warning).toHaveBeenCalledWith(expect.stringContaining("could not inspect PR review gate"))
-		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(latestGateStatus(result)?.state).toBe("pending")
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 	})
 
@@ -1010,6 +1045,43 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
 		)
 		expect(latestGateStatus(result)?.description).toContain("required CI checks")
+	})
+
+	it("accepts a completed reconcile check from another integration", async () => {
+		const result = await runWorkflow({
+			requiredContexts: ["reconcile"],
+			requiredIntegrationId: 999,
+			additionalCheckRuns: [
+				{ id: 100, name: "reconcile", status: "completed", conclusion: "success", appId: 999 },
+			],
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("keeps fork review gates pending after approval", async () => {
+		const result = await runWorkflow({
+			eventName: "schedule",
+			fork: true,
+			permissions: { maintainer: "write" },
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT + 1_000,
+				},
+			],
+		})
+
+		expect(latestGateStatus(result)?.state).toBe("pending")
+		expect(latestGateStatus(result)?.description).toContain("Native GitHub review protections")
 	})
 
 	it("fails closed when branch rules are unavailable", async () => {

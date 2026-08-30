@@ -228,6 +228,7 @@ jobs:
                 'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
                 coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
                 'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
+                'fork-approved': 'Fork review completed. Native GitHub review protections remain authoritative.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
                 maintainer: 'A human maintainer must now review and approve the latest commit.',
                 approved: 'The required review sequence passed. Remaining merge requirements apply.',
@@ -253,7 +254,7 @@ jobs:
               } catch (error) {
                 core.warning(`PR #${pr.number}: could not inspect ${reviewGateName}: ${error.message}`);
               }
-              if (!lookupSucceeded && !required) return;
+              if (!lookupSucceeded && passed) return;
               if (latestGateStatus?.state === state &&
                   latestGateStatus.description === description &&
                   latestGateStatus.target_url === pr.html_url) {
@@ -595,7 +596,11 @@ jobs:
                 }
                 await reconcileLabels(pr, desiredLabel);
                 if (phase === 'approved') {
-                  await updateReviewGate(pr, phase, true);
+                  if (isForkPR(pr)) {
+                    await updateReviewGate(pr, 'fork-approved', false);
+                  } else {
+                    await updateReviewGate(pr, phase, true);
+                  }
                 }
               } catch (error) {
                 let invalidationError = null;
