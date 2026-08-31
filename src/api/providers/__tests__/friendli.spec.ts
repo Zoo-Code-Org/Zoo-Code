@@ -13,7 +13,10 @@ import { clearAllMocks } from "../../../test-utils/reset"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
-const mockCreate = vi.fn()
+const { mockCreate, mockGetModels } = vi.hoisted(() => ({
+	mockCreate: vi.fn(),
+	mockGetModels: vi.fn(),
+}))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -28,11 +31,18 @@ vi.mock("openai", () => ({
 	}),
 }))
 
+// Mock modelCache so we can control dynamic model loading
+vi.mock("../fetchers/modelCache", () => ({
+	getModels: mockGetModels,
+}))
+
 describe("FriendliHandler", () => {
 	let handler: FriendliHandler
 
 	beforeEach(() => {
-		clearAllMocks()
+		vi.clearAllMocks()
+		// By default, dynamic model fetch resolves to empty (static models win)
+		mockGetModels.mockResolvedValue({})
 		// Set up default mock implementation
 		mockCreate.mockImplementation(async () =>
 			asyncStreamFrom([
@@ -93,14 +103,14 @@ describe("FriendliHandler", () => {
 	it("should return GLM-5.2 model with correct configuration", () => {
 		const handlerWithModel = new FriendliHandler({
 			apiModelId: "zai-org/GLM-5.2",
-			friendliApiKey: "test-...ey",
+			friendliApiKey: "test-friendli-api-key",
 		})
 		const model = handlerWithModel.getModel()
 		expect(model.id).toBe("zai-org/GLM-5.2")
 		expect(model.info).toEqual(
 			expect.objectContaining({
-				maxTokens: 131_072,
-				contextWindow: 1_000_000,
+				maxTokens: 1_048_576,
+				contextWindow: 1_048_576,
 				supportsImages: false,
 				supportsPromptCache: true,
 				supportsMaxTokens: true,
@@ -111,68 +121,6 @@ describe("FriendliHandler", () => {
 			}),
 		)
 	})
-
-	it.each([
-		{
-			modelId: "zai-org/GLM-5.1" as const,
-			contextWindow: 200_000,
-			maxTokens: 131_072,
-			supportsMaxTokens: true,
-			inputPrice: 1.4,
-			outputPrice: 4.4,
-			cacheWritesPrice: 0,
-			cacheReadsPrice: 0.26,
-		},
-		{
-			modelId: "deepseek-ai/DeepSeek-V3.2" as const,
-			contextWindow: 163_840,
-			maxTokens: 16384,
-			supportsMaxTokens: undefined,
-			inputPrice: 0.5,
-			outputPrice: 1.5,
-			cacheWritesPrice: 0,
-			cacheReadsPrice: 0.25,
-		},
-		{
-			modelId: "MiniMaxAI/MiniMax-M2.5" as const,
-			contextWindow: 204_800,
-			maxTokens: 4096,
-			supportsMaxTokens: undefined,
-			inputPrice: 0.3,
-			outputPrice: 1.2,
-			cacheWritesPrice: 0,
-			cacheReadsPrice: 0.06,
-		},
-	])(
-		"should expose newly added model $modelId",
-		({
-			modelId,
-			contextWindow,
-			maxTokens,
-			supportsMaxTokens,
-			inputPrice,
-			outputPrice,
-			cacheWritesPrice,
-			cacheReadsPrice,
-		}) => {
-			expect(friendliModels[modelId]).toBeDefined()
-			const info = friendliModels[modelId] as import("@roo-code/types").ModelInfo
-			expect(info.maxTokens).toBe(maxTokens)
-			expect(info.contextWindow).toBe(contextWindow)
-			expect(info.supportsMaxTokens).toBe(supportsMaxTokens)
-			expect(info.inputPrice).toBe(inputPrice)
-			expect(info.outputPrice).toBe(outputPrice)
-			expect(info.cacheWritesPrice).toBe(cacheWritesPrice)
-			expect(info.cacheReadsPrice).toBe(cacheReadsPrice)
-			expect(info.description).toBeTruthy()
-
-			const handlerWithModel = new FriendliHandler({
-				apiModelId: modelId,
-				friendliApiKey: "test-friendli-api-key",
-			})
-			expect(handlerWithModel.getModel().id).toBe(modelId)
-		},
-	)
 
 	it("completePrompt method should return text from Friendli API", async () => {
 		const expectedResponse = "This is a test response from Friendli"
@@ -229,10 +177,11 @@ describe("FriendliHandler", () => {
 		const messageGenerator = handlerWithModel.createMessage(systemPrompt, messages)
 		await messageGenerator.next()
 
+		// GLM-5.2 maxTokens (1_048_576) is clamped to 20% of context window (209_716)
 		expect(mockCreate).toHaveBeenCalledWith(
 			expect.objectContaining({
 				model: modelId,
-				max_tokens: modelInfo.maxTokens,
+				max_tokens: 209_716,
 				temperature: 0.6,
 				messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
 				stream: true,
@@ -331,7 +280,7 @@ describe("buildApiHandler friendli wiring", () => {
 })
 
 describe("Friendli model max output tokens (clamping behavior)", () => {
-	it("GLM-5.2: maxTokens (131072) is under 20% of 1M context window — clamp is no-op", () => {
+	it("GLM-5.2: maxTokens (1048576) exceeds 20% of 1M context window — clamp binds to 209716", () => {
 		const model = friendliModels["zai-org/GLM-5.2"]
 		const result = getModelMaxOutputTokens({
 			modelId: "zai-org/GLM-5.2",
@@ -339,38 +288,14 @@ describe("Friendli model max output tokens (clamping behavior)", () => {
 			settings: { apiProvider: providerIdentifiers.friendli },
 			format: "openai",
 		})
-		// 1_000_000 * 0.2 = 200_000 > 131_072 → no clamping
-		expect(result).toBe(131_072)
-	})
-
-	it("GLM-5.1: maxTokens (131072) exceeds 20% of 200k context window — clamp binds to 40000", () => {
-		const model = friendliModels["zai-org/GLM-5.1"]
-		const result = getModelMaxOutputTokens({
-			modelId: "zai-org/GLM-5.1",
-			model,
-			settings: { apiProvider: providerIdentifiers.friendli },
-			format: "openai",
-		})
-		// 200_000 * 0.2 = 40_000 < 131_072 → clamped to 40_000
-		expect(result).toBe(40_000)
-	})
-
-	it("GLM-5.1 with user modelMaxTokens override: honors override capped at model maxTokens", () => {
-		const model = friendliModels["zai-org/GLM-5.1"]
-		const result = getModelMaxOutputTokens({
-			modelId: "zai-org/GLM-5.1",
-			model,
-			settings: { apiProvider: providerIdentifiers.friendli, modelMaxTokens: 80_000 },
-			format: "openai",
-		})
-		// supportsMaxTokens=true, user set 80k, model ceiling 131072 → min(80000, 131072) = 80000
-		expect(result).toBe(80_000)
+		// 1_048_576 * 0.2 = 209_715.2 → ceil = 209_716 < 1_048_576 → clamped
+		expect(result).toBe(209_716)
 	})
 })
 
 describe("FriendliHandler — Friendli-specific reasoning params", () => {
 	beforeEach(() => {
-		clearAllMocks()
+		vi.clearAllMocks()
 	})
 
 	it("should include reasoning_effort, chat_template_kwargs, parse_reasoning for GLM-5.2 with reasoning enabled", async () => {
@@ -471,12 +396,32 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 		expect(callArgs.include_reasoning).toBe(true)
 	})
 
-	it("should not include any reasoning params for non-reasoning DeepSeek-V3.2", async () => {
+	it("should send enable_thinking + parse_reasoning (no reasoning_effort) for binary reasoning DeepSeek-V3.2", async () => {
+		mockGetModels.mockResolvedValue({
+			"deepseek-ai/DeepSeek-V3.2": {
+				maxTokens: 163840,
+				contextWindow: 163840,
+				supportsImages: false,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningBinary: true,
+				inputPrice: 0.5,
+				outputPrice: 1.5,
+				cacheReadsPrice: 0.25,
+				description: "DeepSeek V3.2",
+			},
+		})
 		const handler = new FriendliHandler({
 			apiModelId: "deepseek-ai/DeepSeek-V3.2",
-			friendliApiKey: "test-key",
+			friendliApiKey: "test-friendli-api-key",
 			enableReasoningEffort: true,
 			reasoningEffort: "high",
+		})
+
+		// Wait for the dynamic model to load so getModel() returns the DeepSeek
+		// binary reasoning model instead of falling back to the static default.
+		await vi.waitFor(() => {
+			expect(handler.getModel().id).toBe("deepseek-ai/DeepSeek-V3.2")
 		})
 
 		mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
@@ -484,9 +429,11 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 		await handler.createMessage("system", []).next()
 
 		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+		// Binary reasoning model: no reasoning_effort, but enable_thinking + parse_reasoning
 		expect(callArgs.reasoning_effort).toBeUndefined()
-		expect(callArgs.chat_template_kwargs).toBeUndefined()
-		expect(callArgs.parse_reasoning).toBeUndefined()
+		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+		expect(callArgs.parse_reasoning).toBe(true)
+		expect(callArgs.include_reasoning).toBe(true)
 	})
 
 	it("should handle delta.reasoning_content from parse_reasoning=true stream", async () => {
@@ -526,7 +473,7 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 			apiModelId: "zai-org/GLM-5.2",
 			friendliApiKey: "test-key",
 			enableReasoningEffort: true,
-			reasoningEffort: "medium",
+			reasoningEffort: "high",
 		})
 
 		mockCreate.mockResolvedValueOnce({
@@ -536,9 +483,100 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 		await handler.completePrompt("test")
 
 		const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
-		expect(callArgs.reasoning_effort).toBe("medium")
+		expect(callArgs.reasoning_effort).toBe("high")
 		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
 		expect(callArgs.parse_reasoning).toBe(true)
 		expect(callArgs.include_reasoning).toBe(true)
+	})
+})
+
+describe("FriendliHandler — dynamic model loading", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+		mockCreate.mockImplementation(async () => asyncStreamFrom([]))
+	})
+
+	it("preserves a dynamic-only model id during the initial load window", () => {
+		// mockGetModels never resolves — simulates an in-flight fetch
+		mockGetModels.mockReturnValue(new Promise(() => {}))
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		// "friendli-only/future-model" is not in static friendliModels, but
+		// because dynamicModelsLoaded is still false the handler keeps the
+		// requested id and uses sane defaults (no model-specific metadata)
+		// until the dynamic list arrives.
+		const model = handler.getModel()
+		expect(model.id).toBe("friendli-only/future-model")
+		expect(model.info).toEqual(expect.objectContaining({ supportsImages: true, supportsPromptCache: false }))
+	})
+
+	it("falls back to default model after load completes and id is not in dynamic set", async () => {
+		// Dynamic fetch resolves to empty — no models
+		mockGetModels.mockResolvedValue({})
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		// After load, the dynamic-only id is not found -- falls back to default.
+		// Wait for the observable getModel() result to reflect the fallback.
+		await vi.waitFor(() => {
+			expect(handler.getModel().id).toBe(friendliDefaultModelId)
+		})
+	})
+
+	it("uses dynamic model info when available", async () => {
+		const dynamicModel = {
+			"friendli-only/future-model": {
+				maxTokens: 8192,
+				contextWindow: 100000,
+				supportsImages: false,
+				supportsPromptCache: false,
+				description: "A dynamic-only model",
+			},
+		}
+		mockGetModels.mockResolvedValue(dynamicModel)
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		// Wait for the dynamic model to appear in getModel() results.
+		await vi.waitFor(() => {
+			const model = handler.getModel()
+			expect(model.id).toBe("friendli-only/future-model")
+			expect(model.info).toEqual(
+				expect.objectContaining({
+					maxTokens: 8192,
+					contextWindow: 100000,
+					description: "A dynamic-only model",
+				}),
+			)
+		})
+	})
+
+	it("sets dynamicModelsLoaded even when getModels rejects", async () => {
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		mockGetModels.mockRejectedValue(new Error("Network error"))
+
+		const handler = new FriendliHandler({
+			apiModelId: "friendli-only/future-model",
+			friendliApiKey: "test-key",
+		})
+
+		// A dynamic-only apiModelId makes the fallback observable: while the
+		// load is still pending, getModel() preserves the requested id, so the
+		// assertion below can only pass once the rejection handler has marked
+		// the load settled and the id fell back to the default.
+		await vi.waitFor(() => {
+			expect(handler.getModel().id).toBe(friendliDefaultModelId)
+		})
+		consoleErrorSpy.mockRestore()
 	})
 })

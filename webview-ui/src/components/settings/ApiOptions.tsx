@@ -715,6 +715,10 @@ const ApiOptions = ({
 						<Friendli
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
 						/>
 					)}
 

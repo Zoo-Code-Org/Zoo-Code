@@ -1,7 +1,15 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { type FriendliModelId, friendliDefaultModelId, friendliModels } from "@roo-code/types"
+import {
+	type FriendliModelId,
+	friendliDefaultModelId,
+	friendliModels,
+	type ModelInfo,
+	openAiModelInfoSaneDefaults,
+	providerIdentifiers,
+} from "@roo-code/types"
+import type { ModelRecord } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { shouldUseReasoningEffort, getModelMaxOutputTokens } from "../../shared/api"
@@ -11,6 +19,7 @@ import { getModelParams } from "../transform/model-params"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { handleOpenAIError } from "./utils/error-handler"
+import { getModels } from "./fetchers/modelCache"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -53,10 +62,34 @@ type FriendliChatCompletionNonStreamingParams = Omit<
  * Handler for the Friendli Model APIs (OpenAI-compatible).
  * Routes chat completions to `https://api.friendli.ai/serverless/v1`.
  *
+ * Model list is dynamic: on construction the handler kicks off a fire-and-forget
+ * fetch of the live model list from `https://api.friendli.ai/serverless/v1/models`
+ * (public, no auth) via the shared `getModels` cache. `getModel()` falls back to
+ * the static `friendliModels` map when dynamic models haven't loaded yet or when
+ * the requested model id isn't present in the dynamic set (e.g. the API lags
+ * behind a newly released model). This mirrors the OpenRouterHandler pattern.
+ *
  * Overrides `createStream` and `completePrompt` to inject Friendli-specific
  * reasoning parameters that the base class doesn't know about.
  */
 export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelId> {
+	/**
+	 * Dynamically fetched model list (populated asynchronously after construction).
+	 * Empty until the background load completes; `getModel()` falls back to the
+	 * static `providerModels` (`friendliModels`) in that window.
+	 */
+	private dynamicModels: ModelRecord = {}
+
+	/**
+	 * Tracks whether the background `getModels()` fetch has settled. Until it
+	 * does, `getModel()` preserves a configured `requestedId` even when it is
+	 * absent from the static `friendliModels` map — dynamic-only models selected
+	 * in the webview would otherwise silently fall back to the default model on
+	 * the first request after handler construction. After loading completes, the
+	 * normal fallback applies.
+	 */
+	private dynamicModelsLoaded = false
+
 	/**
 	 * @param options  Provider settings; `friendliApiKey` is required.
 	 */
@@ -67,18 +100,61 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			baseURL: "https://api.friendli.ai/serverless/v1",
 			apiKey: options.friendliApiKey,
 			defaultProviderModelId: friendliDefaultModelId,
-			providerModels: friendliModels,
+			providerModels: friendliModels as Record<FriendliModelId, ModelInfo>,
 			defaultTemperature: 0.6,
 		})
+
+		// Load dynamic models asynchronously to populate the cache before
+		// getModel() is called. Fire-and-forget; errors are logged by the
+		// cache layer and we gracefully fall back to static models.
+		getModels({ provider: providerIdentifiers.friendli })
+			.then((models) => {
+				this.dynamicModels = models
+				this.dynamicModelsLoaded = true
+			})
+			.catch((error) => {
+				this.dynamicModelsLoaded = true
+				console.error("[FriendliHandler] Failed to load dynamic models:", error)
+			})
 	}
 
 	override getModel() {
-		const id =
-			this.options.apiModelId && this.options.apiModelId in this.providerModels
-				? (this.options.apiModelId as FriendliModelId)
-				: this.defaultProviderModelId
+		const requestedId = this.options.apiModelId
 
-		const info = this.providerModels[id]
+		// Prefer dynamic info when available; fall back to static `providerModels`
+		// (the hardcoded `friendliModels` passed to super) for cold-start, network
+		// failure, or models not yet in the dynamic list.
+		const dynamicInfo = requestedId ? this.dynamicModels[requestedId] : undefined
+		const staticId =
+			requestedId && requestedId in this.providerModels
+				? (requestedId as FriendliModelId)
+				: this.defaultProviderModelId
+		const staticInfo = this.providerModels[staticId]
+
+		// Determine which id/info pair to use.
+		let id: FriendliModelId
+		let info: ModelInfo
+		if (dynamicInfo) {
+			id = requestedId as FriendliModelId
+			info = dynamicInfo
+		} else if (requestedId && requestedId in this.providerModels) {
+			id = requestedId as FriendliModelId
+			info = staticInfo
+		} else if (!this.dynamicModelsLoaded && requestedId) {
+			// Dynamic load still in-flight and the requested id is dynamic-only
+			// (not in the static map). Preserve the requested id so the first
+			// request after construction goes to the model the user selected, not
+			// the default. Use sane defaults (no reasoning, no cache, no max-tokens)
+			// instead of the GLM-5.2 default model's metadata so that reasoning
+			// params and max_tokens are not derived from the wrong model's capabilities.
+			// Once the dynamic list arrives, getModel() returns the correct metadata.
+			id = requestedId as FriendliModelId
+			info = openAiModelInfoSaneDefaults
+		} else {
+			id = staticId
+			info = staticInfo
+		}
+
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,
@@ -94,22 +170,41 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	 * Build Friendli-specific reasoning params to merge into the OpenAI request.
 	 *
 	 * Rules:
-	 * - Controllable reasoning models (GLM-5.x): always send `chat_template_kwargs`.
+	 * - Controllable reasoning models (GLM-5.2): always send `chat_template_kwargs`.
 	 *   User enabled → { enable_thinking: true } + reasoning_effort + parse_reasoning.
 	 *   User disabled (none/disable) → { enable_thinking: false } to prevent the
 	 *   model's Jinja template from defaulting thinking ON.
-	 * - Non-reasoning models (DeepSeek-V3.2, MiniMax-M2.5): no extra params
-	 *   (reasoning_effort silently ignored).
+	 * - Boolean reasoning models (e.g. GLM-5.1, DeepSeek-V3.2, MiniMax-M2.5 from
+	 *   the live /v1/models list): reasoning is on/off only — no reasoning_effort
+	 *   enum. The handler sends { enable_thinking: true } + parse_reasoning when
+	 *   enabled, or nothing when disabled. reasoning_effort is omitted because the
+	 *   API doesn't accept it.
 	 */
-	private buildFriendliReasoningParams(): Partial<FriendliReasoningParams> {
-		const { info: modelInfo, reasoningEffort } = this.getModel()
+	private buildFriendliReasoningParams(model: {
+		info: ModelInfo
+		reasoningEffort?: string
+	}): Partial<FriendliReasoningParams> {
+		const { info: modelInfo, reasoningEffort } = model
 		const extra: Partial<FriendliReasoningParams> = {}
 
 		const isControllableReasoning = Array.isArray(modelInfo.supportsReasoningEffort)
+		const isBinaryReasoning = !!modelInfo.supportsReasoningBinary
 
 		const useReasoningEffort = modelInfo.supportsReasoningEffort
 			? shouldUseReasoningEffort({ model: modelInfo, settings: this.options })
 			: false
+
+		// Binary reasoning toggle (no effort enum). These models accept
+		// enable_thinking + parse_reasoning but not reasoning_effort.
+		if (isBinaryReasoning && !isControllableReasoning) {
+			if (this.options.enableReasoningEffort === false) {
+				return extra // reasoning disabled — send nothing
+			}
+			extra.parse_reasoning = true
+			extra.include_reasoning = true
+			extra.chat_template_kwargs = { enable_thinking: true }
+			return extra
+		}
 
 		// User disabled reasoning on a controllable model — explicitly turn thinking off.
 		// The model's Jinja chat template defaults enable_thinking to true, so omitting
@@ -119,12 +214,12 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			return extra
 		}
 
-		// Non-reasoning model — nothing to send
+		// Non-reasoning model — nothing to send.
 		if (!useReasoningEffort) {
 			return extra
 		}
 
-		// Reasoning is enabled
+		// Reasoning is enabled (controllable model with effort enum)
 		extra.parse_reasoning = true
 		extra.include_reasoning = true
 		extra.chat_template_kwargs = { enable_thinking: true }
@@ -147,9 +242,12 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 		metadata?: ApiHandlerCreateMessageMetadata,
 		requestOptions?: OpenAI.RequestOptions,
 	) {
-		const friendliExtra = this.buildFriendliReasoningParams()
+		// Call getModel() once and reuse for both reasoning params and request
+		// construction to avoid race conditions during dynamic model loading.
+		const modelInfo = this.getModel()
+		const friendliExtra = this.buildFriendliReasoningParams(modelInfo)
 
-		const { id: model, info } = this.getModel()
+		const { id: model, info } = modelInfo
 
 		// Centralized cap: clamp to 20% of the context window
 		const max_tokens =
@@ -186,8 +284,9 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 	}
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId } = this.getModel()
-		const friendliExtra = this.buildFriendliReasoningParams()
+		const model = this.getModel()
+		const { id: modelId } = model
+		const friendliExtra = this.buildFriendliReasoningParams(model)
 
 		const params: FriendliChatCompletionNonStreamingParams = {
 			model: modelId,

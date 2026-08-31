@@ -73,6 +73,7 @@ export const dynamicProviders = [
 	providerIdentifiers.kenari,
 	providerIdentifiers.nanogpt,
 	providerIdentifiers.kimiCode,
+	providerIdentifiers.friendli,
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
