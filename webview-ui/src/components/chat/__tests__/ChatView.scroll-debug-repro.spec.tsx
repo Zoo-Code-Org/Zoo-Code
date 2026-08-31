@@ -3,6 +3,8 @@ import { act, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
 
 import type { ClineMessage } from "@roo-code/types"
 
+import { vscode } from "@src/utils/vscode"
+
 import ChatView, { type ChatViewProps } from "../ChatView"
 
 type FollowOutput = ((isAtBottom: boolean) => "auto" | false) | "auto" | false
@@ -98,7 +100,9 @@ vi.mock("@/components/ui", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("@/components/ui")>()
 	return {
 		...actual,
-		StandardTooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+		StandardTooltip: ({ children, content }: { children: React.ReactNode; content?: string }) => (
+			<div data-tooltip={content}>{children}</div>
+		),
 	}
 })
 
@@ -357,9 +361,18 @@ const getScrollToCheckpointButton = (): HTMLButtonElement => {
 	return button
 }
 
+const getButtonByText = (text: string): HTMLButtonElement => {
+	const button = Array.from(document.querySelectorAll("button")).find((candidate) => candidate.textContent === text)
+	if (!(button instanceof HTMLButtonElement)) {
+		throw new Error(`Expected button with text: ${text}`)
+	}
+	return button
+}
+
 describe("ChatView scroll behavior regression coverage", () => {
 	beforeEach(() => {
 		vi.useFakeTimers()
+		vi.mocked(vscode.postMessage).mockClear()
 		harness.scrollCalls = 0
 		harness.scrollToIndexArgs = []
 		harness.atBottomAfterCalls = Number.POSITIVE_INFINITY
@@ -530,11 +543,48 @@ describe("ChatView scroll behavior regression coverage", () => {
 
 		expect(document.querySelector(".codicon-chevron-down")).toBeTruthy()
 		expect(document.querySelector("button[aria-label='chat:scrollToLatestCheckpoint']")).toBeNull()
-		expect(
-			Array.from(document.querySelectorAll("button")).some(
-				(button) => button.textContent === "chat:completeSubtaskAndReturn",
-			),
-		).toBe(true)
+		const completeButton = getButtonByText("chat:completeSubtaskAndReturn")
+		expect(completeButton.disabled).toBe(false)
+		expect(completeButton.closest("[data-tooltip]")?.getAttribute("data-tooltip")).toBe(
+			"chat:completeSubtaskAndReturn",
+		)
+
+		fireEvent.click(completeButton)
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "askResponse", askResponse: "yesButtonClicked" })
+	})
+
+	it("keeps two-button approvals actionable while browsing history", async () => {
+		const baseTs = Date.now() - 3_000
+		await hydrate(2, buildMessages(baseTs))
+		await waitForCalls(2)
+		await waitForCallsSettled()
+
+		await act(async () => {
+			fireEvent.wheel(getScrollable(), { deltaY: -120 })
+			postState([
+				...buildMessages(baseTs),
+				{
+					type: "ask",
+					ask: "tool",
+					ts: baseTs + 3,
+					text: JSON.stringify({ tool: "editedExistingFile", batchDiffs: [] }),
+				},
+			])
+		})
+		await flushEffects()
+
+		expect(document.querySelector(".codicon-chevron-down")).toBeTruthy()
+		const approveButton = getButtonByText("chat:edit-batch.approve.title")
+		const denyButton = getButtonByText("chat:edit-batch.deny.title")
+		expect(approveButton.disabled).toBe(false)
+		expect(denyButton.disabled).toBe(false)
+		expect(approveButton.closest("[data-tooltip]")?.getAttribute("data-tooltip")).toBe(
+			"chat:edit-batch.approve.title",
+		)
+		expect(denyButton.closest("[data-tooltip]")?.getAttribute("data-tooltip")).toBe("chat:edit-batch.deny.title")
+
+		fireEvent.click(denyButton)
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "askResponse", askResponse: "noButtonClicked" })
 	})
 
 	it("hydration completion cannot override user escape hatch", async () => {
