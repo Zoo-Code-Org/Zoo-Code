@@ -1383,4 +1383,76 @@ describe("auth session cache", () => {
 		expect(freshMockGetKimiCodeModels).toHaveBeenCalledTimes(1)
 		expect(mockSet).not.toHaveBeenCalled()
 	})
+
+	it("flushModels without refresh evicts the session cache until the next fetch", async () => {
+		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await freshGetModels(options)
+		await freshFlushModels(options)
+		await freshGetModels(options)
+
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+	})
+
+	it("returns an empty catalog when revalidation is 304 and no session cache exists", async () => {
+		vi.useFakeTimers()
+		try {
+			freshMockGetZooGatewayModels
+				.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				.mockResolvedValueOnce({ kind: "not_modified" })
+
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+			await freshGetModels(options)
+			await freshFlushModels(options)
+
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+
+			const result = await freshGetModels(options)
+
+			expect(result).toEqual({})
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("returns an empty catalog on the first empty zoo-gateway response", async () => {
+		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		const result = await freshGetModels(options)
+
+		expect(result).toEqual({})
+	})
+
+	it("clearAuthSessionModelsForProvider removes compound cache keys", async () => {
+		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+
+		await freshGetModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "account-a",
+			baseUrl: "https://gateway-a.test/v1",
+		})
+		await freshGetModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "account-b",
+			baseUrl: "https://gateway-b.test/v1",
+		})
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+
+		await freshGetModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "account-a",
+			baseUrl: "https://gateway-a.test/v1",
+		})
+		await freshGetModels({
+			provider: providerIdentifiers.zooGateway,
+			apiKey: "account-b",
+			baseUrl: "https://gateway-b.test/v1",
+		})
+
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(4)
+	})
 })

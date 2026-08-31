@@ -88,6 +88,13 @@ describe("Zoo Gateway Fetchers", () => {
 
 			const result = await getZooGatewayModels(gatewayOptions())
 
+			const axiosConfig = mockAxiosGet.mock.calls[0]?.[1] as
+				| { validateStatus?: (status: number) => boolean }
+				| undefined
+			expect(axiosConfig?.validateStatus?.(200)).toBe(true)
+			expect(axiosConfig?.validateStatus?.(304)).toBe(true)
+			expect(axiosConfig?.validateStatus?.(500)).toBe(false)
+
 			expect(mockAxiosGet).toHaveBeenCalledWith(
 				`${baseUrl}/models`,
 				expect.objectContaining({
@@ -101,6 +108,19 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(Object.keys(result.models)).toHaveLength(1)
 			expect(result.models["anthropic/claude-sonnet-4"]).toBeDefined()
 			expect(result.etag).toBe('"catalog-abc"')
+		})
+
+		it("reads ETag from the capitalized response header", async () => {
+			mockAxiosGet.mockResolvedValueOnce({
+				...mockResponse,
+				headers: { ETag: '"catalog-capital"' },
+			})
+
+			const result = await getZooGatewayModels(gatewayOptions())
+
+			expect(result.kind).toBe("ok")
+			if (result.kind !== "ok") return
+			expect(result.etag).toBe('"catalog-capital"')
 		})
 
 		it("sends If-None-Match when provided and returns not_modified on 304", async () => {
