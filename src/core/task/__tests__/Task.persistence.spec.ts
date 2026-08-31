@@ -586,6 +586,23 @@ describe("Task persistence", () => {
 			expect(saveClineMessagesSpy).toHaveBeenCalledTimes(1)
 			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
 		})
+
+		it("can abort a completed handoff without persisting stale messages", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "Completed delegated child",
+				startTask: false,
+			})
+			const saveClineMessagesSpy = vi.spyOn(getTaskPersistenceAccess(task), "saveClineMessages")
+
+			await task.abortTask(true, { saveMessages: false })
+
+			expect(saveClineMessagesSpy).not.toHaveBeenCalled()
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(task.abort).toBe(true)
+			expect(task.abandoned).toBe(true)
+		})
 	})
 
 	// ── resumeTaskFromHistory — interrupted tool calls must be recorded as errors ──

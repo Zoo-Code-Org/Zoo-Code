@@ -157,12 +157,14 @@ describe("Nested delegation resume (A → B → C)", () => {
 					secondId: string,
 					firstUpdater: (h: any) => any,
 					secondUpdater: (h: any) => any,
+					options?: { whileFirstFileLocked?: () => Promise<void> },
 				) => {
 					// Apply both updaters and persist to historyIndex atomically
 					const updatedFirst = firstUpdater(historyIndex[firstId])
 					const updatedSecond = secondUpdater(historyIndex[secondId])
 					historyIndex[firstId] = updatedFirst
 					historyIndex[secondId] = updatedSecond
+					await options?.whileFirstFileLocked?.()
 					return Object.values(historyIndex)
 				},
 			),

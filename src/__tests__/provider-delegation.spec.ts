@@ -20,6 +20,7 @@ function makeStoreStub(
 	overrides: Partial<{ atomicReadAndUpdate: ReturnType<typeof vi.fn>; get: ReturnType<typeof vi.fn> }> = {},
 ) {
 	return {
+		withTaskFileLock: vi.fn(async (_taskId: string, callback: () => Promise<unknown>) => callback()),
 		atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (h: HistoryItem) => HistoryItem) => {
 			updater(parentHistoryItem)
 			return []
@@ -97,6 +98,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		let current: HistoryItem = { ...parentHistoryItem, status: "active", pendingAction }
 		const taskHistoryStore = {
+			withTaskFileLock: vi.fn(async (_taskId: string, callback: () => Promise<unknown>) => callback()),
 			get: vi.fn(() => current),
 			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
 				current = updater(current)
