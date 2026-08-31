@@ -36,4 +36,10 @@ describe("getToolUseGuidelinesSection", () => {
 
 		expect(guidelines).not.toContain("After each tool use, the user will respond with the result")
 	})
+
+	it("omits tool guidance when no tools are available", () => {
+		const guidelines = getToolUseGuidelinesSection({ availableToolNames: new Set() })
+
+		expect(guidelines).toBe("")
+	})
 })

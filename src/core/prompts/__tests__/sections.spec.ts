@@ -192,6 +192,50 @@ describe("getRulesSection", () => {
 		expect(result).not.toContain("Actively Running Terminals")
 		expect(result).toContain('The active mode can only edit files matching "\\.md$" (Markdown files only)')
 	})
+
+	it("varies tool guidance with the effective tool set", () => {
+		const fullResult = getRulesSection(
+			cwd,
+			{
+				todoListEnabled: true,
+				useAgentRules: true,
+				newTaskRequireTodos: false,
+				isStealthModel: true,
+			},
+			{
+				availableToolNames: new Set([
+					"execute_command",
+					"list_files",
+					"read_file",
+					"write_to_file",
+					"ask_followup_question",
+					"attempt_completion",
+					"access_mcp_resource",
+				]),
+			},
+		)
+		const commandOnlyResult = getRulesSection(cwd, undefined, {
+			availableToolNames: new Set(["execute_command"]),
+		})
+		const restrictedResult = getRulesSection(cwd, undefined, {
+			availableToolNames: new Set(["write_to_file"]),
+			editFileRestriction: { fileRegex: "\\.md$" },
+		})
+		const noToolsResult = getRulesSection(cwd, undefined, {
+			availableToolNames: new Set(),
+		})
+
+		expect(fullResult).toContain("Before using the execute_command tool")
+		expect(fullResult).toContain("list_files tool to list the files")
+		expect(fullResult).toContain("shouldn't use the read_file tool")
+		expect(fullResult).toContain("must use the attempt_completion tool")
+		expect(fullResult).toContain("MCP operations should be used one at a time")
+		expect(fullResult).toContain("VENDOR CONFIDENTIALITY")
+		expect(commandOnlyResult).not.toContain("ask_followup_question")
+		expect(restrictedResult).toContain('The active mode can only edit files matching "\\.md$".')
+		expect(noToolsResult).not.toContain("Use the tools provided")
+		expect(noToolsResult).not.toContain("wait for the user's response after each tool use")
+	})
 })
 
 describe("getCommandChainOperator", () => {
