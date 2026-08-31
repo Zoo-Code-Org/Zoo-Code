@@ -294,6 +294,66 @@ describe("NativeToolCallParser", () => {
 	})
 
 	describe("processStreamingChunk", () => {
+		it("keeps interleaved task streams isolated", () => {
+			const firstScope = NativeToolCallParser.createScope()
+			const secondScope = NativeToolCallParser.createScope()
+
+			const firstStart = NativeToolCallParser.processRawChunk(
+				{ index: 0, id: "call_first", name: "read_file" },
+				firstScope,
+			)
+			NativeToolCallParser.startStreamingToolCall("call_first", "read_file", firstScope)
+
+			NativeToolCallParser.clearRawChunkState(secondScope)
+			NativeToolCallParser.clearAllStreamingToolCalls(secondScope)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(firstScope)).toBe(true)
+
+			const secondStart = NativeToolCallParser.processRawChunk(
+				{ index: 0, id: "call_second", name: "read_file" },
+				secondScope,
+			)
+
+			expect(firstStart).toEqual([{ type: "tool_call_start", id: "call_first", name: "read_file" }])
+			expect(secondStart).toEqual([{ type: "tool_call_start", id: "call_second", name: "read_file" }])
+
+			NativeToolCallParser.startStreamingToolCall("call_second", "read_file", secondScope)
+
+			const firstDelta = NativeToolCallParser.processRawChunk(
+				{ index: 0, arguments: JSON.stringify({ path: "first.ts" }) },
+				firstScope,
+			)
+			const secondDelta = NativeToolCallParser.processRawChunk(
+				{ index: 0, arguments: JSON.stringify({ path: "second.ts" }) },
+				secondScope,
+			)
+
+			expect(firstDelta).toEqual([
+				{ type: "tool_call_delta", id: "call_first", delta: JSON.stringify({ path: "first.ts" }) },
+			])
+			expect(secondDelta).toEqual([
+				{ type: "tool_call_delta", id: "call_second", delta: JSON.stringify({ path: "second.ts" }) },
+			])
+			if (firstDelta[0]?.type !== "tool_call_delta" || secondDelta[0]?.type !== "tool_call_delta") {
+				throw new Error("Expected argument delta events")
+			}
+
+			NativeToolCallParser.processStreamingChunk("call_first", firstDelta[0].delta, firstScope)
+			NativeToolCallParser.processStreamingChunk("call_second", secondDelta[0].delta, secondScope)
+
+			NativeToolCallParser.finalizeRawChunks(firstScope)
+			NativeToolCallParser.finalizeRawChunks(secondScope)
+
+			const firstResult = NativeToolCallParser.finalizeStreamingToolCall("call_first", firstScope)
+			const secondResult = NativeToolCallParser.finalizeStreamingToolCall("call_second", secondScope)
+			expect(firstResult?.type).toBe("tool_use")
+			expect(secondResult?.type).toBe("tool_use")
+			if (firstResult?.type !== "tool_use" || secondResult?.type !== "tool_use") {
+				throw new Error("Expected native tool uses")
+			}
+			expect(firstResult.nativeArgs).toEqual({ path: "first.ts" })
+			expect(secondResult.nativeArgs).toEqual({ path: "second.ts" })
+		})
+
 		describe("read_file tool", () => {
 			it("should emit a partial ToolUse with nativeArgs.path during streaming", () => {
 				const id = "toolu_streaming_123"
