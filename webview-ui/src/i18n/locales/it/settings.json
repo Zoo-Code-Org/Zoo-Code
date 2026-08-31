@@ -421,6 +421,12 @@
 			"billingWarning": "Le preferenze di routing avanzate possono usare il routing a consumo e possono escludere la copertura dell'abbonamento, in base alle regole di fatturazione attuali di NanoGPT.",
 			"routingDocs": "Visualizza i dettagli di routing e fatturazione di NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "Le chiavi API sono memorizzate in modo sicuro nell'Archivio Segreto di VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

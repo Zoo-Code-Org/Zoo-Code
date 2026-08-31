@@ -45,6 +45,7 @@ export const MODELS_BY_PROVIDER: Partial<Record<ProviderName, Record<string, Mod
 
 export const PROVIDERS: Array<{ value: string; label: string; proxy: boolean }> = [
 	{ value: providerIdentifiers.openrouter, label: "OpenRouter", proxy: false },
+	{ value: providerIdentifiers.orcaRouter, label: "OrcaRouter", proxy: false },
 	{ value: providerIdentifiers.anthropic, label: "Anthropic", proxy: false },
 	{ value: providerIdentifiers.gemini, label: "Google Gemini", proxy: false },
 	{ value: providerIdentifiers.deepseek, label: "DeepSeek", proxy: false },

@@ -61,6 +61,7 @@ export const DEFAULT_CONSECUTIVE_MISTAKE_LIMIT = 3
 
 export const dynamicProviders = [
 	providerIdentifiers.openrouter,
+	providerIdentifiers.orcaRouter,
 	providerIdentifiers.vercelAiGateway,
 	providerIdentifiers.zooGateway,
 	providerIdentifiers.litellm,
@@ -275,6 +276,7 @@ export type ModelIdKey = Extract<keyof ProviderSettingsShape, `${string}ModelId`
 export const modelIdKeys = [
 	"apiModelId",
 	"openRouterModelId",
+	"orcaRouterModelId",
 	"openAiModelId",
 	"ollamaModelId",
 	"lmStudioModelId",
@@ -505,6 +507,7 @@ export const MODELS_BY_PROVIDER: Record<
 	[providerIdentifiers.poe]: { id: providerIdentifiers.poe, label: "Poe", models: [] },
 	[providerIdentifiers.litellm]: { id: providerIdentifiers.litellm, label: "LiteLLM", models: [] },
 	[providerIdentifiers.openrouter]: { id: providerIdentifiers.openrouter, label: "OpenRouter", models: [] },
+	[providerIdentifiers.orcaRouter]: { id: providerIdentifiers.orcaRouter, label: "OrcaRouter", models: [] },
 	[providerIdentifiers.requesty]: { id: providerIdentifiers.requesty, label: "Requesty", models: [] },
 	[providerIdentifiers.unbound]: { id: providerIdentifiers.unbound, label: "Unbound", models: [] },
 	[providerIdentifiers.vercelAiGateway]: {

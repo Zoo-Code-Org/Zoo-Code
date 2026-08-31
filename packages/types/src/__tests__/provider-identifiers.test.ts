@@ -23,6 +23,7 @@ import {
 
 const expectedProviderIdentifiers = [
 	"openrouter",
+	"orcarouter",
 	"vercel-ai-gateway",
 	"zoo-gateway",
 	"litellm",
@@ -97,6 +98,7 @@ describe("provider identifiers", () => {
 	it("derives provider category collections from canonical identifiers", () => {
 		expect(dynamicProviders).toEqual([
 			providerIdentifiers.openrouter,
+			providerIdentifiers.orcaRouter,
 			providerIdentifiers.vercelAiGateway,
 			providerIdentifiers.zooGateway,
 			providerIdentifiers.litellm,

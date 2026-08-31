@@ -67,6 +67,7 @@ import {
 	OpenAICompatible,
 	OpenAICodex,
 	OpenRouter,
+	OrcaRouter,
 	Poe,
 	QwenCode,
 	Requesty,
@@ -684,6 +685,17 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.nanogpt && (
 						<NanoGPT
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.orcaRouter && (
+						<OrcaRouter
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

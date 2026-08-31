@@ -421,6 +421,12 @@
 			"billingWarning": "Tùy chọn định tuyến nâng cao có thể sử dụng định tuyến trả theo mức dùng và có thể không thuộc phạm vi gói đăng ký, tùy theo quy tắc thanh toán hiện tại của NanoGPT.",
 			"routingDocs": "Xem chi tiết định tuyến và thanh toán NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "Khóa API được lưu trữ an toàn trong Bộ lưu trữ bí mật của VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

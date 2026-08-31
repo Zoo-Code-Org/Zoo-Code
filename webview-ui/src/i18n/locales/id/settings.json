@@ -421,6 +421,12 @@
 			"billingWarning": "Preferensi routing lanjutan dapat menggunakan routing bayar sesuai pemakaian dan dapat melewati cakupan langganan, tergantung aturan penagihan NanoGPT saat ini.",
 			"routingDocs": "Lihat detail routing dan penagihan NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API key disimpan dengan aman di Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

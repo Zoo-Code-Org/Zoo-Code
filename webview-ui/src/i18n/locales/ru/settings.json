@@ -421,6 +421,12 @@
 			"billingWarning": "Расширенные предпочтения маршрутизации могут использовать оплату по факту использования и могут обходить покрытие подписки в зависимости от текущих правил оплаты NanoGPT.",
 			"routingDocs": "Подробнее о маршрутизации и оплате NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API-ключи хранятся безопасно в Secret Storage VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

@@ -102,6 +102,7 @@ describe("NanoGPT", () => {
 		moonshot: {},
 		"opencode-go": {},
 		kenari: {},
+		orcarouter: {},
 		nanogpt: { "openai/test": { contextWindow: 1, maxTokens: 1, supportsPromptCache: false } },
 		"kimi-code": {},
 		ollama: {},

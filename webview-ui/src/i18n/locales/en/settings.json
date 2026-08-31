@@ -501,6 +501,12 @@
 			"billingWarning": "Advanced routing preferences may use pay-as-you-go routing and may bypass subscription coverage, depending on NanoGPT's current billing rules.",
 			"routingDocs": "View NanoGPT routing and billing details"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API keys are stored securely in VSCode's Secret Storage",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

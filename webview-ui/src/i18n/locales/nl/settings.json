@@ -421,6 +421,12 @@
 			"billingWarning": "Geavanceerde routeringsvoorkeuren kunnen betalen-per-gebruik-routering gebruiken en kunnen, afhankelijk van de huidige factureringsregels van NanoGPT, buiten je abonnement vallen.",
 			"routingDocs": "Routerings- en factureringsdetails van NanoGPT bekijken"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API-sleutels worden veilig opgeslagen in de geheime opslag van VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

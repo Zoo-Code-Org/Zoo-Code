@@ -3,6 +3,7 @@ import { getModelId, modelIdKeys, providerIdentifiers, type ProviderSettings } f
 const expectedModelIdKeys = [
 	"apiModelId",
 	"openRouterModelId",
+	"orcaRouterModelId",
 	"openAiModelId",
 	"ollamaModelId",
 	"lmStudioModelId",

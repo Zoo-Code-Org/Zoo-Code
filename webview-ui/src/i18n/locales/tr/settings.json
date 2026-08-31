@@ -421,6 +421,12 @@
 			"billingWarning": "Gelişmiş yönlendirme tercihleri kullanıma göre ödeme yönlendirmesini kullanabilir ve NanoGPT'nin güncel faturalandırma kurallarına bağlı olarak abonelik kapsamını atlayabilir.",
 			"routingDocs": "NanoGPT yönlendirme ve faturalandırma ayrıntılarını görüntüle"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API anahtarları VSCode'un Gizli Depolamasında güvenli bir şekilde saklanır",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

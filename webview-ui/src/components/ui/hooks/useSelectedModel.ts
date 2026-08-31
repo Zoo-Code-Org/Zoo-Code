@@ -32,6 +32,7 @@ import {
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
 	nanoGptDefaultModelInfo,
+	orcaRouterDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	VERTEX_1M_CONTEXT_MODEL_IDS,
 	isDynamicProvider,
@@ -442,6 +443,15 @@ function getSelectedModel({
 				defaultModelId,
 			)
 			const info = routerModels[providerIdentifiers.nanogpt]?.[id] ?? nanoGptDefaultModelInfo
+			return { id, info }
+		}
+		case providerIdentifiers.orcaRouter: {
+			const id = getValidatedModelId(
+				apiConfiguration.orcaRouterModelId,
+				routerModels[providerIdentifiers.orcaRouter],
+				defaultModelId,
+			)
+			const info = routerModels[providerIdentifiers.orcaRouter]?.[id] ?? orcaRouterDefaultModelInfo
 			return { id, info }
 		}
 		case providerIdentifiers.zooGateway: {

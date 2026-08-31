@@ -177,6 +177,7 @@ type CommonFetchParams = {
 // until a corresponding entry is added here.
 const dynamicProviderExtras = {
 	openrouter: {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
+	orcarouter: {} as { apiKey?: string }, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	"vercel-ai-gateway": {} as {}, // eslint-disable-line @typescript-eslint/no-empty-object-type
 	"zoo-gateway": {} as { apiKey?: string; baseUrl?: string },
 	litellm: {} as { apiKey?: string; baseUrl: string },
