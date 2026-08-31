@@ -277,6 +277,10 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 		return "delegated"
 	}
 
+	/**
+	 * Handles streaming partial blocks for attempt_completion, updating the completion result
+	 * or command ask as the model streams its response.
+	 */
 	override async handlePartial(task: Task, block: ToolUse<"attempt_completion">): Promise<void> {
 		const result: string | undefined = block.params.result
 		const command: string | undefined = block.params.command

@@ -646,6 +646,10 @@ describe("Task persistence", () => {
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
 				expect(callbacks.handleError).not.toHaveBeenCalled()
 				expect(completionListener).toHaveBeenCalledTimes(1)
+				// Assert ordering: retry save completes before TaskCompleted is emitted
+				expect(vi.mocked(mockSaveApiMessages).mock.invocationCallOrder[1]).toBeLessThan(
+					vi.mocked(completionListener).mock.invocationCallOrder[0],
+				)
 			} finally {
 				mockSaveApiMessages.mockResolvedValue(undefined)
 				vi.useRealTimers()
@@ -706,6 +710,38 @@ describe("Task persistence", () => {
 
 			await expect(waiting).resolves.toBe(false)
 			task.dispose()
+		})
+
+		it("stops retry attempts immediately when cancelled during delay", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages.mockRejectedValueOnce(new Error("initial write failed")).mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "text", text: "message" }],
+				})
+				const waiting = task.waitForCurrentAssistantMessagePersistence()
+
+				// Cancel during the first retry delay (100ms)
+				await vi.advanceTimersByTimeAsync(50)
+				task.dispose()
+
+				await expect(waiting).resolves.toBe(false)
+				await vi.runAllTimersAsync()
+
+				// Should only have attempted the initial save, no retry saves
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+			} finally {
+				vi.useRealTimers()
+			}
 		})
 	})
 
