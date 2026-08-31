@@ -155,7 +155,7 @@ const McpSettingsSchema = z.object({
 export const EXA_MCP_SERVER_CONFIG = {
 	type: "streamable-http",
 	url: "https://mcp.exa.ai/mcp",
-	alwaysAllow: ["web_search_exa", "web_fetch_exa"],
+	alwaysAllow: [],
 } as const
 
 export class McpHub {
@@ -510,9 +510,8 @@ export class McpHub {
 			await provider.ensureSettingsDirectoryExists(),
 			GlobalFileNames.mcpSettings,
 		)
-		const fileExists = await fileExistsAtPath(mcpSettingsFilePath)
-		if (!fileExists) {
-			await safeWriteJson(mcpSettingsFilePath, { mcpServers: {} }, { prettyPrint: true })
+		if (!(await fileExistsAtPath(mcpSettingsFilePath))) {
+			await safeWriteJson(mcpSettingsFilePath, { mcpServers: {} }, { createOnly: true, prettyPrint: true })
 		}
 		return mcpSettingsFilePath
 	}
@@ -550,16 +549,67 @@ export class McpHub {
 			throw new Error("Invalid config structure")
 		}
 
-		const mcpSettings = config as { mcpServers?: Record<string, unknown> }
-		mcpSettings.mcpServers ??= {}
+		const mcpSettings = config as { mcpServers?: unknown }
+		if (mcpSettings.mcpServers === undefined) {
+			mcpSettings.mcpServers = {}
+		} else if (
+			mcpSettings.mcpServers === null ||
+			typeof mcpSettings.mcpServers !== "object" ||
+			Array.isArray(mcpSettings.mcpServers)
+		) {
+			throw new Error("Invalid MCP servers structure")
+		}
 
-		if (Object.keys(mcpSettings.mcpServers).some((name) => name.toLowerCase() === "exa")) {
+		const currentServers = mcpSettings.mcpServers as Record<string, unknown>
+
+		if (Object.keys(currentServers).some((name) => name.toLowerCase() === "exa")) {
 			return
 		}
 
-		mcpSettings.mcpServers.exa = EXA_MCP_SERVER_CONFIG
-		await safeWriteJson(configPath, { mcpServers: mcpSettings.mcpServers }, { prettyPrint: true })
-		await this.updateServerConnections(mcpSettings.mcpServers, "global")
+		let updatedServers: Record<string, unknown> = { ...currentServers, exa: EXA_MCP_SERVER_CONFIG }
+		if (this.flagResetTimer) {
+			clearTimeout(this.flagResetTimer)
+		}
+		this.isProgrammaticUpdate = true
+		try {
+			await safeWriteJson(
+				configPath,
+				{ mcpServers: updatedServers },
+				{
+					prettyPrint: true,
+					merge: (existing) => {
+						if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
+							throw new Error("Invalid config structure")
+						}
+
+						const existingServers = (existing as { mcpServers?: unknown }).mcpServers
+						if (
+							existingServers !== undefined &&
+							(existingServers === null ||
+								typeof existingServers !== "object" ||
+								Array.isArray(existingServers))
+						) {
+							throw new Error("Invalid MCP servers structure")
+						}
+
+						const servers = (existingServers ?? {}) as Record<string, unknown>
+						if (Object.keys(servers).some((name) => name.toLowerCase() === "exa")) {
+							updatedServers = servers
+							return { mcpServers: servers }
+						}
+
+						updatedServers = { ...servers, exa: EXA_MCP_SERVER_CONFIG }
+						return { mcpServers: updatedServers }
+					},
+				},
+			)
+		} finally {
+			this.flagResetTimer = setTimeout(() => {
+				this.isProgrammaticUpdate = false
+				this.flagResetTimer = undefined
+			}, 600)
+		}
+		await this.updateServerConnections(updatedServers, "global")
 	}
 
 	private async watchMcpSettingsFile(): Promise<void> {

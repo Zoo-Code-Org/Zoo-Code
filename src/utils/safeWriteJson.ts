@@ -17,6 +17,14 @@ export interface SafeWriteJsonOptions {
 	prettyPrint?: boolean
 
 	/**
+	 * Only writes when the target does not exist at the time the advisory lock
+	 * is held. This is useful for initializing files without overwriting content
+	 * created by another process between a caller's existence check and write.
+	 * @default false
+	 */
+	createOnly?: boolean
+
+	/**
 	 * When provided, the current file is read under the advisory lock
 	 * and passed to this function along with the incoming data. The
 	 * return value replaces `data` for the write. This turns a blind
@@ -93,6 +101,19 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	let actualTempBackupFilePath: string | null = null
 
 	try {
+		if (options?.createOnly) {
+			try {
+				await fs.access(absoluteFilePath)
+				return
+			} catch (error: unknown) {
+				const code =
+					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				if (code !== "ENOENT") {
+					throw error
+				}
+			}
+		}
+
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally
 		// so a throwing merge still releases the lock.

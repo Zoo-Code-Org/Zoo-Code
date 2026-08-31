@@ -9,7 +9,9 @@ type ExaMcpPromptContext = {
 	globalState: Pick<vscode.Memento, "get" | "update">
 }
 
-export async function promptToInstallExaMcp(context: ExaMcpPromptContext, mcpHub: McpHub): Promise<void> {
+let promptInFlight: Promise<void> | undefined
+
+async function promptToInstallExaMcpOnce(context: ExaMcpPromptContext, mcpHub: McpHub): Promise<void> {
 	if (mcpHub.hasExaServer() || context.globalState.get<boolean>(EXA_MCP_PROMPT_SHOWN_KEY, false)) {
 		return
 	}
@@ -30,4 +32,11 @@ export async function promptToInstallExaMcp(context: ExaMcpPromptContext, mcpHub
 		const errorMessage = error instanceof Error ? error.message : String(error)
 		void vscode.window.showErrorMessage(t("mcp:errors.exa_install_failed", { errorMessage }))
 	}
+}
+
+export function promptToInstallExaMcp(context: ExaMcpPromptContext, mcpHub: McpHub): Promise<void> {
+	promptInFlight ??= promptToInstallExaMcpOnce(context, mcpHub).finally(() => {
+		promptInFlight = undefined
+	})
+	return promptInFlight
 }

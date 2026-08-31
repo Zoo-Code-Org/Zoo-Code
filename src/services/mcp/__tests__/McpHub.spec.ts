@@ -37,10 +37,18 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 // Mock safeWriteJson
 vi.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vi.fn(async (filePath, data) => {
+	safeWriteJson: vi.fn(async (filePath, data, options?: { createOnly?: boolean }) => {
 		// Instead of trying to write to the file system, just call fs.writeFile mock
 		// This avoids the complex file locking and temp file operations
 		const fs = await import("fs/promises")
+		if (options?.createOnly) {
+			try {
+				await fs.access(filePath)
+				return
+			} catch {
+				// The target is missing, so initialization may create it.
+			}
+		}
 		return fs.writeFile(filePath, JSON.stringify(data), "utf8")
 	}),
 }))
@@ -188,6 +196,7 @@ describe("McpHub", () => {
 
 		mcpHub = new McpHub(mockProvider as ClineProvider)
 		await mcpHub.waitUntilReady()
+		vi.mocked(safeWriteJson).mockClear()
 	})
 
 	afterEach(() => {
@@ -224,7 +233,11 @@ describe("McpHub", () => {
 			const settingsPath = await mcpHub.getMcpSettingsFilePath()
 
 			expect(settingsPath).toBe(path.join("/mock/settings/path", "mcp_settings.json"))
-			expect(safeWriteJson).toHaveBeenCalledWith(settingsPath, { mcpServers: {} }, { prettyPrint: true })
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				settingsPath,
+				{ mcpServers: {} },
+				{ createOnly: true, prettyPrint: true },
+			)
 		})
 
 		it("detects Exa configured under a custom server name", () => {
@@ -288,7 +301,7 @@ describe("McpHub", () => {
 				},
 			}
 			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify(existingConfig))
-			vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+			const updateConnectionsSpy = vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
 
 			await mcpHub.installExaServer()
 
@@ -300,11 +313,18 @@ describe("McpHub", () => {
 						exa: {
 							type: "streamable-http",
 							url: "https://mcp.exa.ai/mcp",
-							alwaysAllow: ["web_search_exa", "web_fetch_exa"],
+							alwaysAllow: [],
 						},
 					},
 				},
-				{ prettyPrint: true },
+				expect.objectContaining({ prettyPrint: true, merge: expect.any(Function) }),
+			)
+			expect(updateConnectionsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					existing: { type: "stdio", command: "node" },
+					exa: expect.objectContaining({ url: "https://mcp.exa.ai/mcp", alwaysAllow: [] }),
+				}),
+				"global",
 			)
 		})
 
@@ -342,7 +362,7 @@ describe("McpHub", () => {
 			expect(safeWriteJson).toHaveBeenCalledWith(
 				settingsPath,
 				{ mcpServers: { exa: expect.objectContaining({ url: "https://mcp.exa.ai/mcp" }) } },
-				{ prettyPrint: true },
+				expect.objectContaining({ prettyPrint: true, merge: expect.any(Function) }),
 			)
 		})
 
@@ -351,6 +371,32 @@ describe("McpHub", () => {
 
 			await expect(mcpHub.installExaServer()).rejects.toThrow("Invalid config structure")
 			expect(safeWriteJson).not.toHaveBeenCalled()
+		})
+
+		it.each([[], "invalid", 42])("rejects invalid MCP server containers (%j)", async (mcpServers) => {
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers }))
+
+			await expect(mcpHub.installExaServer()).rejects.toThrow("Invalid MCP servers structure")
+			expect(safeWriteJson).not.toHaveBeenCalled()
+		})
+
+		it("suppresses file-watcher handling during the settings write", async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: {} }))
+			let releaseWrite: (() => void) | undefined
+			vi.mocked(safeWriteJson).mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						releaseWrite = resolve
+					}),
+			)
+			vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+
+			const installation = mcpHub.installExaServer()
+			await vi.waitFor(() => expect(safeWriteJson).toHaveBeenCalled())
+
+			expect(mcpHub["isProgrammaticUpdate"]).toBe(true)
+			releaseWrite?.()
+			await installation
 		})
 	})
 
@@ -391,6 +437,31 @@ describe("McpHub", () => {
 
 			expect(context.globalState.update).toHaveBeenCalledWith(EXA_MCP_PROMPT_SHOWN_KEY, true)
 			expect(installSpy).not.toHaveBeenCalled()
+		})
+
+		it("shows only one notification for concurrent prompt attempts", async () => {
+			let releaseUpdate: (() => void) | undefined
+			const context = {
+				globalState: {
+					get: vi.fn().mockReturnValue(false),
+					update: vi.fn(
+						() =>
+							new Promise<void>((resolve) => {
+								releaseUpdate = resolve
+							}),
+					),
+				},
+			}
+			vi.spyOn(mcpHub, "hasExaServer").mockReturnValue(false)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(undefined)
+
+			const firstPrompt = promptToInstallExaMcp(context, mcpHub)
+			await vi.waitFor(() => expect(context.globalState.update).toHaveBeenCalledOnce())
+			const secondPrompt = promptToInstallExaMcp(context, mcpHub)
+			releaseUpdate?.()
+
+			await Promise.all([firstPrompt, secondPrompt])
+			expect(vscode.window.showInformationMessage).toHaveBeenCalledOnce()
 		})
 
 		it("installs Exa when the user accepts", async () => {
