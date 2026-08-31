@@ -895,11 +895,13 @@ describe("ClineProvider", () => {
 		const olderSnapshot = new Promise<ExtensionState>((resolve) => {
 			releaseOlderSnapshot = resolve
 		})
-		const emptyState = { taskHistory: [], clineMessages: [] } as unknown as ExtensionState
-		const readyState = {
+		const baseState = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		const emptyState: ExtensionState = { ...baseState, taskHistory: [], clineMessages: [] }
+		const readyState: ExtensionState = {
+			...baseState,
 			taskHistory: [],
 			clineMessages: [{ type: "say", say: "text", text: "child ready" }],
-		} as unknown as ExtensionState
+		}
 
 		vi.spyOn(provider, "getStateToPostToWebview")
 			.mockReturnValueOnce(olderSnapshot)
