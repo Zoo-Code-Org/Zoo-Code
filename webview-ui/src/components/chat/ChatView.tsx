@@ -1510,7 +1510,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// regular message
 			return (
 				<ChatRow
-					key={messageOrGroup.ts}
+					key={`${messageOrGroup.ts}-${messageOrGroup.partial ? "partial" : "full"}`}
 					message={messageOrGroup}
 					isExpanded={expandedRows[messageOrGroup.ts] || false}
 					onToggleExpand={toggleRowExpansion} // This was already stabilized
@@ -1565,7 +1565,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 
 	const computeMessageKey = useCallback(
-		(index: number, messageOrGroup: ClineMessage) => `${messageOrGroup.ts}-${index}`,
+		(index: number, messageOrGroup: ClineMessage) =>
+			`${messageOrGroup.ts}-${index}-${messageOrGroup.partial ? "partial" : "full"}`,
 		[],
 	)
 

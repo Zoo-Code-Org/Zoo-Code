@@ -14,6 +14,7 @@ import {
 } from "@roo-code/types"
 
 import { ExtensionStateContextProvider, useExtensionState, mergeExtensionState } from "../ExtensionStateContext"
+import { StringCache } from "@/utils/stringCache"
 
 const TestComponent = () => {
 	const { allowedCommands, setAllowedCommands, soundEnabled, showRooIgnoredFiles, setShowRooIgnoredFiles } =
@@ -103,6 +104,85 @@ const InitialStateTestComponent = () => {
 }
 
 describe("ExtensionStateContext", () => {
+	it("clears the task-scoped message cache only on explicit task transitions", () => {
+		const clearSpy = vi.spyOn(StringCache.prototype, "clear")
+		render(
+			<ExtensionStateContextProvider initialState={{ currentTaskId: "task-a" }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		clearSpy.mockClear()
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { currentTaskId: "task-a" } } }),
+			)
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "state", state: { language: "en" } } }))
+		})
+		expect(clearSpy).not.toHaveBeenCalled()
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { currentTaskId: undefined } } }),
+			)
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "state", state: { currentTaskId: "task-b" } } }),
+			)
+		})
+		expect(clearSpy).toHaveBeenCalledTimes(2)
+	})
+
+	it("does not intern messages from stale sequenced state updates", () => {
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		render(
+			<ExtensionStateContextProvider initialState={{ clineMessagesSeq: 5 }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		internSpy.mockClear()
+		const staleMessage = { ts: 1, type: "say", say: "text", text: "stale" } as ClineMessage
+		const currentMessage = { ts: 2, type: "say", say: "text", text: "current" } as ClineMessage
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { clineMessages: [staleMessage], clineMessagesSeq: 4 } },
+				}),
+			)
+		})
+		expect(internSpy).not.toHaveBeenCalledWith(staleMessage)
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { clineMessages: [currentMessage], clineMessagesSeq: 6 } },
+				}),
+			)
+		})
+		expect(internSpy).toHaveBeenCalledWith(currentMessage)
+	})
+
+	it("does not intern an update for a message outside the current task", () => {
+		const currentMessage = { ts: 1, type: "say", say: "text", text: "current" } as ClineMessage
+		const unknownMessage = { ts: 2, type: "say", say: "text", text: "late" } as ClineMessage
+		const internSpy = vi.spyOn(StringCache.prototype, "intern")
+		vi.spyOn(console, "warn").mockImplementation(() => undefined)
+		render(
+			<ExtensionStateContextProvider initialState={{ clineMessages: [currentMessage] }}>
+				<TestComponent />
+			</ExtensionStateContextProvider>,
+		)
+		internSpy.mockClear()
+
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "messageUpdated", clineMessage: unknownMessage } }),
+			)
+		})
+
+		expect(internSpy).not.toHaveBeenCalledWith(unknownMessage)
+	})
+
 	it("initializes with empty allowedCommands array", () => {
 		render(
 			<ExtensionStateContextProvider>

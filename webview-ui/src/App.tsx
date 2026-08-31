@@ -55,6 +55,7 @@ const App = () => {
 	useThemeFixtureProbe()
 
 	const {
+		currentTaskId,
 		didHydrateState,
 		showWelcome,
 		settingsImportedAt,
@@ -260,6 +261,7 @@ const App = () => {
 				/>
 			)}
 			<ChatView
+				key={currentTaskId ?? "no-task"}
 				ref={chatViewRef}
 				isHidden={tab !== "chat"}
 				showAnnouncement={showAnnouncement}
