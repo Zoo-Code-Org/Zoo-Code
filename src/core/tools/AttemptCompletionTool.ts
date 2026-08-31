@@ -143,7 +143,8 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								hasFlushedTelemetry = true
 
 								try {
-									await task.waitForCurrentAssistantMessagePersistence()
+									const persistenceReady = await task.waitForCurrentAssistantMessagePersistence()
+									if (!persistenceReady) return
 								} catch (error) {
 									await handleError("persisting task completion", error as Error)
 									return
@@ -301,7 +302,8 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	 * PostHog telemetry flush, which reports on every model-initiated attempt_completion call.
 	 */
 	private async emitPublicTaskCompleted(task: Task): Promise<void> {
-		await task.waitForCurrentAssistantMessagePersistence()
+		const persistenceReady = await task.waitForCurrentAssistantMessagePersistence()
+		if (!persistenceReady) return
 
 		// Force final token usage update before emitting TaskCompleted.
 		// This ensures the latest stats are captured regardless of throttle timer.

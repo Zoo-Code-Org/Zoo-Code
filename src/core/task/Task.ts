@@ -195,6 +195,8 @@ export interface TaskOptions extends CreateTaskOptions {
 	diffFuzzyThreshold?: number
 }
 
+type AssistantMessagePersistenceResult = "saved" | "failed" | "cancelled"
+
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
 	readonly rootTaskId?: string
@@ -409,9 +411,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Set to `true` only after the assistant message is durably saved.
 	 */
 	assistantMessageSavedToHistory = false
-	private assistantMessagePersistencePromise!: Promise<boolean>
-	private resolveAssistantMessagePersistence!: (saved: boolean) => void
-	private completionPersistenceReadyPromise?: Promise<void>
+	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
+	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
+	private assistantMessagePersistenceCancellationPromise!: Promise<void>
+	private resolveAssistantMessagePersistenceCancellation!: () => void
+	private completionPersistenceReadyPromise?: Promise<boolean>
 
 	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
@@ -1023,34 +1027,54 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		if (message.role === "assistant") {
 			this.assistantMessageSavedToHistory = saved
-			this.resolveAssistantMessagePersistence(saved)
+			this.resolveAssistantMessagePersistence(saved ? "saved" : "failed")
 		}
 	}
 
-	/** Creates the persistence boundary for the next streamed assistant turn. */
+	/** Cancels the current persistence generation before creating the next assistant-turn boundary. */
 	private resetAssistantMessagePersistence(): void {
-		this.assistantMessagePersistencePromise = new Promise<boolean>((resolve) => {
+		this.cancelAssistantMessagePersistence()
+		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve
 		})
+		this.assistantMessagePersistenceCancellationPromise = new Promise<void>((resolve) => {
+			this.resolveAssistantMessagePersistenceCancellation = resolve
+		})
 		this.completionPersistenceReadyPromise = undefined
+	}
+
+	/** Settles persistence waiters when the task or current stream generation ends. */
+	private cancelAssistantMessagePersistence(): void {
+		this.resolveAssistantMessagePersistence?.("cancelled")
+		this.resolveAssistantMessagePersistenceCancellation?.()
 	}
 
 	/**
 	 * Waits until the current assistant turn is visible to a fresh extension host.
 	 * A public completion event must not be emitted before this boundary succeeds.
 	 */
-	public waitForCurrentAssistantMessagePersistence(): Promise<void> {
+	public waitForCurrentAssistantMessagePersistence(): Promise<boolean> {
 		if (!this.completionPersistenceReadyPromise) {
 			const currentPersistence = this.assistantMessagePersistencePromise
+			const currentCancellation = this.assistantMessagePersistenceCancellationPromise
 			this.completionPersistenceReadyPromise = (async () => {
-				const saved = await currentPersistence
-				if (saved) return
+				const result = await Promise.race([
+					currentPersistence,
+					currentCancellation.then(() => "cancelled" as const),
+				])
+				if (result === "cancelled") return false
+				if (result === "saved") return true
 
-				const retrySucceeded = await this.retrySaveApiConversationHistory()
-				if (!retrySucceeded) {
+				const retryResult = await Promise.race([
+					this.retrySaveApiConversationHistory().then((saved) => ({ status: "complete" as const, saved })),
+					currentCancellation.then(() => ({ status: "cancelled" as const })),
+				])
+				if (retryResult.status === "cancelled") return false
+				if (!retryResult.saved) {
 					throw new Error("Failed to persist API conversation history before task completion")
 				}
 				this.assistantMessageSavedToHistory = true
+				return true
 			})()
 		}
 
@@ -2547,6 +2571,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.abort = true
+		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
 	}
@@ -2610,6 +2635,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		this.cancelAssistantMessagePersistence()
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task

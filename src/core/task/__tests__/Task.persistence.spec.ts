@@ -23,6 +23,7 @@ import type { AttemptCompletionToolUse } from "../../../shared/tools"
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
+	resetAssistantMessagePersistence: () => void
 	resumeTaskFromHistory: () => Promise<void>
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
@@ -583,6 +584,61 @@ describe("Task persistence", () => {
 				mockSaveApiMessages.mockResolvedValue(undefined)
 				vi.useRealTimers()
 			}
+		})
+
+		it("settles a pending assistant persistence wait when the task is disposed", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const waiting = task.waitForCurrentAssistantMessagePersistence()
+			task.dispose()
+
+			await expect(waiting).resolves.toBe(false)
+		})
+
+		it("cancels a persistence wait while failed history is awaiting retry", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages.mockRejectedValueOnce(new Error("write failed"))
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "text", text: "completion" }],
+				})
+				const waiting = task.waitForCurrentAssistantMessagePersistence()
+
+				task.dispose()
+
+				await expect(waiting).resolves.toBe(false)
+			} finally {
+				vi.clearAllTimers()
+				vi.useRealTimers()
+			}
+		})
+
+		it("settles the previous persistence generation when a new request resets the barrier", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const waiting = task.waitForCurrentAssistantMessagePersistence()
+
+			getTaskPersistenceAccess(task).resetAssistantMessagePersistence()
+
+			await expect(waiting).resolves.toBe(false)
+			task.dispose()
 		})
 	})
 

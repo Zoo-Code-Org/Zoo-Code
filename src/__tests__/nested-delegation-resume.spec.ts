@@ -204,7 +204,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 			consecutiveMistakeCount: 0,
 			emitFinalTokenUsageUpdate: vi.fn(),
 			flushTelemetryInstallment: vi.fn(),
-			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(undefined),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(true),
 		} as unknown as Task
 
 		const blockC = {
@@ -253,7 +253,7 @@ describe("Nested delegation resume (A → B → C)", () => {
 			consecutiveMistakeCount: 0,
 			emitFinalTokenUsageUpdate: vi.fn(),
 			flushTelemetryInstallment: vi.fn(),
-			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(undefined),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(true),
 		} as unknown as Task
 
 		const blockB = {

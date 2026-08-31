@@ -76,7 +76,7 @@ describe("attemptCompletionTool", () => {
 			flushTelemetryInstallment: vi.fn(),
 			setPendingTaskAction: vi.fn(),
 			persistQueuedFeedbackAndAcknowledge: vi.fn().mockResolvedValue(true),
-			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(undefined),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(true),
 		}
 	})
 
@@ -480,8 +480,8 @@ describe("attemptCompletionTool", () => {
 		describe("completion lifecycle", () => {
 			it("delegates an active subtask completion when the active parent awaits that child", async () => {
 				let markPersistenceReady!: () => void
-				const persistenceReady = new Promise<void>((resolve) => {
-					markPersistenceReady = resolve
+				const persistenceReady = new Promise<boolean>((resolve) => {
+					markPersistenceReady = () => resolve(true)
 				})
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
@@ -845,6 +845,34 @@ describe("attemptCompletionTool", () => {
 				)
 			})
 
+			it("does not emit TaskCompleted when persistence is cancelled", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "2" },
+					nativeArgs: { result: "2" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+				mockTask.waitForCurrentAssistantMessagePersistence = vi.fn().mockResolvedValue(false)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
 			it("reports telemetry but does not emit the public TaskCompleted event when user provides follow-up feedback", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",
@@ -1035,7 +1063,7 @@ describe("attemptCompletionTool telemetry invariants", () => {
 			messageCounts: { user: 0, assistant: 0 },
 			taskId: "task_1",
 			flushTelemetryInstallment: vi.fn(),
-			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(undefined),
+			waitForCurrentAssistantMessagePersistence: vi.fn().mockResolvedValue(true),
 			...overrides,
 		}
 	}
