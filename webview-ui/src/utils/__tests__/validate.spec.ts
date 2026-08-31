@@ -58,6 +58,7 @@ describe("Model Validation Functions", () => {
 		deepseek: {},
 		"opencode-go": {},
 		kenari: {},
+		orcarouter: {},
 		nanogpt: {},
 		"zoo-gateway": {},
 		"kimi-code": {},

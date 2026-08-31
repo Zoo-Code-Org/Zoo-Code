@@ -421,6 +421,12 @@
 			"billingWarning": "高级路由偏好可能使用按用量付费路由，并且根据 NanoGPT 当前的计费规则，可能不在订阅范围内。",
 			"routingDocs": "查看 NanoGPT 路由和计费详情"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API 密钥安全存储在 VSCode 的密钥存储中",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

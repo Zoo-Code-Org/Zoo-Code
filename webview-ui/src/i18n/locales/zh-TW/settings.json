@@ -448,6 +448,12 @@
 			"billingWarning": "進階路由偏好可能使用隨用隨付路由，並且根據 NanoGPT 目前的計費規則，可能不在訂閱涵蓋範圍內。",
 			"routingDocs": "查看 NanoGPT 路由與計費詳細資訊"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "API 金鑰會安全地儲存在 VS Code 的 Secret Storage 中",
 		"openAiCodexRateLimits": {
 			"title": "Codex 用量限制{{planLabel}}",

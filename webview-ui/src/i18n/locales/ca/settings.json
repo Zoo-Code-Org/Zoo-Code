@@ -421,6 +421,12 @@
 			"billingWarning": "Les preferències d'encaminament avançades poden utilitzar encaminament de pagament per ús i poden quedar fora de la cobertura de la subscripció, segons les regles de facturació actuals de NanoGPT.",
 			"routingDocs": "Consulta els detalls d'encaminament i facturació de NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "Les claus API s'emmagatzemen de forma segura a l'Emmagatzematge Secret de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

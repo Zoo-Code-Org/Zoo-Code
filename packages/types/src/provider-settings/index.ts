@@ -1,5 +1,6 @@
 import { anthropicProviderDefinition } from "./anthropic.js"
 import { openRouterProviderDefinition } from "./openrouter.js"
+import { orcaRouterProviderDefinition } from "./orca-router.js"
 import { bedrockProviderDefinition } from "./bedrock.js"
 import { vertexProviderDefinition } from "./vertex.js"
 import { openAiProviderDefinition } from "./openai.js"
@@ -50,6 +51,7 @@ export type { ProviderDefinition } from "./common.js"
 export const providerDefinitionList = [
 	anthropicProviderDefinition,
 	openRouterProviderDefinition,
+	orcaRouterProviderDefinition,
 	bedrockProviderDefinition,
 	vertexProviderDefinition,
 	openAiProviderDefinition,

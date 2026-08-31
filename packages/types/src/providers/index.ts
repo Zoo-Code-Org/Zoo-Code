@@ -14,6 +14,7 @@ export * from "./openai.js"
 export * from "./openai-codex.js"
 export * from "./openai-codex-rate-limits.js"
 export * from "./openrouter.js"
+export * from "./orca-router.js"
 export * from "./poe.js"
 export * from "./qwen-code.js"
 export * from "./requesty.js"
@@ -44,6 +45,7 @@ import { mistralDefaultModelId } from "./mistral.js"
 import { moonshotDefaultModelId } from "./moonshot.js"
 import { openAiCodexDefaultModelId } from "./openai-codex.js"
 import { openRouterDefaultModelId } from "./openrouter.js"
+import { orcaRouterDefaultModelId } from "./orca-router.js"
 import { poeDefaultModelId } from "./poe.js"
 import { qwenCodeDefaultModelId } from "./qwen-code.js"
 import { requestyDefaultModelId } from "./requesty.js"
@@ -80,6 +82,8 @@ export function getProviderDefaultModelId(
 	switch (provider) {
 		case providerIdentifiers.openrouter:
 			return openRouterDefaultModelId
+		case providerIdentifiers.orcaRouter:
+			return orcaRouterDefaultModelId
 		case providerIdentifiers.requesty:
 			return requestyDefaultModelId
 		case providerIdentifiers.litellm:

@@ -148,6 +148,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
+		case providerIdentifiers.orcaRouter:
+			if (!apiConfiguration.orcaRouterApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case providerIdentifiers.zooGateway:
 			if (!apiConfiguration.zooSessionToken && !zooCodeIsAuthenticated) {
 				return i18next.t("settings:validation.zooGatewaySignIn")

@@ -421,6 +421,12 @@
 			"billingWarning": "高度なルーティング設定では従量課金ルーティングが使用され、NanoGPTの現在の請求ルールによってはサブスクリプションの対象外になる場合があります。",
 			"routingDocs": "NanoGPTのルーティングと請求の詳細を表示"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "APIキーはVSCodeのシークレットストレージに安全に保存されます",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

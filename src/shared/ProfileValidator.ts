@@ -74,6 +74,8 @@ export class ProfileValidator {
 				return profile.vsCodeLmModelSelector?.id
 			case providerIdentifiers.openrouter:
 				return profile.openRouterModelId
+			case providerIdentifiers.orcaRouter:
+				return profile.orcaRouterModelId
 			case providerIdentifiers.ollama:
 				return profile.ollamaModelId
 			case providerIdentifiers.requesty:

@@ -421,6 +421,12 @@
 			"billingWarning": "Las preferencias de enrutamiento avanzadas pueden usar enrutamiento de pago por uso y pueden omitir la cobertura de la suscripción, según las reglas de facturación actuales de NanoGPT.",
 			"routingDocs": "Ver detalles de enrutamiento y facturación de NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "Las claves API se almacenan de forma segura en el Almacenamiento Secreto de VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

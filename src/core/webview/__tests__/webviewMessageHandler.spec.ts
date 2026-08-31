@@ -538,6 +538,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 		// Verify getModels was called for each provider
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.orcaRouter })
 		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
 		expect(mockGetModels).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -564,6 +565,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				orcarouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -812,6 +814,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				orcarouter: mockModels,
 				requesty: mockModels,
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -844,6 +847,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Mock some providers to succeed and others to fail
 		mockGetModels
 			.mockResolvedValueOnce(mockModels) // openrouter
+			.mockResolvedValueOnce(mockModels) // orcarouter
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockResolvedValueOnce(mockModels) // unbound
 			.mockResolvedValueOnce(mockModels) // vercel-ai-gateway
@@ -877,6 +881,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			type: "routerModels",
 			routerModels: {
 				openrouter: mockModels,
+				orcarouter: mockModels,
 				requesty: {},
 				unbound: mockModels,
 				"vercel-ai-gateway": mockModels,
@@ -900,6 +905,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		// Mock providers to fail with different error types
 		mockGetModels
 			.mockRejectedValueOnce(new Error("Structured error message")) // openrouter
+			.mockRejectedValueOnce(new Error("OrcaRouter error")) // orcarouter
 			.mockRejectedValueOnce(new Error("Requesty API error")) // requesty
 			.mockRejectedValueOnce(new Error("Unbound error")) // unbound
 			.mockRejectedValueOnce(new Error("Vercel AI Gateway error")) // vercel-ai-gateway
@@ -916,6 +922,13 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			success: false,
 			error: "Structured error message",
 			values: { provider: providerIdentifiers.openrouter },
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "singleRouterModelFetchResponse",
+			success: false,
+			error: "OrcaRouter error",
+			values: { provider: providerIdentifiers.orcaRouter },
 		})
 
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({

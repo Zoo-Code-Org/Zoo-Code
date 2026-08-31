@@ -339,6 +339,7 @@ export const SECRET_STATE_KEYS = [
 	"opencodeGoApiKey",
 	"kenariApiKey",
 	"nanoGptApiKey",
+	"orcaRouterApiKey",
 	"basetenApiKey",
 ] as const
 

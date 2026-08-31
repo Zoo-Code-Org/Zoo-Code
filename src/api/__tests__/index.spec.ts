@@ -53,6 +53,7 @@ import {
 	OpenAiNativeHandler,
 	OpencodeGoHandler,
 	OpenRouterHandler,
+	OrcaRouterHandler,
 	PoeHandler,
 	QwenCodeHandler,
 	RequestyHandler,
@@ -72,6 +73,7 @@ type HandlerConstructor = new (...args: never[]) => object
 const expectedHandlers = {
 	[providerIdentifiers.anthropic]: AnthropicHandler,
 	[providerIdentifiers.openrouter]: OpenRouterHandler,
+	[providerIdentifiers.orcaRouter]: OrcaRouterHandler,
 	[providerIdentifiers.bedrock]: AwsBedrockHandler,
 	[providerIdentifiers.openai]: OpenAiHandler,
 	[providerIdentifiers.ollama]: NativeOllamaHandler,

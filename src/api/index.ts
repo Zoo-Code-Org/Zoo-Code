@@ -16,6 +16,7 @@ import {
 	AnthropicHandler,
 	AwsBedrockHandler,
 	OpenRouterHandler,
+	OrcaRouterHandler,
 	PoeHandler,
 	VertexHandler,
 	AnthropicVertexHandler,
@@ -169,6 +170,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new AnthropicHandler(options)
 		case providerIdentifiers.openrouter:
 			return new OpenRouterHandler(options)
+		case providerIdentifiers.orcaRouter:
+			return new OrcaRouterHandler(options)
 		case providerIdentifiers.bedrock:
 			return new AwsBedrockHandler(options)
 		case providerIdentifiers.vertex:

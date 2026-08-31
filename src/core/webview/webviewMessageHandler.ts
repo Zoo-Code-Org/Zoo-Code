@@ -1120,6 +1120,7 @@ export const webviewMessageHandler = async (
 				? ({} as Record<RouterName, ModelRecord>)
 				: {
 						[providerIdentifiers.openrouter]: {},
+						[providerIdentifiers.orcaRouter]: {},
 						[providerIdentifiers.vercelAiGateway]: {},
 						[providerIdentifiers.zooGateway]: {},
 						[providerIdentifiers.litellm]: {},
@@ -1154,6 +1155,10 @@ export const webviewMessageHandler = async (
 				{
 					key: providerIdentifiers.openrouter,
 					options: { provider: providerIdentifiers.openrouter },
+				},
+				{
+					key: providerIdentifiers.orcaRouter,
+					options: { provider: providerIdentifiers.orcaRouter },
 				},
 				{
 					key: providerIdentifiers.requesty,

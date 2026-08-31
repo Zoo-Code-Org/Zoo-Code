@@ -421,6 +421,12 @@
 			"billingWarning": "Zaawansowane preferencje routingu mogą używać rozliczeń za użycie i mogą omijać zakres subskrypcji, zależnie od aktualnych zasad rozliczeń NanoGPT.",
 			"routingDocs": "Zobacz szczegóły routingu i rozliczeń NanoGPT"
 		},
+		"orcaRouter": {
+			"provider": "OrcaRouter",
+			"apiKey": "OrcaRouter API Key",
+			"getApiKey": "Get OrcaRouter API Key",
+			"model": "Model"
+		},
 		"apiKeyStorageNotice": "Klucze API są bezpiecznie przechowywane w Tajnym Magazynie VSCode",
 		"openAiCodexRateLimits": {
 			"title": "Usage Limits for Codex{{planLabel}}",

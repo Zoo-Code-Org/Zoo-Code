@@ -18,6 +18,7 @@ import type { RouterName } from "../../../shared/api"
 import { fileExistsAtPath } from "../../../utils/fs"
 
 import { getOpenRouterModels } from "./openrouter"
+import { getOrcaRouterModels } from "./orca-router"
 import { getVercelAiGatewayModels } from "./vercel-ai-gateway"
 import { getOpencodeGoModels } from "./opencode-go"
 import { getKenariModels } from "./kenari"
@@ -229,6 +230,9 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 	switch (provider) {
 		case providerIdentifiers.openrouter:
 			models = await getOpenRouterModels()
+			break
+		case providerIdentifiers.orcaRouter:
+			models = await getOrcaRouterModels(options.apiKey)
 			break
 		case providerIdentifiers.requesty:
 			// Requesty models endpoint requires an API key for per-user custom policies.
@@ -458,6 +462,10 @@ export async function initializeModelCacheRefresh(): Promise<void> {
 			{
 				provider: providerIdentifiers.openrouter,
 				options: { provider: providerIdentifiers.openrouter },
+			},
+			{
+				provider: providerIdentifiers.orcaRouter,
+				options: { provider: providerIdentifiers.orcaRouter },
 			},
 			{
 				provider: providerIdentifiers.vercelAiGateway,

@@ -9,6 +9,7 @@ import {
 	geminiDefaultModelId,
 	mistralDefaultModelId,
 	openRouterDefaultModelId,
+	orcaRouterDefaultModelId,
 	openAiNativeDefaultModelId,
 	openAiCodexDefaultModelId,
 	qwenCodeDefaultModelId,
@@ -116,6 +117,7 @@ export type ProviderModelConfig = {
 // Kept in this file to keep ApiOptions.tsx from growing a second registry.
 const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> = {
 	[providerIdentifiers.openrouter]: { field: "openRouterModelId", default: openRouterDefaultModelId },
+	[providerIdentifiers.orcaRouter]: { field: "orcaRouterModelId", default: orcaRouterDefaultModelId },
 	[providerIdentifiers.requesty]: { field: "requestyModelId", default: requestyDefaultModelId },
 	[providerIdentifiers.unbound]: { field: "unboundModelId", default: unboundDefaultModelId },
 	[providerIdentifiers.litellm]: { field: "litellmModelId", default: litellmDefaultModelId },
