@@ -2398,9 +2398,9 @@ export class ClineProvider
 	}
 
 	async postStateToWebview() {
+		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview()
-		this.clineMessagesSeq++
-		state.clineMessagesSeq = this.clineMessagesSeq
+		state.clineMessagesSeq = clineMessagesSeq
 		await this.postMessageToWebview({ type: "state", state })
 	}
 
@@ -2413,9 +2413,9 @@ export class ClineProvider
 	 *   `taskHistoryUpdated` / `taskHistoryItemUpdated`.
 	 */
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
+		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
-		this.clineMessagesSeq++
-		state.clineMessagesSeq = this.clineMessagesSeq
+		state.clineMessagesSeq = clineMessagesSeq
 		const { taskHistory: _omit, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
 	}
