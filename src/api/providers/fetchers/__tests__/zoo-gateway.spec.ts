@@ -88,9 +88,7 @@ describe("Zoo Gateway Fetchers", () => {
 
 			const result = await getZooGatewayModels(gatewayOptions())
 
-			const axiosConfig = mockAxiosGet.mock.calls[0]?.[1] as
-				| { validateStatus?: (status: number) => boolean }
-				| undefined
+			const axiosConfig = mockAxiosGet.mock.calls[0]?.[1]
 			expect(axiosConfig?.validateStatus?.(200)).toBe(true)
 			expect(axiosConfig?.validateStatus?.(304)).toBe(true)
 			expect(axiosConfig?.validateStatus?.(500)).toBe(false)

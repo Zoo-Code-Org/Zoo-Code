@@ -663,13 +663,14 @@ export async function initializeModelCacheRefresh(): Promise<void> {
  */
 export const flushModels = async (options: GetModelsOptions, refresh: boolean = false): Promise<void> => {
 	if (isAuthScopedProvider(options.provider)) {
-		deleteAuthSessionEntry(getCacheKey(options))
 		if (refresh) {
 			try {
 				await resolveAuthScopedModels(options, { forceRefresh: true })
 			} catch (error) {
 				console.error(`[flushModels] Failed to refresh auth-scoped ${getCacheKey(options)} models:`, error)
 			}
+		} else {
+			deleteAuthSessionEntry(getCacheKey(options))
 		}
 		return
 	}

@@ -1457,7 +1457,21 @@ describe("auth session cache", () => {
 		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(4)
 	})
 
-	it("flushModels with refresh logs and does not throw when the provider fetch fails", async () => {
+	it("flushModels with refresh keeps the prior catalog when the provider fetch fails", async () => {
+		freshMockGetZooGatewayModels
+			.mockResolvedValueOnce(zooGatewayOk(zooModels))
+			.mockRejectedValueOnce(new Error("network down"))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await freshGetModels(options)
+		await expect(freshFlushModels(options, true)).resolves.toBeUndefined()
+
+		const afterFailedRefresh = await freshGetModels(options)
+		expect(afterFailedRefresh).toEqual(zooModels)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+	})
+
+	it("flushModels with refresh logs and does not throw when refresh fails with no session cache", async () => {
 		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
 		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
@@ -1465,6 +1479,20 @@ describe("auth session cache", () => {
 		await expect(freshFlushModels(options, true)).resolves.toBeUndefined()
 		expect(consoleSpy).toHaveBeenCalled()
 		consoleSpy.mockRestore()
+	})
+
+	it("flushModels with refresh keeps the prior catalog when refresh returns empty", async () => {
+		freshMockGetZooGatewayModels
+			.mockResolvedValueOnce(zooGatewayOk(zooModels))
+			.mockResolvedValueOnce(zooGatewayOk({}))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await freshGetModels(options)
+		await freshFlushModels(options, true)
+
+		const afterEmptyRefresh = await freshGetModels(options)
+		expect(afterEmptyRefresh).toEqual(zooModels)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("prunes session entries older than twice the TTL when maintaining the cache", async () => {
