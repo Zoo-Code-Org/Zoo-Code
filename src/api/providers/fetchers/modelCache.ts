@@ -113,6 +113,7 @@ type AuthScopedProvider = typeof providerIdentifiers.zooGateway | typeof provide
 type AuthScopedGetModelsOptions = Extract<GetModelsOptions, { provider: AuthScopedProvider }>
 
 const AUTH_SESSION_TTL_MS = 5 * 60 * 1000
+const AUTH_SESSION_MAX_ENTRIES = 64
 
 type AuthSessionCacheEntry = {
 	models: ModelRecord
@@ -140,6 +141,34 @@ function isAuthSessionFresh(entry: AuthSessionCacheEntry): boolean {
 	return Date.now() - entry.fetchedAt < AUTH_SESSION_TTL_MS
 }
 
+function pruneExpiredAuthSessionEntries(): void {
+	const staleCutoffMs = AUTH_SESSION_TTL_MS * 2
+	const now = Date.now()
+	for (const [key, entry] of authSessionCache) {
+		if (now - entry.fetchedAt >= staleCutoffMs) {
+			authSessionCache.delete(key)
+		}
+	}
+}
+
+function enforceAuthSessionCacheBound(): void {
+	pruneExpiredAuthSessionEntries()
+	while (authSessionCache.size > AUTH_SESSION_MAX_ENTRIES) {
+		let oldestKey: string | undefined
+		let oldestFetchedAt = Infinity
+		for (const [key, entry] of authSessionCache) {
+			if (entry.fetchedAt < oldestFetchedAt) {
+				oldestFetchedAt = entry.fetchedAt
+				oldestKey = key
+			}
+		}
+		if (!oldestKey) {
+			break
+		}
+		authSessionCache.delete(oldestKey)
+	}
+}
+
 function getAuthSessionEntry(cacheKey: string): AuthSessionCacheEntry | undefined {
 	return authSessionCache.get(cacheKey)
 }
@@ -149,10 +178,12 @@ function setAuthSessionEntry(cacheKey: string, models: ModelRecord, etag?: strin
 		return
 	}
 	authSessionCache.set(cacheKey, { models, etag, fetchedAt: Date.now() })
+	enforceAuthSessionCacheBound()
 }
 
 function touchAuthSessionEntry(cacheKey: string, entry: AuthSessionCacheEntry): void {
 	authSessionCache.set(cacheKey, { ...entry, fetchedAt: Date.now() })
+	enforceAuthSessionCacheBound()
 }
 
 function deleteAuthSessionEntry(cacheKey: string): void {
@@ -634,7 +665,11 @@ export const flushModels = async (options: GetModelsOptions, refresh: boolean = 
 	if (isAuthScopedProvider(options.provider)) {
 		deleteAuthSessionEntry(getCacheKey(options))
 		if (refresh) {
-			await resolveAuthScopedModels(options, { forceRefresh: true })
+			try {
+				await resolveAuthScopedModels(options, { forceRefresh: true })
+			} catch (error) {
+				console.error(`[flushModels] Failed to refresh auth-scoped ${getCacheKey(options)} models:`, error)
+			}
 		}
 		return
 	}

@@ -142,6 +142,11 @@ describe("Zoo Gateway Fetchers", () => {
 				}),
 			)
 			expect(result).toEqual({ kind: "not_modified" })
+
+			const validateStatus = mockAxiosGet.mock.calls[0]?.[1]?.validateStatus
+			expect(validateStatus?.(304)).toBe(true)
+			expect(validateStatus?.(200)).toBe(true)
+			expect(validateStatus?.(500)).toBe(false)
 		})
 
 		it("skips the request and returns {} when no token is available", async () => {

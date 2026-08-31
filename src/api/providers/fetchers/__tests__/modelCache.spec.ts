@@ -1273,12 +1273,13 @@ describe("auth session cache", () => {
 		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
-	it("clears session cache on sign-out helper so the next account refetches", async () => {
+	it("clears session cache on sign-out helper so the same identity refetches", async () => {
 		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-a" })
+		await freshGetModels(options)
 		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
-		await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "account-b" })
+		await freshGetModels(options)
 
 		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
@@ -1454,5 +1455,36 @@ describe("auth session cache", () => {
 		})
 
 		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(4)
+	})
+
+	it("flushModels with refresh logs and does not throw when the provider fetch fails", async () => {
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await expect(freshFlushModels(options, true)).resolves.toBeUndefined()
+		expect(consoleSpy).toHaveBeenCalled()
+		consoleSpy.mockRestore()
+	})
+
+	it("prunes session entries older than twice the TTL when maintaining the cache", async () => {
+		vi.useFakeTimers()
+		try {
+			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			const first = { provider: providerIdentifiers.zooGateway, apiKey: "session-a" }
+			const second = { provider: providerIdentifiers.zooGateway, apiKey: "session-b" }
+
+			await freshGetModels(first)
+			vi.advanceTimersByTime(5 * 60 * 1000 * 2 + 1)
+			await freshGetModels(second)
+
+			freshMockGetZooGatewayModels.mockClear()
+			freshMockGetZooGatewayModels.mockResolvedValueOnce({ kind: "not_modified" })
+			const result = await freshGetModels(first)
+
+			expect(result).toEqual({})
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 })
