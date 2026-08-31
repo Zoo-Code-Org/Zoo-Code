@@ -231,7 +231,8 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		if (!permission) throw Object.assign(new Error("Not Found"), { status: 404 })
 		return { data: { permission } }
 	})
-	const listPullRequests = vi.fn(async () => {
+	const listPullRequests = vi.fn(async ({ state }: { state?: string }) => {
+		if (state === "open" && options.prState === "closed") return []
 		if (eventName === "workflow_run" && options.workflowRunAssociated === false) {
 			if (options.workflowRunFallback === "none" || options.workflowRunFallback === undefined) return []
 			if (options.workflowRunFallback === "sha-mismatch") {
@@ -1477,6 +1478,20 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
 		)
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+	})
+
+	it("ignores closed PRs when resolving an unassociated workflow run", async () => {
+		const result = await runWorkflow({
+			eventName: "workflow_run",
+			prState: "closed",
+			workflowRunAssociated: false,
+			workflowRunFallback: "match",
+		})
+
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.getPullRequest).not.toHaveBeenCalled()
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
 	})
 
 	it("resolves an unassociated fork workflow run by exact head", async () => {
