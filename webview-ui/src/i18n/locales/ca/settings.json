@@ -337,7 +337,8 @@
 		"followupQuestions": {
 			"label": "Pregunta",
 			"description": "Seleccionar automàticament la primera resposta suggerida per a preguntes de seguiment després del temps d'espera configurat",
-			"timeoutLabel": "Temps d'espera abans de seleccionar automàticament la primera resposta"
+			"timeoutLabel": "Temps d'espera abans de seleccionar automàticament la primera resposta",
+			"timeoutDisabled": "Desactivat"
 		},
 		"execute": {
 			"label": "Executar",

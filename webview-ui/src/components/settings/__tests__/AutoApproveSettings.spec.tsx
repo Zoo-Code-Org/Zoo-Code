@@ -33,6 +33,24 @@ vi.mock("@/hooks/useAutoApprovalState", () => ({
 	useAutoApprovalState: () => ({ effectiveAutoApprovalEnabled: false, hasEnabledOptions: false }),
 }))
 
+vi.mock("@/components/ui", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@/components/ui")>()
+
+	return {
+		...actual,
+		Button: ({ children, ...props }: any) => <button {...props}>{children}</button>,
+		Input: (props: any) => <input {...props} />,
+		Slider: ({ value, onValueChange, ...props }: any) => (
+			<input
+				type="range"
+				value={value?.[0] ?? 0}
+				onChange={(event) => onValueChange?.([Number((event.target as HTMLInputElement).value)])}
+				{...props}
+			/>
+		),
+	}
+})
+
 const renderSettings = (overrides = {}) => {
 	const setCachedStateField = vi.fn()
 	const props = {
@@ -225,5 +243,72 @@ describe("AutoApproveSettings - Save/Discard contract", () => {
 
 		expect(screen.getByTestId("allowed-commands-heading")).toBeInTheDocument()
 		expect(screen.getByTestId("denied-commands-heading")).toBeInTheDocument()
+	})
+
+	it("renders disabled timeout label when follow-up auto-approve timeout is 0", () => {
+		const { setCachedStateField } = renderSettings({
+			alwaysAllowFollowupQuestions: true,
+			followupAutoApproveTimeoutMs: 0,
+		})
+
+		const slider = screen.getByTestId("followup-timeout-slider") as HTMLInputElement
+		expect(slider).toBeInTheDocument()
+		expect(slider.value).toBe("0")
+		expect(screen.getByText("settings:autoApprove.followupQuestions.timeoutDisabled")).toBeInTheDocument()
+
+		fireEvent.change(slider, { target: { value: "4000" } })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("followupAutoApproveTimeoutMs", 4000)
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("renders timeout in seconds when follow-up auto-approve timeout is non-zero", () => {
+		const { setCachedStateField } = renderSettings({
+			alwaysAllowFollowupQuestions: true,
+			followupAutoApproveTimeoutMs: 5000,
+		})
+
+		const slider = screen.getByTestId("followup-timeout-slider") as HTMLInputElement
+		expect(slider).toBeInTheDocument()
+		expect(slider.value).toBe("5000")
+		expect(screen.getByText("5s")).toBeInTheDocument()
+
+		fireEvent.change(slider, { target: { value: "0" } })
+
+		expect(setCachedStateField).toHaveBeenCalledWith("followupAutoApproveTimeoutMs", 0)
+		expectNoImmediateUpdateSettings()
+	})
+
+	it("uses the default timeout value when timeout is unset and follow-up auto-approve is enabled", () => {
+		renderSettings({ alwaysAllowFollowupQuestions: true })
+
+		const slider = screen.getByTestId("followup-timeout-slider") as HTMLInputElement
+		expect(slider.value).toBe("60000")
+		expect(screen.getByText("60s")).toBeInTheDocument()
+	})
+
+	it("does not render the follow-up timeout controls when follow-up auto-approve is disabled or unset", () => {
+		const { rerender } = render(
+			<AutoApproveSettings
+				alwaysAllowExecute
+				allowedCommands={[]}
+				deniedCommands={[]}
+				alwaysAllowFollowupQuestions={false}
+				setCachedStateField={vi.fn()}
+			/>,
+		)
+
+		expect(screen.queryByTestId("followup-timeout-slider")).not.toBeInTheDocument()
+
+		rerender(
+			<AutoApproveSettings
+				alwaysAllowExecute
+				allowedCommands={[]}
+				deniedCommands={[]}
+				setCachedStateField={vi.fn()}
+			/>,
+		)
+
+		expect(screen.queryByTestId("followup-timeout-slider")).not.toBeInTheDocument()
 	})
 })

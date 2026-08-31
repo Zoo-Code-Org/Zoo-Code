@@ -1,5 +1,5 @@
 import React, { createContext, useContext } from "react"
-import { render, screen, act } from "@testing-library/react"
+import { render, screen, act, fireEvent } from "@testing-library/react"
 import { TooltipProvider } from "@radix-ui/react-tooltip"
 
 import { FollowUpSuggest } from "../FollowUpSuggest"
@@ -28,7 +28,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 interface TestExtensionState {
 	autoApprovalEnabled: boolean
 	alwaysAllowFollowupQuestions: boolean
-	followupAutoApproveTimeoutMs: number
+	followupAutoApproveTimeoutMs?: number
 }
 
 const TestExtensionStateContext = createContext<TestExtensionState | undefined>(undefined)
@@ -72,6 +72,13 @@ describe("FollowUpSuggest", () => {
 		autoApprovalEnabled: true,
 		alwaysAllowFollowupQuestions: true,
 		followupAutoApproveTimeoutMs: 3000, // 3 seconds for testing
+	}
+
+	// Test state with timeout disabled (0)
+	const disabledTimeoutState: TestExtensionState = {
+		autoApprovalEnabled: true,
+		alwaysAllowFollowupQuestions: true,
+		followupAutoApproveTimeoutMs: 0, // Disabled
 	}
 
 	beforeEach(() => {
@@ -215,6 +222,41 @@ describe("FollowUpSuggest", () => {
 		expect(screen.getByText("Second suggestion")).toBeInTheDocument()
 
 		// Should not show countdown
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+	})
+
+	// Should not show countdown when timeout is disabled (set to 0)
+	it("should not show countdown when timeout is disabled (set to 0)", () => {
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={1}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			disabledTimeoutState,
+		)
+
+		// Should not show countdown when timeout is disabled
+		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
+	})
+
+	it("should not show countdown when timeout is negative", () => {
+		const negativeTimeoutState: TestExtensionState = {
+			...defaultTestState,
+			followupAutoApproveTimeoutMs: -1000,
+		}
+
+		renderWithTestProviders(
+			<FollowUpSuggest
+				suggestions={mockSuggestions}
+				onSuggestionClick={mockOnSuggestionClick}
+				ts={1}
+				onCancelAutoApproval={mockOnCancelAutoApproval}
+			/>,
+			negativeTimeoutState,
+		)
+
 		expect(screen.queryByText(/\d+s/)).not.toBeInTheDocument()
 	})
 
@@ -705,6 +747,96 @@ describe("FollowUpSuggest", () => {
 
 			// onCancelAutoApproval should have been called to cancel the backend timeout
 			expect(mockOnCancelAutoApproval).toHaveBeenCalled()
+		})
+	})
+
+	describe("suggestion interactions", () => {
+		it("cancels countdown and forwards click when user clicks a suggestion", () => {
+			renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={mockSuggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			fireEvent.click(screen.getByText("First suggestion"))
+
+			expect(mockOnSuggestionClick).toHaveBeenCalledWith(
+				expect.objectContaining({ answer: "First suggestion" }),
+				expect.objectContaining({ shiftKey: false }),
+			)
+			expect(mockOnCancelAutoApproval).toHaveBeenCalled()
+			expect(screen.queryByText(/Selecting in \d+s/)).not.toBeInTheDocument()
+		})
+
+		it("keeps countdown when shift-clicking a suggestion", () => {
+			renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={mockSuggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			mockOnCancelAutoApproval.mockClear()
+			fireEvent.click(screen.getByText("First suggestion"), { shiftKey: true })
+
+			expect(mockOnSuggestionClick).toHaveBeenCalledWith(
+				expect.objectContaining({ answer: "First suggestion" }),
+				expect.objectContaining({ shiftKey: true }),
+			)
+			expect(mockOnCancelAutoApproval).not.toHaveBeenCalled()
+			expect(screen.getByText(/Selecting in 3s/)).toBeInTheDocument()
+		})
+
+		it("copies suggestion into input when the copy affordance is clicked", () => {
+			const { container } = renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={mockSuggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			const copyAffordance = container.querySelector(
+				".absolute.cursor-pointer.top-1\\.5.right-1\\.5",
+			) as HTMLElement
+
+			expect(copyAffordance).toBeTruthy()
+			fireEvent.click(copyAffordance)
+
+			expect(mockOnSuggestionClick).toHaveBeenCalledWith(
+				expect.objectContaining({ answer: "First suggestion" }),
+				expect.objectContaining({ shiftKey: true }),
+			)
+			expect(mockOnCancelAutoApproval).toHaveBeenCalled()
+			expect(screen.queryByText(/Selecting in \d+s/)).not.toBeInTheDocument()
+		})
+
+		it("uses default timeout when extension state timeout is undefined", () => {
+			const stateWithUndefinedTimeout = {
+				...defaultTestState,
+				followupAutoApproveTimeoutMs: undefined,
+			}
+
+			renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={mockSuggestions}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				stateWithUndefinedTimeout,
+			)
+
+			expect(screen.getByText(/Selecting in 60s/)).toBeInTheDocument()
 		})
 	})
 })

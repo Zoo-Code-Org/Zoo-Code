@@ -18,41 +18,47 @@ vi.mock("vscrui", () => ({
 	),
 }))
 
-// Mock the VSCodeTextField and VSCodeButton components
-vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeTextField: ({
-		children,
-		value,
-		onInput,
-		placeholder,
-		className,
-		style,
-		"data-testid": dataTestId,
-		...rest
-	}: any) => {
-		return (
-			<div
-				data-testid={dataTestId ? `${dataTestId}-text-field` : "vscode-text-field"}
-				className={className}
-				style={style}>
+// Mock only the controls we interact with in this spec; keep the rest real
+// so newly-used toolkit exports (e.g. VSCodeLink) don't break this test.
+vi.mock("@vscode/webview-ui-toolkit/react", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@vscode/webview-ui-toolkit/react")>()
+
+	return {
+		...actual,
+		VSCodeTextField: ({
+			children,
+			value,
+			onInput,
+			placeholder,
+			className,
+			style,
+			"data-testid": dataTestId,
+			...rest
+		}: any) => {
+			return (
+				<div
+					data-testid={dataTestId ? `${dataTestId}-text-field` : "vscode-text-field"}
+					className={className}
+					style={style}>
+					{children}
+					<input
+						type="text"
+						value={value}
+						onChange={(e) => onInput && onInput(e)}
+						placeholder={placeholder}
+						data-testid={dataTestId}
+						{...rest}
+					/>
+				</div>
+			)
+		},
+		VSCodeButton: ({ children, onClick, appearance, title }: any) => (
+			<button onClick={onClick} title={title} data-testid={`vscode-button-${appearance}`}>
 				{children}
-				<input
-					type="text"
-					value={value}
-					onChange={(e) => onInput && onInput(e)}
-					placeholder={placeholder}
-					data-testid={dataTestId}
-					{...rest}
-				/>
-			</div>
-		)
-	},
-	VSCodeButton: ({ children, onClick, appearance, title }: any) => (
-		<button onClick={onClick} title={title} data-testid={`vscode-button-${appearance}`}>
-			{children}
-		</button>
-	),
-}))
+			</button>
+		),
+	}
+})
 
 // Mock the translation hook
 vi.mock("@src/i18n/TranslationContext", () => ({
@@ -61,16 +67,23 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	}),
 }))
 
-// Mock the UI components
-vi.mock("@src/components/ui", () => ({
-	Button: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
-	StandardTooltip: ({ children, content }: any) => <div title={content}>{children}</div>,
-}))
+// Mock only the pieces this spec needs to simplify interactions.
+// Keep all other UI exports real so indirect dependencies (e.g. ModelPicker -> Popover)
+// don't break when UI surface area evolves.
+vi.mock("@src/components/ui", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@src/components/ui")>()
+
+	return {
+		...actual,
+		Button: ({ children, onClick }: any) => <button onClick={onClick}>{children}</button>,
+		StandardTooltip: ({ children, content }: any) => <div title={content}>{children}</div>,
+	}
+})
 
 // Mock other components
 const { mockModelPicker } = vi.hoisted(() => ({ mockModelPicker: vi.fn() }))
 
-vi.mock("../../ModelPicker", () => ({
+vi.mock("@src/components/settings/ModelPicker", () => ({
 	ModelPicker: (props: any) => {
 		mockModelPicker(props)
 		return <div data-testid="model-picker">Model Picker</div>
@@ -83,7 +96,7 @@ vi.mock("../../R1FormatSetting", () => ({
 
 const { mockThinkingBudget } = vi.hoisted(() => ({ mockThinkingBudget: vi.fn() }))
 
-vi.mock("../../ThinkingBudget", () => ({
+vi.mock("@src/components/settings/ThinkingBudget", () => ({
 	ThinkingBudget: (props: any) => {
 		mockThinkingBudget(props)
 		return <div data-testid="thinking-budget">Thinking Budget</div>
