@@ -196,6 +196,11 @@ export interface TaskOptions extends CreateTaskOptions {
 }
 
 type AssistantMessagePersistenceResult = "saved" | "failed" | "cancelled"
+type AssistantMessagePersistenceCancellation = {
+	cancelled: boolean
+	promise: Promise<void>
+	resolve: () => void
+}
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly taskId: string
@@ -413,8 +418,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	assistantMessageSavedToHistory = false
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
-	private assistantMessagePersistenceCancellationPromise!: Promise<void>
-	private resolveAssistantMessagePersistenceCancellation!: () => void
+	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
 	private completionPersistenceReadyPromise?: Promise<boolean>
 
 	/**
@@ -1037,16 +1041,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.assistantMessagePersistencePromise = new Promise<AssistantMessagePersistenceResult>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve
 		})
-		this.assistantMessagePersistenceCancellationPromise = new Promise<void>((resolve) => {
-			this.resolveAssistantMessagePersistenceCancellation = resolve
-		})
+		let resolveCancellation!: () => void
+		const cancellation: AssistantMessagePersistenceCancellation = {
+			cancelled: false,
+			promise: new Promise<void>((resolve) => {
+				resolveCancellation = resolve
+			}),
+			resolve: () => {
+				if (cancellation.cancelled) return
+				cancellation.cancelled = true
+				resolveCancellation()
+			},
+		}
+		this.assistantMessagePersistenceCancellation = cancellation
 		this.completionPersistenceReadyPromise = undefined
 	}
 
 	/** Settles persistence waiters when the task or current stream generation ends. */
 	private cancelAssistantMessagePersistence(): void {
 		this.resolveAssistantMessagePersistence?.("cancelled")
-		this.resolveAssistantMessagePersistenceCancellation?.()
+		this.assistantMessagePersistenceCancellation?.resolve()
 	}
 
 	/**
@@ -1056,21 +1070,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public waitForCurrentAssistantMessagePersistence(): Promise<boolean> {
 		if (!this.completionPersistenceReadyPromise) {
 			const currentPersistence = this.assistantMessagePersistencePromise
-			const currentCancellation = this.assistantMessagePersistenceCancellationPromise
+			const currentCancellation = this.assistantMessagePersistenceCancellation!
 			this.completionPersistenceReadyPromise = (async () => {
 				const result = await Promise.race([
 					currentPersistence,
-					currentCancellation.then(() => "cancelled" as const),
+					currentCancellation.promise.then(() => "cancelled" as const),
 				])
 				if (result === "cancelled") return false
 				if (result === "saved") return true
 
-				const retryResult = await Promise.race([
-					this.retrySaveApiConversationHistory().then((saved) => ({ status: "complete" as const, saved })),
-					currentCancellation.then(() => ({ status: "cancelled" as const })),
-				])
-				if (retryResult.status === "cancelled") return false
-				if (!retryResult.saved) {
+				const retryResult = await this.retrySaveApiConversationHistoryWithCancellation(currentCancellation)
+				if (retryResult === "cancelled") return false
+				if (retryResult === "failed") {
 					throw new Error("Failed to persist API conversation history before task completion")
 				}
 				this.assistantMessageSavedToHistory = true
@@ -1192,22 +1203,46 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Used by delegation flow when flushPendingToolResultsToHistory reports failure.
 	 */
 	public async retrySaveApiConversationHistory(): Promise<boolean> {
+		return (await this.retrySaveApiConversationHistoryWithCancellation()) === "saved"
+	}
+
+	private async retrySaveApiConversationHistoryWithCancellation(
+		cancellation?: AssistantMessagePersistenceCancellation,
+	): Promise<AssistantMessagePersistenceResult> {
 		const delays = [100, 500, 1500]
 
 		for (let attempt = 0; attempt < delays.length; attempt++) {
-			await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]))
+			if (cancellation) {
+				const delayCompleted = await new Promise<boolean>((resolve) => {
+					let settled = false
+					const finish = (completed: boolean) => {
+						if (settled) return
+						settled = true
+						resolve(completed)
+					}
+					const timer = setTimeout(() => finish(true), delays[attempt])
+					void cancellation.promise.then(() => {
+						clearTimeout(timer)
+						finish(false)
+					})
+				})
+				if (!delayCompleted) return "cancelled"
+			} else {
+				await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]))
+			}
 			console.warn(
 				`[Task#${this.taskId}] retrySaveApiConversationHistory: retry attempt ${attempt + 1}/${delays.length}`,
 			)
 
 			const success = await this.saveApiConversationHistory()
+			if (cancellation?.cancelled) return "cancelled"
 
 			if (success) {
-				return true
+				return "saved"
 			}
 		}
 
-		return false
+		return "failed"
 	}
 
 	// Cline Messages
