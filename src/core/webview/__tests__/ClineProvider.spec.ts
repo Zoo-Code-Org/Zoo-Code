@@ -900,7 +900,7 @@ describe("ClineProvider", () => {
 		const readyState: ExtensionState = {
 			...baseState,
 			taskHistory: [],
-			clineMessages: [{ type: "say", say: "text", text: "child ready" }],
+			clineMessages: [{ ts: 1, type: "say", say: "text", text: "child ready" }],
 		}
 
 		vi.spyOn(provider, "getStateToPostToWebview")
