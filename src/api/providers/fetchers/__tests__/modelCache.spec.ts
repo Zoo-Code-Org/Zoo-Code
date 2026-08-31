@@ -48,6 +48,7 @@ vi.mock("../kenari")
 vi.mock("../nanogpt")
 vi.mock("../moonshot")
 vi.mock("../zoo-gateway")
+vi.mock("../kimi-code")
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -62,6 +63,7 @@ vi.mock("../../../core/config/ContextProxy", () => ({
 
 // Then imports
 import type { Mock, Mocked } from "vitest"
+import type { ModelRecord } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types"
 import * as fsSync from "fs"
 import NodeCache from "node-cache"
@@ -74,6 +76,7 @@ import { getKenariModels } from "../kenari"
 import { getNanoGptModels } from "../nanogpt"
 import { getMoonshotModels } from "../moonshot"
 import { getZooGatewayModels } from "../zoo-gateway"
+import { getKimiCodeModels } from "../kimi-code"
 
 const mockGetLiteLLMModels = getLiteLLMModels as Mock<typeof getLiteLLMModels>
 const mockGetOpenRouterModels = getOpenRouterModels as Mock<typeof getOpenRouterModels>
@@ -82,8 +85,9 @@ const mockGetKenariModels = getKenariModels as Mock<typeof getKenariModels>
 const mockGetNanoGptModels = getNanoGptModels as Mock<typeof getNanoGptModels>
 const mockGetMoonshotModels = getMoonshotModels as Mock<typeof getMoonshotModels>
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
+const mockGetKimiCodeModels = getKimiCodeModels as Mock<typeof getKimiCodeModels>
 
-function zooGatewayOk(models: Record<string, unknown>) {
+function zooGatewayOk(models: ModelRecord) {
 	return { kind: "ok" as const, models }
 }
 
@@ -1212,11 +1216,13 @@ describe("auth session cache", () => {
 
 	let freshGetModels: ModelCacheModule["getModels"]
 	let freshRefreshModels: ModelCacheModule["refreshModels"]
+	let freshFlushModels: ModelCacheModule["flushModels"]
 	let freshClearAuthSessionModelsForProvider: ModelCacheModule["clearAuthSessionModelsForProvider"]
 	let freshMockGetZooGatewayModels: Mock<typeof getZooGatewayModels>
+	let freshMockGetKimiCodeModels: Mock<typeof getKimiCodeModels>
 	let mockSet: Mocked<NodeCache>["set"]
 
-	const zooModels = {
+	const zooModels: ModelRecord = {
 		"anthropic/claude-sonnet-4": {
 			maxTokens: 64000,
 			contextWindow: 200000,
@@ -1230,6 +1236,7 @@ describe("auth session cache", () => {
 
 		const modelCacheModule: ModelCacheModule = await import("../modelCache")
 		const zooGatewayModule = await import("../zoo-gateway")
+		const kimiCodeModule = await import("../kimi-code")
 		const MockedNodeCache = vi.mocked(NodeCache)
 		const mockCache = vi.mocked(new MockedNodeCache())
 		mockCache.get.mockReturnValue(undefined)
@@ -1237,8 +1244,10 @@ describe("auth session cache", () => {
 
 		freshGetModels = modelCacheModule.getModels
 		freshRefreshModels = modelCacheModule.refreshModels
+		freshFlushModels = modelCacheModule.flushModels
 		freshClearAuthSessionModelsForProvider = modelCacheModule.clearAuthSessionModelsForProvider
 		freshMockGetZooGatewayModels = zooGatewayModule.getZooGatewayModels as Mock<typeof getZooGatewayModels>
+		freshMockGetKimiCodeModels = kimiCodeModule.getKimiCodeModels as Mock<typeof getKimiCodeModels>
 	})
 
 	it("reuses in-memory session cache within TTL without refetching", async () => {
@@ -1304,5 +1313,74 @@ describe("auth session cache", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("flushModels clears session cache and can force a refetch", async () => {
+		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await freshGetModels(options)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+
+		await freshFlushModels(options, true)
+
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+	})
+
+	it("returns the prior session catalog when a fetch throws", async () => {
+		vi.useFakeTimers()
+		try {
+			freshMockGetZooGatewayModels
+				.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				.mockRejectedValueOnce(new Error("network down"))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await freshGetModels(options)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+			const second = await freshGetModels(options)
+
+			expect(second).toEqual(zooModels)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("refreshModels returns an empty catalog when refresh throws and no session cache exists", async () => {
+		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		const refreshed = await freshRefreshModels(options)
+
+		expect(refreshed).toEqual({})
+	})
+
+	it("refreshModels keeps the prior session catalog when refresh throws", async () => {
+		freshMockGetZooGatewayModels
+			.mockResolvedValueOnce(zooGatewayOk(zooModels))
+			.mockRejectedValueOnce(new Error("network down"))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await freshGetModels(options)
+		const refreshed = await freshRefreshModels(options)
+
+		expect(refreshed).toEqual(zooModels)
+	})
+
+	it("caches kimi-code catalogs in the session store", async () => {
+		const kimiModels: ModelRecord = {
+			"kimi-for-coding": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+		freshMockGetKimiCodeModels.mockResolvedValue(kimiModels)
+		const options = { provider: providerIdentifiers.kimiCode, apiKey: "kimi-session" }
+
+		await freshGetModels(options)
+		await freshGetModels(options)
+
+		expect(freshMockGetKimiCodeModels).toHaveBeenCalledTimes(1)
+		expect(mockSet).not.toHaveBeenCalled()
 	})
 })

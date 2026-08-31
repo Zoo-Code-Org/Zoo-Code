@@ -108,6 +108,10 @@ const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.kimiCode,
 ])
 
+type AuthScopedProvider = typeof providerIdentifiers.zooGateway | typeof providerIdentifiers.kimiCode
+
+type AuthScopedGetModelsOptions = Extract<GetModelsOptions, { provider: AuthScopedProvider }>
+
 const AUTH_SESSION_TTL_MS = 5 * 60 * 1000
 
 type AuthSessionCacheEntry = {
@@ -120,8 +124,16 @@ type AuthSessionCacheEntry = {
 // and keyed by the same compound identity as getCacheKey (provider + baseUrl + token hash).
 const authSessionCache = new Map<string, AuthSessionCacheEntry>()
 
-function isAuthScopedProvider(provider: RouterName): boolean {
+function isAuthScopedProvider(provider: RouterName): provider is AuthScopedProvider {
 	return AUTH_SCOPED_PROVIDERS.has(provider)
+}
+
+function assertAuthScopedGetModelsOptions(options: GetModelsOptions): AuthScopedGetModelsOptions {
+	if (!isAuthScopedProvider(options.provider)) {
+		throw new Error(`Expected auth-scoped provider, got ${options.provider}`)
+	}
+	// Runtime guard above; TS cannot narrow the GetModelsOptions discriminated union here.
+	return options as AuthScopedGetModelsOptions
 }
 
 function isAuthSessionFresh(entry: AuthSessionCacheEntry): boolean {
@@ -162,12 +174,10 @@ type AuthScopedFetchResult = {
 }
 
 async function fetchAuthScopedModelsFromProvider(
-	options: GetModelsOptions,
+	options: AuthScopedGetModelsOptions,
 	ifNoneMatch?: string,
 ): Promise<AuthScopedFetchResult> {
-	const { provider } = options
-
-	switch (provider) {
+	switch (options.provider) {
 		case providerIdentifiers.zooGateway: {
 			const result = await getZooGatewayModels({
 				zooSessionToken: options.apiKey,
@@ -181,10 +191,6 @@ async function fetchAuthScopedModelsFromProvider(
 		}
 		case providerIdentifiers.kimiCode:
 			return { models: await getKimiCodeModels(options.apiKey) }
-		default: {
-			const exhaustiveCheck: never = provider
-			throw new Error(`Unknown auth-scoped provider: ${exhaustiveCheck}`)
-		}
 	}
 }
 
@@ -201,7 +207,10 @@ async function resolveAuthScopedModels(
 	}
 
 	try {
-		const fetched = await fetchAuthScopedModelsFromProvider(options, existing?.etag)
+		const fetched = await fetchAuthScopedModelsFromProvider(
+			assertAuthScopedGetModelsOptions(options),
+			existing?.etag,
+		)
 
 		if (fetched.notModified) {
 			if (existing && Object.keys(existing.models).length > 0) {
