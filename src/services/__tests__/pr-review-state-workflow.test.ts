@@ -1127,6 +1127,27 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
 	})
 
+	it("publishes a changed review gate status with the workflow run URL", async () => {
+		const result = await runWorkflow({
+			gateStatuses: [
+				{
+					context: "Zoo Code / PR review gate",
+					state: "pending",
+					description: "Wait for the required CI checks to finish.",
+					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
+				},
+			],
+		})
+
+		expect(latestGateStatus(result)).toEqual(
+			expect.objectContaining({
+				state: "pending",
+				description: "Required CI passed. Wait for CodeRabbit to approve the latest commit.",
+				target_url: WORKFLOW_RUN_URL,
+			}),
+		)
+	})
+
 	it("continues metadata reconciliation when gate publication fails", async () => {
 		const result = await runWorkflow({ createCommitStatusErrorStatus: 500 })
 
