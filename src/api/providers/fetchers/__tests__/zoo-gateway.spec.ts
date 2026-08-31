@@ -2,6 +2,8 @@
 
 import axios from "axios"
 
+import type { ApiHandlerOptions } from "../../../../shared/api"
+import type { VercelAiGatewayModel } from "../vercel-ai-gateway"
 import { getZooGatewayModels, parseZooGatewayModel } from "../zoo-gateway"
 
 vitest.mock("axios")
@@ -16,7 +18,22 @@ vitest.mock("../../../../services/zoo-code-auth", () => ({
 		return profileToken || undefined
 	}),
 }))
-const mockedAxios = axios as any
+
+const mockAxiosGet = vi.mocked(axios.get)
+
+function modelsFromResult(result: Awaited<ReturnType<typeof getZooGatewayModels>>) {
+	return result.kind === "ok" ? result.models : {}
+}
+
+function gatewayOptions(
+	overrides: Partial<ApiHandlerOptions & { ifNoneMatch?: string }> = {},
+): ApiHandlerOptions & { ifNoneMatch?: string } {
+	return {
+		zooGatewayBaseUrl: "https://example.test/api/gateway/v1",
+		zooSessionToken: "zoo_ext_test_token",
+		...overrides,
+	}
+}
 
 describe("Zoo Gateway Fetchers", () => {
 	beforeEach(() => {
@@ -28,6 +45,8 @@ describe("Zoo Gateway Fetchers", () => {
 		const token = "zoo_ext_test_token"
 
 		const mockResponse = {
+			status: 200,
+			headers: { etag: '"catalog-abc"' },
 			data: {
 				object: "list",
 				data: [
@@ -65,46 +84,65 @@ describe("Zoo Gateway Fetchers", () => {
 		}
 
 		it("forwards the bearer token and timeout, filters non-language models", async () => {
-			mockedAxios.get.mockResolvedValueOnce(mockResponse)
+			mockAxiosGet.mockResolvedValueOnce(mockResponse)
 
-			const models = await getZooGatewayModels({
-				zooGatewayBaseUrl: baseUrl,
-				zooSessionToken: token,
-			} as any)
+			const result = await getZooGatewayModels(gatewayOptions())
 
-			expect(mockedAxios.get).toHaveBeenCalledWith(
+			expect(mockAxiosGet).toHaveBeenCalledWith(
 				`${baseUrl}/models`,
 				expect.objectContaining({
 					headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
 					timeout: expect.any(Number),
+					validateStatus: expect.any(Function),
 				}),
 			)
-			expect(Object.keys(models)).toHaveLength(1)
-			expect(models["anthropic/claude-sonnet-4"]).toBeDefined()
+			expect(result.kind).toBe("ok")
+			if (result.kind !== "ok") return
+			expect(Object.keys(result.models)).toHaveLength(1)
+			expect(result.models["anthropic/claude-sonnet-4"]).toBeDefined()
+			expect(result.etag).toBe('"catalog-abc"')
+		})
+
+		it("sends If-None-Match when provided and returns not_modified on 304", async () => {
+			mockAxiosGet.mockResolvedValueOnce({ status: 304, headers: {}, data: "" })
+
+			const result = await getZooGatewayModels(
+				gatewayOptions({
+					ifNoneMatch: '"catalog-abc"',
+				}),
+			)
+
+			expect(mockAxiosGet).toHaveBeenCalledWith(
+				`${baseUrl}/models`,
+				expect.objectContaining({
+					headers: expect.objectContaining({
+						Authorization: `Bearer ${token}`,
+						"If-None-Match": '"catalog-abc"',
+					}),
+				}),
+			)
+			expect(result).toEqual({ kind: "not_modified" })
 		})
 
 		it("skips the request and returns {} when no token is available", async () => {
-			const models = await getZooGatewayModels({ zooGatewayBaseUrl: baseUrl } as any)
+			const result = await getZooGatewayModels(gatewayOptions({ zooSessionToken: undefined }))
 
-			expect(mockedAxios.get).not.toHaveBeenCalled()
-			expect(models).toEqual({})
+			expect(mockAxiosGet).not.toHaveBeenCalled()
+			expect(modelsFromResult(result)).toEqual({})
 		})
 
 		it("returns {} and never leaks the error object when the request fails", async () => {
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
-			const failure: any = new Error("Network error")
-			// Simulate axios attaching the request config (which contains the bearer token).
-			failure.config = { headers: { Authorization: "Bearer should-never-be-logged" } }
-			failure.code = "ECONNRESET"
-			failure.response = { status: 502, statusText: "Bad Gateway" }
-			mockedAxios.get.mockRejectedValueOnce(failure)
+			const failure = Object.assign(new Error("Network error"), {
+				config: { headers: { Authorization: "Bearer should-never-be-logged" } },
+				code: "ECONNRESET",
+				response: { status: 502, statusText: "Bad Gateway" },
+			})
+			mockAxiosGet.mockRejectedValueOnce(failure)
 
-			const models = await getZooGatewayModels({
-				zooGatewayBaseUrl: baseUrl,
-				zooSessionToken: token,
-			} as any)
+			const result = await getZooGatewayModels(gatewayOptions())
 
-			expect(models).toEqual({})
+			expect(modelsFromResult(result)).toEqual({})
 			const logged = consoleErrorSpy.mock.calls.map((args) => String(args[0])).join("\n")
 			expect(logged).toContain("status=502")
 			expect(logged).toContain("code=ECONNRESET")
@@ -114,7 +152,9 @@ describe("Zoo Gateway Fetchers", () => {
 		})
 
 		it("accepts gateway catalog models without created or description (e.g. Bedrock)", async () => {
-			mockedAxios.get.mockResolvedValueOnce({
+			mockAxiosGet.mockResolvedValueOnce({
+				status: 200,
+				headers: {},
 				data: {
 					object: "list",
 					data: [
@@ -135,24 +175,19 @@ describe("Zoo Gateway Fetchers", () => {
 				},
 			})
 
-			const models = await getZooGatewayModels({
-				zooGatewayBaseUrl: baseUrl,
-				zooSessionToken: token,
-			} as any)
+			const result = await getZooGatewayModels(gatewayOptions())
 
-			expect(Object.keys(models)).toEqual(["anthropic/claude-sonnet-4"])
-			expect(models["anthropic/claude-sonnet-4"].description).toBe("Claude Sonnet 4")
+			expect(Object.keys(modelsFromResult(result))).toEqual(["anthropic/claude-sonnet-4"])
+			if (result.kind !== "ok") return
+			expect(result.models["anthropic/claude-sonnet-4"].description).toBe("Claude Sonnet 4")
 		})
 		it("returns {} on a structurally broken response instead of throwing", async () => {
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
-			mockedAxios.get.mockResolvedValueOnce({ data: { unexpected: true } })
+			mockAxiosGet.mockResolvedValueOnce({ status: 200, headers: {}, data: { unexpected: true } })
 
-			const models = await getZooGatewayModels({
-				zooGatewayBaseUrl: baseUrl,
-				zooSessionToken: token,
-			} as any)
+			const result = await getZooGatewayModels(gatewayOptions())
 
-			expect(models).toEqual({})
+			expect(modelsFromResult(result)).toEqual({})
 			expect(consoleErrorSpy).toHaveBeenCalled()
 			consoleErrorSpy.mockRestore()
 		})
@@ -182,25 +217,27 @@ describe("Zoo Gateway Fetchers", () => {
 		})
 
 		it("delegates to the vercel-ai-gateway parser", () => {
+			const model: VercelAiGatewayModel = {
+				id: "anthropic/claude-sonnet-4",
+				object: "model",
+				created: 0,
+				owned_by: "anthropic",
+				name: "Claude Sonnet 4",
+				description: "Sonnet",
+				context_window: 200000,
+				max_tokens: 64000,
+				type: "language",
+				pricing: {
+					input: "3.00",
+					output: "15.00",
+					input_cache_write: "3.75",
+					input_cache_read: "0.30",
+				},
+			}
+
 			const result = parseZooGatewayModel({
 				id: "anthropic/claude-sonnet-4",
-				model: {
-					id: "anthropic/claude-sonnet-4",
-					object: "model",
-					created: 0,
-					owned_by: "anthropic",
-					name: "Claude Sonnet 4",
-					description: "Sonnet",
-					context_window: 200000,
-					max_tokens: 64000,
-					type: "language",
-					pricing: {
-						input: "3.00",
-						output: "15.00",
-						input_cache_write: "3.75",
-						input_cache_read: "0.30",
-					},
-				} as any,
+				model,
 			})
 
 			expect(result.contextWindow).toBe(200000)

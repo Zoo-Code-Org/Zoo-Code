@@ -349,11 +349,6 @@
 			"count": 1
 		}
 	},
-	"api/providers/fetchers/__tests__/zoo-gateway.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 8
-		}
-	},
 	"api/providers/fetchers/litellm.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1

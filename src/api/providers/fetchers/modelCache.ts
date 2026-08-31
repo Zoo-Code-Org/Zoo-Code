@@ -108,8 +108,133 @@ const AUTH_SCOPED_PROVIDERS: ReadonlySet<RouterName> = new Set([
 	providerIdentifiers.kimiCode,
 ])
 
+const AUTH_SESSION_TTL_MS = 5 * 60 * 1000
+
+type AuthSessionCacheEntry = {
+	models: ModelRecord
+	etag?: string
+	fetchedAt: number
+}
+
+// In-memory, per-session catalog cache for auth-scoped providers. Never written to disk
+// and keyed by the same compound identity as getCacheKey (provider + baseUrl + token hash).
+const authSessionCache = new Map<string, AuthSessionCacheEntry>()
+
 function isAuthScopedProvider(provider: RouterName): boolean {
 	return AUTH_SCOPED_PROVIDERS.has(provider)
+}
+
+function isAuthSessionFresh(entry: AuthSessionCacheEntry): boolean {
+	return Date.now() - entry.fetchedAt < AUTH_SESSION_TTL_MS
+}
+
+function getAuthSessionEntry(cacheKey: string): AuthSessionCacheEntry | undefined {
+	return authSessionCache.get(cacheKey)
+}
+
+function setAuthSessionEntry(cacheKey: string, models: ModelRecord, etag?: string): void {
+	if (Object.keys(models).length === 0) {
+		return
+	}
+	authSessionCache.set(cacheKey, { models, etag, fetchedAt: Date.now() })
+}
+
+function touchAuthSessionEntry(cacheKey: string, entry: AuthSessionCacheEntry): void {
+	authSessionCache.set(cacheKey, { ...entry, fetchedAt: Date.now() })
+}
+
+function deleteAuthSessionEntry(cacheKey: string): void {
+	authSessionCache.delete(cacheKey)
+}
+
+export function clearAuthSessionModelsForProvider(provider: RouterName): void {
+	for (const key of authSessionCache.keys()) {
+		if (key === provider || key.startsWith(`${provider}:`)) {
+			authSessionCache.delete(key)
+		}
+	}
+}
+
+type AuthScopedFetchResult = {
+	models: ModelRecord
+	etag?: string
+	notModified?: boolean
+}
+
+async function fetchAuthScopedModelsFromProvider(
+	options: GetModelsOptions,
+	ifNoneMatch?: string,
+): Promise<AuthScopedFetchResult> {
+	const { provider } = options
+
+	switch (provider) {
+		case providerIdentifiers.zooGateway: {
+			const result = await getZooGatewayModels({
+				zooSessionToken: options.apiKey,
+				zooGatewayBaseUrl: options.baseUrl,
+				ifNoneMatch,
+			})
+			if (result.kind === "not_modified") {
+				return { models: {}, notModified: true }
+			}
+			return { models: result.models, etag: result.etag }
+		}
+		case providerIdentifiers.kimiCode:
+			return { models: await getKimiCodeModels(options.apiKey) }
+		default: {
+			const exhaustiveCheck: never = provider
+			throw new Error(`Unknown auth-scoped provider: ${exhaustiveCheck}`)
+		}
+	}
+}
+
+async function resolveAuthScopedModels(
+	options: GetModelsOptions,
+	{ forceRefresh = false }: { forceRefresh?: boolean } = {},
+): Promise<ModelRecord> {
+	const { provider } = options
+	const cacheKey = getCacheKey(options)
+	const existing = getAuthSessionEntry(cacheKey)
+
+	if (!forceRefresh && existing && isAuthSessionFresh(existing) && Object.keys(existing.models).length > 0) {
+		return existing.models
+	}
+
+	try {
+		const fetched = await fetchAuthScopedModelsFromProvider(options, existing?.etag)
+
+		if (fetched.notModified) {
+			if (existing && Object.keys(existing.models).length > 0) {
+				touchAuthSessionEntry(cacheKey, existing)
+				reportedEmptyModelResponse.delete(cacheKey)
+				return existing.models
+			}
+		} else {
+			const modelCount = Object.keys(fetched.models).length
+			if (modelCount > 0) {
+				setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
+				reportedEmptyModelResponse.delete(cacheKey)
+				return fetched.models
+			}
+
+			captureModelCacheEmptyResponseOnce(provider, cacheKey, {
+				context: forceRefresh ? "refreshModels" : "getModels",
+				hasExistingCache: Boolean(existing && Object.keys(existing.models).length > 0),
+				...(existing ? { existingCacheSize: Object.keys(existing.models).length } : {}),
+			})
+		}
+
+		if (existing && Object.keys(existing.models).length > 0) {
+			return existing.models
+		}
+
+		return fetched.models
+	} catch (error) {
+		if (existing && Object.keys(existing.models).length > 0) {
+			return existing.models
+		}
+		throw error
+	}
 }
 
 // Memoize derived digests so the deliberately-structureless KDF runs at most once per
@@ -267,9 +392,18 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey)
 			break
-		case providerIdentifiers.zooGateway:
-			models = await getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+		case providerIdentifiers.zooGateway: {
+			const result = await getZooGatewayModels({
+				zooSessionToken: options.apiKey,
+				zooGatewayBaseUrl: options.baseUrl,
+			})
+			if (result.kind === "not_modified") {
+				models = {}
+				break
+			}
+			models = result.models
 			break
+		}
 		case providerIdentifiers.kimiCode:
 			models = await getKimiCodeModels(options.apiKey)
 			break
@@ -298,9 +432,11 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 	const { provider } = options
 	const cacheKey = getCacheKey(options)
 
-	const shouldSkipCache = isAuthScopedProvider(provider)
+	if (isAuthScopedProvider(provider)) {
+		return resolveAuthScopedModels(options)
+	}
 
-	const models = shouldSkipCache ? undefined : getModelsFromCache(options)
+	const models = getModelsFromCache(options)
 
 	if (models) {
 		return models
@@ -318,7 +454,7 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 	// refreshModels() degrades to cached data doesn't surface as a silent stale result to
 	// getModels(), and a fetch failure joined from refreshModels() still re-throws for
 	// getModels() callers.
-	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+	const sharedFetch = dedupedFetch(cacheKey, options)
 
 	try {
 		const fetched = await sharedFetch
@@ -328,16 +464,15 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 		// as if the provider had no models. Auth-scoped providers skip caching entirely.
 		if (modelCount > 0) {
 			// Clear the empty-response throttle for any non-empty response, including from
-			// auth-scoped providers that skip caching, so a later empty response is reported again.
+			// auth-scoped providers that skip disk/memory cache, so a later empty response
+			// is reported again.
 			reportedEmptyModelResponse.delete(cacheKey)
 
-			if (!shouldSkipCache) {
-				memoryCache.set(cacheKey, fetched)
+			memoryCache.set(cacheKey, fetched)
 
-				await writeModels(cacheKey, fetched).catch((err) =>
-					console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
-				)
-			}
+			await writeModels(cacheKey, fetched).catch((err) =>
+				console.error(`[MODEL_CACHE] Error writing ${cacheKey} models to file cache:`, err),
+			)
 		} else {
 			captureModelCacheEmptyResponseOnce(provider, cacheKey, {
 				context: "getModels",
@@ -392,17 +527,24 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 	const { provider } = options
 	const cacheKey = getCacheKey(options)
 
-	const shouldSkipCache = isAuthScopedProvider(provider)
+	if (isAuthScopedProvider(provider)) {
+		try {
+			return await resolveAuthScopedModels(options, { forceRefresh: true })
+		} catch (error) {
+			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
+			const existing = getAuthSessionEntry(cacheKey)
+			if (existing && Object.keys(existing.models).length > 0) {
+				return existing.models
+			}
+			return {}
+		}
+	}
 
-	// De-duplication is skipped for auth-scoped providers because two concurrent calls may
-	// carry different tokens (e.g., after a sign-out/sign-in within the same session) and we
-	// must not return the first caller's results to the second caller.
-	//
 	// Shares the same underlying fetch getModels() uses (see dedupedFetch) so a refreshModels()
 	// call racing a getModels() cache-miss for the same key converges on one provider fetch --
 	// but each function still applies its own success/failure contract on the result below
 	// rather than sharing that promise's resolution/rejection wholesale.
-	const sharedFetch = shouldSkipCache ? fetchModelsFromProvider(options) : dedupedFetch(cacheKey, options)
+	const sharedFetch = dedupedFetch(cacheKey, options)
 
 	try {
 		// Force fresh API fetch - skip getModelsFromCache() check
@@ -410,7 +552,7 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 		const modelCount = Object.keys(models).length
 
 		// Get existing cached data for comparison
-		const existingCache = shouldSkipCache ? undefined : getModelsFromCache(options)
+		const existingCache = getModelsFromCache(options)
 		const existingCount = existingCache ? Object.keys(existingCache).length : 0
 
 		if (modelCount === 0) {
@@ -424,23 +566,15 @@ export const refreshModels = async (options: GetModelsOptions): Promise<ModelRec
 
 		reportedEmptyModelResponse.delete(cacheKey)
 
-		if (!shouldSkipCache) {
-			memoryCache.set(cacheKey, models)
+		memoryCache.set(cacheKey, models)
 
-			await writeModels(cacheKey, models).catch((err) =>
-				console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
-			)
-		}
+		await writeModels(cacheKey, models).catch((err) =>
+			console.error(`[refreshModels] Error writing ${cacheKey} models to disk:`, err),
+		)
 
 		return models
 	} catch (error) {
-		// Log the error for debugging, then return existing cache if available (graceful degradation).
-		// For auth-scoped providers (zoo-gateway) we MUST NOT return cached models from a prior
-		// session, since they could belong to a different user -- return empty instead.
 		console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
-		if (shouldSkipCache) {
-			return {}
-		}
 		return getModelsFromCache(options) || {}
 	}
 }
@@ -488,6 +622,14 @@ export async function initializeModelCacheRefresh(): Promise<void> {
  * @param refresh - If true, immediately fetch fresh data from API
  */
 export const flushModels = async (options: GetModelsOptions, refresh: boolean = false): Promise<void> => {
+	if (isAuthScopedProvider(options.provider)) {
+		deleteAuthSessionEntry(getCacheKey(options))
+		if (refresh) {
+			await resolveAuthScopedModels(options, { forceRefresh: true })
+		}
+		return
+	}
+
 	if (refresh) {
 		// Don't delete memory cache - let refreshModels atomically replace it
 		// This prevents a race condition where getModels() might be called
