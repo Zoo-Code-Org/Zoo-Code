@@ -1488,10 +1488,15 @@ describe("PR review-state workflow", () => {
 			workflowRunFallback: "match",
 		})
 
-		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.listPullRequests).toHaveBeenCalledTimes(1)
+		expect(result.listPullRequests).toHaveBeenCalledWith(
+			expect.objectContaining({ head: "Zoo-Code-Org:feature/test", state: "open" }),
+		)
 		expect(result.getPullRequest).not.toHaveBeenCalled()
 		expect(result.createCommitStatus).not.toHaveBeenCalled()
 		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.createLabel).not.toHaveBeenCalled()
 	})
 
 	it("resolves an unassociated fork workflow run by exact head", async () => {
