@@ -586,6 +586,72 @@ describe("Task persistence", () => {
 			}
 		})
 
+		it("emits TaskCompleted after a failed assistant save succeeds on retry", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages
+				.mockRejectedValueOnce(new Error("initial write failed"))
+				.mockResolvedValueOnce(undefined)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const completionCallId = "retried-completion-call"
+			const callbacks: AttemptCompletionCallbacks = {
+				askApproval: vi.fn(),
+				handleError: vi.fn(),
+				pushToolResult: vi.fn(),
+				askFinishSubTaskApproval: vi.fn(),
+				toolDescription: vi.fn(),
+				toolCallId: completionCallId,
+			}
+			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+			vi.spyOn(task, "emitFinalTokenUsageUpdate").mockImplementation(() => undefined)
+			vi.spyOn(task, "flushTelemetryInstallment").mockImplementation(() => undefined)
+			const completionListener = vi.fn()
+			task.on(RooCodeEventName.TaskCompleted, completionListener)
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [
+						{
+							type: "tool_use",
+							id: completionCallId,
+							name: "attempt_completion",
+							input: { result: "done" },
+						},
+					],
+				})
+
+				const handlingCompletion = attemptCompletionTool.handle(
+					task,
+					{
+						type: "tool_use",
+						id: completionCallId,
+						name: "attempt_completion",
+						params: { result: "done" },
+						nativeArgs: { result: "done" },
+						partial: false,
+					},
+					callbacks,
+				)
+				expect(completionListener).not.toHaveBeenCalled()
+
+				await vi.runAllTimersAsync()
+				await handlingCompletion
+
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+				expect(callbacks.handleError).not.toHaveBeenCalled()
+				expect(completionListener).toHaveBeenCalledTimes(1)
+			} finally {
+				mockSaveApiMessages.mockResolvedValue(undefined)
+				vi.useRealTimers()
+			}
+		})
+
 		it("settles a pending assistant persistence wait when the task is disposed", async () => {
 			const task = new Task({
 				provider: mockProvider,

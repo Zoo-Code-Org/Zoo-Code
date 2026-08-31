@@ -1206,6 +1206,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return (await this.retrySaveApiConversationHistoryWithCancellation()) === "saved"
 	}
 
+	/** Retries API-history persistence while allowing the active assistant generation to cancel backoff. */
 	private async retrySaveApiConversationHistoryWithCancellation(
 		cancellation?: AssistantMessagePersistenceCancellation,
 	): Promise<AssistantMessagePersistenceResult> {
