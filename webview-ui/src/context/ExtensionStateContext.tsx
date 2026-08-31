@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useEffect, useState } from "react"
+import React, { createContext, useCallback, useEffect, useRef, useState } from "react"
 
 import {
 	type ProviderSettings,
@@ -33,6 +33,7 @@ import { experimentDefault } from "@roo/experiments"
 
 import { vscode } from "@src/utils/vscode"
 import { convertTextMateToHljs } from "@src/utils/textMateToHljs"
+import { StringCache } from "@src/utils/stringCache"
 
 export interface ExtensionStateContextType extends ExtensionState {
 	historyPreviewCollapsed?: boolean // Add the new state property
@@ -283,9 +284,22 @@ export const ExtensionStateContextProvider: React.FC<{
 	children: React.ReactNode
 	initialState?: ExtensionStateProviderInitialState
 }> = ({ children, initialState }) => {
-	const [state, setState] = useState<ExtensionState>(() =>
-		mergeExtensionState(createInitialExtensionState(), initialState ?? {}),
-	)
+	const [historyCache] = useState(() => new StringCache())
+	const [messageCache] = useState(() => new StringCache((value) => !("partial" in value) || value.partial !== true))
+	const currentTaskIdRef = useRef(initialState?.currentTaskId)
+	const clineMessagesSeqRef = useRef(initialState?.clineMessagesSeq)
+
+	const [state, setState] = useState<ExtensionState>(() => {
+		const mergedState = mergeExtensionState(createInitialExtensionState(), initialState ?? {})
+		for (const clineMessage of mergedState.clineMessages) {
+			messageCache.intern(clineMessage)
+		}
+		historyCache.intern(mergedState.taskHistory)
+		if (mergedState.currentTaskItem) {
+			historyCache.intern(mergedState.currentTaskItem)
+		}
+		return mergedState
+	})
 
 	const [didHydrateState, setDidHydrateState] = useState(false)
 	const [showWelcome, setShowWelcome] = useState(false)
@@ -341,6 +355,37 @@ export const ExtensionStateContextProvider: React.FC<{
 			switch (message.type) {
 				case "state": {
 					const newState = message.state ?? {}
+					if (Object.prototype.hasOwnProperty.call(newState, "currentTaskId")) {
+						if (newState.currentTaskId !== currentTaskIdRef.current) {
+							messageCache.clear()
+							currentTaskIdRef.current = newState.currentTaskId
+						}
+					}
+
+					const messagesAreStale =
+						newState.clineMessages !== undefined &&
+						newState.clineMessagesSeq !== undefined &&
+						clineMessagesSeqRef.current !== undefined &&
+						newState.clineMessagesSeq <= clineMessagesSeqRef.current
+
+					if (newState.clineMessages && !messagesAreStale) {
+						for (const clineMessage of newState.clineMessages) {
+							messageCache.intern(clineMessage)
+						}
+					}
+					if (
+						newState.clineMessagesSeq !== undefined &&
+						(clineMessagesSeqRef.current === undefined ||
+							newState.clineMessagesSeq > clineMessagesSeqRef.current)
+					) {
+						clineMessagesSeqRef.current = newState.clineMessagesSeq
+					}
+					if (newState.taskHistory) {
+						historyCache.intern(newState.taskHistory)
+					}
+					if (newState.currentTaskItem) {
+						historyCache.intern(newState.currentTaskItem)
+					}
 					setState((prevState) => mergeExtensionState(prevState, newState))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
@@ -409,6 +454,7 @@ export const ExtensionStateContextProvider: React.FC<{
 						// worth noting it will never be possible for a more up-to-date message to be sent here or in normal messages post since the presentAssistantContent function uses lock
 						const lastIndex = findLastIndex(prevState.clineMessages, (msg) => msg.ts === clineMessage.ts)
 						if (lastIndex !== -1) {
+							messageCache.intern(clineMessage)
 							const newClineMessages = [...prevState.clineMessages]
 							newClineMessages[lastIndex] = clineMessage
 							return { ...prevState, clineMessages: newClineMessages }
@@ -469,6 +515,7 @@ export const ExtensionStateContextProvider: React.FC<{
 				case "taskHistoryUpdated": {
 					// Efficiently update just the task history without replacing entire state
 					if (message.taskHistory !== undefined) {
+						historyCache.intern(message.taskHistory)
 						setState((prevState) => ({
 							...prevState,
 							taskHistory: message.taskHistory!,
@@ -481,6 +528,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					if (!item) {
 						break
 					}
+					historyCache.intern(item)
 					setState((prevState) => {
 						const existingIndex = prevState.taskHistory.findIndex((h) => h.id === item.id)
 						let nextHistory: typeof prevState.taskHistory
@@ -503,7 +551,7 @@ export const ExtensionStateContextProvider: React.FC<{
 				}
 			}
 		},
-		[setListApiConfigMeta],
+		[historyCache, messageCache, setListApiConfigMeta],
 	)
 
 	useEffect(() => {

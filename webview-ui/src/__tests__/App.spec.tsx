@@ -5,6 +5,8 @@ import { render, screen, act, cleanup } from "@/utils/test-utils"
 
 import AppWithProviders from "../App"
 
+let nextChatViewInstance = 0
+
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
 		postMessage: vi.fn(),
@@ -28,8 +30,9 @@ vi.mock("@src/utils/TelemetryClient", () => ({
 vi.mock("@src/components/chat/ChatView", () => ({
 	__esModule: true,
 	default: function ChatView({ isHidden }: { isHidden: boolean }) {
+		const [instance] = React.useState(() => ++nextChatViewInstance)
 		return (
-			<div data-testid="chat-view" data-hidden={isHidden}>
+			<div data-testid="chat-view" data-hidden={isHidden} data-instance={instance}>
 				Chat View
 			</div>
 		)
@@ -160,6 +163,7 @@ vi.mock("process.env", () => ({
 describe("App", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
+		nextChatViewInstance = 0
 		window.removeEventListener("message", () => {})
 
 		// Set up default mock return value
@@ -204,6 +208,35 @@ describe("App", () => {
 		expect(chatView).toBeInTheDocument()
 		expect(chatView.getAttribute("data-hidden")).toBe("false")
 	}, 10000)
+
+	it("remounts chat on task transitions but preserves it across tab changes", async () => {
+		const state = {
+			didHydrateState: true,
+			showWelcome: false,
+			shouldShowAnnouncement: false,
+			experiments: {},
+			language: "en",
+			telemetrySetting: "enabled",
+			currentTaskId: "task-a" as string | undefined,
+		}
+		mockUseExtensionState.mockImplementation(() => state)
+
+		const { rerender } = render(<AppWithProviders />)
+		const firstInstance = screen.getByTestId("chat-view").getAttribute("data-instance")
+
+		act(() => triggerMessage("settingsButtonClicked"))
+		expect(await screen.findByTestId("settings-view")).toBeInTheDocument()
+		expect(screen.getByTestId("chat-view").getAttribute("data-instance")).toBe(firstInstance)
+
+		state.currentTaskId = "task-b"
+		rerender(<AppWithProviders />)
+		const secondInstance = screen.getByTestId("chat-view").getAttribute("data-instance")
+		expect(secondInstance).not.toBe(firstInstance)
+
+		state.currentTaskId = undefined
+		rerender(<AppWithProviders />)
+		expect(screen.getByTestId("chat-view").getAttribute("data-instance")).not.toBe(secondInstance)
+	})
 
 	it("shows welcome view when setup is incomplete", () => {
 		mockUseExtensionState.mockReturnValue({
