@@ -7,7 +7,7 @@ import deepEqual from "fast-deep-equal"
 import type { HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
+import { LOCK_STALE_MS, lockJsonFile, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -19,8 +19,17 @@ export { DeltaRejectedError } from "./taskStoreConcurrency"
  * Build a `safeWriteJson` merge callback that applies only `delta` to the
  * current disk state, preserving fields written by another process.
  */
-function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incoming: unknown) => unknown {
-	return (existing, incoming) => mergeHistoryDelta(existing, incoming as HistoryItem, delta)
+function mergeWithDisk(
+	delta: Partial<HistoryItem>,
+	options: { mergeChildIds?: boolean } = {},
+): (existing: unknown, incoming: unknown) => unknown {
+	return (existing, incoming) => {
+		const merged = mergeHistoryDelta(existing, incoming as HistoryItem, delta)
+		if (options.mergeChildIds === false && delta.childIds) {
+			merged.childIds = delta.childIds
+		}
+		return merged
+	}
 }
 
 /**
@@ -75,6 +84,23 @@ export interface TaskHistoryStoreOptions {
 	 * globalState during the transition period.
 	 */
 	onWrite?: (items: HistoryItem[]) => Promise<void>
+}
+
+export interface AtomicUpdatePairOptions {
+	/** Validate the first record against its current on-disk state while its cross-process lock is held. */
+	firstDiskGuard?: (current: HistoryItem) => void
+	/** Restore the first record's exact guarded pre-image if writing the second record fails. */
+	rollbackFirstOnSecondFailure?: boolean
+	/**
+	 * Run finite handoff work after both writes and `onWrite`, before releasing the first file lock.
+	 * The callback runs inside the non-reentrant store lock and must not call store mutation,
+	 * invalidation, or reconciliation methods. Rejection occurs after both records are durable.
+	 */
+	whileFirstFileLocked?: () => Promise<void>
+	/** The caller already holds the first record's cross-process lock. */
+	firstFileLockAcquired?: boolean
+	/** The caller already holds the in-process store lock. */
+	storeLockAcquired?: boolean
 }
 
 export class TaskHistoryStore {
@@ -849,13 +875,25 @@ export class TaskHistoryStore {
 	 * process are preserved. Without a delta the full item is written
 	 * as-is (used by administrative repair paths that are authoritative).
 	 */
-	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<HistoryItem> {
+	private async writeTaskFile(
+		item: HistoryItem,
+		delta?: Partial<HistoryItem>,
+		diskGuard?: (current: HistoryItem) => void,
+		options?: { mergeChildIds?: boolean; lockAcquired?: boolean },
+	): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
 		if (delta) {
 			let written: HistoryItem = item
-			const mergeFn = mergeWithDisk(delta)
+			const mergeFn = mergeWithDisk(delta, options)
 			await safeWriteJson(filePath, item, {
+				lockAcquired: options?.lockAcquired,
 				merge: (existing, incoming) => {
+					if (diskGuard) {
+						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+							throw new Error(`[TaskHistoryStore] guarded write: task ${item.id} not found on disk`)
+						}
+						diskGuard(existing as HistoryItem)
+					}
 					const result = mergeFn(existing, incoming)
 					written = result as HistoryItem
 					return result
@@ -958,39 +996,88 @@ export class TaskHistoryStore {
 	// ────────────────────────────── Atomic read-modify-write ──────────────────────────────
 
 	/**
-	 * Read a HistoryItem from the in-memory cache and write back an updated version,
-	 * all within a single lock acquisition so no concurrent writer can interleave
-	 * between the read and the write.
-	 *
-	 * The `updater` receives the current cached item and must return the new item
-	 * synchronously. It must not perform I/O or acquire any other lock.
-	 *
-	 * @throws If the task ID is not present in the cache.
+	 * Run a bounded parent transition while holding the in-process store lock and then
+	 * the task's cross-process file lock. Store mutations inside the callback must use
+	 * their already-acquired-lock options; other store mutation, invalidation, and
+	 * reconciliation methods are non-reentrant and must not be called.
 	 */
-	public atomicReadAndUpdate(taskId: string, updater: (current: HistoryItem) => HistoryItem): Promise<HistoryItem[]> {
+	public async withTaskFileLock<T>(taskId: string, callback: () => Promise<T>): Promise<T> {
 		return this.withLock(async () => {
-			const current = this.cache.get(taskId)
-			if (!current) {
-				throw new Error(`[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`)
+			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
+			try {
+				const current = await this.readTaskFile(taskId)
+				if (current) {
+					this.cache.set(taskId, current)
+				}
+				return await callback()
+			} finally {
+				await releaseFileLock()
 			}
-			// Deep-copy so a mutating updater cannot alter cached state before persistence.
-			const snapshot = structuredClone(current)
-			const updated = updater(snapshot)
-			if (updated.id !== taskId) {
-				throw new Error(
-					`[TaskHistoryStore] atomicReadAndUpdate: updater changed task id from ${taskId} to ${updated.id}`,
-				)
-			}
-			return this.upsertCore(updated)
 		})
 	}
 
 	/**
-	 * Update two related HistoryItems within a single in-process lock acquisition.
-	 * Both updaters run synchronously (no I/O, no lock re-entry). Both writes
-	 * complete before the lock releases, so no in-process reader can observe an
-	 * intermediate state. Cross-process atomicity is NOT guaranteed — each
-	 * writeTaskFile call acquires and releases its own advisory file lock.
+	 * Read the current on-disk HistoryItem and write back an updated version while
+	 * holding both the in-process store lock and the record's cross-process lock.
+	 * The synchronous updater must not perform I/O or acquire another lock.
+	 *
+	 * @throws If the task ID is not present in the cache.
+	 */
+	public atomicReadAndUpdate(
+		taskId: string,
+		updater: (current: HistoryItem) => HistoryItem,
+		options: { fileLockAcquired?: boolean; storeLockAcquired?: boolean } = {},
+	): Promise<HistoryItem[]> {
+		const update = async () => {
+			const cached = this.cache.get(taskId)
+			if (!cached) {
+				throw new Error(`[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`)
+			}
+			const releaseFileLock = options.fileLockAcquired
+				? async () => {}
+				: await lockJsonFile(await this.getTaskFilePath(taskId))
+			try {
+				const current = (await this.readTaskFile(taskId)) ?? cached
+				const updated = updater(structuredClone(current))
+				if (updated.id !== taskId) {
+					throw new Error(
+						`[TaskHistoryStore] atomicReadAndUpdate: updater changed task id from ${taskId} to ${updated.id}`,
+					)
+				}
+				if (updated.status !== undefined) {
+					const currentStatus: HistoryItemStatus = current.status ?? "active"
+					if (updated.status !== currentStatus) {
+						assertValidTransition(current.status, updated.status)
+					}
+				}
+
+				const merged = { ...current, ...updated }
+				const written = await this.writeTaskFile(merged, this.buildDelta(taskId, current, updated), undefined, {
+					lockAcquired: true,
+				})
+				this.cache.set(taskId, written)
+				const all = this.getAll()
+				if (this.onWrite) {
+					await this.onWrite(all)
+				}
+				return all
+			} finally {
+				await releaseFileLock()
+			}
+		}
+		return options.storeLockAcquired ? update() : this.withLock(update)
+	}
+
+	/**
+	 * Update two related HistoryItems within one in-process lock acquisition. Both
+	 * updaters are synchronous and both writes finish before the store lock releases.
+	 *
+	 * By default each record write takes only its own file lock, so cross-process
+	 * atomicity is not guaranteed. Supplying a first-record guard, rollback, or
+	 * `whileFirstFileLocked` holds the first record's lock across both writes,
+	 * `onWrite`, and the callback; the second record's lock still covers only its own
+	 * write. `firstFileLockAcquired` and `storeLockAcquired` reuse locks held by
+	 * `withTaskFileLock` and must only be set by that lock-scoped callback.
 	 *
 	 * @throws If either task ID is not present in the cache.
 	 */
@@ -999,8 +1086,9 @@ export class TaskHistoryStore {
 		secondId: string,
 		firstUpdater: (current: HistoryItem) => HistoryItem,
 		secondUpdater: (current: HistoryItem) => HistoryItem,
+		options?: AtomicUpdatePairOptions,
 	): Promise<HistoryItem[]> {
-		return this.withLock(async () => {
+		const update = async () => {
 			const first = this.cache.get(firstId)
 			if (!first) throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${firstId} not found`)
 			const second = this.cache.get(secondId)
@@ -1036,28 +1124,90 @@ export class TaskHistoryStore {
 			// Merge with existing cache entries before writing, mirroring upsertCore.
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
+			const holdFirstFileLock = Boolean(
+				options?.firstDiskGuard || options?.rollbackFirstOnSecondFailure || options?.whileFirstFileLocked,
+			)
+			const releaseFirstFileLock = options?.firstFileLockAcquired
+				? async () => {}
+				: holdFirstFileLock
+					? await lockJsonFile(await this.getTaskFilePath(firstId))
+					: async () => {}
 
-			const writtenFirst = await this.writeTaskFile(mergedFirst, this.buildDelta(firstId, first, updatedFirst))
-			let writtenSecond: HistoryItem
 			try {
-				writtenSecond = await this.writeTaskFile(mergedSecond, this.buildDelta(secondId, second, updatedSecond))
-			} catch (error) {
-				// First record is committed on disk. Update cache so it
-				// reflects disk state before propagating the error.
+				let firstDiskSnapshot: HistoryItem | undefined
+				const captureAndGuardFirst =
+					options?.firstDiskGuard || options?.rollbackFirstOnSecondFailure
+						? (current: HistoryItem) => {
+								options?.firstDiskGuard?.(current)
+								firstDiskSnapshot = structuredClone(current)
+							}
+						: undefined
+				const firstDelta = this.buildDelta(firstId, first, updatedFirst)
+				const writtenFirst = await this.writeTaskFile(mergedFirst, firstDelta, captureAndGuardFirst, {
+					lockAcquired: holdFirstFileLock || options?.firstFileLockAcquired,
+				})
+				let writtenSecond: HistoryItem
+				try {
+					writtenSecond = await this.writeTaskFile(
+						mergedSecond,
+						this.buildDelta(secondId, second, updatedSecond),
+					)
+				} catch (error) {
+					if (options?.rollbackFirstOnSecondFailure && firstDiskSnapshot) {
+						try {
+							let restoredFirst = firstDiskSnapshot
+							await safeWriteJson(await this.getTaskFilePath(firstId), firstDiskSnapshot, {
+								lockAcquired: holdFirstFileLock || options?.firstFileLockAcquired,
+								merge: (existing) => {
+									if (!existing || typeof existing !== "object" || !("id" in existing)) {
+										throw new Error(
+											`[TaskHistoryStore] atomicUpdatePair: ${firstId} missing during rollback`,
+										)
+									}
+									const current = existing as HistoryItem
+									const firstWriteStillCurrent = Object.entries(firstDelta).every(([key, value]) =>
+										deepEqual((current as Record<string, unknown>)[key], value),
+									)
+									if (!firstWriteStillCurrent) {
+										throw new Error(
+											`[TaskHistoryStore] atomicUpdatePair: cannot roll back ${firstId} after a concurrent update`,
+										)
+									}
+									restoredFirst = structuredClone(firstDiskSnapshot)
+									return restoredFirst
+								},
+							})
+							this.cache.set(firstId, restoredFirst)
+						} catch (rollbackError) {
+							this.cache.set(firstId, writtenFirst)
+							throw new AggregateError(
+								[error, rollbackError],
+								`[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed`,
+							)
+						}
+					} else {
+						// First record is committed on disk. Update cache so it
+						// reflects disk state before propagating the error.
+						this.cache.set(firstId, writtenFirst)
+					}
+					throw error
+				}
+
+				// Both disk writes succeeded — now update the cache.
 				this.cache.set(firstId, writtenFirst)
-				throw error
-			}
+				this.cache.set(secondId, writtenSecond)
 
-			// Both disk writes succeeded — now update the cache.
-			this.cache.set(firstId, writtenFirst)
-			this.cache.set(secondId, writtenSecond)
-
-			const all = this.getAll()
-			if (this.onWrite) {
-				await this.onWrite(all)
+				const all = this.getAll()
+				if (this.onWrite) {
+					await this.onWrite(all)
+				}
+				await options?.whileFirstFileLocked?.()
+				return all
+			} finally {
+				await releaseFirstFileLock()
 			}
-			return all
-		})
+		}
+		return options?.storeLockAcquired ? update() : this.withLock(update)
 	}
 
 	// ────────────────────────────── Private: Write lock ──────────────────────────────

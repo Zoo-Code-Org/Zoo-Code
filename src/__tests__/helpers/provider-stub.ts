@@ -5,7 +5,11 @@ import { type Task } from "../../core/task/Task"
 type ProviderStubFields = {
 	cancelledDelegationChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
-	taskHistoryStore?: { get: (id: string) => unknown; invalidate?: (id: string) => Promise<void> }
+	taskHistoryStore?: {
+		get: (id: string) => unknown
+		invalidate?: (id: string) => Promise<void>
+		withTaskFileLock?: <T>(id: string, callback: () => Promise<T>) => Promise<T>
+	}
 	taskScheduler?: { schedule: (task: Task, run: () => Promise<void>) => Promise<void> }
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
@@ -39,6 +43,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.taskHistoryStore ??= { get: () => undefined }
 	s.taskHistoryStore.invalidate ??= async () => {}
 	s.taskScheduler ??= { schedule: async (_task, run) => run() }
+	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback()
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {

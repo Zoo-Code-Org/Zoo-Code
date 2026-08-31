@@ -382,6 +382,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private telemetryToolUsageBaseline: ToolUsage = {}
 	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
 	private abortPromise?: Promise<void>
+	private skipAbortMessageSave = false
 	private disposalPromise?: Promise<void>
 	private diffReversionPromise: Promise<void> = Promise.resolve()
 
@@ -2626,9 +2627,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.debouncedEmitTokenUsage.flush()
 	}
 
-	public abortTask(isAbandoned = false): Promise<void> {
+	public abortTask(isAbandoned = false, options: { saveMessages?: boolean } = {}): Promise<void> {
 		if (isAbandoned) {
 			this.abandoned = true
+		}
+		if (options.saveMessages === false) {
+			this.skipAbortMessageSave = true
 		}
 
 		this.abort = true
@@ -2668,6 +2672,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
 			// Don't rethrow - we want abort to always succeed
+		}
+		if (this.skipAbortMessageSave) {
+			return
 		}
 		// Guard: a history task whose message load has not finished yet has
 		// clineMessages = []. Saving now would call taskMetadata() with an
