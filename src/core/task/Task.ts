@@ -988,6 +988,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return ensureMessageIdentifiers(messages)
 	}
 
+	/** Appends an API turn and records whether an assistant turn reached persistent storage. */
 	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
@@ -1026,6 +1027,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/** Creates the persistence boundary for the next streamed assistant turn. */
 	private resetAssistantMessagePersistence(): void {
 		this.assistantMessagePersistencePromise = new Promise<boolean>((resolve) => {
 			this.resolveAssistantMessagePersistence = resolve

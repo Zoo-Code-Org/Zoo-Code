@@ -503,6 +503,7 @@ describe("Task persistence", () => {
 					}),
 				])
 				expect(saveSettled).toBe(false)
+				expect(completionEmitted).toBe(false)
 
 				saveDeferred.resolve(undefined)
 				await Promise.all([saving, handlingCompletion])

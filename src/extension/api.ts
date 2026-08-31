@@ -14,6 +14,7 @@ import {
 	type ProviderSettingsEntry,
 	type TaskEvent,
 	type CreateTaskOptions,
+	type TaskApiConversationHistorySequence,
 	type WebviewThemeFixture,
 	RooCodeEventName,
 	TaskCommandName,
@@ -248,6 +249,39 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			return apiConversationHistory.length
 		} catch {
 			return 0
+		}
+	}
+
+	/** Checks persisted turn ordering without exposing conversation contents to tests. */
+	public async hasTaskApiConversationHistorySequence(
+		taskId: string,
+		sequence: TaskApiConversationHistorySequence,
+	): Promise<boolean> {
+		try {
+			const { apiConversationHistory } = await this.sidebarProvider.getTaskWithId(taskId)
+			const userTurnIndex = apiConversationHistory.findIndex(
+				(message) =>
+					message.role === "user" &&
+					Array.isArray(message.content) &&
+					message.content.some((block) => block.type === "text" && block.text.includes(sequence.userText)),
+			)
+			if (userTurnIndex < 0) return false
+
+			return apiConversationHistory
+				.slice(userTurnIndex + 1)
+				.some(
+					(message) =>
+						message.role === "assistant" &&
+						Array.isArray(message.content) &&
+						message.content.some(
+							(block) =>
+								block.type === "tool_use" &&
+								block.name === sequence.assistantToolName &&
+								JSON.stringify(block.input).includes(sequence.assistantToolInputText),
+						),
+				)
+		} catch {
+			return false
 		}
 	}
 
