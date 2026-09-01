@@ -270,4 +270,33 @@ describe("filterMcpToolsForMode", () => {
 		expect(result).toHaveLength(1)
 		expect("function" in result[0] ? result[0].function?.name : undefined).toBe("mcp--server--allowed")
 	})
+
+	const globallyDisabledMcpCases: [string, NonNullable<Parameters<typeof filterMcpToolsForMode>[4]>][] = [
+		["disabledTools", { disabledTools: ["use_mcp_tool"] }],
+		[
+			"modelInfo.excludedTools",
+			{
+				modelInfo: {
+					contextWindow: 200_000,
+					supportsPromptCache: false,
+					excludedTools: ["use_mcp_tool"],
+				},
+			},
+		],
+	]
+
+	it.each(globallyDisabledMcpCases)(
+		"drops all MCP tools when %s globally disables MCP tool use",
+		(_source, settings) => {
+			const result = filterMcpToolsForMode(
+				[makeTool("mcp--server--first"), makeTool("mcp--server--second")],
+				"code",
+				undefined,
+				undefined,
+				settings,
+			)
+
+			expect(result).toEqual([])
+		},
+	)
 })

@@ -14,6 +14,9 @@ describe("getBuiltInModeInstructions", () => {
 		expect(result).not.toContain("update_todo_list")
 		expect(result).not.toContain("switch_mode")
 		expect(result).toContain("write the plan to a markdown file")
+
+		const stepNumbers = Array.from(result.matchAll(/^(\d+)\. /gm), (match) => Number(match[1]))
+		expect(stepNumbers).toEqual([1, 2, 3, 4, 5, 6])
 	})
 
 	it("uses a response plan when Architect has no edit tool", () => {

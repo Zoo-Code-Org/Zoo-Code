@@ -1,6 +1,7 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-usage-attribution.spec.ts
 
 import type { Anthropic } from "@anthropic-ai/sdk"
+import { parametersSchema as z } from "@roo-code/types"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
@@ -45,6 +46,7 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
+import { customToolRegistry } from "@roo-code/core"
 import { TelemetryService } from "@roo-code/telemetry"
 
 interface MockTask {
@@ -261,6 +263,62 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 		expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 		expect(mockTask.recordToolError).toHaveBeenCalledWith("execute_command", expect.any(String))
 		expect(mockTask.userMessageContent).toHaveLength(1)
+	})
+
+	it("uses the request policy experiment and mode for custom tool execution", async () => {
+		const parameters = z.object({ value: z.string() })
+		const parseSpy = vi.spyOn(parameters, "parse")
+		const execute = vi.fn().mockResolvedValue("request-scoped custom result")
+		const getState = vi.fn().mockRejectedValue(new Error("live state should not be read"))
+
+		vi.mocked(customToolRegistry.has).mockImplementation((name) => name === "request_scoped_tool")
+		vi.mocked(customToolRegistry.get).mockImplementation((name) =>
+			name === "request_scoped_tool"
+				? {
+						name,
+						description: "A request-scoped custom tool",
+						parameters,
+						execute,
+					}
+				: undefined,
+		)
+		mockTask.getCurrentRequestToolPolicy = () => ({
+			effectiveToolNames: new Set(["request_scoped_tool"]),
+			mode: "architect",
+			customModes: [],
+			experiments: { customTools: true },
+		})
+		mockTask.providerRef = {
+			deref: () => ({
+				getState,
+			}),
+		}
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_request_scoped_custom_tool",
+				name: "request_scoped_tool",
+				params: { value: "from-request" },
+				nativeArgs: { value: "from-request" },
+				partial: false,
+			},
+		]
+
+		await presentMockTask(mockTask)
+
+		expect(getState).not.toHaveBeenCalled()
+		expect(customToolRegistry.get).toHaveBeenCalledWith("request_scoped_tool")
+		expect(parseSpy).toHaveBeenCalledWith({ value: "from-request" })
+		expect(execute).toHaveBeenCalledWith(
+			{ value: "from-request" },
+			expect.objectContaining({ mode: "architect", task: mockTask }),
+		)
+		expect(mockTask.userMessageContent).toEqual([
+			expect.objectContaining({
+				tool_use_id: "call_request_scoped_custom_tool",
+				content: "request-scoped custom result",
+			}),
+		])
 	})
 
 	it("validates available tools with the request mode and effective included set", async () => {

@@ -45,6 +45,7 @@ import { ModeConfig } from "@roo-code/types"
 
 import { SYSTEM_PROMPT } from "../system"
 import { McpHub } from "../../../services/mcp/McpHub"
+import { SkillsManager } from "../../../services/skills/SkillsManager"
 import { defaultModeSlug, modes, Mode } from "../../../shared/modes"
 import "../../../utils/path"
 import { addCustomInstructions } from "../sections/custom-instructions"
@@ -197,6 +198,7 @@ const generatePromptWithTools = (
 	mode: Mode = defaultModeSlug,
 	customModePrompts?: Parameters<typeof SYSTEM_PROMPT>[6],
 	customModes?: ModeConfig[],
+	skillsManager?: SkillsManager,
 ) =>
 	SYSTEM_PROMPT(
 		mockContext,
@@ -214,7 +216,7 @@ const generatePromptWithTools = (
 		undefined,
 		undefined,
 		undefined,
-		undefined,
+		skillsManager,
 		{ availableToolNames: new Set(toolNames) },
 	)
 
@@ -610,6 +612,38 @@ describe("SYSTEM_PROMPT", () => {
 		expect(prompt).not.toContain("execute_command")
 		expect(prompt).not.toContain("list_files")
 		expect(prompt).not.toContain("write and edit files")
+	})
+
+	it("should include available skills only when the skill tool is available", async () => {
+		const skillsManager = Object.create(SkillsManager.prototype) as SkillsManager
+		vi.spyOn(skillsManager, "getSkillsForMode").mockReturnValue([
+			{
+				name: "test-skill",
+				description: "A test skill for prompt composition",
+				path: "/skills/test-skill/SKILL.md",
+				source: "global",
+			},
+		])
+
+		const withoutSkillTool = await generatePromptWithTools(
+			["read_file", "attempt_completion"],
+			defaultModeSlug,
+			undefined,
+			undefined,
+			skillsManager,
+		)
+		const withSkillTool = await generatePromptWithTools(
+			["read_file", "skill", "attempt_completion"],
+			defaultModeSlug,
+			undefined,
+			undefined,
+			skillsManager,
+		)
+
+		expect(withoutSkillTool).not.toContain("AVAILABLE SKILLS")
+		expect(withoutSkillTool).not.toContain("<name>test-skill</name>")
+		expect(withSkillTool).toContain("AVAILABLE SKILLS")
+		expect(withSkillTool).toContain("<name>test-skill</name>")
 	})
 
 	it("should fall back to the default mode configuration for an unknown mode", async () => {

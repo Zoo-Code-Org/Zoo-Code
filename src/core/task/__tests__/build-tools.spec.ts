@@ -89,9 +89,9 @@ describe("buildNativeToolsArrayWithRestrictions", () => {
 			},
 		})
 
-		expect(result.effectiveToolNames).not.toContain("execute_command")
-		expect(result.effectiveToolNames).toContain("edit")
-		expect(result.effectiveToolNames).not.toContain("search_and_replace")
+		expect(result.effectiveToolNames.has("execute_command")).toBe(false)
+		expect(result.effectiveToolNames.has("edit")).toBe(true)
+		expect(result.effectiveToolNames.has("search_and_replace")).toBe(false)
 	})
 
 	it("removes model-excluded tools from logical availability", async () => {
@@ -109,8 +109,8 @@ describe("buildNativeToolsArrayWithRestrictions", () => {
 			},
 		})
 
-		expect(result.effectiveToolNames).not.toContain("execute_command")
-		expect(result.effectiveToolNames).toContain("read_file")
+		expect(result.effectiveToolNames.has("execute_command")).toBe(false)
+		expect(result.effectiveToolNames.has("read_file")).toBe(true)
 	})
 
 	it("separates Gemini compatibility definitions from logical availability", async () => {
@@ -126,7 +126,7 @@ describe("buildNativeToolsArrayWithRestrictions", () => {
 		const sentToolNames = result.tools.flatMap((tool) => (tool.type === "function" ? [tool.function.name] : []))
 
 		expect(sentToolNames).toContain("execute_command")
-		expect(result.effectiveToolNames).not.toContain("execute_command")
+		expect(result.effectiveToolNames.has("execute_command")).toBe(false)
 		expect(result.allowedFunctionNames).not.toContain("execute_command")
 	})
 
@@ -151,9 +151,9 @@ describe("buildNativeToolsArrayWithRestrictions", () => {
 			disabledTools: ["new_task"],
 		})
 
-		expect(codeResult.effectiveToolNames).toContain("ask_followup_question")
-		expect(codeResult.effectiveToolNames).toContain("attempt_completion")
-		expect(orchestratorResult.effectiveToolNames).toContain("new_task")
+		expect(codeResult.effectiveToolNames.has("ask_followup_question")).toBe(true)
+		expect(codeResult.effectiveToolNames.has("attempt_completion")).toBe(true)
+		expect(orchestratorResult.effectiveToolNames.has("new_task")).toBe(true)
 	})
 
 	it("excludes MCP operations when MCP is globally disabled", async () => {
@@ -167,7 +167,7 @@ describe("buildNativeToolsArrayWithRestrictions", () => {
 			mcpEnabled: false,
 		})
 
-		expect(result.effectiveToolNames).not.toContain("access_mcp_resource")
+		expect(result.effectiveToolNames.has("access_mcp_resource")).toBe(false)
 		expect(Array.from(result.effectiveToolNames).some((name) => name.startsWith("mcp--"))).toBe(false)
 	})
 
@@ -183,7 +183,7 @@ describe("buildNativeToolsArrayWithRestrictions", () => {
 			mcpEnabled: true,
 		})
 
-		expect(result.effectiveToolNames).toContain("access_mcp_resource")
+		expect(result.effectiveToolNames.has("access_mcp_resource")).toBe(true)
 		expect(Array.from(result.effectiveToolNames).some((name) => name.startsWith("mcp--"))).toBe(false)
 	})
 })

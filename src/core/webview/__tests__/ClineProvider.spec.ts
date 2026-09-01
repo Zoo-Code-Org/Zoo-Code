@@ -2213,8 +2213,8 @@ describe("ClineProvider", () => {
 			)
 			const systemPromptCall = vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1)
 			const promptContext = systemPromptCall?.[16]
-			expect(promptContext?.availableToolNames).not.toContain("execute_command")
-			expect(promptContext?.availableToolNames).toContain("read_file")
+			expect(promptContext?.availableToolNames.has("execute_command")).toBe(false)
+			expect(promptContext?.availableToolNames.has("read_file")).toBe(true)
 		})
 
 		test("uses cached model policy when full model metadata fetch fails", async () => {

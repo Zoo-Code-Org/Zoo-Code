@@ -2861,16 +2861,46 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}
 			}
 
-			await this.safeEnsureModelFetched()
-			const supportsAllowedFunctionNames = this.apiConfiguration?.apiProvider === providerIdentifiers.gemini
-			const resolvedPromptTools = await this.resolvePromptTools({
-				includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
-			})
-			const environmentDetails = await getEnvironmentDetails(
-				this,
-				currentIncludeFileDetails,
-				resolvedPromptTools.toolsResult.effectiveToolNames,
-			)
+			let resolvedPromptTools: ResolvedPromptTools
+			let environmentDetails: string
+			try {
+				await this.safeEnsureModelFetched()
+				const supportsAllowedFunctionNames = this.apiConfiguration?.apiProvider === providerIdentifiers.gemini
+				resolvedPromptTools = await this.resolvePromptTools({
+					includeAllToolsWithRestrictions: supportsAllowedFunctionNames,
+				})
+				environmentDetails = await getEnvironmentDetails(
+					this,
+					currentIncludeFileDetails,
+					resolvedPromptTools.toolsResult.effectiveToolNames,
+				)
+			} catch (error) {
+				const lastApiReqIndex = findLastIndex(
+					this.clineMessages,
+					(message) => message.say === "api_req_started",
+				)
+				const rawErrorMessage = error instanceof Error ? error.message : String(error)
+				const streamingFailedMessage = `${t("common:interruption.streamTerminatedByProvider")}: ${rawErrorMessage}`
+
+				if (lastApiReqIndex >= 0 && this.clineMessages[lastApiReqIndex]) {
+					const existingData = JSON.parse(this.clineMessages[lastApiReqIndex].text || "{}")
+					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
+						...existingData,
+						tokensIn: 0,
+						tokensOut: 0,
+						cacheWrites: 0,
+						cacheReads: 0,
+						cost: 0,
+						cancelReason: "streaming_failed",
+						streamingFailedMessage,
+					} satisfies ClineApiReqInfo)
+					await this.saveClineMessages()
+					await this.providerRef.deref()?.postStateToWebviewWithoutTaskHistory()
+				}
+
+				console.error(`[Task#${this.taskId}.${this.instanceId}] Failed to prepare API request:`, error)
+				return true
+			}
 
 			// Remove any existing environment_details blocks before adding fresh ones.
 			// This prevents duplicate environment details when resuming tasks,

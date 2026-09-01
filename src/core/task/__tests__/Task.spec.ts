@@ -31,21 +31,21 @@ import { processUserContentMentions } from "../../mentions/processUserContentMen
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import type { McpHub } from "../../../services/mcp/McpHub"
 import { defaultModeSlug } from "../../../shared/modes"
+import type { BuildToolsResult } from "../build-tools"
 
 type TestPromptTools = {
 	state: ProviderState
-	mode?: string
-	mcpHub: undefined
-	toolsResult: {
-		tools: unknown[]
-		effectiveToolNames: Set<string>
-		allowedFunctionNames?: string[]
-	}
+	mode: string
+	mcpHub?: McpHub
+	toolsResult: BuildToolsResult
 }
 
+type TestSystemPromptTools = Omit<TestPromptTools, "mode"> & { mode?: string }
+
 type TaskTestAccess = {
-	getSystemPrompt: (resolved?: TestPromptTools) => Promise<string>
+	getSystemPrompt: (resolved?: TestSystemPromptTools) => Promise<string>
 	getMcpHubForPrompt: (state: ProviderState) => Promise<unknown>
 	resolvePromptTools: (options?: {
 		state?: ProviderState
@@ -604,7 +604,7 @@ describe("Cline", () => {
 			const [, , , , , mode, , , , , , , settings, , , , promptContext] = systemPromptCall
 			expect(mode).toBe("architect")
 			expect(settings).toMatchObject({ todoListEnabled: true })
-			expect(promptContext?.availableToolNames).not.toContain("execute_command")
+			expect(promptContext?.availableToolNames.has("execute_command")).toBe(false)
 		})
 
 		it("passes disabled tools through the effective prompt context", async () => {
@@ -628,8 +628,8 @@ describe("Cline", () => {
 
 			const systemPromptCall = requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))
 			const promptContext = systemPromptCall[16]
-			expect(promptContext?.availableToolNames).not.toContain("execute_command")
-			expect(promptContext?.availableToolNames).toContain("read_file")
+			expect(promptContext?.availableToolNames.has("execute_command")).toBe(false)
+			expect(promptContext?.availableToolNames.has("read_file")).toBe(true)
 		})
 
 		it("uses the task mode when manually condensing after focused state changes", async () => {
@@ -741,7 +741,7 @@ describe("Cline", () => {
 
 			expect(promptToolNames).toEqual(requestPolicy.effectiveToolNames)
 			expect(apiToolNames).toEqual(requestPolicy.effectiveToolNames)
-			expect(requestPolicy.effectiveToolNames).not.toContain("execute_command")
+			expect(requestPolicy.effectiveToolNames.has("execute_command")).toBe(false)
 		})
 	})
 
@@ -799,6 +799,74 @@ describe("Cline", () => {
 			Object.defineProperty(task, "providerRef", { value: { deref: () => undefined } })
 
 			await expect(getTaskTestAccess(task).resolvePromptTools()).rejects.toThrow("Provider not available")
+		})
+
+		it("finalizes api_req_started when request tool resolution fails", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const state = {
+				...(await mockProvider.getState()),
+				mcpEnabled: false,
+				autoApprovalEnabled: true,
+				requestDelaySeconds: 0,
+			}
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			vi.mocked(processUserContentMentions).mockResolvedValueOnce({
+				content: [{ type: "text", text: "hello" }],
+				mode: undefined,
+			})
+			vi.spyOn(taskAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			const resolutionError = new Error("MCP hub unavailable")
+			vi.spyOn(taskAccess, "resolvePromptTools").mockRejectedValueOnce(resolutionError)
+			const saveSpy = vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
+			const requestSpy = vi.spyOn(task, "attemptApiRequest")
+			const postStateSpy = vi.mocked(mockProvider.postStateToWebviewWithoutTaskHistory)
+			postStateSpy.mockClear()
+			task.clineMessages = []
+			vi.spyOn(task, "say").mockImplementation(async (type, text) => {
+				if (type === "api_req_started") {
+					task.clineMessages.push({
+						ts: Date.now(),
+						type: "say",
+						say: "api_req_started",
+						text,
+					})
+				}
+				return undefined
+			})
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
+
+			const requestMessage = requireDefined(
+				task.clineMessages
+					.slice()
+					.reverse()
+					.find((message) => message.say === "api_req_started"),
+			)
+			expect(JSON.parse(requireDefined(requestMessage.text))).toMatchObject({
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				cost: 0,
+				cancelReason: "streaming_failed",
+				streamingFailedMessage: expect.stringContaining("MCP hub unavailable"),
+			})
+			expect(result).toBe(true)
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(postStateSpy).toHaveBeenCalledOnce()
+			expect(requestSpy).not.toHaveBeenCalled()
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to prepare API request"),
+				resolutionError,
+			)
+			errorSpy.mockRestore()
 		})
 
 		it("reports a lost provider while building the system prompt", async () => {
@@ -930,7 +998,7 @@ describe("Cline", () => {
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 
-			await task.attemptApiRequest(0, { resolvedPromptTools } as never).next()
+			await task.attemptApiRequest(0, { resolvedPromptTools }).next()
 
 			expect(ensureSpy).not.toHaveBeenCalled()
 			expect(task.getCurrentRequestToolPolicy()?.allowedMcpServers).toEqual(["allowed-server"])
