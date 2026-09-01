@@ -45,6 +45,13 @@ Prefer the narrowest test layer that proves the behavior. This follows standard 
 - Keep e2e tests focused on high-value smoke coverage across boundaries. Avoid placing detailed protocol, parsing, storage, retry, or edge-case assertions in e2e when they can be covered reliably at a lower layer.
 - When fixing a regression, add the regression test at the lowest layer that would have failed for the bug. Add an e2e test only if lower-level tests cannot represent the failure mode.
 
+## Task Lifecycle Changes
+
+- Read `docs/architecture/task-lifecycle-model.md` before changing task status, delegation, interruption, completion, abandonment, persistence ownership, or scheduler fan-out behavior.
+- Keep lifecycle mutations in the shared reducers under `src/core/task-persistence/taskLifecycle.ts`. Update the model actions or invariants for every new transition or concurrency bug class representable in the lifecycle model, then run `pnpm lifecycle:model-check`.
+- Add extension-host E2E coverage only for a boundary the reducer model cannot prove, such as restart visibility, real persistence/rehydration, delayed provider streams, scheduler permits, or webview task scoping. Do not duplicate reducer interleavings in E2E.
+- Run the focused lifecycle tests and `pnpm test` before completing a Zoo Code lifecycle change.
+
 ## Shared Test Utilities
 
 - Use `src/test-utils/stream.ts` for mechanical async-stream setup and collection.

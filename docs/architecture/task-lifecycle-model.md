@@ -79,3 +79,9 @@ When production lifecycle behavior changes:
 5. Convert any discovered counterexample into a focused production regression test as well as retaining the architectural invariant.
 
 Do not weaken bounds or remove an invariant merely to make CI pass. If state growth becomes difficult to control, split independent protocols or move the model to TLC/Quint with an implementation trace adapter rather than silently sampling the state space.
+
+## Test layering
+
+Keep reducer permutations in this model and focused Vitest suites. The real VS Code extension-host suite using a mocked provider in `apps/vscode-e2e/src/suite/subtasks.test.ts` already covers the boundaries the pure explorer cannot: task creation and rehydration, persisted parent-child state, cancellation during a delayed provider stream, interrupted-child resume, abandonment followed by a real resume/save/completion cycle, pending approvals across leave/return, and scheduler-driven resume. `restart-persistence.test.ts` separately verifies completion history through a fresh extension host.
+
+Add E2E coverage only when a lifecycle change crosses one of those runtime boundaries or introduces a new one. For example, #1453 persistence-readiness semantics require a controlled fresh-host test, and #369/#372 fan-out requires scheduler permit, live-parent routing, orphan cleanup, and task-scoping E2E. Do not add E2E cases solely to replay reducer orderings already exhausted here; they increase fixture and timing cost without strengthening the proof claim.
