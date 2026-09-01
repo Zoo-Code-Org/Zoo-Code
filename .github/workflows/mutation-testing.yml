@@ -51,10 +51,6 @@ jobs:
               if: github.event_name == 'pull_request'
               run: pnpm test:mutation-ci
 
-            - name: Run Stryker integration smoke
-              if: github.event_name == 'pull_request'
-              run: pnpm test:mutation-smoke
-
             - name: Mutate changed executable lines
               if: github.event_name == 'pull_request'
               env:

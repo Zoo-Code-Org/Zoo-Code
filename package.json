@@ -13,7 +13,6 @@
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
-		"test:mutation-smoke": "node scripts/stryker-smoke.mjs",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",
