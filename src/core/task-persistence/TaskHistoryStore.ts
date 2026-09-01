@@ -9,9 +9,9 @@ import type { HistoryItem } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { LOCK_STALE_MS, safeWriteJson } from "../../utils/safeWriteJson"
 import { getStorageBasePath } from "../../utils/storage"
+import { assertValidTransition, type HistoryItemStatus, VALID_TASK_STATUS_TRANSITIONS } from "./taskLifecycle"
 
-/** Valid status values for a task's HistoryItem. */
-export type HistoryItemStatus = NonNullable<HistoryItem["status"]>
+export { assertValidTransition, type HistoryItemStatus } from "./taskLifecycle"
 
 export class DeltaRejectedError extends Error {
 	constructor(
@@ -21,26 +21,6 @@ export class DeltaRejectedError extends Error {
 	) {
 		super(`Delta rejected for task ${taskId}: disk status ${diskStatus} rejects transition to ${attemptedStatus}`)
 		this.name = "DeltaRejectedError"
-	}
-}
-
-const VALID_TRANSITIONS: Record<HistoryItemStatus, HistoryItemStatus[]> = {
-	active: ["delegated", "completed", "interrupted"],
-	delegated: ["active"],
-	interrupted: ["completed"],
-	completed: [],
-}
-
-/**
- * Asserts that a task status transition is valid, throwing if not.
- *
- * @throws {Error} When the transition is not allowed by the state machine.
- */
-export function assertValidTransition(from: HistoryItemStatus | undefined, to: HistoryItemStatus): void {
-	const fromStatus: HistoryItemStatus = from ?? "active"
-	const validTargets = VALID_TRANSITIONS[fromStatus]
-	if (!validTargets.includes(to)) {
-		throw new Error(`Invalid task status transition: ${fromStatus} → ${to}`)
 	}
 }
 
@@ -57,7 +37,7 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 		if (delta.status !== undefined) {
 			const diskStatus: HistoryItemStatus = disk.status ?? "active"
 			if (delta.status !== diskStatus) {
-				const validTargets = VALID_TRANSITIONS[diskStatus]
+				const validTargets = VALID_TASK_STATUS_TRANSITIONS[diskStatus]
 				if (!validTargets?.includes(delta.status as HistoryItemStatus)) {
 					throw new DeltaRejectedError(disk.id, diskStatus, delta.status as HistoryItemStatus)
 				}
