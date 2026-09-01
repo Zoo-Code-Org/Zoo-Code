@@ -6,6 +6,7 @@ import * as path from "path"
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
 import type { Mock } from "vitest"
+import pWaitFor from "p-wait-for"
 
 import {
 	providerIdentifiers,
@@ -14,6 +15,7 @@ import {
 	type ProviderSettings,
 	type ModelInfo,
 	type TaskLike,
+	type ModeConfig,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -28,9 +30,28 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import { McpServerManager } from "../../../services/mcp/McpServerManager"
+import { defaultModeSlug } from "../../../shared/modes"
+
+type TestPromptTools = {
+	state: ProviderState
+	mode?: string
+	mcpHub: undefined
+	toolsResult: {
+		tools: unknown[]
+		effectiveToolNames: Set<string>
+		allowedFunctionNames?: string[]
+	}
+}
 
 type TaskTestAccess = {
-	getSystemPrompt: () => Promise<string>
+	getSystemPrompt: (resolved?: TestPromptTools) => Promise<string>
+	getMcpHubForPrompt: (state: ProviderState) => Promise<unknown>
+	resolvePromptTools: (options?: {
+		state?: ProviderState
+		mode?: string
+		includeAllToolsWithRestrictions?: boolean
+	}) => Promise<TestPromptTools>
 	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
@@ -41,6 +62,7 @@ type TaskTestAccess = {
 	saveClineMessages: () => Promise<boolean>
 	safeEnsureModelFetched: () => Promise<void>
 	addToApiConversationHistory: (message: unknown, reasoning?: string) => Promise<void>
+	saveApiConversationHistory: () => Promise<boolean>
 }
 
 type TaskAskResult = Awaited<ReturnType<Task["ask"]>>
@@ -720,6 +742,198 @@ describe("Cline", () => {
 			expect(promptToolNames).toEqual(requestPolicy.effectiveToolNames)
 			expect(apiToolNames).toEqual(requestPolicy.effectiveToolNames)
 			expect(requestPolicy.effectiveToolNames).not.toContain("execute_command")
+		})
+	})
+
+	describe("effective prompt tool resolution", () => {
+		it("refreshes model and tool policy before resuming after delegation", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.apiConversationHistory = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "delegation result" },
+						{ type: "text", text: "<environment_details>stale</environment_details>" },
+					],
+					ts: Date.now(),
+				},
+			]
+			const state = await mockProvider.getState()
+			const effectiveToolNames = new Set(["read_file"])
+			const taskAccess = getTaskTestAccess(task)
+			const ensureSpy = vi.spyOn(taskAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(taskAccess, "resolvePromptTools").mockResolvedValue({
+				state,
+				mode: "code",
+				mcpHub: undefined,
+				toolsResult: { tools: [], effectiveToolNames },
+			})
+			vi.mocked(getEnvironmentDetails).mockResolvedValueOnce("<environment_details>fresh</environment_details>")
+			const saveSpy = vi.spyOn(taskAccess, "saveApiConversationHistory").mockResolvedValue(true)
+			const loopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
+
+			await task.resumeAfterDelegation()
+
+			expect(ensureSpy).toHaveBeenCalledOnce()
+			expect(getEnvironmentDetails).toHaveBeenCalledWith(task, true, effectiveToolNames)
+			expect(task.apiConversationHistory[0].content).toEqual([
+				{ type: "text", text: "delegation result" },
+				{ type: "text", text: "<environment_details>fresh</environment_details>" },
+			])
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(loopSpy).toHaveBeenCalledWith([])
+		})
+
+		it("reports a lost provider while resolving tools", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			Object.defineProperty(task, "providerRef", { value: { deref: () => undefined } })
+
+			await expect(getTaskTestAccess(task).resolvePromptTools()).rejects.toThrow("Provider not available")
+		})
+
+		it("reports a lost provider while building the system prompt", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			Object.defineProperty(task, "providerRef", { value: { deref: () => undefined } })
+
+			await expect(
+				getTaskTestAccess(task).getSystemPrompt({
+					state,
+					mode: "code",
+					mcpHub: undefined,
+					toolsResult: { tools: [], effectiveToolNames: new Set() },
+				}),
+			).rejects.toThrow("Provider not available")
+		})
+
+		it("uses the default mode when a resolved prompt policy has no mode", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = await mockProvider.getState()
+			vi.mocked(SYSTEM_PROMPT).mockResolvedValueOnce("mock system prompt")
+
+			await getTaskTestAccess(task).getSystemPrompt({
+				state,
+				mode: undefined,
+				mcpHub: undefined,
+				toolsResult: { tools: [], effectiveToolNames: new Set() },
+			})
+
+			expect(requireDefined(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1))[5]).toBe(defaultModeSlug)
+		})
+
+		it("reports a lost provider before loading the MCP hub", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = { ...(await mockProvider.getState()), mcpEnabled: true }
+			Object.defineProperty(task, "providerRef", { value: { deref: () => undefined } })
+
+			await expect(getTaskTestAccess(task).getMcpHubForPrompt(state)).rejects.toThrow(
+				"Provider reference lost during view transition",
+			)
+		})
+
+		it("reports a missing MCP hub from the server manager", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = { ...(await mockProvider.getState()), mcpEnabled: true }
+			const getInstanceSpy = vi.spyOn(McpServerManager, "getInstance").mockResolvedValueOnce(undefined as never)
+
+			await expect(getTaskTestAccess(task).getMcpHubForPrompt(state)).rejects.toThrow(
+				"Failed to get MCP hub from server manager",
+			)
+			getInstanceSpy.mockRestore()
+		})
+
+		it("returns the MCP hub after logging a connection timeout", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const state = { ...(await mockProvider.getState()), mcpEnabled: true }
+			const mcpHub = { isConnecting: true }
+			const getInstanceSpy = vi.spyOn(McpServerManager, "getInstance").mockResolvedValueOnce(mcpHub as never)
+			vi.mocked(pWaitFor).mockRejectedValueOnce(new Error("timeout"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+			await expect(getTaskTestAccess(task).getMcpHubForPrompt(state)).resolves.toBe(mcpHub)
+			expect(errorSpy).toHaveBeenCalledWith("MCP servers failed to connect in time")
+			errorSpy.mockRestore()
+			getInstanceSpy.mockRestore()
+		})
+
+		it("reuses a resolved policy and snapshots its MCP allowlist for the request", async () => {
+			const mode = "restricted-mcp"
+			const customModes: ModeConfig[] = [
+				{
+					slug: mode,
+					name: "Restricted MCP",
+					roleDefinition: "Restricted MCP role",
+					groups: ["read", "mcp"],
+					allowedMcpServers: ["allowed-server"],
+				},
+			]
+			const state = {
+				...(await mockProvider.getState()),
+				mode,
+				mcpEnabled: false,
+				autoApprovalEnabled: true,
+				requestDelaySeconds: 0,
+				customModes,
+			}
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			const resolvedPromptTools = await taskAccess.resolvePromptTools({ state, mode })
+			const ensureSpy = vi.spyOn(taskAccess, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(taskAccess, "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				(async function* () {
+					yield { type: "text", text: "response" } as ApiStreamChunk
+				})(),
+			)
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
+			]
+
+			await task.attemptApiRequest(0, { resolvedPromptTools } as never).next()
+
+			expect(ensureSpy).not.toHaveBeenCalled()
+			expect(task.getCurrentRequestToolPolicy()?.allowedMcpServers).toEqual(["allowed-server"])
 		})
 	})
 
@@ -2581,11 +2795,19 @@ describe("Cline", () => {
 						id: requireDefined(mockApiConfig.apiModelId),
 						info: { contextWindow: 200000, maxTokens: 4096 } as ModelInfo,
 					})
+					vi.spyOn(task, "getTokenUsage").mockReturnValue({
+						totalCost: 0,
+						totalTokensIn: 0,
+						totalTokensOut: 0,
+						contextTokens: 190000,
+					})
 					const providerState = await mockProvider.getState()
 					vi.spyOn(mockProvider, "getState").mockResolvedValue({
 						...providerState,
 						apiConfiguration,
 						autoApprovalEnabled: true,
+						autoCondenseContext: true,
+						autoCondenseContextPercent: 80,
 						requestDelaySeconds: 0,
 					})
 					const mockStream = (async function* () {
@@ -2611,6 +2833,10 @@ describe("Cline", () => {
 					expect(tools.length).toBeGreaterThan(0)
 					expect(allowedFunctionNames.length).toBeGreaterThan(0)
 					expect(allowedFunctionNames.every((name) => toolNames.includes(name))).toBe(true)
+					expect(summarizeConversation).toHaveBeenCalled()
+					const [contextOptions] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+					expect(contextOptions.metadata?.tools).toEqual(tools)
+					expect(contextOptions.metadata?.allowedFunctionNames).toEqual(allowedFunctionNames)
 				})
 
 				it("should invoke abort on currentRequestAbortController during first-chunk wait", async () => {
