@@ -63,6 +63,13 @@ describe("McpToolRow", () => {
 		expect(screen.getByText("A test tool")).toBeInTheDocument()
 	})
 
+	it("hides only the tool description when requested", () => {
+		render(<McpToolRow tool={mockTool} showDescription={false} />)
+
+		expect(screen.getByText("test-tool")).toBeInTheDocument()
+		expect(screen.queryByText("A test tool")).not.toBeInTheDocument()
+	})
+
 	it("does not show always allow checkbox when serverName is not provided", () => {
 		render(<McpToolRow tool={mockTool} />)
 
@@ -142,6 +149,21 @@ describe("McpToolRow", () => {
 		expect(screen.getByText("param2")).toBeInTheDocument()
 		expect(screen.getByText("First parameter")).toBeInTheDocument()
 		expect(screen.getByText("Second parameter")).toBeInTheDocument()
+	})
+
+	it("keeps parameter descriptions visible when the tool description is hidden", () => {
+		const toolWithSchema = {
+			...mockTool,
+			inputSchema: {
+				type: "object",
+				properties: { query: { type: "string", description: "Search query" } },
+			},
+		}
+
+		render(<McpToolRow tool={toolWithSchema} showDescription={false} />)
+
+		expect(screen.queryByText("A test tool")).not.toBeInTheDocument()
+		expect(screen.getByText("Search query")).toBeInTheDocument()
 	})
 
 	it("shows toggle switch when serverName is provided and not in chat context", () => {

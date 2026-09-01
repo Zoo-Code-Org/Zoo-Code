@@ -8,6 +8,10 @@
 		"title": "MCPサーバーを有効化",
 		"description": "これをONにすると、Rooが接続されたMCPサーバーのツールを使えるようになるよ。Rooの機能が増える！追加ツールを使わないなら、APIトークンのコストを抑えるためにOFFにしてね。"
 	},
+	"showDescriptions": {
+		"title": "MCPの説明を表示",
+		"description": "MCPサーバーが提供するツールとリソースの説明を表示します。"
+	},
 	"editGlobalMCP": "グローバルMCPを編集",
 	"editProjectMCP": "プロジェクトMCPを編集",
 	"learnMoreEditingSettings": "MCP設定ファイルの編集方法を詳しく見る",

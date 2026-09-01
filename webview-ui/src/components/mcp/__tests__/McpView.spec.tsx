@@ -3,12 +3,14 @@ import { fireEvent, render, screen } from "@/utils/test-utils"
 import McpView from "../McpView"
 
 const setMcpEnabled = vi.fn()
+const setShowMcpDescriptions = vi.fn()
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
 		mcpServers: [],
 		alwaysAllowMcp: false,
 		mcpEnabled: false,
+		showMcpDescriptions: true,
 	}),
 }))
 
@@ -73,5 +75,14 @@ describe("McpView", () => {
 		fireEvent.click(screen.getByTestId("mcp-enabled-toggle"))
 
 		expect(setMcpEnabled).toHaveBeenCalledWith(false)
+	})
+
+	it("renders the controlled MCP description setting", () => {
+		render(
+			<McpView mcpEnabled={true} showMcpDescriptions={false} setShowMcpDescriptions={setShowMcpDescriptions} />,
+		)
+
+		expect(screen.getByText("mcp:showDescriptions.title")).toBeInTheDocument()
+		expect(screen.getByText("mcp:showDescriptions.description")).toBeInTheDocument()
 	})
 })

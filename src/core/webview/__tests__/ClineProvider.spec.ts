@@ -16,6 +16,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_SHOW_MCP_DESCRIPTIONS,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
 } from "@roo-code/types"
@@ -1350,6 +1351,27 @@ describe("ClineProvider", () => {
 
 		expect(state.apiConfiguration).toMatchObject(expectedConfiguration)
 		expect(postedState.apiConfiguration).toMatchObject(expectedConfiguration)
+	})
+
+	it.each([true, false])("returns a saved MCP description visibility value of %s", async (value) => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("showMcpDescriptions", value)
+
+		const state = await provider.getState()
+		const postedState = await provider.getStateToPostToWebview()
+
+		expect(state.showMcpDescriptions).toBe(value)
+		expect(postedState.showMcpDescriptions).toBe(value)
+	})
+
+	test("shows MCP descriptions by default in runtime and posted state", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getState()
+		const postedState = await provider.getStateToPostToWebview()
+
+		expect(state.showMcpDescriptions).toBe(DEFAULT_SHOW_MCP_DESCRIPTIONS)
+		expect(postedState.showMcpDescriptions).toBe(DEFAULT_SHOW_MCP_DESCRIPTIONS)
 	})
 
 	test("getState returns the saved destructive command guard setting", async () => {

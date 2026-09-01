@@ -1240,6 +1240,20 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
+describe("webviewMessageHandler - showMcpDescriptions", () => {
+	it.each([true, false])("persists %s through the generic settings path", async (value) => {
+		vi.clearAllMocks()
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { showMcpDescriptions: value },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("showMcpDescriptions", value)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

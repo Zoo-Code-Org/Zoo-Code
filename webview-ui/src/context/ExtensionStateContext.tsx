@@ -23,6 +23,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
+	DEFAULT_SHOW_MCP_DESCRIPTIONS,
 } from "@roo-code/types"
 
 import { findLastIndex } from "@roo/array"
@@ -218,6 +219,7 @@ const createInitialExtensionState = (): ExtensionState => ({
 	diffFuzzyThreshold: DEFAULT_DIFF_FUZZY_THRESHOLD,
 	terminalShellIntegrationTimeout: 4000,
 	mcpEnabled: true,
+	showMcpDescriptions: DEFAULT_SHOW_MCP_DESCRIPTIONS,
 	taskSyncEnabled: false,
 	currentApiConfigName: "default",
 	listApiConfigMeta: [],

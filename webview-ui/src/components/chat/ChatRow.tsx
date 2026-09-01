@@ -190,6 +190,7 @@ export const ChatRowContent = ({
 	const {
 		mcpServers,
 		alwaysAllowMcp,
+		showMcpDescriptions,
 		currentCheckpoint,
 		mode,
 		apiConfiguration,
@@ -1661,6 +1662,7 @@ export const ChatRowContent = ({
 											// Always use the actual URI from the request
 											uri: useMcpServer.uri || "",
 										}}
+										showDescription={showMcpDescriptions}
 									/>
 								)}
 								{useMcpServer.type === "use_mcp_tool" && (
@@ -1673,6 +1675,7 @@ export const ChatRowContent = ({
 										server={server}
 										useMcpServer={useMcpServer}
 										alwaysAllowMcp={alwaysAllowMcp}
+										showMcpDescriptions={showMcpDescriptions}
 									/>
 								)}
 							</div>
