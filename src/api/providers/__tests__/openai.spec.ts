@@ -1060,29 +1060,54 @@ describe("OpenAiHandler", () => {
 				openAiModelId: "gpt-4o",
 			}
 			const handler = new OpenAiHandler(nonGrokOptions)
-			// @ts-expect-error - accessing private method for testing
-			expect(handler._isGrokXAI(nonGrokOptions.openAiBaseUrl)).toBe(false)
+			expect(handler["_isGrokXAI"](nonGrokOptions.openAiBaseUrl)).toBe(false)
 		})
 
 		it("should NOT detect as Grok xAI for other domains containing 'x.ai' substring (e.g. fox.ai, max.ai)", () => {
 			const handler = new OpenAiHandler({ ...mockOptions, openAiBaseUrl: "https://fox.ai/v1" })
-			// @ts-expect-error - accessing private method for testing
-			expect(handler._isGrokXAI("https://fox.ai/v1")).toBe(false)
-
-			// @ts-expect-error - accessing private method for testing
-			expect(handler._isGrokXAI("https://max.ai/v1")).toBe(false)
+			expect(handler["_isGrokXAI"]("https://fox.ai/v1")).toBe(false)
+			expect(handler["_isGrokXAI"]("https://max.ai/v1")).toBe(false)
 		})
 
 		it("should detect as Grok xAI for api.x.ai", () => {
 			const handler = new OpenAiHandler({ ...mockOptions, openAiBaseUrl: "https://api.x.ai/v1" })
-			// @ts-expect-error - accessing private method for testing
-			expect(handler._isGrokXAI("https://api.x.ai/v1")).toBe(true)
+			expect(handler["_isGrokXAI"]("https://api.x.ai/v1")).toBe(true)
 		})
 
 		it("should detect as Grok xAI for subdomains of x.ai (e.g. custom.x.ai)", () => {
 			const handler = new OpenAiHandler({ ...mockOptions, openAiBaseUrl: "https://custom.x.ai/v1" })
-			// @ts-expect-error - accessing private method for testing
-			expect(handler._isGrokXAI("https://custom.x.ai/v1")).toBe(true)
+			expect(handler["_isGrokXAI"]("https://custom.x.ai/v1")).toBe(true)
+		})
+
+		it("should detect as Grok xAI when api.x.ai uses a non-default port", () => {
+			const handler = new OpenAiHandler({ ...mockOptions, openAiBaseUrl: "https://api.x.ai:8443/v1" })
+			expect(handler["_isGrokXAI"]("https://api.x.ai:8443/v1")).toBe(true)
+		})
+
+		it("should exclude stream_options when streaming with api.x.ai on a non-default port", async () => {
+			const portOptions = {
+				...mockOptions,
+				openAiBaseUrl: "https://api.x.ai:8443/v1",
+				openAiModelId: "grok-1",
+			}
+			const handler = new OpenAiHandler(portOptions)
+			const systemPrompt = "You are a helpful assistant."
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello!" }]
+
+			const stream = handler.createMessage(systemPrompt, messages)
+			await stream.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: portOptions.openAiModelId,
+					stream: true,
+				}),
+				{},
+			)
+
+			const mockCalls = mockCreate.mock.calls
+			const lastCall = mockCalls[mockCalls.length - 1]
+			expect(lastCall[0]).not.toHaveProperty("stream_options")
 		})
 
 		it("should include stream_options when using a non-Grok provider whose URL contains 'x.ai' substring", async () => {

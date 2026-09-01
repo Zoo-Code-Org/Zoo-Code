@@ -510,7 +510,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 	protected _getUrlHost(baseUrl?: string): string {
 		try {
-			return new URL(baseUrl ?? "").host
+			return new URL(baseUrl ?? "").hostname
 		} catch (error) {
 			return ""
 		}
