@@ -712,7 +712,7 @@ describe("Task persistence", () => {
 			task.dispose()
 		})
 
-		it("stops retry attempts immediately when cancelled during delay", async () => {
+		it("does not retry when cancelled after the delay resolves but before persistence starts", async () => {
 			vi.useFakeTimers()
 			mockSaveApiMessages.mockRejectedValueOnce(new Error("initial write failed")).mockResolvedValue(undefined)
 
@@ -730,14 +730,13 @@ describe("Task persistence", () => {
 				})
 				const waiting = task.waitForCurrentAssistantMessagePersistence()
 
-				// Cancel during the first retry delay (100ms)
-				await vi.advanceTimersByTimeAsync(50)
+				// Resolve the delay without flushing its promise continuation, then cancel at the save boundary.
+				vi.advanceTimersByTime(100)
 				task.dispose()
 
 				await expect(waiting).resolves.toBe(false)
 				await vi.runAllTimersAsync()
 
-				// Should only have attempted the initial save, no retry saves
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
 			} finally {
 				vi.useRealTimers()

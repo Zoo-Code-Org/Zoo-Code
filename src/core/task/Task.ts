@@ -420,7 +420,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
 	private completionPersistenceReadyPromise?: Promise<boolean>
-	private assistantMessageRetryTimeoutHandle?: NodeJS.Timeout
 
 	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
@@ -967,10 +966,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	/**
-	 * Processes a queued ask response and determines if a durable acknowledgment is needed.
-	 * Returns the message ID if persistence is required, otherwise removes the message and returns undefined.
-	 */
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
 		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
 		if (resolution.requiresDurableAck) {
@@ -1071,10 +1066,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/** Settles persistence waiters when the task or current stream generation ends. */
 	private cancelAssistantMessagePersistence(): void {
-		if (this.assistantMessageRetryTimeoutHandle !== undefined) {
-			clearTimeout(this.assistantMessageRetryTimeoutHandle)
-			this.assistantMessageRetryTimeoutHandle = undefined
-		}
 		this.resolveAssistantMessagePersistence?.("cancelled")
 		this.assistantMessagePersistenceCancellation?.resolve()
 	}
@@ -1240,13 +1231,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const finish = (completed: boolean) => {
 						if (settled) return
 						settled = true
-						if (this.assistantMessageRetryTimeoutHandle !== undefined) {
-							this.assistantMessageRetryTimeoutHandle = undefined
-						}
 						resolve(completed)
 					}
 					const timer = setTimeout(() => finish(true), delays[attempt])
-					this.assistantMessageRetryTimeoutHandle = timer
 					void cancellation.promise.then(() => {
 						clearTimeout(timer)
 						finish(false)
@@ -1277,15 +1264,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Cline Messages
 
-	/** Reads the persisted Cline messages from disk for this task. */
 	private async getSavedClineMessages(): Promise<ClineMessage[]> {
 		return readTaskMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
 	}
 
-	/**
-	 * Appends a new Cline message, posts it to the webview, emits an event, and persists.
-	 * Partial messages and unanswered asks are flushed immediately to the webview.
-	 */
 	private async addToClineMessages(message: ClineMessage) {
 		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
