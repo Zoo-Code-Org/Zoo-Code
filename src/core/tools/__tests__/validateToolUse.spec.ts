@@ -166,10 +166,16 @@ describe("mode-validator", () => {
 			})
 
 			it("keeps lifecycle tools available while allowing optional control tools to be disabled", () => {
-				const requirements = { switch_mode: false, new_task: false, attempt_completion: false }
+				const requirements = {
+					switch_mode: false,
+					new_task: false,
+					attempt_completion: false,
+					ask_followup_question: false,
+				}
 				expect(isToolAllowedForMode("switch_mode", codeMode, [], requirements)).toBe(false)
 				expect(isToolAllowedForMode("new_task", codeMode, [], requirements)).toBe(false)
 				expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(true)
+				expect(isToolAllowedForMode("ask_followup_question", codeMode, [], requirements)).toBe(true)
 				expect(isToolAllowedForMode("new_task", "orchestrator", [], requirements)).toBe(true)
 			})
 		})

@@ -42,4 +42,15 @@ describe("getToolUseGuidelinesSection", () => {
 
 		expect(guidelines).toBe("")
 	})
+
+	it.each(["list_files", "execute_command"])(
+		"omits the list-files comparison when only %s is available",
+		(availableToolName) => {
+			const guidelines = getToolUseGuidelinesSection({
+				availableToolNames: new Set([availableToolName]),
+			})
+
+			expect(guidelines).not.toContain("running a command like `ls`")
+		},
+	)
 })

@@ -78,4 +78,10 @@ describe("getBuiltInModeInstructions", () => {
 			}),
 		).toBe(instructions)
 	})
+
+	it("leaves built-in instructions unchanged when no prompt context is provided", () => {
+		const instructions = getInstructions("architect")
+
+		expect(getBuiltInModeInstructions("architect", instructions)).toBe(instructions)
+	})
 })
