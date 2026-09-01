@@ -1,5 +1,6 @@
 import { render, screen, fireEvent, waitFor } from "@/utils/test-utils"
 import { vscode } from "@/utils/vscode"
+import { providerIdentifiers } from "@roo-code/types"
 
 import { ApiConfigSelector } from "../ApiConfigSelector"
 
@@ -24,7 +25,7 @@ vi.mock("@/components/ui/hooks/useRooPortal", () => ({
 vi.mock("@/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
 		apiConfiguration: {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiModelId: "claude-3-opus-20240229",
 		},
 	}),
