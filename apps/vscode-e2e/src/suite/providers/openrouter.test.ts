@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 
 import { setDefaultSuiteTimeout } from "../test-utils"
@@ -93,7 +94,7 @@ suite("OpenRouter provider", function () {
 		restoreFetch = installOpenRouterRequestCapture(requests, baseUrl)
 
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : OPENROUTER_API_KEY!,
 			openRouterModelId: "anthropic/claude-haiku-4-5",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),

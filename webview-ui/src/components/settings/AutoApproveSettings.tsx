@@ -12,6 +12,7 @@ import { SetCachedStateField } from "./types"
 import { SectionHeader } from "./SectionHeader"
 import { Section } from "./Section"
 import { SearchableSetting } from "./SearchableSetting"
+import { FilePatternAllowlist } from "./FilePatternAllowlist"
 import { AutoApproveToggle } from "./AutoApproveToggle"
 import { MaxLimitInputs } from "./MaxLimitInputs"
 import { useExtensionState } from "@/context/ExtensionStateContext"
@@ -21,9 +22,11 @@ import { useAutoApprovalToggles } from "@/hooks/useAutoApprovalToggles"
 type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	alwaysAllowReadOnly?: boolean
 	alwaysAllowReadOnlyOutsideWorkspace?: boolean
+	allowedReadFiles?: string[]
 	alwaysAllowWrite?: boolean
 	alwaysAllowWriteOutsideWorkspace?: boolean
 	alwaysAllowWriteProtected?: boolean
+	allowedWriteFiles?: string[]
 	alwaysAllowMcp?: boolean
 	alwaysAllowModeSwitch?: boolean
 	alwaysAllowSubtasks?: boolean
@@ -38,9 +41,11 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	setCachedStateField: SetCachedStateField<
 		| "alwaysAllowReadOnly"
 		| "alwaysAllowReadOnlyOutsideWorkspace"
+		| "allowedReadFiles"
 		| "alwaysAllowWrite"
 		| "alwaysAllowWriteOutsideWorkspace"
 		| "alwaysAllowWriteProtected"
+		| "allowedWriteFiles"
 		| "alwaysAllowMcp"
 		| "alwaysAllowModeSwitch"
 		| "alwaysAllowSubtasks"
@@ -58,9 +63,11 @@ type AutoApproveSettingsProps = HTMLAttributes<HTMLDivElement> & {
 export const AutoApproveSettings = ({
 	alwaysAllowReadOnly,
 	alwaysAllowReadOnlyOutsideWorkspace,
+	allowedReadFiles,
 	alwaysAllowWrite,
 	alwaysAllowWriteOutsideWorkspace,
 	alwaysAllowWriteProtected,
+	allowedWriteFiles,
 	alwaysAllowMcp,
 	alwaysAllowModeSwitch,
 	alwaysAllowSubtasks,
@@ -241,6 +248,41 @@ export const AutoApproveSettings = ({
 						</SearchableSetting>
 					</div>
 				)}
+
+				{/*
+				 * Shown regardless of the category toggles above: listing a file
+				 * here is what grants access to it, so it must be reachable
+				 * without first granting that access to everything.
+				 */}
+				<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
+					<div className="flex items-center gap-4 font-bold">
+						<span className="codicon codicon-file" />
+						<div>{t("settings:autoApprove.allowlists.label")}</div>
+					</div>
+
+					{/* The pattern syntax is shared by every allowlist below. */}
+					<div className="text-vscode-descriptionForeground text-sm">
+						{t("settings:autoApprove.allowlists.description")}
+					</div>
+
+					<FilePatternAllowlist
+						field="allowedReadFiles"
+						settingId="auto-approve-allowed-read-files"
+						testIdPrefix="allowed-read-file"
+						translationKey="readFiles"
+						patterns={allowedReadFiles}
+						setCachedStateField={setCachedStateField}
+					/>
+
+					<FilePatternAllowlist
+						field="allowedWriteFiles"
+						settingId="auto-approve-allowed-write-files"
+						testIdPrefix="allowed-write-file"
+						translationKey="writeFiles"
+						patterns={allowedWriteFiles}
+						setCachedStateField={setCachedStateField}
+					/>
+				</div>
 
 				{alwaysAllowFollowupQuestions && (
 					<div className="flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">

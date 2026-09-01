@@ -53,7 +53,7 @@ const persistPortPlugin = (): Plugin => ({
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-	let outDir = "../src/webview-ui/build"
+	const outDir = "../src/webview-ui/build"
 
 	const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "src", "package.json"), "utf8"))
 	const gitSha = getGitSha()
@@ -66,21 +66,6 @@ export default defineConfig(({ mode }) => {
 		"process.env.PKG_OUTPUT_CHANNEL": JSON.stringify("Zoo-Code"),
 		"process.env.PKG_RELEASE_CHANNEL": JSON.stringify(process.env.PKG_RELEASE_CHANNEL || "stable"),
 		...(gitSha ? { "process.env.PKG_SHA": JSON.stringify(gitSha) } : {}),
-	}
-
-	// TODO: We can use `@roo-code/build` to generate `define` once the
-	// monorepo is deployed.
-	if (mode === "nightly") {
-		outDir = "../apps/vscode-nightly/build/webview-ui/build"
-
-		const nightlyPkg = JSON.parse(
-			fs.readFileSync(path.join(__dirname, "..", "apps", "vscode-nightly", "package.nightly.json"), "utf8"),
-		)
-
-		define["process.env.PKG_NAME"] = JSON.stringify(nightlyPkg.name)
-		define["process.env.PKG_VERSION"] = JSON.stringify(nightlyPkg.version)
-		define["process.env.PKG_OUTPUT_CHANNEL"] = JSON.stringify("Zoo-Code-Nightly")
-		define["process.env.PKG_RELEASE_CHANNEL"] = JSON.stringify("prerelease")
 	}
 
 	const plugins: PluginOption[] = [

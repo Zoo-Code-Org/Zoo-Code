@@ -344,9 +344,9 @@
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
 			"heading": "नया क्या है:",
-			"highlight1": "तीन बड़े नए models आ गए हैं — बिल्कुल नए Gemini 3.7 Flash, GLM 5.3 और Qwen3.8 Max models का उपयोग करें, साथ ही DeepSeek V4 के updated reasoning, pricing और provider coverage का लाभ लें।",
-			"highlight2": "NanoGPT से connect करें — dynamic model discovery, streaming और prompt completions के साथ speed, price, latency, throughput, tool support और caching के लिए routing preferences का उपयोग करें।",
-			"highlight3": "अधिक reliable providers और tasks — fixes Azure OpenAI endpoint setup, Kimi Code output limits, task-history title preservation और Zoo settings import/export को बेहतर बनाते हैं।"
+			"highlight1": "🤖 नए Zoo Gateway पर balance रखने वाले users के लिए GLM-5.3-Flash और Gemini 3.7 Flash को 2 हफ़्तों के लिए 50% छूट पर आज़माएं और MiniMax M3 बिल्कुल FREE पाएं: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "नया model — GLM-5.3-Flash अब Z AI के माध्यम से उपलब्ध है।",
+			"highlight3": "Reliability fixes — subtask approvals को बहाल किया गया, और Vertex Gemini 3.7 के खाली tool output, terminal startup विफलताओं, background service errors तथा theme legibility की समस्याएं ठीक की गईं।"
 		},
 		"cloudAgents": {
 			"heading": "क्लाउड में नया:",
