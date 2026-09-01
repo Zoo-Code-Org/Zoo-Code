@@ -771,6 +771,70 @@ describe("ClineProvider", () => {
 		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
 	})
 
+	describe("theme fixture probes", () => {
+		const fixture = {
+			themeId: "Default Dark Modern",
+			bodyClass: "vscode-dark",
+			variables: { "--vscode-foreground": "#cccccc" },
+		}
+		const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+
+		beforeEach(() => {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = "1"
+		})
+
+		afterEach(() => {
+			if (originalProbeSetting === undefined) {
+				delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			} else {
+				process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalProbeSetting
+			}
+			vi.useRealTimers()
+		})
+
+		test("rejects requests when probing is disabled", async () => {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+
+			await expect(provider.requestWebviewThemeFixture()).rejects.toThrow("Theme fixture probing is disabled")
+		})
+
+		test("posts a request and resolves the matching response", async () => {
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const request = provider.requestWebviewThemeFixture()
+			await Promise.resolve()
+			const requestId = postMessageSpy.mock.calls[0]?.[0].requestId
+			const unknownFixture = { ...fixture, themeId: "Unexpected Theme" }
+
+			expect(requestId).toBeTruthy()
+			expect(postMessageSpy).toHaveBeenCalledWith({ type: "themeFixtureProbeRequest", requestId })
+			provider.resolveWebviewThemeFixtureProbe("unknown-request", unknownFixture)
+			provider.resolveWebviewThemeFixtureProbe(requestId!, fixture)
+
+			await expect(request).resolves.toEqual(fixture)
+		})
+
+		test("rejects a request after its timeout", async () => {
+			vi.useFakeTimers()
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const request = provider.requestWebviewThemeFixture(100)
+			const rejection = expect(request).rejects.toThrow("Theme fixture probe timed out after 100ms")
+
+			await vi.advanceTimersByTimeAsync(100)
+			await rejection
+		})
+
+		test("rejects pending requests when webview resources are cleared", async () => {
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const request = provider.requestWebviewThemeFixture()
+			const rejection = expect(request).rejects.toThrow(
+				"Webview was disposed before the theme fixture probe completed",
+			)
+
+			provider["clearWebviewResources"]()
+			await rejection
+		})
+	})
+
 	test("postStateToWebview does not force action navigation for non-compliant MDM state", async () => {
 		const mdmService = {
 			requiresCloudAuth: vi.fn().mockReturnValue(true),
@@ -818,6 +882,44 @@ describe("ClineProvider", () => {
 		releasePost()
 		await statePost
 		expect(statePostSettled).toBe(true)
+	})
+
+	test.each([
+		["postStateToWebview", (currentProvider: ClineProvider) => currentProvider.postStateToWebview()],
+		[
+			"postStateToWebviewWithoutTaskHistory",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
+		],
+	])("%s assigns message sequence numbers before asynchronous state construction", async (_methodName, postState) => {
+		let releaseOlderSnapshot!: (state: ExtensionState) => void
+		const olderSnapshot = new Promise<ExtensionState>((resolve) => {
+			releaseOlderSnapshot = resolve
+		})
+		const baseState = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		const emptyState: ExtensionState = { ...baseState, taskHistory: [], clineMessages: [] }
+		const readyState: ExtensionState = {
+			...baseState,
+			taskHistory: [],
+			clineMessages: [{ ts: 1, type: "say", say: "text", text: "child ready" }],
+		}
+
+		vi.spyOn(provider, "getStateToPostToWebview")
+			.mockReturnValueOnce(olderSnapshot)
+			.mockResolvedValueOnce(readyState)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		const olderPost = postState(provider)
+		await Promise.resolve()
+		const newerPost = postState(provider)
+		await newerPost
+		releaseOlderSnapshot(emptyState)
+		await olderPost
+
+		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessages)).toEqual([
+			readyState.clineMessages,
+			emptyState.clineMessages,
+		])
+		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessagesSeq)).toEqual([2, 1])
 	})
 
 	test.each([
@@ -1256,6 +1358,68 @@ describe("ClineProvider", () => {
 		const state = await provider.getState()
 
 		expect(state.destructiveCommandGuardEnabled).toBe(true)
+	})
+
+	test("getState returns the saved allowed read files", async () => {
+		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
+
+		const state = await provider.getState()
+
+		expect(state.allowedReadFiles).toEqual(["notes.md"])
+	})
+
+	test("getState defaults allowed read files to an empty list", async () => {
+		const state = await provider.getState()
+
+		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	test("getStateToPostToWebview returns the saved allowed read files", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedReadFiles).toEqual(["notes.md"])
+	})
+
+	test("getStateToPostToWebview defaults allowed read files to an empty list", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	test("getState returns the saved allowed write files", async () => {
+		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])
+
+		const state = await provider.getState()
+
+		expect(state.allowedWriteFiles).toEqual(["notes.md"])
+	})
+
+	test("getState defaults allowed write files to an empty list", async () => {
+		const state = await provider.getState()
+
+		expect(state.allowedWriteFiles).toEqual([])
+	})
+
+	test("getStateToPostToWebview returns the saved allowed write files", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedWriteFiles).toEqual(["notes.md"])
+	})
+
+	test("getStateToPostToWebview defaults allowed write files to an empty list", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedWriteFiles).toEqual([])
 	})
 
 	test("getStateToPostToWebview returns the saved destructive command guard setting", async () => {

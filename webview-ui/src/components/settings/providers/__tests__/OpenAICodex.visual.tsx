@@ -1,16 +1,14 @@
-import React from "react"
-
 import { expect, test } from "../../../../../playwright/coverage-fixture"
-import { OpenAICodexFixture } from "./OpenAICodex.visual.fixture"
+import { mountedStory } from "../../../../../playwright/mounted-story"
 
 const themes = [
 	{
 		name: "dark",
 		bodyClass: "vscode-dark",
 		themeId: "Default Dark Modern",
-		editorBackground: "#1e1e1e",
-		dropdownBackground: "#3c3c3c",
-		triggerBackground: "rgb(60, 60, 60)",
+		editorBackground: "#1f1f1f",
+		dropdownBackground: "#313131",
+		triggerBackground: "rgb(49, 49, 49)",
 	},
 	{
 		name: "light",
@@ -24,7 +22,7 @@ const themes = [
 
 for (const theme of themes) {
 	test(`renders both OpenAI Codex speeds in the VS Code ${theme.name} theme`, async ({ mount }) => {
-		const component = await mount(<OpenAICodexFixture />)
+		const component = mountedStory(await mount("openai-codex"))
 		const selectors = component.getByTestId("openai-codex-service-tier")
 		const comboboxes = component.getByRole("combobox", { name: "Speed" })
 		const selector = selectors.first()

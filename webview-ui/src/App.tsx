@@ -22,6 +22,7 @@ import ErrorBoundary from "./components/ErrorBoundary"
 import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonInteractiveClick"
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
+import { useThemeFixtureProbe } from "./utils/useThemeFixtureProbe"
 
 type Tab = "settings" | "history" | "chat" | "marketplace"
 
@@ -51,6 +52,8 @@ const tabsByMessageAction: Partial<Record<NonNullable<ExtensionMessage["action"]
 }
 
 const App = () => {
+	useThemeFixtureProbe()
+
 	const {
 		didHydrateState,
 		showWelcome,
@@ -59,6 +62,7 @@ const App = () => {
 		telemetrySetting,
 		telemetryKey,
 		machineId,
+		vscodeTelemetryEnabled,
 		renderContext,
 		mdmCompliant,
 	} = useExtensionState()
@@ -186,9 +190,18 @@ const App = () => {
 
 	useEffect(() => {
 		if (didHydrateState) {
-			telemetryClient.updateTelemetryState(telemetrySetting, telemetryKey, machineId)
+			// vscodeTelemetryEnabled defaults to true when the extension hasn't sent a value
+			// yet (e.g. an old extension build during a mixed rollout), matching VS Code's own
+			// default -- it must never silently disable telemetry just because the field is
+			// momentarily undefined during hydration.
+			telemetryClient.updateTelemetryState(
+				telemetrySetting,
+				telemetryKey,
+				machineId,
+				vscodeTelemetryEnabled ?? true,
+			)
 		}
-	}, [telemetrySetting, telemetryKey, machineId, didHydrateState])
+	}, [telemetrySetting, telemetryKey, machineId, vscodeTelemetryEnabled, didHydrateState])
 
 	// Tell the extension that we are ready to receive messages.
 	useEffect(() => vscode.postMessage({ type: "webviewDidLaunch" }), [])

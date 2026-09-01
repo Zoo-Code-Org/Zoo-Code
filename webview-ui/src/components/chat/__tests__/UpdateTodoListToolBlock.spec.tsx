@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, test, vi } from "vitest"
 
 import UpdateTodoListToolBlock from "../UpdateTodoListToolBlock"
 
@@ -40,5 +40,15 @@ describe("UpdateTodoListToolBlock", () => {
 
 		await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
 		expect(onChange).toHaveBeenCalledWith([])
+	})
+
+	test("renders theme-aware edit controls", () => {
+		renderEditableList()
+		fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+
+		expect(screen.getByTitle("Remove")).toBeInTheDocument()
+		expect(screen.getByDisplayValue("Ship the follow-up")).toBeInTheDocument()
+		fireEvent.click(screen.getByRole("button", { name: "+ Add Todo" }))
+		expect(screen.getByPlaceholderText("Enter todo item, press Enter to add")).toBeInTheDocument()
 	})
 })
