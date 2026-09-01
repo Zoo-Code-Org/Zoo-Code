@@ -12,6 +12,7 @@
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
+		"test:mutation-ci": "node --test scripts/stryker-diff.test.mjs",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",
@@ -27,6 +28,8 @@
 	"devDependencies": {
 		"@changesets/cli": "2.31.0",
 		"@roo-code/config-typescript": "workspace:^",
+		"@stryker-mutator/core": "10.0.0",
+		"@stryker-mutator/vitest-runner": "10.0.0",
 		"@types/node": "22.20.1",
 		"@vscode/vsce": "3.9.2",
 		"esbuild": "0.28.1",
