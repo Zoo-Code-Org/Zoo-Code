@@ -1,19 +1,17 @@
-const vitestConfig = process.env.STRYKER_VITEST_CONFIG
-const reportDirectory = process.env.STRYKER_REPORT_DIR
+const vitestConfig = process.env.STRYKER_VITEST_CONFIG ?? "vitest.config.ts"
+const reportDirectory = process.env.STRYKER_REPORT_DIR ?? "reports/mutation"
+const testFiles = JSON.parse(process.env.STRYKER_TEST_FILES ?? "[]")
 
-if (!vitestConfig || !reportDirectory) {
-	throw new Error("STRYKER_VITEST_CONFIG and STRYKER_REPORT_DIR are required")
-}
-
-/** @type {import("@stryker-mutator/api/core").PartialStrykerOptions} */
 export default {
 	plugins: ["@stryker-mutator/vitest-runner"],
 	testRunner: "vitest",
 	vitest: {
 		configFile: vitestConfig,
-		related: true,
+		related: process.env.STRYKER_VITEST_RELATED !== "false",
 	},
+	testFiles,
 	incremental: false,
+	inPlace: process.env.STRYKER_IN_PLACE === "true",
 	concurrency: 2,
 	timeoutMS: 5_000,
 	timeoutFactor: 1.5,

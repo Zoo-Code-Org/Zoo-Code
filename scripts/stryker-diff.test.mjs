@@ -15,6 +15,9 @@ import {
 	mutantCounts,
 	parseChangedLines,
 	parseNameStatus,
+	parseVitestTestFiles,
+	preferDirectTestFiles,
+	packageForPath,
 	selectFromGit,
 	validateDisableDirectives,
 } from "./stryker-diff.mjs"
@@ -61,14 +64,20 @@ describe("buildManifest", () => {
 		const sources = {
 			"packages/core/src/changed.ts": "export function changed(value: boolean) {\n\treturn value ? 1 : 2\n}\n",
 			"packages/cloud/src/new.ts": "export const enabled = true\n",
+			"webview-ui/src/utils/changed.ts": "export const changed = (value: boolean) => (value ? 1 : 2)\n",
+			"src/utils/changed.ts": "export const changed = (value: boolean) => (value ? 1 : 2)\n",
 		}
 		const diffs = {
 			"packages/core/src/changed.ts": "@@ -1,2 +1,2 @@\n",
+			"webview-ui/src/utils/changed.ts": "@@ -1 +1 @@\n",
+			"src/utils/changed.ts": "@@ -1 +1 @@\n",
 		}
 		const manifest = buildManifest(
 			[
 				{ status: "M", path: "packages/core/src/changed.ts" },
 				{ status: "A", path: "packages/cloud/src/new.ts" },
+				{ status: "M", path: "webview-ui/src/utils/changed.ts" },
+				{ status: "M", path: "src/utils/changed.ts" },
 			],
 			(filePath) => sources[filePath],
 			(filePath) => diffs[filePath] ?? "",
@@ -79,8 +88,17 @@ describe("buildManifest", () => {
 			[
 				{ id: "core", selectors: ["src/changed.ts:1-2"] },
 				{ id: "cloud", selectors: ["src/new.ts:1-1"] },
+				{ id: "webview", selectors: ["webview-ui/src/utils/changed.ts:1-1"] },
+				{ id: "extension", selectors: ["utils/changed.ts:1-1"] },
 			],
 		)
+		const webview = manifest.packages.find(({ id }) => id === "webview")
+		const extension = manifest.packages.find(({ id }) => id === "extension")
+		assert.equal(webview.runRoot, ".")
+		assert.equal(webview.discoverRelatedTests, true)
+		assert.equal(webview.vitestRelated, false)
+		assert.equal(extension.discoverRelatedTests, true)
+		assert.equal(extension.vitestRelated, false)
 	})
 
 	it("returns no packages for tests, barrels, unsupported packages, and type-only changes", () => {
@@ -88,7 +106,10 @@ describe("buildManifest", () => {
 			[
 				{ status: "M", path: "packages/core/src/index.ts" },
 				{ status: "M", path: "packages/core/src/value.spec.ts" },
-				{ status: "M", path: "webview-ui/src/value.ts" },
+				{ status: "M", path: "webview-ui/src/value.visual.tsx" },
+				{ status: "M", path: "webview-ui/src/main.tsx" },
+				{ status: "M", path: "src/utils/vitest-verbosity.ts" },
+				{ status: "M", path: "apps/cli/src/value.ts" },
 				{ status: "M", path: "packages/cloud/src/types.ts" },
 			],
 			(filePath) => {
@@ -113,6 +134,47 @@ describe("buildManifest", () => {
 				),
 			/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
 		)
+	})
+})
+
+describe("packageForPath", () => {
+	it("routes webview and extension production code while excluding test infrastructure", () => {
+		assert.equal(packageForPath("webview-ui/src/utils/path-mentions.ts").id, "webview")
+		assert.equal(packageForPath("src/utils/tool-id.ts").id, "extension")
+		assert.equal(packageForPath("webview-ui/src/utils/test-utils.ts"), undefined)
+		assert.equal(packageForPath("src/__mocks__/vscode.js"), undefined)
+		assert.equal(packageForPath("apps/vscode-e2e/src/example.ts"), undefined)
+	})
+})
+
+describe("parseVitestTestFiles", () => {
+	it("normalizes and deduplicates Vitest related-test results", () => {
+		assert.deepEqual(
+			parseVitestTestFiles(
+				{
+					testResults: [
+						{ name: "/repo/webview-ui/src/utils/__tests__/value.test.ts" },
+						{ name: "/repo/webview-ui/src/utils/__tests__/value.test.ts" },
+					],
+				},
+				"/repo",
+			),
+			["webview-ui/src/utils/__tests__/value.test.ts"],
+		)
+	})
+})
+
+describe("preferDirectTestFiles", () => {
+	it("uses matching focused specs and falls back to all related tests", () => {
+		const related = [
+			"webview-ui/src/__tests__/App.spec.tsx",
+			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
+			"webview-ui/src/components/chat/__tests__/ChatView.spec.tsx",
+		]
+		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/path-mentions.ts"]), [
+			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
+		])
+		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
 	})
 })
 

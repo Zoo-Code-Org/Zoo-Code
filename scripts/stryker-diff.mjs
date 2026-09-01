@@ -36,12 +36,31 @@ export const PACKAGE_CONFIGS = [
 		sourceRoot: "packages/vscode-shim/src/",
 		vitestConfig: "vitest.config.ts",
 	},
+	{
+		id: "webview",
+		root: "webview-ui",
+		runRoot: ".",
+		sourceRoot: "webview-ui/src/",
+		vitestConfig: "vitest.stryker.config.ts",
+		vitestRelated: false,
+		discoverRelatedTests: true,
+		excludedPaths: ["webview-ui/src/main.tsx"],
+	},
+	{
+		id: "extension",
+		root: "src",
+		sourceRoot: "src/",
+		vitestConfig: "vitest.config.ts",
+		vitestRelated: false,
+		discoverRelatedTests: true,
+		excludedPaths: ["src/esbuild.mjs", "src/eslint.config.mjs", "src/utils/vitest-verbosity.ts"],
+	},
 ]
 
 const VALID_MUTANT_STATUSES = new Set(["Killed", "Timeout", "Survived", "NoCoverage"])
 const BLOCKING_MUTANT_STATUSES = new Set(["Survived", "NoCoverage"])
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"])
-const EXCLUDED_PATH_SEGMENTS = ["/__mocks__/", "/__tests__/", "/fixtures/"]
+const EXCLUDED_PATH_SEGMENTS = ["/__mocks__/", "/__tests__/", "/fixtures/", "/test-utils/"]
 const DISABLE_DIRECTIVE =
 	/^\s*\/\/\s*Stryker disable next-line ([A-Za-z][A-Za-z0-9]*(?:,[A-Za-z][A-Za-z0-9]*)*)\s*:\s*(\S.*)$/
 
@@ -163,14 +182,18 @@ export function packageForPath(filePath) {
 	if (
 		!SOURCE_EXTENSIONS.has(path.posix.extname(filePath)) ||
 		EXCLUDED_PATH_SEGMENTS.some((segment) => filePath.includes(segment)) ||
-		/(?:^|\/)[^/]+\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(filePath) ||
+		/(?:^|\/)[^/]+\.(?:test|spec|visual)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(filePath) ||
 		filePath.endsWith(".d.ts") ||
-		path.posix.basename(filePath).startsWith("vitest.config.")
+		path.posix.basename(filePath).startsWith("vitest.config.") ||
+		path.posix.basename(filePath).startsWith("vite.config.") ||
+		path.posix.basename(filePath).startsWith("vitest.setup.") ||
+		path.posix.basename(filePath).startsWith("test-utils.")
 	) {
 		return undefined
 	}
 
-	return PACKAGE_CONFIGS.find((candidate) => filePath.startsWith(candidate.sourceRoot))
+	const packageConfig = PACKAGE_CONFIGS.find((candidate) => filePath.startsWith(candidate.sourceRoot))
+	return packageConfig?.excludedPaths?.includes(filePath) ? undefined : packageConfig
 }
 
 export function buildManifest(entries, readSource, diffForPath) {
@@ -192,7 +215,7 @@ export function buildManifest(entries, readSource, diffForPath) {
 		const executableLines = executableChangedLines(source, changedLines, entry.path)
 		if (executableLines.size === 0) continue
 
-		const relativePath = path.posix.relative(packageConfig.root, entry.path)
+		const relativePath = path.posix.relative(packageConfig.runRoot ?? packageConfig.root, entry.path)
 		const selectors = toRanges(executableLines).map(({ start, end }) => `${relativePath}:${start}-${end}`)
 
 		const packageEntry = packages.get(packageConfig.id) ?? {
@@ -259,8 +282,67 @@ function stripAnsi(value) {
 	return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, "")
 }
 
+function selectorFile(selector) {
+	return selector.replace(/:\d+(?::\d+)?-\d+(?::\d+)?$/, "")
+}
+
+export function parseVitestTestFiles(report, runRoot) {
+	return [
+		...new Set((report.testResults ?? []).map(({ name }) => path.relative(runRoot, name).replaceAll("\\", "/"))),
+	]
+}
+
+export function preferDirectTestFiles(testFiles, sourceFiles) {
+	const sourceNames = sourceFiles.map((sourceFile) => path.posix.basename(sourceFile, path.posix.extname(sourceFile)))
+	const direct = testFiles.filter((testFile) => {
+		const testName = path.posix.basename(testFile)
+		return sourceNames.some(
+			(sourceName) =>
+				testName.startsWith(`${sourceName}.`) && /\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
+		)
+	})
+	return direct.length > 0 ? direct : testFiles
+}
+
+function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
+	const packageRoot = path.join(repoRoot, packageEntry.root)
+	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
+	const outputFile = path.join(reportDirectory, "vitest-related.json")
+	const configFile = path.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig)).replaceAll("\\", "/")
+	const sourceFiles = [...new Set(packageEntry.selectors.map(selectorFile))]
+	const result = spawnSync(
+		path.join(repoRoot, "node_modules/.bin/vitest"),
+		["related", ...sourceFiles, "--run", "--config", configFile, "--reporter=json", `--outputFile=${outputFile}`],
+		{
+			cwd: runRoot,
+			encoding: "utf8",
+			timeout: 5 * 60 * 1_000,
+			maxBuffer: 50 * 1024 * 1024,
+			env: process.env,
+		},
+	)
+
+	if (result.error?.code === "ETIMEDOUT") {
+		throw new Error(`${packageEntry.id} related-test discovery exceeded 5 minutes`)
+	}
+	if (result.status !== 0) {
+		throw new Error(
+			`${packageEntry.id} related-test discovery failed:\n${stripAnsi(`${result.stdout ?? ""}${result.stderr ?? ""}`).trim()}`,
+		)
+	}
+
+	const testFiles = preferDirectTestFiles(
+		parseVitestTestFiles(JSON.parse(fs.readFileSync(outputFile, "utf8")), runRoot),
+		sourceFiles,
+	)
+	if (testFiles.length === 0)
+		throw new Error(`${packageEntry.id} has no tests related to the changed executable lines`)
+	return testFiles
+}
+
 function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
+	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
 	const reportDirectory = path.join(reportRoot, packageEntry.id)
 	fs.mkdirSync(reportDirectory, { recursive: true })
 
@@ -274,14 +356,19 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 	if (dryRunOnly) args.push("--dryRunOnly", "--reporters", "clear-text", "--logLevel", "info")
 
 	const result = spawnSync(path.join(repoRoot, "node_modules/.bin/stryker"), args, {
-		cwd: packageRoot,
+		cwd: runRoot,
 		encoding: "utf8",
 		timeout: 12 * 60 * 1_000,
 		maxBuffer: 50 * 1024 * 1024,
 		env: {
 			...process.env,
-			STRYKER_VITEST_CONFIG: path.join(packageRoot, packageEntry.vitestConfig),
+			STRYKER_VITEST_CONFIG: path
+				.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig))
+				.replaceAll("\\", "/"),
 			STRYKER_REPORT_DIR: reportDirectory,
+			STRYKER_IN_PLACE: "false",
+			STRYKER_VITEST_RELATED: packageEntry.vitestRelated === false ? "false" : "true",
+			STRYKER_TEST_FILES: JSON.stringify(packageEntry.testFiles ?? []),
 		},
 	})
 
@@ -408,6 +495,11 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 	for (const packageEntry of manifest.packages) {
 		let counts
 		try {
+			const reportDirectory = path.join(reportRoot, packageEntry.id)
+			fs.mkdirSync(reportDirectory, { recursive: true })
+			if (packageEntry.discoverRelatedTests) {
+				packageEntry.testFiles = discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory)
+			}
 			const preflightOutput = stripAnsi(runStryker(repoRoot, packageEntry, reportRoot, true))
 			const mutantMatch = /Instrumented \d+ source file\(s\) with (\d+) mutant\(s\)/.exec(preflightOutput)
 			if (!mutantMatch) throw new Error(`${packageEntry.id} preflight did not report a mutant count`)
@@ -437,7 +529,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			const reportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
 			const report = JSON.parse(fs.readFileSync(reportPath, "utf8"))
 			counts = mutantCounts(report)
-			for (const annotation of formatAnnotations(counts.blocking, packageEntry.root)) {
+			for (const annotation of formatAnnotations(counts.blocking, packageEntry.runRoot ?? packageEntry.root)) {
 				console.log(
 					`::error file=${escapeWorkflowValue(annotation.file)},line=${annotation.line},title=Mutation test gap::${escapeWorkflowValue(annotation.message)}`,
 				)
