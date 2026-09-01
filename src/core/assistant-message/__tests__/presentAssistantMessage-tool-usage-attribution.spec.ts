@@ -321,6 +321,74 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 		])
 	})
 
+	it("allows the standard MCP wrapper when the request policy exposes a dynamic MCP tool", async () => {
+		const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+		mockTask.getCurrentRequestToolPolicy = () => ({
+			effectiveToolNames: new Set(["mcp--filesystem--read_file", "attempt_completion"]),
+			mode: "code",
+			customModes: [],
+			experiments: {},
+		})
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_standard_mcp_wrapper",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "nonexistent-server",
+					tool_name: "read_file",
+					arguments: { path: "test.txt" },
+				},
+				nativeArgs: {
+					server_name: "nonexistent-server",
+					tool_name: "read_file",
+					arguments: { path: "test.txt" },
+				},
+				partial: false,
+			},
+		]
+
+		await presentMockTask(mockTask)
+
+		expect(handleSpy).toHaveBeenCalledOnce()
+		expect(mockTask.recordToolUsage).toHaveBeenCalledWith("use_mcp_tool")
+		handleSpy.mockRestore()
+	})
+
+	it("blocks the standard MCP wrapper when the request policy exposes no MCP tools", async () => {
+		const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+		mockTask.getCurrentRequestToolPolicy = () => ({
+			effectiveToolNames: new Set(["read_file", "attempt_completion"]),
+			mode: "code",
+			customModes: [],
+			experiments: {},
+		})
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_unavailable_standard_mcp_wrapper",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "filesystem",
+					tool_name: "read_file",
+					arguments: { path: "test.txt" },
+				},
+				nativeArgs: {
+					server_name: "filesystem",
+					tool_name: "read_file",
+					arguments: { path: "test.txt" },
+				},
+				partial: false,
+			},
+		]
+
+		await presentMockTask(mockTask)
+
+		expect(handleSpy).not.toHaveBeenCalled()
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
+		handleSpy.mockRestore()
+	})
+
 	it("validates available tools with the request mode and effective included set", async () => {
 		const effectiveToolNames = new Set(["read_file", "apply_patch", "attempt_completion"])
 		mockTask.getCurrentRequestToolPolicy = () => ({

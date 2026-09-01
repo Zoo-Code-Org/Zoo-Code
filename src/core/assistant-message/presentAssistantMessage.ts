@@ -679,7 +679,11 @@ export async function presentAssistantMessage(cline: Task) {
 						return acc
 					}, {})
 					const canonicalToolName = resolveToolAlias(block.name)
-					if (requestPolicy && !requestPolicy.effectiveToolNames.has(canonicalToolName)) {
+					const isAvailableInRequestPolicy =
+						requestPolicy?.effectiveToolNames.has(canonicalToolName) ||
+						(canonicalToolName === "use_mcp_tool" &&
+							Array.from(requestPolicy?.effectiveToolNames ?? []).some(isMcpTool))
+					if (requestPolicy && !isAvailableInRequestPolicy) {
 						throw new Error(`Tool "${block.name}" is not available for this request.`)
 					}
 
