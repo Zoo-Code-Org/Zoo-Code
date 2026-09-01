@@ -249,6 +249,24 @@ describe("DeepSeekHandler", () => {
 			expect((model.info as ModelInfo).reasoningEffort).toBe("high")
 		})
 
+		it("should return vision metadata for deepseek-v4-flash-vision-exp", () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+			})
+			const model = visionHandler.getModel()
+
+			expect(model.info).toMatchObject({
+				maxTokens: 384_000,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				preserveReasoning: true,
+				reasoningEffort: "high",
+				defaultTemperature: 1.0,
+			})
+		})
+
 		it("should return provided model ID with default model info if model does not exist", () => {
 			const handlerWithInvalidModel = new DeepSeekHandler({
 				...mockOptions,
@@ -322,6 +340,43 @@ describe("DeepSeekHandler", () => {
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
 			expect(textChunks[0].text).toBe("Test response")
+		})
+
+		it("should send images and V4 thinking controls to deepseek-v4-flash-vision-exp", async () => {
+			const visionHandler = new DeepSeekHandler({
+				...mockOptions,
+				apiModelId: "deepseek-v4-flash-vision-exp",
+			})
+			const visionMessages: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Describe this image." },
+						{
+							type: "image",
+							source: { type: "base64", media_type: "image/png", data: "image-data" },
+						},
+					],
+				},
+			]
+
+			await collectStream(visionHandler.createMessage(systemPrompt, visionMessages))
+
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs).toMatchObject({
+				model: "deepseek-v4-flash-vision-exp",
+				thinking: { type: "enabled" },
+				reasoning_effort: "high",
+				max_completion_tokens: 200_000,
+			})
+			expect(callArgs.temperature).toBeUndefined()
+			expect(callArgs.messages).toContainEqual({
+				role: "user",
+				content: expect.arrayContaining([
+					{ type: "text", text: expect.stringContaining("Describe this image.") },
+					{ type: "image_url", image_url: { url: "data:image/png;base64,image-data" } },
+				]),
+			})
 		})
 
 		it("should include usage information", async () => {
@@ -683,6 +738,11 @@ describe("DeepSeekHandler", () => {
 					modelId: "deepseek-v4-pro",
 					rawReasoningEffort: "max",
 					mappedReasoningEffort: "max",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "medium",
+					mappedReasoningEffort: "high",
 				},
 			]
 
