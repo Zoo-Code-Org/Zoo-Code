@@ -229,6 +229,32 @@ describe("filterNativeToolsForMode - access_mcp_resource allowlist", () => {
 })
 
 describe("filterMcpToolsForMode", () => {
+	it("drops MCP tools when the mode does not allow MCP", () => {
+		const result = filterMcpToolsForMode([makeTool("mcp--server--search")], "orchestrator", undefined, undefined)
+
+		expect(result).toEqual([])
+	})
+
+	it("drops MCP tools excluded by the model", () => {
+		const result = filterMcpToolsForMode(
+			[makeTool("mcp--server--allowed"), makeTool("mcp--server--excluded")],
+			"code",
+			undefined,
+			undefined,
+			{
+				modelInfo: {
+					contextWindow: 200_000,
+					supportsPromptCache: false,
+					excludedTools: ["mcp--server--excluded"],
+				},
+			},
+		)
+
+		expect(result.map((tool) => ("function" in tool ? tool.function?.name : undefined))).toEqual([
+			"mcp--server--allowed",
+		])
+	})
+
 	it("drops malformed and explicitly disabled MCP tools", () => {
 		// Provider input is validated at runtime, so exercise the guard with a tool
 		// that is deliberately missing the statically required function payload.

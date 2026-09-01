@@ -3514,9 +3514,11 @@ describe("Cline", () => {
 				mode: undefined,
 			})
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
+			let observedEnvironmentToolNames: unknown
+			let observedPolicyToolNames: unknown
 			vi.spyOn(task, "attemptApiRequest").mockImplementation((_retryAttempt, options) => {
-				const environmentToolNames = vi.mocked(getEnvironmentDetails).mock.calls.at(-1)?.[2]
-				expect(environmentToolNames).toEqual(options?.resolvedPromptTools?.toolsResult.effectiveToolNames)
+				observedEnvironmentToolNames = vi.mocked(getEnvironmentDetails).mock.calls.at(-1)?.[2]
+				observedPolicyToolNames = options?.resolvedPromptTools?.toolsResult.effectiveToolNames
 				throw new Error("stop after model metadata fetch")
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
@@ -3546,6 +3548,8 @@ describe("Cline", () => {
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "hello" }], false)
 
 			expect(result).toBe(true)
+			expect(observedPolicyToolNames).toBeDefined()
+			expect(observedEnvironmentToolNames).toEqual(observedPolicyToolNames)
 			expect(safeSpy).toHaveBeenCalled()
 			expect(ensureModelFetched).toHaveBeenCalled()
 			expect(task.cachedStreamingModel?.id).toBe(mockApiConfig.apiModelId)

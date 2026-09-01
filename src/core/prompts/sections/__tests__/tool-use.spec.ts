@@ -34,4 +34,10 @@ describe("getSharedToolUseSection", () => {
 
 		expect(section).toBe("")
 	})
+
+	it("keeps tool-use instructions when a supplied context has an available tool", () => {
+		const section = getSharedToolUseSection({ availableToolNames: new Set(["read_file"]) })
+
+		expect(section).toContain("TOOL USE")
+	})
 })
