@@ -27,8 +27,8 @@ describe("mergeHistoryDelta", () => {
 		expect("mode" in disk).toBe(false)
 	})
 
-	it("normalizes legacy undefined status to explicit active", () => {
-		const disk = item("active")
+	it("normalizes a legacy undefined disk status to explicit active", () => {
+		const disk = item(undefined)
 		const incoming = { ...disk, status: undefined }
 
 		expect(mergeHistoryDelta(disk, incoming, { id: disk.id, status: undefined }).status).toBe("active")
