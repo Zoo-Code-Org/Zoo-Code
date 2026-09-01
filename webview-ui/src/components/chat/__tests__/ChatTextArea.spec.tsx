@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { defaultModeSlug } from "@roo/modes"
 
 import { render, fireEvent, screen, act } from "@src/utils/test-utils"
@@ -68,7 +69,7 @@ describe("ChatTextArea", () => {
 			filePaths: [],
 			openedTabs: [],
 			apiConfiguration: {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			},
 			taskHistory: [],
 			cwd: "/test/workspace",
@@ -92,7 +93,7 @@ describe("ChatTextArea", () => {
 	describe("handleEnhancePrompt", () => {
 		it("should send message with correct configuration when clicked", () => {
 			const apiConfiguration = {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "test-key",
 			}
 
@@ -120,7 +121,7 @@ describe("ChatTextArea", () => {
 				filePaths: [],
 				openedTabs: [],
 				apiConfiguration: {
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				taskHistory: [],
 				cwd: "/test/workspace",
@@ -142,7 +143,7 @@ describe("ChatTextArea", () => {
 				filePaths: [],
 				openedTabs: [],
 				apiConfiguration: {
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				taskHistory: [],
 				cwd: "/test/workspace",
@@ -168,7 +169,7 @@ describe("ChatTextArea", () => {
 				filePaths: [],
 				openedTabs: [],
 				apiConfiguration: {
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 					newSetting: "test",
 				},
 				taskHistory: [],
@@ -500,7 +501,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: [],
 					clineMessages: mockClineMessages,
@@ -653,7 +654,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: [],
 					clineMessages: mixedClineMessages,
@@ -681,7 +682,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: [],
 					clineMessages: [],
@@ -712,7 +713,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: [],
 					clineMessages: clineMessagesWithEmpty,
@@ -746,7 +747,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: mockTaskHistory,
 					clineMessages: [], // No conversation messages
@@ -780,7 +781,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: [
 						{ task: "Task 1", workspace: "/test/workspace" },
@@ -803,7 +804,7 @@ describe("ChatTextArea", () => {
 					filePaths: [],
 					openedTabs: [],
 					apiConfiguration: {
-						apiProvider: "anthropic",
+						apiProvider: providerIdentifiers.anthropic,
 					},
 					taskHistory: [],
 					clineMessages: [

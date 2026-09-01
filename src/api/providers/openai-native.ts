@@ -28,6 +28,7 @@ import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
 import { BaseProvider } from "./base-provider"
+import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
@@ -95,7 +96,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		if (this.options.enableResponsesReasoningSummary === undefined) {
 			this.options.enableResponsesReasoningSummary = true
 		}
-		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
+		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
 		// Include originator, session_id, and User-Agent headers for API tracking and debugging
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
 		this.client = new OpenAI({
@@ -555,7 +556,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
-		const apiKey = this.options.openAiNativeApiKey ?? "not-provided"
+		const apiKey = this.options.openAiNativeApiKey ?? NOT_PROVIDED
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
 		const url = `${baseUrl}/v1/responses`
 

@@ -47,13 +47,12 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.78.0'daki Yenilikler
+## v3.80.1'daki Yenilikler
 
-- **Üç önemli yeni model geldi** — yepyeni Gemini 3.7 Flash, GLM 5.3 ve Qwen3.8 Max modellerini, ayrıca güncellenmiş DeepSeek V4 reasoning, fiyatlandırma ve sağlayıcı kapsamını kullan.
-- **NanoGPT'ye bağlan** — dinamik model keşfi, streaming ve Prompt tamamlama ile hız, fiyat, gecikme, throughput, araç desteği ve caching için yönlendirme tercihlerini kullan.
-- **Daha güvenilir sağlayıcılar ve görevler** — düzeltmeler Azure OpenAI endpoint kurulumunu, Kimi Code çıktı sınırlarını, görev geçmişi başlıklarının korunmasını ve Zoo ayarlarının içe/dışa aktarımını iyileştiriyor.
-- Destructive Command Guard artık Intel tabanlı Mac'leri destekliyor.
-- Güvenlik güncellemeleri `undici` ve Mermaid'deki güvenlik açıklarını gideriyor.
+🤖 Yeni Zoo Gateway'de bakiyesi olan kullanıcılar GLM-5.3-Flash ve Gemini 3.7 Flash'ı 2 hafta boyunca %50 indirimle, MiniMax M3'ü ise tamamen ÜCRETSİZ deneyebilir. https://zoocode.dev/models
+
+- **Yeni model** — GLM-5.3-Flash artık Z AI üzerinden kullanılabilir.
+- **Güvenilirlik düzeltmeleri** — alt görev onayları geri getirildi, Vertex Gemini 3.7 boş araç çıktısı, terminal başlatma hataları ve arka plan servis hataları giderildi, IDE temalarındaki okunabilirlik iyileştirildi.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

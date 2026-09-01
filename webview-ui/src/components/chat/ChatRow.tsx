@@ -52,7 +52,7 @@ import CodebaseSearchResultsDisplay from "./CodebaseSearchResultsDisplay"
 import { appendImages } from "@src/utils/imageUtils"
 import { McpExecution } from "./McpExecution"
 import { ChatTextArea } from "./ChatTextArea"
-import { MAX_IMAGES_PER_MESSAGE } from "./ChatView"
+import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import { useSelectedModel } from "../ui/hooks/useSelectedModel"
 import {
 	Eye,

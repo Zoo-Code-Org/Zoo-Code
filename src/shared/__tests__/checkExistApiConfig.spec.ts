@@ -1,6 +1,6 @@
 // npx vitest run src/shared/__tests__/checkExistApiConfig.spec.ts
 
-import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers, retiredProviderIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { checkExistKey } from "../checkExistApiConfig"
 
@@ -61,7 +61,7 @@ describe("checkExistKey", () => {
 
 	it("should return true for fake-ai provider without API key", () => {
 		const config: ProviderSettings = {
-			apiProvider: "fake-ai",
+			apiProvider: providerIdentifiers.fakeAi,
 		}
 		expect(checkExistKey(config)).toBe(true)
 	})
@@ -86,14 +86,14 @@ describe("checkExistKey", () => {
 
 	it("should return false for roo provider without API key", () => {
 		const config: ProviderSettings = {
-			apiProvider: "roo",
+			apiProvider: retiredProviderIdentifiers.roo,
 		}
 		expect(checkExistKey(config)).toBe(false)
 	})
 
 	it("should return true for kimi-code provider with OAuth auth method", () => {
 		const config: ProviderSettings = {
-			apiProvider: "kimi-code",
+			apiProvider: providerIdentifiers.kimiCode,
 			kimiCodeAuthMethod: "oauth",
 		}
 		expect(checkExistKey(config)).toBe(true)
@@ -105,14 +105,14 @@ describe("checkExistKey", () => {
 
 	it("should return true for kimi-code provider without auth method (defaults to OAuth)", () => {
 		const config: ProviderSettings = {
-			apiProvider: "kimi-code",
+			apiProvider: providerIdentifiers.kimiCode,
 		}
 		expect(checkExistKey(config)).toBe(true)
 	})
 
 	it("should return true for kimi-code provider with api-key auth and key present", () => {
 		const config: ProviderSettings = {
-			apiProvider: "kimi-code",
+			apiProvider: providerIdentifiers.kimiCode,
 			kimiCodeAuthMethod: "api-key",
 			kimiCodeApiKey: "test-key",
 		}
@@ -121,7 +121,7 @@ describe("checkExistKey", () => {
 
 	it("should return false for kimi-code provider with api-key auth but no key", () => {
 		const config: ProviderSettings = {
-			apiProvider: "kimi-code",
+			apiProvider: providerIdentifiers.kimiCode,
 			kimiCodeAuthMethod: "api-key",
 		}
 		expect(checkExistKey(config)).toBe(false)
@@ -129,7 +129,7 @@ describe("checkExistKey", () => {
 
 	it("should return false for zoo-gateway without session token or auth", () => {
 		const config: ProviderSettings = {
-			apiProvider: "zoo-gateway",
+			apiProvider: providerIdentifiers.zooGateway,
 			zooGatewayModelId: "alibaba/qwen-3.6-max-preview",
 		}
 		expect(checkExistKey(config)).toBe(false)
@@ -142,7 +142,7 @@ describe("checkExistKey", () => {
 
 	it("should return true for zoo-gateway when profile has zooSessionToken", () => {
 		const config: ProviderSettings = {
-			apiProvider: "zoo-gateway",
+			apiProvider: providerIdentifiers.zooGateway,
 			zooSessionToken: "zoo_ext_test_token",
 		}
 		expect(checkExistKey(config)).toBe(true)
@@ -150,7 +150,7 @@ describe("checkExistKey", () => {
 
 	it("should return true for zoo-gateway when Zoo Code session auth is active", () => {
 		const config: ProviderSettings = {
-			apiProvider: "zoo-gateway",
+			apiProvider: providerIdentifiers.zooGateway,
 			zooGatewayModelId: "alibaba/qwen-3.6-max-preview",
 		}
 		expect(checkExistKey(config, true)).toBe(true)
@@ -158,7 +158,7 @@ describe("checkExistKey", () => {
 
 	it("should ignore zooCodeIsAuthenticated for non-zoo-gateway providers", () => {
 		const config: ProviderSettings = {
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 		}
 		expect(checkExistKey(config, true)).toBe(false)
 	})

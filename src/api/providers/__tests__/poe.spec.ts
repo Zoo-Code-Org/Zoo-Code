@@ -1,6 +1,55 @@
-const mockStreamText = vitest.fn()
-const mockGenerateText = vitest.fn()
-const mockCreatePoe = vitest.fn()
+import { poeDefaultModelId, providerIdentifiers } from "@roo-code/types"
+
+import { PoeHandler } from "../poe"
+import { getModelsFromCache } from "../fetchers/modelCache"
+
+import { clearAllMocks } from "../../../test-utils/reset"
+
+const { mockStreamText, mockGenerateText, mockCreatePoe, mockGetModelsFromCache, mockCaptureException } =
+	vitest.hoisted(() => ({
+		mockStreamText: vitest.fn(),
+		mockGenerateText: vitest.fn(),
+		mockCreatePoe: vitest.fn(),
+		mockCaptureException: vitest.fn(),
+		mockGetModelsFromCache: vitest.fn(),
+	}))
+
+const cachedModels = {
+	"anthropic/claude-sonnet-4": {
+		maxTokens: 10_000,
+		contextWindow: 200_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		inputPrice: 3,
+		outputPrice: 15,
+	},
+	"openai/gpt-4o": {
+		maxTokens: 16_384,
+		contextWindow: 128_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		inputPrice: 2.5,
+		outputPrice: 10,
+	},
+	"openai/o3": {
+		maxTokens: 100_000,
+		contextWindow: 200_000,
+		supportsImages: true,
+		supportsPromptCache: false,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		inputPrice: 10,
+		outputPrice: 40,
+	},
+}
+
+vitest.mock("@roo-code/telemetry", () => ({
+	TelemetryService: {
+		instance: {
+			captureException: (...args: unknown[]) => mockCaptureException(...args),
+		},
+	},
+}))
 
 vitest.mock("ai-sdk-provider-poe", () => ({
 	createPoe: (...args: unknown[]) => mockCreatePoe(...args),
@@ -41,40 +90,8 @@ vitest.mock("ai", async (importOriginal) => {
 })
 
 vitest.mock("../fetchers/modelCache", () => ({
-	getModelsFromCache: vitest.fn().mockReturnValue({
-		"anthropic/claude-sonnet-4": {
-			maxTokens: 10_000,
-			contextWindow: 200_000,
-			supportsImages: true,
-			supportsPromptCache: true,
-			supportsReasoningBudget: true,
-			inputPrice: 3,
-			outputPrice: 15,
-		},
-		"openai/gpt-4o": {
-			maxTokens: 16_384,
-			contextWindow: 128_000,
-			supportsImages: true,
-			supportsPromptCache: false,
-			inputPrice: 2.5,
-			outputPrice: 10,
-		},
-		"openai/o3": {
-			maxTokens: 100_000,
-			contextWindow: 200_000,
-			supportsImages: true,
-			supportsPromptCache: false,
-			supportsReasoningEffort: ["low", "medium", "high"],
-			inputPrice: 10,
-			outputPrice: 40,
-		},
-	}),
+	getModelsFromCache: mockGetModelsFromCache,
 }))
-
-import { poeDefaultModelId } from "@roo-code/types"
-import { PoeHandler } from "../poe"
-
-import { clearAllMocks } from "../../../test-utils/reset"
 
 describe("PoeHandler", () => {
 	const mockLanguageModel = { modelId: "test-model" }
@@ -83,6 +100,7 @@ describe("PoeHandler", () => {
 	beforeEach(() => {
 		clearAllMocks()
 		mockCreatePoe.mockReturnValue(mockPoeProvider)
+		mockGetModelsFromCache.mockReturnValue(cachedModels)
 	})
 
 	describe("constructor", () => {
@@ -116,9 +134,19 @@ describe("PoeHandler", () => {
 
 	describe("getModel", () => {
 		it("returns model info from cache", () => {
-			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "anthropic/claude-sonnet-4" })
+			const options = {
+				poeApiKey: "key",
+				poeBaseUrl: "https://custom.poe.com/v1",
+				apiModelId: "anthropic/claude-sonnet-4",
+			}
+			const handler = new PoeHandler(options)
 			const result = handler.getModel()
 
+			expect(getModelsFromCache).toHaveBeenCalledWith({
+				provider: providerIdentifiers.poe,
+				apiKey: options.poeApiKey,
+				baseUrl: options.poeBaseUrl,
+			})
 			expect(result.id).toBe("anthropic/claude-sonnet-4")
 			expect(result.info.contextWindow).toBe(200_000)
 			expect(result.info.maxTokens).toBe(10_000)
@@ -165,6 +193,49 @@ describe("PoeHandler", () => {
 			expect(chunks).toContainEqual({ type: "text", text: "Hello " })
 			expect(chunks).toContainEqual({ type: "text", text: "world!" })
 			expect(chunks).toContainEqual(expect.objectContaining({ type: "usage", inputTokens: 10, outputTokens: 5 }))
+		})
+
+		it("reports synchronous completion failures with the canonical provider identifier", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockStreamText.mockImplementationOnce(() => {
+				throw new Error("request failed")
+			})
+
+			await expect(
+				handler.createMessage("system", [{ role: "user" as const, content: "hello" }]).next(),
+			).rejects.toThrow("Poe completion error: request failed")
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					provider: providerIdentifiers.poe,
+					modelId: "openai/gpt-4o",
+					operation: "createMessage",
+				}),
+			)
+		})
+
+		it("reports asynchronous stream failures with the canonical provider identifier", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			const failedStream = {
+				[Symbol.asyncIterator]() {
+					return this
+				},
+				next: vitest.fn().mockRejectedValueOnce(new Error("stream failed")),
+			}
+			mockStreamText.mockReturnValueOnce({
+				fullStream: failedStream,
+				usage: Promise.resolve(undefined),
+			})
+
+			await expect(
+				handler.createMessage("system", [{ role: "user" as const, content: "hello" }]).next(),
+			).rejects.toThrow("Poe streaming error: stream failed")
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					provider: providerIdentifiers.poe,
+					modelId: "openai/gpt-4o",
+					operation: "createMessage",
+				}),
+			)
 		})
 	})
 
@@ -308,6 +379,22 @@ describe("PoeHandler", () => {
 				expect.objectContaining({
 					model: mockLanguageModel,
 					prompt: "complete this",
+				}),
+			)
+		})
+
+		it("reports failures with the canonical provider identifier", async () => {
+			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
+			mockGenerateText.mockRejectedValueOnce(new Error("generation failed"))
+
+			await expect(handler.completePrompt("complete this")).rejects.toThrow(
+				"Poe completion error: generation failed",
+			)
+			expect(mockCaptureException).toHaveBeenCalledWith(
+				expect.objectContaining({
+					provider: providerIdentifiers.poe,
+					modelId: "openai/gpt-4o",
+					operation: "completePrompt",
 				}),
 			)
 		})
