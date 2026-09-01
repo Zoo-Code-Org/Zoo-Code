@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
@@ -735,7 +736,7 @@ suite("Roo Code Subtasks", function () {
 
 		const aimockUrl = process.env.AIMOCK_URL
 		const parentProfile = {
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: "mock-key",
 			openRouterModelId: "openai/gpt-4.1",
 			rateLimitSeconds: 0,
