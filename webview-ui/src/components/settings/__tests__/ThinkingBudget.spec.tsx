@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ThinkingBudget.spec.tsx
 
 import React from "react"
@@ -43,16 +44,16 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: (apiConfiguration: any) => {
 		// Return the model ID based on apiConfiguration for testing
 		// For Gemini tests, check if apiProvider is gemini and use apiModelId
-		if (apiConfiguration?.apiProvider === "gemini") {
+		if (apiConfiguration?.apiProvider === providerIdentifiers.gemini) {
 			return {
 				id: apiConfiguration?.apiModelId || "gemini-2.0-flash-exp",
-				provider: "gemini",
+				provider: providerIdentifiers.gemini,
 				info: undefined,
 			}
 		}
 		return {
 			id: apiConfiguration?.apiModelId || "claude-3-5-sonnet-20241022",
-			provider: apiConfiguration?.apiProvider || "anthropic",
+			provider: apiConfiguration?.apiProvider || providerIdentifiers.anthropic,
 			info: undefined,
 		}
 	},
@@ -176,7 +177,7 @@ describe("ThinkingBudget", () => {
 				{...defaultProps}
 				apiConfiguration={{
 					modelMaxTokens: 10000,
-					apiProvider: "gemini",
+					apiProvider: providerIdentifiers.gemini,
 					apiModelId: "gemini-2.5-pro-002",
 				}}
 			/>,
@@ -192,7 +193,7 @@ describe("ThinkingBudget", () => {
 				{...defaultProps}
 				apiConfiguration={{
 					modelMaxTokens: 10000,
-					apiProvider: "gemini",
+					apiProvider: providerIdentifiers.gemini,
 					apiModelId: "gemini-2.5-pro-002",
 				}}
 			/>,
@@ -208,7 +209,7 @@ describe("ThinkingBudget", () => {
 				{...defaultProps}
 				apiConfiguration={{
 					modelMaxTokens: 10000,
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-5-sonnet-20241022",
 				}}
 			/>,
@@ -419,7 +420,7 @@ describe("ThinkingBudget", () => {
 			supportsPromptCache: true,
 		}
 
-		const glmApiConfiguration = { apiProvider: "zai", apiModelId: "glm-5.1" } as const
+		const glmApiConfiguration = { apiProvider: providerIdentifiers.zai, apiModelId: "glm-5.1" } as const
 
 		it("should render the max output tokens slider alongside the reasoning effort dropdown", () => {
 			render(<ThinkingBudget {...defaultProps} apiConfiguration={glmApiConfiguration} modelInfo={glmModelInfo} />)

@@ -1,19 +1,12 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { AppProviders } from "../../../../playwright/AppProviders"
 import { expectContrast } from "../../../../playwright/contrast"
+import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import { ThemeSensitiveStatusFixture } from "./ThemeSensitiveStatus.visual.fixture"
 
 for (const theme of visualThemes) {
 	test(`audits status controls in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("theme-sensitive-status"))
 		await applyVisualTheme(page, theme)
-		const component = await mount(
-			<AppProviders>
-				<ThemeSensitiveStatusFixture />
-			</AppProviders>,
-		)
 		const surface = component.getByTestId("status-surface")
 
 		await component.getByRole("button", { name: /auto-approved commands/i }).click()

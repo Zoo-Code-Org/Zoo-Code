@@ -1,20 +1,14 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { AppProviders } from "../../../../playwright/AppProviders"
 import { expectContrast } from "../../../../playwright/contrast"
+import { expectBoundedLayout } from "../../../../playwright/layout-contracts"
+import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import { WelcomeLanding } from "../WelcomeLanding"
 
 for (const theme of visualThemes) {
 	test(`renders the full welcome screen in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
 		await page.setViewportSize({ width: 480, height: 640 })
+		const component = mountedStory(await mount("welcome"))
 		await applyVisualTheme(page, theme)
-		const component = await mount(
-			<AppProviders initialState={{ apiConfiguration: {} }}>
-				<WelcomeLanding onGetStarted={() => undefined} onImportSettings={() => undefined} />
-			</AppProviders>,
-		)
 
 		const screen = component.locator(".fixed.inset-0")
 		const heading = component.getByRole("heading", { level: 2 })
@@ -37,5 +31,9 @@ for (const theme of visualThemes) {
 		}
 
 		await expect(screen).toHaveScreenshot(`welcome-screen-${theme.name}.png`)
+		await expectBoundedLayout(page, component, {
+			actionRows: [action.locator("..")],
+			focusedControl: action,
+		})
 	})
 }
