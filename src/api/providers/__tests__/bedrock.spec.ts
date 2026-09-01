@@ -1820,6 +1820,9 @@ describe("AwsBedrockHandler", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(false)
 				expect(isAdaptiveThinkingModel("amazon.nova-lite-v1:0")).toBe(false)
 			})
+		})
+
+		describe("completePrompt and createMessage: abort signal and listener lifecycle", () => {
 			it("should pass abort signal through to client.send", async () => {
 				const mockSend = vi.fn()
 
@@ -1893,6 +1896,9 @@ describe("AwsBedrockHandler", () => {
 				const sendOptions = mockSend.mock.calls[0][1]
 				expect(sendOptions).toBeDefined()
 				expect(sendOptions?.abortSignal).toBeDefined()
+				// The signal must not be aborted yet (i.e. a real timeout signal was created,
+				// not a no-op placeholder)
+				expect(sendOptions?.abortSignal.aborted).toBe(false)
 			})
 
 			it("completePrompt should merge abortSignal and timeoutMs", async () => {
@@ -1918,14 +1924,18 @@ describe("AwsBedrockHandler", () => {
 				expect(mockSend).toHaveBeenCalled()
 				const sendOptions = mockSend.mock.calls[0][1]
 				expect(sendOptions?.abortSignal).toBeDefined()
+				// AbortSignal.any() returns a new composite object; if the merge were skipped and
+				// the external signal returned directly, this assertion would fail
+				expect(sendOptions?.abortSignal).not.toBe(controller.signal)
+				// The merged signal propagates the external abort
+				controller.abort()
+				expect(sendOptions?.abortSignal.aborted).toBe(true)
 			})
 
-			it("should abort internal controller when external abortSignal is triggered", async () => {
-				const mockResult = {
-					output: { message: { content: [{ type: "text", text: "response" }] }, stopReason: null },
-				}
-				const mockSend = vi.fn().mockResolvedValue(mockResult)
-
+			it("should abort the merged signal mid-flight when the external abortSignal fires", async () => {
+				// This test keeps client.send pending so it can verify that aborting the external
+				// signal while the request is in flight propagates through the composite signal
+				// and cancels the SDK call — a post-completion check cannot prove this.
 				const handler = new AwsBedrockHandler({
 					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
 					awsAccessKey: "test-access-key",
@@ -1933,27 +1943,43 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const clientInstance = handler["client"]
-				clientInstance.send = mockSend
-
 				const controller = new AbortController()
 				let internalSignalCaptured: AbortSignal | undefined
 
-				// Spy on the send call to capture the abortSignal
-				mockSend.mockImplementation(async (_command: unknown, options?: { abortSignal?: AbortSignal }) => {
-					internalSignalCaptured = options?.abortSignal
-					return mockResult
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						internalSignalCaptured = options?.abortSignal
+						return new Promise<unknown>((_resolve, reject) => {
+							internalSignalCaptured?.addEventListener(
+								"abort",
+								() => reject(new DOMException("The operation was aborted.", "AbortError")),
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				// Pass timeoutMs so mergeAbortSignalAndTimeout creates a composite via AbortSignal.any()
+				const sendPromise = handler.completePrompt("test prompt", {
+					abortSignal: controller.signal,
+					timeoutMs: 5000,
 				})
 
-				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+				// Wait until client.send is in flight and the composite signal is captured
+				await vi.waitFor(() => {
+					expect(internalSignalCaptured).toBeDefined()
+				})
 
-				expect(internalSignalCaptured).toBeDefined()
-				expect(internalSignalCaptured).toBeInstanceOf(AbortSignal)
+				// The composite is a distinct object — not the same reference as the external signal
+				expect(internalSignalCaptured).not.toBe(controller.signal)
+				expect(internalSignalCaptured?.aborted).toBe(false)
 
-				// Abort the external signal and verify it propagates to the captured signal
+				// Abort mid-flight; the composite must propagate it immediately (synchronous)
 				controller.abort()
-				await new Promise((resolve) => setTimeout(resolve, 10))
 				expect(internalSignalCaptured?.aborted).toBe(true)
+
+				await expect(sendPromise).rejects.toMatchObject({ name: "AbortError" })
 			})
 
 			it("should abort immediately when signal is already aborted and timeoutMs > 0", async () => {
@@ -1982,6 +2008,9 @@ describe("AwsBedrockHandler", () => {
 				const sendOptions = mockSend.mock.calls[0][1]
 				expect(sendOptions?.abortSignal).toBeDefined()
 				expect(sendOptions?.abortSignal.aborted).toBe(true)
+				// AbortSignal.any() always returns a new composite; this distinguishes the merged
+				// path from a mutation that returns the pre-aborted external signal directly
+				expect(sendOptions?.abortSignal).not.toBe(controller.signal)
 			})
 
 			it("should return undefined sendOptions when timeoutMs is 0 and no signal", async () => {
@@ -2087,6 +2116,54 @@ describe("AwsBedrockHandler", () => {
 				expect(result).toBe("")
 			})
 
+			it("completePrompt should reject with AbortError when the signal is aborted while client.send is in flight", async () => {
+				const handler = new AwsBedrockHandler({
+					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+					awsAccessKey: "test-access-key",
+					awsSecretKey: "test-secret-key",
+					awsRegion: "us-east-1",
+				})
+
+				const controller = new AbortController()
+				let rejectSend: ((err: unknown) => void) | undefined
+
+				// mockSend hangs until the abort signal fires
+				const mockSend = vi
+					.fn()
+					.mockImplementation((_command: unknown, options?: { abortSignal?: AbortSignal }) => {
+						return new Promise<unknown>((_resolve, reject) => {
+							rejectSend = reject
+							options?.abortSignal?.addEventListener(
+								"abort",
+								() => {
+									const abortError = new DOMException("The operation was aborted.", "AbortError")
+									reject(abortError)
+								},
+								{ once: true },
+							)
+						})
+					})
+				handler["client"].send = mockSend
+
+				const sendPromise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+
+				// Wait until send is in flight
+				await vi.waitFor(() => {
+					expect(rejectSend).toBeDefined()
+				})
+
+				// Abort mid-flight; completePrompt must reject with AbortError.
+				// Also assert the ABORT classification is applied: the error message must come
+				// from the ABORT template ("Request was aborted"), not the GENERIC fallback.
+				// This proves "ABORT" sits in errorTypeOrder before competing patterns.
+				controller.abort()
+
+				await expect(sendPromise).rejects.toMatchObject({
+					name: "AbortError",
+					message: expect.stringContaining("Request was aborted"),
+				})
+			})
+
 			it("createMessage should reject with an AbortError when the external signal is already aborted", async () => {
 				const handler = new AwsBedrockHandler({
 					apiModelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -2163,28 +2240,42 @@ describe("AwsBedrockHandler", () => {
 
 				const controller = new AbortController()
 
-				const generator = handler.createMessage(
-					"You are a helpful assistant",
-					[{ role: "user", content: "Hello" }],
-					makeCreateMessageMetadata({ abortSignal: controller.signal }),
-				)
+				// Spy before createMessage so we capture the exact listener the production code registers
+				const addSpy = vi.spyOn(controller.signal, "addEventListener")
+				const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
 
-				const consumed = (async () => {
-					for await (const _chunk of generator) {
-						// ignore chunks
-					}
-				})()
+				try {
+					const generator = handler.createMessage(
+						"You are a helpful assistant",
+						[{ role: "user", content: "Hello" }],
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					)
 
-				// Wait until the request is in flight and the internal signal is captured
-				await vi.waitFor(() => {
-					expect(internalSignal).toBeDefined()
-				})
-				expect(internalSignal?.aborted).toBe(false)
+					const consumed = (async () => {
+						for await (const _chunk of generator) {
+							// ignore chunks
+						}
+					})()
 
-				// Abort the external signal mid-flight; the stream must reject with an AbortError
-				controller.abort()
+					// Wait until the request is in flight and the internal signal is captured
+					await vi.waitFor(() => {
+						expect(internalSignal).toBeDefined()
+					})
+					expect(internalSignal?.aborted).toBe(false)
 
-				await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+					// Abort the external signal mid-flight; the stream must reject with an AbortError
+					controller.abort()
+
+					await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+
+					// Verify the finally block removed the exact listener it registered (error path cleanup)
+					const registeredListener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+					expect(registeredListener).toBeDefined()
+					expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+				} finally {
+					addSpy.mockRestore()
+					removeSpy.mockRestore()
+				}
 			})
 
 			it("createMessage should detach the external abort listener when the request completes", async () => {
@@ -2210,8 +2301,12 @@ describe("AwsBedrockHandler", () => {
 					})
 				handler["client"].send = mockSend
 
-				// First request completes normally with its own external signal
+				// First request completes normally with its own external signal.
+				// Spy on both add and remove so we can assert the exact same function
+				// reference was registered and then detached — expect.any(Function) would
+				// pass even if a different listener were removed, leaving the real one attached.
 				const firstController = new AbortController()
+				const firstAddSpy = vi.spyOn(firstController.signal, "addEventListener")
 				const firstRemoveSpy = vi.spyOn(firstController.signal, "removeEventListener")
 				const firstGenerator = handler.createMessage(
 					"You are a helpful assistant",
@@ -2229,8 +2324,13 @@ describe("AwsBedrockHandler", () => {
 				})()
 				expect(firstText).toBe("hello")
 
-				// The bridge listener must be detached as soon as the request completes
-				expect(firstRemoveSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+				// The bridge listener must be detached as soon as the request completes.
+				// Extract the exact function reference that was registered so we can assert
+				// the same reference (not just any function) was passed to removeEventListener.
+				const abortAddCall = firstAddSpy.mock.calls.find(([type]) => type === "abort")
+				const registeredAbortListener = abortAddCall?.[1]
+				expect(registeredAbortListener).toBeDefined()
+				expect(firstRemoveSpy).toHaveBeenCalledWith("abort", registeredAbortListener)
 
 				// Second request starts with a DIFFERENT external signal
 				const secondController = new AbortController()
@@ -2255,6 +2355,7 @@ describe("AwsBedrockHandler", () => {
 				expect(secondSendSignal).toBeDefined()
 				expect(secondSendSignal?.aborted).toBe(false)
 
+				firstAddSpy.mockRestore()
 				firstRemoveSpy.mockRestore()
 			})
 

@@ -56,6 +56,13 @@ reviews:
               Check cleanup and deterministic async behavior and prefer shared typed test helpers.
               Visible webview changes require a durable Playwright component snapshot; behavior-only
               changes do not.
+              Reject weak assertions on values that could take multiple forms: .toBeDefined() or
+              .toHaveBeenCalled() alone are not sufficient when the actual type, value, or object
+              identity is verifiable. For listener registration and removal, assert the same function
+              reference was added and removed (not expect.any(Function)).
+              Flag tests that assert in-flight behavior only after the call completes — these cannot
+              prove the behavior fires during execution. Check that describe block names match the
+              actual subjects of the tests they contain.
 
         - path: "apps/vscode-e2e/**"
           instructions: >-

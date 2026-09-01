@@ -561,12 +561,17 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 		// Create a request-local AbortController with 10 minute timeout. Keeping it
 		// request-local (and detaching the bridge listener in the finally block) means
 		// a completed request can never leave a stale listener on the caller's signal.
+		// A manual setTimeout (rather than AbortSignal.timeout()) is required here
+		// because clearTimeout in the finally block needs a cancelable handle —
+		// AbortSignal.timeout() self-manages its timer and cannot be cleared.
 		const requestController = new AbortController()
 		let timeoutId: NodeJS.Timeout | undefined
 
-		// Bridge external abort signal to the request controller using the Bedrock pattern:
-		// - pre-aborted guard: check if already aborted before adding listener
-		// - { once: true }: remove listener after first abort to avoid leaks
+		// Bridge external abort signal to the request controller using the standard
+		// abort bridge pattern:
+		// - pre-aborted guard: a listener on an already-aborted signal may never fire,
+		//   so abort the local controller directly in that case
+		// - { once: true }: the listener auto-removes on first abort event
 		let abortListener: (() => void) | undefined
 		const externalAbortSignal = metadata?.abortSignal
 		if (externalAbortSignal) {
@@ -1612,6 +1617,7 @@ Please check:
 
 		// Check each error type's patterns in order of specificity (most specific first)
 		const errorTypeOrder = [
+			"ABORT", // Classify cancellations (user abort or request timeout) before any other pattern
 			"SERVICE_QUOTA_EXCEEDED", // Most specific - check before THROTTLING
 			"MODEL_NOT_READY",
 			"TOO_MANY_TOKENS",
