@@ -2,16 +2,28 @@ name: Label PR review state
 
 on:
   schedule:
-    - cron: '0 * * * *' # hourly fallback
+    - cron: "0 * * * *" # hourly fallback
   workflow_dispatch:
-  pull_request:
-    types: [opened, reopened, ready_for_review, synchronize, review_requested]
+    inputs:
+      pull_request_number:
+        description: Pull request number to reconcile
+        required: true
+        type: number
+  # This workflow only reads PR metadata and never checks out or executes PR code.
+  # pull_request_target gives fork PRs a token that can update labels and comments.
+  pull_request_target:
+    types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled, unlabeled]
   pull_request_review:
     types: [submitted, dismissed]
+  workflow_run:
+    workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
+    types: [completed]
 
 permissions:
   pull-requests: write
+  issues: write
   checks: read
+  statuses: write
 
 concurrency:
   group: label-pr-review-state
@@ -19,42 +31,99 @@ concurrency:
 
 jobs:
   reconcile:
+    name: Zoo Code / reconcile PR review state
     runs-on: ubuntu-latest
     steps:
       - name: Reconcile PR review state labels
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         with:
+          retries: 3
           script: |
             const { owner, repo } = context.repo;
-            const stateLabels = ['awaiting-author', 'awaiting-review', 'has-conflicts'];
+            const stateLabels = [
+              'awaiting-author',
+              'awaiting-coderabbit',
+              'awaiting-ready',
+              'awaiting-maintainer',
+              'awaiting-review', // Legacy label removed during reconciliation.
+              'has-conflicts',
+            ];
+            const labelDefinitions = [
+              {
+                name: 'awaiting-coderabbit',
+                color: '5319e7',
+                description: 'Waiting for CodeRabbit to approve the latest commit',
+              },
+              {
+                name: 'awaiting-ready',
+                color: '1d76db',
+                description: 'CodeRabbit approved; waiting for the draft to be marked ready',
+              },
+              {
+                name: 'awaiting-maintainer',
+                color: '0e8a16',
+                description: 'CodeRabbit approved; waiting for a human maintainer',
+              },
+              {
+                name: 'coderabbit-review-active',
+                color: '5319e7',
+                description: 'Required CI passed; CodeRabbit review is active',
+              },
+            ];
+            const guideMarker = '<!-- zoo-code-pr-review-process -->';
+            const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
+            const codeRabbitLogin = 'coderabbitai[bot]';
+            const codeRabbitActiveLabel = 'coderabbit-review-active';
+            const reviewGateName = 'Zoo Code / PR review gate';
+            const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
 
             // When triggered by a single PR event, only reconcile that PR.
             // The hourly schedule and workflow_dispatch reconcile all open PRs.
             let prs;
-            const prNumber = context.payload.pull_request?.number;
-            if (prNumber) {
-              const { data: pr } = await github.rest.pulls.get({
-                owner, repo, pull_number: prNumber,
-              });
-              prs = [pr];
+            let eventPrNumbers = [];
+            if (context.payload.pull_request?.number) {
+              eventPrNumbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'workflow_dispatch') {
+              eventPrNumbers = [Number(context.payload.inputs.pull_request_number)];
+            } else if (context.payload.workflow_run?.pull_requests) {
+              eventPrNumbers = context.payload.workflow_run.pull_requests.map(pr => pr.number);
+            }
+            if (eventPrNumbers.length > 0) {
+              prs = await Promise.all(eventPrNumbers.map(async pull_number => {
+                const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
+                return pr;
+              }));
+              prs = prs.filter(pr => pr.state === 'open');
+            } else if (context.eventName === 'workflow_run') {
+              prs = [];
             } else {
               prs = await github.paginate(github.rest.pulls.list, {
                 owner, repo, state: 'open', per_page: 100,
               });
             }
 
-            // Only a `pull_request`/`pull_request_review` run that was itself triggered
-            // FROM a fork gets a read-only GITHUB_TOKEN — label mutations there 403 with
-            // "Resource not accessible by integration". `schedule` and `workflow_dispatch`
-            // runs always execute in the base repo's context with a read/write token, even
-            // when the PR they're reconciling happens to come from a fork, so they must NOT
-            // be skipped or fork PRs would never get stale labels cleaned up.
+            // pull_request_review runs originating from forks can still receive a read-only
+            // token. pull_request_target, schedule, and workflow_dispatch runs execute in the
+            // base repository context and can safely mutate metadata without trusting PR code.
             // See: https://docs.github.com/en/actions/concepts/security/github_token
-            const isReadOnlyRun = Boolean(context.payload.pull_request) &&
-              context.payload.pull_request.head?.repo?.owner?.login !== owner;
+            const isReadOnlyRun = context.eventName === 'pull_request_review' &&
+              Boolean(context.payload.pull_request) &&
+              context.payload.pull_request.head?.repo?.full_name !==
+                context.payload.pull_request.base?.repo?.full_name;
 
             function isForkPR(pr) {
-              return pr.head?.repo?.owner?.login && pr.head.repo.owner.login !== owner;
+              return pr.head?.repo?.full_name && pr.head.repo.full_name !== pr.base?.repo?.full_name;
+            }
+
+            if (!isReadOnlyRun) {
+              for (const label of labelDefinitions) {
+                try {
+                  await github.rest.issues.getLabel({ owner, repo, name: label.name });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                  await github.rest.issues.createLabel({ owner, repo, ...label });
+                }
+              }
             }
 
             // Strips stateLabels from a PR, optionally keeping one.
@@ -67,63 +136,306 @@ jobs:
                 return;
               }
               const currentLabels = new Set(pr.labels.map(l => l.name));
+              const labelErrors = [];
               for (const label of stateLabels) {
                 if (label !== desiredLabel && currentLabels.has(label)) {
                   try {
                     await github.rest.issues.removeLabel({
                       owner, repo, issue_number: pr.number, name: label,
                     });
+                    currentLabels.delete(label);
+                    pr.labels = pr.labels.filter(current => current.name !== label);
                   } catch (err) {
-                    if (err.status !== 404) throw err; // 404 = already gone, benign
+                    if (err.status === 404) {
+                      currentLabels.delete(label);
+                      pr.labels = pr.labels.filter(current => current.name !== label);
+                    } else {
+                      labelErrors.push(err);
+                    }
                   }
                 }
               }
               if (desiredLabel && !currentLabels.has(desiredLabel)) {
-                await github.rest.issues.addLabels({
-                  owner, repo, issue_number: pr.number, labels: [desiredLabel],
-                });
+                try {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
+                  });
+                  currentLabels.add(desiredLabel);
+                  pr.labels.push({ name: desiredLabel });
+                } catch (err) {
+                  labelErrors.push(err);
+                }
               }
               if (desiredLabel !== 'awaiting-author' && currentLabels.has('stale-awaiting-author')) {
                 try {
                   await github.rest.issues.removeLabel({
                     owner, repo, issue_number: pr.number, name: 'stale-awaiting-author',
                   });
+                  currentLabels.delete('stale-awaiting-author');
+                  pr.labels = pr.labels.filter(current => current.name !== 'stale-awaiting-author');
                 } catch (err) {
-                  if (err.status !== 404) throw err;
+                  if (err.status === 404) {
+                    currentLabels.delete('stale-awaiting-author');
+                    pr.labels = pr.labels.filter(current => current.name !== 'stale-awaiting-author');
+                  } else {
+                    labelErrors.push(err);
+                  }
                 }
               }
+              if (labelErrors.length > 0) {
+                throw new Error(`Could not reconcile labels: ${labelErrors.map(err => err.message).join('; ')}`);
+              }
+            }
+
+            async function findReviewGuide(pr) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner, repo, issue_number: pr.number, per_page: 100,
+              });
+              return comments.find(comment =>
+                comment.user?.login === 'github-actions[bot]' && comment.body?.includes(guideMarker)
+              );
+            }
+
+            async function setCodeRabbitReviewActive(pr, enabled, recycle = false) {
+              if (isReadOnlyRun && isForkPR(pr)) return;
+
+              const hasLabel = pr.labels.some(label => label.name === codeRabbitActiveLabel);
+              if (enabled && hasLabel && recycle) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
+                  });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+                pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
+              }
+              if (enabled && (!hasLabel || recycle)) {
+                let addError = null;
+                for (let attempt = 1; attempt <= 2; attempt++) {
+                  try {
+                    await github.rest.issues.addLabels({
+                      owner, repo, issue_number: pr.number, labels: [codeRabbitActiveLabel],
+                    });
+                    if (!pr.labels.some(label => label.name === codeRabbitActiveLabel)) {
+                      pr.labels.push({ name: codeRabbitActiveLabel });
+                    }
+                    delete pr.codeRabbitActivationUncertain;
+                    return;
+                  } catch (error) {
+                    addError = error;
+                    if (attempt === 1) {
+                      core.warning(`PR #${pr.number}: retrying CodeRabbit activation label: ${error.message}`);
+                    }
+                  }
+                }
+
+                pr.codeRabbitActivationUncertain = true;
+                try {
+                  const { data: issue } = await github.rest.issues.get({
+                    owner, repo, issue_number: pr.number,
+                  });
+                  pr.labels = issue.labels.map(label =>
+                    typeof label === 'string' ? { name: label } : label
+                  );
+                  if (pr.labels.some(label => label.name === codeRabbitActiveLabel)) {
+                    delete pr.codeRabbitActivationUncertain;
+                    return;
+                  }
+                } catch (verificationError) {
+                  core.warning(
+                    `PR #${pr.number}: could not verify CodeRabbit activation label: ${verificationError.message}`
+                  );
+                }
+                throw addError;
+              } else if (!enabled && (hasLabel || pr.codeRabbitActivationUncertain)) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner, repo, issue_number: pr.number, name: codeRabbitActiveLabel,
+                  });
+                } catch (error) {
+                  if (error.status !== 404) throw error;
+                }
+                pr.labels = pr.labels.filter(label => label.name !== codeRabbitActiveLabel);
+                delete pr.codeRabbitActivationUncertain;
+              }
+            }
+
+            function codeRabbitLabelHead(comment) {
+              const markerPattern = new RegExp(`${codeRabbitLabelMarkerPrefix}([a-f0-9]{40}) -->`);
+              const match = comment?.body?.match(markerPattern);
+              return match?.[1] ?? null;
+            }
+
+            async function permissionFor(username) {
+              try {
+                const result = await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner, repo, username,
+                });
+                return result.data.permission;
+              } catch (error) {
+                if (error.status === 404) return 'none';
+                throw error;
+              }
+            }
+
+            function phaseMessage(phase) {
+              const messages = {
+                draft: 'Mark the PR ready to start CodeRabbit after required CI passes.',
+                conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
+                'ci-pending': 'Wait for the required CI checks to finish.',
+                'ci-failed': 'Fix the failing required CI checks and push an update.',
+                'configuration-error': 'Repository rules must not require this advisory workflow\'s own gate or reconciliation job.',
+                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
+                coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
+                'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
+                'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
+                maintainer: 'Ready for human maintainer review and approval.',
+                approved: 'The required review sequence passed. Remaining merge requirements apply.',
+              };
+              return messages[phase];
+            }
+
+            async function updateReviewGate(pr, phase, passed, required = false) {
+              if (isReadOnlyRun && isForkPR(pr)) return;
+
+              const state = passed ? 'success' : 'pending';
+              const description = phaseMessage(phase);
+              let latestGateStatus = null;
+              let lookupSucceeded = false;
+              try {
+                const { data: combinedStatus } = await github.rest.repos.getCombinedStatusForRef({
+                  owner, repo, ref: pr.head.sha,
+                });
+                lookupSucceeded = true;
+                latestGateStatus = combinedStatus.statuses
+                  .filter(status => status.context === reviewGateName)
+                  .sort((a, b) => b.id - a.id)[0];
+              } catch (error) {
+                core.warning(`PR #${pr.number}: could not inspect ${reviewGateName}: ${error.message}`);
+              }
+              if (!lookupSucceeded && passed) return;
+              if (latestGateStatus?.state === state &&
+                  latestGateStatus.description === description &&
+                  latestGateStatus.target_url === pr.html_url) {
+                return;
+              }
+              const mustInvalidateSuccess = !passed &&
+                (!lookupSucceeded || latestGateStatus?.state === 'success');
+
+              try {
+                await github.rest.repos.createCommitStatus({
+                  owner,
+                  repo,
+                  sha: pr.head.sha,
+                  state,
+                  context: reviewGateName,
+                  description,
+                  target_url: pr.html_url,
+                });
+              } catch (error) {
+                if (required || mustInvalidateSuccess) throw error;
+                core.warning(`PR #${pr.number}: could not publish ${reviewGateName}: ${error.message}`);
+              }
+            }
+
+            function reviewGuideBody(pr, phase, activationPending = false) {
+              const automatedAuthor = pr.user?.type === 'Bot';
+              const authorNote = automatedAuthor
+                ? 'This PR was opened by an automated account. A human maintainer must verify the change intent, provenance, and validation before merging.'
+                : 'Thanks for contributing. This comment tracks the review sequence and the next action.';
+
+              const labelMarker = phase === 'coderabbit'
+                ? `\n${codeRabbitLabelMarkerPrefix}${pr.head.sha}${activationPending ? ':pending' : ''} -->`
+                : '';
+
+              return `${guideMarker}\n### Review process\n\n${authorNote}\n\n` +
+                '1. Required CI checks pass.\n' +
+                '2. The workflow starts CodeRabbit automatically.\n' +
+                '3. For eligible human-authored PRs, CodeRabbit reviews and approves the latest commit.\n' +
+                '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
+                `**Current step:** ${phaseMessage(phase)}${labelMarker}`;
+            }
+
+            async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false) {
+              if (isReadOnlyRun && isForkPR(pr)) {
+                core.info(`PR #${pr.number}: fork PR on a read-only run — skipping guide update`);
+                return;
+              }
+
+              const body = reviewGuideBody(pr, phase, activationPending);
+              const existing = existingGuide ?? await findReviewGuide(pr);
+
+              if (!existing) {
+                const { data: created } = await github.rest.issues.createComment({
+                  owner, repo, issue_number: pr.number, body,
+                });
+                return created;
+              } else if (existing.body !== body) {
+                await github.rest.issues.updateComment({
+                  owner, repo, comment_id: existing.id, body,
+                });
+                return { ...existing, body };
+              }
+              return existing;
             }
 
             // Fetch required status check names from the branch ruleset.
             // Uses the public /rules/branches endpoint — no admin token needed.
-            // Falls back to blocking on all checks if the endpoint is unavailable.
-            let requiredCheckNames = null;
+            // Fails closed if the endpoint is unavailable.
+            let requiredChecks = null;
             try {
-              const { data: rules } = await github.request(
+              const rules = await github.paginate(
                 'GET /repos/{owner}/{repo}/rules/branches/{branch}',
-                { owner, repo, branch: 'main' },
+                { owner, repo, branch: 'main', per_page: 100 },
               );
-              const statusRule = rules.find(r => r.type === 'required_status_checks');
-              if (statusRule) {
-                requiredCheckNames = new Set(
-                  statusRule.parameters.required_status_checks.map(c => c.context),
+              const statusRules = rules.filter(rule => rule.type === 'required_status_checks');
+              requiredChecks = [];
+              if (statusRules.length > 0) {
+                const uniqueChecks = new Map();
+                for (const rule of statusRules) {
+                  for (const check of rule.parameters.required_status_checks) {
+                    const integrationId = check.integration_id ?? null;
+                    uniqueChecks.set(`${check.context}:${integrationId ?? 'any'}`, {
+                      context: check.context,
+                      integrationId,
+                    });
+                  }
+                }
+                requiredChecks = [...uniqueChecks.values()];
+                core.info(
+                  `Required checks: ${requiredChecks.map(check =>
+                    `${check.context}${check.integrationId ? `@${check.integrationId}` : ''}`
+                  ).join(', ')}`
                 );
-                core.info(`Required checks: ${[...requiredCheckNames].join(', ')}`);
               }
             } catch (err) {
-              core.warning(`Could not fetch branch rules, falling back to all checks: ${err.message}`);
+              core.warning(`Could not fetch branch rules; review gate remains pending: ${err.message}`);
             }
 
             const failures = [];
 
             for (const pr of prs) {
+              let failurePhase = 'ci-pending';
               try {
-                // Draft PRs never get a state label.
-                if (pr.draft) {
-                  core.info(`PR #${pr.number}: draft — stripping state labels`);
+                const selfReferentialRequirements = (requiredChecks ?? []).filter(check =>
+                  check.context === reviewGateName || check.context === reconciliationCheckName
+                );
+                if (selfReferentialRequirements.length > 0) {
+                  failurePhase = 'configuration-error';
+                  const contexts = selfReferentialRequirements.map(check => check.context).join(', ');
+                  core.warning(
+                    `PR #${pr.number}: unsupported self-referential required check configuration: ${contexts}`
+                  );
+                  await updateReviewGate(pr, 'configuration-error', false, true);
+                  const existingGuide = await findReviewGuide(pr);
+                  await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, null);
+                  await updateReviewGuide(pr, 'configuration-error', existingGuide);
                   continue;
                 }
+
+                let existingGuide = await findReviewGuide(pr);
 
                 // `mergeable`/`mergeable_state` are only returned by the single-PR GET
                 // endpoint, and are computed asynchronously by GitHub — a PR fetched via
@@ -131,27 +443,33 @@ jobs:
                 // single-PR fetch can return `null`/"unknown" if the merge check hasn't
                 // finished yet. Re-fetch the single PR to get a fresh value, and treat
                 // "unknown" as not-yet-computed rather than as conflicting.
-                const prDetail = prNumber
+                const prDetail = eventPrNumbers.length > 0
                   ? pr
                   : (await github.rest.pulls.get({ owner, repo, pull_number: pr.number })).data;
 
                 if (prDetail.mergeable === false && prDetail.mergeable_state === 'dirty') {
                   core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                  await updateReviewGate(pr, 'conflict', false);
+                  await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, 'has-conflicts');
+                  await updateReviewGuide(pr, 'conflict', existingGuide);
                   continue;
                 }
 
                 // Check CI status for required checks on the PR's head commit only.
                 // Scoping to required checks avoids advisory checks (e.g. codecov/patch)
                 // incorrectly blocking label assignment on otherwise-ready PRs.
-                const [checkRuns, commitStatusRes] = await Promise.all([
-                  github.paginate(github.rest.checks.listForRef, {
+                const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                  owner, repo, ref: pr.head.sha, per_page: 100,
+                });
+                const needsLegacyStatuses = requiredChecks?.some(
+                  check => check.integrationId === null
+                );
+                const commitStatuses = needsLegacyStatuses
+                  ? await github.paginate(github.rest.repos.listCommitStatusesForRef, {
                     owner, repo, ref: pr.head.sha, per_page: 100,
-                  }),
-                  github.rest.repos.getCombinedStatusForRef({
-                    owner, repo, ref: pr.head.sha,
-                  }),
-                ]);
+                  })
+                  : [];
 
                 // listForRef returns every check run ever recorded on the ref, including
                 // stale superseded ones (e.g. a failed run later re-run green). Branch
@@ -165,52 +483,85 @@ jobs:
                 // run can have started_at: null, which would lose a string comparison
                 // against an older completed run's timestamp).
                 const latestByName = new Map();
+                const latestByNameAndApp = new Map();
                 for (const run of checkRuns) {
                   const prev = latestByName.get(run.name);
                   if (!prev || run.id > prev.id) {
                     latestByName.set(run.name, run);
                   }
+                  const appKey = `${run.name}:${run.app?.id ?? 'none'}`;
+                  const previousAppRun = latestByNameAndApp.get(appKey);
+                  if (!previousAppRun || run.id > previousAppRun.id) {
+                    latestByNameAndApp.set(appKey, run);
+                  }
                 }
 
-                // Filter to required checks only (or all checks if rules unavailable).
-                // Always exclude this workflow's own run to avoid self-referential loops.
-                const relevantRuns = [...latestByName.values()].filter(run => {
-                  if (run.name === 'Reconcile PR review state labels') return false;
-                  return requiredCheckNames ? requiredCheckNames.has(run.name) : true;
+                const latestStatusByContext = new Map();
+                for (const status of commitStatuses) {
+                  const previous = latestStatusByContext.get(status.context);
+                  if (!previous || status.id > previous.id) {
+                    latestStatusByContext.set(status.context, status);
+                  }
+                }
+
+                // Evaluate every required rule exactly as GitHub reports it. Workflow
+                // ownership cannot be inferred from the shared GitHub Actions app ID.
+                const requiredSpecs = requiredChecks ?? [];
+                const requiredResults = requiredSpecs.map(check => {
+                  const run = check.integrationId === null
+                    ? latestByName.get(check.context)
+                    : latestByNameAndApp.get(`${check.context}:${check.integrationId}`);
+                  const status = check.integrationId === null
+                    ? latestStatusByContext.get(check.context)
+                    : null;
+                  return { check, run, status };
                 });
+                const relevantRuns = requiredResults.map(result => result.run).filter(Boolean);
+                const relevantStatuses = requiredResults.map(result => result.status).filter(Boolean);
+                const missingRequiredChecks = requiredResults
+                  .filter(result => !result.run && !result.status)
+                  .map(result =>
+                    `${result.check.context}${result.check.integrationId ? `@${result.check.integrationId}` : ''}`
+                  );
 
-                // For commit statuses (external CIs), there's no per-status name filtering
-                // available from getCombinedStatusForRef — it aggregates all statuses.
-                // If required checks are known, we only use commitStatus as a signal when
-                // no required check runs exist for this ref (i.e. pure status-based CI).
-                const useCommitStatus = !requiredCheckNames || relevantRuns.length === 0;
-
-                core.debug(`PR #${pr.number}: ${relevantRuns.length} required check run(s), commit status=${commitStatusRes.data.state} (used=${useCommitStatus})`);
+                core.debug(
+                  `PR #${pr.number}: ${relevantRuns.length} check run(s), ` +
+                  `${relevantStatuses.length} commit status(es), ` +
+                  `missing=[${missingRequiredChecks.join(', ')}]`
+                );
                 for (const run of relevantRuns) {
                   core.debug(`  check: "${run.name}" status=${run.status} conclusion=${run.conclusion}`);
                 }
 
-                const ciPending = relevantRuns.some(
-                  run => run.status === 'queued' || run.status === 'in_progress',
-                ) || (useCommitStatus && commitStatusRes.data.state === 'pending');
-
-                const ciFailed = !ciPending && (
-                  relevantRuns.some(
+                const ciFailed = relevantRuns.some(
                     run => run.status === 'completed' &&
                            run.conclusion !== 'success' &&
                            run.conclusion !== 'skipped' &&
                            run.conclusion !== 'neutral',
-                  ) || (useCommitStatus && (
-                    commitStatusRes.data.state === 'failure' ||
-                    commitStatusRes.data.state === 'error'
-                  ))
+                  ) || relevantStatuses.some(
+                    status => status.state === 'failure' || status.state === 'error'
+                  );
+
+                const ciPending = !ciFailed && (
+                  requiredChecks === null || missingRequiredChecks.length > 0 || relevantRuns.some(
+                    run => run.status !== 'completed',
+                  ) || relevantStatuses.some(
+                    status => status.state === 'pending'
+                  )
                 );
 
                 // While CI is running or has failed, remove state labels and move on.
                 // CI failure is its own signal; the label would add noise, not clarity.
                 if (ciPending || ciFailed) {
                   core.info(`PR #${pr.number}: CI ${ciPending ? 'pending' : 'failed'} — stripping state labels`);
+                  await updateReviewGate(pr, ciPending ? 'ci-pending' : 'ci-failed', false);
+                  await setCodeRabbitReviewActive(pr, false);
                   await reconcileLabels(pr, null);
+                  await updateReviewGuide(
+                    pr,
+                    ciPending ? 'ci-pending' : 'ci-failed',
+                    existingGuide
+                  );
                   continue;
                 }
 
@@ -225,50 +576,136 @@ jobs:
                 // block the PR or indicate the author needs to act.
                 const latest = new Map();
                 for (const r of reviews) {
-                  if (r.state !== 'COMMENTED' && r.state !== 'DISMISSED') {
-                    latest.set(r.user.login, r);
+                  const reviewer = r.user.login.toLowerCase();
+                  if (r.state === 'DISMISSED') {
+                    latest.delete(reviewer);
+                  } else if (r.state !== 'COMMENTED') {
+                    latest.set(reviewer, r);
                   }
                 }
 
-                const requestedReviewers = new Set(
-                  pr.requested_reviewers.map(r => r.login),
+                const codeRabbitReview = latest.get(codeRabbitLogin);
+                const freshCodeRabbitReview = codeRabbitReview?.commit_id === pr.head.sha
+                  ? codeRabbitReview
+                  : null;
+                const freshMaintainerReviews = [];
+                for (const review of latest.values()) {
+                  if (review.commit_id !== pr.head.sha ||
+                      review.user?.type === 'Bot' ||
+                      review.user?.login.toLowerCase() === pr.user?.login.toLowerCase()) {
+                    continue;
+                  }
+                  if (['admin', 'maintain', 'write'].includes(await permissionFor(review.user.login))) {
+                    freshMaintainerReviews.push(review);
+                  }
+                }
+                const maintainerChangeRequest = freshMaintainerReviews.find(
+                  review => review.state === 'CHANGES_REQUESTED'
                 );
-
-                const changeRequesters = [...latest.entries()]
-                  .filter(([, r]) => r.state === 'CHANGES_REQUESTED')
-                  .map(([login]) => login);
+                const automatedAuthor = pr.user?.type === 'Bot';
+                const codeRabbitApproved = freshCodeRabbitReview?.state === 'APPROVED';
+                const codeRabbitChangesRequested = freshCodeRabbitReview?.state === 'CHANGES_REQUESTED';
+                const maintainerApproval = freshMaintainerReviews
+                  .filter(review => review.state === 'APPROVED')
+                  .sort((a, b) => b.id - a.id)[0];
+                const maintainerApprovedAfterCodeRabbit = codeRabbitApproved &&
+                  maintainerApproval &&
+                  maintainerApproval.id > freshCodeRabbitReview.id;
 
                 let desiredLabel;
-                if (changeRequesters.length > 0) {
-                  // If every change-requester has been re-requested for review,
-                  // the author has addressed feedback and re-opened it for review.
-                  desiredLabel = changeRequesters.every(login => requestedReviewers.has(login))
-                    ? 'awaiting-review'
-                    : 'awaiting-author';
+                let phase;
+                let activateCodeRabbit = false;
+                let recycleCodeRabbitLabel = false;
+                if (codeRabbitChangesRequested || maintainerChangeRequest) {
+                  desiredLabel = 'awaiting-author';
+                  phase = codeRabbitChangesRequested ? 'coderabbit-changes' : 'maintainer-changes';
+                } else if (automatedAuthor) {
+                  if (pr.draft) {
+                    desiredLabel = null;
+                    phase = 'draft';
+                  } else if (!maintainerApproval) {
+                    desiredLabel = 'awaiting-maintainer';
+                    phase = 'maintainer';
+                  } else {
+                    desiredLabel = null;
+                    phase = 'approved';
+                  }
+                } else if (!codeRabbitApproved) {
+                  if (pr.draft) {
+                    desiredLabel = null;
+                    phase = 'draft';
+                  } else {
+                    activateCodeRabbit = true;
+                    recycleCodeRabbitLabel = codeRabbitLabelHead(existingGuide) !== pr.head.sha;
+                    desiredLabel = 'awaiting-coderabbit';
+                    phase = 'coderabbit';
+                  }
+                } else if (pr.draft) {
+                  desiredLabel = 'awaiting-ready';
+                  phase = 'draft-approved';
+                } else if (!maintainerApprovedAfterCodeRabbit) {
+                  desiredLabel = 'awaiting-maintainer';
+                  phase = 'maintainer';
                 } else {
-                  // No outstanding change requests: awaiting first review, or all approved.
-                  // awaiting-review if: there are pending requested reviewers, or nobody
-                  // has given a meaningful review yet. null (approved) if everyone approved.
-                  const allApproved = latest.size > 0 &&
-                    [...latest.values()].every(r => r.state === 'APPROVED') &&
-                    requestedReviewers.size === 0;
-
-                  desiredLabel = allApproved ? null : 'awaiting-review';
+                  desiredLabel = null;
+                  phase = 'approved';
                 }
 
                 core.info(
                   `PR #${pr.number}: CI passing, reviews=${latest.size}, ` +
-                  `changeRequesters=[${changeRequesters.join(',')}], ` +
-                  `requestedReviewers=[${[...requestedReviewers].join(',')}] → ${desiredLabel ?? '(none)'}`
+                  `coderabbit=${freshCodeRabbitReview?.state ?? (automatedAuthor ? 'optional' : 'pending')}, ` +
+                  `maintainer=${maintainerApproval?.state ?? 'pending'} → ${desiredLabel ?? '(none)'}`
                 );
 
+                const readyForMaintainer = phase === 'maintainer' || phase === 'approved';
+                if (!readyForMaintainer) {
+                  await updateReviewGate(pr, phase, false);
+                }
+                const recyclingActiveLabel = activateCodeRabbit && recycleCodeRabbitLabel &&
+                  pr.labels.some(label => label.name === codeRabbitActiveLabel);
+                existingGuide = await updateReviewGuide(
+                  pr,
+                  phase,
+                  existingGuide,
+                  recyclingActiveLabel,
+                );
+                await setCodeRabbitReviewActive(pr, activateCodeRabbit, recycleCodeRabbitLabel);
+                if (recyclingActiveLabel) {
+                  await updateReviewGuide(pr, phase, existingGuide);
+                }
                 await reconcileLabels(pr, desiredLabel);
+                if (readyForMaintainer) {
+                  await updateReviewGate(pr, phase, true);
+                }
               } catch (error) {
+                let invalidationError = null;
+                const metadataErrors = [];
+                try {
+                  await updateReviewGate(pr, failurePhase, false, true);
+                } catch (gateError) {
+                  invalidationError = gateError;
+                }
+                try {
+                  await setCodeRabbitReviewActive(pr, false);
+                } catch (cleanupError) {
+                  metadataErrors.push(cleanupError);
+                }
+                try {
+                  await reconcileLabels(pr, null);
+                } catch (cleanupError) {
+                  metadataErrors.push(cleanupError);
+                }
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
                   : error.message;
-                failures.push(`#${pr.number}: ${detail}`);
-                core.error(`Failed to reconcile PR #${pr.number}: ${detail}`);
+                const gateDetail = invalidationError
+                  ? `; could not invalidate ${reviewGateName}: ${invalidationError.message}`
+                  : '';
+                const metadataDetail = metadataErrors.length > 0
+                  ? `; could not clear review metadata: ${metadataErrors.map(err => err.message).join('; ')}`
+                  : '';
+                failures.push(`#${pr.number}: ${detail}${gateDetail}${metadataDetail}`);
+                core.error(`Failed to reconcile PR #${pr.number}: ${detail}${gateDetail}${metadataDetail}`);
               }
             }
 

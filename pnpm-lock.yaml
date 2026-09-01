@@ -49,9 +49,6 @@ importers:
       lint-staged:
         specifier: 16.4.0
         version: 16.4.0
-      mkdirp:
-        specifier: 3.0.1
-        version: 3.0.1
       ovsx:
         specifier: 0.10.12
         version: 0.10.12
@@ -192,17 +189,7 @@ importers:
         specifier: 6.0.1
         version: 6.0.1
 
-  apps/vscode-nightly:
-    devDependencies:
-      '@roo-code/build':
-        specifier: workspace:^
-        version: link:../../packages/build
-
   packages/build:
-    dependencies:
-      zod:
-        specifier: 3.25.76
-        version: 3.25.76
     devDependencies:
       '@roo-code/config-eslint':
         specifier: workspace:^
@@ -671,9 +658,6 @@ importers:
       '@types/vscode':
         specifier: 1.100.0
         version: 1.100.0
-      '@typescript-eslint/parser':
-        specifier: 8.32.1
-        version: 8.32.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
       '@vitest/coverage-v8':
         specifier: 4.1.9
         version: 4.1.9(vitest@4.1.9)
@@ -3479,6 +3463,7 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xobotyi/scrollbar-width@1.9.5':
     resolution: {integrity: sha512-N8tkAACJx2ww8vFMneJmaAgmjAG1tnVBZJRLRcx061tmsLRZHSEZSLuGWnwPtunsSLvSqXQ2wfp7Mgqg1I+2dQ==}
