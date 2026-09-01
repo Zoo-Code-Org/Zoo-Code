@@ -33,6 +33,14 @@ describe("task lifecycle transitions", () => {
 		})
 	})
 
+	it("treats a legacy unset status as active when delegating", () => {
+		expect(delegateTaskToChild(item("parent", { status: undefined }), "child")).toMatchObject({
+			status: "delegated",
+			awaitingChildId: "child",
+			delegatedToId: "child",
+		})
+	})
+
 	it("allows re-delegation only after the previous child is interrupted", () => {
 		const parent = item("parent", {
 			status: "delegated",
