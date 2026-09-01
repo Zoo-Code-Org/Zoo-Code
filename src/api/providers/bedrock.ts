@@ -50,6 +50,7 @@ import { shouldUseReasoningBudget } from "../../shared/api"
 import { normalizeToolSchema } from "../../utils/json-schema"
 import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 /************************************************************************************
  *
@@ -557,21 +558,42 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
 		}
 
-		// Create AbortController with 10 minute timeout
-		const controller = new AbortController()
+		// Create a request-local AbortController with 10 minute timeout. Keeping it
+		// request-local (and detaching the bridge listener in the finally block) means
+		// a completed request can never leave a stale listener on the caller's signal.
+		// A manual setTimeout (rather than AbortSignal.timeout()) is required here
+		// because clearTimeout in the finally block needs a cancelable handle —
+		// AbortSignal.timeout() self-manages its timer and cannot be cleared.
+		const requestController = new AbortController()
 		let timeoutId: NodeJS.Timeout | undefined
+
+		// Bridge external abort signal to the request controller using the standard
+		// abort bridge pattern:
+		// - pre-aborted guard: a listener on an already-aborted signal may never fire,
+		//   so abort the local controller directly in that case
+		// - { once: true }: the listener auto-removes on first abort event
+		let abortListener: (() => void) | undefined
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal) {
+			if (externalAbortSignal.aborted) {
+				requestController.abort()
+			} else {
+				abortListener = () => requestController.abort()
+				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
+			}
+		}
 
 		try {
 			timeoutId = setTimeout(
 				() => {
-					controller.abort()
+					requestController.abort()
 				},
 				10 * 60 * 1000,
 			)
 
 			const command = new ConverseStreamCommand(payload)
 			const response = await this.client.send(command, {
-				abortSignal: controller.signal,
+				abortSignal: requestController.signal,
 			})
 
 			if (!response.stream) {
@@ -820,6 +842,17 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			} else {
 				throw new Error("An unknown error occurred")
 			}
+		} finally {
+			// Clear the request timeout as soon as the generator ends. This also covers
+			// early termination by the caller (break/destroy), which bypasses the normal
+			// timeout-clearing path after the stream completes.
+			clearTimeout(timeoutId)
+
+			// Detach the bridge listener once the request ends (success or error) so the
+			// external signal keeps no reference to this request's controller.
+			if (abortListener) {
+				externalAbortSignal?.removeEventListener("abort", abortListener)
+			}
 		}
 	}
 
@@ -865,7 +898,14 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			}
 
 			const command = new ConverseCommand(payload)
-			const response = await this.client.send(command)
+
+			// Build request options with abortSignal and/or timeoutMs.
+			// The shared helper keeps Bedrock aligned with other providers:
+			// positive timeout values create request-local cancellation, while
+			// zero/negative timeout values mean "no timeout".
+			const mergedAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+			const sendOptions = mergedAbortSignal ? { abortSignal: mergedAbortSignal } : undefined
+			const response = await this.client.send(command, sendOptions)
 
 			if (
 				response?.output?.message?.content &&
@@ -1577,6 +1617,7 @@ Please check:
 
 		// Check each error type's patterns in order of specificity (most specific first)
 		const errorTypeOrder = [
+			"ABORT", // Classify cancellations (user abort or request timeout) before any other pattern
 			"SERVICE_QUOTA_EXCEEDED", // Most specific - check before THROTTLING
 			"MODEL_NOT_READY",
 			"TOO_MANY_TOKENS",
