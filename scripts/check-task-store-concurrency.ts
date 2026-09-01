@@ -91,6 +91,29 @@ const commonInvariantNames = [
 	"whole-delta rejection",
 ] as const
 const expectedPhases = ["read", "prepare", "revalidate", "commit", "refresh", "reject", "fail"] as const
+const semanticLandmarks = {
+	"stale-cache-newer-disk": (state: ModelState) =>
+		state.commits.length > 0 &&
+		hosts.some((host) =>
+			(Object.keys(state.disk) as TaskId[]).some(
+				(taskId) => canonical(state.caches[host][taskId]) !== canonical(state.disk[taskId]),
+			),
+		),
+	"pair-first-commit-second-pending": (state: ModelState) =>
+		(["complete-a", "abandon-b"] as OperationId[]).some((operationId) => {
+			const operation = state.operations[operationId]
+			return (
+				operation?.writeIndex === 1 &&
+				(operation.phase === "prepared" || operation.phase === "revalidated") &&
+				state.commits.filter((entry) => entry.operationId === operationId).length === 1
+			)
+		}),
+	"pair-first-commit-second-failed": (state: ModelState) =>
+		state.operations["complete-a"]?.phase === "failed" &&
+		state.commits.filter((entry) => entry.operationId === "complete-a").length === 1 &&
+		state.caches.A["child-a"]?.status === "completed" &&
+		state.caches.A.parent?.status === "delegated",
+} satisfies Record<string, (state: ModelState) => boolean>
 
 function item(id: TaskId, overrides: Partial<HistoryItem> = {}): HistoryItem {
 	return {
@@ -503,7 +526,12 @@ function targetViolation(state: ModelState, scenario: Scenario): string | undefi
 	return undefined
 }
 
-function runScenario(scenario: Scenario): { states: number; witness?: TraceStep[]; phases: Set<string> } {
+function runScenario(scenario: Scenario): {
+	states: number
+	witness?: TraceStep[]
+	phases: Set<string>
+	landmarks: Set<string>
+} {
 	const startDisk =
 		scenario.name === "status rejection"
 			? { parent: item("parent", { status: "completed", mode: "stable" }) }
@@ -518,10 +546,14 @@ function runScenario(scenario: Scenario): { states: number; witness?: TraceStep[
 	const visited = new Set([canonical(start)])
 	const frontier: ModelState[] = []
 	const phases = new Set<string>()
+	const landmarks = new Set<string>()
 	let witness: TraceStep[] | undefined
 
 	for (let index = 0; index < queue.length; index++) {
 		const node = queue[index]!
+		for (const [name, predicate] of Object.entries(semanticLandmarks)) {
+			if (predicate(node.state)) landmarks.add(name)
+		}
 		const violations = [...commonViolations(node.state, scenario), ...scenario.check(node.state)]
 		if (violations.length) throw new Error(formatTrace(scenario, violations.join("; "), node.trace))
 		const expectedViolation = targetViolation(node.state, scenario)
@@ -551,7 +583,7 @@ function runScenario(scenario: Scenario): { states: number; witness?: TraceStep[
 		.flatMap((state) => nextSteps(state, scenario))
 		.find((step) => !visited.has(canonical(step.state)))
 	if (unseen) throw new Error(`${scenario.name} truncated before unseen action ${unseen.action}`)
-	return { states: visited.size, witness, phases }
+	return { states: visited.size, witness, phases, landmarks }
 }
 
 const scenarios: Scenario[] = [
@@ -653,10 +685,12 @@ const scenarios: Scenario[] = [
 
 let totalStates = 0
 const reachedPhases = new Set<string>()
+const reachedLandmarks = new Set<string>()
 for (const scenario of scenarios) {
 	const result = runScenario(scenario)
 	totalStates += result.states
 	for (const phase of result.phases) reachedPhases.add(phase)
+	for (const landmark of result.landmarks) reachedLandmarks.add(landmark)
 	if (scenario.targetViolation) {
 		const actions = result.witness!.slice(1).map((step) => step.action)
 		if (canonical(actions) !== canonical(scenario.targetViolation.expectedActions)) {
@@ -679,7 +713,11 @@ for (const scenario of scenarios) {
 
 const missingPhases = expectedPhases.filter((phase) => !reachedPhases.has(phase))
 if (missingPhases.length) throw new Error(`Shared-store model has unreachable phases: ${missingPhases.join(", ")}`)
+const missingLandmarks = Object.keys(semanticLandmarks).filter((name) => !reachedLandmarks.has(name))
+if (missingLandmarks.length) {
+	throw new Error(`Shared-store model has unreachable semantic landmarks: ${missingLandmarks.join(", ")}`)
+}
 
 console.log(
-	`Shared-store model check passed: ${totalStates} states, ${scenarios.length} scenarios, ${commonInvariantNames.length} invariants, ${expectedPhases.length}/${expectedPhases.length} phases reachable`,
+	`Shared-store model check passed: ${totalStates} states, ${scenarios.length} scenarios, ${commonInvariantNames.length} invariants, ${expectedPhases.length}/${expectedPhases.length} phases reachable, ${Object.keys(semanticLandmarks).length}/${Object.keys(semanticLandmarks).length} landmarks reached`,
 )

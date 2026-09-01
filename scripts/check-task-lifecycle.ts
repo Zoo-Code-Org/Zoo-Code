@@ -26,6 +26,17 @@ interface TraceStep {
 const MAX_DEPTH = 12
 const MAX_STATES = 10_000
 const expectedActions = ["delegate", "interrupt", "complete", "abandon"] as const
+const semanticLandmarks = {
+	"interrupted-child-redelegation": (state: ModelState) =>
+		state.parent?.status === "delegated" &&
+		state.parent.awaitingChildId === "child-b" &&
+		state["child-a"]?.status === "interrupted",
+	"nested-delegation": (state: ModelState) =>
+		state.parent?.status === "delegated" &&
+		state.parent.awaitingChildId === "child-a" &&
+		state["child-a"]?.status === "delegated" &&
+		state["child-a"].awaitingChildId === "child-b",
+} satisfies Record<string, (state: ModelState) => boolean>
 
 function task(id: TaskId, parentTaskId?: TaskId): HistoryItem {
 	return {
@@ -192,10 +203,14 @@ function runModelCheck(): number {
 	]
 	const visited = new Set([canonical(start)])
 	const reachedActions = new Set<string>()
+	const reachedLandmarks = new Set<string>()
 	const frontier: ModelState[] = []
 
 	for (let index = 0; index < queue.length; index++) {
 		const node = queue[index]!
+		for (const [name, predicate] of Object.entries(semanticLandmarks)) {
+			if (predicate(node.state)) reachedLandmarks.add(name)
+		}
 		const violations = invariantViolations(node.state)
 		if (violations.length) throw new Error(formatCounterexample(violations.join("; "), node.trace))
 		if (node.trace.length - 1 === MAX_DEPTH) {
@@ -224,6 +239,10 @@ function runModelCheck(): number {
 	const unreachableActions = expectedActions.filter((action) => !reachedActions.has(action))
 	if (unreachableActions.length) {
 		throw new Error(`Task lifecycle model has unreachable actions: ${unreachableActions.join(", ")}`)
+	}
+	const missingLandmarks = Object.keys(semanticLandmarks).filter((name) => !reachedLandmarks.has(name))
+	if (missingLandmarks.length) {
+		throw new Error(`Task lifecycle model has unreachable semantic landmarks: ${missingLandmarks.join(", ")}`)
 	}
 	const unexploredSuccessor = frontier
 		.flatMap((state) => transitions(state))
@@ -264,5 +283,5 @@ function runRepresentativeScenarios(): void {
 runRepresentativeScenarios()
 const checkedStates = runModelCheck()
 console.log(
-	`Task lifecycle model check passed: ${checkedStates} reachable states, ${expectedActions.length}/${expectedActions.length} actions reachable, depth <= ${MAX_DEPTH}, ${taskIds.length} task slots`,
+	`Task lifecycle model check passed: ${checkedStates} reachable states, ${expectedActions.length}/${expectedActions.length} actions reachable, ${Object.keys(semanticLandmarks).length}/${Object.keys(semanticLandmarks).length} landmarks reached, depth <= ${MAX_DEPTH}, ${taskIds.length} task slots`,
 )

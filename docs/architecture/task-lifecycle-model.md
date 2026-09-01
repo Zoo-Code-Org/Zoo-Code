@@ -33,7 +33,7 @@ TLA+/PlusCal or Quint with TLC becomes a better fit when the lifecycle needs tem
 | Atomic event step         | `atomicReadAndUpdate`, `atomicUpdatePair`, and per-parent delegation transition lock |
 | Event interleaving        | Competing completion, cancellation, abandonment, and new delegation calls            |
 
-The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain. It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion.
+The model has three fixed task slots, enough to cover competing siblings and a nested parent-child-grandchild chain. It explores every reachable interleaving through depth 12, deduplicating canonical states. Representative checks also exercise rejected operations that do not create a new state: a second concurrent delegation while the first child is active, stale completion after re-delegation, late completion after abandonment, completion after interruption, and nested completion. Named semantic landmarks require the graph to retain interrupted-child re-delegation and nested delegation even when the raw state total changes.
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
 
@@ -50,14 +50,18 @@ The same `pnpm lifecycle:model-check` command also runs a second bounded explore
 - successful pair-operation cache entries publish together after both file writes; if the second write fails, the cache publishes only the first committed record;
 - cache refresh is explicit and may occur after an external live-task snapshot was captured.
 
-There is no production record version or compare-and-swap token today. The model therefore does not invent one. It universally checks host-mutex and file-lock ownership, whole-file delta rejection, disk-field preservation, `childIds` union, and pair write order. Six scenarios, including distinct-task writes from #920 and a second-write pair failure, and all seven phases (`read`, `prepare`, `revalidate`, `commit`, `refresh`, `reject`, and `fail`) must remain reachable without exceeding the state/depth budgets.
+There is no production record version or compare-and-swap token today. The model therefore does not invent one. It universally checks host-mutex and file-lock ownership, whole-file delta rejection, disk-field preservation, `childIds` union, and pair write order. Six scenarios, including distinct-task writes from #920 and a second-write pair failure, and all seven phases (`read`, `prepare`, `revalidate`, `commit`, `refresh`, `reject`, and `fail`) must remain reachable without exceeding the state/depth budgets. Positive semantic landmarks additionally require a stale cache beside newer disk state, the first pair write committed while the second is pending, and the same committed prefix retained after the second write fails.
 
 Two desired properties are currently false and remain issue-keyed shortest-witness ratchets rather than silently allowed assertion failures:
 
 - [#1469](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1469): an old completion can commit after a newer handoff and clear it because disk revalidation checks status legality, not exact-child ownership.
 - [#1021](https://github.com/Zoo-Code-Org/Zoo-Code/issues/1021): after abandonment and cache refresh, a stale live-task save can preserve the new interrupted status while restoring old lineage fields.
 
-CI fails if either exact causal witness or violation class changes, a witness disappears without being promoted to a universal invariant, a new safety violation appears, a modeled phase becomes unreachable, or exploration truncates. `TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with one synchronized integration smoke check through the real `proper-lockfile` and filesystem rename path; broader VS Code E2E remains reserved for restart and extension-host behavior.
+CI fails if either exact causal witness or violation class changes, a witness disappears without being promoted to a universal invariant, a named semantic landmark or modeled phase becomes unreachable, a new safety violation appears, or exploration truncates. Raw reachable-state totals are printed as diagnostics, not used as ratchets: harmless representation changes can alter them without weakening protocol coverage.
+
+The known-unsafe witnesses currently compare exact shortest action sequences. This is intentionally simple and reviewable, but brittle to harmless action renames or serialization refactors. A causal partial-order comparator would reduce that brittleness but would add a second trace-equivalence protocol to maintain. Until that complexity is justified, update an exact witness only after confirming the terminal violation class and required causal ordering are unchanged.
+
+`TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with one synchronized integration smoke check through the real `proper-lockfile` and filesystem rename path; broader VS Code E2E remains reserved for restart and extension-host behavior.
 
 ## Invariants
 
