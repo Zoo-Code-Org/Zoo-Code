@@ -168,6 +168,25 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 	})
 
 	describe("handleSettingsChange", () => {
+		it("should log background indexing failures", async () => {
+			const indexingError = new Error("indexing startup failed")
+			const startIndexing = vi.fn().mockRejectedValue(indexingError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+			Object.defineProperty(manager, "_orchestrator", {
+				value: { startIndexing, stopIndexing: vi.fn() },
+				configurable: true,
+			})
+
+			manager["startIndexingInBackground"]()
+			await Promise.resolve()
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[CodeIndexManager] Background indexing failed:",
+				indexingError,
+			)
+			consoleErrorSpy.mockRestore()
+		})
+
 		it("should not throw when called on uninitialized manager (regression test)", async () => {
 			// This is the core regression test: handleSettingsChange() should not throw
 			// when called before the manager is initialized (during first-time configuration)

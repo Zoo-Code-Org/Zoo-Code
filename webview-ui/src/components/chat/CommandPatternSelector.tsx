@@ -71,7 +71,7 @@ export const CommandPatternSelector: React.FC<CommandPatternSelectorProps> = ({
 					<span
 						className={cn(
 							"text-sm flex-1 group-hover:opacity-100",
-							isExpanded ? "opacity-100" : "opacity-40",
+							isExpanded ? "text-vscode-foreground" : "text-vscode-descriptionForeground",
 						)}>
 						<CheckCheck className="size-3 inline-block mr-2" />
 						{t("chat:commandExecution.manageCommands")}
@@ -79,7 +79,7 @@ export const CommandPatternSelector: React.FC<CommandPatternSelectorProps> = ({
 					<ChevronUp
 						className={cn(
 							"group-hover:opacity-100 size-4 transition-transform",
-							isExpanded ? "opacity-100" : "opacity-40 -rotate-180",
+							isExpanded ? "text-vscode-foreground" : "text-vscode-descriptionForeground -rotate-180",
 						)}
 					/>
 				</div>
@@ -135,12 +135,14 @@ export const CommandPatternSelector: React.FC<CommandPatternSelectorProps> = ({
 										)}>
 										<button
 											className={cn("p-1 rounded transition-all cursor-pointer", {
-												"bg-green-500/20 text-green-500 hover:bg-green-500/30":
+												"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground hover:bg-vscode-list-focusBackground":
 													status === "allowed",
-												"text-vscode-descriptionForeground hover:text-green-500 hover:bg-green-500/10":
+												"text-vscode-descriptionForeground hover:text-vscode-foreground hover:bg-vscode-list-hoverBackground":
 													status !== "allowed",
 											})}
 											onClick={() => onAllowPatternChange(editState.value)}
+											aria-pressed={status === "allowed"}
+											data-testid="allow-command-pattern"
 											aria-label={t(
 												status === "allowed"
 													? "chat:commandExecution.removeFromAllowed"
@@ -157,11 +159,14 @@ export const CommandPatternSelector: React.FC<CommandPatternSelectorProps> = ({
 										)}>
 										<button
 											className={cn("p-1 rounded transition-all cursor-pointer", {
-												"bg-red-500/20 text-red-500 hover:bg-red-500/30": status === "denied",
-												"text-vscode-descriptionForeground hover:text-red-500 hover:bg-red-500/10":
+												"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground hover:bg-vscode-list-focusBackground":
+													status === "denied",
+												"text-vscode-descriptionForeground hover:text-vscode-foreground hover:bg-vscode-list-hoverBackground":
 													status !== "denied",
 											})}
 											onClick={() => onDenyPatternChange(editState.value)}
+											aria-pressed={status === "denied"}
+											data-testid="deny-command-pattern"
 											aria-label={t(
 												status === "denied"
 													? "chat:commandExecution.removeFromDenied"

@@ -42,6 +42,14 @@ flag_management:
         - packages/core/src/
       carryforward: true
 
+ignore:
+  # Playwright CT-only fixtures/helpers: exercised by the webview-ui-ct flag's browser run, not
+  # Vitest, and excluded from that flag's own lcov by playwright-ct.config.ts's sourceFilter (same
+  # ".visual." match). Without this, patch coverage sees 0% for these paths on any PR that adds or
+  # touches one, since no flag's lcov contains them.
+  - "webview-ui/src/**/*.visual.fixture.tsx"
+  - "webview-ui/src/**/*.visual.i18n.ts"
+
 component_management:
   individual_components:
     - component_id: webview_components

@@ -366,9 +366,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "三款重磅新模型現已推出 — 使用全新的 Gemini 3.7 Flash、GLM 5.3 和 Qwen3.8 Max 模型，以及更新後的 DeepSeek V4 推理、定價與供應商支援。",
-			"highlight2": "連接 NanoGPT — 使用動態模型探索、串流與 Prompt 補全，並依速度、價格、延遲、吞吐量、工具支援和快取設定路由偏好。",
-			"highlight3": "更可靠的供應商與任務 — 修正改善了 Azure OpenAI endpoint 設定、Kimi Code 輸出限制、任務歷史標題保留，以及 Zoo 設定的匯入/匯出。"
+			"highlight1": "🤖 在全新的 Zoo Gateway 上，有餘額的使用者可在 2 週內以 5 折優惠試用 GLM-5.3-Flash 和 Gemini 3.7 Flash，並可完全免費使用 MiniMax M3：<modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "新模型 — GLM-5.3-Flash 現已透過 Z AI 提供。",
+			"highlight3": "可靠性修正 — 恢復了子任務核准，解決了 Vertex Gemini 3.7 工具輸出為空、終端機啟動失敗和背景服務錯誤問題，並提升了不同 IDE 主題下的可讀性。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",
