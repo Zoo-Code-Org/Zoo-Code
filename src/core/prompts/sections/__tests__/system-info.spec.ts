@@ -63,4 +63,18 @@ describe("getSystemInfoSection", () => {
 
 		expect(result).toContain("Operating System: win32 10.0.19043")
 	})
+
+	it("includes workspace guidance only for available tools", () => {
+		mockOsName.mockReturnValue("Ubuntu 22.04")
+
+		const withTools = getSystemInfoSection(mockCwd, {
+			availableToolNames: new Set(["execute_command", "list_files"]),
+		})
+		const withoutTools = getSystemInfoSection(mockCwd, { availableToolNames: new Set() })
+
+		expect(withTools).toContain("New terminals will be created")
+		expect(withTools).toContain("you can use the list_files tool")
+		expect(withoutTools).not.toContain("New terminals will be created")
+		expect(withoutTools).not.toContain("you can use the list_files tool")
+	})
 })

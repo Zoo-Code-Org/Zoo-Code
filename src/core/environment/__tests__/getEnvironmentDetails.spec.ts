@@ -208,6 +208,16 @@ describe("getEnvironmentDetails", () => {
 		expect(listFiles).not.toHaveBeenCalled()
 	})
 
+	it("should not advertise list_files for the desktop when it is unavailable", async () => {
+		;(arePathsEqual as Mock).mockReturnValue(true)
+
+		const result = await getEnvironmentDetails(mockCline as Task, true, new Set(["read_file"]))
+
+		expect(result).toContain("(Desktop files not shown automatically.)")
+		expect(result).not.toContain("Use list_files")
+		expect(listFiles).not.toHaveBeenCalled()
+	})
+
 	it("should skip file listing when maxWorkspaceFiles is 0", async () => {
 		mockProvider.getState.mockResolvedValue({
 			...mockState,

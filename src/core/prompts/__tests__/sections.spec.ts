@@ -122,6 +122,41 @@ describe("getCapabilitiesSection", () => {
 		expect(withoutMcpOperation).not.toContain("MCP servers")
 		expect(withMcpOperation).toContain("MCP servers")
 	})
+
+	it("describes command, listing, search, and unrestricted edit capabilities", () => {
+		const result = getCapabilitiesSection(cwd, undefined, undefined, {
+			availableToolNames: new Set(["execute_command", "list_files", "search_files", "write_to_file"]),
+		})
+
+		expect(result).toContain("execute CLI commands")
+		expect(result).toContain("list files")
+		expect(result).toContain("search source code")
+		expect(result).toContain("write and edit files")
+		expect(result).toContain("you can use the list_files tool")
+		expect(result).toContain("You can use the execute_command tool")
+	})
+
+	it("describes edit restrictions using their description or regex", () => {
+		const withDescription = getCapabilitiesSection(cwd, undefined, undefined, {
+			availableToolNames: new Set(["apply_patch"]),
+			editFileRestriction: { fileRegex: "\\.md$", description: "Markdown files only" },
+		})
+		const withRegexOnly = getCapabilitiesSection(cwd, undefined, undefined, {
+			availableToolNames: new Set(["apply_patch"]),
+			editFileRestriction: { fileRegex: "\\.ts$" },
+		})
+
+		expect(withDescription).toContain("edit files matching Markdown files only")
+		expect(withRegexOnly).toContain("edit files matching \\.ts$")
+	})
+
+	it("omits the capability summary when no tools are available", () => {
+		const result = getCapabilitiesSection(cwd, undefined, undefined, {
+			availableToolNames: new Set(),
+		})
+
+		expect(result).not.toContain("- You have access to tools that let you")
+	})
 })
 
 describe("getRulesSection", () => {
@@ -235,6 +270,18 @@ describe("getRulesSection", () => {
 		expect(restrictedResult).toContain('The active mode can only edit files matching "\\.md$".')
 		expect(noToolsResult).not.toContain("Use the tools provided")
 		expect(noToolsResult).not.toContain("wait for the user's response after each tool use")
+	})
+
+	it("includes PowerShell chaining guidance when command execution is available", () => {
+		vi.spyOn(shellUtils, "getShell").mockReturnValue(
+			"C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+		)
+
+		const result = getRulesSection(cwd, undefined, {
+			availableToolNames: new Set(["execute_command"]),
+		})
+
+		expect(result).toContain("Note: Using `;` for PowerShell command chaining")
 	})
 })
 

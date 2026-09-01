@@ -612,6 +612,13 @@ describe("SYSTEM_PROMPT", () => {
 		expect(prompt).not.toContain("write and edit files")
 	})
 
+	it("should fall back to the default mode configuration for an unknown mode", async () => {
+		const prompt = await generatePromptWithTools(["read_file"], "unknown-mode")
+
+		expect(prompt).toContain(modes[0].roleDefinition)
+		expect(prompt).toContain("read files")
+	})
+
 	it("should apply Architect tool availability and edit restrictions to built-in instructions", async () => {
 		const prompt = await generatePromptWithTools(
 			["read_file", "write_to_file", "ask_followup_question", "attempt_completion"],

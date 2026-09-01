@@ -136,6 +136,11 @@ describe("mode-validator", () => {
 		})
 
 		describe("tool requirements", () => {
+			it("disables every non-required tool when requirements are false", () => {
+				expect(isToolAllowedForMode("read_file", codeMode, [], false)).toBe(false)
+				expect(isToolAllowedForMode("attempt_completion", codeMode, [], false)).toBe(true)
+			})
+
 			it("respects tool requirements when provided", () => {
 				const requirements = { apply_diff: false }
 				expect(isToolAllowedForMode("apply_diff", codeMode, [], requirements)).toBe(false)

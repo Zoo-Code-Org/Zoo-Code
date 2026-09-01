@@ -33,7 +33,7 @@ export function validateToolUse(
 	toolName: ToolName,
 	mode: Mode,
 	customModes?: ModeConfig[],
-	toolRequirements?: Record<string, boolean>,
+	toolRequirements?: Record<string, boolean> | false,
 	toolParams?: Record<string, unknown>,
 	experiments?: Record<string, boolean>,
 	includedTools?: string[],
@@ -121,7 +121,7 @@ export function isToolAllowedForMode(
 	tool: string,
 	modeSlug: string,
 	customModes: ModeConfig[],
-	toolRequirements?: Record<string, boolean>,
+	toolRequirements?: Record<string, boolean> | false,
 	toolParams?: Record<string, any>, // All tool parameters
 	experiments?: Record<string, boolean>,
 	includedTools?: string[], // Opt-in tools explicitly included (e.g., from modelInfo)

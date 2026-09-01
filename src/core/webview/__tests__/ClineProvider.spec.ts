@@ -2219,16 +2219,19 @@ describe("ClineProvider", () => {
 
 		test("uses cached model policy when full model metadata fetch fails", async () => {
 			const { buildApiHandler } = await import("../../../api")
-			const fallbackHandler = buildApiHandler({ apiProvider: providerIdentifiers.openrouter })
-			fallbackHandler.ensureModelFetched = vi.fn().mockRejectedValue(new Error("fetch failed"))
-			vi.mocked(fallbackHandler.getModel).mockReturnValue({
-				id: "cached-model",
-				info: {
-					contextWindow: 128_000,
-					supportsPromptCache: false,
-					excludedTools: ["execute_command"],
-				},
-			})
+			const fallbackHandler = {
+				ensureModelFetched: vi.fn().mockRejectedValue(new Error("fetch failed")),
+				createMessage: vi.fn(),
+				countTokens: vi.fn(),
+				getModel: vi.fn().mockReturnValue({
+					id: "cached-model",
+					info: {
+						contextWindow: 128_000,
+						supportsPromptCache: false,
+						excludedTools: ["execute_command"],
+					},
+				}),
+			} as ReturnType<typeof buildApiHandler>
 			vi.mocked(buildApiHandler).mockReturnValueOnce(fallbackHandler)
 
 			const providerState = await provider.getState()
@@ -2248,6 +2251,27 @@ describe("ClineProvider", () => {
 					modelInfo: expect.objectContaining({ excludedTools: ["execute_command"] }),
 				}),
 			)
+		})
+
+		test("generates a preview when the temporary API handler cannot be created", async () => {
+			const { buildApiHandler } = await import("../../../api")
+			const error = new Error("handler creation failed")
+			vi.mocked(buildApiHandler).mockImplementationOnce(() => {
+				throw error
+			})
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined)
+
+			const handler = getMessageHandler()
+			await handler({ type: "getSystemPrompt", mode: "code" })
+
+			expect(errorSpy).toHaveBeenCalledWith("Error reading model info for system prompt preview:", error)
+			expect(buildNativeToolsArrayWithRestrictions).toHaveBeenCalledWith(
+				expect.objectContaining({ modelInfo: undefined }),
+			)
+			expect(mockPostMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "systemPrompt", text: "mocked system prompt" }),
+			)
+			errorSpy.mockRestore()
 		})
 
 		test("uses code mode custom instructions", async () => {
