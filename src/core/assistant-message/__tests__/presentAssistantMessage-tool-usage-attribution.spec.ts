@@ -5,7 +5,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { validateToolUse } from "../../tools/validateToolUse"
 import { useMcpToolTool } from "../../tools/UseMcpToolTool"
-import { getModeBySlug } from "../../../shared/modes"
+import { defaultModeSlug, getModeBySlug } from "../../../shared/modes"
 import type { CurrentRequestToolPolicy, Task } from "../../task/Task"
 
 vi.mock("../../task/Task")
@@ -181,6 +181,58 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 		expect(vi.mocked(validateToolUse).mock.calls[0][3]).toMatchObject({ read_file: false })
 	})
 
+	it("uses task mode before live state when no request policy exists", async () => {
+		mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
+			}),
+		}
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_task_mode",
+				name: "read_file",
+				params: { path: "test.txt" },
+				nativeArgs: { path: "test.txt" },
+				partial: false,
+			},
+		]
+
+		await presentMockTask(mockTask)
+
+		expect(vi.mocked(validateToolUse).mock.calls[0][1]).toBe("architect")
+	})
+
+	it("defaults fallback validation and resolves model-included tool aliases", async () => {
+		mockTask.api.getModel = () => ({
+			id: "test-model",
+			info: { includedTools: ["search_and_replace"] },
+		})
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({}),
+			}),
+		}
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: "call_default_policy",
+				name: "read_file",
+				params: { path: "test.txt" },
+				nativeArgs: { path: "test.txt" },
+				partial: false,
+			},
+		]
+
+		await presentMockTask(mockTask)
+
+		const validationCall = vi.mocked(validateToolUse).mock.calls[0]
+		expect(validationCall[1]).toBe(defaultModeSlug)
+		expect(validationCall[2]).toEqual([])
+		expect(validationCall[6]).toEqual(["edit"])
+	})
+
 	it("uses the request policy without reading the live focused mode", async () => {
 		mockTask.getCurrentRequestToolPolicy = () => ({
 			effectiveToolNames: new Set(["read_file", "attempt_completion"]),
@@ -347,7 +399,156 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 		expect(mockTask.recordToolUsage).not.toHaveBeenCalled()
 	})
 
+	it.each([
+		["custom-mode", "Custom Mode"],
+		["missing-mode", "missing-mode"],
+	])("describes skipped new_task calls using the resolved mode name for %s", async (mode, expectedName) => {
+		mockTask.didRejectTool = true
+		mockTask.providerRef = {
+			deref: () => ({
+				getState: vi.fn().mockResolvedValue({
+					mode: "code",
+					customModes: [
+						{
+							slug: "custom-mode",
+							name: "Custom Mode",
+							roleDefinition: "Custom role",
+							groups: ["read"],
+						},
+					],
+				}),
+			}),
+		}
+		mockTask.assistantMessageContent = [
+			{
+				type: "tool_use",
+				id: `call_new_task_${mode}`,
+				name: "new_task",
+				params: { mode, message: "Delegate work" },
+				nativeArgs: { mode, message: "Delegate work" },
+				partial: false,
+			},
+		]
+
+		await presentMockTask(mockTask)
+
+		expect(mockTask.pushToolResultToUserContent).toHaveBeenCalledWith(
+			expect.objectContaining({ content: expect.stringContaining(`[new_task in ${expectedName} mode`) }),
+		)
+	})
+
 	describe("native mcp_tool_use block", () => {
+		it("passes partial MCP blocks through without final validation", async () => {
+			const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_partial",
+					name: "mcp--test-server--search",
+					serverName: "test-server",
+					toolName: "search",
+					arguments: {},
+					partial: true,
+				},
+			]
+
+			await presentMockTask(mockTask)
+
+			expect(handleSpy).toHaveBeenCalledTimes(1)
+			expect(validateToolUse).not.toHaveBeenCalled()
+			handleSpy.mockRestore()
+		})
+
+		it("applies fallback disablement before executing an MCP block", async () => {
+			const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+			mockTask.api.getModel = () => ({
+				id: "test-model",
+				info: { excludedTools: ["mcp--blocked-server--blocked-tool"] },
+			})
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({
+						disabledTools: ["read_file"],
+						mcpEnabled: false,
+					}),
+					getMcpHub: () => undefined,
+				}),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_fallback_blocked",
+					name: "mcp--blocked-server--blocked-tool",
+					serverName: "blocked-server",
+					toolName: "blocked-tool",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentMockTask(mockTask)
+
+			expect(handleSpy).not.toHaveBeenCalled()
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("use_mcp_tool", expect.any(String))
+			handleSpy.mockRestore()
+		})
+
+		it("uses the task mode for fallback MCP validation", async () => {
+			const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+			mockTask.getTaskMode = vi.fn().mockResolvedValue("architect")
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({}),
+					getMcpHub: () => undefined,
+				}),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_task_mode",
+					name: "mcp--test-server--search",
+					serverName: "test-server",
+					toolName: "search",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentMockTask(mockTask)
+
+			expect(vi.mocked(validateToolUse).mock.calls[0][1]).toBe("architect")
+			expect(vi.mocked(validateToolUse).mock.calls[0][2]).toEqual([])
+			expect(handleSpy).toHaveBeenCalledTimes(1)
+			handleSpy.mockRestore()
+		})
+
+		it("uses the default mode for fallback MCP validation", async () => {
+			const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+			mockTask.providerRef = {
+				deref: () => ({
+					getState: vi.fn().mockResolvedValue({}),
+					getMcpHub: () => undefined,
+				}),
+			}
+			mockTask.assistantMessageContent = [
+				{
+					type: "mcp_tool_use",
+					id: "call_native_mcp_default_mode",
+					name: "mcp--test-server--search",
+					serverName: "test-server",
+					toolName: "search",
+					arguments: {},
+					partial: false,
+				},
+			]
+
+			await presentMockTask(mockTask)
+
+			expect(vi.mocked(validateToolUse).mock.calls[0][1]).toBe(defaultModeSlug)
+			expect(handleSpy).toHaveBeenCalledTimes(1)
+			handleSpy.mockRestore()
+		})
+
 		it("blocks an MCP tool absent from the request policy", async () => {
 			const handleSpy = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
 			mockTask.getCurrentRequestToolPolicy = () => ({
