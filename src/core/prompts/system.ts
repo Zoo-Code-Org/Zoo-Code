@@ -2,7 +2,15 @@ import * as vscode from "vscode"
 
 import { type ModeConfig, type PromptComponent, type CustomModePrompts, type TodoItem } from "@roo-code/types"
 
-import { Mode, modes, defaultModeSlug, getModeBySlug, getGroupName, getModeSelection } from "../../shared/modes"
+import {
+	Mode,
+	modes,
+	defaultModeSlug,
+	getModeBySlug,
+	getModeConfig,
+	getGroupName,
+	getModeSelection,
+} from "../../shared/modes"
 import { DiffStrategy } from "../../shared/tools"
 import { formatLanguage } from "../../shared/language"
 import { isEmpty } from "../../utils/object"
@@ -64,7 +72,7 @@ async function generatePrompt(
 
 	// Get the full mode config to ensure we have the role definition (used for groups, etc.)
 	const builtInMode = modes.find((candidate) => candidate.slug === mode)
-	const modeConfig = getModeBySlug(mode, customModeConfigs) || builtInMode || modes[0]
+	const modeConfig = getModeConfig(mode, customModeConfigs)
 	const { roleDefinition, baseInstructions } = getModeSelection(mode, promptComponent, customModeConfigs)
 	const editGroup = modeConfig.groups.find((groupEntry) => getGroupName(groupEntry) === "edit")
 	const editFileRestriction =
@@ -77,7 +85,7 @@ async function generatePrompt(
 	const effectivePromptContext = promptContext
 		? {
 				availableToolNames: promptContext.availableToolNames,
-				...(editFileRestriction ? { editFileRestriction } : {}),
+				editFileRestriction,
 			}
 		: undefined
 	const hasUserAuthoredModeInstructions =

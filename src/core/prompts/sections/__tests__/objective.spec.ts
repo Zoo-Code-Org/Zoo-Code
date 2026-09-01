@@ -44,4 +44,27 @@ describe("getObjectiveSection", () => {
 		expect(objective).toContain("OBJECTIVE")
 		expect(objective).toContain("You accomplish a given task iteratively")
 	})
+
+	it("omits tool-specific steps when no tools are available", () => {
+		const objective = getObjectiveSection({ availableToolNames: new Set() })
+
+		expect(objective).not.toContain("utilizing available tools")
+		expect(objective).not.toContain("use attempt_completion")
+	})
+
+	it("uses non-interactive parameter guidance when follow-up questions are unavailable", () => {
+		const objective = getObjectiveSection({ availableToolNames: new Set(["read_file"]) })
+
+		expect(objective).toContain("DO NOT invoke the tool, including with filler values")
+		expect(objective).not.toContain("ask_followup_question tool")
+	})
+
+	it("includes question and completion guidance only when those tools are available", () => {
+		const objective = getObjectiveSection({
+			availableToolNames: new Set(["ask_followup_question", "attempt_completion"]),
+		})
+
+		expect(objective).toContain("ask_followup_question tool")
+		expect(objective).toContain("use attempt_completion to present the result")
+	})
 })

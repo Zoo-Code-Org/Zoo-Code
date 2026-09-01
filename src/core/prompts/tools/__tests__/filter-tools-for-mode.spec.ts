@@ -2,7 +2,7 @@
 
 import type OpenAI from "openai"
 
-import { filterNativeToolsForMode } from "../filter-tools-for-mode"
+import { filterMcpToolsForMode, filterNativeToolsForMode } from "../filter-tools-for-mode"
 
 function makeTool(name: string): OpenAI.Chat.ChatCompletionTool {
 	return {
@@ -225,5 +225,23 @@ describe("filterNativeToolsForMode - access_mcp_resource allowlist", () => {
 			const resultNames = result.map((t) => (t as any).function.name)
 			expect(resultNames).toContain("access_mcp_resource")
 		})
+	})
+})
+
+describe("filterMcpToolsForMode", () => {
+	it("drops malformed and explicitly disabled MCP tools", () => {
+		// Provider input is validated at runtime, so exercise the guard with a tool
+		// that is deliberately missing the statically required function payload.
+		const malformedTool = { type: "function" } as OpenAI.Chat.ChatCompletionTool
+		const result = filterMcpToolsForMode(
+			[malformedTool, makeTool("mcp--server--allowed"), makeTool("mcp--server--blocked")],
+			"code",
+			undefined,
+			undefined,
+			{ disabledTools: ["mcp--server--blocked"] },
+		)
+
+		expect(result).toHaveLength(1)
+		expect("function" in result[0] ? result[0].function?.name : undefined).toBe("mcp--server--allowed")
 	})
 })

@@ -61,10 +61,8 @@ CAPABILITIES
 	const hasEditTool = hasAnyPromptTool(context, FILE_EDIT_TOOL_NAMES)
 	const hasImageTool = hasTool("generate_image")
 	const hasQuestionTool = hasTool("ask_followup_question")
-	const hasMcpOperations = context
-		? context.availableToolNames.has("access_mcp_resource") ||
-			Array.from(context.availableToolNames).some(isMcpTool)
-		: hasMcpServers
+	const hasMcpOperations =
+		context.availableToolNames.has("access_mcp_resource") || Array.from(context.availableToolNames).some(isMcpTool)
 
 	const capabilities: string[] = []
 	if (hasCommandTool) capabilities.push("execute CLI commands on the user's computer")

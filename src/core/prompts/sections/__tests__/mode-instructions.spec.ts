@@ -46,4 +46,36 @@ describe("getBuiltInModeInstructions", () => {
 
 		expect(result).not.toContain("access external resources")
 	})
+
+	it("preserves Ask's external-resource claim when an MCP operation is available", () => {
+		const withResourceTool = getBuiltInModeInstructions("ask", getInstructions("ask"), {
+			availableToolNames: new Set(["access_mcp_resource"]),
+		})
+		const withDynamicTool = getBuiltInModeInstructions("ask", getInstructions("ask"), {
+			availableToolNames: new Set(["mcp--test-server--search"]),
+		})
+
+		expect(withResourceTool).toContain("access external resources")
+		expect(withDynamicTool).toContain("access external resources")
+	})
+
+	it("leaves other built-in modes unchanged", () => {
+		const instructions = getInstructions("code")
+
+		expect(
+			getBuiltInModeInstructions("code", instructions, {
+				availableToolNames: new Set(),
+			}),
+		).toBe(instructions)
+	})
+
+	it("leaves Architect instructions unchanged when all referenced tools are available", () => {
+		const instructions = getInstructions("architect")
+
+		expect(
+			getBuiltInModeInstructions("architect", instructions, {
+				availableToolNames: new Set(["update_todo_list", "switch_mode", "write_to_file"]),
+			}),
+		).toBe(instructions)
+	})
 })
