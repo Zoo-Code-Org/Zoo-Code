@@ -6,6 +6,25 @@ import type { RooTerminal } from "./types"
 import { BaseTerminal } from "./BaseTerminal"
 import { BaseTerminalProcess } from "./BaseTerminalProcess"
 
+/**
+ * Returns a UTF-8 locale string derived from `value`, preserving the
+ * language/territory the system already has configured instead of
+ * forcing en_US. Falls back to en_US.UTF-8 when `value` is unset or is
+ * one of the encoding-less POSIX defaults ("C"/"POSIX").
+ */
+export function ensureUtf8Locale(value: string | undefined): string {
+	if (!value || value === "C" || value === "POSIX") {
+		return "en_US.UTF-8"
+	}
+
+	if (/utf-?8$/i.test(value)) {
+		return value
+	}
+
+	const [base] = value.split(".")
+	return `${base}.UTF-8`
+}
+
 export class ExecaTerminalProcess extends BaseTerminalProcess {
 	private terminalRef: WeakRef<RooTerminal>
 	private aborted = false
@@ -47,9 +66,11 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 				stdin: "ignore",
 				env: {
 					...process.env,
-					// Ensure UTF-8 encoding for Ruby, CocoaPods, etc.
-					LANG: "en_US.UTF-8",
-					LC_ALL: "en_US.UTF-8",
+					// Ensure UTF-8 encoding for Ruby, CocoaPods, etc., without
+					// clobbering a locale the system already has correctly
+					// configured (see https://github.com/Zoo-Code-Org/Zoo-Code/issues/1084).
+					LANG: ensureUtf8Locale(process.env.LANG),
+					LC_ALL: ensureUtf8Locale(process.env.LC_ALL),
 				},
 			})`${command}`
 

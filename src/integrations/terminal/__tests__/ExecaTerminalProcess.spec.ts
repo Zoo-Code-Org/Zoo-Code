@@ -62,7 +62,10 @@ describe("ExecaTerminalProcess", () => {
 	})
 
 	describe("UTF-8 encoding fix", () => {
-		it("should set LANG and LC_ALL to en_US.UTF-8", async () => {
+		it("should default LANG and LC_ALL to en_US.UTF-8 when unset", async () => {
+			delete process.env.LANG
+			delete process.env.LC_ALL
+			terminalProcess = new ExecaTerminalProcess(mockTerminal)
 			await terminalProcess.run("echo test")
 			const execaMock = vitest.mocked(execa)
 			expect(execaMock).toHaveBeenCalledWith(
@@ -95,6 +98,28 @@ describe("ExecaTerminalProcess", () => {
 			const execaMock = vitest.mocked(execa)
 			const calledOptions = execaMock.mock.calls[0][0] as any
 			expect(calledOptions.env.LANG).toBe("en_US.UTF-8")
+			expect(calledOptions.env.LC_ALL).toBe("en_US.UTF-8")
+		})
+
+		it("should preserve an already-UTF-8 non-US locale instead of forcing en_US (issue #1084)", async () => {
+			process.env.LANG = "en_AU.UTF-8"
+			process.env.LC_ALL = "en_AU.UTF-8"
+			terminalProcess = new ExecaTerminalProcess(mockTerminal)
+			await terminalProcess.run("echo test")
+			const execaMock = vitest.mocked(execa)
+			const calledOptions = execaMock.mock.calls[0][0] as unknown as { env: Record<string, string | undefined> }
+			expect(calledOptions.env.LANG).toBe("en_AU.UTF-8")
+			expect(calledOptions.env.LC_ALL).toBe("en_AU.UTF-8")
+		})
+
+		it("should upgrade a non-UTF-8 encoding while keeping the language/territory", async () => {
+			process.env.LANG = "de_DE.ISO-8859-1"
+			delete process.env.LC_ALL
+			terminalProcess = new ExecaTerminalProcess(mockTerminal)
+			await terminalProcess.run("echo test")
+			const execaMock = vitest.mocked(execa)
+			const calledOptions = execaMock.mock.calls[0][0] as unknown as { env: Record<string, string | undefined> }
+			expect(calledOptions.env.LANG).toBe("de_DE.UTF-8")
 			expect(calledOptions.env.LC_ALL).toBe("en_US.UTF-8")
 		})
 
