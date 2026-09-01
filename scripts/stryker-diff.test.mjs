@@ -144,6 +144,7 @@ describe("packageForPath", () => {
 		assert.equal(packageForPath("webview-ui/src/utils/test-utils.ts"), undefined)
 		assert.equal(packageForPath("src/__mocks__/vscode.js"), undefined)
 		assert.equal(packageForPath("apps/vscode-e2e/src/example.ts"), undefined)
+		assert.equal(packageForPath("scripts/fixtures/stryker-smoke/smoke.ts"), undefined)
 	})
 })
 
