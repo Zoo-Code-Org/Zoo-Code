@@ -1370,6 +1370,7 @@ describe("History resume delegation - parent metadata transitions", () => {
 				parentTaskId: "parent-566",
 				historyItem: { parentTaskId: "parent-566" },
 				providerRef: { deref: () => provider },
+				ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] }),
 				say: vi.fn().mockResolvedValue(undefined),
 				emit: vi.fn(),
 				getTokenUsage: vi.fn(() => ({})),
