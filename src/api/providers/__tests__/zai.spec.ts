@@ -742,31 +742,45 @@ describe("ZAiHandler", () => {
 			expect(result.message).toBe("Z.ai request aborted")
 		})
 
-		it("glm-5.3 completePrompt should merge the abort signal and timeoutMs on the thinking path", async () => {
+		it("glm-5.3 completePrompt should cancel the in-flight request when the caller signal aborts", async () => {
 			const h53 = new ZAiHandler({
 				apiModelId: "glm-5.3",
 				zaiApiKey: "test-zai-api-key",
 				zaiApiLine: "international_coding",
 			})
 			const controller = new AbortController()
-			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+			// Emulate the OpenAI SDK: the pending request rejects when its signal aborts.
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) => {
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new APIUserAbortError()
+				},
+			)
 
-			const result = await h53.completePrompt("prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			// The request stays pending while the caller's signal is still live.
+			const requestPromise = h53.completePrompt("prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
+			controller.abort()
 
-			expect(result).toBe("response")
+			const result = await captureError(requestPromise)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("Z.ai request aborted")
+
 			const requestCall = mockCreate.mock.calls.at(-1)
 			expect(requestCall?.[0]).toEqual(
 				expect.objectContaining({ model: "glm-5.3", thinking: { type: "enabled", clear_thinking: false } }),
 			)
 			const requestOptions = requestCall?.[1]
 			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
-			expect(requestOptions?.signal.aborted).toBe(false)
 			// A positive timeoutMs must be forwarded as the per-request SDK timeout.
 			expect(requestOptions?.timeout).toBe(5000)
-			// A timeout-only merged signal would still pass the assertions above;
-			// aborting the caller's controller proves caller cancellation survives.
-			controller.abort()
-			expect(requestOptions?.signal.aborted).toBe(true)
+			// Aborting the caller's controller propagates to the merged request signal.
+			expect(requestOptions?.signal?.aborted).toBe(true)
 		})
 
 		it("glm-5.3 completePrompt should normalize the SDK APIUserAbortError", async () => {

@@ -28,6 +28,8 @@ type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerO
 /** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
 type OpenAiRequestConfig = {
 	signal?: AbortSignal
+	/** Per-request SDK timeout (ms); overrides the client-level default when set. */
+	timeout?: number
 }
 
 export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
@@ -265,9 +267,14 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		// CompletePromptOptions is not ApiHandlerCreateMessageMetadata (required taskId),
 		// so the abort/timeout merge goes through setOption; the helper treats
-		// timeoutMs <= 0 as "no explicit timeout".
+		// timeoutMs <= 0 as "no explicit timeout". The per-request timeout is
+		// forwarded as well: without it the SDK falls back to the client-level
+		// default, which can still expire before a larger per-request timeoutMs.
+		const requestTimeout =
+			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
 			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.setOption("timeout", requestTimeout)
 			.build()
 
 		try {

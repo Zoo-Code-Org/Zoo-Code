@@ -274,7 +274,9 @@ describe("KimiCodeHandler", () => {
 	})
 
 	it("rejects before any request when the createMessage abort signal is already aborted", async () => {
-		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+		// OAuth auth so the token assertions below are not vacuous: without the
+		// cancellation guard, resolveAccessToken would invoke the OAuth mocks.
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const controller = new AbortController()
 		controller.abort()
 		const createCompletion = completionsCreate(handler)
@@ -313,7 +315,9 @@ describe("KimiCodeHandler", () => {
 	})
 
 	it("rejects before any request when the completePrompt signal is already aborted", async () => {
-		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
+		// OAuth auth so the token assertions below are not vacuous: without the
+		// cancellation guard, resolveAccessToken would invoke the OAuth mocks.
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "oauth" })
 		const controller = new AbortController()
 		controller.abort()
 		const createCompletion = completionsCreate(handler)

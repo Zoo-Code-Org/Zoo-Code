@@ -434,10 +434,45 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
 			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
 			expect(requestOptions?.signal.aborted).toBe(false)
+			// A positive timeoutMs must be forwarded as the per-request SDK timeout.
+			expect(requestOptions?.timeout).toBe(5000)
 			// A timeout-only merged signal would still pass the assertions above;
 			// aborting the caller's controller proves caller cancellation survives.
 			controller.abort()
 			expect(requestOptions?.signal.aborted).toBe(true)
+		})
+
+		it("should abort the request when a timeout-only completePrompt timeoutMs elapses", async () => {
+			// Emulate the OpenAI SDK: the pending request rejects when its signal aborts.
+			let capturedOptions: { signal?: AbortSignal; timeout?: number } | undefined
+			mockCreate.mockImplementationOnce(
+				async (_params: unknown, options?: { signal?: AbortSignal; timeout?: number }) => {
+					capturedOptions = options
+					await new Promise<void>((resolve) => {
+						if (options?.signal?.aborted) {
+							resolve()
+						} else {
+							options?.signal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+					throw new APIUserAbortError()
+				},
+			)
+
+			// No caller signal: the timeout branch is exercised on its own. AbortSignal.timeout
+			// is backed by a native self-managed timer (not the fakeable global), so poll with
+			// vi.waitFor the same way abort-signal.spec.ts does.
+			const requestPromise = handler.completePrompt("test prompt", { timeoutMs: 50 })
+			// Attach the rejection handler immediately so the timeout rejection
+			// is never observed as unhandled while we poll for the abort.
+			const resultPromise = captureError(requestPromise)
+
+			await vi.waitFor(() => expect(capturedOptions?.signal?.aborted).toBe(true))
+			expect(capturedOptions?.timeout).toBe(50)
+
+			const result = await resultPromise
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("TestProvider request aborted")
 		})
 
 		it("should not set a request signal for zero completePrompt timeoutMs", async () => {
