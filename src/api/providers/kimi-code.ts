@@ -20,6 +20,7 @@ import { getModelParams } from "../transform/model-params"
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getModels } from "./fetchers/modelCache"
+import { throwIfAborted } from "./utils/abort-signal"
 
 const OAUTH_AUTH_METHOD: KimiCodeAuthMethod = "oauth"
 const API_KEY_AUTH_METHOD: KimiCodeAuthMethod = "api-key"
@@ -88,6 +89,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		throwIfAborted(metadata?.abortSignal)
 		await this.prepareRequest()
 		try {
 			yield* super.createMessage(systemPrompt, messages, metadata)
@@ -99,6 +101,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 	}
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
 		await this.prepareRequest()
 		try {
 			// Forward abort/timeout options so the inherited OpenAiHandler wiring

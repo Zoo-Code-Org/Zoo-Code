@@ -290,6 +290,10 @@ describe("KimiCodeHandler", () => {
 			}
 		}).rejects.toMatchObject({ name: "AbortError", message: "This operation was aborted" })
 		expect(createCompletion).not.toHaveBeenCalled()
+		// Cancellation must also skip model discovery and OAuth token work.
+		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockGetAccessToken).not.toHaveBeenCalled()
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
 	})
 
 	it("forwards completePrompt abort options through the override on both 401 retry attempts", async () => {
@@ -319,6 +323,10 @@ describe("KimiCodeHandler", () => {
 			message: "This operation was aborted",
 		})
 		expect(createCompletion).not.toHaveBeenCalled()
+		// Cancellation must also skip model discovery and OAuth token work.
+		expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockGetAccessToken).not.toHaveBeenCalled()
+		expect(mockForceRefreshAccessToken).not.toHaveBeenCalled()
 	})
 
 	it("surfaces a normalized AbortError when the SDK aborts a streaming request", async () => {

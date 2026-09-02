@@ -33,6 +33,8 @@ import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal
 type OpenAiRequestConfig = {
 	path?: string
 	signal?: AbortSignal
+	/** Per-request SDK timeout; a positive timeoutMs overrides the client default. */
+	timeout?: number
 }
 
 // TODO: Rename this to OpenAICompatibleHandler. Also, I think the
@@ -380,16 +382,21 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	/**
 	 * Builds the per-request options for completePrompt. CompletePromptOptions
 	 * is not ApiHandlerCreateMessageMetadata (required taskId), so the merged
-	 * abort/timeout signal goes through setOption instead of setAbortSignal.
+	 * abort/timeout signal and the per-request SDK timeout (a positive timeoutMs
+	 * overrides the client-level default) go through setOption instead of
+	 * setAbortSignal.
 	 */
 	private buildCompletePromptRequestConfig(
 		isAzureAiInference: boolean,
 		options?: CompletePromptOptions,
 	): OpenAI.RequestOptions {
+		const requestTimeout =
+			typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined
 		return (
 			new RequestConfigBuilder<OpenAiRequestConfig>()
 				.setOption("path", isAzureAiInference ? OPENAI_AZURE_AI_INFERENCE_PATH : undefined)
 				.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+				.setOption("timeout", requestTimeout)
 				.build() ?? {}
 		)
 	}

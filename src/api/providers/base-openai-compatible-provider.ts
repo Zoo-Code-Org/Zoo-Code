@@ -143,11 +143,29 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		try {
 			for await (const chunk of stream) {
-				// Check for provider-specific error responses (e.g., MiniMax base_resp)
-				const chunkAny = chunk as any
-				if (chunkAny.base_resp?.status_code && chunkAny.base_resp.status_code !== 0) {
+				// Check for provider-specific error responses (e.g., MiniMax base_resp).
+				// ChatCompletionChunk has no base_resp member, so read it through an
+				// unknown guard instead of casting the whole chunk.
+				const chunkUnknown: unknown = chunk
+				const baseResp: unknown =
+					typeof chunkUnknown === "object" && chunkUnknown !== null && "base_resp" in chunkUnknown
+						? (chunkUnknown as { base_resp?: unknown }).base_resp
+						: undefined
+				const baseRespFields =
+					baseResp !== null && typeof baseResp === "object"
+						? (baseResp as Record<string, unknown>)
+						: undefined
+				const baseRespStatusCode = baseRespFields?.["status_code"]
+				const baseRespStatusMsg = baseRespFields?.["status_msg"]
+				if (
+					baseRespStatusCode &&
+					baseRespStatusCode !== 0 &&
+					(typeof baseRespStatusCode === "number" || typeof baseRespStatusCode === "string")
+				) {
 					throw new Error(
-						`${this.providerName} API Error (${chunkAny.base_resp.status_code}): ${chunkAny.base_resp.status_msg || "Unknown error"}`,
+						`${this.providerName} API Error (${baseRespStatusCode}): ${
+							typeof baseRespStatusMsg === "string" ? baseRespStatusMsg : "Unknown error"
+						}`,
 					)
 				}
 

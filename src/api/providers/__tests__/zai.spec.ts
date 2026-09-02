@@ -742,7 +742,7 @@ describe("ZAiHandler", () => {
 			expect(result.message).toBe("Z.ai request aborted")
 		})
 
-		it("glm-5.3 completePrompt should pass the abort signal on the thinking path", async () => {
+		it("glm-5.3 completePrompt should merge the abort signal and timeoutMs on the thinking path", async () => {
 			const h53 = new ZAiHandler({
 				apiModelId: "glm-5.3",
 				zaiApiKey: "test-zai-api-key",
@@ -751,13 +751,22 @@ describe("ZAiHandler", () => {
 			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
-			const result = await h53.completePrompt("prompt", { abortSignal: controller.signal })
+			const result = await h53.completePrompt("prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
 
 			expect(result).toBe("response")
-			expect(mockCreate).toHaveBeenCalledWith(
+			const requestCall = mockCreate.mock.calls.at(-1)
+			expect(requestCall?.[0]).toEqual(
 				expect.objectContaining({ model: "glm-5.3", thinking: { type: "enabled", clear_thinking: false } }),
-				{ signal: controller.signal },
 			)
+			const requestOptions = requestCall?.[1]
+			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(requestOptions?.signal.aborted).toBe(false)
+			// A positive timeoutMs must be forwarded as the per-request SDK timeout.
+			expect(requestOptions?.timeout).toBe(5000)
+			// A timeout-only merged signal would still pass the assertions above;
+			// aborting the caller's controller proves caller cancellation survives.
+			controller.abort()
+			expect(requestOptions?.signal.aborted).toBe(true)
 		})
 
 		it("glm-5.3 completePrompt should normalize the SDK APIUserAbortError", async () => {

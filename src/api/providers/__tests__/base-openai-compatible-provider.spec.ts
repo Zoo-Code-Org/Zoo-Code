@@ -425,14 +425,19 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			})
 		})
 
-		it("should merge completePrompt timeoutMs into the request signal", async () => {
+		it("should merge the completePrompt abort signal and timeoutMs into one request signal", async () => {
+			const controller = new AbortController()
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
-			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
+			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
 
 			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
 			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
 			expect(requestOptions?.signal.aborted).toBe(false)
+			// A timeout-only merged signal would still pass the assertions above;
+			// aborting the caller's controller proves caller cancellation survives.
+			controller.abort()
+			expect(requestOptions?.signal.aborted).toBe(true)
 		})
 
 		it("should not set a request signal for zero completePrompt timeoutMs", async () => {

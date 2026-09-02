@@ -971,6 +971,8 @@ describe("OpenAiHandler", () => {
 			// would stop aborting here and fail the test.
 			controller.abort()
 			expect(requestOptions?.signal.aborted).toBe(true)
+			// A positive timeoutMs must be forwarded as the per-request SDK timeout.
+			expect(requestOptions?.timeout).toBe(5000)
 		})
 
 		it("should pass a timeout-only request signal when completePrompt timeoutMs is positive", async () => {
@@ -978,6 +980,7 @@ describe("OpenAiHandler", () => {
 			await handler.completePrompt("test prompt", { timeoutMs: 5000 })
 			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
 			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(requestOptions?.timeout).toBe(5000)
 		})
 
 		it("should not pass a request signal for zero timeoutMs in completePrompt", async () => {

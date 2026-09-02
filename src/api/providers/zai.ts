@@ -32,6 +32,8 @@ type ZAiChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParams, "rea
 /** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
 type OpenAiRequestConfig = {
 	signal?: AbortSignal
+	/** Per-request SDK timeout; a positive timeoutMs overrides the client default. */
+	timeout?: number
 }
 
 const isGlm53Model = (model: string) => model === "glm-5.3" || model === "glm-5.3-flash"
@@ -172,10 +174,15 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		}
 
 		// CompletePromptOptions is not ApiHandlerCreateMessageMetadata (required
-		// taskId), so the abort/timeout merge goes through setOption; the helper
-		// treats timeoutMs <= 0 as "no explicit timeout".
+		// taskId), so the abort/timeout merge and the per-request SDK timeout go
+		// through setOption; a positive timeoutMs overrides the client default and
+		// values <= 0 mean "no explicit timeout".
 		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
 			.setOption("signal", mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs))
+			.setOption(
+				"timeout",
+				typeof options?.timeoutMs === "number" && options.timeoutMs > 0 ? options.timeoutMs : undefined,
+			)
 			.build()
 
 		try {
