@@ -1,9 +1,9 @@
-import React from "react"
+import type { Locator } from "@playwright/test"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import RooHero from "../RooHero"
+import { mountedStory } from "../../../../playwright/mounted-story"
 
-async function waitForAssetsAndRender(component: any) {
+async function waitForAssetsAndRender(component: Locator) {
 	await component.evaluate(async () => {
 		await document.fonts.ready
 		const images = Array.from(document.querySelectorAll("img"))
@@ -21,7 +21,7 @@ async function waitForAssetsAndRender(component: any) {
 }
 
 test("renders the welcome hero in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<RooHero />)
+	const component = mountedStory(await mount("roo-hero"))
 
 	await waitForAssetsAndRender(component)
 

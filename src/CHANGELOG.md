@@ -1,5 +1,19 @@
 # Zoo Code Changelog
 
+## [3.80.1]
+
+🤖 Try GLM-5.3-Flash and Gemini 3.7 Flash at 50% Discount for 2 Weeks and MiniMax M3 completely FREE for users with a balance on the new Zoo Gateway. https://zoocode.dev/models
+
+### Patch Changes
+
+- Add GLM-5.3-Flash support to Z AI (PR #1430 by @app/zoomote)
+- Restore subtask approval requests when users return to a parent task (#1223 by @martin-rueegg, PR #1320 by @app/zoomote)
+- Fix Vertex Gemini 3.7 requests that fail after tools return empty output (PR #1250 by @app/zoomote)
+- Fix terminal startup failures that leave commands unresolved (PR #1351 by @app/zoomote)
+- Fix background service failures that surface as unhandled rejections (PR #1352 by @app/zoomote)
+- Keep rendered content legible across IDE themes (PR #1344 by @app/zoomote)
+- Fix announcement links opening twice in the VS Code webview (PR #1432 by @edelauna)
+
 ## [3.80.0]
 
 ### Minor Changes

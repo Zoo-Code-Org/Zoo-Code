@@ -1,4 +1,14 @@
 export { type ApiMessage, readApiMessages, saveApiMessages } from "./apiMessages"
 export { readTaskMessages, saveTaskMessages } from "./taskMessages"
 export { taskMetadata } from "./taskMetadata"
-export { TaskHistoryStore, assertValidTransition } from "./TaskHistoryStore"
+export { TaskHistoryStore } from "./TaskHistoryStore"
+export {
+	abandonDelegatedChild,
+	assertValidTransition,
+	completeDelegatedChild,
+	delegateTaskToChild,
+	interruptDelegatedChild,
+	LifecycleTransitionError,
+	type HistoryItemStatus,
+	VALID_TASK_STATUS_TRANSITIONS,
+} from "./taskLifecycle"

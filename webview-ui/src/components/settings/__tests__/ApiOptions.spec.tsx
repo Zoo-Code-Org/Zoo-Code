@@ -1,3 +1,4 @@
+import { retiredProviderIdentifiers, providerIdentifiers } from "@roo-code/types"
 // npx vitest src/components/settings/__tests__/ApiOptions.spec.tsx
 
 import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
@@ -292,7 +293,7 @@ describe("ApiOptions", () => {
 
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				// Simulate a previously-selected model ID from another provider.
 				// When switching to OpenAI - ChatGPT Plus/Pro, this is invalid and should be reset.
 				apiModelId: "claude-3-5-sonnet-20241022",
@@ -320,7 +321,7 @@ describe("ApiOptions", () => {
 
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 				// No prior zooGatewayModelId.
 			},
 			setApiConfigurationField: mockSetApiConfigurationField,
@@ -337,7 +338,7 @@ describe("ApiOptions", () => {
 	it("renders the Friendli provider form when friendli is selected", () => {
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "friendli" as const,
+				apiProvider: providerIdentifiers.friendli,
 				friendliApiKey: "k",
 			},
 		})
@@ -364,7 +365,7 @@ describe("ApiOptions", () => {
 		it("should show ThinkingBudget for Anthropic models that support thinking", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-7-sonnet-20250219:thinking",
 				},
 			})
@@ -375,7 +376,7 @@ describe("ApiOptions", () => {
 		it("should show ThinkingBudget for Vertex models that support thinking", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "vertex",
+					apiProvider: providerIdentifiers.vertex,
 					apiModelId: "claude-3-7-sonnet@20250219:thinking",
 				},
 			})
@@ -386,7 +387,7 @@ describe("ApiOptions", () => {
 		it("should not show ThinkingBudget for models that don't support thinking", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 					apiModelId: "claude-3-opus-20240229",
 				},
 			})
@@ -430,7 +431,7 @@ describe("ApiOptions", () => {
 		it("removes reasoningEffort from openAiCustomModelInfo when unchecked", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: true,
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults, // Start with defaults
@@ -473,7 +474,7 @@ describe("ApiOptions", () => {
 		it("does not render ReasoningEffort component when initially disabled", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: false, // Initially disabled
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
@@ -492,7 +493,7 @@ describe("ApiOptions", () => {
 		it("renders ReasoningEffort component and sets flag when checkbox is checked", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: false, // Initially disabled
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
@@ -520,7 +521,7 @@ describe("ApiOptions", () => {
 		it("updates reasoningEffort in openAiCustomModelInfo when select value changes", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			const initialConfig = {
-				apiProvider: "openai" as const,
+				apiProvider: providerIdentifiers.openai,
 				enableReasoningEffort: true, // Initially enabled
 				openAiCustomModelInfo: {
 					...openAiModelInfoSaneDefaults,
@@ -568,7 +569,7 @@ describe("ApiOptions", () => {
 		it("renders LiteLLM component when provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "litellm",
+					apiProvider: providerIdentifiers.litellm,
 					litellmBaseUrl: "http://localhost:4000",
 					litellmApiKey: "test-key",
 				},
@@ -583,7 +584,7 @@ describe("ApiOptions", () => {
 			const mockSetApiConfigurationField = vi.fn()
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "litellm",
+					apiProvider: providerIdentifiers.litellm,
 				},
 				setApiConfigurationField: mockSetApiConfigurationField,
 			})
@@ -601,7 +602,7 @@ describe("ApiOptions", () => {
 		it("shows refresh models button for LiteLLM", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "litellm",
+					apiProvider: providerIdentifiers.litellm,
 					litellmBaseUrl: "http://localhost:4000",
 					litellmApiKey: "test-key",
 				},
@@ -613,7 +614,7 @@ describe("ApiOptions", () => {
 		it("does not render LiteLLM component when other provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 				},
 			})
 
@@ -625,7 +626,7 @@ describe("ApiOptions", () => {
 		it("renders Kenari component when provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "kenari",
+					apiProvider: providerIdentifiers.kenari,
 					kenariApiKey: "kn-test-key",
 				},
 			})
@@ -637,7 +638,7 @@ describe("ApiOptions", () => {
 		it("does not render Kenari component when other provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 				},
 			})
 
@@ -648,7 +649,7 @@ describe("ApiOptions", () => {
 	it("renders retired provider message and hides provider-specific forms", () => {
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 			},
 		})
 
@@ -661,7 +662,7 @@ describe("ApiOptions", () => {
 	it("does not reintroduce retired providers into active provider options", () => {
 		renderApiOptions({
 			apiConfiguration: {
-				apiProvider: "groq",
+				apiProvider: retiredProviderIdentifiers.groq,
 			},
 		})
 
