@@ -53,8 +53,7 @@ export class NewTaskTool extends BaseTool<"new_task"> {
 
 			const state = await provider.getState()
 
-			// Use Package.name (dynamic at build time) as the VSCode configuration namespace.
-			// Supports multiple extension variants (e.g., stable/nightly) without hardcoded strings.
+			// Use the package name as the VSCode configuration namespace.
 			const requireTodos = vscode.workspace
 				.getConfiguration(Package.name)
 				.get<boolean>("newTaskRequireTodos", false)

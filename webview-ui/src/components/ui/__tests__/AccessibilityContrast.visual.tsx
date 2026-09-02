@@ -1,14 +1,12 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
 import { expectContrast } from "../../../../playwright/contrast"
+import { mountedStory } from "../../../../playwright/mounted-story"
 import { applyVisualTheme, visualThemes } from "../../../../playwright/themes"
-import { AccessibilityContrastGallery } from "./AccessibilityContrast.visual.fixture"
 
 for (const theme of visualThemes) {
 	test(`audits representative controls in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		const component = mountedStory(await mount("accessibility-contrast"))
 		await applyVisualTheme(page, theme)
-		const component = await mount(<AccessibilityContrastGallery />)
 		const gallery = component
 
 		await expectContrast(component.getByRole("heading", { name: "New task" }), {
