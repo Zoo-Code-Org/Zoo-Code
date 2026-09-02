@@ -347,6 +347,115 @@ describe("useMcpToolTool", () => {
 		})
 	})
 
+	describe("request tool policy", () => {
+		it("allows the resolved MCP tool when it is in the request snapshot", async () => {
+			const callTool = vi.fn().mockResolvedValue({
+				content: [{ type: "text", text: "Allowed result" }],
+				isError: false,
+			})
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: () => [
+						{
+							name: "test-server",
+							tools: [{ name: "allowed-tool", description: "Allowed tool" }],
+						},
+					],
+					callTool,
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+			mockTask.getCurrentRequestToolPolicy = () => ({
+				effectiveToolNames: new Set(["mcp--test-server--allowed-tool"]),
+				mode: "code",
+				customModes: [],
+				experiments: {},
+			})
+			mockAskApproval.mockResolvedValue(true)
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test-server",
+					tool_name: "allowed_tool",
+					arguments: "{}",
+				},
+				nativeArgs: {
+					server_name: "test-server",
+					tool_name: "allowed_tool",
+					arguments: {},
+				},
+				partial: false,
+			}
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledOnce()
+			expect(callTool).toHaveBeenCalledWith("test-server", "allowed-tool", {})
+			expect(mockTask.recordToolError).not.toHaveBeenCalled()
+		})
+
+		it("blocks an existing MCP tool excluded from the request snapshot", async () => {
+			const callTool = vi.fn()
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: () => [
+						{
+							name: "test-server",
+							tools: [
+								{ name: "allowed-tool", description: "Allowed tool" },
+								{ name: "excluded-tool", description: "Excluded tool" },
+							],
+						},
+					],
+					callTool,
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+			mockTask.getCurrentRequestToolPolicy = () => ({
+				effectiveToolNames: new Set(["mcp--test-server--allowed-tool"]),
+				mode: "code",
+				customModes: [],
+				experiments: {},
+			})
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test-server",
+					tool_name: "excluded-tool",
+					arguments: "{}",
+				},
+				nativeArgs: {
+					server_name: "test-server",
+					tool_name: "excluded-tool",
+					arguments: {},
+				},
+				partial: false,
+			}
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.recordToolError).toHaveBeenCalledWith(
+				"use_mcp_tool",
+				'Tool "mcp--test-server--excluded-tool" is not available for this request.',
+			)
+			expect(mockPushToolResult).toHaveBeenCalledWith(
+				'Tool error: Tool "mcp--test-server--excluded-tool" is not available for this request.',
+			)
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(callTool).not.toHaveBeenCalled()
+		})
+	})
+
 	describe("error handling", () => {
 		it("should handle unexpected errors", async () => {
 			const block: ToolUse = {
