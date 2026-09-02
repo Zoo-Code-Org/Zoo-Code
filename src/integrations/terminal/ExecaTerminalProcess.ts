@@ -8,21 +8,26 @@ import { BaseTerminalProcess } from "./BaseTerminalProcess"
 
 /**
  * Returns a UTF-8 locale string derived from `value`, preserving the
- * language/territory the system already has configured instead of
- * forcing en_US. Falls back to en_US.UTF-8 when `value` is unset or is
- * one of the encoding-less POSIX defaults ("C"/"POSIX").
+ * language/territory (and any @modifier, e.g. "de_DE@euro") the system
+ * already has configured instead of forcing en_US. Falls back to
+ * en_US.UTF-8 when `value` is unset or is one of the encoding-less POSIX
+ * defaults ("C"/"POSIX").
  */
 export function ensureUtf8Locale(value: string | undefined): string {
 	if (!value || value === "C" || value === "POSIX") {
 		return "en_US.UTF-8"
 	}
 
-	if (/utf-?8$/i.test(value)) {
+	const atIndex = value.indexOf("@")
+	const modifier = atIndex === -1 ? "" : value.slice(atIndex)
+	const localeAndEncoding = atIndex === -1 ? value : value.slice(0, atIndex)
+
+	if (/utf-?8$/i.test(localeAndEncoding)) {
 		return value
 	}
 
-	const [base] = value.split(".")
-	return `${base}.UTF-8`
+	const [base] = localeAndEncoding.split(".")
+	return `${base}.UTF-8${modifier}`
 }
 
 export class ExecaTerminalProcess extends BaseTerminalProcess {
@@ -70,7 +75,13 @@ export class ExecaTerminalProcess extends BaseTerminalProcess {
 					// clobbering a locale the system already has correctly
 					// configured (see https://github.com/Zoo-Code-Org/Zoo-Code/issues/1084).
 					LANG: ensureUtf8Locale(process.env.LANG),
-					LC_ALL: ensureUtf8Locale(process.env.LC_ALL),
+					// LC_ALL overrides LANG and every category-specific LC_*
+					// variable, so only normalize it when the system already set
+					// it -- fabricating one here would silently override a
+					// correctly configured LANG with en_US.UTF-8.
+					...(process.env.LC_ALL !== undefined
+						? { LC_ALL: ensureUtf8Locale(process.env.LC_ALL) }
+						: undefined),
 				},
 			})`${command}`
 
