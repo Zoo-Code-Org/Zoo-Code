@@ -451,7 +451,7 @@
 	},
 	"api/providers/xai.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/transform/__tests__/ai-sdk.spec.ts": {

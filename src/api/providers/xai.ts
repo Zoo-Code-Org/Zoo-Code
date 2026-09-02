@@ -63,6 +63,33 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 	 * Uses base provider's convertToolSchemaForOpenAI() for schema hardening
 	 * (additionalProperties: false, ensureAllRequired) and handles MCP tools.
 	 */
+	/**
+	 * Map a Chat Completions tool choice to the Responses API shape so TypeScript
+	 * validates the provider payload (the APIs use different object forms for the
+	 * named-tool choices: Chat Completions nests the name under `function`/`custom`,
+	 * Responses API puts it at the top level). String options (auto/required/none)
+	 * are identical in both APIs and pass through unchanged.
+	 */
+	private mapToolChoice(
+		toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
+	): OpenAI.Responses.ResponseCreateParamsStreaming["tool_choice"] {
+		if (typeof toolChoice === "string") {
+			return toolChoice
+		}
+		switch (toolChoice.type) {
+			case "function":
+				return { type: "function", name: toolChoice.function.name }
+			case "custom":
+				return { type: "custom", name: toolChoice.custom.name }
+			case "allowed_tools":
+				return {
+					type: "allowed_tools",
+					mode: toolChoice.allowed_tools.mode,
+					tools: toolChoice.allowed_tools.tools,
+				}
+		}
+	}
+
 	private mapResponseTools(tools?: any[]): any[] | undefined {
 		const converted = this.convertToolsForOpenAI(tools)
 		if (!converted?.length) {
@@ -139,8 +166,9 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 
 			if (responseTools) {
 				requestBody.tools = responseTools
-				// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
-				requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
+				// Metadata carries a Chat Completions tool choice; the Responses API
+				// uses its own shape, so map it explicitly instead of casting.
+				requestBody.tool_choice = this.mapToolChoice(metadata?.tool_choice ?? "auto")
 				requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
 			}
 
