@@ -16,7 +16,7 @@ import { ApiHandlerOptions } from "../../shared/api"
 import { convertToMistralMessages } from "../transform/mistral-format"
 import { ApiStream } from "../transform/stream"
 import { handleProviderError } from "./utils/error-handler"
-import { getRequestTimeoutMs } from "./utils/request-timeout"
+import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
@@ -231,14 +231,11 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 		try {
 			// Build Mistral SDK RequestOptions
 			const requestOptions: Parameters<typeof this.client.chat.complete>[1] = {}
-			if (options?.abortSignal) {
-				requestOptions.fetchOptions = { signal: options.abortSignal }
-			}
-			// Per the abort-signal series contract, timeoutMs <= 0 means 'no per-request
-			// timeout': the option is omitted entirely.
-			const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
-			if (timeoutMs !== undefined) {
-				requestOptions.timeoutMs = timeoutMs
+			// Build a single signal that combines the external abort with the per-request
+			// timeout (timeoutMs <= 0 disables the timeout; see mergeAbortSignalAndTimeout).
+			const signal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+			if (signal) {
+				requestOptions.fetchOptions = { signal }
 			}
 
 			const response = await this.client.chat.complete(

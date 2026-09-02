@@ -549,25 +549,52 @@ describe("MistralHandler", () => {
 			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), undefined)
 		})
 
-		it("should pass timeout through to client", async () => {
+		it("should pass a composite abort+timeout signal through to client", async () => {
 			const controller = new AbortController()
 			mockComplete.mockResolvedValueOnce({
 				choices: [{ message: { content: "response" } }],
 			})
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
-			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				fetchOptions: { signal: controller.signal },
-				timeoutMs: 5000,
-			})
+			const callArgs = mockComplete.mock.calls[0][1] as { fetchOptions?: { signal?: AbortSignal } } | undefined
+			expect(callArgs).toBeDefined()
+			expect(callArgs?.fetchOptions?.signal).toBeInstanceOf(AbortSignal)
+			// A fresh composite signal — not the external signal forwarded by reference.
+			expect(callArgs?.fetchOptions?.signal).not.toBe(controller.signal)
+			expect(callArgs).not.toHaveProperty("timeoutMs")
+			// The external side is bridged into the composite.
+			controller.abort()
+			expect(callArgs?.fetchOptions?.signal?.aborted).toBe(true)
 		})
 
-		it("should pass only timeoutMs when no signal provided", async () => {
+		it("should pass a timeout signal through to client when no external signal is provided", async () => {
 			mockComplete.mockResolvedValueOnce({
 				choices: [{ message: { content: "response" } }],
 			})
 			await handler.completePrompt("test prompt", { timeoutMs: 3000 })
-			expect(mockComplete).toHaveBeenCalledWith(expect.objectContaining({ model: expect.any(String) }), {
-				timeoutMs: 3000,
+			const callArgs = mockComplete.mock.calls[0][1] as { fetchOptions?: { signal?: AbortSignal } } | undefined
+			expect(callArgs).toBeDefined()
+			expect(callArgs?.fetchOptions?.signal).toBeInstanceOf(AbortSignal)
+			expect(callArgs).not.toHaveProperty("timeoutMs")
+		})
+
+		it("should bridge the per-request timeout into the composite signal", async () => {
+			let capturedSignal: AbortSignal | undefined
+			mockComplete.mockImplementationOnce(
+				(_options: unknown, requestOptions?: { fetchOptions?: { signal?: AbortSignal } }) => {
+					capturedSignal = requestOptions?.fetchOptions?.signal
+					return Promise.resolve({
+						choices: [{ message: { content: "response" } }],
+					})
+				},
+			)
+
+			await handler.completePrompt("test prompt", { timeoutMs: 200 })
+
+			expect(capturedSignal).toBeInstanceOf(AbortSignal)
+			// The timeout side fires on its own: the self-managed AbortSignal.timeout
+			// aborts the captured signal after the 200ms per-request deadline.
+			await vi.waitFor(() => {
+				expect(capturedSignal?.aborted).toBe(true)
 			})
 		})
 
@@ -661,6 +688,9 @@ describe("MistralHandler", () => {
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect(capturedSignal).toBeDefined()
+			// The in-flight stream must run against a request-local signal, not the
+			// external one forwarded by reference.
+			expect(capturedSignal).not.toBe(controller.signal)
 			expect(capturedSignal?.aborted).toBe(true)
 		})
 

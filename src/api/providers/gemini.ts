@@ -173,6 +173,53 @@ function sanitizeSchemaForGemini(
 	return result
 }
 
+// googleGeminiBaseUrl is user-editable and can reach non-HTTPS values (settings,
+// imported profiles). The @google/genai client keeps API-key authentication for
+// custom endpoints, so reject cleartext base URLs before any request — with a
+// narrow loopback exception for local test proxies.
+function isLoopbackUrl(value: string): boolean {
+	try {
+		const parsed = new URL(value)
+		if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+			return false
+		}
+		return (
+			parsed.hostname === "localhost" ||
+			parsed.hostname === "::1" ||
+			parsed.hostname === "[::1]" ||
+			/^127\./.test(parsed.hostname)
+		)
+	} catch {
+		return false
+	}
+}
+
+// Throws an ApiProviderError when baseUrl is not HTTPS (loopback HTTP is the
+// narrow exception, for local test proxies). The provider/model/operation
+// arguments keep the structured error context consistent with the request-path
+// ApiProviderError instances in this file.
+function assertSecureGeminiBaseUrl(baseUrl: string, modelId: string, operation: string): void {
+	let parsed: URL
+	try {
+		parsed = new URL(baseUrl)
+	} catch {
+		throw new ApiProviderError("Invalid Google Gemini base URL (not a valid URL)", "Gemini", modelId, operation)
+	}
+	if (parsed.protocol === "https:") {
+		return
+	}
+	if (parsed.protocol === "http:" && isLoopbackUrl(baseUrl)) {
+		// Loopback endpoints (localhost/127.x/::1) are allowed for local test proxies.
+		return
+	}
+	throw new ApiProviderError(
+		"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+		"Gemini",
+		modelId,
+		operation,
+	)
+}
+
 export class GeminiHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 
@@ -296,6 +343,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		const temperatureConfig: number | undefined = supportsTemperature
 			? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
 			: info.defaultTemperature
+
+		// Reject cleartext (non-loopback) base URLs before building the request so the
+		// API key is never sent over an insecure endpoint.
+		if (this.options.googleGeminiBaseUrl) {
+			assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "createMessage")
+		}
 
 		const config: GenerateContentConfig = {
 			systemInstruction,
@@ -627,6 +680,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 				httpOpts.timeout = timeoutMs
 			}
 			if (this.options.googleGeminiBaseUrl) {
+				assertSecureGeminiBaseUrl(this.options.googleGeminiBaseUrl, model, "completePrompt")
 				httpOpts.baseUrl = this.options.googleGeminiBaseUrl
 			}
 

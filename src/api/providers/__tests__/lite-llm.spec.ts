@@ -1324,10 +1324,17 @@ describe("LiteLLMHandler", () => {
 		it("should abort the in-flight stream when the external signal is triggered", async () => {
 			const controller = new AbortController()
 			let capturedSignal: AbortSignal | undefined
+			// Readiness barrier: resolves once the request-local signal is captured and
+			// the (mocked) request has started, instead of guessing a fixed delay.
+			let requestStartedResolve!: () => void
+			const requestStarted = new Promise<void>((resolve) => {
+				requestStartedResolve = resolve
+			})
 			// The stream is built inside the mock implementation so that capturedSignal
 			// is already set before the abort-aware chunk is created.
 			mockCreate.mockImplementationOnce((_body: unknown, options?: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
+				requestStartedResolve()
 				const mockStream = asyncStreamFrom([
 					{
 						choices: [{ delta: { content: "partial" } }],
@@ -1352,7 +1359,7 @@ describe("LiteLLMHandler", () => {
 			)
 
 			const collector = collectStream(stream).catch((e: unknown) => e)
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await requestStarted
 			controller.abort()
 
 			const error = await collector

@@ -676,6 +676,103 @@ describe("GeminiHandler", () => {
 				}),
 			)
 		})
+		describe("googleGeminiBaseUrl security (CWE-319)", () => {
+			it("should reject a non-HTTPS non-loopback googleGeminiBaseUrl in completePrompt", async () => {
+				const insecureHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://gemini.example.test",
+				})
+				insecureHandler["client"] = handler["client"]
+				vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+					stubGenerateContentResponse("Response"),
+				)
+
+				await expect(insecureHandler.completePrompt("Test prompt")).rejects.toThrow(
+					t("common:errors.gemini.generate_complete_prompt", {
+						error: "Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+					}),
+				)
+				expect(handler["client"].models.generateContent).not.toHaveBeenCalled()
+			})
+
+			it("should allow a loopback HTTP googleGeminiBaseUrl in completePrompt", async () => {
+				const loopbackHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://127.0.0.1:8080",
+				})
+				loopbackHandler["client"] = handler["client"]
+				vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+					stubGenerateContentResponse("Response"),
+				)
+
+				const result = await loopbackHandler.completePrompt("Test prompt")
+
+				expect(result).toBe("Response")
+				expect(handler["client"].models.generateContent).toHaveBeenCalledWith(
+					expect.objectContaining({
+						config: expect.objectContaining({
+							httpOptions: {
+								baseUrl: "http://127.0.0.1:8080",
+							},
+						}),
+					}),
+				)
+			})
+
+			it("should reject a non-HTTPS non-loopback googleGeminiBaseUrl in createMessage", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const insecureHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://insecure.example.com",
+				})
+				insecureHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				const stream = insecureHandler.createMessage("You are a helpful assistant", messages)
+
+				const error = await collectStream(stream).catch((e: unknown) => e)
+				expect(error).toBeInstanceOf(ApiProviderError)
+				expect((error as ApiProviderError).message).toBe(
+					"Google Gemini base URL must use HTTPS (or a loopback HTTP endpoint for local test proxies)",
+				)
+				expect(stub).not.toHaveBeenCalled()
+			})
+
+			it("should allow a loopback HTTP googleGeminiBaseUrl in createMessage", async () => {
+				const messages: Anthropic.Messages.MessageParam[] = [
+					{
+						role: "user",
+						content: "Hello",
+					},
+				]
+				const stub = vi.fn().mockReturnValue((async function* () {})())
+				const loopbackHandler = new GeminiHandler({
+					apiKey: "test-key",
+					apiModelId: GEMINI_MODEL_NAME,
+					geminiApiKey: "test-key",
+					googleGeminiBaseUrl: "http://127.0.0.1:8080",
+				})
+				loopbackHandler["client"] = handler["client"]
+				handler["client"].models.generateContentStream = stub
+
+				await collectStream(loopbackHandler.createMessage("You are a helpful assistant", messages))
+
+				const config = stub.mock.calls[0][0].config
+				expect(config.httpOptions).toEqual({ baseUrl: "http://127.0.0.1:8080" })
+			})
+		})
 	})
 
 	describe("createMessage abort signal (bridging)", () => {
@@ -737,6 +834,9 @@ describe("GeminiHandler", () => {
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect(capturedSignal).toBeDefined()
+			// The in-flight request must run against a request-local signal, not the
+			// external one forwarded by reference.
+			expect(capturedSignal).not.toBe(controller.signal)
 			expect(capturedSignal?.aborted).toBe(true)
 		})
 
