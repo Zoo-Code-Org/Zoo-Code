@@ -161,6 +161,17 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		}
 	}
 
+	/**
+	 * Backdate a task's history file mtime so the cross-instance liveness guard
+	 * treats it as a crash orphan (last write > 5 minutes ago) rather than a
+	 * live child owned by another window.
+	 */
+	async function markStaleMtime(taskId: string): Promise<void> {
+		const filePath = path.join(tmpDir, "tasks", taskId, GlobalFileNames.historyItem)
+		const stale = new Date(Date.now() - 10 * 60 * 1000)
+		await fs.utimes(filePath, stale, stale)
+	}
+
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "reconcile-test-"))
 		store = registerStore(new TaskHistoryStore(tmpDir))
@@ -236,6 +247,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			childIds: ["child-4"],
 		})
 		await seedItems([parent, child])
+		await markStaleMtime("child-4")
 
 		await store.initialize()
 
@@ -275,6 +287,87 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
+	it("skips repair for active child with recent mtime (live in another window)", async () => {
+		const child = makeItem({
+			id: "child-live",
+			status: "active",
+			parentTaskId: "parent-live",
+			rootTaskId: "parent-live",
+		})
+		const parent = makeItem({
+			id: "parent-live",
+			status: "delegated",
+			awaitingChildId: "child-live",
+			delegatedToId: "child-live",
+			childIds: ["child-live"],
+		})
+		await seedItems([parent, child])
+
+		// Simulate another live window actively persisting the child: the file
+		// was just written, so its mtime is within the 5-minute threshold.
+		const childFilePath = path.join(tmpDir, "tasks", "child-live", "history_item.json")
+		const now = new Date()
+		await fs.utimes(childFilePath, now, now)
+
+		await store.initialize()
+
+		// Repair must NOT run: child stays active, parent delegation link preserved.
+		expect(store.get("child-live")?.status).toBe("active")
+		const preservedParent = store.get("parent-live")
+		expect(preservedParent?.status).toBe("delegated")
+		expect(preservedParent?.awaitingChildId).toBe("child-live")
+		expect(preservedParent?.delegatedToId).toBe("child-live")
+
+		// Persisted state must be untouched as well.
+		const persistedChild = JSON.parse(await fs.readFile(childFilePath, "utf8")) as HistoryItem
+		expect(persistedChild.status).toBe("active")
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tmpDir, "tasks", "parent-live", "history_item.json"), "utf8"),
+		) as HistoryItem
+		expect(persistedParent.status).toBe("delegated")
+		expect(persistedParent.awaitingChildId).toBe("child-live")
+	})
+
+	it("repairs active child with stale mtime (crash orphan)", async () => {
+		const child = makeItem({
+			id: "child-stale",
+			status: "active",
+			parentTaskId: "parent-stale",
+			rootTaskId: "parent-stale",
+			childIds: ["grandchild-stale"],
+		})
+		const parent = makeItem({
+			id: "parent-stale",
+			status: "delegated",
+			awaitingChildId: "child-stale",
+			delegatedToId: "child-stale",
+			childIds: ["child-stale"],
+		})
+		await seedItems([parent, child])
+
+		// Simulate a crash orphan: the child file has not been written for 6
+		// minutes, exceeding the 5-minute liveness threshold.
+		const childFilePath = path.join(tmpDir, "tasks", "child-stale", "history_item.json")
+		const sixMinutesAgo = new Date(Date.now() - 6 * 60 * 1000)
+		await fs.utimes(childFilePath, sixMinutesAgo, sixMinutesAgo)
+
+		await store.initialize()
+
+		// Original repair behavior: child → interrupted, parent → active.
+		const repairedChild = store.get("child-stale")
+		const repairedParent = store.get("parent-stale")
+		expect(repairedChild).toMatchObject({
+			id: "child-stale",
+			status: "interrupted",
+			parentTaskId: "parent-stale",
+			rootTaskId: "parent-stale",
+			childIds: ["grandchild-stale"],
+		})
+		expect(repairedParent).toMatchObject({ id: "parent-stale", status: "active" })
+		expect(repairedParent?.awaitingChildId).toBeUndefined()
+		expect(repairedParent?.delegatedToId).toBeUndefined()
+	})
+
 	it("repairs a delegated child with an omitted status as implicit active", async () => {
 		const child = makeItem({
 			id: "child-implicit-active",
@@ -288,6 +381,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: child.id,
 		})
 		await seedItems([parent, child])
+		await markStaleMtime(child.id)
 
 		await store.initialize()
 
@@ -348,6 +442,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: child.id,
 		})
 		await seedItems([parent, child])
+		await markStaleMtime(child.id)
 		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
 			if (filePath.includes(child.id) && filePath.endsWith(GlobalFileNames.historyItem))
 				throw new Error("fault before child write")
@@ -385,6 +480,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: child.id,
 		})
 		await seedItems([parent, child])
+		await markStaleMtime(child.id)
 		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
 			if (filePath.includes(parent.id) && filePath.endsWith(GlobalFileNames.historyItem))
 				throw new Error("fault before parent write")
@@ -418,6 +514,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: child.id,
 		})
 		await seedItems([parent, child])
+		await markStaleMtime(child.id)
 		store.dispose()
 		store = registerStore(
 			new TaskHistoryStore(tmpDir, { onWrite: vi.fn().mockRejectedValue(new Error("fault before cleanup")) }),
@@ -738,6 +835,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			delegatedToId: child.id,
 		})
 		await seedItems([parent, child])
+		await markStaleMtime(child.id)
 
 		await store.initialize()
 		const afterFirstParent = { ...store.get(parent.id) }
