@@ -97,6 +97,13 @@ export class TaskHistoryStore {
 	/** Periodic reconciliation interval in milliseconds. */
 	private static readonly RECONCILE_INTERVAL_MS = 5 * 60 * 1000
 
+	/**
+	 * Maximum age (in ms) of a child's history file mtime for the child to be
+	 * considered live in another window. Kept at least as long as the reconcile
+	 * interval so live tasks with sparse writes are not misjudged as orphans.
+	 */
+	private static readonly LIVE_CHILD_MTIME_THRESHOLD_MS = 5 * 60 * 1000 // 5 minutes
+
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
 		this.onWrite = options?.onWrite
@@ -466,6 +473,19 @@ export class TaskHistoryStore {
 						)
 						repairsInThisPass++
 					} else if ((child.status ?? "active") === "active" && persistedActiveIds.has(child.id)) {
+						// Cross-instance liveness guard: a child whose history file was written
+						// recently is owned by another live window, not a crash orphan.
+						const mtimeMs = await this.getChildFileMtimeMs(child.id)
+						const isLiveElsewhere =
+							mtimeMs !== undefined &&
+							Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+						if (isLiveElsewhere) {
+							console.log(
+								`[TaskHistoryStore] Skipping repair for live child ${child.id} ` +
+									`(mtime ${Math.round((Date.now() - mtimeMs) / 1000)}s ago) — owned by another window`,
+							)
+							continue
+						}
 						// An active child persisted across startup cannot have a live task session
 						// behind it. Mark it interrupted before releasing the parent's delegation
 						// link so the normal resume/re-delegate flow can take over. This is an
@@ -1091,5 +1111,20 @@ export class TaskHistoryStore {
 	private async getTaskFilePath(taskId: string): Promise<string> {
 		const tasksDir = await this.getTasksDir()
 		return path.join(tasksDir, taskId, GlobalFileNames.historyItem)
+	}
+
+	/**
+	 * Returns the mtime (ms epoch) of the child's history_item.json, or undefined
+	 * when unreadable. A recent mtime means another live extension host is actively
+	 * persisting this child, so startup repair must not treat it as a crash orphan.
+	 */
+	private async getChildFileMtimeMs(childId: string): Promise<number | undefined> {
+		try {
+			const filePath = await this.getTaskFilePath(childId)
+			const stat = await fs.stat(filePath)
+			return stat.mtimeMs
+		} catch {
+			return undefined // File missing/unreadable → conservatively proceed with repair
+		}
 	}
 }
