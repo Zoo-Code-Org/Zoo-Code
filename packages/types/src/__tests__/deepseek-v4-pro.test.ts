@@ -35,6 +35,15 @@ describe("DeepSeek V4 Pro 0813 provider catalogs", () => {
 		})
 	})
 
+	it("marks deepseek-v4-flash-vision-exp as a vision-capable model", () => {
+		const model = deepSeekModels["deepseek-v4-flash-vision-exp"]
+		expect(model).toBeDefined()
+		expect(model.supportsImages).toBe(true)
+		expect(model.supportsPromptCache).toBe(true)
+		expect(model.contextWindow).toBeGreaterThanOrEqual(1_000_000)
+		expect(model.supportsReasoningEffort).toEqual(["disable", "low", "high", "max"])
+	})
+
 	// Self-hosted providers retain separate IDs for the preview weights and 0813 checkpoint.
 	it.each([
 		["Fireworks AI", fireworksModels["accounts/fireworks/models/deepseek-v4-pro"]],
