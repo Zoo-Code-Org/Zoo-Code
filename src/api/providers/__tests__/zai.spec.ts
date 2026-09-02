@@ -958,6 +958,7 @@ describe("ZAiHandler", () => {
 					reasoning_effort: "max",
 					temperature: 1,
 				}),
+				undefined,
 			)
 		})
 
@@ -1018,13 +1019,16 @@ describe("ZAiHandler", () => {
 			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
 
 			await expect(handlerWithModel.completePrompt("prompt")).resolves.toBe("response")
-			expect(mockCreate).toHaveBeenCalledWith({
-				model: "glm-5.3-flash",
-				messages: [{ role: "user", content: "prompt" }],
-				temperature: 1,
-				thinking: { type: "enabled", clear_thinking: false },
-				reasoning_effort: "low",
-			})
+			expect(mockCreate).toHaveBeenCalledWith(
+				{
+					model: "glm-5.3-flash",
+					messages: [{ role: "user", content: "prompt" }],
+					temperature: 1,
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "low",
+				},
+				undefined,
+			)
 		})
 
 		it("should omit reasoning_effort for GLM-5.2 when reasoningEffort is set to disable", async () => {
