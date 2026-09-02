@@ -165,8 +165,8 @@ describe("SwitchModeTool", () => {
 			}),
 		)
 
-		// Should have called handleModeSwitch with the target slug
-		expect(mockHandleModeSwitch).toHaveBeenCalledWith("architect")
+		// Should have called handleModeSwitch with the target slug and the task
+		expect(mockHandleModeSwitch).toHaveBeenCalledWith("architect", mockTask)
 
 		// Should have pushed success result
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
@@ -184,7 +184,7 @@ describe("SwitchModeTool", () => {
 			JSON.stringify({ tool: "switchMode", mode: "ask", reason: "" }),
 		)
 
-		expect(mockHandleModeSwitch).toHaveBeenCalledWith("ask")
+		expect(mockHandleModeSwitch).toHaveBeenCalledWith("ask", mockTask)
 
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith("Successfully switched from Code mode to Ask mode.")
 	})
@@ -244,7 +244,7 @@ describe("SwitchModeTool", () => {
 		// Should have asked for approval first
 		expect(mockCallbacks.askApproval).toHaveBeenCalled()
 		// Should have called handleModeSwitch (which throws)
-		expect(mockHandleModeSwitch).toHaveBeenCalledWith("architect")
+		expect(mockHandleModeSwitch).toHaveBeenCalledWith("architect", mockTask)
 		// Error should be caught and reported
 		expect(mockCallbacks.handleError).toHaveBeenCalledWith("switching mode", switchError)
 	})
@@ -303,7 +303,7 @@ describe("SwitchModeTool", () => {
 		await switchModeTool.handle(mockTask, block, mockCallbacks)
 
 		expect(mockCallbacks.askApproval).toHaveBeenCalled()
-		expect(mockHandleModeSwitch).toHaveBeenCalledWith("custom-mode")
+		expect(mockHandleModeSwitch).toHaveBeenCalledWith("custom-mode", mockTask)
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
 			"Successfully switched from Code mode to Custom Mode mode because: testing custom modes.",
 		)
@@ -335,7 +335,7 @@ describe("SwitchModeTool", () => {
 
 		await switchModeTool.handle(mockTask, block, mockCallbacks)
 
-		expect(mockHandleModeSwitch).toHaveBeenCalledWith("code")
+		expect(mockHandleModeSwitch).toHaveBeenCalledWith("code", mockTask)
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
 			"Successfully switched from Architect mode to Code mode because: switching back.",
 		)
