@@ -167,6 +167,9 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				throw createAbortError("Requesty")
 			}
 
+			// Model discovery is not signal-aware: race it against the per-request signal so an
+			// abort during the lookup rejects with AbortError instead of calling the API with an
+			// already-aborted signal.
 			const {
 				id: model,
 				info,
@@ -174,7 +177,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				temperature,
 				reasoningEffort: reasoning_effort,
 				reasoning: thinking,
-			} = await this.fetchModel()
+			} = await rejectOnAbort(this.fetchModel(), controller.signal, this.providerName)
 
 			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 				{ role: "system", content: systemPrompt },

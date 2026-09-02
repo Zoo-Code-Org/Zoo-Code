@@ -246,7 +246,10 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				throw createAbortError("OpenRouter")
 			}
 
-			const model = await this.fetchModel()
+			// Model discovery is not signal-aware: race it against the per-request signal so an
+			// abort during the lookup rejects with AbortError instead of calling the API with an
+			// already-aborted signal.
+			const model = await rejectOnAbort(this.fetchModel(), controller.signal, this.providerName)
 
 			let { id: modelId, maxTokens, temperature, topP, reasoning } = model
 

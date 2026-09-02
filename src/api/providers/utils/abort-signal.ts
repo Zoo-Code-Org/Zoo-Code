@@ -109,7 +109,7 @@ export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, provi
 	return new Promise<T>((resolve, reject) => {
 		const onAbort = () => reject(createAbortError(providerName))
 		signal.addEventListener("abort", onAbort, { once: true })
-		pending.then(
+		void pending.then(
 			(value) => {
 				signal.removeEventListener("abort", onAbort)
 				resolve(value)

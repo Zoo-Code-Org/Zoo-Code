@@ -17,7 +17,7 @@ const MOCK_TIMEOUT_MS = 300_000
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { providerIdentifiers } from "@roo-code/types"
+import { providerIdentifiers, type ModelRecord } from "@roo-code/types"
 
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
@@ -565,6 +565,46 @@ describe("OpenRouterHandler", () => {
 			).rejects.toMatchObject({
 				name: "AbortError",
 			})
+		})
+
+		it("rejects with AbortError when the external signal aborts during deferred model discovery", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+
+			const mockCreate = vitest.fn()
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			client.chat = { completions: { create: mockCreate } }
+
+			// Model discovery is deferred: capture the resolver and settle it only at the end of
+			// the test, so the abort deterministically lands while the lookup is still pending.
+			// The barrier below (instead of a fixed sleep) synchronizes on the lookup starting.
+			let resolveModelLookup!: (models: ModelRecord) => void
+			const deferredModelLookup = new Promise<ModelRecord>((resolve) => {
+				resolveModelLookup = resolve
+			})
+			let notifyLookupStarted!: () => void
+			const lookupStarted = new Promise<void>((resolve) => {
+				notifyLookupStarted = resolve
+			})
+			const { getModels } = await import("../fetchers/modelCache")
+			vitest.mocked(getModels).mockImplementationOnce(() => {
+				notifyLookupStarted()
+				return deferredModelLookup
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)
+
+			const nextPromise = generator.next()
+			await lookupStarted
+			controller.abort()
+
+			await expect(nextPromise).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockCreate).not.toHaveBeenCalled()
+
+			// Settle the abandoned lookup so it cannot outlive the test.
+			resolveModelLookup({})
 		})
 
 		it("aborts the in-flight stream and rejects with AbortError when the external signal aborts", async () => {
