@@ -25,9 +25,9 @@ vi.mock("../../../api", async () => {
 	const modelInfoFor = (config: { apiProvider?: string; apiModelId?: string }) => {
 		const id = config?.apiModelId ?? ""
 		switch (config?.apiProvider) {
-			case "zai":
+			case types.providerIdentifiers.zai:
 				return zaiModels[id] ?? {}
-			case "anthropic":
+			case types.providerIdentifiers.anthropic:
 				return anthropicModels[id] ?? {}
 			default:
 				return {}

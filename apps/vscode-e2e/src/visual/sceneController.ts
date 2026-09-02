@@ -2,7 +2,13 @@ import fs from "fs/promises"
 
 import * as vscode from "vscode"
 
-import { RooCodeEventName, type ClineMessage, type RooCodeTestAPI, type WebviewThemeFixture } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	RooCodeEventName,
+	type ClineMessage,
+	type RooCodeTestAPI,
+	type WebviewThemeFixture,
+} from "@roo-code/types"
 
 import { isCompletedAsk } from "../suite/utils"
 
@@ -89,7 +95,7 @@ export async function run(): Promise<void> {
 		if (!prompt || !result) throw new Error("Chat prompt and result are required for the populated chat scene")
 
 		await api.setConfiguration({
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			lastShownAnnouncementId: api.getLatestAnnouncementId(),
 			openRouterApiKey: "mock-key",
 			openRouterModelId: "openai/gpt-4.1",
