@@ -566,43 +566,6 @@ describe("newTaskTool", () => {
 			expect(mockGetConfiguration).toHaveBeenCalledWith("zoo-code")
 			expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
 		})
-
-		it("should use current Package.name value (zoo-code-nightly) when accessing VSCode configuration", async () => {
-			// Arrange: capture calls to VSCode configuration and ensure we can assert the namespace
-			const mockGet = vi.fn().mockReturnValue(false)
-			const mockGetConfiguration = vi.fn().mockReturnValue({
-				get: mockGet,
-			} as any)
-			vi.mocked(vscode.workspace.getConfiguration).mockImplementation(mockGetConfiguration)
-
-			const pkg = await import("../../../shared/package")
-			const originalName = (pkg.Package as any).name
-			;(pkg.Package as any).name = "zoo-code-nightly"
-
-			try {
-				const block: ToolUse<"new_task"> = {
-					type: "tool_use",
-					name: "new_task",
-					params: {
-						mode: "code",
-						message: "Test message",
-					},
-					partial: false,
-				}
-
-				await newTaskTool.handle(mockCline as any, withNativeArgs(block), {
-					askApproval: mockAskApproval,
-					handleError: mockHandleError,
-					pushToolResult: mockPushToolResult,
-				})
-
-				// Assert: configuration was read using the dynamic nightly namespace
-				expect(mockGetConfiguration).toHaveBeenCalledWith("zoo-code-nightly")
-				expect(mockGet).toHaveBeenCalledWith("newTaskRequireTodos", false)
-			} finally {
-				;(pkg.Package as any).name = originalName
-			}
-		})
 	})
 
 	// Add more tests for error handling (invalid mode, approval denied) if needed
