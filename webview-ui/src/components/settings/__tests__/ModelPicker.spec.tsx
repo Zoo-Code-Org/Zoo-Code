@@ -1,17 +1,33 @@
 // npx vitest src/components/settings/__tests__/ModelPicker.spec.tsx
 
 import { screen, fireEvent, renderWithExtensionState } from "@/utils/test-utils"
-import { act } from "react"
+import { act, type ReactNode } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import { type Mock } from "vitest"
 
-import { litellmDefaultModelId, ModelInfo, providerIdentifiers } from "@roo-code/types"
+import {
+	litellmDefaultModelId,
+	type ModelInfo,
+	type ProviderSettings,
+	type RouterModels,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { ModelPicker } from "../ModelPicker"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 
+type SetApiConfigurationField = <K extends keyof ProviderSettings>(
+	field: K,
+	value: ProviderSettings[K],
+	isUserAction?: boolean,
+) => void
+
+// useRouterModels returns a react-query observable result; these tests only need the stable state fields.
+const createRouterModelsResult = (data: Partial<RouterModels>): ReturnType<typeof useRouterModels> =>
+	({ data, isLoading: false, isError: false }) as ReturnType<typeof useRouterModels>
+
 vi.mock("@src/context/ExtensionStateContext", () => ({
-	ExtensionStateContextProvider: ({ children }: any) => children,
+	ExtensionStateContextProvider: ({ children }: { children: ReactNode }) => children,
 	useExtensionState: vi.fn(),
 }))
 
@@ -40,8 +56,9 @@ describe("ModelPicker", () => {
 		model2: { name: "Model 2", description: "Test model 2", ...modelInfo },
 	}
 
+	const apiConfiguration: ProviderSettings = {}
 	const defaultProps = {
-		apiConfiguration: {},
+		apiConfiguration,
 		defaultModelId: "model1",
 		modelIdKey: "openRouterModelId" as const,
 		serviceName: "Test Service",
@@ -62,7 +79,7 @@ describe("ModelPicker", () => {
 		vi.clearAllMocks()
 		vi.useFakeTimers()
 		// Default: no router models available. Provider-specific tests override per test.
-		mockUseRouterModels.mockReturnValue({ data: {}, isLoading: false, isError: false } as any)
+		mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
 	})
 
 	afterEach(() => {
@@ -268,30 +285,23 @@ describe("ModelPicker", () => {
 			"gpt-4o-mini": { description: "LiteLLM proxy model", ...modelInfo },
 		}
 
-		const renderLiteLLMPicker = (
-			apiConfiguration: Record<string, unknown>,
-			setField: (field: string, value: unknown) => void,
-		) =>
+		const renderLiteLLMPicker = (apiConfiguration: ProviderSettings, setField: SetApiConfigurationField) =>
 			renderWithExtensionState(
 				<ModelPicker
-					apiConfiguration={apiConfiguration as never}
+					apiConfiguration={apiConfiguration}
 					defaultModelId={litellmDefaultModelId}
 					models={litellmModels}
 					modelIdKey="litellmModelId"
 					serviceName="LiteLLM"
 					serviceUrl="https://docs.litellm.ai/"
-					setApiConfigurationField={setField as never}
+					setApiConfigurationField={setField}
 					organizationAllowList={{ allowAll: true, providers: {} }}
 				/>,
 				{ queryClient },
 			)
 
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue({
-				data: { litellm: litellmModels },
-				isLoading: false,
-				isError: false,
-			} as any)
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ litellm: litellmModels }))
 		})
 
 		it("keeps a custom model ID in the picker instead of reverting to the default", async () => {
@@ -299,8 +309,8 @@ describe("ModelPicker", () => {
 			// model ID to a value absent from the fetched /models list -- the picker
 			// silently reverted to the hardcoded default model after the selection.
 			const customModelId = "my-litellm-alias"
-			let apiConfiguration: Record<string, unknown> = { apiProvider: providerIdentifiers.litellm }
-			const setField = vi.fn((field: string, value: unknown) => {
+			let apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.litellm }
+			const setField = vi.fn(function <K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) {
 				apiConfiguration = { ...apiConfiguration, [field]: value }
 			})
 
@@ -338,13 +348,13 @@ describe("ModelPicker", () => {
 			await act(async () => {
 				rerender(
 					<ModelPicker
-						apiConfiguration={apiConfiguration as never}
+						apiConfiguration={apiConfiguration}
 						defaultModelId={litellmDefaultModelId}
 						models={litellmModels}
 						modelIdKey="litellmModelId"
 						serviceName="LiteLLM"
 						serviceUrl="https://docs.litellm.ai/"
-						setApiConfigurationField={setField as never}
+						setApiConfigurationField={setField}
 						organizationAllowList={{ allowAll: true, providers: {} }}
 					/>,
 				)

@@ -57,6 +57,17 @@ function getValidatedModelId(
 	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
 }
 
+/**
+ * Resolves the model currently selected for the active API provider.
+ *
+ * Dynamic providers validate the configured model ID against the fetched
+ * router-model list and only resolve the selection once that list is
+ * available. LiteLLM is the exception: it fronts arbitrary models and
+ * aliases, so a configured `litellmModelId` is the user's explicit
+ * selection and is preserved as soon as the fetch settles, even when the
+ * router payload has no LiteLLM entry (partial listing, failed fetch, or
+ * renamed deployment).
+ */
 export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const provider = apiConfiguration?.apiProvider || providerIdentifiers.openrouter
 	const activeProvider: ProviderName | undefined = isRetiredProvider(provider) ? undefined : provider
@@ -84,12 +95,19 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
+	// LiteLLM may legitimately have no entry in the router payload (partial
+	// listing, failed fetch, renamed deployment) even though the configured
+	// ID is a valid selection, so it only needs the fetch to settle. Other
+	// dynamic providers require a populated provider entry before the
+	// selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? routerModels.data &&
-				routerModels.data[dynamicProvider] !== undefined &&
-				typeof routerModels.data[dynamicProvider] === "object" &&
-				!routerModels.isLoading
+			? dynamicProvider === providerIdentifiers.litellm
+				? !routerModels.isLoading
+				: routerModels.data &&
+					routerModels.data[dynamicProvider] !== undefined &&
+					typeof routerModels.data[dynamicProvider] === "object" &&
+					!routerModels.isLoading
 			: true
 
 	const isReady =
