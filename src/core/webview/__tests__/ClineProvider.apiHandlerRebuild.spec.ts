@@ -612,6 +612,41 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
 		})
 
+		test("pending child preparation applies its profile without posting an empty task state", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			await provider.addClineToStack(unrelatedTask)
+			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			provider["providerSettingsManager"].listConfig = vi
+				.fn()
+				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			provider["providerSettingsManager"].activateProfile = vi.fn().mockResolvedValue({
+				name: "ask-profile",
+				id: "ask-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4.1-mini",
+			})
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+			postStateSpy.mockClear()
+
+			await provider["handleModeSwitchUnlocked"]("ask" as Mode, undefined, { preparePendingTask: true })
+
+			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
+			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4.1-mini" }),
+			)
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
 			const mockTask = new Task({
 				...defaultTaskOptions,
