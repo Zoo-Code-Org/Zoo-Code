@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import React, { createContext, useCallback, useEffect, useState } from "react"
 
 import {
@@ -18,6 +19,7 @@ import {
 	type Command,
 	type McpServer,
 	RouterModels,
+	RouterModelsMessageType,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
@@ -203,6 +205,8 @@ const createInitialExtensionState = (): ExtensionState => ({
 	shouldShowAnnouncement: false,
 	allowedCommands: [],
 	deniedCommands: [],
+	allowedReadFiles: [],
+	allowedWriteFiles: [],
 	soundEnabled: false,
 	soundVolume: 0.5,
 	ttsEnabled: false,
@@ -256,7 +260,7 @@ const createInitialExtensionState = (): ExtensionState => ({
 	codebaseIndexConfig: {
 		codebaseIndexEnabled: true,
 		codebaseIndexQdrantUrl: "http://localhost:6333",
-		codebaseIndexEmbedderProvider: "openai",
+		codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 		codebaseIndexEmbedderBaseUrl: "",
 		codebaseIndexEmbedderModelId: "",
 		codebaseIndexSearchMaxResults: undefined,
@@ -444,7 +448,7 @@ export const ExtensionStateContextProvider: React.FC<{
 					setListApiConfigMeta(message.listApiConfig ?? [])
 					break
 				}
-				case "routerModels": {
+				case RouterModelsMessageType.routerModels: {
 					const provider = message.values?.provider as string | undefined
 					const incoming = message.routerModels
 					if (provider && incoming) {

@@ -64,7 +64,7 @@ describe("providerModelConfig", () => {
 
 	describe("getProviderServiceConfig", () => {
 		it("returns correct config for known provider", () => {
-			const config = getProviderServiceConfig("gemini")
+			const config = getProviderServiceConfig(providerIdentifiers.gemini)
 			expect(config.serviceName).toBe("Google Gemini")
 			expect(config.serviceUrl).toBe("https://ai.google.dev")
 		})
@@ -87,7 +87,7 @@ describe("providerModelConfig", () => {
 
 	describe("getDefaultModelIdForProvider", () => {
 		it("returns default model ID for known provider", () => {
-			const defaultId = getDefaultModelIdForProvider("anthropic")
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.anthropic)
 			expect(defaultId).toBeDefined()
 			expect(typeof defaultId).toBe("string")
 			expect(defaultId.length).toBeGreaterThan(0)
@@ -99,15 +99,15 @@ describe("providerModelConfig", () => {
 		})
 
 		it("returns international default for Z.ai without apiConfiguration", () => {
-			const defaultId = getDefaultModelIdForProvider("zai")
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai)
 			expect(defaultId).toBeDefined()
 			expect(typeof defaultId).toBe("string")
 			expect(defaultId.length).toBeGreaterThan(0)
 		})
 
 		it("returns mainland default for Z.ai with china_coding entrypoint", () => {
-			const defaultId = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_coding",
 			})
 			expect(defaultId).toBeDefined()
@@ -118,16 +118,16 @@ describe("providerModelConfig", () => {
 
 		it("returns mainland default for Z.ai with china_api entrypoint", () => {
 			expect(
-				getDefaultModelIdForProvider("zai", {
-					apiProvider: "zai",
+				getDefaultModelIdForProvider(providerIdentifiers.zai, {
+					apiProvider: providerIdentifiers.zai,
 					zaiApiLine: "china_api",
 				}),
 			).toBe(mainlandZAiDefaultModelId)
 		})
 
 		it("returns international default for Z.ai with international_coding entrypoint", () => {
-			const defaultId = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const defaultId = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_coding",
 			})
 			expect(defaultId).toBeDefined()
@@ -137,12 +137,12 @@ describe("providerModelConfig", () => {
 
 		it("uses mainland or international defaults based on zaiApiLine setting", () => {
 			// Verify the function correctly routes to appropriate defaults
-			const chinaDefault = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const chinaDefault = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_coding",
 			})
-			const internationalDefault = getDefaultModelIdForProvider("zai", {
-				apiProvider: "zai",
+			const internationalDefault = getDefaultModelIdForProvider(providerIdentifiers.zai, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_coding",
 			})
 			// Both should return valid model IDs (they may or may not be the same)
@@ -191,58 +191,62 @@ describe("providerModelConfig", () => {
 
 	describe("getStaticModelsForProvider", () => {
 		it("returns models for anthropic provider", () => {
-			const models = getStaticModelsForProvider("anthropic")
+			const models = getStaticModelsForProvider(providerIdentifiers.anthropic)
 			expect(Object.keys(models).length).toBeGreaterThan(0)
 		})
 
 		it("adds custom-arn option for bedrock provider", () => {
-			const models = getStaticModelsForProvider("bedrock", "Use Custom ARN")
+			const models = getStaticModelsForProvider(providerIdentifiers.bedrock, "Use Custom ARN")
 			expect(models["custom-arn"]).toBeDefined()
 			expect(models["custom-arn"].description).toBe("Use Custom ARN")
 		})
 
 		it("returns empty object for providers without static models", () => {
-			const models = getStaticModelsForProvider("openrouter")
+			const models = getStaticModelsForProvider(providerIdentifiers.openrouter)
 			expect(Object.keys(models).length).toBe(0)
 		})
 
-		it("shows GLM-5.3 only for Z.ai Coding Plan entrypoints", () => {
-			const internationalCoding = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+		it("shows GLM-5.3 models for international Z.ai API and Coding Plan entrypoints", () => {
+			const internationalCoding = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_coding",
 			})
-			const chinaCoding = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const chinaCoding = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_coding",
 			})
-			const internationalApi = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const internationalApi = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "international_api",
 			})
-			const chinaApi = getStaticModelsForProvider("zai", undefined, {
-				apiProvider: "zai",
+			const chinaApi = getStaticModelsForProvider(providerIdentifiers.zai, undefined, {
+				apiProvider: providerIdentifiers.zai,
 				zaiApiLine: "china_api",
 			})
 
 			expect(internationalCoding).toHaveProperty("glm-5.3")
+			expect(internationalCoding).toHaveProperty("glm-5.3-flash")
 			expect(chinaCoding).toHaveProperty("glm-5.3")
-			expect(internationalApi).not.toHaveProperty("glm-5.3")
+			expect(chinaCoding).toHaveProperty("glm-5.3-flash")
+			expect(internationalApi).toHaveProperty("glm-5.3")
+			expect(internationalApi).toHaveProperty("glm-5.3-flash")
 			expect(chinaApi).not.toHaveProperty("glm-5.3")
+			expect(chinaApi).not.toHaveProperty("glm-5.3-flash")
 		})
 	})
 
 	describe("isStaticModelProvider", () => {
 		it("returns true for providers with static models", () => {
-			expect(isStaticModelProvider("anthropic")).toBe(true)
-			expect(isStaticModelProvider("bedrock")).toBe(true)
-			expect(isStaticModelProvider("gemini")).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.anthropic)).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.bedrock)).toBe(true)
+			expect(isStaticModelProvider(providerIdentifiers.gemini)).toBe(true)
 			expect(isStaticModelProvider(providerIdentifiers.openaiNative)).toBe(true)
 		})
 
 		it("returns false for providers without static models", () => {
-			expect(isStaticModelProvider("openrouter")).toBe(false)
-			expect(isStaticModelProvider("ollama")).toBe(false)
-			expect(isStaticModelProvider("lmstudio")).toBe(false)
+			expect(isStaticModelProvider(providerIdentifiers.openrouter)).toBe(false)
+			expect(isStaticModelProvider(providerIdentifiers.ollama)).toBe(false)
+			expect(isStaticModelProvider(providerIdentifiers.lmstudio)).toBe(false)
 		})
 	})
 

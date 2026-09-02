@@ -5,9 +5,9 @@ import { type ModelInfo, type ModelRecord } from "@roo-code/types"
 import { ApiHandlerOptions, RouterName } from "../../shared/api"
 
 import { BaseProvider } from "./base-provider"
-import { getModels, getModelsFromCache } from "./fetchers/modelCache"
+import { getModels, getModelsFromCache, refreshModels } from "./fetchers/modelCache"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 
 type RouterProviderOptions = {
 	name: RouterName
@@ -41,7 +41,7 @@ export abstract class RouterProvider extends BaseProvider {
 
 		this.client = new OpenAI({
 			baseURL,
-			apiKey: apiKey ?? "not-provided",
+			apiKey: apiKey ?? NOT_PROVIDED,
 			defaultHeaders: {
 				...DEFAULT_HEADERS,
 				...(options.openAiHeaders || {}),
@@ -51,25 +51,58 @@ export abstract class RouterProvider extends BaseProvider {
 	}
 
 	private modelFetchPromise?: Promise<{ id: string; info: ModelInfo }>
+	/** Last catalog refresh attempt per missing model id (ms), for negative caching. */
+	private missingModelRefreshAt = new Map<string, number>()
+	private static readonly MISSING_MODEL_RETRY_MS = 5 * 60 * 1000
 
 	public async fetchModel() {
-		if (Object.keys(this.models).length > 0) {
+		// Refetch when the selected model is missing — a stale non-empty map
+		// would otherwise keep serving defaultModelInfo prices for cost estimates.
+		const id = this.modelId || this.defaultModelId
+		if (this.models[id]) {
+			return this.getModel()
+		}
+
+		// After a catalog fetch that still lacks this id, don't hammer getModels
+		// on every createMessage; retry only after the negative-cache window.
+		const lastMissingAttempt = this.missingModelRefreshAt.get(id)
+		if (
+			lastMissingAttempt !== undefined &&
+			Date.now() - lastMissingAttempt < RouterProvider.MISSING_MODEL_RETRY_MS
+		) {
 			return this.getModel()
 		}
 
 		if (!this.modelFetchPromise) {
-			this.modelFetchPromise = getModels({
+			const fetchOptions = {
 				provider: this.name,
 				apiKey: this.apiKey,
 				baseUrl: this.client.baseURL,
-			})
-				.then((models) => {
+			}
+
+			this.modelFetchPromise = (async () => {
+				let models = await getModels(fetchOptions)
+				this.models = models
+
+				// getModels may return a shared cached catalog that predates this
+				// model. Force a provider refresh before recording a miss so
+				// newly listed models are not blocked for MISSING_MODEL_RETRY_MS.
+				// Auth-scoped providers already bypass that cache in getModels;
+				// refreshModels is then a no-op extra live fetch only on true misses.
+				if (!models[id]) {
+					models = await refreshModels(fetchOptions)
 					this.models = models
-					return this.getModel()
-				})
-				.finally(() => {
-					this.modelFetchPromise = undefined
-				})
+				}
+
+				if (models[id]) {
+					this.missingModelRefreshAt.delete(id)
+				} else {
+					this.missingModelRefreshAt.set(id, Date.now())
+				}
+				return this.getModel()
+			})().finally(() => {
+				this.modelFetchPromise = undefined
+			})
 		}
 
 		return this.modelFetchPromise
@@ -107,10 +140,21 @@ export abstract class RouterProvider extends BaseProvider {
 			return { id, info: cachedModels[id] }
 		}
 
-		// Last resort: preserve the configured model ID (falling back to the default
-		// only when none is configured) so an as-yet-unfetched model isn't silently
-		// swapped for the hardcoded default. info still comes from defaults since we
-		// have no fetched or cached metadata for the configured model at this point.
+		// Last resort: keep the configured id so we don't swap models, but zero
+		// prices so we don't bill the UI with defaultModelInfo's $/token rates.
+		if (id !== this.defaultModelId) {
+			return {
+				id,
+				info: {
+					...this.defaultModelInfo,
+					inputPrice: 0,
+					outputPrice: 0,
+					cacheWritesPrice: 0,
+					cacheReadsPrice: 0,
+				},
+			}
+		}
+
 		return { id, info: this.defaultModelInfo }
 	}
 

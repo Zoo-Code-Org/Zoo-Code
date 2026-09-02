@@ -6,6 +6,7 @@ import {
 	vercelAiGatewayDefaultModelInfo,
 	VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -27,7 +28,7 @@ export class VercelAiGatewayHandler extends RouterProvider implements SingleComp
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "vercel-ai-gateway",
+			name: providerIdentifiers.vercelAiGateway,
 			baseURL: "https://ai-gateway.vercel.sh/v1",
 			apiKey: options.vercelAiGatewayApiKey,
 			modelId: options.vercelAiGatewayModelId,

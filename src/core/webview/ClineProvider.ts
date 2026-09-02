@@ -6,6 +6,7 @@ import EventEmitter from "events"
 import { Anthropic } from "@anthropic-ai/sdk"
 import delay from "delay"
 import axios from "axios"
+import debounce from "lodash.debounce"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
@@ -29,6 +30,7 @@ import {
 	type TerminalActionId,
 	type TerminalActionPromptType,
 	type HistoryItem,
+	type PendingTaskAction,
 	type CloudUserInfo,
 	type CloudOrganizationMembership,
 	type CreateTaskOptions,
@@ -36,6 +38,7 @@ import {
 	type ToolUsage,
 	type ExtensionMessage,
 	type ExtensionState,
+	type WebviewThemeFixture,
 	type MarketplaceInstalledMetadata,
 	RooCodeEventName,
 	requestyDefaultModelId,
@@ -111,7 +114,10 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
-	assertValidTransition,
+	abandonDelegatedChild,
+	completeDelegatedChild,
+	delegateTaskToChild,
+	interruptDelegatedChild,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -161,6 +167,10 @@ function scheduleTask(scheduler: TaskScheduler, task: Task, source: string): voi
 		.catch((error) => console.error(`[${source}] taskScheduler.schedule failed:`, error))
 }
 
+type GetStateOptions = {
+	includeTaskHistory?: boolean
+}
+
 export class ClineProvider
 	extends EventEmitter<TaskProviderEvents>
 	implements vscode.WebviewViewProvider, TelemetryPropertiesProvider, TaskProviderLike
@@ -173,6 +183,15 @@ export class ClineProvider
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private disposables: vscode.Disposable[] = []
 	private webviewDisposables: vscode.Disposable[] = []
+	private pendingThemeFixtureProbes = new Map<
+		string,
+		{
+			resolve: (fixture: WebviewThemeFixture) => void
+			reject: (error: Error) => void
+			timeout: ReturnType<typeof setTimeout>
+		}
+	>()
+	private nextThemeFixtureProbeId = 0
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
@@ -189,6 +208,21 @@ export class ClineProvider
 	private taskEventListeners: WeakMap<Task, Array<() => void>> = new WeakMap()
 	private currentWorkspacePath: string | undefined
 	private _disposed = false
+	private readonly _postStateToWebviewThrottled = debounce(
+		async () => {
+			try {
+				await this.postStateToWebviewWithoutTaskHistory()
+			} catch (error) {
+				this.log(
+					`[ClineProvider#postStateToWebviewThrottled] Failed to post state: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			}
+		},
+		500,
+		{ leading: true, trailing: true, maxWait: 1000 },
+	)
 	private readonly rateLimitClock: RateLimitClock = createRateLimitClock()
 
 	private recentTasksCache?: string[]
@@ -198,6 +232,7 @@ export class ClineProvider
 	private static readonly GLOBAL_STATE_WRITE_THROUGH_DEBOUNCE_MS = 5000 // 5 seconds
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
+	private historyTaskCreationQueue = Promise.resolve()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		this.delegationTransitionLocks ??= new Map()
@@ -272,7 +307,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "aug-2026-v3.78.0-models-nanogpt-reliability" // v3.78.0 new models, NanoGPT, and provider/task reliability
+	public readonly latestAnnouncementId = "aug-2026-v3.80.1-gateway-promo-models-fixes" // v3.80.1 Zoo Gateway promo, GLM-5.3-Flash, and reliability fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -673,7 +708,7 @@ export class ClineProvider
 					return
 				}
 
-				const interruptedChild = { ...childHistory, status: "interrupted" as const }
+				const interruptedChild = interruptDelegatedChild(parentHistory, childHistory)
 				await this.updateTaskHistory(interruptedChild)
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: interruptedChild })
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: parentHistory })
@@ -694,6 +729,40 @@ export class ClineProvider
 
 	public getCurrentTaskStack(): string[] {
 		return this.taskRegistry.taskIds
+	}
+
+	public async setPendingTaskAction(taskId: string, pendingAction: PendingTaskAction): Promise<void> {
+		await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => ({
+			...historyItem,
+			pendingAction,
+		}))
+		this.recentTasksCache = undefined
+	}
+
+	public async clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean> {
+		let cleared = false
+		try {
+			await this.taskHistoryStore.atomicReadAndUpdate(taskId, (historyItem) => {
+				if (historyItem.pendingAction?.actionId !== actionId) {
+					return historyItem
+				}
+
+				cleared = true
+				return { ...historyItem, pendingAction: undefined }
+			})
+		} catch (error) {
+			if (
+				error instanceof Error &&
+				error.message === `[TaskHistoryStore] atomicReadAndUpdate: task ${taskId} not found in cache`
+			) {
+				return false
+			}
+			throw error
+		}
+		if (cleared) {
+			this.recentTasksCache = undefined
+		}
+		return cleared
 	}
 
 	// Pending Edit Operations Management
@@ -732,6 +801,7 @@ export class ClineProvider
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
 	private clearWebviewResources() {
+		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		while (this.webviewDisposables.length) {
 			const x = this.webviewDisposables.pop()
 			if (x) {
@@ -746,6 +816,7 @@ export class ClineProvider
 		}
 
 		this._disposed = true
+		this._postStateToWebviewThrottled.cancel()
 		this.log("Disposing ClineProvider...")
 
 		// Reject any tasks still waiting for a scheduler permit so they don't
@@ -943,7 +1014,8 @@ export class ClineProvider
 		}
 
 		webviewView.webview.html =
-			this.contextProxy.extensionMode === vscode.ExtensionMode.Development
+			this.contextProxy.extensionMode === vscode.ExtensionMode.Development &&
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1"
 				? await this.getHMRHtmlContent(webviewView.webview)
 				: await this.getHtmlContent(webviewView.webview)
 
@@ -1113,10 +1185,31 @@ export class ClineProvider
 		await this.handleZooCodeCallback(token)
 	}
 
-	public async createTaskWithHistoryItem(
+	public createTaskWithHistoryItem(
 		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
 		options?: { startTask?: boolean },
-	) {
+	): Promise<Task> {
+		// History navigation can arrive concurrently (for example, two rapid
+		// showTaskWithId messages). Serialize the full eviction/installation
+		// transition so both callers cannot observe the same previous registry
+		// state and schedule distinct Task instances for one history item.
+		// Fail forward so one rejected restoration does not poison the queue.
+		const previous = this.historyTaskCreationQueue ?? Promise.resolve()
+		const run = previous.then(
+			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
+			() => ClineProvider.prototype.createTaskWithHistoryItemUnlocked.call(this, historyItem, options),
+		)
+		this.historyTaskCreationQueue = run.then(
+			() => {},
+			() => {},
+		)
+		return run
+	}
+
+	private async createTaskWithHistoryItemUnlocked(
+		historyItem: HistoryItem & { rootTask?: Task; parentTask?: Task },
+		options?: { startTask?: boolean },
+	): Promise<Task> {
 		const isCliRuntime = process.env.ROO_CLI_RUNTIME === "1"
 		// CLI injects runtime provider settings from command flags/env at startup.
 		// Restoring provider profiles from task history can overwrite those
@@ -1363,6 +1456,43 @@ export class ClineProvider
 		} catch {
 			// View disposed, drop message silently
 		}
+	}
+
+	public requestWebviewThemeFixture(timeoutMs = 5_000): Promise<WebviewThemeFixture> {
+		if (process.env.ROO_CODE_THEME_FIXTURE_PROBE !== "1") {
+			return Promise.reject(new Error("Theme fixture probing is disabled"))
+		}
+
+		const requestId = `theme-fixture-${++this.nextThemeFixtureProbeId}`
+
+		return new Promise((resolve, reject) => {
+			const timeout = setTimeout(() => {
+				this.pendingThemeFixtureProbes.delete(requestId)
+				reject(new Error(`Theme fixture probe timed out after ${timeoutMs}ms`))
+			}, timeoutMs)
+
+			this.pendingThemeFixtureProbes.set(requestId, { resolve, reject, timeout })
+			void this.postMessageToWebview({ type: "themeFixtureProbeRequest", requestId })
+		})
+	}
+
+	public resolveWebviewThemeFixtureProbe(requestId: string, fixture: WebviewThemeFixture): void {
+		const pending = this.pendingThemeFixtureProbes.get(requestId)
+		if (!pending) {
+			return
+		}
+
+		clearTimeout(pending.timeout)
+		this.pendingThemeFixtureProbes.delete(requestId)
+		pending.resolve(fixture)
+	}
+
+	private rejectPendingThemeFixtureProbes(error: Error): void {
+		for (const pending of this.pendingThemeFixtureProbes.values()) {
+			clearTimeout(pending.timeout)
+			pending.reject(error)
+		}
+		this.pendingThemeFixtureProbes.clear()
 	}
 
 	private async getHMRHtmlContent(webview: vscode.Webview): Promise<string> {
@@ -1970,7 +2100,7 @@ export class ClineProvider
 
 		const newConfiguration: ProviderSettings = {
 			...apiConfiguration,
-			apiProvider: "openrouter",
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: apiKey,
 			openRouterModelId: apiConfiguration?.openRouterModelId || openRouterDefaultModelId,
 		}
@@ -2016,7 +2146,7 @@ export class ClineProvider
 			if (zooProfiles.length === 0) {
 				// No existing zoo-gateway profile — create the canonical default.
 				const newConfiguration: ProviderSettings = {
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 					zooSessionToken: token,
 					zooGatewayModelId: apiConfiguration.zooGatewayModelId,
 					zooGatewayBaseUrl: derivedGatewayBaseUrl,
@@ -2064,7 +2194,7 @@ export class ClineProvider
 
 		const newConfiguration: ProviderSettings = {
 			...apiConfiguration,
-			apiProvider: "requesty",
+			apiProvider: providerIdentifiers.requesty,
 			requestyApiKey: code,
 			requestyModelId: apiConfiguration?.requestyModelId || requestyDefaultModelId,
 		}
@@ -2271,9 +2401,9 @@ export class ClineProvider
 	}
 
 	async postStateToWebview() {
+		const clineMessagesSeq = ++this.clineMessagesSeq
 		const state = await this.getStateToPostToWebview()
-		this.clineMessagesSeq++
-		state.clineMessagesSeq = this.clineMessagesSeq
+		state.clineMessagesSeq = clineMessagesSeq
 		await this.postMessageToWebview({ type: "state", state })
 	}
 
@@ -2286,11 +2416,33 @@ export class ClineProvider
 	 *   `taskHistoryUpdated` / `taskHistoryItemUpdated`.
 	 */
 	async postStateToWebviewWithoutTaskHistory(): Promise<void> {
-		const state = await this.getStateToPostToWebview()
-		this.clineMessagesSeq++
-		state.clineMessagesSeq = this.clineMessagesSeq
+		const clineMessagesSeq = ++this.clineMessagesSeq
+		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
+		state.clineMessagesSeq = clineMessagesSeq
 		const { taskHistory: _omit, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
+	}
+
+	/**
+	 * Schedules a debounced state-post attempt. A call made while the debounce timer is active returns
+	 * the result of the most recent invocation, so awaiting this method does not wait for the trailing
+	 * invocation scheduled by that call. Use `flushPostStateToWebviewThrottled()` to force and await any
+	 * pending trailing invocation before continuing.
+	 */
+	async postStateToWebviewThrottled(): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		await this._postStateToWebviewThrottled()
+	}
+
+	async flushPostStateToWebviewThrottled(): Promise<void> {
+		if (this._disposed) {
+			return
+		}
+
+		await this._postStateToWebviewThrottled.flush()
 	}
 
 	/**
@@ -2305,7 +2457,7 @@ export class ClineProvider
 	 *   (cloud auth, org settings, profiles, etc.) without interfering with task message streaming.
 	 */
 	async postStateToWebviewWithoutClineMessages(): Promise<void> {
-		const state = await this.getStateToPostToWebview()
+		const state = await this.getStateToPostToWebview({ includeTaskHistory: false })
 		const { clineMessages: _omitMessages, taskHistory: _omitHistory, ...rest } = state
 		await this.postMessageToWebview({ type: "state", state: rest })
 	}
@@ -2411,7 +2563,7 @@ export class ClineProvider
 		}
 	}
 
-	async getStateToPostToWebview(): Promise<ExtensionState> {
+	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
 
@@ -2421,9 +2573,11 @@ export class ClineProvider
 			customInstructions,
 			alwaysAllowReadOnly,
 			alwaysAllowReadOnlyOutsideWorkspace,
+			allowedReadFiles,
 			alwaysAllowWrite,
 			alwaysAllowWriteOutsideWorkspace,
 			alwaysAllowWriteProtected,
+			allowedWriteFiles,
 			alwaysAllowExecute,
 			destructiveCommandGuardEnabled,
 			allowedCommands,
@@ -2440,7 +2594,6 @@ export class ClineProvider
 			ttsSpeed,
 			enableCheckpoints,
 			checkpointTimeout,
-			taskHistory,
 			soundVolume,
 			writeDelayMs,
 			diffFuzzyThreshold,
@@ -2503,7 +2656,7 @@ export class ClineProvider
 			autoCloseZooOpenedFiles,
 			autoCloseZooOpenedFilesAfterUserEdited,
 			autoCloseZooOpenedNewFiles,
-		} = await this.getState()
+		} = await this.getState({ includeTaskHistory: false })
 
 		let cloudOrganizations: CloudOrganizationMembership[] = []
 
@@ -2529,6 +2682,7 @@ export class ClineProvider
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
+		const vscodeTelemetryEnabled = vscode.env.isTelemetryEnabled
 		const mergedAllowedCommands = this.mergeAllowedCommands(allowedCommands)
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
@@ -2571,9 +2725,11 @@ export class ClineProvider
 			customInstructions,
 			alwaysAllowReadOnly: alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: alwaysAllowReadOnlyOutsideWorkspace ?? false,
+			allowedReadFiles: allowedReadFiles ?? [],
 			alwaysAllowWrite: alwaysAllowWrite ?? false,
 			alwaysAllowWriteOutsideWorkspace: alwaysAllowWriteOutsideWorkspace ?? false,
 			alwaysAllowWriteProtected: alwaysAllowWriteProtected ?? false,
+			allowedWriteFiles: allowedWriteFiles ?? [],
 			alwaysAllowExecute: alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled,
 			alwaysAllowMcp: alwaysAllowMcp ?? false,
@@ -2589,7 +2745,9 @@ export class ClineProvider
 			clineMessages: currentTask?.clineMessages || [],
 			currentTaskTodos: currentTask?.todoList || [],
 			messageQueue: currentTask?.messageQueueService?.messages,
-			taskHistory: this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task),
+			taskHistory: includeTaskHistory
+				? this.taskHistoryStore.getAll().filter((item: HistoryItem) => item.ts && item.task)
+				: [],
 			soundEnabled: soundEnabled ?? false,
 			ttsEnabled: ttsEnabled ?? false,
 			ttsSpeed: ttsSpeed ?? 1.0,
@@ -2630,6 +2788,7 @@ export class ClineProvider
 			telemetrySetting,
 			telemetryKey,
 			machineId,
+			vscodeTelemetryEnabled,
 			showRooIgnoredFiles: showRooIgnoredFiles ?? false,
 			enableSubfolderRules: enableSubfolderRules ?? false,
 			language: language ?? formatLanguage(vscode.env.language),
@@ -2654,7 +2813,8 @@ export class ClineProvider
 			codebaseIndexConfig: {
 				codebaseIndexEnabled: codebaseIndexConfig?.codebaseIndexEnabled ?? false,
 				codebaseIndexQdrantUrl: codebaseIndexConfig?.codebaseIndexQdrantUrl ?? "http://localhost:6333",
-				codebaseIndexEmbedderProvider: codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? "openai",
+				codebaseIndexEmbedderProvider:
+					codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? providerIdentifiers.openai,
 				codebaseIndexEmbedderBaseUrl: codebaseIndexConfig?.codebaseIndexEmbedderBaseUrl ?? "",
 				codebaseIndexEmbedderModelId: codebaseIndexConfig?.codebaseIndexEmbedderModelId ?? "",
 				codebaseIndexEmbedderModelDimension: codebaseIndexConfig?.codebaseIndexEmbedderModelDimension ?? 1536,
@@ -2724,7 +2884,7 @@ export class ClineProvider
 	 * https://www.eliostruyf.com/devhack-code-extension-storage-options/
 	 */
 
-	async getState(): Promise<
+	async getState({ includeTaskHistory = true }: GetStateOptions = {}): Promise<
 		Omit<
 			ExtensionState,
 			"clineMessages" | "renderContext" | "hasOpenedModeSelector" | "version" | "shouldShowAnnouncement"
@@ -2737,7 +2897,7 @@ export class ClineProvider
 		const apiProvider: ProviderName =
 			stateValues.apiProvider && !isRetiredProvider(stateValues.apiProvider)
 				? stateValues.apiProvider
-				: "anthropic"
+				: providerIdentifiers.anthropic
 
 		// Build the apiConfiguration object combining state values and secrets.
 		const providerSettings = this.contextProxy.getProviderSettings()
@@ -2804,9 +2964,11 @@ export class ClineProvider
 			apiModelId: stateValues.apiModelId,
 			alwaysAllowReadOnly: stateValues.alwaysAllowReadOnly ?? false,
 			alwaysAllowReadOnlyOutsideWorkspace: stateValues.alwaysAllowReadOnlyOutsideWorkspace ?? false,
+			allowedReadFiles: stateValues.allowedReadFiles ?? [],
 			alwaysAllowWrite: stateValues.alwaysAllowWrite ?? false,
 			alwaysAllowWriteOutsideWorkspace: stateValues.alwaysAllowWriteOutsideWorkspace ?? false,
 			alwaysAllowWriteProtected: stateValues.alwaysAllowWriteProtected ?? false,
+			allowedWriteFiles: stateValues.allowedWriteFiles ?? [],
 			alwaysAllowExecute: stateValues.alwaysAllowExecute ?? false,
 			destructiveCommandGuardEnabled:
 				stateValues.destructiveCommandGuardEnabled ?? DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED,
@@ -2820,7 +2982,7 @@ export class ClineProvider
 			allowedMaxCost: stateValues.allowedMaxCost,
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
-			taskHistory: this.taskHistoryStore.getAll(),
+			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
 			allowedCommands: stateValues.allowedCommands,
 			deniedCommands: stateValues.deniedCommands,
 			soundEnabled: stateValues.soundEnabled ?? false,
@@ -2880,7 +3042,7 @@ export class ClineProvider
 				codebaseIndexQdrantUrl:
 					stateValues.codebaseIndexConfig?.codebaseIndexQdrantUrl ?? "http://localhost:6333",
 				codebaseIndexEmbedderProvider:
-					stateValues.codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? "openai",
+					stateValues.codebaseIndexConfig?.codebaseIndexEmbedderProvider ?? providerIdentifiers.openai,
 				codebaseIndexEmbedderBaseUrl: stateValues.codebaseIndexConfig?.codebaseIndexEmbedderBaseUrl ?? "",
 				codebaseIndexEmbedderModelId: stateValues.codebaseIndexConfig?.codebaseIndexEmbedderModelId ?? "",
 				codebaseIndexEmbedderModelDimension:
@@ -3437,7 +3599,7 @@ export class ClineProvider
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
 						// Mark the child interrupted and leave parent delegated with awaitingChildId
 						// intact — the user can resume this child later and it will report back.
-						historyItem = { ...historyItem!, status: "interrupted" }
+						historyItem = interruptDelegatedChild(parentHistory, historyItem!)
 						await this.updateTaskHistory(historyItem)
 						// Clear any stale fail-closed entry from a prior failed cancel attempt so
 						// reopenParentFromDelegation is not incorrectly blocked on resume.
@@ -3646,8 +3808,9 @@ export class ClineProvider
 		message: string
 		initialTodos: TodoItem[]
 		mode: string
+		pendingActionId?: string
 	}): Promise<Task> {
-		const { parentTaskId, message, initialTodos, mode } = params
+		const { parentTaskId, message, initialTodos, mode, pendingActionId } = params
 
 		// Metadata-driven delegation is always enabled
 
@@ -3660,6 +3823,14 @@ export class ClineProvider
 			throw new Error(
 				`[delegateParentAndOpenChild] Parent mismatch: expected ${parentTaskId}, current ${parent.taskId}`,
 			)
+		}
+		if (pendingActionId) {
+			const parentHistory = this.taskHistoryStore.get(parentTaskId)
+			if (parentHistory?.pendingAction?.actionId !== pendingActionId) {
+				throw new Error(
+					`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${parentHistory?.pendingAction?.actionId}`,
+				)
+			}
 		}
 		// 2) Flush pending tool results to API history BEFORE disposing the parent.
 		//    This is critical: when tools are called before new_task,
@@ -3755,37 +3926,19 @@ export class ClineProvider
 		//    silently detached.
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
-				let base = historyItem
-				if (historyItem.status === "delegated") {
-					// Re-read the awaited child's current status under the store lock.
-					const awaitedChildStatus = historyItem.awaitingChildId
-						? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
-						: undefined
-					// Only sever the stale link when the old child is confirmed interrupted.
-					// If it is still active, throw so the rollback path cleans up the new child
-					// rather than silently detaching a live task.
-					if (awaitedChildStatus !== "interrupted") {
-						throw new Error(
-							`[delegateParentAndOpenChild] Cannot re-delegate: existing child ${historyItem.awaitingChildId} is ${awaitedChildStatus}, not interrupted`,
-						)
-					}
-					// Implicit sever of the stale interrupted-child link.
-					// The old child keeps its interrupted status; we just clear the parent's pointer.
-					base = {
-						...historyItem,
-						status: "active" as const,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-					}
+				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
+					throw new Error(
+						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
+					)
 				}
-				assertValidTransition(base.status, "delegated")
-				const childIds = Array.from(new Set([...(base.childIds ?? []), child.taskId]))
+				const awaitedChildStatus = historyItem.awaitingChildId
+					? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
+					: undefined
+				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
 				return {
-					...base,
-					status: "delegated" as const,
-					delegatedToId: child.taskId,
-					awaitingChildId: child.taskId,
-					childIds,
+					...delegated,
+					pendingAction:
+						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
 				}
 			})
 			this.recentTasksCache = undefined
@@ -3856,13 +4009,21 @@ export class ClineProvider
 		parentTaskId: string
 		childTaskId: string
 		completionResultSummary: string
+		pendingActionId?: string
 	}): Promise<boolean> {
-		const { parentTaskId, childTaskId, completionResultSummary } = params
+		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
 		return this.runDelegationTransition(parentTaskId, async () => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 
 			// 1) Load parent from history and current persisted messages
 			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			const childHistory = this.taskHistoryStore.get(childTaskId)
+			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
+				this.log(
+					`[reopenParentFromDelegation] Aborting: child ${childTaskId} pending action does not match ${pendingActionId}`,
+				)
+				return false
+			}
 
 			// Guard: re-validate delegation state after the async approval gap.
 			// cancelTask() or removeClineFromStack() may have already detached the parent
@@ -4025,27 +4186,25 @@ export class ClineProvider
 			//      any concurrent write that landed between step 1 and the lock acquisition
 			//      is preserved rather than silently overwritten.
 			let updatedHistory!: typeof historyItem
+			let completingChild!: HistoryItem
 			await this.taskHistoryStore.atomicUpdatePair(
 				childTaskId,
 				parentTaskId,
 				(child) => {
-					assertValidTransition(child.status, "completed")
-					return { ...child, status: "completed" as const, completionResultSummary }
+					if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
+						throw new Error(`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`)
+					}
+					completingChild = { ...child }
+					const lifecycleUpdate = completeDelegatedChild(historyItem, child, completionResultSummary)
+					return {
+						...lifecycleUpdate.child,
+						pendingAction:
+							child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
+					}
 				},
 				(parent) => {
-					if (parent.status !== "active") {
-						assertValidTransition(parent.status, "active")
-					}
-					const childIds = Array.from(new Set([...(parent.childIds ?? []), childTaskId]))
-					updatedHistory = {
-						...parent,
-						status: "active" as const,
-						completedByChildId: childTaskId,
-						completionResultSummary,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-						childIds,
-					}
+					const lifecycleUpdate = completeDelegatedChild(parent, completingChild, completionResultSummary)
+					updatedHistory = lifecycleUpdate.parent
 					return updatedHistory
 				},
 			)
@@ -4155,8 +4314,6 @@ export class ClineProvider
 				return false
 			}
 
-			assertValidTransition(parentHistory.status, "active")
-
 			// Close the live child instance (if it's still the open task — the common case,
 			// since an interrupted child is rehydrated onto the stack after cancelTask) BEFORE
 			// clearing its persisted links. Task#saveClineMessages() rebuilds parentTaskId/
@@ -4171,13 +4328,8 @@ export class ClineProvider
 			await this.taskHistoryStore.atomicUpdatePair(
 				childTaskId,
 				parentTaskId,
-				(child) => ({ ...child, parentTaskId: undefined, rootTaskId: undefined }),
-				(parent) => ({
-					...parent,
-					status: "active" as const,
-					awaitingChildId: undefined,
-					delegatedToId: undefined,
-				}),
+				(child) => abandonDelegatedChild(parentHistory, child).child,
+				(parent) => abandonDelegatedChild(parent, freshChild).parent,
 			)
 			this.recentTasksCache = undefined
 

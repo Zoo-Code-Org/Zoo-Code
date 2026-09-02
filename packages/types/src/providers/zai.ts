@@ -6,10 +6,33 @@ import { ZaiApiLine } from "../provider-settings.js"
 // https://docs.z.ai/guides/llm/glm-4.5
 // https://docs.z.ai/guides/llm/glm-4.6
 // https://docs.z.ai/guides/llm/glm-5.3
+// https://docs.z.ai/guides/vlm/glm-5.3-flash
 // https://docs.z.ai/guides/llm/glm-5.1
 // https://docs.z.ai/guides/llm/glm-5-turbo
 // https://docs.z.ai/guides/overview/pricing
 // https://bigmodel.cn/pricing
+
+const glm53ModelInfo = {
+	maxTokens: 131_072,
+	contextWindow: 1_000_000,
+	supportsImages: false,
+	supportsPromptCache: true,
+	supportsMaxTokens: true,
+	supportsReasoningEffort: ["low", "high", "max"],
+	requiredReasoningEffort: true,
+	reasoningEffort: "max",
+	preserveReasoning: true,
+	defaultTemperature: 1,
+	description:
+		"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max).",
+} as const satisfies ModelInfo
+
+const glm53FlashModelInfo = {
+	...glm53ModelInfo,
+	supportsImages: true,
+	description:
+		"GLM-5.3-Flash is Zhipu's efficient multimodal coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max).",
+} as const satisfies ModelInfo
 
 export type InternationalZAiModelId = keyof typeof internationalZAiModels
 export const internationalZAiDefaultModelId: InternationalZAiModelId = "glm-4.7"
@@ -170,6 +193,20 @@ export const internationalZAiModels = {
 		cacheReadsPrice: 0.26,
 		description:
 			"GLM-5.2 is Zhipu's flagship model with a 1M context window, 128k max output, and dual thinking-effort modes (High/Max). It delivers top-tier long-context reasoning, coding, and agentic performance for extended engineering sessions.",
+	},
+	"glm-5.3": {
+		...glm53ModelInfo,
+		inputPrice: 1.4,
+		outputPrice: 4.4,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.26,
+	},
+	"glm-5.3-flash": {
+		...glm53FlashModelInfo,
+		inputPrice: 0.15,
+		outputPrice: 0.5,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.03,
 	},
 	"glm-5-turbo": {
 		maxTokens: 131_072,
@@ -474,39 +511,21 @@ export const mainlandZAiModels = {
 	},
 } as const satisfies Record<string, ModelInfo>
 
-const glm53CodingPlanModelInfo = {
-	maxTokens: 131_072,
-	contextWindow: 1_000_000,
-	supportsImages: false,
-	supportsPromptCache: true,
-	supportsMaxTokens: true,
-	supportsReasoningEffort: ["low", "high", "max"],
-	requiredReasoningEffort: true,
-	reasoningEffort: "max",
-	preserveReasoning: true,
-	description:
-		"GLM-5.3 is Zhipu's flagship coding and agent model with a 1M context window, 128k max output, and always-on reasoning with configurable effort (Low/High/Max). Available to GLM Coding Plan users.",
-} as const satisfies ModelInfo
-
-export const internationalZAiCodingPlanOnlyModels = {
-	"glm-5.3": {
-		...glm53CodingPlanModelInfo,
-		// GLM-5.3 API pricing is not published yet; use GLM-5.2 pricing provisionally.
-		inputPrice: 1.4,
-		outputPrice: 4.4,
-		cacheWritesPrice: 0,
-		cacheReadsPrice: 0.26,
-	},
-} as const satisfies Record<string, ModelInfo>
-
 export const mainlandZAiCodingPlanOnlyModels = {
 	"glm-5.3": {
-		...glm53CodingPlanModelInfo,
+		...glm53ModelInfo,
 		// GLM-5.3 API pricing is not published yet; use GLM-5.2 pricing provisionally.
 		inputPrice: 0.68,
 		outputPrice: 2.28,
 		cacheWritesPrice: 0,
 		cacheReadsPrice: 0.13,
+	},
+	"glm-5.3-flash": {
+		...glm53FlashModelInfo,
+		inputPrice: 0.075,
+		outputPrice: 0.25,
+		cacheWritesPrice: 0,
+		cacheReadsPrice: 0.015,
 	},
 } as const satisfies Record<string, ModelInfo>
 
@@ -538,6 +557,7 @@ export const zaiApiLineConfigs = {
 export function getZAiModels(apiLine: ZaiApiLine = "international_coding"): Record<string, ModelInfo> {
 	const isChina = zaiApiLineConfigs[apiLine].isChina
 	const regionalModels = isChina ? mainlandZAiModels : internationalZAiModels
-	const codingPlanOnlyModels = isChina ? mainlandZAiCodingPlanOnlyModels : internationalZAiCodingPlanOnlyModels
-	return apiLine.endsWith("_coding") ? { ...regionalModels, ...codingPlanOnlyModels } : regionalModels
+	return isChina && apiLine.endsWith("_coding")
+		? { ...regionalModels, ...mainlandZAiCodingPlanOnlyModels }
+		: regionalModels
 }

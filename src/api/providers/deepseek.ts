@@ -17,6 +17,7 @@ import { getModelParams } from "../transform/model-params"
 import { convertToR1Format } from "../transform/r1-format"
 
 import { OpenAiHandler } from "./openai"
+import { NOT_PROVIDED } from "./constants"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -27,7 +28,7 @@ type DeepSeekChatCompletionParams = Omit<OpenAI.Chat.ChatCompletionCreateParamsS
 	reasoning_effort?: "low" | "high" | "max"
 }
 
-const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro"])
+const deepSeekV4ThinkingModels = new Set(["deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"])
 const supportsDeepSeekThinkingToggle = (modelId: string) => deepSeekV4ThinkingModels.has(modelId)
 
 // Only known V4 models and the legacy reasoner alias support DeepSeek's
@@ -50,6 +51,7 @@ export const normalizeDeepSeekReasoningEffort = (
 	switch (modelId) {
 		case "deepseek-v4-flash":
 		case "deepseek-v4-pro":
+		case "deepseek-v4-flash-vision-exp":
 			switch (reasoningEffort) {
 				case "low":
 					return "low"
@@ -84,7 +86,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
-			openAiApiKey: options.deepSeekApiKey ?? "not-provided",
+			openAiApiKey: options.deepSeekApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? deepSeekDefaultModelId,
 			openAiBaseUrl: options.deepSeekBaseUrl || "https://api.deepseek.com",
 			openAiStreamingEnabled: true,

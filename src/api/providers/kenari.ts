@@ -6,6 +6,7 @@ import {
 	kenariDefaultModelInfo,
 	KENARI_DEFAULT_TEMPERATURE,
 	KENARI_BASE_URL,
+	providerIdentifiers,
 } from "@roo-code/types"
 
 import { ApiHandlerOptions } from "../../shared/api"
@@ -37,7 +38,7 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "kenari",
+			name: providerIdentifiers.kenari,
 			baseURL: KENARI_BASE_URL,
 			apiKey: options.kenariApiKey,
 			modelId: options.kenariModelId,

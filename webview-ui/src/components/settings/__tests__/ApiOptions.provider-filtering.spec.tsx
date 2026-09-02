@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { screen } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -44,7 +45,7 @@ vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
 // Mock the selected model hook
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: vi.fn(() => ({
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		id: "claude-3-5-sonnet-20241022",
 		info: null,
 	})),
@@ -99,7 +100,7 @@ describe("ApiOptions Provider Filtering", () => {
 	const defaultProps = {
 		uriScheme: "vscode",
 		apiConfiguration: {
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 			apiKey: "test-key",
 		} as ProviderSettings,
 		setApiConfigurationField: vi.fn(),

@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 
 import { startBedrockMockServer, type BedrockMockServer } from "../../bedrock-mock-server"
@@ -26,7 +27,7 @@ suite("Bedrock provider", function () {
 		if (!aimockUrl && BEDROCK_LIVE_E2E && AWS_BEARER_TOKEN_BEDROCK) {
 			// Live mode — explicitly opted into real AWS credentials, no aimock intercepting traffic.
 			await globalThis.api.setConfiguration({
-				apiProvider: "bedrock" as const,
+				apiProvider: providerIdentifiers.bedrock,
 				awsUseApiKey: true,
 				awsApiKey: AWS_BEARER_TOKEN_BEDROCK,
 				awsRegion: BEDROCK_REGION,
@@ -38,7 +39,7 @@ suite("Bedrock provider", function () {
 			// deserializer to drop the delta field (take() reads top-level only).
 			mockServer = await startBedrockMockServer()
 			await globalThis.api.setConfiguration({
-				apiProvider: "bedrock" as const,
+				apiProvider: providerIdentifiers.bedrock,
 				awsUseApiKey: true,
 				awsApiKey: "mock-key",
 				awsRegion: BEDROCK_REGION,
@@ -56,7 +57,7 @@ suite("Bedrock provider", function () {
 		const aimockUrl = process.env.AIMOCK_URL
 		const isRecord = process.env.AIMOCK_RECORD === "true"
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 			openRouterModelId: "openai/gpt-4.1",
 			...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
@@ -108,7 +109,7 @@ suite("Bedrock provider", function () {
 		// formation end-to-end.
 		if (!process.env.AIMOCK_URL && BEDROCK_LIVE_E2E && AWS_BEARER_TOKEN_BEDROCK) {
 			await api.setConfiguration({
-				apiProvider: "bedrock" as const,
+				apiProvider: providerIdentifiers.bedrock,
 				awsUseApiKey: true,
 				awsApiKey: AWS_BEARER_TOKEN_BEDROCK,
 				awsRegion: BEDROCK_REGION,
@@ -116,7 +117,7 @@ suite("Bedrock provider", function () {
 			})
 		} else {
 			await api.setConfiguration({
-				apiProvider: "bedrock" as const,
+				apiProvider: providerIdentifiers.bedrock,
 				awsUseApiKey: true,
 				awsApiKey: "mock-key",
 				awsRegion: BEDROCK_REGION,

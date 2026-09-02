@@ -6,6 +6,8 @@ import {
 	type RouterModels,
 	nanoGptDefaultModelId,
 	nanoGptRoutingPreferences,
+	providerIdentifiers,
+	RouterModelsMessageType,
 } from "@roo-code/types"
 
 import { NanoGPT } from "../NanoGPT"
@@ -160,8 +162,8 @@ describe("NanoGPT", () => {
 	it("refreshes models with the unsaved cached key whenever it changes", () => {
 		const { rerender } = renderComponent({ nanoGptApiKey: "first-key" })
 		expect(postMessageMock).toHaveBeenLastCalledWith({
-			type: "requestRouterModels",
-			values: { provider: "nanogpt", nanoGptApiKey: "first-key" },
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.nanogpt, nanoGptApiKey: "first-key" },
 		})
 
 		rerender(
@@ -174,8 +176,8 @@ describe("NanoGPT", () => {
 		)
 
 		expect(postMessageMock).toHaveBeenLastCalledWith({
-			type: "requestRouterModels",
-			values: { provider: "nanogpt", nanoGptApiKey: "unsaved-key" },
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { provider: providerIdentifiers.nanogpt, nanoGptApiKey: "unsaved-key" },
 		})
 	})
 })

@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useRef } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 
-import { type ExtensionMessage, type RouterModels, providerIdentifiers } from "@roo-code/types"
+import {
+	allRouterModelsProvider,
+	RouterModelsMessageType,
+	type ExtensionMessage,
+	type RouterModels,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 
@@ -28,8 +34,9 @@ export function useZooGatewayRouterModelsSync() {
 				return
 			}
 
-			queryClient.setQueryData<RouterModels>(["routerModels", "all"], (current) =>
-				current ? { ...current, [providerIdentifiers.zooGateway]: zooModels } : partial,
+			queryClient.setQueryData<RouterModels>(
+				[RouterModelsMessageType.routerModels, allRouterModelsProvider],
+				(current) => (current ? { ...current, [providerIdentifiers.zooGateway]: zooModels } : partial),
 			)
 		} catch {
 			// Ignore: bulk router fetch may still be in flight.

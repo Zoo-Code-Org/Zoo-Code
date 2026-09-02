@@ -33,7 +33,6 @@ import {
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
 	getZAiModels,
-	internationalZAiDefaultModelId,
 	mainlandZAiDefaultModelId,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
@@ -1332,13 +1331,14 @@ describe("useSelectedModel", () => {
 		it("uses the International Coding catalog when no API line is configured", () => {
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.zai,
-				apiModelId: "glm-5.3",
+				apiModelId: "glm-5.3-flash",
 			}
 
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
 
-			expect(result.current.id).toBe("glm-5.3")
-			expect(result.current.info).toEqual(getZAiModels("international_coding")["glm-5.3"])
+			expect(result.current.id).toBe("glm-5.3-flash")
+			expect(result.current.info).toEqual(getZAiModels("international_coding")["glm-5.3-flash"])
+			expect(result.current.info?.supportsImages).toBe(true)
 		})
 
 		it("uses the China Coding catalog for GLM-5.3", () => {
@@ -1355,20 +1355,30 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.inputPrice).toBe(0.68)
 		})
 
-		it.each([
-			["international_api", internationalZAiDefaultModelId],
-			["china_api", mainlandZAiDefaultModelId],
-		] as const)("falls back when GLM-5.3 is unavailable on %s", (zaiApiLine, expectedModelId) => {
+		it("uses the International API catalog for GLM-5.3", () => {
 			const apiConfiguration: ProviderSettings = {
 				apiProvider: providerIdentifiers.zai,
 				apiModelId: "glm-5.3",
-				zaiApiLine,
+				zaiApiLine: "international_api",
 			}
 
 			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
 
-			expect(result.current.id).toBe(expectedModelId)
-			expect(result.current.info).toEqual(getZAiModels(zaiApiLine)[expectedModelId])
+			expect(result.current.id).toBe("glm-5.3")
+			expect(result.current.info).toEqual(getZAiModels("international_api")["glm-5.3"])
+		})
+
+		it("falls back when GLM-5.3 is unavailable on the China API", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.zai,
+				apiModelId: "glm-5.3",
+				zaiApiLine: "china_api",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(mainlandZAiDefaultModelId)
+			expect(result.current.info).toEqual(getZAiModels("china_api")[mainlandZAiDefaultModelId])
 		})
 	})
 

@@ -1,4 +1,14 @@
+import { z } from "zod"
+
 import type { ModelInfo } from "../model.js"
+
+export const lmStudioModelsMessageTypes = ["requestLmStudioModels", "lmStudioModels"] as const
+
+export const lmStudioModelsMessageTypeSchema = z.enum(lmStudioModelsMessageTypes)
+
+export const LmStudioModelsMessageType = lmStudioModelsMessageTypeSchema.enum
+
+export type LmStudioModelsMessageType = z.infer<typeof lmStudioModelsMessageTypeSchema>
 
 export const LMSTUDIO_DEFAULT_TEMPERATURE = 0
 

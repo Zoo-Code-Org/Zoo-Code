@@ -6,6 +6,7 @@ import {
 	NANOGPT_BASE_URL,
 	nanoGptDefaultModelId,
 	nanoGptDefaultModelInfo,
+	providerIdentifiers,
 	type NanoGptRoutingPreference,
 } from "@roo-code/types"
 
@@ -25,6 +26,8 @@ type NanoGptUsage = OpenAI.CompletionUsage & {
 }
 
 type NanoGptCachingRequest = { caching?: true }
+
+const NANO_GPT_MERGED_TOOL_RESULT_MODELS = new Set(["meta/muse-spark-1.2-contributor"])
 
 const OPENAI_REASONING_EFFORTS = ["low", "medium", "high"] as const
 type OpenAiReasoningEffort = (typeof OPENAI_REASONING_EFFORTS)[number]
@@ -58,7 +61,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 	constructor(options: ApiHandlerOptions) {
 		super({
 			options,
-			name: "nanogpt",
+			name: providerIdentifiers.nanogpt,
 			baseURL: NANOGPT_BASE_URL,
 			apiKey: options.nanoGptApiKey,
 			modelId: options.nanoGptModelId,
@@ -92,7 +95,12 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		const { id: canonicalModelId, info } = await this.fetchModel()
 		const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & NanoGptCachingRequest = {
 			model: this.getRequestModelId(canonicalModelId),
-			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
+			messages: [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages, {
+					mergeToolResultText: NANO_GPT_MERGED_TOOL_RESULT_MODELS.has(canonicalModelId),
+				}),
+			],
 			stream: true,
 			stream_options: { include_usage: true },
 			max_tokens: info.maxTokens ?? undefined,

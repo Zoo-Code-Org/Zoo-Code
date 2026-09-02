@@ -21,7 +21,7 @@ import { convertToR1Format } from "../transform/r1-format"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
-import { DEFAULT_HEADERS } from "./constants"
+import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
@@ -40,7 +40,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		this.options = options
 
 		const baseURL = this.options.openAiBaseUrl || "https://api.openai.com/v1"
-		const apiKey = this.options.openAiApiKey ?? "not-provided"
+		const apiKey = this.options.openAiApiKey ?? NOT_PROVIDED
 		const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 		const isAzureOpenAi = isAzureOpenAiBaseUrl(this.options.openAiBaseUrl, options.openAiUseAzure)
 

@@ -12,6 +12,7 @@ import {
 	azureOpenAiDefaultApiVersion,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
+	OpenAiModelsMessageType,
 } from "@roo-code/types"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -115,7 +116,7 @@ export const OpenAICompatible = ({
 		const message: ExtensionMessage = event.data
 
 		switch (message.type) {
-			case "openAiModels": {
+			case OpenAiModelsMessageType.openAiModels: {
 				const updatedModels = message.openAiModels ?? []
 				setOpenAiModels(Object.fromEntries(updatedModels.map((item) => [item, openAiModelInfoSaneDefaults])))
 				break

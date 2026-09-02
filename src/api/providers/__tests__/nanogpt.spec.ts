@@ -5,7 +5,7 @@ vi.mock("vscode", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { nanoGptDefaultModelId } from "@roo-code/types"
+import { nanoGptDefaultModelId, providerIdentifiers } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -15,6 +15,15 @@ import { getModels } from "../fetchers/modelCache"
 vi.mock("openai")
 vi.mock("../fetchers/modelCache", () => ({
 	getModels: vi.fn().mockResolvedValue({
+		"model:thinking": {
+			maxTokens: 128000,
+			contextWindow: 1050000,
+			supportsImages: true,
+			supportsPromptCache: false,
+			supportsReasoningEffort: ["low", "medium", "high"],
+		},
+	}),
+	refreshModels: vi.fn().mockResolvedValue({
 		"model:thinking": {
 			maxTokens: 128000,
 			contextWindow: 1050000,
@@ -49,7 +58,7 @@ describe("NanoGptHandler", () => {
 	})
 
 	it("is constructed by the backend provider registry", () => {
-		expect(buildApiHandler({ apiProvider: "nanogpt" })).toBeInstanceOf(NanoGptHandler)
+		expect(buildApiHandler({ apiProvider: providerIdentifiers.nanogpt })).toBeInstanceOf(NanoGptHandler)
 	})
 
 	it("keeps the canonical model ID while applying request-only routing", async () => {
@@ -162,6 +171,78 @@ describe("NanoGptHandler", () => {
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("max_completion_tokens")
 	})
 
+	it("keeps Muse Spark tool-result history contiguous across turns", async () => {
+		const modelId = "meta/muse-spark-1.2-contributor"
+		vi.mocked(getModels).mockResolvedValue({
+			[modelId]: {
+				maxTokens: 65_536,
+				contextWindow: 1_000_000,
+				supportsPromptCache: false,
+			},
+		})
+		const tools: OpenAI.Chat.ChatCompletionTool[] = [
+			{ type: "function", function: { name: "read_file", parameters: { type: "object" } } },
+		]
+		const toolHistory: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call_1", name: "read_file", input: { path: "first.txt" } }],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "call_1", content: "first result" },
+					{ type: "text", text: "<environment_details>first context</environment_details>" },
+				],
+			},
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call_2", name: "read_file", input: { path: "second.txt" } }],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "call_2", content: "second result" },
+					{ type: "text", text: "<environment_details>second context</environment_details>" },
+				],
+			},
+		]
+
+		await collectStream(
+			new NanoGptHandler({ nanoGptModelId: modelId }).createMessage("sys", toolHistory, {
+				taskId: "task",
+				tools,
+				tool_choice: "auto",
+				parallelToolCalls: true,
+			}),
+		)
+
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				model: modelId,
+				messages: [
+					{ role: "system", content: "sys" },
+					expect.objectContaining({ role: "assistant", tool_calls: [expect.anything()] }),
+					{
+						role: "tool",
+						tool_call_id: "call_1",
+						content: "first result\n\n<environment_details>first context</environment_details>",
+					},
+					expect.objectContaining({ role: "assistant", tool_calls: [expect.anything()] }),
+					{
+						role: "tool",
+						tool_call_id: "call_2",
+						content: "second result\n\n<environment_details>second context</environment_details>",
+					},
+				],
+				tools: [expect.objectContaining({ function: expect.objectContaining({ name: "read_file" }) })],
+				tool_choice: "auto",
+				parallel_tool_calls: true,
+			}),
+			expect.anything(),
+		)
+	})
+
 	it("omits temperature when it was not explicitly configured", async () => {
 		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
 		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
@@ -187,7 +268,9 @@ describe("NanoGptHandler", () => {
 		vi.mocked(getModels).mockResolvedValue({})
 		mockCreate.mockResolvedValue(asyncStreamFrom([]))
 		await collectStream(new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages))
-		expect(getModels).toHaveBeenLastCalledWith(expect.objectContaining({ provider: "nanogpt", apiKey: undefined }))
+		expect(getModels).toHaveBeenLastCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.nanogpt, apiKey: undefined }),
+		)
 	})
 
 	it("maps usage with root-field precedence and no reasoning double count", async () => {

@@ -537,7 +537,7 @@ describe("ClineProvider", () => {
 		defaultTaskOptions = {
 			provider,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 		}
 
@@ -700,7 +700,7 @@ describe("ClineProvider", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 			customInstructions: undefined,
 			alwaysAllowReadOnly: false,
@@ -709,7 +709,7 @@ describe("ClineProvider", () => {
 			codebaseIndexConfig: {
 				codebaseIndexEnabled: true,
 				codebaseIndexQdrantUrl: "",
-				codebaseIndexEmbedderProvider: "openai",
+				codebaseIndexEmbedderProvider: providerIdentifiers.openai,
 				codebaseIndexEmbedderBaseUrl: "",
 				codebaseIndexEmbedderModelId: "",
 			},
@@ -771,6 +771,70 @@ describe("ClineProvider", () => {
 		await expect(provider.postMessageToWebview(message)).resolves.toBeUndefined()
 	})
 
+	describe("theme fixture probes", () => {
+		const fixture = {
+			themeId: "Default Dark Modern",
+			bodyClass: "vscode-dark",
+			variables: { "--vscode-foreground": "#cccccc" },
+		}
+		const originalProbeSetting = process.env.ROO_CODE_THEME_FIXTURE_PROBE
+
+		beforeEach(() => {
+			process.env.ROO_CODE_THEME_FIXTURE_PROBE = "1"
+		})
+
+		afterEach(() => {
+			if (originalProbeSetting === undefined) {
+				delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+			} else {
+				process.env.ROO_CODE_THEME_FIXTURE_PROBE = originalProbeSetting
+			}
+			vi.useRealTimers()
+		})
+
+		test("rejects requests when probing is disabled", async () => {
+			delete process.env.ROO_CODE_THEME_FIXTURE_PROBE
+
+			await expect(provider.requestWebviewThemeFixture()).rejects.toThrow("Theme fixture probing is disabled")
+		})
+
+		test("posts a request and resolves the matching response", async () => {
+			const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const request = provider.requestWebviewThemeFixture()
+			await Promise.resolve()
+			const requestId = postMessageSpy.mock.calls[0]?.[0].requestId
+			const unknownFixture = { ...fixture, themeId: "Unexpected Theme" }
+
+			expect(requestId).toBeTruthy()
+			expect(postMessageSpy).toHaveBeenCalledWith({ type: "themeFixtureProbeRequest", requestId })
+			provider.resolveWebviewThemeFixtureProbe("unknown-request", unknownFixture)
+			provider.resolveWebviewThemeFixtureProbe(requestId!, fixture)
+
+			await expect(request).resolves.toEqual(fixture)
+		})
+
+		test("rejects a request after its timeout", async () => {
+			vi.useFakeTimers()
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const request = provider.requestWebviewThemeFixture(100)
+			const rejection = expect(request).rejects.toThrow("Theme fixture probe timed out after 100ms")
+
+			await vi.advanceTimersByTimeAsync(100)
+			await rejection
+		})
+
+		test("rejects pending requests when webview resources are cleared", async () => {
+			vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const request = provider.requestWebviewThemeFixture()
+			const rejection = expect(request).rejects.toThrow(
+				"Webview was disposed before the theme fixture probe completed",
+			)
+
+			provider["clearWebviewResources"]()
+			await rejection
+		})
+	})
+
 	test("postStateToWebview does not force action navigation for non-compliant MDM state", async () => {
 		const mdmService = {
 			requiresCloudAuth: vi.fn().mockReturnValue(true),
@@ -792,6 +856,261 @@ describe("ClineProvider", () => {
 
 		expect(postMessageSpy).toHaveBeenCalledTimes(1)
 		expect(postMessageSpy).not.toHaveBeenCalledWith(expect.objectContaining({ type: "action" }))
+	})
+
+	test("postStateToWebviewWithoutTaskHistory waits for the webview post boundary", async () => {
+		let releasePost!: () => void
+		const pendingPost = new Promise<void>((resolve) => {
+			releasePost = resolve
+		})
+		let statePostSettled = false
+
+		vi.spyOn(provider, "getStateToPostToWebview").mockResolvedValue({
+			taskHistory: [],
+		} as unknown as ExtensionState)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockReturnValue(pendingPost)
+
+		const statePost = provider.postStateToWebviewWithoutTaskHistory()
+		void statePost.then(() => {
+			statePostSettled = true
+		})
+		await Promise.resolve()
+
+		expect(postMessageSpy).toHaveBeenCalledOnce()
+		expect(statePostSettled).toBe(false)
+
+		releasePost()
+		await statePost
+		expect(statePostSettled).toBe(true)
+	})
+
+	test.each([
+		["postStateToWebview", (currentProvider: ClineProvider) => currentProvider.postStateToWebview()],
+		[
+			"postStateToWebviewWithoutTaskHistory",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
+		],
+	])("%s assigns message sequence numbers before asynchronous state construction", async (_methodName, postState) => {
+		let releaseOlderSnapshot!: (state: ExtensionState) => void
+		const olderSnapshot = new Promise<ExtensionState>((resolve) => {
+			releaseOlderSnapshot = resolve
+		})
+		const baseState = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+		const emptyState: ExtensionState = { ...baseState, taskHistory: [], clineMessages: [] }
+		const readyState: ExtensionState = {
+			...baseState,
+			taskHistory: [],
+			clineMessages: [{ ts: 1, type: "say", say: "text", text: "child ready" }],
+		}
+
+		vi.spyOn(provider, "getStateToPostToWebview")
+			.mockReturnValueOnce(olderSnapshot)
+			.mockResolvedValueOnce(readyState)
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		const olderPost = postState(provider)
+		await Promise.resolve()
+		const newerPost = postState(provider)
+		await newerPost
+		releaseOlderSnapshot(emptyState)
+		await olderPost
+
+		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessages)).toEqual([
+			readyState.clineMessages,
+			emptyState.clineMessages,
+		])
+		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessagesSeq)).toEqual([2, 1])
+	})
+
+	test.each([
+		[
+			"postStateToWebviewWithoutTaskHistory",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutTaskHistory(),
+		],
+		[
+			"postStateToWebviewWithoutClineMessages",
+			(currentProvider: ClineProvider) => currentProvider.postStateToWebviewWithoutClineMessages(),
+		],
+	])("%s skips task history computation", async (_methodName, postState) => {
+		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll")
+		const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+
+		await postState(provider)
+
+		expect(getAllSpy).not.toHaveBeenCalled()
+		expect(postMessageSpy).toHaveBeenCalledOnce()
+		expect(postMessageSpy.mock.calls[0]?.[0].state).not.toHaveProperty("taskHistory")
+	})
+
+	test("getStateToPostToWebview computes task history once after its base state resolves", async () => {
+		const historyItem = {
+			id: "history-task",
+			number: 1,
+			ts: 1,
+			task: "History task",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const originalGetState = provider.getState.bind(provider)
+		let baseStateResolved = false
+		const getStateSpy = vi.spyOn(provider, "getState").mockImplementation(async (options) => {
+			const state = await originalGetState(options)
+			baseStateResolved = true
+			return state
+		})
+		const historyReadPhases: boolean[] = []
+		const getAllSpy = vi.spyOn(provider.taskHistoryStore, "getAll").mockImplementation(() => {
+			historyReadPhases.push(baseStateResolved)
+			return [historyItem]
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(getStateSpy).toHaveBeenCalledOnce()
+		expect(getStateSpy).toHaveBeenCalledWith({ includeTaskHistory: false })
+		expect(getAllSpy).toHaveBeenCalledOnce()
+		expect(historyReadPhases).toEqual([true])
+		expect(state.taskHistory).toEqual([historyItem])
+	})
+
+	describe("postStateToWebviewThrottled", () => {
+		beforeEach(() => {
+			vi.useFakeTimers()
+		})
+
+		afterEach(async () => {
+			await provider.dispose()
+			vi.useRealTimers()
+		})
+
+		test("posts on the leading edge and coalesces a burst into one trailing post", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(499)
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		test("does not starve state posts during continuous updates", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(400)
+			await provider.postStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(400)
+			await provider.postStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(199)
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await vi.advanceTimersByTimeAsync(1)
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		test("flushes a pending trailing post exactly once and waits for it", async () => {
+			let releasePost!: () => void
+			const pendingPost = new Promise<void>((resolve) => {
+				releasePost = resolve
+			})
+			const postStateSpy = vi
+				.spyOn(provider, "postStateToWebviewWithoutTaskHistory")
+				.mockResolvedValueOnce(undefined)
+				.mockReturnValueOnce(pendingPost)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			let flushSettled = false
+			const flushPromise = provider.flushPostStateToWebviewThrottled()
+			void flushPromise.then(() => {
+				flushSettled = true
+			})
+			await Promise.resolve()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+			expect(flushSettled).toBe(false)
+
+			releasePost()
+			await flushPromise
+			expect(flushSettled).toBe(true)
+
+			await vi.advanceTimersByTimeAsync(1000)
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+		})
+
+		test("does not duplicate an idle leading post when flushed", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.flushPostStateToWebviewThrottled()
+			await vi.advanceTimersByTimeAsync(1000)
+
+			expect(postStateSpy).toHaveBeenCalledOnce()
+		})
+
+		test("handles state post failures inside the debounced callback", async () => {
+			const error = new Error("state post failed")
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockRejectedValue(error)
+
+			await expect(provider.postStateToWebviewThrottled()).resolves.toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				"[ClineProvider#postStateToWebviewThrottled] Failed to post state: state post failed",
+			)
+		})
+
+		test("stringifies non-Error state post failures inside the debounced callback", async () => {
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockRejectedValue("state post failed")
+
+			await expect(provider.postStateToWebviewThrottled()).resolves.toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				"[ClineProvider#postStateToWebviewThrottled] Failed to post state: state post failed",
+			)
+		})
+
+		test("handles state post failures while flushing a pending trailing post", async () => {
+			const error = new Error("state post failed")
+			const logSpy = vi.spyOn(provider, "log").mockImplementation(() => {})
+			const postStateSpy = vi
+				.spyOn(provider, "postStateToWebviewWithoutTaskHistory")
+				.mockResolvedValueOnce(undefined)
+				.mockRejectedValueOnce(error)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			await expect(provider.flushPostStateToWebviewThrottled()).resolves.toBeUndefined()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(2)
+			expect(logSpy).toHaveBeenCalledWith(
+				"[ClineProvider#postStateToWebviewThrottled] Failed to post state: state post failed",
+			)
+		})
+
+		test("cancels pending work on dispose and ignores later schedule or flush calls", async () => {
+			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
+
+			await provider.postStateToWebviewThrottled()
+			await provider.postStateToWebviewThrottled()
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+
+			await provider.dispose()
+			await vi.advanceTimersByTimeAsync(1000)
+			await provider.postStateToWebviewThrottled()
+			await provider.flushPostStateToWebviewThrottled()
+
+			expect(postStateSpy).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	test("postMessageToWebview skips postMessage after dispose", async () => {
@@ -1014,7 +1333,7 @@ describe("ClineProvider", () => {
 	test("getState and getStateToPostToWebview return the complete NanoGPT configuration", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		await provider.contextProxy.setProviderSettings({
-			apiProvider: "nanogpt",
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "nanogpt-secret",
 			nanoGptModelId: "openai/model",
 			nanoGptRoutingPreference: "latency",
@@ -1023,7 +1342,7 @@ describe("ClineProvider", () => {
 		const state = await provider.getState()
 		const postedState = await provider.getStateToPostToWebview()
 		const expectedConfiguration = {
-			apiProvider: "nanogpt",
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "nanogpt-secret",
 			nanoGptModelId: "openai/model",
 			nanoGptRoutingPreference: "latency",
@@ -1039,6 +1358,68 @@ describe("ClineProvider", () => {
 		const state = await provider.getState()
 
 		expect(state.destructiveCommandGuardEnabled).toBe(true)
+	})
+
+	test("getState returns the saved allowed read files", async () => {
+		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
+
+		const state = await provider.getState()
+
+		expect(state.allowedReadFiles).toEqual(["notes.md"])
+	})
+
+	test("getState defaults allowed read files to an empty list", async () => {
+		const state = await provider.getState()
+
+		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	test("getStateToPostToWebview returns the saved allowed read files", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("allowedReadFiles", ["notes.md"])
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedReadFiles).toEqual(["notes.md"])
+	})
+
+	test("getStateToPostToWebview defaults allowed read files to an empty list", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedReadFiles).toEqual([])
+	})
+
+	test("getState returns the saved allowed write files", async () => {
+		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])
+
+		const state = await provider.getState()
+
+		expect(state.allowedWriteFiles).toEqual(["notes.md"])
+	})
+
+	test("getState defaults allowed write files to an empty list", async () => {
+		const state = await provider.getState()
+
+		expect(state.allowedWriteFiles).toEqual([])
+	})
+
+	test("getStateToPostToWebview returns the saved allowed write files", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("allowedWriteFiles", ["notes.md"])
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedWriteFiles).toEqual(["notes.md"])
+	})
+
+	test("getStateToPostToWebview defaults allowed write files to an empty list", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.allowedWriteFiles).toEqual([])
 	})
 
 	test("getStateToPostToWebview returns the saved destructive command guard setting", async () => {
@@ -1261,7 +1642,11 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-		const profile: ProviderSettingsEntry = { name: "test-config", id: "test-id", apiProvider: "anthropic" }
+		const profile: ProviderSettingsEntry = {
+			name: "test-config",
+			id: "test-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
 
 		;(provider as any).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
@@ -1288,7 +1673,9 @@ describe("ClineProvider", () => {
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
-				.mockResolvedValue([{ name: "current-config", id: "current-id", apiProvider: "anthropic" }]),
+				.mockResolvedValue([
+					{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
+				]),
 			setModeConfig: vi.fn(),
 		} as any
 
@@ -1305,7 +1692,11 @@ describe("ClineProvider", () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
-		const profile: ProviderSettingsEntry = { apiProvider: "anthropic", id: "new-id", name: "new-config" }
+		const profile: ProviderSettingsEntry = {
+			apiProvider: providerIdentifiers.anthropic,
+			id: "new-id",
+			name: "new-config",
+		}
 
 		;(provider as any).providerSettingsManager = {
 			activateProfile: vi.fn().mockResolvedValue(profile),
@@ -1331,7 +1722,7 @@ describe("ClineProvider", () => {
 		const profile: ProviderSettingsEntry = {
 			name: "config-by-id",
 			id: "config-id-123",
-			apiProvider: "anthropic",
+			apiProvider: providerIdentifiers.anthropic,
 		}
 
 		;(provider as any).providerSettingsManager = {
@@ -1505,7 +1896,11 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
-			listConfig: vi.fn().mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([
+					{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+				]),
 			saveConfig: vi.fn().mockResolvedValue("test-id"),
 			setModeConfig: vi.fn(),
 		} as any
@@ -1514,7 +1909,7 @@ describe("ClineProvider", () => {
 		await messageHandler({
 			type: "upsertApiConfiguration",
 			text: "test-config",
-			apiConfiguration: { apiProvider: "anthropic" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 		})
 
 		// Should save config as default for current mode
@@ -1723,7 +2118,7 @@ describe("ClineProvider", () => {
 			// Test with mcpEnabled: true
 			vi.spyOn(provider, "getState").mockResolvedValueOnce({
 				apiConfiguration: {
-					apiProvider: "openrouter" as const,
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				mcpEnabled: true,
 				mode: "code" as const,
@@ -1747,7 +2142,7 @@ describe("ClineProvider", () => {
 			// Test with mcpEnabled: false
 			vi.spyOn(provider, "getState").mockResolvedValueOnce({
 				apiConfiguration: {
-					apiProvider: "openrouter" as const,
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				mcpEnabled: false,
 				mode: "code" as const,
@@ -1783,7 +2178,7 @@ describe("ClineProvider", () => {
 			// Mock getState to return custom instructions for code mode
 			vi.spyOn(provider, "getState").mockResolvedValue({
 				apiConfiguration: {
-					apiProvider: "openrouter" as const,
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				customModePrompts: {
 					code: { customInstructions: "Code mode specific instructions" },
@@ -1812,7 +2207,7 @@ describe("ClineProvider", () => {
 			// Mock getState to return architect mode instructions
 			vi.spyOn(provider, "getState").mockResolvedValue({
 				apiConfiguration: {
-					apiProvider: "openrouter",
+					apiProvider: providerIdentifiers.openrouter,
 				},
 				customModePrompts: {
 					architect: { customInstructions: "Architect mode instructions" },
@@ -1847,7 +2242,7 @@ describe("ClineProvider", () => {
 			const profile: ProviderSettingsEntry = {
 				name: "saved-config",
 				id: "saved-config-id",
-				apiProvider: "anthropic",
+				apiProvider: providerIdentifiers.anthropic,
 			}
 
 			;(provider as any).providerSettingsManager = {
@@ -1878,7 +2273,9 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "current-config", id: "current-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 				setModeConfig: vi.fn(),
 			} as any
 
@@ -2002,10 +2399,14 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "config-id", apiProvider: "anthropic" }]),
-				activateProfile: vi
-					.fn()
-					.mockResolvedValue({ name: "test-config", id: "config-id", apiProvider: "anthropic" }),
+					.mockResolvedValue([
+						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "test-config",
+					id: "config-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}),
 			}
 
 			// Spy on log method to verify no warning was logged
@@ -2137,7 +2538,9 @@ describe("ClineProvider", () => {
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "config-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 				activateProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
 			}
 
@@ -2237,7 +2640,9 @@ describe("ClineProvider", () => {
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			// Mock getState to provide necessary data
@@ -2250,7 +2655,7 @@ describe("ClineProvider", () => {
 			await messageHandler({
 				type: "upsertApiConfiguration",
 				text: "test-config",
-				apiConfiguration: { apiProvider: "anthropic", apiKey: "test-key" },
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
 			})
 
 			// Verify error was logged and user was notified
@@ -2269,11 +2674,13 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			const testApiConfig = {
-				apiProvider: "anthropic" as const,
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 
@@ -2289,7 +2696,7 @@ describe("ClineProvider", () => {
 
 			// Verify state updates
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 
@@ -2312,7 +2719,9 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			// Setup Task instance with auto-mock from the top of the file
@@ -2320,7 +2729,7 @@ describe("ClineProvider", () => {
 			await provider.addClineToStack(mockCline)
 
 			const testApiConfig = {
-				apiProvider: "anthropic" as const,
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 
@@ -2339,7 +2748,7 @@ describe("ClineProvider", () => {
 
 			// Verify state was still updated
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 		})
@@ -2353,11 +2762,13 @@ describe("ClineProvider", () => {
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
-					.mockResolvedValue([{ name: "test-config", id: "test-id", apiProvider: "anthropic" }]),
+					.mockResolvedValue([
+						{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
+					]),
 			} as any
 
 			const testApiConfig = {
-				apiProvider: "anthropic" as const,
+				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "test-key",
 			}
 
@@ -2373,10 +2784,10 @@ describe("ClineProvider", () => {
 
 			// Verify state updates
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 			expect(updateGlobalStateSpy).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: "anthropic" },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
 			])
 		})
 	})
@@ -2968,7 +3379,7 @@ describe("getTelemetryProperties", () => {
 		defaultTaskOptions = {
 			provider,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 		}
 
@@ -3209,21 +3620,21 @@ describe("ClineProvider - Router Models", () => {
 		await messageHandler({ type: "requestRouterModels" })
 
 		// Verify getModels was called for each provider with correct options
-		expect(getModels).toHaveBeenCalledWith({ provider: "openrouter" })
-		expect(getModels).toHaveBeenCalledWith({ provider: "requesty", apiKey: "requesty-key" })
-		expect(getModels).toHaveBeenCalledWith({ provider: "unbound" })
-		expect(getModels).toHaveBeenCalledWith({ provider: "vercel-ai-gateway" })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.openrouter })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.requesty, apiKey: "requesty-key" })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.unbound })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.vercelAiGateway })
 		expect(getModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "litellm-key",
 			baseUrl: "http://localhost:4000",
 		})
 		// Opencode Go's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "opencode-go" }))
+		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.opencodeGo }))
 		// Kenari's /models endpoint is public, so it is fetched like the other no-auth routers.
-		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: "kenari" }))
+		expect(getModels).toHaveBeenCalledWith(expect.objectContaining({ provider: providerIdentifiers.kenari }))
 		// NanoGPT's detailed catalog is public and may be scoped by an optional key.
-		expect(getModels).toHaveBeenCalledWith({ provider: "nanogpt", apiKey: undefined })
+		expect(getModels).toHaveBeenCalledWith({ provider: providerIdentifiers.nanogpt, apiKey: undefined })
 
 		// Verify response was sent
 		expect(mockPostMessage).toHaveBeenCalledWith({
@@ -3309,14 +3720,14 @@ describe("ClineProvider - Router Models", () => {
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "Requesty API error",
-			values: { provider: "requesty" },
+			values: { provider: providerIdentifiers.requesty },
 		})
 
 		expect(mockPostMessage).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,
 			error: "LiteLLM connection failed",
-			values: { provider: "litellm" },
+			values: { provider: providerIdentifiers.litellm },
 		})
 	})
 
@@ -3349,7 +3760,7 @@ describe("ClineProvider - Router Models", () => {
 
 		// Verify LiteLLM was called with values from message
 		expect(getModels).toHaveBeenCalledWith({
-			provider: "litellm",
+			provider: providerIdentifiers.litellm,
 			apiKey: "message-litellm-key",
 			baseUrl: "http://message-url:4000",
 		})
@@ -3378,7 +3789,7 @@ describe("ClineProvider - Router Models", () => {
 		// Verify LiteLLM was NOT called
 		expect(getModels).not.toHaveBeenCalledWith(
 			expect.objectContaining({
-				provider: "litellm",
+				provider: providerIdentifiers.litellm,
 			}),
 		)
 
@@ -3428,7 +3839,7 @@ describe("ClineProvider - Router Models", () => {
 		})
 
 		expect(getModels).toHaveBeenCalledWith({
-			provider: "lmstudio",
+			provider: providerIdentifiers.lmstudio,
 			baseUrl: "http://localhost:1234",
 		})
 	})
@@ -3526,7 +3937,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 		defaultTaskOptions = {
 			provider,
 			apiConfiguration: {
-				apiProvider: "openrouter",
+				apiProvider: providerIdentifiers.openrouter,
 			},
 		}
 
@@ -4463,7 +4874,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
 				} as any)
 				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
-					apiProvider: "anthropic",
+					apiProvider: providerIdentifiers.anthropic,
 				} as any)
 				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
 					currentApiConfigName: "Anthropic",
@@ -4481,7 +4892,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(upsertSpy).toHaveBeenCalledWith(
 					"Zoo Gateway",
 					expect.objectContaining({
-						apiProvider: "zoo-gateway",
+						apiProvider: providerIdentifiers.zooGateway,
 						zooSessionToken: "zoo_ext_token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
 					}),
@@ -4494,7 +4905,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiConfiguration: { zooGatewayModelId: "anthropic/claude-sonnet-4" },
 				} as any)
 				vi.spyOn(provider.contextProxy, "getProviderSettings").mockReturnValue({
-					apiProvider: "zoo-gateway",
+					apiProvider: providerIdentifiers.zooGateway,
 				} as any)
 				vi.spyOn(provider.contextProxy, "getValues").mockReturnValue({
 					currentApiConfigName: "Zoo Gateway",
@@ -4504,18 +4915,18 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
 					listConfig: vi.fn().mockResolvedValue([
-						{ name: "Zoo Gateway", apiProvider: "zoo-gateway" },
-						{ name: "Backup Zoo", apiProvider: "zoo-gateway" },
+						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
 					]),
 					getProfile: vi
 						.fn()
 						.mockResolvedValueOnce({
-							apiProvider: "zoo-gateway",
+							apiProvider: providerIdentifiers.zooGateway,
 							zooSessionToken: "old-token",
 							zooGatewayBaseUrl: "https://old.example/api/gateway/v1",
 						})
 						.mockResolvedValueOnce({
-							apiProvider: "zoo-gateway",
+							apiProvider: providerIdentifiers.zooGateway,
 							zooSessionToken: "old-token",
 						}),
 					saveConfig,
@@ -4577,7 +4988,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 					getProfile: vi.fn().mockResolvedValue({
 						zooSessionToken: "current-token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
@@ -4596,7 +5009,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 					getProfile: vi.fn().mockResolvedValue({
 						zooSessionToken: "stale-token",
 						zooGatewayBaseUrl: "https://www.zoocode.dev/api/gateway/v1",
@@ -4614,7 +5029,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
-					listConfig: vi.fn().mockResolvedValue([{ name: "Zoo Gateway", apiProvider: "zoo-gateway" }]),
+					listConfig: vi
+						.fn()
+						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
 					getProfile: vi.fn().mockResolvedValue({
 						zooSessionToken: "current-token",
 						zooGatewayBaseUrl: "https://staging.zoocode.dev/api/gateway/v1",

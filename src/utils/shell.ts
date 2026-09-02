@@ -3,6 +3,9 @@ import { existsSync } from "fs"
 import { userInfo } from "os"
 import * as path from "path"
 
+import { BaseTerminal } from "../integrations/terminal/BaseTerminal"
+import { Terminal } from "../integrations/terminal/Terminal"
+
 // Security: Allowlist of approved shell executables to prevent arbitrary command execution
 const SHELL_ALLOWLIST = new Set<string>([
 	// Windows PowerShell variants
@@ -113,143 +116,70 @@ const SHELL_PATHS = {
 	FALLBACK: "/bin/sh",
 } as const
 
-interface MacTerminalProfile {
-	path?: string | string[]
-}
-
-type MacTerminalProfiles = Record<string, MacTerminalProfile>
-
-interface WindowsTerminalProfile {
-	path?: string | string[]
-	source?: "PowerShell" | "WSL"
-}
-
-type WindowsTerminalProfiles = Record<string, WindowsTerminalProfile>
-
-interface LinuxTerminalProfile {
-	path?: string | string[]
-}
-
-type LinuxTerminalProfiles = Record<string, LinuxTerminalProfile>
-
 // -----------------------------------------------------
-// 1) VS Code Terminal Configuration Helpers
+// 1) VS Code Terminal Configuration Helper
 // -----------------------------------------------------
 
-type PlatformProfilesMap = {
-	windows: WindowsTerminalProfiles
-	osx: MacTerminalProfiles
-	linux: LinuxTerminalProfiles
+function preferredWindowsPowerShell(): string {
+	return existsSync(SHELL_PATHS.POWERSHELL_7) ? SHELL_PATHS.POWERSHELL_7 : SHELL_PATHS.POWERSHELL_LEGACY
 }
 
 /**
- * Reads the VS Code terminal profile configuration for the given platform.
+ * Resolves the shell that VS Code's integrated terminal will use, matching the
+ * priority order from Terminal constructor: Zoo profile override first, then
+ * VS Code's configured default profile (trusted scopes only — workspace scope
+ * excluded per APPLICATION scope restriction).
  *
- * The key must be one of `"windows"`, `"osx"`, or `"linux"` — the exact strings
- * VS Code uses in `terminal.integrated.defaultProfile.<key>` and
- * `terminal.integrated.profiles.<key>`. Passing any other value is a compile-time
- * error, which prevents silent mismatches such as `"darwin"` returning empty config.
- *
- * The return type (`defaultProfileName` and `profiles`) is inferred from `K` via
- * `PlatformProfilesMap`, so callers don't need an explicit type parameter.
- *
- * Returns `{ defaultProfileName: null, profiles: {} }` on any VS Code API error.
+ * Returns null when no profile is configured or the profile has no resolvable path.
  */
-function getTerminalConfig<K extends keyof PlatformProfilesMap>(
-	platformKey: K,
-): { defaultProfileName: string | null; profiles: PlatformProfilesMap[K] } {
+function getShellFromVSCode(): string | null {
 	try {
-		const config = vscode.workspace.getConfiguration("terminal.integrated")
-		const rawProfileName = config.get<string>(`defaultProfile.${platformKey}`)
-		const defaultProfileName = typeof rawProfileName === "string" ? rawProfileName : null
-		const profiles = config.get<PlatformProfilesMap[K]>(`profiles.${platformKey}`) ?? ({} as PlatformProfilesMap[K])
-		return { defaultProfileName, profiles }
-	} catch {
-		return { defaultProfileName: null, profiles: {} as PlatformProfilesMap[K] }
-	}
-}
-
-// -----------------------------------------------------
-// 2) Platform-Specific VS Code Shell Retrieval
-// -----------------------------------------------------
-
-/**
- * Normalizes a path that can be either a string or an array of strings.
- * If it's an array, returns the first element. Otherwise returns the string.
- */
-function normalizeShellPath(path: string | string[] | undefined): string | null {
-	if (!path) return null
-	if (Array.isArray(path)) {
-		return path.length > 0 ? path[0] : null
-	}
-	return path
-}
-
-/** Attempts to retrieve a shell path from VS Code config on Windows. */
-function getWindowsShellFromVSCode(): string | null {
-	const { defaultProfileName, profiles } = getTerminalConfig("windows")
-	if (!defaultProfileName) {
-		// No explicit Windows terminal profile is configured. VS Code auto-detects
-		// the default on modern Windows and prefers PowerShell 7 (pwsh.exe) when it
-		// is installed, otherwise the always-present Windows PowerShell 5.1. Mirror
-		// that here so the system prompt advertises the real shell instead of falling
-		// through to COMSPEC (cmd.exe). See issue #82.
-		return existsSync(SHELL_PATHS.POWERSHELL_7) ? SHELL_PATHS.POWERSHELL_7 : SHELL_PATHS.POWERSHELL_LEGACY
-	}
-
-	const profile = profiles[defaultProfileName]
-
-	// If the profile name indicates PowerShell, do version-based detection.
-	// In testing it was found these typically do not have a path, and this
-	// implementation manages to deductively get the correct version of PowerShell
-	if (defaultProfileName.toLowerCase().includes("powershell")) {
-		const normalizedPath = normalizeShellPath(profile?.path)
-		if (normalizedPath) {
-			// If there's an explicit PowerShell path, return that
-			return normalizedPath
-		} else if (profile?.source === "PowerShell") {
-			// If the profile is sourced from PowerShell, assume the newest
-			return SHELL_PATHS.POWERSHELL_7
+		// Zoo profile override takes precedence — this is the same path
+		// Terminal constructor uses to set shellPath on createTerminal().
+		const profileShell = Terminal.getProfileShell()
+		if (profileShell?.shellPath) {
+			return profileShell.shellPath
 		}
-		// Otherwise, assume legacy Windows PowerShell
-		return SHELL_PATHS.POWERSHELL_LEGACY
-	}
 
-	// If there's a specific path, return that immediately
-	const normalizedPath = normalizeShellPath(profile?.path)
-	if (normalizedPath) {
-		return normalizedPath
-	}
+		const profileName = Terminal.getConfiguredDefaultProfileName()
 
-	// If the profile indicates WSL
-	if (profile?.source === "WSL" || defaultProfileName.toLowerCase().includes("wsl")) {
-		return SHELL_PATHS.WSL_BASH
-	}
+		if (!profileName) {
+			// No profile configured at user/default scope. On Windows, VS Code
+			// auto-detects and prefers PowerShell 7 when installed. Mirror that so
+			// the system prompt matches what VS Code will actually open. (issue #82)
+			if (process.platform === "win32") {
+				return preferredWindowsPowerShell()
+			}
+			return null
+		}
 
-	// If nothing special detected, we assume cmd
-	return SHELL_PATHS.CMD
-}
+		const profiles = Terminal.getConfiguredProfiles()
+		const profile = profiles[profileName] as { path?: unknown; source?: unknown } | null | undefined
 
-/** Attempts to retrieve a shell path from VS Code config on macOS. */
-function getMacShellFromVSCode(): string | null {
-	const { defaultProfileName, profiles } = getTerminalConfig("osx")
-	if (!defaultProfileName) {
+		if (!profile) {
+			return null
+		}
+
+		const resolved = Terminal.resolveProfilePath(profile.path)
+		if (resolved) {
+			return resolved
+		}
+
+		// source-only PowerShell profiles (e.g. { source: "PowerShell" }) have no
+		// path but we can still identify the shell type from the source field.
+		if (typeof profile.source === "string" && profile.source.toLowerCase().includes("powershell")) {
+			return preferredWindowsPowerShell()
+		}
+
+		// source-only WSL profiles
+		if (typeof profile.source === "string" && profile.source.toLowerCase().includes("wsl")) {
+			return SHELL_PATHS.WSL_BASH
+		}
+
+		return null
+	} catch {
 		return null
 	}
-
-	const profile = profiles[defaultProfileName]
-	return normalizeShellPath(profile?.path)
-}
-
-/** Attempts to retrieve a shell path from VS Code config on Linux. */
-function getLinuxShellFromVSCode(): string | null {
-	const { defaultProfileName, profiles } = getTerminalConfig("linux")
-	if (!defaultProfileName) {
-		return null
-	}
-
-	const profile = profiles[defaultProfileName]
-	return normalizeShellPath(profile?.path)
 }
 
 // -----------------------------------------------------
@@ -340,34 +270,31 @@ function getSafeFallbackShell(): string {
 export function getShell(): string {
 	let shell: string | null = null
 
-	// 1. Check VS Code config first.
-	if (process.platform === "win32") {
-		// Special logic for Windows
-		shell = getWindowsShellFromVSCode()
-	} else if (process.platform === "darwin") {
-		// macOS from VS Code
-		shell = getMacShellFromVSCode()
-	} else if (process.platform === "linux") {
-		// Linux from VS Code
-		shell = getLinuxShellFromVSCode()
+	// 1. Explicit execa shell path — when set, execa uses this exact executable
+	//    regardless of VS Code profile settings.
+	shell = BaseTerminal.getExecaShellPath() ?? null
+
+	// 2. VS Code profile config (Zoo override first, then default profile).
+	if (!shell) {
+		shell = getShellFromVSCode()
 	}
 
-	// 2. If no shell from VS Code, try userInfo()
+	// 3. If no shell from VS Code, try userInfo()
 	if (!shell) {
 		shell = getShellFromUserInfo()
 	}
 
-	// 3. If still nothing, try environment variable
+	// 4. If still nothing, try environment variable
 	if (!shell) {
 		shell = getShellFromEnv()
 	}
 
-	// 4. Finally, fall back to a default
+	// 5. Finally, fall back to a default
 	if (!shell) {
 		shell = getSafeFallbackShell()
 	}
 
-	// 5. Validate the shell against allowlist
+	// 6. Validate the shell against allowlist
 	if (!isShellAllowed(shell)) {
 		shell = getSafeFallbackShell()
 	}
