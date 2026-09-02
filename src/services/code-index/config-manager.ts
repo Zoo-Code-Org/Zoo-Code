@@ -117,7 +117,7 @@ export class CodeIndexConfigManager {
 			this.embedderProvider = providerIdentifiers.mistral
 		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.vercelAiGateway) {
 			this.embedderProvider = providerIdentifiers.vercelAiGateway
-		} else if ((codebaseIndexEmbedderProvider as string) === "bedrock") {
+		} else if ((codebaseIndexEmbedderProvider as string) === providerIdentifiers.bedrock) {
 			this.embedderProvider = providerIdentifiers.bedrock
 		} else if (codebaseIndexEmbedderProvider === providerIdentifiers.openrouter) {
 			this.embedderProvider = providerIdentifiers.openrouter
@@ -306,7 +306,7 @@ export class CodeIndexConfigManager {
 		// Handle null/undefined values safely
 		const prevEnabled = prev?.enabled ?? false
 		const prevConfigured = prev?.configured ?? false
-		const prevProvider = prev?.embedderProvider ?? "openai"
+		const prevProvider = prev?.embedderProvider ?? providerIdentifiers.openai
 		const prevOpenAiKey = prev?.openAiKey ?? ""
 		const prevOllamaBaseUrl = prev?.ollamaBaseUrl ?? ""
 		const prevOpenAiCompatibleBaseUrl = prev?.openAiCompatibleBaseUrl ?? ""

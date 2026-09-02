@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 /* v8 ignore file -- Playwright component fixture is covered by the visual test. */
 import React, { useState } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -26,7 +27,7 @@ function flattenTranslations(obj: Record<string, unknown>, prefix = "settings:")
 const translations = flattenTranslations(enSettings as Record<string, unknown>)
 
 const apiConfiguration: ProviderSettings = {
-	apiProvider: "openai",
+	apiProvider: providerIdentifiers.openai,
 	openAiBaseUrl: "",
 	openAiModelId: "my-gpt4o-deployment",
 	openAiUseAzure: true,

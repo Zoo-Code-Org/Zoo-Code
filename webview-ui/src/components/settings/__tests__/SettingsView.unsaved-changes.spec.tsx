@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import { screen, fireEvent, waitFor } from "@testing-library/react"
 
 import { renderWithExtensionState } from "@/utils/test-utils"
@@ -258,7 +259,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		uriScheme: "vscode",
 		settingsImportedAt: undefined,
 		apiConfiguration: {
-			apiProvider: "openai",
+			apiProvider: providerIdentifiers.openai,
 			apiModelId: "", // Empty string initially
 		},
 		alwaysAllowReadOnly: false,
@@ -457,7 +458,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const stateWithUndefined = {
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: undefined,
 			},
 		}
@@ -496,7 +497,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const stateWithNull = {
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "openai",
+				apiProvider: providerIdentifiers.openai,
 				apiModelId: null,
 			},
 		}
@@ -606,7 +607,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 	it("buffers and saves the complete NanoGPT provider configuration from cached state", async () => {
 		const liveApiConfiguration = {
-			apiProvider: "nanogpt" as const,
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "original-key",
 			nanoGptModelId: "openai/original",
 			nanoGptRoutingPreference: "auto" as const,
@@ -660,7 +661,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.change(screen.getByTestId("cached-nanogpt-routing"), { target: { value: "tools" } })
 
 		expect(liveApiConfiguration).toEqual({
-			apiProvider: "nanogpt",
+			apiProvider: providerIdentifiers.nanogpt,
 			nanoGptApiKey: "original-key",
 			nanoGptModelId: "openai/original",
 			nanoGptRoutingPreference: "auto",
@@ -673,7 +674,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			type: "upsertApiConfiguration",
 			text: "default",
 			apiConfiguration: {
-				apiProvider: "nanogpt",
+				apiProvider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: "unsaved-key",
 				nanoGptModelId: "openai/next",
 				nanoGptRoutingPreference: "tools",
@@ -686,7 +687,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			apiConfiguration: {
-				apiProvider: "nanogpt",
+				apiProvider: providerIdentifiers.nanogpt,
 				nanoGptApiKey: "saved-key",
 				nanoGptModelId: "openai/saved",
 				nanoGptRoutingPreference: "cheap",
