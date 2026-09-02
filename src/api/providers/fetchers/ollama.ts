@@ -62,6 +62,26 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
 	return modelInfo
 }
 
+/**
+ * Determines whether an Ollama endpoint is safe to carry an API key.
+ *
+ * Ollama's default installation listens on loopback, where plaintext HTTP is
+ * the norm. API keys are secrets, though, and must not be sent in cleartext to
+ * a remote host (CWE-319). Only HTTPS or a loopback host is considered safe
+ * enough to attach the Authorization header.
+ */
+export function isSecureOllamaEndpoint(baseUrl: string): boolean {
+	if (!URL.canParse(baseUrl)) {
+		return false
+	}
+	const url = new URL(baseUrl)
+	if (url.protocol === "https:") {
+		return true
+	}
+	const host = url.hostname
+	return host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host)
+}
+
 export async function getOllamaModels(
 	baseUrl = "http://localhost:11434",
 	apiKey?: string,
@@ -76,9 +96,11 @@ export async function getOllamaModels(
 			return models
 		}
 
-		// Prepare headers with optional API key
+		// Prepare headers with optional API key. The credential is only attached
+		// when the endpoint is HTTPS or loopback; sending it over plaintext HTTP
+		// to a remote host would leak it (CWE-319).
 		const headers: Record<string, string> = {}
-		if (apiKey) {
+		if (apiKey && isSecureOllamaEndpoint(baseUrl)) {
 			headers["Authorization"] = `Bearer ${apiKey}`
 		}
 

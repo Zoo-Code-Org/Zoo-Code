@@ -1,6 +1,6 @@
 import axios from "axios"
 
-import { getOllamaModels, parseOllamaModel } from "../ollama"
+import { getOllamaModels, isSecureOllamaEndpoint, parseOllamaModel } from "../ollama"
 import ollamaModelsData from "./fixtures/ollama-model-details.json"
 
 // Mock axios
@@ -116,7 +116,56 @@ describe("Ollama Fetcher", () => {
 		})
 	})
 
+	describe("isSecureOllamaEndpoint", () => {
+		it("should treat loopback HTTP endpoints as safe", () => {
+			expect(isSecureOllamaEndpoint("http://localhost:11434")).toBe(true)
+			expect(isSecureOllamaEndpoint("http://127.0.0.1:11434")).toBe(true)
+		})
+
+		it("should treat any HTTPS endpoint as safe", () => {
+			expect(isSecureOllamaEndpoint("https://ollama.example.com")).toBe(true)
+			expect(isSecureOllamaEndpoint("https://10.0.0.5:11434")).toBe(true)
+		})
+
+		it("should treat remote HTTP endpoints as unsafe", () => {
+			expect(isSecureOllamaEndpoint("http://ollama.example.com:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://10.0.0.5:11434")).toBe(false)
+		})
+
+		it("should treat unparseable endpoints as unsafe", () => {
+			expect(isSecureOllamaEndpoint("not a url")).toBe(false)
+		})
+	})
+
 	describe("getOllamaModels", () => {
+		it("should omit the Authorization header for a remote HTTP endpoint", async () => {
+			const baseUrl = "http://ollama.example.com:11434"
+			const apiKey = "test-api-key-123"
+
+			mockedAxios.get.mockResolvedValueOnce({ data: { models: [] } })
+
+			const result = await getOllamaModels(baseUrl, apiKey)
+
+			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, { headers: {} })
+			expect(result).toEqual({})
+		})
+
+		it("should include the Authorization header for an HTTPS endpoint", async () => {
+			const baseUrl = "https://ollama.example.com:11434"
+			const apiKey = "test-api-key-123"
+
+			mockedAxios.get.mockResolvedValueOnce({ data: { models: [] } })
+
+			const result = await getOllamaModels(baseUrl, apiKey)
+
+			expect(mockedAxios.get).toHaveBeenCalledTimes(1)
+			expect(mockedAxios.get).toHaveBeenCalledWith(`${baseUrl}/api/tags`, {
+				headers: { Authorization: `Bearer ${apiKey}` },
+			})
+			expect(result).toEqual({})
+		})
+
 		it("should fetch model list from /api/tags and include models with tools capability", async () => {
 			const baseUrl = "http://localhost:11434"
 			const modelName = "devstral2to16:latest"

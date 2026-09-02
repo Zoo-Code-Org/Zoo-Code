@@ -5,7 +5,7 @@ import { ModelInfo, openAiModelInfoSaneDefaults, DEEP_SEEK_DEFAULT_TEMPERATURE }
 import { ApiStream } from "../transform/stream"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerOptions } from "../../shared/api"
-import { getOllamaModels } from "./fetchers/ollama"
+import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
 import { TagMatcher } from "../../utils/tag-matcher"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
@@ -22,6 +22,48 @@ interface OllamaChatOptions {
 type ReasoningContentBlock = { type: "reasoning"; text: string }
 type ThinkingContentBlock = { type: "thinking"; thinking: string }
 type AssistantContentBlock = Anthropic.ContentBlock | ReasoningContentBlock | ThinkingContentBlock
+
+/**
+ * Creates the canonical abort error shared by every cancellation path so
+ * callers can identify cancellations by `name === "AbortError"`.
+ */
+function createAbortError(): Error {
+	const abortError = new Error("This operation was aborted")
+	abortError.name = "AbortError"
+	return abortError
+}
+
+/**
+ * Races `pending` against `signal`: if the signal aborts before the promise
+ * settles, the returned promise rejects with an AbortError instead of
+ * resolving with a stale result. The Ollama model-discovery fetch accepts no
+ * signal, so the underlying request is left to settle in the background
+ * rather than being cancelled.
+ */
+function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+	if (!signal) {
+		return pending
+	}
+	if (signal.aborted) {
+		return Promise.reject(createAbortError())
+	}
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => {
+			reject(createAbortError())
+		}
+		signal.addEventListener("abort", onAbort, { once: true })
+		pending.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}
 
 function convertToOllamaMessages(anthropicMessages: Anthropic.Messages.MessageParam[]): Message[] {
 	const ollamaMessages: Message[] = []
@@ -242,9 +284,11 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// Note: The ollama npm package handles timeouts internally
 		}
 
-		// Add API key if provided (for Ollama cloud or authenticated instances)
-		// Use constructor `headers` option instead of mutating (request as any).config
-		if (this.options.ollamaApiKey) {
+		// Add API key if provided (for Ollama cloud or authenticated instances).
+		// Use constructor `headers` option instead of mutating (request as any).config.
+		// The credential is only attached when the endpoint is HTTPS or loopback;
+		// sending it over plaintext HTTP to a remote host would leak it (CWE-319).
+		if (this.options.ollamaApiKey && isSecureOllamaEndpoint(clientOptions.host)) {
 			clientOptions.headers = {
 				Authorization: `Bearer ${this.options.ollamaApiKey}`,
 			}
@@ -403,38 +447,40 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		// external signal drives that same client instance instead of a separate
 		// internal controller.
 		const externalAbortSignal = metadata?.abortSignal
-		let onExternalAbort: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				client.abort()
-				const abortError = new Error("This operation was aborted")
-				abortError.name = "AbortError"
-				throw abortError
-			}
-			onExternalAbort = () => {
-				client.abort()
-			}
-			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+		if (externalAbortSignal?.aborted) {
+			client.abort()
+			throw createAbortError()
 		}
 
-		const { id: modelId } = await this.fetchModel()
-		const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
-
-		const ollamaMessages: Message[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOllamaMessages(messages),
-		]
-
-		const matcher = new TagMatcher(
-			["think", "thought"],
-			(chunk) =>
-				({
-					type: chunk.matched ? "reasoning" : "text",
-					text: chunk.data,
-				}) as const,
-		)
-
+		let onExternalAbort: (() => void) | undefined
 		try {
+			if (externalAbortSignal) {
+				onExternalAbort = () => {
+					client.abort()
+				}
+				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+			}
+
+			// Race model discovery against the external signal: the SDK's model
+			// fetch accepts no signal, so a request aborted during discovery must
+			// reject instead of proceeding to chat() with a stale model.
+			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(), externalAbortSignal)
+			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
+
+			const ollamaMessages: Message[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOllamaMessages(messages),
+			]
+
+			const matcher = new TagMatcher(
+				["think", "thought"],
+				(chunk) =>
+					({
+						type: chunk.matched ? "reasoning" : "text",
+						text: chunk.data,
+					}) as const,
+			)
+
 			// Build the shared chat options and conditional think parameter.
 			// Conditionally enabling Ollama's native think parameter lets
 			// reasoning models (qwen3, deepseek-r1, etc.) emit thinking via
@@ -536,6 +582,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				throw new Error(`Ollama stream processing error: ${streamError.message || "Unknown error"}`)
 			}
 		} catch (error: any) {
+			// Let AbortError surface unmodified so callers can identify cancellations
+			// by `name === "AbortError"`; every other error keeps the historical wrap.
+			if (error instanceof Error && error.name === "AbortError") {
+				throw error
+			}
+
 			// Enhance error reporting
 			const statusCode = error.status || error.statusCode
 			const errorMessage = error.message || "Unknown error"
@@ -554,7 +606,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			throw error
 		} finally {
 			// Detach the external-signal listener so it cannot outlive this request,
-			// including on error paths and early generator finalization.
+			// including when model discovery rejects before the chat request starts.
 			if (onExternalAbort) {
 				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
 			}
@@ -582,12 +634,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		const client = this._createOllamaClient()
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		let onAbort: (() => void) | undefined
+		// Set when the timeoutMs timer fires so a model-discovery fetch still in
+		// flight is rejected instead of proceeding to chat() past the deadline.
+		let timedOut = false
 
 		try {
 			// Handle timeoutMs if provided (client already exists above, so the
 			// timer can abort the per-request client directly)
 			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
-				timeoutId = setTimeout(() => client.abort(), options.timeoutMs)
+				timeoutId = setTimeout(() => {
+					timedOut = true
+					client.abort()
+				}, options.timeoutMs)
 			}
 
 			// Propagate abortSignal into the per-request client via client.abort().
@@ -597,9 +655,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			if (options?.abortSignal) {
 				if (options.abortSignal.aborted) {
 					client.abort()
-					const abortError = new Error("This operation was aborted")
-					abortError.name = "AbortError"
-					throw abortError
+					throw createAbortError()
 				} else {
 					onAbort = () => {
 						client.abort()
@@ -611,15 +667,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				}
 			}
 
-			const { id: modelId } = await this.fetchModel()
+			// Race model discovery against the abort signal: the model fetch
+			// accepts no signal, so an abort during discovery must reject instead
+			// of proceeding to chat() with a stale model.
+			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(), options?.abortSignal)
 
-			// Re-check after the model-list fetch: if the signal aborted during
-			// fetchModel(), the listener above already aborted the client, and the
-			// request must reject instead of proceeding to chat().
-			if (options?.abortSignal?.aborted) {
-				const abortError = new Error("This operation was aborted")
-				abortError.name = "AbortError"
-				throw abortError
+			// Re-check after the model-list fetch: if the request aborted or timed
+			// out during fetchModel(), the listener/timer above already aborted the
+			// client, and the request must reject instead of proceeding to chat().
+			if (timedOut || options?.abortSignal?.aborted) {
+				throw createAbortError()
 			}
 
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")

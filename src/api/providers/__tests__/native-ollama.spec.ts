@@ -36,10 +36,17 @@ vitest.mock("ollama", () => {
 // Export OllamaMock for test access
 const OllamaMock = mockedOllama.OllamaMock
 
-// Mock the getOllamaModels function
-vitest.mock("../fetchers/ollama", () => ({
-	getOllamaModels: vitest.fn(),
-}))
+// Mock only the model-list fetch. The real isSecureOllamaEndpoint is kept so
+// the credential-gating assertions exercise the production predicate.
+vitest.mock("../fetchers/ollama", async (importOriginal) => {
+	// The factory's importOriginal is typed as unknown; recover the module's
+	// real type so the production predicate can be spread without `any`.
+	const actual = (await importOriginal()) as typeof import("../fetchers/ollama")
+	return {
+		...actual,
+		getOllamaModels: vitest.fn(),
+	}
+})
 
 const mockGetOllamaModels = vitest.mocked(getOllamaModels)
 
@@ -711,6 +718,11 @@ describe("NativeOllamaHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		// Shared capture for the per-request client's abort spy. The timeoutMs
+		// and abortSignal tests below each override the OllamaMock constructor
+		// and re-assign it inside their own mockImplementation.
+		let capturedInstanceAbort: (() => void) | undefined
+
 		it("should complete a prompt without streaming", async () => {
 			mockChat.mockResolvedValue({
 				message: { content: "This is the response" },
@@ -823,7 +835,6 @@ describe("NativeOllamaHandler", () => {
 		it("should call client.abort() when timeoutMs is reached", async () => {
 			const testTimeout = 5000
 			let capturedFn: (() => void) | undefined
-			let capturedInstanceAbort: (() => void) | undefined
 
 			// Capture the per-request client's abort spy so the assertion targets
 			// the actual abort() call rather than just the constructor call.
@@ -862,7 +873,6 @@ describe("NativeOllamaHandler", () => {
 
 		it("should call instance.abort() when abortSignal is aborted", async () => {
 			const controller = new AbortController()
-			let capturedInstanceAbort: (() => void) | undefined
 
 			// Override the constructor to capture the instance abort spy
 			OllamaMock.mockImplementation(function (options?: { host?: string }) {
@@ -891,7 +901,6 @@ describe("NativeOllamaHandler", () => {
 		it("should call instance.abort() immediately when abortSignal is already aborted", async () => {
 			const controller = new AbortController()
 			controller.abort()
-			let capturedInstanceAbort: (() => void) | undefined
 
 			// Override the constructor to capture the instance abort spy
 			OllamaMock.mockImplementation(function (options?: { host?: string }) {
@@ -953,6 +962,7 @@ describe("NativeOllamaHandler", () => {
 			const clearTimeoutSpy = vitest.spyOn(global, "clearTimeout").mockImplementation(() => {})
 			vitest.spyOn(global, "setTimeout").mockImplementation(() => timeoutHandle)
 			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
 
 			let resolveChat: (value: { message: { content: string } }) => void = () => {}
 			mockChat.mockImplementation(
@@ -972,7 +982,15 @@ describe("NativeOllamaHandler", () => {
 
 			await expect(promise).resolves.toBe("Response")
 			expect(clearTimeoutSpy).toHaveBeenCalledWith(timeoutHandle)
-			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// The listener removed in the finally block must be the exact function
+			// that was registered, proving the same reference is detached.
+			expect(addEventListenerSpy).toHaveBeenCalledWith(
+				"abort",
+				expect.any(Function),
+				{ once: true },
+			)
+			const registeredHandler = addEventListenerSpy.mock.calls[0]?.[1]
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", registeredHandler)
 		})
 
 		it("should clear timeoutId in finally block on success", async () => {
@@ -1846,6 +1864,63 @@ describe("NativeOllamaHandler", () => {
 			expect(userImageMessages).toHaveLength(1)
 			expect(userImageMessages[0].images).toEqual(["img-a"])
 		})
+
+		it("should reject with AbortError when the abort signal fires during model discovery", async () => {
+			let resolveFetch: (() => void) | undefined
+
+			// Hold model discovery open so the abort lands before the chat request.
+			mockGetOllamaModels.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveFetch = () => resolve({})
+					}),
+			)
+
+			const controller = new AbortController()
+			const promise = handler.completePrompt("Test prompt", { abortSignal: controller.signal })
+
+			// The discovery fetch is in flight; abort before it settles.
+			controller.abort()
+			resolveFetch?.()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			expect(mockChat).not.toHaveBeenCalled()
+		})
+
+		it("should reject with AbortError when timeoutMs fires during model discovery", async () => {
+			const testTimeout = 5000
+			let capturedFn: (() => void) | undefined
+			let resolveFetch: (() => void) | undefined
+
+			// Hold model discovery open so the timeout lands before the chat request.
+			mockGetOllamaModels.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveFetch = () => resolve({})
+					}),
+			)
+
+			// The timer id is never consumed (the callback is captured and fired
+			// manually), so bridge the ambient setTimeout signature through unknown.
+			vitest.spyOn(global, "setTimeout").mockImplementation(((fn: () => void, ms?: number) => {
+				if (ms === testTimeout) {
+					capturedFn = fn
+				}
+				return 0
+			}) as unknown as typeof setTimeout)
+
+			const promise = handler.completePrompt("Test prompt", { timeoutMs: testTimeout })
+			expect(capturedFn).toBeDefined()
+
+			// Fire the timeout while discovery is still in flight, then let the
+			// held fetch settle so the post-discovery deadline re-check can run.
+			capturedFn?.()
+			resolveFetch?.()
+
+			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockChat).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("per-request client creation", () => {
@@ -1937,6 +2012,74 @@ describe("NativeOllamaHandler", () => {
 				}),
 			)
 		})
+
+		it("should not attach the API key for a remote HTTP endpoint", async () => {
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+
+			const handler = new NativeOllamaHandler({
+				apiModelId: "llama2",
+				ollamaModelId: "llama2",
+				ollamaBaseUrl: "http://ollama.example.com:11434",
+				ollamaApiKey: "test-api-key-123",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			// Plaintext HTTP to a remote host would leak the credential (CWE-319),
+			// so the Authorization header must be omitted.
+			const callArgs = OllamaMock.mock.calls[0][0]
+			expect(callArgs.headers).toBeUndefined()
+		})
+
+		it("should attach the API key for an HTTPS endpoint", async () => {
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+
+			const handler = new NativeOllamaHandler({
+				apiModelId: "llama2",
+				ollamaModelId: "llama2",
+				ollamaBaseUrl: "https://ollama.example.com:11434",
+				ollamaApiKey: "test-api-key-123",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(OllamaMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					host: "https://ollama.example.com:11434",
+					headers: {
+						Authorization: "Bearer test-api-key-123",
+					},
+				}),
+			)
+		})
+
+		it("should attach the API key for a loopback IP endpoint", async () => {
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+			})
+
+			const handler = new NativeOllamaHandler({
+				apiModelId: "llama2",
+				ollamaModelId: "llama2",
+				ollamaBaseUrl: "http://127.0.0.1:11434",
+				ollamaApiKey: "test-api-key-123",
+			})
+
+			await handler.completePrompt("Test prompt")
+
+			expect(OllamaMock).toHaveBeenCalledWith(
+				expect.objectContaining({
+					host: "http://127.0.0.1:11434",
+					headers: {
+						Authorization: "Bearer test-api-key-123",
+					},
+				}),
+			)
+		})
 	})
 	describe("createMessage abort signal", () => {
 		it("should reject with AbortError when external abortSignal is already aborted", async () => {
@@ -1999,6 +2142,56 @@ describe("NativeOllamaHandler", () => {
 			controller.abort()
 
 			await expect(consume).rejects.toMatchObject({ name: "AbortError" })
+		})
+
+		it("should reject with AbortError when the abort signal fires during model discovery", async () => {
+			let resolveFetch: (() => void) | undefined
+			let clientAborted = false
+
+			// Hold model discovery open so the abort lands between fetchModel()
+			// starting and the chat request being issued.
+			mockGetOllamaModels.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						resolveFetch = () => resolve({})
+					}),
+			)
+
+			// Wire the per-request client's abort() so the bridge into the SDK
+			// client can be observed; the chat request must never start.
+			OllamaMock.mockImplementation(function (options?: { host?: string }) {
+				return {
+					chat: mockChat,
+					abort: () => {
+						clientAborted = true
+					},
+					_host: options?.host ?? "http://localhost:11434",
+				}
+			})
+
+			const controller = new AbortController()
+			const stream = handler.createMessage(
+				"System",
+				[{ role: "user" as const, content: "Test" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			const consume = (async () => {
+				for await (const _ of stream) {
+					// consume stream
+				}
+			})()
+
+			// Abort while the model list is still being fetched. The race must
+			// reject the generator with AbortError before chat() is attempted.
+			controller.abort()
+			await expect(consume).rejects.toMatchObject({ name: "AbortError" })
+			expect(mockChat).not.toHaveBeenCalled()
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			expect(clientAborted).toBe(true)
+
+			// Settle the held discovery fetch so no promise is left dangling.
+			resolveFetch?.()
 		})
 	})
 })
