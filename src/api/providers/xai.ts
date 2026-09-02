@@ -68,7 +68,11 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 	 * validates the provider payload (the APIs use different object forms for the
 	 * named-tool choices: Chat Completions nests the name under `function`/`custom`,
 	 * Responses API puts it at the top level). String options (auto/required/none)
-	 * are identical in both APIs and pass through unchanged.
+	 * are identical in both APIs and pass through unchanged. `allowed_tools`
+	 * entries keep their allowlist mode, but Chat Completions function references
+	 * ({ type: "function", function: { name } }) are flattened to the Responses
+	 * API shape ({ type: "function", name }); other entry types pass through
+	 * unchanged.
 	 */
 	private mapToolChoice(
 		toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
@@ -85,7 +89,21 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 				return {
 					type: "allowed_tools",
 					mode: toolChoice.allowed_tools.mode,
-					tools: toolChoice.allowed_tools.tools,
+					tools: toolChoice.allowed_tools.tools.map((entry) => {
+						// Chat Completions allowlist entries nest the function reference
+						// ({ type: "function", function: { name } }); the Responses API
+						// expects the name at the top level ({ type: "function", name }).
+						const functionRef = entry["function"]
+						if (
+							entry["type"] === "function" &&
+							functionRef != null &&
+							typeof functionRef === "object" &&
+							typeof (functionRef as Record<string, unknown>)["name"] === "string"
+						) {
+							return { type: "function", name: (functionRef as Record<string, unknown>)["name"] }
+						}
+						return entry
+					}),
 				}
 		}
 	}

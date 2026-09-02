@@ -253,6 +253,51 @@ describe("XAIHandler", () => {
 		)
 	})
 
+	it("createMessage should flatten allowed_tools entries to the Responses API shape", async () => {
+		const testTools = [
+			{
+				type: "function" as const,
+				function: {
+					name: "test_tool",
+					description: "A test tool",
+					parameters: { type: "object", properties: { arg1: { type: "string" } }, required: ["arg1"] },
+				},
+			},
+		]
+
+		mockResponsesCreate.mockResolvedValueOnce(asyncStreamFrom([]))
+
+		const stream = handler.createMessage("test prompt", [], {
+			taskId: "test-task-id",
+			tools: testTools,
+			tool_choice: {
+				type: "allowed_tools",
+				allowed_tools: {
+					mode: "required",
+					tools: [
+						{ type: "function", function: { name: "test_tool" } },
+						{ type: "mcp", server_label: "deepwiki" },
+					],
+				},
+			},
+		})
+		await stream.next()
+
+		expect(mockResponsesCreate).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tool_choice: {
+					type: "allowed_tools",
+					mode: "required",
+					tools: [
+						{ type: "function", name: "test_tool" },
+						{ type: "mcp", server_label: "deepwiki" },
+					],
+				},
+			}),
+			undefined,
+		)
+	})
+
 	it("completePrompt should return text from Responses API", async () => {
 		const expectedResponse = "This is a test response"
 		mockResponsesCreate.mockResolvedValueOnce({
