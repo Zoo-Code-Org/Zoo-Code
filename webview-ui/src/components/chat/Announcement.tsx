@@ -1,7 +1,6 @@
-import { memo, type ReactNode, useState } from "react"
+import { memo, type MouseEvent, type ReactNode, useState } from "react"
 import { Trans } from "react-i18next"
 import { SiDiscord, SiReddit, SiX } from "react-icons/si"
-import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 
 import { Package } from "@roo/package"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
@@ -45,7 +44,12 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					<div className="mb-4">
 						<p className="mb-3">{t("chat:announcement.release.heading")}</p>
 						<ul className="list-disc list-inside text-sm space-y-1.5">
-							<li>{t("chat:announcement.release.highlight1")}</li>
+							<li>
+								<Trans
+									i18nKey="chat:announcement.release.highlight1"
+									components={{ modelsLink: <ModelsLink /> }}
+								/>
+							</li>
 							<li>{t("chat:announcement.release.highlight2")}</li>
 							<li>{t("chat:announcement.release.highlight3")}</li>
 						</ul>
@@ -80,28 +84,42 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 	)
 }
 
+// VS Code's webview bootstrap intercepts clicks on any anchor with an href
+// at the document level and opens the URL itself; it never checks
+// defaultPrevented, so a click also handled here would open the URL twice.
+// Stop propagation so the document-level handler never sees the click.
+const openExternal = (url: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+	event.preventDefault()
+	event.stopPropagation()
+	vscode.postMessage({ type: "openExternal", url })
+}
+
 const SocialLink = ({ icon, label, href }: { icon: ReactNode; label: string; href: string }) => (
-	<VSCodeLink
+	<a
 		href={href}
-		className="inline-flex items-center gap-1"
-		onClick={(e) => {
-			e.preventDefault()
-			vscode.postMessage({ type: "openExternal", url: href })
-		}}>
+		className="inline-flex items-center gap-1 text-vscode-textLink-foreground"
+		onClick={openExternal(href)}>
 		{icon}
 		<span className="sr-only">{label}</span>
-	</VSCodeLink>
+	</a>
 )
 
 const GitHubLink = ({ children }: { children?: ReactNode }) => (
-	<VSCodeLink
+	<a
 		href={EXTERNAL_LINKS.GITHUB_REPO}
-		onClick={(e) => {
-			e.preventDefault()
-			vscode.postMessage({ type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
-		}}>
+		className="text-vscode-textLink-foreground underline"
+		onClick={openExternal(EXTERNAL_LINKS.GITHUB_REPO)}>
 		{children}
-	</VSCodeLink>
+	</a>
+)
+
+const ModelsLink = ({ children }: { children?: ReactNode }) => (
+	<a
+		href={EXTERNAL_LINKS.MODELS}
+		className="text-vscode-textLink-foreground underline"
+		onClick={openExternal(EXTERNAL_LINKS.MODELS)}>
+		{children}
+	</a>
 )
 
 export default memo(Announcement)

@@ -13,7 +13,7 @@ export function ChatTextAreaStory() {
 		<AppProviders>
 			<div
 				data-testid="chat-text-area-story"
-				className="w-[488px] rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-3">
+				className="w-[488px] max-w-full rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-3">
 				<ChatTextArea
 					inputValue={inputValue}
 					setInputValue={setInputValue}
