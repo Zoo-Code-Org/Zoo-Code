@@ -1,6 +1,6 @@
 :root,
 body {
-	/* Font settings are environment/user configuration, not theme colors. Keep CT typography stable across runners. */
+	/* Font settings are environment/user configuration, not theme colors. Keep gallery typography stable across runners. */
 	--vscode-font-family: system-ui, "Ubuntu", "Droid Sans", sans-serif;
 	--vscode-editor-font-family: "Droid Sans Mono", "monospace", monospace;
 }

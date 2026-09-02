@@ -1,9 +1,10 @@
+import { providerIdentifiers } from "@roo-code/types"
 import * as assert from "assert"
 
 import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "./test-utils"
-import { sleep, waitFor, waitUntilCompleted } from "./utils"
+import { isCompletedAsk, sleep, waitFor, waitUntilCompleted } from "./utils"
 import {
 	SCHED_COMPLETED_PROMPT,
 	SCHED_COMPLETED_RESULT,
@@ -180,7 +181,7 @@ suite("Roo Code Subtasks", function () {
 		const asks: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -266,7 +267,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -347,7 +348,7 @@ suite("Roo Code Subtasks", function () {
 		let delegationCompletedSummary: string | undefined
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -452,7 +453,7 @@ suite("Roo Code Subtasks", function () {
 		const messages: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -532,7 +533,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -615,7 +616,7 @@ suite("Roo Code Subtasks", function () {
 		let delayedChildRequestStartedAt: number | undefined
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -735,7 +736,7 @@ suite("Roo Code Subtasks", function () {
 
 		const aimockUrl = process.env.AIMOCK_URL
 		const parentProfile = {
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			openRouterApiKey: "mock-key",
 			openRouterModelId: "openai/gpt-4.1",
 			rateLimitSeconds: 0,
@@ -842,7 +843,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -940,7 +941,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -1101,7 +1102,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
@@ -1157,7 +1158,7 @@ suite("Roo Code Subtasks", function () {
 		const says: Record<string, ClineMessage[]> = {}
 
 		const messageHandler = ({ taskId, message }: { taskId: string; message: ClineMessage }) => {
-			if (message.type === "ask") {
+			if (isCompletedAsk(message)) {
 				asks[taskId] = asks[taskId] || []
 				asks[taskId].push(message)
 			}
