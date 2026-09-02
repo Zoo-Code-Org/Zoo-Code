@@ -58,7 +58,7 @@ describe("GeminiHandler backend support", () => {
 
 	it("completePrompt should pass abort signal through to client via config.abortSignal", async () => {
 		const options = {
-			apiProvider: "gemini",
+			apiProvider: providerIdentifiers.gemini,
 			enableUrlContext: false,
 			enableGrounding: false,
 		} as ApiHandlerOptions
@@ -81,7 +81,7 @@ describe("GeminiHandler backend support", () => {
 
 	it("completePrompt should work without options (backward compatible)", async () => {
 		const options = {
-			apiProvider: "gemini",
+			apiProvider: providerIdentifiers.gemini,
 			enableUrlContext: false,
 			enableGrounding: false,
 		} as ApiHandlerOptions
