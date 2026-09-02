@@ -387,7 +387,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Create a mock task with initial mode
 			const mockTask = {
 				taskId: "test-task-id",
-				taskMode: "code", // Initial mode
+				_taskMode: "code", // Initial mode
 				emit: vi.fn(),
 				saveClineMessages: vi.fn(),
 				clineMessages: [],
@@ -421,8 +421,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Switch mode
 			await provider.handleModeSwitch("architect")
 
-			// Verify task's _taskMode property was updated (using private property)
-			expect((mockTask as any)._taskMode).toBe("architect")
+			// Verify task's _taskMode property was updated (accessed via bracket notation)
+			expect(mockTask["_taskMode"]).toBe("architect")
 
 			// Verify emit was called with taskModeSwitched event
 			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
@@ -961,7 +961,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			await savePromise
 
 			// Task should have the new mode
-			expect((mockTask as any)._taskMode).toBe("architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
 		})
 	})
 
@@ -998,7 +998,7 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.handleModeSwitch("invalid-mode")
 
 			expect(mockContext.globalState.update).not.toHaveBeenCalled()
-			expect((mockTask as any)._taskMode).toBe("code")
+			expect(mockTask["_taskMode"]).toBe("code")
 		})
 
 		it("should handle errors during mode switch gracefully", async () => {

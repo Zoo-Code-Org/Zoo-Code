@@ -190,7 +190,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		newTab,
 		preserveOpenTabs,
 	}: {
-		configuration: RooCodeSettings
+		configuration?: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean

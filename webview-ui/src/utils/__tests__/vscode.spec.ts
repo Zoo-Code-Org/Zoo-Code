@@ -3,7 +3,17 @@ import { VSCodeAPIWrapper } from "../vscode"
 const originalCrypto = globalThis.crypto
 const originalLocalStorage = globalThis.localStorage
 
-const createMockStorage = (initialState: Record<string, string> = {}) => {
+// Minimal Storage surface for VSCodeAPIWrapper browser fallback tests. Typed
+// precisely (instead of casting to Storage) so each double only promises the
+// members the wrapper actually touches.
+interface MockStorage {
+	getItem(key: string): string | null
+	setItem(key: string, value: string): void
+	removeItem(key: string): void
+	clear(): void
+}
+
+const createMockStorage = (initialState: Record<string, string> = {}): MockStorage => {
 	const state = { ...initialState }
 	return {
 		getItem: vi.fn((key: string) => state[key] ?? null),
@@ -18,7 +28,7 @@ const createMockStorage = (initialState: Record<string, string> = {}) => {
 				delete state[key]
 			}
 		}),
-	} as unknown as Storage
+	}
 }
 
 describe("VSCodeAPIWrapper", () => {
@@ -66,14 +76,20 @@ describe("VSCodeAPIWrapper", () => {
 			configurable: true,
 			value: { randomUUID },
 		})
-		const storage = {
+		const storage: MockStorage = {
 			getItem: vi.fn(() => {
 				throw new Error("storage denied")
 			}),
 			setItem: vi.fn(() => {
 				throw new Error("storage denied")
 			}),
-		} as unknown as Storage
+			removeItem: vi.fn(() => {
+				throw new Error("storage denied")
+			}),
+			clear: vi.fn(() => {
+				throw new Error("storage denied")
+			}),
+		}
 		Object.defineProperty(globalThis, "localStorage", {
 			configurable: true,
 			value: storage,
@@ -85,5 +101,25 @@ describe("VSCodeAPIWrapper", () => {
 		expect(randomUUID).toHaveBeenCalledTimes(1)
 		expect(storage.getItem).toHaveBeenCalled()
 		expect(storage.setItem).toHaveBeenCalled()
+	})
+
+	it("falls back to a timestamp-random id when crypto.randomUUID is unavailable", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: {},
+		})
+		vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+		vi.spyOn(Math, "random").mockReturnValue(0.987654321)
+		const storage = createMockStorage()
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// 1700000000000.toString(36) === "loyw3v28" and (0.987654321).toString(36) ===
+		// "0.zk00000ytu", so the deterministic fallback id drops the "0." prefix.
+		expect(wrapper.getViewStateId()).toBe("loyw3v28-zk00000ytu")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
 	})
 })

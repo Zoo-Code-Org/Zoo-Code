@@ -1659,9 +1659,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// Route through the shared mode-switch handler so the switch is
 					// validated and recorded like any other mode change (task history,
 					// TaskModeSwitched, and — when this is the focused task — the view's
-					// durable mode pin + ModeChanged broadcast).
+					// durable mode pin + ModeChanged broadcast). The handler writes this
+					// task's mode only after validation and persistence, so an unknown
+					// slug leaves the task mode untouched instead of recording a bad one.
 					await provider.handleModeSwitch(mode, this)
-					this._taskMode = mode
 				}
 
 				if (providerProfile) {

@@ -386,36 +386,39 @@ vi.mock("@roo-code/cloud", () => ({
 // Mock modes
 vi.mock("../../../shared/modes", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../../shared/modes")>()
+	const modes = [
+		{
+			slug: "code",
+			name: "Code Mode",
+			roleDefinition: "You are a code assistant",
+			groups: ["read", "edit"],
+		},
+		{
+			slug: "architect",
+			name: "Architect Mode",
+			roleDefinition: "You are an architect",
+			groups: ["read", "edit"],
+		},
+		{
+			slug: "debugger",
+			name: "Debugger Mode",
+			roleDefinition: "You are a debugger",
+			groups: ["read", "edit"],
+		},
+		{
+			slug: "ask",
+			name: "Ask Mode",
+			roleDefinition: "You are a helpful assistant",
+			groups: ["read"],
+		},
+	]
 	return {
 		...actual,
-		modes: [
-			{
-				slug: "code",
-				name: "Code Mode",
-				roleDefinition: "You are a code assistant",
-				groups: ["read", "edit"],
-			},
-			{
-				slug: "architect",
-				name: "Architect Mode",
-				roleDefinition: "You are an architect",
-				groups: ["read", "edit"],
-			},
-			{
-				slug: "debugger",
-				name: "Debugger Mode",
-				roleDefinition: "You are a debugger",
-				groups: ["read", "edit"],
-			},
-			{
-				slug: "ask",
-				name: "Ask Mode",
-				roleDefinition: "You are a helpful assistant",
-				groups: ["read"],
-			},
-		],
+		modes,
+		// Resolve against the mocked mode list above (not the real module modes) so the
+		// lookup matches exactly what the tests set up.
 		getModeBySlug: vi.fn().mockImplementation((slug: string) => {
-			return actual.modes?.find((m) => m.slug === slug) ?? null
+			return modes.find((m) => m.slug === slug) ?? null
 		}),
 		defaultModeSlug: "code",
 	}
@@ -833,7 +836,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
-		it("should clear local override when saveViewState receives undefined", async () => {
+		it("should clear the currentApiConfigName override when saveViewState receives undefined", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
 			await provider.saveViewState("currentApiConfigName", "my-profile")

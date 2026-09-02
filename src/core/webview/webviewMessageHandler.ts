@@ -645,8 +645,11 @@ export const webviewMessageHandler = async (
 								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
 
-							if (globalStillValid && name) {
-								await provider.saveViewState("currentApiConfigName", name)
+							if (globalStillValid && globalConfigName && name) {
+								// Re-pin this view to the still-valid shared global selection (not the
+								// first listed profile) so the view adopts the shared choice; the
+								// global selection itself is left untouched.
+								await provider.saveViewState("currentApiConfigName", globalConfigName)
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
 							} else {

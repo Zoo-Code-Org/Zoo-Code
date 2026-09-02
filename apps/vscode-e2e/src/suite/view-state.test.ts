@@ -144,6 +144,7 @@ suite("Roo Code View State", function () {
 		const plan = getFollowupModeIsolationPlan()
 		const rounds = plan.reduce((max, taskPlan) => Math.max(max, taskPlan.rounds.length), 0)
 		const modeEvents: Array<{ taskId: string; mode: string }> = []
+		const deliveryFailures: string[] = []
 		const taskIds = new Map<string, string>()
 		const pendingSuggestions = new Map<string, { answer: string; mode?: string }>()
 		const answeredSuggestions = new Set<string>()
@@ -176,7 +177,11 @@ suite("Roo Code View State", function () {
 				assert.ok(suggestion, `Expected pending suggestion for task ${taskId}`)
 				pendingSuggestions.delete(taskId)
 				answeredSuggestions.add(suggestionKey(taskId, suggestion.answer))
-				void globalThis.api.selectTaskFollowupSuggestion({ taskId, ...suggestion })
+				void globalThis.api.selectTaskFollowupSuggestion({ taskId, ...suggestion }).then((delivered) => {
+					if (!delivered) {
+						deliveryFailures.push(`${taskId}:${suggestion.answer}`)
+					}
+				})
 			}
 		}
 
@@ -243,8 +248,10 @@ suite("Roo Code View State", function () {
 					const taskId = taskIds.get(taskPlan.taskName)
 					return `${taskPlan.taskName}:${taskId ? modeCountForTask(taskId) : 0}`
 				})
+				const deliveryFailureDetail =
+					deliveryFailures.length > 0 ? `; suggestion delivery failures: ${deliveryFailures.join(", ")}` : ""
 				throw new Error(
-					`Timed out after ${releasedRounds} coordinated rounds; mode event counts: ${counts.join(", ")}; pending suggestions: ${pendingSuggestions.size}. ${error instanceof Error ? error.message : String(error)}`,
+					`Timed out after ${releasedRounds} coordinated rounds; mode event counts: ${counts.join(", ")}; pending suggestions: ${pendingSuggestions.size}${deliveryFailureDetail}. ${error instanceof Error ? error.message : String(error)}`,
 				)
 			})
 

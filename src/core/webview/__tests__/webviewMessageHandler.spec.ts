@@ -346,6 +346,23 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		)
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
+
+	it("re-pins the view to the shared global profile rather than the first listed profile", async () => {
+		double.providerSettingsManager.listConfig = vi.fn().mockResolvedValue([
+			{ name: "first-listed", apiProvider: providerIdentifiers.anthropic },
+			{ name: "shared-profile", apiProvider: providerIdentifiers.anthropic },
+		])
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+		// The view pin follows the still-valid shared global selection, not the first
+		// profile in the list; the global selection is left untouched.
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		expect(mockClineProvider.saveViewState).not.toHaveBeenCalledWith("currentApiConfigName", "first-listed")
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+	})
 })
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
