@@ -114,7 +114,10 @@ import {
 	saveApiMessages,
 	saveTaskMessages,
 	TaskHistoryStore,
-	assertValidTransition,
+	abandonDelegatedChild,
+	completeDelegatedChild,
+	delegateTaskToChild,
+	interruptDelegatedChild,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { getNonce } from "./getNonce"
@@ -705,7 +708,7 @@ export class ClineProvider
 					return
 				}
 
-				const interruptedChild = { ...childHistory, status: "interrupted" as const }
+				const interruptedChild = interruptDelegatedChild(parentHistory, childHistory)
 				await this.updateTaskHistory(interruptedChild)
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: interruptedChild })
 				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: parentHistory })
@@ -3596,7 +3599,7 @@ export class ClineProvider
 					if (parentHistory?.status === "delegated" && parentHistory?.awaitingChildId === task.taskId) {
 						// Mark the child interrupted and leave parent delegated with awaitingChildId
 						// intact — the user can resume this child later and it will report back.
-						historyItem = { ...historyItem!, status: "interrupted" }
+						historyItem = interruptDelegatedChild(parentHistory, historyItem!)
 						await this.updateTaskHistory(historyItem)
 						// Clear any stale fail-closed entry from a prior failed cancel attempt so
 						// reopenParentFromDelegation is not incorrectly blocked on resume.
@@ -3923,43 +3926,19 @@ export class ClineProvider
 		//    silently detached.
 		try {
 			await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (historyItem) => {
-				let base = historyItem
-				if (pendingActionId && base.pendingAction?.actionId !== pendingActionId) {
+				if (pendingActionId && historyItem.pendingAction?.actionId !== pendingActionId) {
 					throw new Error(
-						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${base.pendingAction?.actionId}`,
+						`[delegateParentAndOpenChild] Pending action mismatch for parent ${parentTaskId}: expected ${pendingActionId}, found ${historyItem.pendingAction?.actionId}`,
 					)
 				}
-				if (historyItem.status === "delegated") {
-					// Re-read the awaited child's current status under the store lock.
-					const awaitedChildStatus = historyItem.awaitingChildId
-						? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
-						: undefined
-					// Only sever the stale link when the old child is confirmed interrupted.
-					// If it is still active, throw so the rollback path cleans up the new child
-					// rather than silently detaching a live task.
-					if (awaitedChildStatus !== "interrupted") {
-						throw new Error(
-							`[delegateParentAndOpenChild] Cannot re-delegate: existing child ${historyItem.awaitingChildId} is ${awaitedChildStatus}, not interrupted`,
-						)
-					}
-					// Implicit sever of the stale interrupted-child link.
-					// The old child keeps its interrupted status; we just clear the parent's pointer.
-					base = {
-						...historyItem,
-						status: "active" as const,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-					}
-				}
-				assertValidTransition(base.status, "delegated")
-				const childIds = Array.from(new Set([...(base.childIds ?? []), child.taskId]))
+				const awaitedChildStatus = historyItem.awaitingChildId
+					? this.taskHistoryStore.get(historyItem.awaitingChildId)?.status
+					: undefined
+				const delegated = delegateTaskToChild(historyItem, child.taskId, awaitedChildStatus)
 				return {
-					...base,
-					status: "delegated" as const,
-					delegatedToId: child.taskId,
-					awaitingChildId: child.taskId,
-					childIds,
-					pendingAction: base.pendingAction?.actionId === pendingActionId ? undefined : base.pendingAction,
+					...delegated,
+					pendingAction:
+						delegated.pendingAction?.actionId === pendingActionId ? undefined : delegated.pendingAction,
 				}
 			})
 			this.recentTasksCache = undefined
@@ -4207,6 +4186,7 @@ export class ClineProvider
 			//      any concurrent write that landed between step 1 and the lock acquisition
 			//      is preserved rather than silently overwritten.
 			let updatedHistory!: typeof historyItem
+			let completingChild!: HistoryItem
 			await this.taskHistoryStore.atomicUpdatePair(
 				childTaskId,
 				parentTaskId,
@@ -4214,29 +4194,17 @@ export class ClineProvider
 					if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
 						throw new Error(`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`)
 					}
-					assertValidTransition(child.status, "completed")
+					completingChild = { ...child }
+					const lifecycleUpdate = completeDelegatedChild(historyItem, child, completionResultSummary)
 					return {
-						...child,
-						status: "completed" as const,
-						completionResultSummary,
+						...lifecycleUpdate.child,
 						pendingAction:
 							child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
 					}
 				},
 				(parent) => {
-					if (parent.status !== "active") {
-						assertValidTransition(parent.status, "active")
-					}
-					const childIds = Array.from(new Set([...(parent.childIds ?? []), childTaskId]))
-					updatedHistory = {
-						...parent,
-						status: "active" as const,
-						completedByChildId: childTaskId,
-						completionResultSummary,
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-						childIds,
-					}
+					const lifecycleUpdate = completeDelegatedChild(parent, completingChild, completionResultSummary)
+					updatedHistory = lifecycleUpdate.parent
 					return updatedHistory
 				},
 			)
@@ -4346,8 +4314,6 @@ export class ClineProvider
 				return false
 			}
 
-			assertValidTransition(parentHistory.status, "active")
-
 			// Close the live child instance (if it's still the open task — the common case,
 			// since an interrupted child is rehydrated onto the stack after cancelTask) BEFORE
 			// clearing its persisted links. Task#saveClineMessages() rebuilds parentTaskId/
@@ -4362,13 +4328,8 @@ export class ClineProvider
 			await this.taskHistoryStore.atomicUpdatePair(
 				childTaskId,
 				parentTaskId,
-				(child) => ({ ...child, parentTaskId: undefined, rootTaskId: undefined }),
-				(parent) => ({
-					...parent,
-					status: "active" as const,
-					awaitingChildId: undefined,
-					delegatedToId: undefined,
-				}),
+				(child) => abandonDelegatedChild(parentHistory, child).child,
+				(parent) => abandonDelegatedChild(parent, freshChild).parent,
 			)
 			this.recentTasksCache = undefined
 
