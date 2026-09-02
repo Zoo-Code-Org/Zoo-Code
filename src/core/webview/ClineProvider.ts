@@ -1713,15 +1713,20 @@ export class ClineProvider
 	 * @param targetTask The task whose in-memory mode should be updated. Defaults to the
 	 * current task. Pass null to apply only global mode/profile effects for a pending child.
 	 */
-	public async handleModeSwitch(newMode: Mode, targetTask: Task | null | undefined = this.getCurrentTask()) {
+	public async handleModeSwitch(
+		newMode: Mode,
+		targetTask: Task | null | undefined = this.getCurrentTask(),
+		options: { preparePendingTask?: boolean } = {},
+	) {
 		return this.enqueueProviderProfileMutation((signal) =>
-			this.handleModeSwitchUnlocked(newMode, targetTask, signal),
+			this.handleModeSwitchUnlocked(newMode, targetTask, options, signal),
 		)
 	}
 
 	private async handleModeSwitchUnlocked(
 		newMode: Mode,
 		targetTask: Task | null | undefined,
+		options: { preparePendingTask?: boolean },
 		signal?: AbortSignal,
 	): Promise<void> {
 		const task = targetTask
@@ -1761,7 +1766,7 @@ export class ClineProvider
 		// If workspace lock is on, keep the current API config — don't load mode-specific config
 		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		if (lockApiConfigAcrossModes) {
-			if (targetTask !== null) {
+			if (targetTask !== null && !options.preparePendingTask) {
 				await this.postStateToWebview()
 			}
 			return
@@ -1795,7 +1800,15 @@ export class ClineProvider
 				if (hasActualSettings) {
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
-						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+						targetTask === null
+							? { skipCurrentTaskRebuild: true }
+							: options.preparePendingTask
+								? {
+										skipCurrentTaskRebuild: true,
+										applyProviderSettingsToContext: true,
+										suppressStatePost: true,
+									}
+								: undefined,
 						signal,
 					)
 				} else {
@@ -1817,7 +1830,7 @@ export class ClineProvider
 			}
 		}
 
-		if (targetTask !== null) {
+		if (targetTask !== null && !options.preparePendingTask) {
 			await this.postStateToWebview()
 		}
 	}
@@ -1995,6 +2008,8 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			applyProviderSettingsToContext?: boolean
+			suppressStatePost?: boolean
 		},
 	) {
 		return this.enqueueProviderProfileMutation((signal) =>
@@ -2008,6 +2023,8 @@ export class ClineProvider
 			persistModeConfig?: boolean
 			persistTaskHistory?: boolean
 			skipCurrentTaskRebuild?: boolean
+			applyProviderSettingsToContext?: boolean
+			suppressStatePost?: boolean
 		},
 		signal?: AbortSignal,
 	): Promise<void> {
@@ -2018,8 +2035,10 @@ export class ClineProvider
 		const persistModeConfig = options?.persistModeConfig ?? true
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
+		const applyProviderSettingsToContext = options?.applyProviderSettingsToContext ?? !skipCurrentTaskRebuild
+		const suppressStatePost = options?.suppressStatePost ?? false
 
-		if (!skipCurrentTaskRebuild) {
+		if (applyProviderSettingsToContext) {
 			// See `upsertProviderProfile` for a description of what this is doing.
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
@@ -2043,7 +2062,7 @@ export class ClineProvider
 			await this.persistStickyProviderProfileToCurrentTask(name, { skipCurrentTaskRebuild })
 		}
 
-		if (!skipCurrentTaskRebuild) {
+		if (!skipCurrentTaskRebuild && !suppressStatePost) {
 			await this.postStateToWebview()
 		}
 
@@ -3902,7 +3921,7 @@ export class ClineProvider
 		//    The mode switch must happen before createTask() because the Task constructor
 		//    initializes its mode from provider.getState() during initializeTaskMode().
 		try {
-			await this.handleModeSwitch(mode as any)
+			await this.handleModeSwitch(mode as any, undefined, { preparePendingTask: true })
 		} catch (e) {
 			this.log(
 				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
