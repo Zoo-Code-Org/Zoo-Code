@@ -2,7 +2,13 @@ import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 import OpenAI from "openai"
 
-import { type ModelInfo, openAiModelInfoSaneDefaults, vscodeLlmDefaultModelId, vscodeLlmModels } from "@roo-code/types"
+import {
+	type ModelInfo,
+	openAiModelInfoSaneDefaults,
+	providerIdentifiers,
+	vscodeLlmDefaultModelId,
+	vscodeLlmModels,
+} from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
 import { SELECTOR_SEPARATOR, stringifyVsCodeLmModelSelector } from "../../shared/vsCodeSelectorUtils"
@@ -555,7 +561,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		// Fallback when no client is available
 		const fallbackId = this.options.vsCodeLmModelSelector
 			? stringifyVsCodeLmModelSelector(this.options.vsCodeLmModelSelector)
-			: "vscode-lm"
+			: providerIdentifiers.vscodeLm
 
 		console.debug("Zoo Code <Language Model API>: No client available, using fallback model info")
 
