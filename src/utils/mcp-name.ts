@@ -115,19 +115,16 @@ export function sanitizeMcpName(name: string): string {
 }
 
 /**
- * Builds the normalized, untruncated identity for an MCP server/tool pair.
- * Provider-facing aliases may be truncated, so authorization checks must use
- * this full identity to distinguish names that share the same alias prefix.
+ * Builds a lossless internal identity for an MCP server/tool pair.
+ * Provider-facing aliases are sanitized and truncated, so authorization checks
+ * use length-prefixed raw names to keep every distinct pair collision-free.
  *
  * @param serverName - The MCP server name
  * @param toolName - The tool name
- * @returns A sanitized identity in the format mcp--serverName--toolName
+ * @returns A collision-free, internal-only MCP identity
  */
 export function buildMcpToolIdentity(serverName: string, toolName: string): string {
-	const sanitizedServer = sanitizeMcpName(serverName)
-	const sanitizedTool = sanitizeMcpName(toolName)
-
-	return `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${sanitizedServer}${MCP_TOOL_SEPARATOR}${sanitizedTool}`
+	return `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}identity:${serverName.length}:${serverName}${toolName.length}:${toolName}`
 }
 
 /**
@@ -141,7 +138,9 @@ export function buildMcpToolIdentity(serverName: string, toolName: string): stri
  * @returns A provider-compatible function name in the format mcp--serverName--toolName
  */
 export function buildMcpToolName(serverName: string, toolName: string): string {
-	const fullName = buildMcpToolIdentity(serverName, toolName)
+	const sanitizedServer = sanitizeMcpName(serverName)
+	const sanitizedTool = sanitizeMcpName(toolName)
+	const fullName = `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${sanitizedServer}${MCP_TOOL_SEPARATOR}${sanitizedTool}`
 
 	// Truncate if necessary (max 64 chars for Gemini)
 	if (fullName.length > 64) {

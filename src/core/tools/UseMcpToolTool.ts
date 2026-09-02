@@ -4,7 +4,7 @@ import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
 import type { ToolUse } from "../../shared/tools"
-import { buildMcpToolIdentity, isMcpTool, toolNamesMatch } from "../../utils/mcp-name"
+import { buildMcpToolIdentity, toolNamesMatch } from "../../utils/mcp-name"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import { ensureMcpServerAllowed } from "./mcpServerRestriction"
@@ -80,9 +80,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// the target resolves, enforce the exact request snapshot before approval or execution.
 			const requestPolicy = task.getCurrentRequestToolPolicy?.()
 			const canonicalToolName = buildMcpToolIdentity(serverName, resolvedToolName)
-			const isAvailableForRequest = Array.from(requestPolicy?.effectiveToolNames ?? []).some(
-				(name) => isMcpTool(name) && toolNamesMatch(name, canonicalToolName),
-			)
+			const isAvailableForRequest = requestPolicy?.effectiveToolNames.has(canonicalToolName) ?? false
 			if (requestPolicy && !isAvailableForRequest) {
 				const errorMessage = `Tool "${canonicalToolName}" is not available for this request.`
 				task.consecutiveMistakeCount++

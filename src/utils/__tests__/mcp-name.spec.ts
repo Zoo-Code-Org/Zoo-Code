@@ -1,5 +1,6 @@
 import {
 	sanitizeMcpName,
+	buildMcpToolIdentity,
 	buildMcpToolName,
 	parseMcpToolName,
 	normalizeMcpToolName,
@@ -190,6 +191,17 @@ describe("mcp-name utilities", () => {
 
 		it("should handle tool names with multiple hyphens", () => {
 			expect(buildMcpToolName("server", "get-user-profile")).toBe("mcp--server--get-user-profile")
+		})
+	})
+
+	describe("buildMcpToolIdentity", () => {
+		it("keeps names distinct when provider sanitization collides", () => {
+			expect(buildMcpToolName("server", "read.file")).toBe(buildMcpToolName("server", "readfile"))
+			expect(buildMcpToolIdentity("server", "read.file")).not.toBe(buildMcpToolIdentity("server", "readfile"))
+		})
+
+		it("keeps hyphens and underscores distinct", () => {
+			expect(buildMcpToolIdentity("server", "read-file")).not.toBe(buildMcpToolIdentity("server", "read_file"))
 		})
 	})
 
