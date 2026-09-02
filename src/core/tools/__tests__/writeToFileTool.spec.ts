@@ -167,6 +167,7 @@ describe("writeToFileTool", () => {
 			update: vi.fn().mockResolvedValue(undefined),
 			reset: vi.fn().mockResolvedValue(undefined),
 			revertChanges: vi.fn().mockResolvedValue(undefined),
+			saveDirectly: vi.fn().mockResolvedValue(undefined),
 			saveChanges: vi.fn().mockResolvedValue({
 				newProblemsMessage: "",
 				userEdits: null,
@@ -790,6 +791,42 @@ describe("writeToFileTool", () => {
 			expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
 		})
 
+		it("continues parse failure cleanup when finalizing the partial ask fails", async () => {
+			// Pins the .catch arm on task.finalizePartialToolAsk() in BaseTool.handle(): when the
+			// final args cannot be parsed and finalizing the open partial ask also fails, the
+			// failure must only be logged so the parse error is still reported to the user.
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				mockCline.finalizePartialToolAsk.mockRejectedValue(new Error("finalize failed"))
+
+				// Final block arrives but its native args cannot be parsed, so execute() is skipped.
+				const toolUse: ToolUse = {
+					type: "tool_use",
+					name: "write_to_file",
+					params: {
+						path: testFilePath,
+						content: testContent,
+					},
+					partial: false,
+				}
+				await writeToFileTool.handle(mockCline, toolUse as ToolUse<"write_to_file">, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: vi.fn(),
+				})
+
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledTimes(1)
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error finalizing write_to_file partial tool ask:",
+					expect.any(Error),
+				)
+				// The parse error is still reported despite the failed finalization.
+				expect(mockHandleError).toHaveBeenCalledWith("parsing write_to_file args", expect.any(Error))
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
 		it("reports a filesystem error only once across the streaming and execute phases", async () => {
 			// Regression test for the double-error UX defect: a single write_to_file call to a
 			// read-only path failed twice -- once in handlePartial ("handling partial write_to_file")
@@ -851,6 +888,36 @@ describe("writeToFileTool", () => {
 
 			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 			expect(diffViewCallOrder).toEqual(["revert", "reset"])
+		})
+
+		it("continues cleanup when reverting the diff document fails before approval", async () => {
+			// Pins the .catch arm on revertChanges() in revertDiffChangesBeforeReset(): a failed
+			// revert (e.g. the diff view was already closed) must only be logged so the
+			// remaining cleanup (diff view reset + per-task state teardown) always completes.
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				mockedCreateDirectoriesForFile.mockRejectedValue(
+					Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
+				)
+				mockCline.diffViewProvider.revertChanges.mockRejectedValue(new Error("revert failed"))
+
+				// Stream two deltas so the diff view opens with the unapproved content...
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+				// ...then the completed block fails before approval and the revert fails too.
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error reverting write_to_file diff view changes:",
+					expect.any(Error),
+				)
+				// The diff view is still reset and the per-task stream state still torn down.
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, expect.any(Function))
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 
 		it("keeps approved diff content in the editor when saving fails after approval", async () => {
@@ -1036,5 +1103,84 @@ describe("writeToFileTool", () => {
 				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
 			},
 		)
+	})
+
+	describe("prevent focus disruption experiment", () => {
+		/**
+		 * Enable the PREVENT_FOCUS_DISRUPTION experiment for the current task: the experiment
+		 * branches in execute()/handlePartial() read it from the provider state they fetch.
+		 */
+		function enablePreventFocusDisruption(): void {
+			mockCline.providerRef = {
+				deref: vi.fn().mockReturnValue({
+					getState: vi.fn().mockResolvedValue({
+						diagnosticsEnabled: true,
+						writeDelayMs: 1000,
+						experiments: { preventFocusDisruption: true },
+					}),
+				}),
+			}
+		}
+
+		beforeEach(() => {
+			// The tests before this describe leave the directory-creation mock rejecting;
+			// restore the factory default so the experiment branch runs to completion.
+			mockedCreateDirectoriesForFile.mockResolvedValue([])
+		})
+
+		it("saves through saveDirectly without diff editor interaction when the experiment is enabled", async () => {
+			enablePreventFocusDisruption()
+
+			await executeWriteFileTool({}, { fileExists: false })
+
+			expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalledWith(
+				testFilePath,
+				testContent,
+				false,
+				true,
+				1000,
+			)
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.didEditFile).toBe(true)
+			expect(toolResult).toBe("Tool result message")
+		})
+
+		it("keeps approved diff content when saveDirectly fails after approval", async () => {
+			// The experiment branch stamps writeApproved before saveDirectly, so a late failure
+			// must NOT revert the document (the user approved the edit and can save it
+			// manually) but must still finalize the partial ask and reset the diff view.
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				enablePreventFocusDisruption()
+				mockCline.diffViewProvider.saveDirectly.mockRejectedValue(new Error("save failed"))
+
+				await executeWriteFileTool({}, { fileExists: false })
+
+				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+				expect(mockCline.diffViewProvider.saveDirectly).toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.revertChanges).not.toHaveBeenCalled()
+				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+				expect(mockCline.didEditFile).toBe(false)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+
+		it("skips streaming diff view work when the experiment is enabled", async () => {
+			// With the experiment enabled the tool preview is embedded in the complete message
+			// built in execute(), so handlePartial must not open or update the diff view while
+			// streaming.
+			enablePreventFocusDisruption()
+
+			// Delta 1 - stabilize path; delta 2 - path stabilized but the experiment short-circuits
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+		})
 	})
 })
