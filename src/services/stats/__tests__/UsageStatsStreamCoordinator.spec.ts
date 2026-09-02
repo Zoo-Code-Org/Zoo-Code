@@ -952,6 +952,12 @@ describe("UsageStatsStreamCoordinator", () => {
 			}
 
 			it("should auto-rebuild when events exist but derived tables are empty", () => {
+				// Pin system time so the 30-day heatmap window deterministically
+				// covers the event date regardless of when the suite runs
+				// (vi.useFakeTimers() freezes new Date() at suite start).
+				// STATS_TEST/heatmappin/001
+				vi.setSystemTime(new Date("2026-07-30T12:00:00Z"))
+
 				// Append an event (populates all tables), then clear derived tables
 				db.append(makeEvent({ occurredAt: "2026-07-30T10:00:00Z" }))
 				clearDerivedTables()
