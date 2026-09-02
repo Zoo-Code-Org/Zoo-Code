@@ -183,6 +183,31 @@ describe("ZAiHandler", () => {
 			expect(model.info.cacheReadsPrice).toBe(0.26)
 		})
 
+		it("should expose multimodal GLM-5.3-Flash for the international Coding Plan", () => {
+			const model = new ZAiHandler({
+				apiModelId: "glm-5.3-flash",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			}).getModel()
+
+			expect(model.id).toBe("glm-5.3-flash")
+			expect(model.info).toMatchObject({
+				contextWindow: 1_000_000,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["low", "high", "max"],
+				requiredReasoningEffort: true,
+				reasoningEffort: "max",
+				preserveReasoning: true,
+				defaultTemperature: 1,
+				inputPrice: 0.15,
+				outputPrice: 0.5,
+				cacheReadsPrice: 0.03,
+			})
+		})
+
 		it("should return GLM-5-Turbo international model with thinking support", () => {
 			const testModelId: InternationalZAiModelId = "glm-5-turbo"
 			const handlerWithModel = new ZAiHandler({
@@ -335,6 +360,22 @@ describe("ZAiHandler", () => {
 			expect(model.info.cacheReadsPrice).toBe(0.13)
 		})
 
+		it("should expose GLM-5.3-Flash for the China Coding Plan", () => {
+			const model = new ZAiHandler({
+				apiModelId: "glm-5.3-flash",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "china_coding",
+			}).getModel()
+
+			expect(model.id).toBe("glm-5.3-flash")
+			expect(model.info.supportsImages).toBe(true)
+			expect(model.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(model.info.requiredReasoningEffort).toBe(true)
+			expect(model.info.inputPrice).toBe(0.075)
+			expect(model.info.outputPrice).toBe(0.25)
+			expect(model.info.cacheReadsPrice).toBe(0.015)
+		})
+
 		it("should return GLM-4.7 China model with thinking support", () => {
 			const testModelId: MainlandZAiModelId = "glm-4.7"
 			const handlerWithModel = new ZAiHandler({
@@ -409,6 +450,7 @@ describe("ZAiHandler", () => {
 
 		it("should expose GLM-5.3 on the international API", () => {
 			expect(getZAiModels("international_api")).toHaveProperty("glm-5.3")
+			expect(getZAiModels("international_api")).toHaveProperty("glm-5.3-flash")
 			const handlerWithModel = new ZAiHandler({
 				apiModelId: "glm-5.3",
 				zaiApiKey: "test-zai-api-key",
@@ -458,6 +500,7 @@ describe("ZAiHandler", () => {
 
 		it("should not expose Coding Plan-only models", () => {
 			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.3")
+			expect(getZAiModels("china_api")).not.toHaveProperty("glm-5.3-flash")
 		})
 	})
 
@@ -895,6 +938,29 @@ describe("ZAiHandler", () => {
 			)
 		})
 
+		it("should use the official GLM-5.3-Flash thinking and sampling defaults", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3-flash",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+				reasoningEffort: "disable",
+			})
+
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+
+			const messageGenerator = handlerWithModel.createMessage("system prompt", [])
+			await messageGenerator.next()
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "glm-5.3-flash",
+					thinking: { type: "enabled", clear_thinking: false },
+					reasoning_effort: "max",
+					temperature: 1,
+				}),
+			)
+		})
+
 		it("should keep GLM-5.3 reasoning enabled when the master reasoning setting is disabled", async () => {
 			const handlerWithModel = new ZAiHandler({
 				apiModelId: "glm-5.3",
@@ -939,6 +1005,26 @@ describe("ZAiHandler", () => {
 				},
 				undefined,
 			)
+		})
+
+		it("should use the official GLM-5.3-Flash parameters for completePrompt", async () => {
+			const handlerWithModel = new ZAiHandler({
+				apiModelId: "glm-5.3-flash",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_api",
+				reasoningEffort: "low",
+			})
+
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await expect(handlerWithModel.completePrompt("prompt")).resolves.toBe("response")
+			expect(mockCreate).toHaveBeenCalledWith({
+				model: "glm-5.3-flash",
+				messages: [{ role: "user", content: "prompt" }],
+				temperature: 1,
+				thinking: { type: "enabled", clear_thinking: false },
+				reasoning_effort: "low",
+			})
 		})
 
 		it("should omit reasoning_effort for GLM-5.2 when reasoningEffort is set to disable", async () => {

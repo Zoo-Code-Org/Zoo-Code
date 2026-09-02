@@ -1,3 +1,4 @@
+import { providerIdentifiers } from "@roo-code/types"
 import fs from "fs/promises"
 import path from "path"
 
@@ -58,7 +59,7 @@ describe("Settings Storage", () => {
 			const settingsData = {
 				onboardingProviderChoice: OnboardingProviderChoice.Byok,
 				mode: "architect",
-				provider: "anthropic" as const,
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				reasoningEffort: "high" as const,
 			}
@@ -95,7 +96,7 @@ describe("Settings Storage", () => {
 
 		it("should merge settings with existing ones", async () => {
 			await saveSettings({ mode: "code" })
-			await saveSettings({ provider: "openrouter" as const })
+			await saveSettings({ provider: providerIdentifiers.openrouter })
 
 			const savedData = await fs.readFile(expectedSettingsFile, "utf-8")
 			const settings = JSON.parse(savedData)
@@ -107,7 +108,7 @@ describe("Settings Storage", () => {
 		it("should save all default settings fields", async () => {
 			await saveSettings({
 				mode: "architect",
-				provider: "anthropic" as const,
+				provider: providerIdentifiers.anthropic,
 				model: "claude-opus-4.6",
 				reasoningEffort: "medium" as const,
 				consecutiveMistakeLimit: 5,
@@ -155,7 +156,7 @@ describe("Settings Storage", () => {
 			await saveSettings({
 				onboardingProviderChoice: OnboardingProviderChoice.Byok,
 				mode: "architect",
-				provider: "gemini" as const,
+				provider: providerIdentifiers.gemini,
 			})
 
 			await resetOnboarding()
@@ -172,7 +173,7 @@ describe("Settings Storage", () => {
 			// Test that all the settings that can be used as defaults are properly saved and loaded
 			const defaultSettings = {
 				mode: "debug",
-				provider: "openai-native" as const,
+				provider: providerIdentifiers.openaiNative,
 				model: "gpt-4o",
 				reasoningEffort: "low" as const,
 				consecutiveMistakeLimit: 7,
@@ -205,7 +206,7 @@ describe("Settings Storage", () => {
 		it("should support all settings together including requireApproval", async () => {
 			const allSettings = {
 				mode: "architect",
-				provider: "anthropic" as const,
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				reasoningEffort: "high" as const,
 				requireApproval: true,
@@ -231,7 +232,7 @@ describe("Settings Storage", () => {
 		it("should support all settings together including oneshot", async () => {
 			const allSettings = {
 				mode: "architect",
-				provider: "anthropic" as const,
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				reasoningEffort: "high" as const,
 				consecutiveMistakeLimit: 9,

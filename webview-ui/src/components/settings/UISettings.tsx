@@ -133,8 +133,9 @@ export const UISettings = ({
 						label={t("settings:ui.chatFontSize.label")}>
 						<div className="flex flex-col gap-1">
 							<label className="block font-medium mb-1">{t("settings:ui.chatFontSize.label")}</label>
-							<div className="flex items-center gap-2">
+							<div className="flex flex-wrap items-center gap-2">
 								<Slider
+									className="min-w-0 flex-1"
 									min={CHAT_FONT_SIZE_MIN}
 									max={CHAT_FONT_SIZE_MAX}
 									step={1}
@@ -144,6 +145,7 @@ export const UISettings = ({
 								/>
 								<span className="w-12 text-right">{chatFontSize ?? CHAT_FONT_SIZE_DEFAULT}px</span>
 								<Button
+									className="h-auto max-w-full whitespace-normal text-center"
 									variant="secondary"
 									size="sm"
 									disabled={chatFontSize === undefined}

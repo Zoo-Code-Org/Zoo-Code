@@ -38,6 +38,7 @@ const MockedQdrantVectorStore = QdrantVectorStore as MockedClass<typeof QdrantVe
 
 // Import the mocked functions
 import { getDefaultModelId, getModelDimension } from "../../../shared/embeddingModels"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 const mockGetDefaultModelId = getDefaultModelId as MockedFunction<typeof getDefaultModelId>
 const mockGetModelDimension = getModelDimension as MockedFunction<typeof getModelDimension>
 
@@ -63,7 +64,7 @@ describe("CodeIndexServiceFactory", () => {
 			// Arrange
 			const testModelId = "text-embedding-3-large"
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: testModelId,
 				openAiOptions: {
 					openAiNativeApiKey: "test-api-key",
@@ -85,7 +86,7 @@ describe("CodeIndexServiceFactory", () => {
 			// Arrange
 			const testModelId = "nomic-embed-text:latest"
 			const testConfig = {
-				embedderProvider: "ollama",
+				embedderProvider: providerIdentifiers.ollama,
 				modelId: testModelId,
 				ollamaOptions: {
 					ollamaBaseUrl: "http://localhost:11434",
@@ -106,7 +107,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should handle undefined model ID for OpenAI embedder", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: undefined,
 				openAiOptions: {
 					openAiNativeApiKey: "test-api-key",
@@ -127,7 +128,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should handle undefined model ID for Ollama embedder", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "ollama",
+				embedderProvider: providerIdentifiers.ollama,
 				modelId: undefined,
 				ollamaOptions: {
 					ollamaBaseUrl: "http://localhost:11434",
@@ -148,7 +149,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should throw error when OpenAI API key is missing", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "text-embedding-3-large",
 				openAiOptions: {
 					openAiNativeApiKey: undefined,
@@ -163,7 +164,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should throw error when Ollama base URL is missing", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "ollama",
+				embedderProvider: providerIdentifiers.ollama,
 				modelId: "nomic-embed-text:latest",
 				ollamaOptions: {
 					ollamaBaseUrl: undefined,
@@ -270,7 +271,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should create GeminiEmbedder with default model when no modelId specified", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				geminiOptions: {
 					apiKey: "test-gemini-api-key",
 				},
@@ -287,7 +288,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should create GeminiEmbedder with specified modelId", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				modelId: "gemini-embedding-001",
 				geminiOptions: {
 					apiKey: "test-gemini-api-key",
@@ -306,7 +307,7 @@ describe("CodeIndexServiceFactory", () => {
 			// Arrange - service-factory passes the config modelId directly;
 			// GeminiEmbedder handles the migration internally
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				modelId: "text-embedding-004",
 				geminiOptions: {
 					apiKey: "test-gemini-api-key",
@@ -324,7 +325,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should throw error when Gemini API key is missing", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				geminiOptions: {
 					apiKey: undefined,
 				},
@@ -338,7 +339,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should throw error when Gemini options are missing", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				geminiOptions: undefined,
 			}
 			mockConfigManager.getConfig.mockReturnValue(testConfig as any)
@@ -381,7 +382,7 @@ describe("CodeIndexServiceFactory", () => {
 			// Arrange
 			const testModelId = "text-embedding-3-large"
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: testModelId,
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "test-key",
@@ -406,7 +407,7 @@ describe("CodeIndexServiceFactory", () => {
 			// Arrange
 			const testModelId = "nomic-embed-text:latest"
 			const testConfig = {
-				embedderProvider: "ollama",
+				embedderProvider: providerIdentifiers.ollama,
 				modelId: testModelId,
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "test-key",
@@ -592,7 +593,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should use model-specific dimension for Gemini provider", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				modelId: "gemini-embedding-001",
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "test-key",
@@ -616,7 +617,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should use default model dimension for Gemini when modelId not specified", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "test-key",
 			}
@@ -641,7 +642,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should use default model when config.modelId is undefined", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: undefined,
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "test-key",
@@ -665,7 +666,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should throw error when vector dimension cannot be determined", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "unknown-model",
 				qdrantUrl: "http://localhost:6333",
 				qdrantApiKey: "test-key",
@@ -680,7 +681,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should throw error when Qdrant URL is missing", () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "text-embedding-3-small",
 				qdrantUrl: undefined,
 				qdrantApiKey: "test-key",
@@ -716,7 +717,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should validate OpenAI embedder successfully", async () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "text-embedding-3-small",
 				openAiOptions: {
 					openAiNativeApiKey: "test-api-key",
@@ -740,7 +741,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should return validation error from OpenAI embedder", async () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "text-embedding-3-small",
 				openAiOptions: {
 					openAiNativeApiKey: "invalid-key",
@@ -769,7 +770,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should validate Ollama embedder successfully", async () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "ollama",
+				embedderProvider: providerIdentifiers.ollama,
 				modelId: "nomic-embed-text",
 				ollamaOptions: {
 					ollamaBaseUrl: "http://localhost:11434",
@@ -818,7 +819,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should validate Gemini embedder successfully", async () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "gemini",
+				embedderProvider: providerIdentifiers.gemini,
 				geminiOptions: {
 					apiKey: "test-gemini-api-key",
 				},
@@ -841,7 +842,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should handle validation exceptions", async () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "text-embedding-3-small",
 				openAiOptions: {
 					openAiNativeApiKey: "test-api-key",
@@ -869,7 +870,7 @@ describe("CodeIndexServiceFactory", () => {
 		it("should return error for invalid embedder configuration", async () => {
 			// Arrange
 			const testConfig = {
-				embedderProvider: "openai",
+				embedderProvider: providerIdentifiers.openai,
 				modelId: "text-embedding-3-small",
 				openAiOptions: {
 					openAiNativeApiKey: undefined, // Missing API key

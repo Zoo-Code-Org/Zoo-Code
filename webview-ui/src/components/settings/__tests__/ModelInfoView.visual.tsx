@@ -1,10 +1,8 @@
-import React from "react"
-
 import { expect, test } from "../../../../playwright/coverage-fixture"
-import { ModelInfoViewFixture } from "./ModelInfoView.visual.fixture"
+import { mountedStory } from "../../../../playwright/mounted-story"
 
 test("renders OpenAI service tier pricing in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<ModelInfoViewFixture />)
+	const component = mountedStory(await mount("model-info"))
 
 	await component.evaluate(async () => {
 		await document.fonts.ready

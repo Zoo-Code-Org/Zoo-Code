@@ -344,9 +344,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Han arribat tres grans models nous — utilitza els nous Gemini 3.7 Flash, GLM 5.3 i Qwen3.8 Max, a més de millores en el raonament, els preus i la cobertura de proveïdors de DeepSeek V4.",
-			"highlight2": "Connecta't a NanoGPT — utilitza el descobriment dinàmic de models, streaming i completions de prompts, i preferències d'encaminament per velocitat, preu, latència, rendiment, compatibilitat amb eines i memòria cau.",
-			"highlight3": "Proveïdors i tasques més fiables — les correccions milloren la configuració dels endpoints d'Azure OpenAI, els límits de sortida de Kimi Code, la conservació dels títols de l'historial de tasques i la importació/exportació de configuració de Zoo."
+			"highlight1": "🤖 Prova GLM-5.3-Flash i Gemini 3.7 Flash amb un 50 % de descompte durant 2 setmanes, i MiniMax M3 totalment GRATUÏT per als usuaris amb saldo al nou Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "Model nou — GLM-5.3-Flash ja està disponible mitjançant Z AI.",
+			"highlight3": "Correccions de fiabilitat — aprovacions de subtasques restaurades, sortida d'eines buida de Vertex Gemini 3.7, errors d'inici del terminal, errors del servei en segon pla i la llegibilitat dels temes."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",

@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
-import { kimiCodeAuthMethodSchema, providerIdentifiers, RouterModelsMessageType } from "@roo-code/types"
+import {
+	kimiCodeAuthMethodSchema,
+	providerIdentifiers,
+	retiredProviderIdentifiers,
+	RouterModelsMessageType,
+} from "@roo-code/types"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
@@ -104,7 +109,7 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			type: RouterModelsMessageType.singleRouterModelFetchResponse,
 			success: false,
 			error: "Roo Code Router has been removed. Please select and configure a different provider.",
-			values: { provider: "roo" },
+			values: { provider: retiredProviderIdentifiers.roo },
 		})
 	})
 

@@ -5,6 +5,5 @@ export const GlobalFileNames = {
 	customModes: "custom_modes.yaml",
 	taskMetadata: "task_metadata.json",
 	historyItem: "history_item.json",
-	historyIndex: "_index.json",
 	delegationRepairIntent: "_delegation_repair_intent.json",
 }

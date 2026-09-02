@@ -33,6 +33,8 @@ type OpenAiRequestConfig = {
 	signal?: AbortSignal
 }
 
+const isGlm53Model = (model: string) => model === "glm-5.3" || model === "glm-5.3-flash"
+
 export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 	constructor(options: ApiHandlerOptions) {
 		const apiLine = options.zaiApiLine ?? "international_coding"
@@ -114,7 +116,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			stream_options: { include_usage: true },
 			// Models with required reasoning stay enabled even when an old setting requests disable.
 			thinking: useReasoning
-				? { type: "enabled", ...(model === "glm-5.3" && { clear_thinking: false }) }
+				? { type: "enabled", ...(isGlm53Model(model) && { clear_thinking: false }) }
 				: { type: "disabled" },
 			reasoning_effort: reasoningEffort,
 			tools: this.convertToolsForOpenAI(metadata?.tools),
@@ -153,7 +155,7 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 
 	override async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		const { id: model, info } = this.getModel()
-		if (model !== "glm-5.3") {
+		if (!isGlm53Model(model)) {
 			return super.completePrompt(prompt, options)
 		}
 
