@@ -1,5 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI, { APIUserAbortError } from "openai"
+import OpenAI from "openai"
 
 import type { ModelInfo } from "@roo-code/types"
 
@@ -11,7 +11,7 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
-import { handleOpenAIError } from "./utils/error-handler"
+import { handleOpenAIError, handleOpenAIRequestError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
@@ -28,27 +28,6 @@ type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerO
 /** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
 type OpenAiRequestConfig = {
 	signal?: AbortSignal
-}
-
-/**
- * Handles errors from OpenAI Node SDK request sites with abort awareness.
- *
- * An abort failure (the external signal already aborted, the SDK's
- * APIUserAbortError, or a fetch-level AbortError) is normalized to a fresh
- * Error with name "AbortError" and a message ending in "aborted" (the Task.ts
- * contract) instead of being wrapped as a regular completion error, which a
- * plain rethrow of the SDK abort error would produce.
- */
-export function handleOpenAIRequestError(error: unknown, providerName: string, abortSignal?: AbortSignal): Error {
-	if (
-		abortSignal?.aborted ||
-		(error instanceof Error && (error.name === "AbortError" || error instanceof APIUserAbortError))
-	) {
-		const aborted = new Error(`${providerName} request aborted`, { cause: error })
-		aborted.name = "AbortError"
-		return aborted
-	}
-	return handleOpenAIError(error, providerName)
 }
 
 export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>

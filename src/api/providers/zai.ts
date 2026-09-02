@@ -14,8 +14,9 @@ import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/ap
 import { convertToZAiFormat } from "../transform/zai-format"
 
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { BaseOpenAiCompatibleProvider, handleOpenAIRequestError } from "./base-openai-compatible-provider"
+import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 import { NOT_PROVIDED } from "./constants"
+import { handleOpenAIRequestError } from "./utils/error-handler"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
 

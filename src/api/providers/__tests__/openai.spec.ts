@@ -12,6 +12,7 @@ import {
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { captureError } from "../../../test-utils/errors"
 import axios from "axios"
 
 vitest.mock("../utils/timeout-config", () => ({
@@ -91,20 +92,6 @@ vitest.mock("axios", () => ({
 		get: vitest.fn(),
 	},
 }))
-
-/**
- * Captures the rejection of an operation as an Error. The abort contract always
- * throws an Error; the guard keeps strict typing without a cast. Fails the test
- * if the operation resolves.
- */
-async function captureError(operation: Promise<unknown>): Promise<Error> {
-	try {
-		await operation
-	} catch (error) {
-		return error instanceof Error ? error : new Error(String(error))
-	}
-	throw new Error("Expected the operation to reject")
-}
 
 describe("OpenAiHandler", () => {
 	let handler: OpenAiHandler
@@ -979,6 +966,11 @@ describe("OpenAiHandler", () => {
 			const requestOptions = mockCreate.mock.calls.at(-1)?.[1]
 			expect(requestOptions?.signal).toBeInstanceOf(AbortSignal)
 			expect(requestOptions?.signal.aborted).toBe(false)
+			// The merged signal must follow the caller's controller: a regression
+			// that drops options.abortSignal (keeping only the timeout signal)
+			// would stop aborting here and fail the test.
+			controller.abort()
+			expect(requestOptions?.signal.aborted).toBe(true)
 		})
 
 		it("should pass a timeout-only request signal when completePrompt timeoutMs is positive", async () => {

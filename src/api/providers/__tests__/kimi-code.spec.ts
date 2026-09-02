@@ -2,6 +2,7 @@ import { buildApiHandler } from "../../index"
 import { KimiCodeHandler } from "../kimi-code"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { captureError } from "../../../test-utils/errors"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
@@ -35,17 +36,6 @@ function completionsCreate(handler: KimiCodeHandler): ReturnType<typeof vi.fn> {
 		}
 	).client
 	return vi.spyOn(client.chat.completions, "create") as unknown as ReturnType<typeof vi.fn>
-}
-
-/** Captures the rejection of an operation; fails the test if it resolves. */
-async function captureError(operation: Promise<unknown>): Promise<Error> {
-	try {
-		await operation
-	} catch (error) {
-		// Abort normalization always throws an Error; the guard keeps strict typing without casts.
-		return error instanceof Error ? error : new Error(String(error))
-	}
-	throw new Error("Expected the operation to reject")
 }
 
 describe("KimiCodeHandler", () => {

@@ -17,6 +17,7 @@ import {
 import { ZAiHandler } from "../zai"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { captureError } from "../../../test-utils/errors"
 
 vitest.mock("openai", () => {
 	const createMock = vitest.fn()
@@ -28,20 +29,6 @@ vitest.mock("openai", () => {
 		}),
 	}
 })
-
-/**
- * Captures the rejection of an operation as an Error. The abort contract always
- * throws an Error; the guard keeps strict typing without a cast. Fails the test
- * if the operation resolves.
- */
-async function captureError(operation: Promise<unknown>): Promise<Error> {
-	try {
-		await operation
-	} catch (error) {
-		return error instanceof Error ? error : new Error(String(error))
-	}
-	throw new Error("Expected the operation to reject")
-}
 
 describe("ZAiHandler", () => {
 	let handler: ZAiHandler

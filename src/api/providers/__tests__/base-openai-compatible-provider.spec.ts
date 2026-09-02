@@ -8,6 +8,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { BaseOpenAiCompatibleProvider } from "../base-openai-compatible-provider"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+import { captureError } from "../../../test-utils/errors"
 
 // Create mock functions
 const mockCreate = vi.fn()
@@ -49,20 +50,6 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 			apiKey,
 		})
 	}
-}
-
-/**
- * Captures the rejection of an operation as an Error. The abort contract always
- * throws an Error; the guard keeps strict typing without a cast. Fails the test
- * if the operation resolves.
- */
-async function captureError(operation: Promise<unknown>): Promise<Error> {
-	try {
-		await operation
-	} catch (error) {
-		return error instanceof Error ? error : new Error(String(error))
-	}
-	throw new Error("Expected the operation to reject")
 }
 
 describe("BaseOpenAiCompatibleProvider", () => {
@@ -385,6 +372,8 @@ describe("BaseOpenAiCompatibleProvider", () => {
 					}
 				})(),
 			)
+
+			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1041): Invalid token")
 		})
 
 		it("should fall back to an Unknown error when a base_resp stream chunk has no status_msg", async () => {
