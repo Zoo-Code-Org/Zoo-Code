@@ -21,7 +21,7 @@ import switchMode from "./switch_mode"
 import updateTodoList from "./update_todo_list"
 import writeToFile from "./write_to_file"
 
-export { getMcpServerTools } from "./mcp_server"
+export { getMcpServerTools, getMcpServerToolsWithIdentity } from "./mcp_server"
 export { convertOpenAIToolToAnthropic, convertOpenAIToolsToAnthropic } from "./converters"
 export type { ReadFileToolOptions } from "./read_file"
 

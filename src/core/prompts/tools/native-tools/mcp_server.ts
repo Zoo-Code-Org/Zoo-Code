@@ -1,7 +1,12 @@
 import type OpenAI from "openai"
 import { McpHub } from "../../../../services/mcp/McpHub"
-import { buildMcpToolName } from "../../../../utils/mcp-name"
+import { buildMcpToolIdentity, buildMcpToolName } from "../../../../utils/mcp-name"
 import { normalizeToolSchema, type JsonSchema } from "../../../../utils/json-schema"
+
+export interface McpServerToolDefinition {
+	tool: OpenAI.Chat.ChatCompletionTool
+	identity: string
+}
 
 /**
  * Dynamically generates native tool definitions for all enabled tools across connected MCP servers.
@@ -12,6 +17,19 @@ import { normalizeToolSchema, type JsonSchema } from "../../../../utils/json-sch
  * @returns An array of OpenAI.Chat.ChatCompletionTool definitions.
  */
 export function getMcpServerTools(mcpHub?: McpHub, allowedServers?: string[]): OpenAI.Chat.ChatCompletionTool[] {
+	return getMcpServerToolsWithIdentity(mcpHub, allowedServers).map(({ tool }) => tool)
+}
+
+/**
+ * Generates provider tool definitions together with their untruncated identities.
+ * The identities are retained separately because provider aliases are limited to
+ * 64 characters and are therefore not safe authorization keys.
+ *
+ * @param mcpHub The McpHub instance containing connected servers.
+ * @param allowedServers Optional server allowlist.
+ * @returns Deduplicated provider definitions paired with full MCP identities.
+ */
+export function getMcpServerToolsWithIdentity(mcpHub?: McpHub, allowedServers?: string[]): McpServerToolDefinition[] {
 	if (!mcpHub) {
 		return []
 	}
@@ -23,7 +41,7 @@ export function getMcpServerTools(mcpHub?: McpHub, allowedServers?: string[]): O
 		const allowSet = new Set(allowedServers)
 		servers = servers.filter((s) => allowSet.has(s.name))
 	}
-	const tools: OpenAI.Chat.ChatCompletionTool[] = []
+	const tools: McpServerToolDefinition[] = []
 	// Track seen tool names to prevent duplicates (e.g., when same server exists in both global and project configs)
 	const seenToolNames = new Set<string>()
 
@@ -67,7 +85,10 @@ export function getMcpServerTools(mcpHub?: McpHub, allowedServers?: string[]): O
 				},
 			}
 
-			tools.push(toolDefinition)
+			tools.push({
+				tool: toolDefinition,
+				identity: buildMcpToolIdentity(server.name, tool.name),
+			})
 		}
 	}
 

@@ -9,7 +9,7 @@ import type { ClineProvider } from "../webview/ClineProvider"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
 
-import { getNativeTools, getMcpServerTools } from "../prompts/tools/native-tools"
+import { getNativeTools, getMcpServerToolsWithIdentity } from "../prompts/tools/native-tools"
 import {
 	filterNativeToolsForMode,
 	filterMcpToolsForMode,
@@ -139,7 +139,8 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	)
 
 	// Filter MCP tools based on mode restrictions.
-	const allMcpTools = getMcpServerTools(mcpHub, allowedMcpServers)
+	const allMcpToolDefinitions = getMcpServerToolsWithIdentity(mcpHub, allowedMcpServers)
+	const allMcpTools = allMcpToolDefinitions.map(({ tool }) => tool)
 	const mcpTools = mcpEnabled === false ? [] : allMcpTools
 	const filteredMcpTools = filterMcpToolsForMode(mcpTools, mode, customModes, experiments, filterSettings)
 
@@ -159,6 +160,13 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	// Combine filtered tools (for backward compatibility and for allowedFunctionNames)
 	const filteredTools = [...filteredNativeTools, ...filteredMcpTools, ...nativeCustomTools]
 	const effectiveToolNames = new Set(filteredTools.map((tool) => resolveToolAlias(getToolName(tool))))
+	const mcpIdentityByTool = new Map(allMcpToolDefinitions.map(({ tool, identity }) => [tool, identity]))
+	for (const tool of filteredMcpTools) {
+		const identity = mcpIdentityByTool.get(tool)
+		if (identity) {
+			effectiveToolNames.add(identity)
+		}
+	}
 
 	// If includeAllToolsWithRestrictions is true, return ALL tools but provide
 	// allowed names based on mode filtering

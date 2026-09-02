@@ -3,6 +3,7 @@
 import { useMcpToolTool } from "../UseMcpToolTool"
 import { Task } from "../../task/Task"
 import { ToolUse, AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
+import { buildMcpToolIdentity, buildMcpToolName } from "../../../utils/mcp-name"
 
 // Mock dependencies
 vi.mock("../../prompts/responses", () => ({
@@ -450,6 +451,68 @@ describe("useMcpToolTool", () => {
 			)
 			expect(mockPushToolResult).toHaveBeenCalledWith(
 				'Tool error: Tool "mcp--test-server--excluded-tool" is not available for this request.',
+			)
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(callTool).not.toHaveBeenCalled()
+		})
+
+		it("blocks a long MCP tool whose provider alias collides with an allowed tool", async () => {
+			const sharedPrefix = "long-tool-prefix-".repeat(4)
+			const allowedToolName = `${sharedPrefix}allowed`
+			const collidingToolName = `${sharedPrefix}excluded`
+			const callTool = vi.fn()
+			mockProviderRef.deref.mockReturnValue({
+				getMcpHub: () => ({
+					getAllServers: () => [
+						{
+							name: "test-server",
+							tools: [
+								{ name: allowedToolName, description: "Allowed tool" },
+								{ name: collidingToolName, description: "Excluded tool" },
+							],
+						},
+					],
+					callTool,
+				}),
+				postMessageToWebview: vi.fn(),
+			})
+			expect(buildMcpToolName("test-server", allowedToolName)).toBe(
+				buildMcpToolName("test-server", collidingToolName),
+			)
+			mockTask.getCurrentRequestToolPolicy = () => ({
+				effectiveToolNames: new Set([
+					buildMcpToolName("test-server", allowedToolName),
+					buildMcpToolIdentity("test-server", allowedToolName),
+				]),
+				mode: "code",
+				customModes: [],
+				experiments: {},
+			})
+			const block: ToolUse<"use_mcp_tool"> = {
+				type: "tool_use",
+				name: "use_mcp_tool",
+				params: {
+					server_name: "test-server",
+					tool_name: collidingToolName,
+					arguments: "{}",
+				},
+				nativeArgs: {
+					server_name: "test-server",
+					tool_name: collidingToolName,
+					arguments: {},
+				},
+				partial: false,
+			}
+
+			await useMcpToolTool.handle(mockTask as Task, block, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+			})
+
+			expect(mockTask.recordToolError).toHaveBeenCalledWith(
+				"use_mcp_tool",
+				expect.stringContaining(`Tool "${buildMcpToolIdentity("test-server", collidingToolName)}"`),
 			)
 			expect(mockAskApproval).not.toHaveBeenCalled()
 			expect(callTool).not.toHaveBeenCalled()

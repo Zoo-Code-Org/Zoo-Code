@@ -4,7 +4,7 @@ import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { t } from "../../i18n"
 import type { ToolUse } from "../../shared/tools"
-import { buildMcpToolName, isMcpTool, toolNamesMatch } from "../../utils/mcp-name"
+import { buildMcpToolIdentity, isMcpTool, toolNamesMatch } from "../../utils/mcp-name"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 import { ensureMcpServerAllowed } from "./mcpServerRestriction"
@@ -79,7 +79,7 @@ export class UseMcpToolTool extends BaseTool<"use_mcp_tool"> {
 			// tool is available so that unknown servers/tools can still return specific errors. Once
 			// the target resolves, enforce the exact request snapshot before approval or execution.
 			const requestPolicy = task.getCurrentRequestToolPolicy?.()
-			const canonicalToolName = buildMcpToolName(serverName, resolvedToolName)
+			const canonicalToolName = buildMcpToolIdentity(serverName, resolvedToolName)
 			const isAvailableForRequest = Array.from(requestPolicy?.effectiveToolNames ?? []).some(
 				(name) => isMcpTool(name) && toolNamesMatch(name, canonicalToolName),
 			)
