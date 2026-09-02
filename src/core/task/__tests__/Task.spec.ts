@@ -4309,55 +4309,68 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 		}
 	})
 
-	it("persists messages but does not update task history when the task was abandoned", async () => {
-		// The history item carries the stale link: a fire-and-forget save that
-		// reaches updateTaskHistory() after abandonSubtask's atomicUpdatePair()
-		// cleared parentTaskId/rootTaskId would silently reattach the severed
-		// parent-child link.
-		const staleHistoryItem: HistoryItem = {
-			id: "orphan-subtask",
-			number: 7,
-			ts: Date.now(),
+	// The history item carries the stale link: a fire-and-forget save that
+	// reaches updateTaskHistory() after abandonSubtask's atomicUpdatePair()
+	// cleared parentTaskId/rootTaskId would silently reattach the severed
+	// parent-child link.
+	const staleHistoryItem: HistoryItem = {
+		id: "orphan-subtask",
+		number: 7,
+		ts: Date.now(),
+		task: "orphan subtask",
+		tokensIn: 0,
+		tokensOut: 0,
+		totalCost: 0,
+		rootTaskId: "stale-root",
+		parentTaskId: "stale-parent",
+	}
+
+	// Task receives a full ClineProvider at runtime; these focused unit tests only
+	// exercise these methods, so the partial double is cast (same pattern as the
+	// "Subtask Rate Limiting" block above). taskHistoryStore must be stubbed:
+	// without it provider?.taskHistoryStore.get() throws before the guard is
+	// evaluated and the catch would mask whether execution reached
+	// updateTaskHistory().
+	function makeMockProvider() {
+		const mockProvider = {
+			context: {
+				globalStorageUri: { fsPath: "/test/storage" },
+				globalState: {
+					get: vi.fn().mockImplementation(() => undefined),
+					update: vi.fn().mockResolvedValue(undefined),
+					keys: vi.fn().mockReturnValue([]),
+				},
+			},
+			getState: vi.fn().mockResolvedValue({
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
+				mcpEnabled: false,
+			}),
+			getMcpHub: vi.fn().mockReturnValue(undefined),
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			updateTaskHistory: vi.fn().mockResolvedValue(undefined),
+			taskHistoryStore: { get: vi.fn(() => undefined) },
+		} as unknown as MockedClineProvider
+		return mockProvider
+	}
+
+	function createTask(provider: MockedClineProvider) {
+		return new Task({
+			provider,
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
 			task: "orphan subtask",
-			tokensIn: 0,
-			tokensOut: 0,
-			totalCost: 0,
-			rootTaskId: "stale-root",
-			parentTaskId: "stale-parent",
-		}
+			startTask: false,
+		})
+	}
+
+	it("persists messages but does not update task history when the task was abandoned", async () => {
 		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue(undefined)
 		const metaSpy = vi
 			.spyOn(taskMetadataModule, "taskMetadata")
 			.mockResolvedValue({ historyItem: staleHistoryItem, tokenUsage: getApiMetrics([]) })
 
 		try {
-			const mockProvider = {
-				context: {
-					globalStorageUri: { fsPath: "/test/storage" },
-					globalState: {
-						get: vi.fn().mockImplementation(() => undefined),
-						update: vi.fn().mockResolvedValue(undefined),
-						keys: vi.fn().mockReturnValue([]),
-					},
-				},
-				getState: vi.fn().mockResolvedValue({
-					apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
-					mcpEnabled: false,
-				}),
-				getMcpHub: vi.fn().mockReturnValue(undefined),
-				postMessageToWebview: vi.fn().mockResolvedValue(undefined),
-				updateTaskHistory: vi.fn().mockResolvedValue(undefined),
-				// Task receives a full ClineProvider at runtime; this focused unit test only
-				// exercises these methods, so the partial double is cast (same pattern as the
-				// "Subtask Rate Limiting" block above).
-			} as unknown as MockedClineProvider
-
-			const task = new Task({
-				provider: mockProvider,
-				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
-				task: "orphan subtask",
-				startTask: false,
-			})
+			const mockProvider = makeMockProvider()
+			const task = createTask(mockProvider)
 
 			// abandonSubtask severs the link, then aborts the subtask with
 			// isAbandoned=true; an in-flight fire-and-forget save lands here.
@@ -4369,6 +4382,66 @@ describe("saveClineMessages abandoned guard (#1021)", () => {
 			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
 			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled() // history link is not reattached
 		} finally {
+			saveSpy.mockRestore()
+			metaSpy.mockRestore()
+		}
+	})
+
+	it("updates task history for a non-abandoned task (guard does not block the normal path)", async () => {
+		const saveSpy = vi.spyOn(taskMessagesModule, "saveTaskMessages").mockResolvedValue(undefined)
+		const metaSpy = vi
+			.spyOn(taskMetadataModule, "taskMetadata")
+			.mockResolvedValue({ historyItem: staleHistoryItem, tokenUsage: getApiMetrics([]) })
+
+		try {
+			const mockProvider = makeMockProvider()
+			const task = createTask(mockProvider)
+
+			const saved = await getTaskTestAccess(task).saveClineMessages()
+
+			expect(saved).toBe(true)
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			// Control case: the guard must not block the normal path, so execution
+			// genuinely reached updateTaskHistory(). No pre-existing store entry,
+			// so the item is written as-is.
+			expect(mockProvider.updateTaskHistory).toHaveBeenCalledTimes(1)
+			expect(mockProvider.updateTaskHistory).toHaveBeenCalledWith(staleHistoryItem)
+		} finally {
+			saveSpy.mockRestore()
+			metaSpy.mockRestore()
+		}
+	})
+
+	it("skips the history update when the task is abandoned while the save is in flight", async () => {
+		// Fire-and-forget race: the save starts while the task is still active,
+		// abandonSubtask severs the link mid-save, and the guard must catch it
+		// when the awaited saveTaskMessages() finally resolves.
+		let resolveSave!: (value?: void) => void
+		const saveSpy = vi
+			.spyOn(taskMessagesModule, "saveTaskMessages")
+			.mockImplementation(() => new Promise<void>((resolve) => (resolveSave = resolve)))
+		const metaSpy = vi
+			.spyOn(taskMetadataModule, "taskMetadata")
+			.mockResolvedValue({ historyItem: staleHistoryItem, tokenUsage: getApiMetrics([]) })
+
+		try {
+			const mockProvider = makeMockProvider()
+			const task = createTask(mockProvider)
+
+			const savePromise = getTaskTestAccess(task).saveClineMessages()
+
+			// The save is in flight (awaiting saveTaskMessages) when the task is
+			// abandoned; only after it resumes does the save hit the guard.
+			task.abandoned = true
+			resolveSave()
+
+			const saved = await savePromise
+
+			expect(saved).toBe(false)
+			expect(saveSpy).toHaveBeenCalledTimes(1) // messages are still persisted
+			expect(mockProvider.updateTaskHistory).not.toHaveBeenCalled() // history link is not reattached
+		} finally {
+			resolveSave?.() // settle the deferred save if an assertion failed above
 			saveSpy.mockRestore()
 			metaSpy.mockRestore()
 		}
