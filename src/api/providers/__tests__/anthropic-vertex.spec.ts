@@ -810,6 +810,33 @@ describe("VertexHandler", () => {
 			controller.abort()
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
+
+		it("should remove the external abort listener when the stream completes", async () => {
+			const handlerWithSignal = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const controller = new AbortController()
+			const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+			const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+			const stream = handlerWithSignal.createMessage(
+				systemPrompt,
+				[{ role: "user", content: "Hello" }],
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+
+			await collectStream(stream)
+
+			expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+			const [event, listener] = addEventListenerSpy.mock.calls[0]
+			expect(event).toBe("abort")
+			// The same retained callback must be detached once the stream is done.
+			expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
+		})
 	})
 
 	describe("completePrompt", () => {
@@ -957,6 +984,26 @@ describe("VertexHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ model: expect.any(String) }),
 				expect.objectContaining({ timeout: 3000 }),
+			)
+		})
+
+		it("completePrompt should pass timeout when timeoutMs=0 (defined check)", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest
+				.spyOn(handler["client"].messages, "create")
+				.mockResolvedValue({ content: [{ type: "text", text: "response" }] } as never)
+
+			await handler.completePrompt("test prompt", { timeoutMs: 0 })
+			// 0 is a defined value: it must reach the client as `timeout: 0`,
+			// not be dropped by a truthiness check.
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: expect.any(String) }),
+				expect.objectContaining({ timeout: 0 }),
 			)
 		})
 

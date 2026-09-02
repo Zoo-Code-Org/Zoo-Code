@@ -29,7 +29,7 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 import { xaiDefaultModelId, xaiModels } from "@roo-code/types"
 
 import { XAIHandler } from "../xai"
-import { asyncStreamFrom } from "../../../test-utils/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -473,5 +473,31 @@ describe("XAIHandler", () => {
 		const promise = stream.next()
 		controller.abort()
 		await expect(promise).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("should remove the external abort listener when the stream completes", async () => {
+		const controller = new AbortController()
+		const addEventListenerSpy = vitest.spyOn(controller.signal, "addEventListener")
+		const removeEventListenerSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+		mockResponsesCreate.mockResolvedValueOnce(
+			asyncStreamFrom([{ type: "response.output_text.delta", delta: "done" }]),
+		)
+
+		const stream = handler.createMessage(
+			"test prompt",
+			[],
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+
+		const chunks = await collectStream(stream)
+		expect(chunks).toEqual([{ type: "text", text: "done" }])
+
+		expect(addEventListenerSpy).toHaveBeenCalledTimes(1)
+		const [event, listener] = addEventListenerSpy.mock.calls[0]
+		expect(event).toBe("abort")
+		// The same retained callback must be detached once the stream is done.
+		expect(removeEventListenerSpy).toHaveBeenCalledTimes(1)
+		expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", listener)
 	})
 })

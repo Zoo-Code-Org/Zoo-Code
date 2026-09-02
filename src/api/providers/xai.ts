@@ -102,74 +102,86 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		// cancellation mechanism, preserving the existing behavior.
 		const externalAbortSignal = metadata?.abortSignal
 		let abortSignal: AbortSignal | undefined
+		let removeExternalAbortListener: (() => void) | undefined
 		if (externalAbortSignal) {
 			const controller = new AbortController()
 			if (externalAbortSignal.aborted) {
 				controller.abort()
 			} else {
-				externalAbortSignal.addEventListener("abort", () => controller.abort(), { once: true })
+				// Retain the listener so it can be removed again once streaming
+				// finishes; otherwise a long-lived external signal would keep one
+				// listener (and its closed-over controller) per completed request.
+				const onExternalAbort = () => controller.abort()
+				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+				removeExternalAbortListener = () => externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
 			abortSignal = controller.signal
 		}
 
-		// Build request options
-		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
-			model: model.id,
-			instructions: systemPrompt,
-			input: input,
-			stream: true,
-			store: false, // Don't store responses server-side for privacy
-			include: ["reasoning.encrypted_content"],
-		}
-
-		if (model.maxTokens) {
-			requestBody.max_output_tokens = model.maxTokens
-		}
-
-		if (model.temperature !== undefined) {
-			requestBody.temperature = model.temperature
-		}
-
-		if (responseTools) {
-			requestBody.tools = responseTools
-			// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
-			requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
-			requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
-		}
-
-		// Pass reasoning effort for models that support it (e.g., grok-4.5, grok-3-mini).
-		// The xAI Responses API uses `reasoning: { effort }` format (not `reasoning_effort`
-		// which is the Chat Completions format), so we convert from the OpenAI params shape.
-		if (model.reasoning) {
-			requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
-		}
-
-		let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
 		try {
-			stream = await this.client.responses.create(
-				{
-					...requestBody,
-					stream: true,
-				},
-				abortSignal ? { signal: abortSignal } : undefined,
-			)
-		} catch (error) {
-			// Let abort errors propagate unmodified so callers can recognize them:
-			// native AbortError (error.name === "AbortError") and the OpenAI SDK's
-			// APIUserAbortError, which the SDK throws when the request signal aborts
-			// (the SDK class does not set a distinctive error.name in v5, so use
-			// instanceof).
-			if ((error instanceof Error && error.name === "AbortError") || error instanceof APIUserAbortError) {
-				throw error
+			// Build request options
+			const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
+				model: model.id,
+				instructions: systemPrompt,
+				input: input,
+				stream: true,
+				store: false, // Don't store responses server-side for privacy
+				include: ["reasoning.encrypted_content"],
 			}
-			const errorMessage = error instanceof Error ? error.message : String(error)
-			const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
-			TelemetryService.instance.captureException(apiError)
-			throw handleOpenAIError(error, this.providerName)
-		}
 
-		const normalizeUsage = createUsageNormalizer()
-		yield* processResponsesApiStream(stream, normalizeUsage)
+			if (model.maxTokens) {
+				requestBody.max_output_tokens = model.maxTokens
+			}
+
+			if (model.temperature !== undefined) {
+				requestBody.temperature = model.temperature
+			}
+
+			if (responseTools) {
+				requestBody.tools = responseTools
+				// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
+				requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
+				requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
+			}
+
+			// Pass reasoning effort for models that support it (e.g., grok-4.5, grok-3-mini).
+			// The xAI Responses API uses `reasoning: { effort }` format (not `reasoning_effort`
+			// which is the Chat Completions format), so we convert from the OpenAI params shape.
+			if (model.reasoning) {
+				requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
+			}
+
+			let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
+			try {
+				stream = await this.client.responses.create(
+					{
+						...requestBody,
+						stream: true,
+					},
+					abortSignal ? { signal: abortSignal } : undefined,
+				)
+			} catch (error) {
+				// Let abort errors propagate unmodified so callers can recognize them:
+				// native AbortError (error.name === "AbortError") and the OpenAI SDK's
+				// APIUserAbortError, which the SDK throws when the request signal aborts
+				// (the SDK class does not set a distinctive error.name in v5, so use
+				// instanceof).
+				if ((error instanceof Error && error.name === "AbortError") || error instanceof APIUserAbortError) {
+					throw error
+				}
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const apiError = new ApiProviderError(errorMessage, this.providerName, model.id, "createMessage")
+				TelemetryService.instance.captureException(apiError)
+				throw handleOpenAIError(error, this.providerName)
+			}
+
+			const normalizeUsage = createUsageNormalizer()
+			yield* processResponsesApiStream(stream, normalizeUsage)
+		} finally {
+			// Release the listener once the stream is consumed, whether the
+			// request completed, failed, or the generator was closed early.
+			removeExternalAbortListener?.()
+		}
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
