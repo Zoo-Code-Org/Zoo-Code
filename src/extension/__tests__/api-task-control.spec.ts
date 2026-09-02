@@ -52,7 +52,7 @@ type ProviderDouble = EventEmitter & {
 	getCurrentTaskStack: Mock<() => string[]>
 	getCurrentTask: Mock<() => undefined>
 	getState: Mock<() => Promise<{ customModes?: ModeConfig[] }>>
-	handleModeSwitch: Mock<(mode: string) => Promise<void>>
+	handleModeSwitch: Mock<(mode: string, targetTask?: unknown) => Promise<void>>
 	viewLaunched: boolean
 }
 
@@ -220,7 +220,7 @@ describe("API task controls", () => {
 			).resolves.toBe(true)
 
 			expect(sidebarProvider.getState).toHaveBeenCalledOnce()
-			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect")
+			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
 			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Use architect")
 		})
 
@@ -256,7 +256,7 @@ describe("API task controls", () => {
 				api.selectTaskFollowupSuggestion({ taskId: task.taskId, answer: "Review it", mode: customMode.slug }),
 			).resolves.toBe(true)
 
-			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith(customMode.slug)
+			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith(customMode.slug, task)
 			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Review it")
 		})
 	})

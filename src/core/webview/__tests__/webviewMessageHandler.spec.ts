@@ -11,18 +11,6 @@ vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
 }))
 
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		instance: {
-			updateTelemetryState: vi.fn(),
-			captureCustomModeCreated: vi.fn(),
-			captureModeSettingChanged: vi.fn(),
-			captureEvent: vi.fn(),
-		},
-		hasInstance: vi.fn(() => false),
-	},
-}))
-
 vi.mock("../../../integrations/theme/getTheme", () => ({
 	getTheme: vi.fn().mockResolvedValue({}),
 }))
@@ -76,6 +64,8 @@ vi.mock("@roo-code/telemetry", () => ({
 		hasInstance: vi.fn().mockReturnValue(false),
 		instance: {
 			updateTelemetryState: vi.fn(),
+			captureCustomModeCreated: vi.fn(),
+			captureModeSettingChanged: vi.fn(),
 			captureTelemetrySettingsChanged: vi.fn(),
 		},
 	},

@@ -1,5 +1,7 @@
-﻿import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
+
+import { providerIdentifiers } from "@roo-code/types"
 
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
