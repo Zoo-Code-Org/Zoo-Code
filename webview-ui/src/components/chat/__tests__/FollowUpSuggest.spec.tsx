@@ -1,6 +1,7 @@
 import React, { createContext, useContext } from "react"
 import { render, screen, act } from "@testing-library/react"
 import { TooltipProvider } from "@radix-ui/react-tooltip"
+import type { SuggestionItem } from "@roo-code/types"
 
 import { FollowUpSuggest } from "../FollowUpSuggest"
 
@@ -709,10 +710,23 @@ describe("FollowUpSuggest", () => {
 	})
 
 	describe("suggestions with blank or missing answers (issue #1226)", () => {
-		it("should not render anything when all answers are blank or missing", () => {
-			const suggestions = [{ answer: "" }, { answer: "   \n\t " }, { answer: undefined }] as any
+		/**
+		 * Malformed follow-up payloads as they can arrive from the model: the
+		 * extension-host transport does not validate `FollowUpData`, so a
+		 * suggestion item may be missing `answer` or carry a blank value.
+		 * `SuggestionItem` cannot model that, so the fixtures keep their
+		 * malformed shape and cross into the component prop at one documented
+		 * boundary instead of disabling type checks with `any`.
+		 */
+		type MalformedSuggestionPayload = { answer?: unknown }
 
-			const { container } = renderWithTestProviders(
+		const renderWithMalformedSuggestions = (payloads: MalformedSuggestionPayload[]) => {
+			// Documented double assertion at the component boundary: FollowUpSuggest
+			// must tolerate malformed transport data, which `SuggestionItem`
+			// cannot express (issue #1226).
+			const suggestions = payloads as unknown as SuggestionItem[]
+
+			return renderWithTestProviders(
 				<FollowUpSuggest
 					suggestions={suggestions}
 					onSuggestionClick={mockOnSuggestionClick}
@@ -721,45 +735,33 @@ describe("FollowUpSuggest", () => {
 				/>,
 				defaultTestState,
 			)
+		}
+
+		it("should not render anything when all answers are blank or missing", () => {
+			const { container } = renderWithMalformedSuggestions([
+				{ answer: "" },
+				{ answer: "   \n\t " },
+				{ answer: undefined },
+			])
 
 			// Blank suggestions are filtered out, so no buttons or countdown render.
 			expect(container.firstChild).toBeNull()
 		})
 
 		it("should only render suggestions with non-blank answers", () => {
-			const suggestions = [
+			renderWithMalformedSuggestions([
 				{ answer: "" },
 				{ answer: "Valid suggestion" },
 				{ answer: undefined },
 				{ answer: "   " },
-			] as any
-
-			renderWithTestProviders(
-				<FollowUpSuggest
-					suggestions={suggestions}
-					onSuggestionClick={mockOnSuggestionClick}
-					ts={123}
-					onCancelAutoApproval={mockOnCancelAutoApproval}
-				/>,
-				defaultTestState,
-			)
+			])
 
 			expect(screen.getByText("Valid suggestion")).toBeInTheDocument()
 			expect(screen.queryAllByRole("button")).toHaveLength(1)
 		})
 
 		it("should not start the auto-approve countdown when all answers are blank", () => {
-			const suggestions = [{ answer: "" }, { answer: undefined }] as any
-
-			renderWithTestProviders(
-				<FollowUpSuggest
-					suggestions={suggestions}
-					onSuggestionClick={mockOnSuggestionClick}
-					ts={123}
-					onCancelAutoApproval={mockOnCancelAutoApproval}
-				/>,
-				defaultTestState,
-			)
+			renderWithMalformedSuggestions([{ answer: "" }, { answer: undefined }])
 
 			vi.advanceTimersByTime(10000)
 
