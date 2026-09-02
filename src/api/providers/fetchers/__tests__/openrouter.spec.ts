@@ -454,7 +454,8 @@ describe("OpenRouter API", () => {
 			expect(result.contextWindow).toBe(1000000)
 			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
 			expect(result.reasoningEffort).toBe("high")
-			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
 		})
 
 		it("applies the Moonshot K3 profile for moonshotai/kimi-latest", () => {
@@ -481,7 +482,8 @@ describe("OpenRouter API", () => {
 			expect(result.maxTokens).toBe(32768)
 			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
 			expect(result.reasoningEffort).toBe("high")
-			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
 		})
 
 		it("does not override max tokens for other models", () => {
@@ -622,7 +624,8 @@ describe("OpenRouter API", () => {
 				maxTokens: 32768,
 				supportsReasoningEffort: ["low", "high", "max"],
 				reasoningEffort: "high",
-				supportsTemperature: false,
+				supportsTemperature: true,
+				defaultTemperature: 1,
 			})
 			// The original record (e.g. a shared cache entry) must not be mutated.
 			expect(stale.maxTokens).toBe(209716)
@@ -642,7 +645,8 @@ describe("OpenRouter API", () => {
 			expect(result.maxTokens).toBe(32768)
 			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
 			expect(result.reasoningEffort).toBe("high")
-			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
 		})
 
 		it("returns other models unchanged", () => {

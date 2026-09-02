@@ -42,6 +42,14 @@ vitest.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
+const { mockGetModelEndpoints } = vitest.hoisted(() => ({
+	mockGetModelEndpoints: vitest.fn(),
+}))
+
+vitest.mock("../fetchers/modelEndpointCache", () => ({
+	getModelEndpoints: mockGetModelEndpoints,
+}))
+
 vitest.mock("../fetchers/modelCache", () => ({
 	getModels: vitest.fn().mockImplementation(function () {
 		return Promise.resolve({
@@ -127,7 +135,13 @@ describe("OpenRouterHandler", () => {
 		openRouterModelId: "anthropic/claude-sonnet-4",
 	})
 
-	beforeEach(() => clearAllMocks())
+	beforeEach(() => {
+		clearAllMocks()
+		// Endpoint records default to "not fetched" (same as the real guard for
+		// missing options); tests that exercise the specific-provider branch
+		// override this per test.
+		mockGetModelEndpoints.mockResolvedValue({})
+	})
 
 	it("initializes with correct options", () => {
 		const handler = new OpenRouterHandler(mockOptions)
@@ -265,13 +279,58 @@ describe("OpenRouterHandler", () => {
 			// correct all of that before any request parameters are derived.
 			expect(result.id).toBe("moonshotai/kimi-k3")
 			expect(result.maxTokens).toBe(32768)
-			expect(result.temperature).toBeUndefined()
+			expect(result.temperature).toBe(1)
 			expect(result.reasoningEffort).toBe("high")
 			expect(result.reasoning).toEqual({ effort: "high" })
 			expect(result.info.maxTokens).toBe(32768)
 			expect(result.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
 			expect(result.info.reasoningEffort).toBe("high")
-			expect(result.info.supportsTemperature).toBe(false)
+			expect(result.info.supportsTemperature).toBe(true)
+			expect(result.info.defaultTemperature).toBe(1)
+		})
+
+		it("applies the Moonshot K3 profile to a stale specific-provider endpoint record", async () => {
+			// Endpoint records are cached separately from the parent model cache and
+			// are selected before the profile is applied. A stale endpoint record
+			// (fabricated max_tokens, boolean supportsReasoningEffort, no reasoning
+			// default, no temperature default) must be corrected for the selected
+			// endpoint.
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 209716,
+					contextWindow: 1000000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 0.6,
+					outputPrice: 3,
+					description: "Kimi K3 (Moonshot endpoint)",
+					supportsReasoningEffort: true,
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					openRouterApiKey: "test-key",
+					openRouterModelId: "moonshotai/kimi-k3",
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			const result = await handler.fetchModel()
+
+			// The selected endpoint record (not the parent model cache entry) must be
+			// profiled: a regression that applied the profile before endpoint
+			// selection would send the stale endpoint values.
+			expect(result.id).toBe("moonshotai/kimi-k3")
+			expect(result.info.maxTokens).toBe(32768)
+			expect(result.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.info.reasoningEffort).toBe("high")
+			expect(result.info.supportsTemperature).toBe(true)
+			expect(result.info.defaultTemperature).toBe(1)
+			expect(result.maxTokens).toBe(32768)
+			expect(result.temperature).toBe(1)
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.reasoning).toEqual({ effort: "high" })
 		})
 	})
 
@@ -581,7 +640,7 @@ describe("OpenRouterHandler", () => {
 			expect(endChunks[0].id).toBe("call_openrouter_test")
 		})
 
-		it("sends profiled max_tokens and reasoning effort, omitting temperature, for moonshotai/kimi-k3", async () => {
+		it("sends profiled max_tokens, explicit temperature 1.0, and reasoning effort for moonshotai/kimi-k3", async () => {
 			const handler = new OpenRouterHandler(
 				makeApiHandlerOptions({
 					openRouterApiKey: "test-key",
@@ -595,19 +654,28 @@ describe("OpenRouterHandler", () => {
 			// The vitest-mocked OpenAI class is structurally incompatible with the narrow
 			// chat stub; the double assertion routes through unknown (instead of any) to
 			// keep this file's no-explicit-any budget flat.
-			;(OpenAI as unknown as { prototype: { chat: typeof chatStub } }).prototype.chat = chatStub
+			const openAiPrototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+			const originalChat = openAiPrototype.prototype.chat
+			openAiPrototype.prototype.chat = chatStub
 
-			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "test message" }]
-			await collectStream(handler.createMessage("test system prompt", messages))
+			try {
+				const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "test message" }]
+				await collectStream(handler.createMessage("test system prompt", messages))
 
-			const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
-			expect(requestParams).toMatchObject({
-				model: "moonshotai/kimi-k3",
-				max_tokens: 32768,
-				reasoning: { effort: "high" },
-			})
-			// K3 ignores temperature (fixed at 1.0 server-side); the request must omit it.
-			expect(requestParams.temperature).toBeUndefined()
+				const [requestParams] = mockCreate.mock.calls[0] as [Record<string, unknown>]
+				expect(requestParams).toMatchObject({
+					model: "moonshotai/kimi-k3",
+					max_tokens: 32768,
+					temperature: 1,
+					reasoning: { effort: "high" },
+				})
+				// K3 is fixed at temperature 1.0 upstream (issue #1316); the request
+				// must carry it explicitly.
+			} finally {
+				// Restore the original prototype property so this stub cannot leak
+				// into later tests; clearAllMocks does not undo prototype assignment.
+				openAiPrototype.prototype.chat = originalChat
+			}
 		})
 	})
 

@@ -186,9 +186,10 @@ export async function getOpenRouterModelEndpoints(
  * OpenRouter reports `max_completion_tokens: null` for these models, so the
  * generic 0.2 context-window fallback would fabricate an inflated max_tokens
  * value (e.g. 209,716 for a 1M context window). K3 also always reasons with a
- * low/high/max effort ladder (default "high") and ignores temperature
- * (fixed at 1.0), so its wire-safe capability flags are profiled here instead
- * of being derived from the catalogue.
+ * low/high/max effort ladder (default "high") and is fixed at temperature 1.0
+ * (issue #1316 expects requests to carry an explicit `temperature: 1.0`), so
+ * its wire-safe capability flags and temperature default are profiled here
+ * instead of being derived from the catalogue.
  */
 export const OPENROUTER_MOONSHOT_K3_MODELS = new Set<string>(["moonshotai/kimi-k3", "moonshotai/kimi-latest"])
 
@@ -196,7 +197,8 @@ const MOONSHOT_K3_OPENROUTER_PROFILE: Partial<ModelInfo> = {
 	maxTokens: 32_768,
 	supportsReasoningEffort: ["low", "high", "max"],
 	reasoningEffort: "high",
-	supportsTemperature: false,
+	supportsTemperature: true,
+	defaultTemperature: 1.0, // K3 is fixed at 1.0 upstream; send it explicitly (issue #1316)
 }
 
 /**
