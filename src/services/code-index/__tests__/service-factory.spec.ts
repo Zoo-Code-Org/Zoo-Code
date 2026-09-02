@@ -394,6 +394,24 @@ describe("CodeIndexServiceFactory", () => {
 			expect(() => factory.createEmbedder()).toThrow("serviceFactory.mistralConfigMissing")
 		})
 
+		it("should handle undefined model ID for Mistral embedder", () => {
+			// Arrange
+			const testConfig = {
+				embedderProvider: providerIdentifiers.mistral,
+				modelId: undefined,
+				mistralOptions: {
+					apiKey: "test-mistral-key",
+				},
+			}
+			mockConfigManager.getConfig.mockReturnValue(testConfig)
+
+			// Act
+			factory.createEmbedder()
+
+			// Assert — modelId omitted so the embedder selects its documented default model.
+			expect(MockedMistralEmbedder).toHaveBeenCalledWith("test-mistral-key", undefined)
+		})
+
 		it("should pass model ID to Vercel AI Gateway embedder when using Vercel AI Gateway provider", () => {
 			// Arrange
 			const testModelId = "vercel-embed-model"
@@ -426,6 +444,24 @@ describe("CodeIndexServiceFactory", () => {
 
 			// Act & Assert
 			expect(() => factory.createEmbedder()).toThrow("serviceFactory.vercelAiGatewayConfigMissing")
+		})
+
+		it("should handle undefined model ID for Vercel AI Gateway embedder", () => {
+			// Arrange
+			const testConfig = {
+				embedderProvider: providerIdentifiers.vercelAiGateway,
+				modelId: undefined,
+				vercelAiGatewayOptions: {
+					apiKey: "test-vercel-key",
+				},
+			}
+			mockConfigManager.getConfig.mockReturnValue(testConfig)
+
+			// Act
+			factory.createEmbedder()
+
+			// Assert — modelId omitted so the embedder selects its documented default model.
+			expect(MockedVercelAiGatewayEmbedder).toHaveBeenCalledWith("test-vercel-key", undefined)
 		})
 
 		it("should pass region, profile and model ID to Bedrock embedder when using Bedrock provider", () => {
@@ -481,6 +517,25 @@ describe("CodeIndexServiceFactory", () => {
 
 			// Act & Assert
 			expect(() => factory.createEmbedder()).toThrow("serviceFactory.bedrockConfigMissing")
+		})
+
+		it("should handle undefined model ID for Bedrock embedder", () => {
+			// Arrange
+			const testConfig = {
+				embedderProvider: providerIdentifiers.bedrock,
+				modelId: undefined,
+				bedrockOptions: {
+					region: "us-east-1",
+					profile: "test-profile",
+				},
+			}
+			mockConfigManager.getConfig.mockReturnValue(testConfig)
+
+			// Act
+			factory.createEmbedder()
+
+			// Assert — modelId omitted so the embedder selects its documented default model.
+			expect(MockedBedrockEmbedder).toHaveBeenCalledWith("us-east-1", "test-profile", undefined)
 		})
 
 		it("should pass API key, model ID and specific provider to OpenRouter embedder", () => {
@@ -545,6 +600,25 @@ describe("CodeIndexServiceFactory", () => {
 
 			// Act & Assert
 			expect(() => factory.createEmbedder()).toThrow("serviceFactory.openRouterConfigMissing")
+		})
+
+		it("should handle undefined model ID for OpenRouter embedder", () => {
+			// Arrange
+			const testConfig = {
+				embedderProvider: providerIdentifiers.openrouter,
+				modelId: undefined,
+				openRouterOptions: {
+					apiKey: "test-openrouter-key",
+					specificProvider: providerIdentifiers.openai,
+				},
+			}
+			mockConfigManager.getConfig.mockReturnValue(testConfig)
+
+			// Act
+			factory.createEmbedder()
+
+			// Assert — modelId omitted so the embedder selects its documented default model.
+			expect(MockedOpenRouterEmbedder).toHaveBeenCalledWith("test-openrouter-key", undefined, undefined, "openai")
 		})
 
 		it("should throw error for invalid embedder provider", () => {
