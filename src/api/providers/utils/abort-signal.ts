@@ -93,3 +93,31 @@ export function createAbortError(providerName: string): Error {
 	abortError.name = "AbortError"
 	return abortError
 }
+
+/**
+ * Await `pending` but reject with the provider's abort error when `signal`
+ * aborts first. For async phases that have no native signal support (model
+ * discovery) yet must still settle promptly on cancellation. The underlying
+ * promise keeps running (its settlement is ignored) — cancellation is
+ * cooperative at this boundary.
+ */
+export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
+	if (signal.aborted) {
+		return Promise.reject(createAbortError(providerName))
+	}
+
+	return new Promise<T>((resolve, reject) => {
+		const onAbort = () => reject(createAbortError(providerName))
+		signal.addEventListener("abort", onAbort, { once: true })
+		pending.then(
+			(value) => {
+				signal.removeEventListener("abort", onAbort)
+				resolve(value)
+			},
+			(error) => {
+				signal.removeEventListener("abort", onAbort)
+				reject(error)
+			},
+		)
+	})
+}

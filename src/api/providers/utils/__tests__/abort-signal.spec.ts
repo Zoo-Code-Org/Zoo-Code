@@ -3,8 +3,48 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	mergeAbortSignals,
+	rejectOnAbort,
 	throwIfAborted,
 } from "../abort-signal"
+
+describe("rejectOnAbort", () => {
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+
+		await expect(rejectOnAbort(Promise.resolve("done"), controller.signal, "TestProvider")).resolves.toBe("done")
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	it("rejects with the provider abort error when the signal aborts first", async () => {
+		const controller = new AbortController()
+		// Never settles: the race must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const race = rejectOnAbort(pending, controller.signal, "TestProvider")
+		controller.abort()
+
+		await expect(race).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The TestProvider request was aborted",
+		})
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const pending = new Promise<never>(() => {})
+
+		await expect(rejectOnAbort(pending, controller.signal, "TestProvider")).rejects.toMatchObject({
+			name: "AbortError",
+		})
+	})
+
+	it("propagates the pending rejection when the signal stays active", async () => {
+		const controller = new AbortController()
+		const boom = new Error("lookup failed")
+
+		await expect(rejectOnAbort(Promise.reject(boom), controller.signal, "TestProvider")).rejects.toBe(boom)
+	})
+})
 
 describe("abort-signal utilities", () => {
 	describe("mergeAbortSignalAndTimeout", () => {

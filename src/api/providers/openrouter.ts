@@ -38,7 +38,13 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { ApiHandlerCreateMessageMetadata, CompletePromptOptions, SingleCompletionHandler } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import { createAbortError, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	throwIfAborted,
+} from "./utils/abort-signal"
 import { generateImageWithProvider, ImageGenerationResult } from "./utils/image-generation"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
 
@@ -633,7 +639,27 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions) {
-		const { id: modelId, maxTokens, temperature, reasoning } = await this.fetchModel()
+		// Establish the cancellation scope before model lookup: a pre-aborted call, or
+		// one aborted while model metadata is loading, must reject promptly instead of
+		// waiting for the lookup to settle. The configured timeoutMs covers the lookup
+		// as well.
+		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		if (requestAbortSignal) {
+			throwIfAborted(requestAbortSignal)
+		}
+
+		let model: Awaited<ReturnType<OpenRouterHandler["fetchModel"]>>
+		try {
+			model = requestAbortSignal
+				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
+				: await this.fetchModel()
+		} catch (error) {
+			if (isRequestAborted(error, requestAbortSignal)) {
+				throw createAbortError(this.providerName)
+			}
+			throw error
+		}
+		const { id: modelId, maxTokens, temperature, reasoning } = model
 
 		const completionParams: OpenRouterChatCompletionParams = {
 			model: modelId,
@@ -654,12 +680,11 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		// and forward the caller's abort signal / per-request timeout to the SDK. The merged signal
-		// aborts when either the caller's signal or the timeout fires, so timeouts are normalized to
-		// AbortError in the catch below. The client-level timeout remains the default safety net;
-		// timeoutMs <= 0 disables the per-request timeout, and 0 is never passed to the SDK.
-		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
-
+		// and forward the caller's abort signal / per-request timeout to the SDK. The merged
+		// signal (established before model lookup, above) aborts when either the caller's signal
+		// or the timeout fires, so timeouts are normalized to AbortError in the catch below.
+		// The client-level timeout remains the default safety net; timeoutMs <= 0 disables the
+		// per-request timeout, and 0 is never passed to the SDK.
 		const requestOptions: OpenAI.RequestOptions = {
 			...(modelId.startsWith("anthropic/")
 				? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }

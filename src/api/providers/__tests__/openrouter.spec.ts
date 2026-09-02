@@ -788,9 +788,17 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const controller = new AbortController()
 
+			// Deterministic synchronization (mirrors the Requesty test): the mock notifies the
+			// test when the request actually starts, so the abort lands after create() began
+			// instead of racing a fixed sleep that a slow runner can lose.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
 			const mockCreate = vitest
 				.fn()
 				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					notifyCreateStarted()
 					// Emulate the OpenAI SDK: the pending request rejects when the signal aborts.
 					await new Promise<void>((resolve) => {
 						if (options?.signal?.aborted) {
@@ -811,8 +819,8 @@ describe("OpenRouterHandler", () => {
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
 
 			const nextPromise = generator.next()
-			// Let the generator reach the pending create() call, then abort.
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			// Abort only once create() has actually started.
+			await createStarted
 			controller.abort()
 
 			await expect(nextPromise).rejects.toMatchObject({ name: "AbortError" })
@@ -1124,10 +1132,18 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const controller = new AbortController()
 
+			// Deterministic synchronization: the mock notifies the test when the request
+			// actually starts, so the abort lands mid-flight (after model lookup) instead of
+			// winning the race at model discovery on a slow runner.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
 			let requestSignal: AbortSignal | undefined
 			const mockCreate = vitest
 				.fn()
 				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+					notifyCreateStarted()
 					requestSignal = options?.signal
 					await new Promise<void>((resolve) => {
 						if (options?.signal?.aborted) {
@@ -1148,6 +1164,8 @@ describe("OpenRouterHandler", () => {
 				abortSignal: controller.signal,
 				timeoutMs: 100_000,
 			})
+			// Abort only once create() has actually started (after model lookup).
+			await createStarted
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })

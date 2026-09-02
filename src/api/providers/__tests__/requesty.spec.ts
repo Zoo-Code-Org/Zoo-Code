@@ -675,6 +675,13 @@ describe("RequestyHandler", () => {
 	})
 
 	describe("completePrompt", () => {
+		// The createMessage tests leave behind a persistent stream mock plus queued
+		// one-shot implementations; reset so each completePrompt test starts from a clean
+		// mock (its own mockSetup below is authoritative).
+		beforeEach(() => {
+			mockCreate.mockReset()
+		})
+
 		it("returns correct response", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const mockResponse = { choices: [{ message: { content: "test completion" } }] }
@@ -826,7 +833,15 @@ describe("RequestyHandler", () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
 
+			// Deterministic synchronization (mirrors the Requesty test): the mock notifies the
+			// test when the request actually starts, so the abort lands mid-flight (after model
+			// lookup) instead of winning the race at model discovery on a slow runner.
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
 			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
 				// Emulate the OpenAI SDK: the in-flight request rejects when the signal aborts.
 				await new Promise<void>((resolve) => {
 					if (options?.signal?.aborted) {
@@ -841,6 +856,8 @@ describe("RequestyHandler", () => {
 			})
 
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			// Abort only once create() has actually started (after model lookup).
+			await createStarted
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
@@ -870,8 +887,13 @@ describe("RequestyHandler", () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()
 
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
 			let requestSignal: AbortSignal | undefined
 			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				notifyCreateStarted()
 				requestSignal = options?.signal
 				await new Promise<void>((resolve) => {
 					if (options?.signal?.aborted) {
@@ -889,6 +911,8 @@ describe("RequestyHandler", () => {
 				abortSignal: controller.signal,
 				timeoutMs: 100_000,
 			})
+			// Abort only once create() has actually started (after model lookup).
+			await createStarted
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })

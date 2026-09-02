@@ -540,7 +540,7 @@ describe("PoeHandler", () => {
 			)
 		})
 
-		it("completePrompt should merge signal and timeoutMs into combined abortSignal", async () => {
+		it("completePrompt should merge the abort signal and timeoutMs into a combined abortSignal", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			const controller = new AbortController()
 			mockGenerateText.mockResolvedValueOnce({ text: "response" })
@@ -553,10 +553,11 @@ describe("PoeHandler", () => {
 					abortSignal: expect.any(AbortSignal),
 				}),
 			)
-			// The abortSignal should be a merged signal (not the original controller.signal)
+			// The abortSignal should be a merged signal (not the original controller.signal).
 			const callArgs = mockGenerateText.mock.calls[0][0]
 			expect(callArgs.abortSignal).toBeDefined()
 			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
+			expect(callArgs.abortSignal).not.toBe(controller.signal)
 		})
 
 		it("completePrompt should use AbortSignal.timeout when only timeoutMs is provided", async () => {
@@ -574,18 +575,6 @@ describe("PoeHandler", () => {
 			const callArgs = mockGenerateText.mock.calls[0][0]
 			expect(callArgs.abortSignal).toBeDefined()
 			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
-		})
-
-		it("completePrompt should prefer signal over timeoutMs when both are provided", async () => {
-			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
-			const controller = new AbortController()
-			mockGenerateText.mockResolvedValueOnce({ text: "response" })
-
-			await handler.completePrompt("test prompt", { abortSignal: controller.signal, timeoutMs: 5000 })
-			const callArgs = mockGenerateText.mock.calls[0][0]
-			// Should have a merged abortSignal (not the original controller.signal)
-			expect(callArgs.abortSignal).toBeInstanceOf(AbortSignal)
-			expect(callArgs.abortSignal).not.toBe(controller.signal)
 		})
 
 		it("completePrompt rejects with AbortError when the external signal aborts mid-flight", async () => {
@@ -636,7 +625,7 @@ describe("PoeHandler", () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
 			mockGenerateText.mockRejectedValueOnce("not an error")
 
-			await expect(handler.completePrompt("test prompt")).rejects.toThrow()
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Poe completion error: not an error")
 		})
 		it("completePrompt rejects with AbortError when the response resolves after abort", async () => {
 			const handler = new PoeHandler({ poeApiKey: "key", apiModelId: "openai/gpt-4o" })
