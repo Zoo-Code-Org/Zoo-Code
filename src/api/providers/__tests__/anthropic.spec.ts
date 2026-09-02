@@ -633,6 +633,87 @@ describe("AnthropicHandler", () => {
 			expect(deltaUsage?.outputTokens).toBe(200)
 			expect(deltaUsage?.reasoningTokens).toBeUndefined()
 		})
+
+		it("should preserve a zero-valued thinking_tokens in message_start and message_delta usage chunks", async () => {
+			// A zero-valued `thinking_tokens` is a valid numeric boundary (the
+			// model skipped thinking this turn); both usage chunks must preserve
+			// it as 0 rather than dropping it via a truthiness check.
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						type: "message_start",
+						message: {
+							usage: {
+								input_tokens: 100,
+								output_tokens: 10,
+								output_tokens_details: {
+									thinking_tokens: 0,
+								},
+							},
+						},
+					},
+					{
+						type: "content_block_start",
+						index: 0,
+						content_block: {
+							type: "text",
+							text: "Hello",
+						},
+					},
+					{
+						type: "content_block_delta",
+						index: 0,
+						delta: {
+							type: "text_delta",
+							text: " world",
+						},
+					},
+					{
+						type: "message_delta",
+						usage: {
+							output_tokens: 200,
+							output_tokens_details: {
+								thinking_tokens: 0,
+							},
+						},
+						delta: {
+							stop_reason: "end_turn",
+							stop_sequence: null,
+						},
+					},
+				]),
+			)
+
+			const adaptiveHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-opus-4-7",
+				enableReasoningEffort: true,
+			})
+
+			const stream = adaptiveHandler.createMessage("prompt", [
+				{
+					role: "user",
+					content: [{ type: "text", text: "Hi" }],
+				},
+			])
+
+			const chunks: ApiStreamChunk[] = await collectStream(stream)
+
+			const usageChunks = chunks.filter(
+				(chunk): chunk is Extract<ApiStreamChunk, { type: "usage" }> => chunk.type === "usage",
+			)
+
+			// message_start snapshot preserves the zero-valued decomposition
+			const startUsage = usageChunks.find((chunk) => chunk.inputTokens > 0)
+			expect(startUsage).toBeDefined()
+			expect(startUsage?.reasoningTokens).toBe(0)
+
+			// message_delta preserves the zero-valued final decomposition
+			const deltaUsage = usageChunks.find((chunk) => chunk.inputTokens === 0)
+			expect(deltaUsage).toBeDefined()
+			expect(deltaUsage?.outputTokens).toBe(200)
+			expect(deltaUsage?.reasoningTokens).toBe(0)
+		})
 	})
 
 	describe("completePrompt", () => {
