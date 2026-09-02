@@ -1,6 +1,6 @@
 import * as assert from "assert"
 
-import { RooCodeEventName, type ClineMessage } from "@roo-code/types"
+import { RooCodeEventName, providerIdentifiers, type ClineMessage } from "@roo-code/types"
 
 import { setDefaultSuiteTimeout } from "../test-utils"
 import { waitUntilCompleted } from "../utils"
@@ -25,7 +25,7 @@ type CapturedLmStudioRequest = {
 
 /** Returns the URL string for a fetch request input (string, URL, or Request). */
 function getRequestUrl(input: RequestInfo | URL): string {
-	return typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url
+	return typeof input === "string" ? input : input instanceof URL ? input.href : input.url
 }
 
 /** True if the raw URL parses and its origin equals the expected origin. */
@@ -68,8 +68,8 @@ function installLmStudioRequestCapture(capture: CapturedLmStudioRequest[], baseU
 			capture.push({ model: body.model, lastUserMessage })
 		}
 
-		return originalFetch.call(globalThis, input, init as RequestInit)
-	} as typeof globalThis.fetch
+		return originalFetch.call(globalThis, input, init)
+	}
 
 	return () => {
 		globalThis.fetch = originalFetch
@@ -121,7 +121,7 @@ suite("LM Studio provider", function () {
 		// Explicitly clear the LM Studio fields: setConfiguration only updates
 		// supplied keys, so omitting them would leave them set for later suites.
 		await globalThis.api.setConfiguration({
-			apiProvider: "openrouter" as const,
+			apiProvider: providerIdentifiers.openrouter,
 			lmStudioBaseUrl: undefined,
 			lmStudioModelId: undefined,
 			openRouterApiKey: "mock-key",
@@ -140,7 +140,7 @@ suite("LM Studio provider", function () {
 
 		// LmStudioHandler appends /v1 itself, so the base URL is aimock's origin only.
 		await api.setConfiguration({
-			apiProvider: "lmstudio" as const,
+			apiProvider: providerIdentifiers.lmstudio,
 			lmStudioBaseUrl: aimockUrl,
 			lmStudioModelId: LMSTUDIO_MODEL_ID,
 		})
