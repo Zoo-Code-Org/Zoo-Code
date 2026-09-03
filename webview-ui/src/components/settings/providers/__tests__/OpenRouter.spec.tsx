@@ -2,7 +2,8 @@ import { render, screen, fireEvent, act } from "@testing-library/react"
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 
-import type { ProviderSettings, OrganizationAllowList } from "@roo-code/types"
+import type { ReactNode, ChangeEvent } from "react"
+import type { ProviderSettings, OrganizationAllowList, ExtensionMessage } from "@roo-code/types"
 import {
 	openRouterDefaultModelId,
 	allRouterModelsProvider,
@@ -17,7 +18,13 @@ import { OpenRouter } from "../OpenRouter"
 // imports are still initializing (hoisted vi.mock).
 vi.mock("@vscode/webview-ui-toolkit/react", async () => {
 	const React = await import("react")
-	const VSCodeTextField = ({ children, value, onInput, type }: any) =>
+	type VSCodeTextFieldProps = {
+		children?: ReactNode
+		value?: string
+		onInput?: (event: ChangeEvent<HTMLInputElement>) => void
+		type?: string
+	}
+	const VSCodeTextField = ({ children, value, onInput, type }: VSCodeTextFieldProps) =>
 		React.createElement(
 			"div",
 			null,
@@ -25,11 +32,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", async () => {
 			React.createElement("input", {
 				type,
 				value,
-				onChange: (e: any) => onInput(e),
+				onChange: (e: ChangeEvent<HTMLInputElement>) => onInput?.(e),
 				"data-testid": type === "url" ? "base-url-input" : "api-key-input",
 			}),
 		)
-	const VSCodeLink = ({ children, href }: any) =>
+	type VSCodeLinkProps = { children?: ReactNode; href?: string }
+	const VSCodeLink = ({ children, href }: VSCodeLinkProps) =>
 		React.createElement("a", { href, "data-vscode-stub": "VSCodeLink" }, children)
 	return { VSCodeTextField, VSCodeLink }
 })
@@ -49,11 +57,25 @@ vi.mock("@src/components/settings/providers/OpenRouterBalanceDisplay", () => ({
 }))
 
 vi.mock("@src/components/common/VSCodeButtonLink", () => ({
-	VSCodeButtonLink: ({ children, href }: any) => (
+	VSCodeButtonLink: ({ children, href }: { children?: ReactNode; href?: string }) => (
 		<a href={href} data-testid="get-api-key-link">
 			{children}
 		</a>
 	),
+}))
+
+// Stub the whole hook module: the real fetchRouterModels registers a
+// transient window "message" listener that only cleans up when a matching
+// response arrives or the 10s timeout fires. Stubbing removes that noise so
+// the unmount test below can assert listener balance for OpenRouter's own
+// effect pair in isolation.
+vi.mock("@src/components/ui/hooks/useRouterModels", () => ({
+	useRouterModels: ({ provider }: { provider?: string }) => ({
+		data: provider ? { [provider]: {} } : {},
+		isLoading: false,
+		isError: false,
+		refetch: vi.fn(),
+	}),
 }))
 
 const { postMessageMock } = vi.hoisted(() => ({
@@ -70,7 +92,17 @@ vi.mock("@src/utils/vscode", () => ({
 // and only stub Button to assert onClick/disabled without styling deps.
 vi.mock("@src/components/ui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("@src/components/ui")>()),
-	Button: ({ children, onClick, disabled, className }: any) => (
+	Button: ({
+		children,
+		onClick,
+		disabled,
+		className,
+	}: {
+		children?: ReactNode
+		onClick?: React.MouseEventHandler<HTMLButtonElement>
+		disabled?: boolean
+		className?: string
+	}) => (
 		<button onClick={onClick} disabled={disabled} className={className} data-testid="refresh-button">
 			{children}
 		</button>
@@ -79,8 +111,16 @@ vi.mock("@src/components/ui", async (importOriginal) => ({
 
 vi.mock("vscrui", async (importOriginal) => ({
 	...(await importOriginal<typeof import("vscrui")>()),
-	Checkbox: ({ checked, onChange, children }: any) => (
-		<label data-testid="base-url-checkbox" onClick={() => onChange(!checked)}>
+	Checkbox: ({
+		checked,
+		onChange,
+		children,
+	}: {
+		checked?: boolean
+		onChange?: (checked: boolean) => void
+		children?: ReactNode
+	}) => (
+		<label data-testid="base-url-checkbox" onClick={() => onChange?.(!checked)}>
 			{children}
 		</label>
 	),
@@ -88,8 +128,13 @@ vi.mock("vscrui", async (importOriginal) => ({
 
 // The shared Button stub is also used by the real ModelPicker rendered
 // underneath, so identify OUR refresh button via its unique i18n label.
-const getRefreshButton = () =>
-	screen.getByText("settings:providers.refreshModels.label").closest("button") as HTMLElement
+const getRefreshButton = (): HTMLButtonElement => {
+	const button = screen.getByText("settings:providers.refreshModels.label").closest("button")
+	if (!(button instanceof HTMLButtonElement)) {
+		throw new Error("Refresh button element not found or not a <button>")
+	}
+	return button
+}
 
 describe("OpenRouter", () => {
 	const organizationAllowList: OrganizationAllowList = { allowAll: true, providers: {} }
@@ -98,8 +143,13 @@ describe("OpenRouter", () => {
 	let queryClient: QueryClient
 	let invalidateQueriesSpy: ReturnType<typeof vi.spyOn>
 
+	const minimalApiConfiguration: ProviderSettings = {
+		apiProvider: providerIdentifiers.openrouter,
+		openRouterApiKey: "key",
+	}
+
 	const renderComponent = ({
-		apiConfiguration = { openRouterApiKey: "key" } as ProviderSettings,
+		apiConfiguration = minimalApiConfiguration,
 		simplifySettings = true,
 	}: {
 		apiConfiguration?: ProviderSettings
@@ -169,7 +219,9 @@ describe("OpenRouter", () => {
 	})
 
 	describe("refresh models", () => {
-		const dispatchMessage = (data: any) =>
+		// Narrow fixture type matching the message shapes OpenRouter actually
+		// consumes (ExtensionMessage fields for routerModels refresh flows).
+		const dispatchMessage = (data: ExtensionMessage) =>
 			act(() => {
 				window.dispatchEvent(new MessageEvent("message", { data }))
 			})
@@ -327,18 +379,62 @@ describe("OpenRouter", () => {
 		})
 
 		it("stops listening for messages after unmount", () => {
-			const { unmount } = renderComponent()
+			// Spy but delegate to the original methods (captured before spying,
+			// since jsdom rejects EventTarget.prototype.addEventListener.call(window))
+			// so the component still registers/unregisters listeners during the test.
+			type Listener = EventListenerOrEventListenerObject | null
+			const added: Array<[string, Listener]> = []
+			const removed: Array<[string, Listener]> = []
 
-			unmount()
+			const originalAdd = window.addEventListener
+			const originalRemove = window.removeEventListener
 
-			expect(() =>
-				act(() => {
-					window.dispatchEvent(
-						new MessageEvent("message", { data: { type: RouterModelsMessageType.routerModels } }),
-					)
-				}),
-			).not.toThrow()
-			expect(screen.queryByText("settings:providers.refreshModels.label")).not.toBeInTheDocument()
+			const addSpy = vi
+				.spyOn(window, "addEventListener")
+				.mockImplementation((type: string, listener: Listener, options?: AddEventListenerOptions | boolean) => {
+					added.push([type, listener])
+					originalAdd.call(window, type, listener, options)
+				})
+
+			const removeSpy = vi
+				.spyOn(window, "removeEventListener")
+				.mockImplementation((type: string, listener: Listener, options?: EventListenerOptions | boolean) => {
+					removed.push([type, listener])
+					originalRemove.call(window, type, listener, options)
+				})
+
+			try {
+				const { unmount } = renderComponent()
+
+				unmount()
+
+				// Every "message" listener added must be removed (multiset compare).
+				const addedMessages = added.filter(([type]) => type === "message").map(([, listener]) => listener)
+				const removedMessages = removed.filter(([type]) => type === "message").map(([, listener]) => listener)
+				expect(addedMessages.length).toBeGreaterThan(0)
+
+				const remaining = [...addedMessages]
+				for (const listener of removedMessages) {
+					const index = remaining.indexOf(listener)
+					expect(index).toBeGreaterThanOrEqual(0)
+					if (index >= 0) {
+						remaining.splice(index, 1)
+					}
+				}
+				expect(remaining).toEqual([])
+
+				expect(() =>
+					act(() => {
+						window.dispatchEvent(
+							new MessageEvent("message", { data: { type: RouterModelsMessageType.routerModels } }),
+						)
+					}),
+				).not.toThrow()
+				expect(screen.queryByText("settings:providers.refreshModels.label")).not.toBeInTheDocument()
+			} finally {
+				addSpy.mockRestore()
+				removeSpy.mockRestore()
+			}
 		})
 	})
 })

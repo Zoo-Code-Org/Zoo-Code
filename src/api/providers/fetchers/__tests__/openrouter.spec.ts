@@ -539,5 +539,38 @@ describe("OpenRouter API", () => {
 
 			expect(resultWithoutTools.supportedParameters).toContain("max_tokens")
 		})
+
+		it("leaves supportsReasoningEffort undefined when reasoning is absent or supportedParameters is unset", () => {
+			const mockModel = {
+				name: "Reasoning Effort Model",
+				description: "Model without reasoning parameter support",
+				context_length: 128000,
+				max_completion_tokens: 8192,
+				pricing: {
+					prompt: "0.000003",
+					completion: "0.000015",
+				},
+			}
+
+			const resultWithoutReasoningParam = parseOpenRouterModel({
+				id: "test/no-reasoning-model",
+				model: mockModel,
+				inputModality: ["text"],
+				outputModality: ["text"],
+				maxTokens: 8192,
+				supportedParameters: ["max_tokens", "temperature"],
+			})
+
+			const resultWithoutSupportedParameters = parseOpenRouterModel({
+				id: "test/unset-parameters-model",
+				model: mockModel,
+				inputModality: ["text"],
+				outputModality: ["text"],
+				maxTokens: 8192,
+			})
+
+			expect(resultWithoutReasoningParam.supportsReasoningEffort).toBeUndefined()
+			expect(resultWithoutSupportedParameters.supportsReasoningEffort).toBeUndefined()
+		})
 	})
 })
