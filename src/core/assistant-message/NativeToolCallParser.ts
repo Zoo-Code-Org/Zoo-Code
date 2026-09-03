@@ -193,7 +193,7 @@ export class NativeToolCallParser {
 		const events: ToolCallStreamEvent[] = []
 		const rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
 
-		if (finishReason === "tool_calls" && rawChunkTracker && rawChunkTracker.size > 0) {
+		if (finishReason === "tool_calls" && rawChunkTracker) {
 			for (const [, tracked] of rawChunkTracker.entries()) {
 				events.push({
 					type: "tool_call_end",
@@ -213,7 +213,7 @@ export class NativeToolCallParser {
 		const events: ToolCallStreamEvent[] = []
 		const rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
 
-		if (rawChunkTracker && rawChunkTracker.size > 0) {
+		if (rawChunkTracker) {
 			for (const [, tracked] of rawChunkTracker.entries()) {
 				if (tracked.hasStarted) {
 					events.push({
@@ -317,7 +317,10 @@ export class NativeToolCallParser {
 	 */
 	public static finalizeStreamingToolCall(id: string, scope = this.defaultScope): ToolUse | McpToolUse | null {
 		const streamingToolCalls = this.streamingToolCallsByScope.get(scope)
-		const toolCall = streamingToolCalls?.get(id)
+		if (!streamingToolCalls) {
+			return null
+		}
+		const toolCall = streamingToolCalls.get(id)
 		if (!toolCall) {
 			return null
 		}
@@ -331,8 +334,9 @@ export class NativeToolCallParser {
 		})
 
 		// Clean up streaming state
-		streamingToolCalls?.delete(id)
-		if (streamingToolCalls?.size === 0) {
+		streamingToolCalls.delete(id)
+		if (streamingToolCalls.size === 0) {
+			// Stryker disable next-line CallExpression: deleting an empty WeakMap value is only observable as GC eligibility.
 			this.streamingToolCallsByScope.delete(scope)
 		}
 

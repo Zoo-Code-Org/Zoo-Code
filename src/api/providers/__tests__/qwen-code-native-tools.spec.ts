@@ -285,6 +285,45 @@ describe("QwenCodeHandler Native Tools", () => {
 			expect(endChunks[0].id).toBe("call_qwen_test")
 		})
 
+		it("emits completion only for identified calls and clears completed IDs", async () => {
+			const toolCall = (id?: string) => ({
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, id, function: { name: "test_tool", arguments: '{"arg1":"value"}' } },
+							],
+						},
+					},
+				],
+			})
+			mockCreate
+				.mockImplementationOnce(() =>
+					asyncStreamFrom([toolCall(), { choices: [{ delta: {}, finish_reason: "tool_calls" }] }]),
+				)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom([toolCall("call_qwen_stop"), { choices: [{ delta: {}, finish_reason: "stop" }] }]),
+				)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom([
+						toolCall("call_qwen_once"),
+						{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+						{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+					]),
+				)
+
+			const createMessage = () => handler.createMessage("test prompt", [], { taskId: "task", tools: testTools })
+			const idlessChunks = await collectStream(createMessage())
+			const stoppedChunks = await collectStream(createMessage())
+			const completedChunks = await collectStream(createMessage())
+
+			expect(idlessChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(stoppedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(completedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_qwen_once" },
+			])
+		})
+
 		it("isolates overlapping tool-call finalization between provider streams", async () => {
 			let releaseFirstStream: (() => void) | undefined
 			let markFirstStreamPaused: (() => void) | undefined

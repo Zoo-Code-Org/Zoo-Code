@@ -544,6 +544,58 @@ describe("OpenRouterHandler", () => {
 			expect(endChunks[0].id).toBe("call_openrouter_test")
 		})
 
+		it("emits completion only for identified calls and clears completed IDs", async () => {
+			const toolCall = (id?: string) => ({
+				id: "stream",
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{ index: 0, id, function: { name: "read_file", arguments: '{"path":"test.ts"}' } },
+							],
+						},
+						index: 0,
+					},
+				],
+			})
+			const mockCreate = vitest
+				.fn()
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall(),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall("call_openrouter_stop"),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "stop", index: 0 }] },
+					]),
+				)
+				.mockResolvedValueOnce(
+					asyncStreamFrom([
+						toolCall("call_openrouter_once"),
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+						{ id: "stream", choices: [{ delta: {}, finish_reason: "tool_calls", index: 0 }] },
+					]),
+				)
+			Object.defineProperty(OpenAI.prototype, "chat", {
+				configurable: true,
+				value: { completions: { create: mockCreate } },
+			})
+			const handler = new OpenRouterHandler(mockOptions)
+
+			const idlessChunks = await collectStream(handler.createMessage("idless", []))
+			const stoppedChunks = await collectStream(handler.createMessage("stopped", []))
+			const completedChunks = await collectStream(handler.createMessage("completed", []))
+
+			expect(idlessChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(stoppedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([])
+			expect(completedChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_openrouter_once" },
+			])
+		})
+
 		it("isolates overlapping tool-call finalization between provider streams", async () => {
 			const { NativeToolCallParser } = await import("../../../core/assistant-message/NativeToolCallParser")
 			NativeToolCallParser.clearRawChunkState()

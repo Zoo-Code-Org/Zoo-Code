@@ -324,9 +324,57 @@ describe("NativeToolCallParser", () => {
 			NativeToolCallParser.clearRawChunkState(secondScope)
 			NativeToolCallParser.clearRawChunkState()
 		})
+
+		it("returns no events for unused and argument-only scopes", () => {
+			const unusedScope = NativeToolCallParser.createScope()
+			const argumentOnlyScope = NativeToolCallParser.createScope()
+
+			expect(NativeToolCallParser.processFinishReason("tool_calls", unusedScope)).toEqual([])
+			expect(
+				NativeToolCallParser.processRawChunk(
+					{ index: 0, arguments: '{"path":"buffered.ts"}' },
+					argumentOnlyScope,
+				),
+			).toEqual([])
+			expect(NativeToolCallParser.processFinishReason("tool_calls", argumentOnlyScope)).toEqual([])
+			expect(NativeToolCallParser.finalizeRawChunks(argumentOnlyScope)).toEqual([])
+		})
 	})
 
 	describe("processStreamingChunk", () => {
+		it("retains peer calls until each call in a scope is finalized", () => {
+			const scope = NativeToolCallParser.createScope()
+			NativeToolCallParser.startStreamingToolCall("call_first", "read_file", scope)
+			NativeToolCallParser.startStreamingToolCall("call_second", "read_file", scope)
+			NativeToolCallParser.processStreamingChunk("call_first", '{"path":"first.ts"}', scope)
+			NativeToolCallParser.processStreamingChunk("call_second", '{"path":"second.ts"}', scope)
+
+			const firstResult = NativeToolCallParser.finalizeStreamingToolCall("call_first", scope)
+			expect(firstResult?.type).toBe("tool_use")
+			if (firstResult?.type === "tool_use") expect(firstResult.nativeArgs).toMatchObject({ path: "first.ts" })
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(true)
+			const secondResult = NativeToolCallParser.finalizeStreamingToolCall("call_second", scope)
+			expect(secondResult?.type).toBe("tool_use")
+			if (secondResult?.type === "tool_use") expect(secondResult.nativeArgs).toMatchObject({ path: "second.ts" })
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(scope)).toBe(false)
+		})
+
+		it("clears active raw and streaming state without affecting unused scopes", () => {
+			const activeScope = NativeToolCallParser.createScope()
+			const unusedScope = NativeToolCallParser.createScope()
+			NativeToolCallParser.processRawChunk({ index: 0, id: "call_active", name: "read_file" }, activeScope)
+			NativeToolCallParser.startStreamingToolCall("call_active", "read_file", activeScope)
+
+			NativeToolCallParser.clearRawChunkState(activeScope)
+			NativeToolCallParser.clearAllStreamingToolCalls(activeScope)
+
+			expect(NativeToolCallParser.finalizeRawChunks(activeScope)).toEqual([])
+			expect(NativeToolCallParser.processFinishReason("tool_calls", activeScope)).toEqual([])
+			expect(NativeToolCallParser.processStreamingChunk("call_active", "{}", activeScope)).toBeNull()
+			expect(NativeToolCallParser.processStreamingChunk("missing", "{}", unusedScope)).toBeNull()
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(activeScope)).toBe(false)
+		})
+
 		it("keeps interleaved task streams isolated", () => {
 			const firstScope = NativeToolCallParser.createScope()
 			const secondScope = NativeToolCallParser.createScope()
