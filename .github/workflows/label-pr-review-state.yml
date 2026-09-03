@@ -73,6 +73,7 @@ jobs:
             const guideMarker = '<!-- zoo-code-pr-review-process -->';
             const codeRabbitLabelMarkerPrefix = '<!-- coderabbit-review-label:';
             const codeRabbitLogin = 'coderabbitai[bot]';
+            const codeRabbitLogins = new Set([codeRabbitLogin, 'coderabbitai']);
             const codeRabbitActiveLabel = 'coderabbit-review-active';
             const reviewGateName = 'Zoo Code / PR review gate';
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
@@ -601,10 +602,11 @@ jobs:
                 const latest = new Map();
                 for (const r of reviews) {
                   const reviewer = r.user.login.toLowerCase();
+                  const reviewerKey = codeRabbitLogins.has(reviewer) ? codeRabbitLogin : reviewer;
                   if (r.state === 'DISMISSED') {
-                    latest.delete(reviewer);
+                    latest.delete(reviewerKey);
                   } else if (r.state !== 'COMMENTED') {
-                    latest.set(reviewer, r);
+                    latest.set(reviewerKey, r);
                   }
                 }
 
@@ -616,6 +618,7 @@ jobs:
                 for (const review of latest.values()) {
                   if (review.commit_id !== pr.head.sha ||
                       review.user?.type === 'Bot' ||
+                      codeRabbitLogins.has(review.user?.login.toLowerCase()) ||
                       review.user?.login.toLowerCase() === pr.user?.login.toLowerCase()) {
                     continue;
                   }

@@ -861,12 +861,16 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
 	})
 
-	it("recognizes CodeRabbit regardless of login casing", async () => {
+	it.each([
+		{ login: "CodeRabbitAI[bot]", type: "Bot" },
+		{ login: "coderabbitai", type: "User" },
+	] as const)("recognizes CodeRabbit review login $login", async ({ login, type }) => {
 		const result = await runWorkflow({
+			permissionErrorStatus: 500,
 			reviews: [
 				{
-					login: "CodeRabbitAI[bot]",
-					type: "Bot",
+					login,
+					type,
 					state: "APPROVED",
 					submittedAt: REVIEWED_AT,
 				},
