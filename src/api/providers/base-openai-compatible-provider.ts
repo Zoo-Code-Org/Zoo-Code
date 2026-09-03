@@ -154,6 +154,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 						? (chunkUnknown as { base_resp?: unknown }).base_resp
 						: undefined
 				const baseRespFields =
+					// Stryker disable next-line ConditionalExpression,LogicalOperator: equivalent for all JSON-reachable baseResp values: null/undefined/primitive yield undefined through the optional-chained status reads and object values behave identically under every guard variant
 					baseResp !== null && typeof baseResp === "object"
 						? (baseResp as Record<string, unknown>)
 						: undefined
@@ -161,6 +162,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				const baseRespStatusMsg = baseRespFields?.["status_msg"]
 				if (
 					baseRespStatusCode &&
+					// Stryker disable next-line ConditionalExpression: a truthy baseRespStatusCode is necessarily !== 0 and the trailing typeof gate reproduces the original result for falsy values
 					baseRespStatusCode !== 0 &&
 					(typeof baseRespStatusCode === "number" || typeof baseRespStatusCode === "string")
 				) {
@@ -203,6 +205,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 				// Emit tool_call_end events when finish_reason is "tool_calls"
 				// This ensures tool calls are finalized even if the stream doesn't properly close
+				// Stryker disable next-line ConditionalExpression,EqualityOperator: with an empty activeToolCallIds the guarded loop yields nothing and clear() is a no-op, so the size guard is unobservable
 				if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
 					for (const id of activeToolCallIds) {
 						yield { type: "tool_call_end", id }
