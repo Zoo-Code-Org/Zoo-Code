@@ -15,6 +15,7 @@ import {
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
+	formatAnnotationCommand,
 	formatBlockingMutants,
 	formatSummary,
 	mutantCounts,
@@ -430,6 +431,19 @@ describe("failure output", () => {
 		assert.equal(first.length, 15)
 		assert.equal(second.length, 5)
 		assert.equal(state.total, 20)
+	})
+
+	it("preserves punctuation in annotation messages while escaping properties", () => {
+		const command = formatAnnotationCommand({
+			file: "src/value:one,two.ts",
+			line: 4,
+			message: "Survived mutant (replacement: left, right). 100% reproducible.",
+		})
+
+		assert.equal(
+			command,
+			"::error file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test gap::Survived mutant (replacement: left, right). 100%25 reproducible.",
+		)
 	})
 
 	it("uses the actual tests recorded by Stryker", () => {

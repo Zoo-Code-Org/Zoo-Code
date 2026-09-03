@@ -422,13 +422,16 @@ export function mutantCounts(report) {
 	return counts
 }
 
-function escapeWorkflowValue(value) {
-	return String(value)
-		.replaceAll("%", "%25")
-		.replaceAll("\r", "%0D")
-		.replaceAll("\n", "%0A")
-		.replaceAll(":", "%3A")
-		.replaceAll(",", "%2C")
+function escapeWorkflowData(value) {
+	return String(value).replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")
+}
+
+function escapeWorkflowProperty(value) {
+	return escapeWorkflowData(value).replaceAll(":", "%3A").replaceAll(",", "%2C")
+}
+
+export function formatAnnotationCommand(annotation) {
+	return `::error file=${escapeWorkflowProperty(annotation.file)},line=${annotation.line},title=Mutation test gap::${escapeWorkflowData(annotation.message)}`
 }
 
 export function formatAnnotations(blockingMutants, packageRoot, state = { total: 0, perFile: new Map() }) {
@@ -682,9 +685,7 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 				packageEntry.runRoot ?? packageEntry.root,
 				annotationState,
 			)) {
-				console.log(
-					`::error file=${escapeWorkflowValue(annotation.file)},line=${annotation.line},title=Mutation test gap::${escapeWorkflowValue(annotation.message)}`,
-				)
+				console.log(formatAnnotationCommand(annotation))
 			}
 			evaluateReport(report, packageEntry)
 			rows.push({
