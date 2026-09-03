@@ -382,7 +382,7 @@ describe("OpenRouter", () => {
 			// Spy but delegate to the original methods (captured before spying,
 			// since jsdom rejects EventTarget.prototype.addEventListener.call(window))
 			// so the component still registers/unregisters listeners during the test.
-			type Listener = EventListenerOrEventListenerObject | null
+			type Listener = Parameters<typeof window.addEventListener>[1] & {}
 			const added: Array<[string, Listener]> = []
 			const removed: Array<[string, Listener]> = []
 
