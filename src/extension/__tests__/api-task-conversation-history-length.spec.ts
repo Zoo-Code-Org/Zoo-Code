@@ -8,6 +8,11 @@ vi.mock("vscode")
 vi.mock("../../core/webview/ClineProvider")
 
 describe("API#getTaskApiConversationHistoryLength", () => {
+	const expectedSequence = {
+		userText: "RESTART_PERSISTENCE_SMOKE",
+		assistantToolName: "attempt_completion",
+		assistantToolInputText: "done",
+	}
 	let api: API
 	let mockOutputChannel: vscode.OutputChannel
 	let mockProvider: ClineProvider
@@ -76,6 +81,126 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 				assistantToolInputText: "done",
 			}),
 		).resolves.toBe(false)
+	})
+
+	it.each([
+		["has no matching user text", [{ role: "user", content: [{ type: "text", text: "different" }] }]],
+		[
+			"finds the text on an assistant turn",
+			[{ role: "assistant", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] }],
+		],
+		["stores non-array user content", [{ role: "user", content: "RESTART_PERSISTENCE_SMOKE" }]],
+	] as const)("returns false when history %s", async (_name, apiConversationHistory) => {
+		mockGetTaskWithId.mockResolvedValue({ apiConversationHistory })
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(false)
+	})
+
+	it.each([
+		[
+			"matching text belongs to an assistant",
+			{ role: "assistant", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] },
+		],
+		["the user text does not match", { role: "user", content: [{ type: "text", text: "different" }] }],
+		[
+			"matching text is on a non-text user block",
+			{ role: "user", content: [{ type: "image", text: "RESTART_PERSISTENCE_SMOKE" }] },
+		],
+	] as const)("does not use a false user match when %s", async (_name, invalidUserCandidate) => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				invalidUserCandidate,
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+					],
+				},
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(false)
+	})
+
+	it("accepts matching text among mixed user blocks", async () => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				{
+					role: "user",
+					content: [
+						{ type: "image", source: { type: "base64", media_type: "image/png", data: "data" } },
+						{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" },
+					],
+				},
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+					],
+				},
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(true)
+	})
+
+	it.each([
+		[
+			"matching tool data on a user turn",
+			{
+				role: "user",
+				content: [
+					{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+				],
+			},
+		],
+		["non-array assistant content", { role: "assistant", content: "attempt_completion done" }],
+		[
+			"matching fields on a non-tool block",
+			{ role: "assistant", content: [{ type: "text", text: "done", name: "attempt_completion", input: "done" }] },
+		],
+		[
+			"the wrong tool name",
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "completion", name: "other", input: { result: "done" } }],
+			},
+		],
+		[
+			"the wrong tool input",
+			{
+				role: "assistant",
+				content: [
+					{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "other" } },
+				],
+			},
+		],
+	] as const)("returns false for %s after the expected user turn", async (_name, assistantCandidate) => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				{ role: "user", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] },
+				assistantCandidate,
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(false)
+	})
+
+	it("accepts a later matching assistant turn after unrelated history", async () => {
+		mockGetTaskWithId.mockResolvedValue({
+			apiConversationHistory: [
+				{ role: "user", content: [{ type: "text", text: "RESTART_PERSISTENCE_SMOKE" }] },
+				{ role: "assistant", content: [{ type: "text", text: "working" }] },
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "completion", name: "attempt_completion", input: { result: "done" } },
+					],
+				},
+			],
+		})
+
+		await expect(api.hasTaskApiConversationHistorySequence("task-1", expectedSequence)).resolves.toBe(true)
 	})
 
 	it("rejects an assistant completion that does not follow the expected user turn", async () => {

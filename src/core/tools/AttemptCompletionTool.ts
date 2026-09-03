@@ -215,7 +215,11 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				// subtask that already completed (and already emitted TaskCompleted) the first
 				// time through -- re-acknowledging it from history must not emit it again.
 				if (!isStaleHistoryReplay) {
-					await this.emitPublicTaskCompleted(task)
+					try {
+						await this.emitPublicTaskCompleted(task)
+					} catch (error) {
+						await handleError("persisting task completion", error as Error)
+					}
 				}
 				return
 			}

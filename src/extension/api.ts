@@ -257,32 +257,35 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		taskId: string,
 		sequence: TaskApiConversationHistorySequence,
 	): Promise<boolean> {
+		let apiConversationHistory: Awaited<ReturnType<ClineProvider["getTaskWithId"]>>["apiConversationHistory"]
 		try {
-			const { apiConversationHistory } = await this.sidebarProvider.getTaskWithId(taskId)
-			const userTurnIndex = apiConversationHistory.findIndex(
-				(message) =>
-					message.role === "user" &&
-					Array.isArray(message.content) &&
-					message.content.some((block) => block.type === "text" && block.text.includes(sequence.userText)),
-			)
-			if (userTurnIndex < 0) return false
-
-			return apiConversationHistory
-				.slice(userTurnIndex + 1)
-				.some(
-					(message) =>
-						message.role === "assistant" &&
-						Array.isArray(message.content) &&
-						message.content.some(
-							(block) =>
-								block.type === "tool_use" &&
-								block.name === sequence.assistantToolName &&
-								JSON.stringify(block.input).includes(sequence.assistantToolInputText),
-						),
-				)
+			const task = await this.sidebarProvider.getTaskWithId(taskId)
+			apiConversationHistory = task.apiConversationHistory
 		} catch {
 			return false
 		}
+
+		const userTurnIndex = apiConversationHistory.findIndex(
+			(message) =>
+				message.role === "user" &&
+				Array.isArray(message.content) &&
+				message.content.some((block) => block.type === "text" && block.text.includes(sequence.userText)),
+		)
+		if (userTurnIndex < 0) return false
+
+		return apiConversationHistory
+			.slice(userTurnIndex + 1)
+			.some(
+				(message) =>
+					message.role === "assistant" &&
+					Array.isArray(message.content) &&
+					message.content.some(
+						(block) =>
+							block.type === "tool_use" &&
+							block.name === sequence.assistantToolName &&
+							JSON.stringify(block.input).includes(sequence.assistantToolInputText),
+					),
+			)
 	}
 
 	public getCurrentTaskStack() {

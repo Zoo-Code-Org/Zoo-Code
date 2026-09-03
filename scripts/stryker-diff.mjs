@@ -293,15 +293,23 @@ export function parseVitestTestFiles(report, runRoot) {
 }
 
 export function preferDirectTestFiles(testFiles, sourceFiles) {
-	const sourceNames = sourceFiles.map((sourceFile) => path.posix.basename(sourceFile, path.posix.extname(sourceFile)))
+	const sourceNames = sourceFiles.map((sourceFile) =>
+		path.posix.basename(sourceFile, path.posix.extname(sourceFile)).toLowerCase(),
+	)
 	const direct = testFiles.filter((testFile) => {
 		const testName = path.posix.basename(testFile)
+		const normalizedTestName = testName.toLowerCase()
 		return sourceNames.some(
 			(sourceName) =>
-				testName.startsWith(`${sourceName}.`) && /\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
+				(normalizedTestName.startsWith(`${sourceName}.`) || normalizedTestName.startsWith(`${sourceName}-`)) &&
+				/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
 		)
 	})
 	return direct.length > 0 ? direct : testFiles
+}
+
+export function shouldUseVitestRelated(packageEntry) {
+	return (packageEntry.testFiles?.length ?? 0) === 0 && packageEntry.vitestRelated !== false
 }
 
 export function resolveVitestBinary(repoRoot, packageEntry) {
@@ -384,7 +392,7 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 			STRYKER_REPORT_DIR: reportDirectory,
 			STRYKER_TEMP_DIR: resolveStrykerTempDir(repoRoot, runRoot),
 			STRYKER_IN_PLACE: "false",
-			STRYKER_VITEST_RELATED: packageEntry.vitestRelated === false ? "false" : "true",
+			STRYKER_VITEST_RELATED: shouldUseVitestRelated(packageEntry) ? "true" : "false",
 			STRYKER_TEST_FILES: JSON.stringify(packageEntry.testFiles ?? []),
 		},
 	})

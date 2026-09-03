@@ -922,6 +922,35 @@ describe("attemptCompletionTool", () => {
 				)
 			})
 
+			it("reports accepted-completion persistence failures with persistence context", async () => {
+				const persistenceError = new Error("history write failed")
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "2" },
+					nativeArgs: { result: "2" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({ response: "yesButtonClicked", text: "", images: [] })
+				mockTask.waitForCurrentAssistantMessagePersistence = vi.fn().mockRejectedValue(persistenceError)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockHandleError).toHaveBeenCalledWith("persisting task completion", persistenceError)
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
 			it("reports telemetry but does not emit the public TaskCompleted event when user provides follow-up feedback", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",

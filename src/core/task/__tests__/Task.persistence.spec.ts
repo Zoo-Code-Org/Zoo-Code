@@ -425,6 +425,46 @@ describe("Task persistence", () => {
 			expect(callArgs.messages).toEqual(task.apiConversationHistory)
 		})
 
+		it("settles the current assistant persistence boundary only for assistant messages", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const privateTask = getTaskPersistenceAccess(task)
+			const waiting = task.waitForCurrentAssistantMessagePersistence()
+			let settled = false
+			void waiting.then(() => {
+				settled = true
+			})
+
+			await privateTask.addToApiConversationHistory({ role: "user", content: "hello" })
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			expect(settled).toBe(false)
+
+			await privateTask.addToApiConversationHistory({ role: "assistant", content: "done" })
+			await expect(waiting).resolves.toBe(true)
+			expect(task.assistantMessageSavedToHistory).toBe(true)
+			expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+		})
+
+		it("shares one completion persistence result per assistant generation", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const first = task.waitForCurrentAssistantMessagePersistence()
+			const second = task.waitForCurrentAssistantMessagePersistence()
+
+			expect(second).toBe(first)
+			task.dispose()
+			await expect(first).resolves.toBe(false)
+		})
+
 		it("emits TaskCompleted only after API history persistence succeeds", async () => {
 			const saveDeferred = createDeferred<void>()
 			mockSaveApiMessages.mockReturnValueOnce(saveDeferred.promise)
@@ -575,7 +615,7 @@ describe("Task persistence", () => {
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(4)
 				expect(completionListener).not.toHaveBeenCalled()
 				expect(callbacks.handleError).toHaveBeenCalledWith(
-					"inspecting site",
+					"persisting task completion",
 					expect.objectContaining({
 						message: "Failed to persist API conversation history before task completion",
 					}),
@@ -646,6 +686,7 @@ describe("Task persistence", () => {
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
 				expect(callbacks.handleError).not.toHaveBeenCalled()
 				expect(completionListener).toHaveBeenCalledTimes(1)
+				expect(task.assistantMessageSavedToHistory).toBe(true)
 				// Assert ordering: retry save completes before TaskCompleted is emitted
 				expect(vi.mocked(mockSaveApiMessages).mock.invocationCallOrder[1]).toBeLessThan(
 					vi.mocked(completionListener).mock.invocationCallOrder[0],
@@ -687,9 +728,12 @@ describe("Task persistence", () => {
 				})
 				const waiting = task.waitForCurrentAssistantMessagePersistence()
 
+				await vi.advanceTimersByTimeAsync(50)
 				task.dispose()
 
 				await expect(waiting).resolves.toBe(false)
+				await Promise.resolve()
+				expect(vi.getTimerCount()).toBe(0)
 				await vi.runAllTimersAsync()
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
 			} finally {
@@ -731,6 +775,7 @@ describe("Task persistence", () => {
 				const waiting = task.waitForCurrentAssistantMessagePersistence()
 
 				// Resolve the delay without flushing its promise continuation, then cancel at the save boundary.
+				await Promise.resolve()
 				vi.advanceTimersByTime(100)
 				task.dispose()
 
@@ -739,6 +784,39 @@ describe("Task persistence", () => {
 
 				expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
 			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("does not mark persistence ready when cancelled during a retry write", async () => {
+			vi.useFakeTimers()
+			const retrySave = createDeferred<void>()
+			mockSaveApiMessages
+				.mockRejectedValueOnce(new Error("initial write failed"))
+				.mockReturnValueOnce(retrySave.promise)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({
+					role: "assistant",
+					content: [{ type: "text", text: "message" }],
+				})
+				const waiting = task.waitForCurrentAssistantMessagePersistence()
+
+				await vi.advanceTimersByTimeAsync(100)
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+				task.dispose()
+				retrySave.resolve(undefined)
+
+				await expect(waiting).resolves.toBe(false)
+				expect(task.assistantMessageSavedToHistory).toBe(false)
+			} finally {
+				retrySave.resolve(undefined)
 				vi.useRealTimers()
 			}
 		})
