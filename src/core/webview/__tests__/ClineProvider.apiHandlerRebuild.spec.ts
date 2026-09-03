@@ -652,11 +652,26 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
 				expect.objectContaining({ openRouterModelId: "openai/gpt-4.1-mini" }),
 			)
+			expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledWith({ name: "ask-profile" })
 			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
 			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
 			expect(unrelatedTask["_taskMode"]).toBe("code")
 			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
 			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation tolerates a current profile missing from configuration metadata", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("currentApiConfigName", "missing-config")
+
+			await expect(
+				provider.handleModeSwitch("ask" as Mode, null, {
+					pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+				}),
+			).resolves.toBeUndefined()
+
+			expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
 		})
 
 		test("pending child preparation keeps the current profile when the mode has no saved profile", async () => {
@@ -773,6 +788,19 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect((mockTask as any).apiConfiguration.openRouterModelId).toBe("openai/gpt-4")
 			expect((mockTask as any).apiConfiguration.modelTemperature).toBe(0.9)
 			expect((mockTask as any).apiConfiguration.rateLimitSeconds).toBe(7)
+		})
+
+		test("suppresses only explicitly suppressed profile state posts", async () => {
+			const mockTask = new Task(defaultTaskOptions)
+			await provider.addClineToStack(mockTask)
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.activateProviderProfile({ name: "test-config" }, { suppressStatePost: true })
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			await provider.activateProviderProfile({ name: "test-config" })
+			expect(postStateSpy).toHaveBeenCalledOnce()
 		})
 
 		test("calls updateApiConfiguration when provider changes and syncs task.apiConfiguration", async () => {

@@ -44,7 +44,7 @@
 			"count": 9
 		}
 	},
-	"__tests__/provider-delegation.spec.ts": {
+	"__tests__/ClineProvider.delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 9
 		}
