@@ -298,6 +298,76 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(firstChunk.done).toBe(false)
 			expect(firstChunk.value).toMatchObject({ type: "usage", inputTokens: 100, outputTokens: 50 })
 		})
+
+		it("should keep the last usage when a later chunk carries none", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: {} }],
+						usage: { prompt_tokens: 10, completion_tokens: 5 },
+					},
+					{ choices: [{ delta: { content: "tail" } }] },
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = await collectStream(stream)
+
+			// The recorded usage is only replaced by a chunk that actually carries
+			// usage; a later usage-less chunk must not wipe out the metrics.
+			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+			expect(usageChunks).toHaveLength(1)
+			expect(usageChunks[0]).toMatchObject({ type: "usage", inputTokens: 10, outputTokens: 5 })
+		})
+	})
+
+	describe("stream chunk shape edge cases", () => {
+		it("should surface the choices access as the failure site for a null chunk", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([null, { choices: [{ delta: { content: "after" } }] }]),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// A null chunk passes the base_resp guard (typeof null is "object" but
+			// the !== null check short-circuits) and only fails at the first choices
+			// access; pinning the message proves the guard is evaluated first.
+			expect(result.name).toBe("Error")
+			expect(result.message).toBe(
+				"TestProvider completion error: Cannot read properties of null (reading 'choices')",
+			)
+		})
+
+		it("should continue streaming content after a primitive chunk", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom(["unexpected-chunk", { choices: [{ delta: { content: "after" } }] }]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			// A primitive chunk fails the base_resp guard's object check and its
+			// property reads short-circuit through optional chaining, so the stream
+			// must carry on with the next real chunk.
+			expect(chunks).toEqual([{ type: "text", text: "after" }])
+		})
+
+		it("should skip an empty choices array without crashing the delta reads", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([{ choices: [] }, { choices: [{ delta: { content: "after" } }] }]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			// With no first choice, delta and finish_reason resolve to undefined;
+			// the optional chaining must keep the iteration alive for the next chunk.
+			expect(chunks).toEqual([{ type: "text", text: "after" }])
+		})
 	})
 
 	describe("abort signal wiring", () => {
@@ -414,6 +484,71 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			)
 
 			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1041): Unknown error")
+		})
+
+		it("should ignore a zero base_resp status_code because 0 is a success sentinel", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" } }],
+						base_resp: { status_code: 0 },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			expect(chunks).toEqual([{ type: "text", text: "ok" }])
+		})
+
+		it("should ignore an empty-string base_resp status_code", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" } }],
+						base_resp: { status_code: "" },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			expect(chunks).toEqual([{ type: "text", text: "ok" }])
+		})
+
+		it("should report a string base_resp status_code with its status_msg", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						base_resp: { status_code: "1001", status_msg: "bad token" },
+					},
+				]),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			expect(result.message).toBe("TestProvider completion error: TestProvider API Error (1001): bad token")
+		})
+
+		it("should ignore a boolean base_resp status_code", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "ok" } }],
+						base_resp: { status_code: true },
+					},
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage("system prompt", []))
+
+			expect(chunks).toEqual([{ type: "text", text: "ok" }])
 		})
 
 		it("should still wrap non-abort request errors with the provider prefix", async () => {
@@ -644,6 +779,85 @@ describe("BaseOpenAiCompatibleProvider", () => {
 
 			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
 			expect(endChunks).toHaveLength(0)
+		})
+
+		it("should yield a tool_call_partial with undefined name and arguments when function is absent", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { tool_calls: [{ index: 0, id: "call_fn" }] } }],
+					},
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = await collectStream(stream)
+
+			// A first-chunk tool call may carry only its id; the optional chaining
+			// on function must yield undefined fields instead of throwing.
+			expect(chunks).toEqual([
+				{ type: "tool_call_partial", index: 0, id: "call_fn", name: undefined, arguments: undefined },
+			])
+		})
+
+		it("should emit the tool_call_end after the trailing content, not before it", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{ index: 0, id: "call_seq", function: { name: "seq_tool", arguments: "{}" } },
+									],
+								},
+							},
+						],
+					},
+					{ choices: [{ delta: { content: "between" } }] },
+					{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = await collectStream(stream)
+
+			// The end event must only be emitted when finish_reason arrives;
+			// emitting it on finish-less chunks would reorder this sequence.
+			expect(chunks).toEqual([
+				{ type: "tool_call_partial", index: 0, id: "call_seq", name: "seq_tool", arguments: "{}" },
+				{ type: "text", text: "between" },
+				{ type: "tool_call_end", id: "call_seq" },
+			])
+		})
+
+		it("should clear the tracked tool call ids after emitting tool_call_end", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{ index: 0, id: "call_dup", function: { name: "dup_tool", arguments: "{}" } },
+									],
+								},
+							},
+						],
+					},
+					{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+					{ choices: [{ delta: { content: "more" } }] },
+					{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = await collectStream(stream)
+
+			// Without the clear(), the second tool_calls finish would re-emit the
+			// end event for the already-finalized call.
+			const endChunks = chunks.filter((chunk) => chunk.type === "tool_call_end")
+			expect(endChunks).toEqual([{ type: "tool_call_end", id: "call_dup" }])
 		})
 	})
 })

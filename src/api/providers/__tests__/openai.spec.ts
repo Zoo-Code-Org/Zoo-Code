@@ -280,6 +280,55 @@ describe("OpenAiHandler", () => {
 			expect(textChunks).toEqual([{ type: "text", text: "hello " }])
 		})
 
+		it("should treat a streaming chunk without choices as an empty delta", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ usage: { prompt_tokens: 1, completion_tokens: 2 } },
+					{ choices: [{ delta: { content: "tail" }, index: 0 }] },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			// A usage-only chunk has no choices at all; the optional chaining must
+			// resolve to the empty-delta fallback instead of throwing.
+			const textChunks = chunks.filter((chunk) => chunk.type === "text")
+			expect(textChunks).toEqual([{ type: "text", text: "tail" }])
+		})
+
+		it("should treat a streaming chunk with an empty choices array as an empty delta", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([{ choices: [] }, { choices: [{ delta: { content: "tail" }, index: 0 }] }]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			// With no first choice, delta and finish_reason resolve to undefined;
+			// the optional chaining must keep the iteration alive for the next chunk.
+			const textChunks = chunks.filter((chunk) => chunk.type === "text")
+			expect(textChunks).toEqual([{ type: "text", text: "tail" }])
+		})
+
+		it("should keep the last usage when a later chunk carries none", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { content: "hi" }, index: 0 }],
+						usage: { prompt_tokens: 7, completion_tokens: 3, total_tokens: 10 },
+					},
+					{ choices: [{ delta: {}, index: 0 }] },
+				]),
+			)
+
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+			// The recorded usage is only replaced by a chunk that actually carries
+			// usage; a later usage-less chunk must not wipe out the metrics.
+			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
+			expect(usageChunks).toHaveLength(1)
+			expect(usageChunks[0]).toMatchObject({ type: "usage", inputTokens: 7, outputTokens: 3 })
+		})
+
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([
@@ -1074,6 +1123,28 @@ describe("OpenAiHandler", () => {
 			expect(result.name).toBe("AbortError")
 			expect(result.message).toBe("OpenAI request aborted")
 			expect(result.message.endsWith("aborted")).toBe(true)
+		})
+
+		it("should wrap a non-abort stream error with the provider prefix when no metadata is passed", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				(async function* () {
+					yield { choices: [{ delta: { content: "partial" } }] }
+					throw new Error("mid-stream boom")
+				})(),
+			)
+
+			const result = await captureError(
+				(async () => {
+					for await (const _ of handler.createMessage("system prompt", [])) {
+						// consume
+					}
+				})(),
+			)
+
+			// Without metadata there is no abort signal to consult; the raw error
+			// must still be normalized through the completion-error wrapper.
+			expect(result.name).toBe("Error")
+			expect(result.message).toBe("OpenAI completion error: mid-stream boom")
 		})
 
 		it("should normalize the SDK APIUserAbortError from completePrompt without an external signal", async () => {

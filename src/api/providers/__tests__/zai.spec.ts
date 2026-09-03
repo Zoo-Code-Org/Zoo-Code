@@ -798,6 +798,21 @@ describe("ZAiHandler", () => {
 			expect(result.name).toBe("AbortError")
 			expect(result.message).toBe("Z.ai request aborted")
 		})
+
+		it("glm-5.3 completePrompt should omit the request timeout when timeoutMs is zero", async () => {
+			const h53 = new ZAiHandler({
+				apiModelId: "glm-5.3",
+				zaiApiKey: "test-zai-api-key",
+				zaiApiLine: "international_coding",
+			})
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "response" } }] })
+
+			await expect(h53.completePrompt("prompt", { timeoutMs: 0 })).resolves.toBe("response")
+
+			// Values <= 0 mean "no explicit timeout": with no caller signal either,
+			// the built request config is empty and nothing is forwarded to the SDK.
+			expect(mockCreate.mock.calls.at(-1)?.[1]).toBeUndefined()
+		})
 	})
 
 	describe("GLM-4.7 Thinking Mode", () => {
