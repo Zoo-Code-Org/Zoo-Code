@@ -477,6 +477,7 @@ export class TaskHistoryStore {
 						// recently is owned by another live window, not a crash orphan.
 						const mtimeMs = await this.getChildFileMtimeMs(child.id)
 						const isLiveElsewhere =
+							// Stryker disable next-line ConditionalExpression: replacing `mtimeMs !== undefined` with `true` is mutation-equivalent; with a defined mtimeMs `true && X === X`, and with undefined the right operand is `NaN < threshold === false`, identical to the short-circuit result.
 							mtimeMs !== undefined &&
 							Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
 						if (isLiveElsewhere) {

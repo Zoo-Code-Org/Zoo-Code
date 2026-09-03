@@ -24,6 +24,14 @@ vi.mock("../../../utils/safeWriteJson", () => ({ safeWriteJson: safeWriteJsonMoc
 
 safeWriteJsonMock.mockImplementation(writeJson)
 
+// Private static member read for the threshold-constant test. There is no
+// typed accessor; this casts through `unknown` (not `as any`) following the
+// same private-member access pattern used by
+// "removes the repair-intent file after successful replay" below.
+const LIVE_CHILD_MTIME_THRESHOLD_MS = (TaskHistoryStore as unknown as {
+	LIVE_CHILD_MTIME_THRESHOLD_MS: number
+}).LIVE_CHILD_MTIME_THRESHOLD_MS
+
 function makeItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
 	return {
 		id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
@@ -172,9 +180,47 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await fs.utimes(filePath, stale, stale)
 	}
 
+	/**
+		* Deterministic wall clock for liveness-boundary tests. `fs.utimes` accepts
+		* ms-precision Date values and the store's `Date.now()` is spied to return
+		* this same instant, so `Date.now() - mtimeMs` is exact regardless of how
+		* long the test body takes to run.
+		*/
+	const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z
+
+	async function setChildMtimeAge(taskId: string, ageMs: number): Promise<void> {
+		const filePath = path.join(tmpDir, "tasks", taskId, GlobalFileNames.historyItem)
+		const stamp = new Date(FIXED_NOW - ageMs)
+		await fs.utimes(filePath, stamp, stamp)
+		// Guard the assumption that the filesystem round-trips millisecond
+		// precision, so a boundary test failure is diagnosable rather than a
+		// silent live/stale flip.
+		const written = await fs.stat(filePath)
+		expect(Math.round(written.mtimeMs)).toBe(FIXED_NOW - ageMs)
+	}
+
 	beforeEach(async () => {
 		tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "reconcile-test-"))
 		store = registerStore(new TaskHistoryStore(tmpDir))
+	})
+
+	it("getChildFileMtimeMs returns the file mtime for an existing child and undefined for a missing one", async () => {
+		// Direct coverage of the private mtime probe used by the cross-instance
+		// liveness guard (TaskHistoryStore.ts getChildFileMtimeMs): the happy
+		// path returns stat.mtimeMs and the catch path returns undefined.
+		// Bracket/typed access follows the same private-member pattern used by
+		// "removes the repair-intent file after successful replay" below.
+		const internals = store as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+
+		expect(await internals.getChildFileMtimeMs("missing-mtime-child")).toBeUndefined()
+
+		const child = makeItem({ id: "present-mtime-child", status: "active" })
+		await seedItems([child])
+		const mtimeMs = await internals.getChildFileMtimeMs("present-mtime-child")
+		expect(typeof mtimeMs).toBe("number")
+		expect(mtimeMs).toBeGreaterThan(0)
 	})
 
 	afterEach(async () => {
@@ -287,7 +333,16 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
+	it("pins LIVE_CHILD_MTIME_THRESHOLD_MS to exactly 5 minutes in milliseconds", () => {
+		// Kills the TaskHistoryStore.ts line-105 ArithmeticOperator mutants
+		// directly: every mutated expression (5 * 60 / 1000 → 0.3,
+		// 5 + 60 * 1000 → 60005, 5 * 60 % 1000 → 300, ...) changes the
+		// constant's own value, so this assertion fails under all of them.
+		expect(LIVE_CHILD_MTIME_THRESHOLD_MS).toBe(5 * 60 * 1000)
+	})
+
 	it("skips repair for active child with recent mtime (live in another window)", async () => {
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 		const child = makeItem({
 			id: "child-live",
 			status: "active",
@@ -326,9 +381,20 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		) as HistoryItem
 		expect(persistedParent.status).toBe("delegated")
 		expect(persistedParent.awaitingChildId).toBe("child-live")
+
+		// Kills the line-484/485 StringLiteral mutants: the two concatenated
+		// fragments of the skip message are asserted independently, so either
+		// fragment mutated to '' breaks its matching stringContaining check.
+		expect(logSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Skipping repair for live child child-live"),
+		)
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("owned by another window"))
+
+		logSpy.mockRestore()
 	})
 
 	it("repairs active child with stale mtime (crash orphan)", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 		const child = makeItem({
 			id: "child-stale",
 			status: "active",
@@ -366,6 +432,216 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(repairedParent).toMatchObject({ id: "parent-stale", status: "active" })
 		expect(repairedParent?.awaitingChildId).toBeUndefined()
 		expect(repairedParent?.delegatedToId).toBeUndefined()
+
+		// Kills line-495 StringLiteral mutants on the orphan-repair warning.
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Reconciled orphaned active child"))
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("child-stale"))
+
+		warnSpy.mockRestore()
+	})
+
+	it("repairs when child file age is exactly the liveness threshold (strict '<' boundary)", async () => {
+		// Kills the TaskHistoryStore.ts line-481 EqualityOperator mutant `<=`:
+		// under `<=`, age === threshold (300000 ms) would count as live and the
+		// repair would be skipped. With the real strict `<`, age === threshold
+		// is NOT live, so the crash orphan must be repaired.
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		try {
+			const child = makeItem({
+				id: "child-boundary-equal",
+				status: "active",
+				parentTaskId: "parent-boundary-equal",
+				rootTaskId: "parent-boundary-equal",
+			})
+			const parent = makeItem({
+				id: "parent-boundary-equal",
+				status: "delegated",
+				awaitingChildId: "child-boundary-equal",
+				delegatedToId: "child-boundary-equal",
+			})
+			await seedItems([parent, child])
+			await setChildMtimeAge("child-boundary-equal", 300_000)
+
+			await store.initialize()
+
+			expect(store.get("child-boundary-equal")?.status).toBe("interrupted")
+			expect(store.get("parent-boundary-equal")?.status).toBe("active")
+			expect(store.get("parent-boundary-equal")?.awaitingChildId).toBeUndefined()
+			expect(store.get("parent-boundary-equal")?.delegatedToId).toBeUndefined()
+		} finally {
+			nowSpy.mockRestore()
+		}
+	})
+
+	it("skips repair when child file age is one millisecond below the liveness threshold", async () => {
+		// Kills:
+		// - line-481 EqualityOperator mutants `>` / `>=`: with either, age
+		//   299999 < 300000 would evaluate stale and the repair would run.
+		// - line-105 ArithmeticOperator mutants behaviorally: every mutated
+		//   threshold (0.3, 83.3, 60005, 1300, -700, 300, 5000, ...) is far
+		//   below 299999, so the child would no longer be considered live.
+		// - line-484/485 StringLiteral mutants: both message fragments are
+		//   asserted independently.
+		// - line-485 `/ 1000` ArithmeticOperator mutants: Math.round(299999 /
+		//   1000) renders "300", while `* 1000`, `+ 1000`, `- 1000` and
+		//   `% 1000` all render a different second count.
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		try {
+			const child = makeItem({
+				id: "child-boundary-live",
+				status: "active",
+				parentTaskId: "parent-boundary-live",
+				rootTaskId: "parent-boundary-live",
+			})
+			const parent = makeItem({
+				id: "parent-boundary-live",
+				status: "delegated",
+				awaitingChildId: "child-boundary-live",
+				delegatedToId: "child-boundary-live",
+			})
+			await seedItems([parent, child])
+			await setChildMtimeAge("child-boundary-live", 299_999)
+
+			await store.initialize()
+
+			expect(store.get("child-boundary-live")?.status).toBe("active")
+			expect(store.get("parent-boundary-live")?.status).toBe("delegated")
+			expect(store.get("parent-boundary-live")?.awaitingChildId).toBe("child-boundary-live")
+			expect(store.get("parent-boundary-live")?.delegatedToId).toBe("child-boundary-live")
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("[TaskHistoryStore] Skipping repair for live child child-boundary-live"),
+			)
+			// Split around the non-ASCII em dash so the assertion depends only on
+			// the seconds count rendered from (Date.now() - mtimeMs) / 1000:
+			// Math.round(299.999) = 300, while `* 1000`, `+ 1000`, `- 1000` and
+			// `% 1000` ArithmeticOperator mutants all render a different string.
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("(mtime 300s ago)"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("owned by another window"))
+		} finally {
+			logSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
+	})
+
+	it("repairs a child whose file mtime is at the unix epoch (kills '-' -> '%' mutant at the liveness subtraction)", async () => {
+		// Files stamped 1970-01-01 (epoch-zero artifacts from misconfigured clocks,
+		// zip extraction, or container images) must be treated as stale orphans.
+		// Kills the ArithmeticOperator mutant `Date.now() - mtimeMs` ->
+		// `Date.now() % mtimeMs`: with mtimeMs = 1000, the real subtraction is
+		// ~56 years (stale -> repair), while FIXED_NOW % 1000 === 0 would be read
+		// as live and skip the repair. The same mutant inside the skip-path log is
+		// never reached under the mutant because the guard already diverges.
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		try {
+			const child = makeItem({
+				id: "child-epoch-mtime",
+				status: "active",
+				parentTaskId: "parent-epoch-mtime",
+				rootTaskId: "parent-epoch-mtime",
+			})
+			const parent = makeItem({
+				id: "parent-epoch-mtime",
+				status: "delegated",
+				awaitingChildId: "child-epoch-mtime",
+				delegatedToId: "child-epoch-mtime",
+			})
+			await seedItems([parent, child])
+			const childFilePath = path.join(tmpDir, "tasks", "child-epoch-mtime", GlobalFileNames.historyItem)
+			const epochStamp = new Date(1_000) // 1970-01-01T00:00:01.000Z
+			await fs.utimes(childFilePath, epochStamp, epochStamp)
+			const written = await fs.stat(childFilePath)
+			expect(Math.round(written.mtimeMs)).toBe(1_000)
+
+			await store.initialize()
+
+			expect(store.get("child-epoch-mtime")?.status).toBe("interrupted")
+			expect(store.get("parent-epoch-mtime")?.status).toBe("active")
+			expect(store.get("parent-epoch-mtime")?.awaitingChildId).toBeUndefined()
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
+		} finally {
+			logSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
+	})
+
+	it("treats a future child-file mtime as live and renders the negative age (kills '-' -> '%' in the skip log)", async () => {
+		// Clock skew can put a child file's mtime ahead of Date.now(). The skip
+		// path renders (Date.now() - mtimeMs) / 1000 = -100s. The
+		// ArithmeticOperator mutant `Date.now() % mtimeMs` would instead render
+		// the whole epoch magnitude (1756886400s), so the seconds-count
+		// assertion below kills it. The live-side status assertions also kill
+		// the same mutant on the guard subtraction in TaskHistoryStore.ts.
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		try {
+			const child = makeItem({
+				id: "child-future-mtime",
+				status: "active",
+				parentTaskId: "parent-future-mtime",
+				rootTaskId: "parent-future-mtime",
+			})
+			const parent = makeItem({
+				id: "parent-future-mtime",
+				status: "delegated",
+				awaitingChildId: "child-future-mtime",
+				delegatedToId: "child-future-mtime",
+			})
+			await seedItems([parent, child])
+			const childFilePath = path.join(tmpDir, "tasks", "child-future-mtime", GlobalFileNames.historyItem)
+			const futureStamp = new Date(FIXED_NOW + 100_000)
+			await fs.utimes(childFilePath, futureStamp, futureStamp)
+			const written = await fs.stat(childFilePath)
+			expect(Math.round(written.mtimeMs)).toBe(FIXED_NOW + 100_000)
+
+			await store.initialize()
+
+			expect(store.get("child-future-mtime")?.status).toBe("active")
+			expect(store.get("parent-future-mtime")?.status).toBe("delegated")
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("(mtime -100s ago)"))
+		} finally {
+			logSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
+	})
+
+	it("skips repair and renders 299s for a child file age of threshold-501ms (kills Math.ceil mutant)", async () => {
+		// Companion to the 299999 ms test: Math.round(299.499) = 299 while
+		// Math.ceil(299.499) = 300 and Math.floor(299.499) = 299. The 299999 ms
+		// test above covers the floor mutant (round = ceil = 300 there), and
+		// this one covers the ceil mutant. It also re-asserts the live side of
+		// the strict `<` boundary and the line-105 threshold mutants.
+		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
+		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+		try {
+			const child = makeItem({
+				id: "child-boundary-ceil",
+				status: "active",
+				parentTaskId: "parent-boundary-ceil",
+				rootTaskId: "parent-boundary-ceil",
+			})
+			const parent = makeItem({
+				id: "parent-boundary-ceil",
+				status: "delegated",
+				awaitingChildId: "child-boundary-ceil",
+				delegatedToId: "child-boundary-ceil",
+			})
+			await seedItems([parent, child])
+			await setChildMtimeAge("child-boundary-ceil", 299_499)
+
+			await store.initialize()
+
+			expect(store.get("child-boundary-ceil")?.status).toBe("active")
+			expect(store.get("parent-boundary-ceil")?.status).toBe("delegated")
+			expect(store.get("parent-boundary-ceil")?.awaitingChildId).toBe("child-boundary-ceil")
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("(mtime 299s ago)"))
+		} finally {
+			logSpy.mockRestore()
+			nowSpy.mockRestore()
+		}
 	})
 
 	it("repairs a delegated child with an omitted status as implicit active", async () => {
