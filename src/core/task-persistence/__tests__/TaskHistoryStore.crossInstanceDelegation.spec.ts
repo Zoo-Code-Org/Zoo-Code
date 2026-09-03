@@ -339,4 +339,236 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			await fs.rm(storage, { recursive: true, force: true })
 		}
 	})
+
+	it("rejects a guarded pair update when the authoritative parent record disappeared", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missing-parent-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			await fs.unlink(path.join(storage, "tasks", "parent", "history_item.json"))
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({ ...parent, status: "active", awaitingChildId: undefined }),
+					(child) => ({ ...child, status: "completed" }),
+					{ firstDiskGuard: () => {} },
+				),
+			).rejects.toThrow("guarded write: task parent not found on disk")
+			expect(store.get("parent")?.status).toBe("delegated")
+			expect(store.get("child")?.status).toBe("active")
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects an atomic updater that changes the task identity", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-id-guard-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "active" }))
+
+			await expect(
+				store.atomicReadAndUpdate("parent", (parent) => ({ ...parent, id: "replacement" })),
+			).rejects.toThrow("updater changed task id from parent to replacement")
+			expect(store.get("parent")?.id).toBe("parent")
+			expect(store.get("replacement")).toBeUndefined()
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("rejects an atomic update for a task missing from the local cache", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missing-cache-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await expect(store.atomicReadAndUpdate("missing", (item) => item)).rejects.toThrow(
+				"task missing not found in cache",
+			)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("recreates a missing task file from cached state and publishes the update", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-cached-fallback-"))
+		const onWrite = vi.fn().mockResolvedValue(undefined)
+		const store = new TaskHistoryStore(storage, { onWrite })
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "active", tokensIn: 1 }))
+			await fs.unlink(path.join(storage, "tasks", "parent", "history_item.json"))
+			onWrite.mockClear()
+
+			await store.atomicReadAndUpdate("parent", (parent) => ({ ...parent, tokensIn: 2 }))
+
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			expect(store.get("parent")?.tokensIn).toBe(2)
+			const persisted = JSON.parse(
+				await fs.readFile(path.join(storage, "tasks", "parent", "history_item.json"), "utf8"),
+			)
+			expect(persisted).toMatchObject({ id: "parent", tokensIn: 2 })
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the cached snapshot available when a locked task file is missing", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missing-locked-file-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "active", tokensIn: 3 }))
+			await fs.unlink(path.join(storage, "tasks", "parent", "history_item.json"))
+
+			const tokensIn = await store.withTaskFileLock("parent", async () => store.get("parent")?.tokensIn)
+
+			expect(tokensIn).toBe(3)
+			expect(store.get("parent")?.tokensIn).toBe(3)
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("treats a legacy missing status as active during an atomic transition", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-legacy-status-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: undefined }))
+
+			await store.atomicReadAndUpdate("parent", (parent) => ({
+				...parent,
+				status: "delegated",
+				awaitingChildId: "child",
+				delegatedToId: "child",
+			}))
+
+			expect(store.get("parent")).toMatchObject({
+				status: "delegated",
+				awaitingChildId: "child",
+				delegatedToId: "child",
+			})
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("runs pair write-through inside an already-held parent transition lock", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-held-pair-lock-"))
+		const onWrite = vi.fn().mockResolvedValue(undefined)
+		const store = new TaskHistoryStore(storage, { onWrite })
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			onWrite.mockClear()
+
+			await store.withTaskFileLock("parent", () =>
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({
+						...parent,
+						status: "active",
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+					}),
+					(child) => ({ ...child, status: "completed" }),
+					{
+						firstDiskGuard: (parent) => {
+							expect(parent.awaitingChildId).toBe("child")
+						},
+						firstFileLockAcquired: true,
+						storeLockAcquired: true,
+					},
+				),
+			)
+
+			expect(onWrite).toHaveBeenCalledTimes(1)
+			expect(store.get("parent")?.status).toBe("active")
+			expect(store.get("child")?.status).toBe("completed")
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("surfaces rollback failure when the first record disappears after its write", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missing-rollback-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+
+			const storeAccess = store as unknown as {
+				writeTaskFile: (...args: unknown[]) => Promise<HistoryItem>
+			}
+			const writeTaskFile = storeAccess.writeTaskFile.bind(store)
+			let pairWrite = 0
+			vi.spyOn(storeAccess, "writeTaskFile").mockImplementation(async (...args) => {
+				pairWrite++
+				if (pairWrite === 1) {
+					const written = await writeTaskFile(...args)
+					await fs.unlink(path.join(storage, "tasks", "parent", "history_item.json"))
+					return written
+				}
+				throw new Error("child write failed")
+			})
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({ ...parent, status: "active", awaitingChildId: undefined }),
+					(child) => ({ ...child, status: "completed" }),
+					{ rollbackFirstOnSecondFailure: true },
+				),
+			).rejects.toMatchObject({
+				name: "AggregateError",
+				message: expect.stringContaining("second write and first-record rollback failed"),
+			})
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
 })

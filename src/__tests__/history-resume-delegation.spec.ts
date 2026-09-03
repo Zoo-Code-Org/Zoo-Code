@@ -313,6 +313,75 @@ describe("History resume delegation - parent metadata transitions", () => {
 		)
 	})
 
+	it("preserves an unrelated child pending action when completion has no action owner", async () => {
+		const parentHistoryItem = {
+			id: "parent-unowned-action",
+			status: "delegated",
+			awaitingChildId: "child-unowned-action",
+			childIds: ["child-unowned-action"],
+			ts: 1,
+			task: "Parent",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const pendingAction = {
+			kind: "finish_subtask" as const,
+			actionId: "other-action",
+			approvalText: "{}",
+			parentTaskId: "parent-unowned-action",
+			result: "Other result",
+		}
+		const childHistoryItem = {
+			id: "child-unowned-action",
+			status: "active",
+			pendingAction,
+		}
+		let updatedChild: HistoryItem | undefined
+		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem, {
+			atomicUpdatePair: vi.fn(
+				async (
+					_firstId: string,
+					_secondId: string,
+					firstUpdater: (item: HistoryItem) => HistoryItem,
+					secondUpdater: (item: HistoryItem) => HistoryItem,
+					options?: { whileFirstFileLocked?: () => Promise<void> },
+				) => {
+					firstUpdater(parentHistoryItem as HistoryItem)
+					updatedChild = secondUpdater(childHistoryItem as HistoryItem)
+					await options?.whileFirstFileLocked?.()
+					return []
+				},
+			),
+		})
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/tmp" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentHistoryItem }),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => ({ taskId: "different-task" })),
+			removeClineFromStack: vi.fn(),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue({
+				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+				overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+			}),
+			taskHistoryStore,
+		})
+
+		vi.mocked(readTaskMessages).mockResolvedValue([])
+		vi.mocked(readApiMessages).mockResolvedValue([])
+		vi.mocked(saveTaskMessages).mockResolvedValue(undefined)
+		vi.mocked(saveApiMessages).mockResolvedValue(undefined)
+
+		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "parent-unowned-action",
+			childTaskId: "child-unowned-action",
+			completionResultSummary: "Done",
+		})
+
+		expect(updatedChild?.pendingAction).toEqual(pendingAction)
+	})
+
 	it("reopenParentFromDelegation injects subtask_result into both UI and API histories", async () => {
 		const parentItem = {
 			id: "p1",
@@ -517,11 +586,17 @@ describe("History resume delegation - parent metadata transitions", () => {
 		const existingApiMessages = [
 			{
 				role: "assistant" as const,
-				content: [{ type: "tool_use" as const, name: "new_task", id: "tool-existing", input: {} }],
+				content: [
+					{ type: "tool_use" as const, name: "read_file", id: "tool-unrelated", input: {} },
+					{ type: "tool_use" as const, name: "new_task", id: "tool-existing", input: {} },
+				],
 			},
 			{
 				role: "user" as const,
-				content: [{ type: "tool_result" as const, tool_use_id: "tool-existing", content: "old result" }],
+				content: [
+					{ type: "tool_result" as const, tool_use_id: "tool-unrelated", content: "read result" },
+					{ type: "tool_result" as const, tool_use_id: "tool-existing", content: "old result" },
+				],
 			},
 		]
 
@@ -540,13 +615,13 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(persistedApiMessages).toHaveLength(2)
 		expect(persistedApiMessages[1]).toMatchObject({
 			role: "user",
-			content: [
+			content: expect.arrayContaining([
 				{
 					type: "tool_result",
 					tool_use_id: "tool-existing",
 					content: "Subtask c-existing-result completed.\n\nResult:\nreplacement result",
 				},
-			],
+			]),
 		})
 	})
 
@@ -598,6 +673,61 @@ describe("History resume delegation - parent metadata transitions", () => {
 		expect(injected.role).toBe("user")
 		expect((injected.content[0] as any).type).toBe("text")
 		expect((injected.content[0] as any).text).toContain("Subtask c-no-tool completed")
+	})
+
+	it("keeps already-injected UI and fallback API completion records idempotent", async () => {
+		const parentItem = {
+			id: "p-existing-fallback",
+			status: "delegated",
+			awaitingChildId: "c-existing-fallback",
+			childIds: ["c-existing-fallback"],
+			ts: 100,
+			task: "Parent with existing fallback",
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		const completionResultSummary = "Already recorded"
+		const fallbackText = `Subtask c-existing-fallback completed.\n\nResult:\n${completionResultSummary}`
+		const existingUiMessages = [
+			{
+				type: "say" as const,
+				say: "subtask_result" as const,
+				text: completionResultSummary,
+				ts: 50,
+			},
+		]
+		const existingApiMessages = [
+			{ role: "user" as const, content: [{ type: "text" as const, text: fallbackText }], ts: 50 },
+		]
+		const taskHistoryStore = makeTaskHistoryStoreStub({ id: "c-existing-fallback", status: "active" }, parentItem)
+		const provider = makeProviderStub({
+			contextProxy: { globalStorageUri: { fsPath: "/storage" } },
+			getTaskWithId: vi.fn().mockResolvedValue({ historyItem: parentItem }),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => ({ taskId: "c-existing-fallback" })),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTaskWithHistoryItem: vi.fn().mockResolvedValue({
+				resumeAfterDelegation: vi.fn().mockResolvedValue(undefined),
+				overwriteClineMessages: vi.fn().mockResolvedValue(undefined),
+				overwriteApiConversationHistory: vi.fn().mockResolvedValue(undefined),
+			}),
+			taskHistoryStore,
+		})
+
+		vi.mocked(readTaskMessages).mockResolvedValue(existingUiMessages)
+		vi.mocked(readApiMessages).mockResolvedValue(existingApiMessages)
+		vi.mocked(saveTaskMessages).mockResolvedValue(undefined)
+		vi.mocked(saveApiMessages).mockResolvedValue(undefined)
+
+		await ClineProvider.prototype.reopenParentFromDelegation.call(provider, {
+			parentTaskId: "p-existing-fallback",
+			childTaskId: "c-existing-fallback",
+			completionResultSummary,
+		})
+
+		expect(vi.mocked(saveTaskMessages).mock.calls[0][0].messages).toEqual(existingUiMessages)
+		expect(vi.mocked(saveApiMessages).mock.calls[0][0].messages).toEqual(existingApiMessages)
 	})
 
 	it("reopenParentFromDelegation sets skipPrevResponseIdOnce via resumeAfterDelegation", async () => {

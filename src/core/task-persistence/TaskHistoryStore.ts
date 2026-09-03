@@ -1158,7 +1158,7 @@ export class TaskHistoryStore {
 							const rollbackSnapshot = firstDiskSnapshot
 							let restoredFirst = rollbackSnapshot
 							await safeWriteJson(await this.getTaskFilePath(firstId), rollbackSnapshot, {
-								lockAcquired: holdFirstFileLock || options?.firstFileLockAcquired,
+								lockAcquired: true,
 								merge: (existing) => {
 									if (!existing || typeof existing !== "object" || !("id" in existing)) {
 										throw new Error(

@@ -131,6 +131,48 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		expect(current).toMatchObject({ status: "delegated", awaitingChildId: "child-1" })
 	})
 
+	it("preserves an unrelated pending action when delegation has no action owner", async () => {
+		const pendingAction = {
+			kind: "create_subtask" as const,
+			actionId: "other-action",
+			approvalText: "{}",
+			mode: "code",
+			message: "Other request",
+			todos: [],
+		}
+		let current: HistoryItem = { ...parentHistoryItem, status: "active", pendingAction }
+		const taskHistoryStore = {
+			withTaskFileLock: vi.fn(async (_taskId: string, callback: () => Promise<unknown>) => callback()),
+			get: vi.fn(() => current),
+			atomicReadAndUpdate: vi.fn(async (_taskId: string, updater: (item: HistoryItem) => HistoryItem) => {
+				current = updater(current)
+				return [current]
+			}),
+		}
+		const parentTask = makeParentTask()
+		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask: vi.fn().mockResolvedValue(child),
+			handleModeSwitch: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore,
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Do something",
+			initialTodos: [],
+			mode: "code",
+		})
+
+		expect(current.pendingAction).toEqual(pendingAction)
+	})
+
 	it("rolls back when pending-action ownership changes before the atomic parent update", async () => {
 		const pendingAction = {
 			kind: "create_subtask" as const,
