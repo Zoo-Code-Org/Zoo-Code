@@ -4302,23 +4302,16 @@ export class ClineProvider
 		return this.runLockedDelegationTransition(
 			parentTaskId,
 			transition,
-			async () => {
-				await parentToResume?.resumeAfterDelegation()
-			},
+			async () => parentToResume?.resumeAfterDelegation(),
 			async (error) => {
 				if (!childToRestore) return
 				try {
-					if (this.getCurrentTask()?.taskId === parentTaskId) {
+					if (this.getCurrentTask()?.taskId === parentTaskId)
 						await this.removeClineFromStack({ saveMessages: false })
-					}
-					if (!this.getCurrentTask()) {
+					if (!this.getCurrentTask())
 						await this.createTaskWithHistoryItem(childToRestore, { startTask: false })
-					}
 				} catch (restoreError) {
-					throw new AggregateError(
-						[error, restoreError],
-						`[reopenParentFromDelegation] Failed to restore child ${childTaskId} after parent handoff failure`,
-					)
+					throw new AggregateError([error, restoreError], `Failed to restore child ${childTaskId}`)
 				}
 			},
 		)

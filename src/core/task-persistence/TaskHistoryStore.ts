@@ -932,8 +932,8 @@ export class TaskHistoryStore {
 			this.cache.set(taskId, structuredClone(preImage))
 		} catch (error) {
 			const current = await this.readTaskFile(taskId)
+			this.cache.delete(taskId)
 			if (current) this.cache.set(taskId, current)
-			else this.cache.delete(taskId)
 			throw error
 		}
 	}
