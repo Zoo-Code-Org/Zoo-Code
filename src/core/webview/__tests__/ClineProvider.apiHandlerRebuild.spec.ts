@@ -614,6 +614,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 		test("pending child preparation applies its profile without posting an empty task state", async () => {
 			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
 			await provider.addClineToStack(unrelatedTask)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
 			provider["providerSettingsManager"].listConfig = vi
@@ -632,11 +633,12 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				openRouterModelId: "openai/gpt-4.1-mini",
 			})
 			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 			postStateSpy.mockClear()
 
-			await provider["handleModeSwitchUnlocked"]("ask" as Mode, undefined, { preparePendingTask: true })
+			await provider.handleModeSwitch("ask" as Mode, null, { preparePendingTask: true })
 
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
@@ -644,6 +646,47 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			)
 			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
 			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(updateTaskHistorySpy).not.toHaveBeenCalled()
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation keeps the current profile when the mode has no saved profile", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			const activateProfileSpy = vi.spyOn(provider["providerSettingsManager"], "activateProfile")
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, { preparePendingTask: true })
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			expect(activateProfileSpy).not.toHaveBeenCalled()
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation preserves the locked profile without posting state", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			vi.mocked(mockContext.workspaceState.get).mockReturnValue(true)
+			const getModeConfigIdSpy = vi.spyOn(provider["providerSettingsManager"], "getModeConfigId")
+			const activateProfileSpy = vi.spyOn(provider["providerSettingsManager"], "activateProfile")
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, { preparePendingTask: true })
+
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
+			expect(activateProfileSpy).not.toHaveBeenCalled()
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
 			expect(postStateSpy).not.toHaveBeenCalled()
 		})
 
