@@ -58,6 +58,7 @@ jobs:
               run: node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
 
             - name: Upload mutation reports
+              id: mutation_report
               if: always() && github.event_name == 'pull_request'
               uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
               with:
@@ -65,3 +66,12 @@ jobs:
                   path: reports/mutation/
                   if-no-files-found: ignore
                   retention-days: 7
+
+            - name: Link mutation report artifact
+              if: always() && github.event_name == 'pull_request' && steps.mutation_report.outputs.artifact-url != ''
+              env:
+                  ARTIFACT_URL: ${{ steps.mutation_report.outputs.artifact-url }}
+              run: |
+                  echo "" >> "$GITHUB_STEP_SUMMARY"
+                  echo "### Download mutation reports" >> "$GITHUB_STEP_SUMMARY"
+                  echo "[Open the changed-code-mutation-report artifact]($ARTIFACT_URL), then open the package's mutation.html file." >> "$GITHUB_STEP_SUMMARY"

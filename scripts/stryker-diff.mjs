@@ -431,8 +431,7 @@ function escapeWorkflowValue(value) {
 		.replaceAll(",", "%2C")
 }
 
-export function formatAnnotations(blockingMutants, packageRoot) {
-	const perFile = new Map()
+export function formatAnnotations(blockingMutants, packageRoot, state = { total: 0, perFile: new Map() }) {
 	const annotations = []
 
 	for (const mutant of blockingMutants.sort((left, right) => {
@@ -441,9 +440,8 @@ export function formatAnnotations(blockingMutants, packageRoot) {
 	})) {
 		const repositoryPath = path.posix.join(packageRoot, mutant.filePath.replaceAll("\\", "/"))
 		const key = `${repositoryPath}:${mutant.location.start.line}`
-		const fileCount = perFile.get(repositoryPath) ?? 0
-		if (annotations.some((annotation) => annotation.key === key) || fileCount >= 7 || annotations.length >= 20)
-			continue
+		const fileCount = state.perFile.get(repositoryPath) ?? 0
+		if (annotations.some((annotation) => annotation.key === key) || fileCount >= 7 || state.total >= 20) continue
 
 		const replacement = String(mutant.replacement ?? "")
 			.replace(/\s+/g, " ")
@@ -455,17 +453,59 @@ export function formatAnnotations(blockingMutants, packageRoot) {
 			line: mutant.location.start.line,
 			message:
 				`${mutant.status} ${mutant.mutatorName} mutant${replacement ? ` (replacement: ${replacement})` : ""}. ` +
-				"Add or strengthen a focused test that fails under this mutation, or add a maintainer-approved targeted exclusion with a reason.",
+				"See the job summary for the complete list and resolution guidance.",
 		})
-		perFile.set(repositoryPath, fileCount + 1)
+		state.perFile.set(repositoryPath, fileCount + 1)
+		state.total++
 	}
 
 	return annotations
 }
 
-function appendSummary(rows, failures) {
-	if (!process.env.GITHUB_STEP_SUMMARY) return
+function markdownCell(value) {
+	return String(value ?? "—")
+		.replace(/\s+/g, " ")
+		.trim()
+		.replaceAll("|", "\\|")
+		.slice(0, 120)
+}
 
+export function testsFromMutationReport(report, fallback = []) {
+	const testFiles = Object.keys(report.testFiles ?? {})
+	return testFiles.length > 0 ? testFiles : fallback
+}
+
+export function formatBlockingMutants(blockingMutants, packageRoot) {
+	const grouped = new Map()
+	for (const mutant of [...blockingMutants].sort((left, right) => {
+		const pathOrder = left.filePath.localeCompare(right.filePath)
+		return pathOrder || left.location.start.line - right.location.start.line
+	})) {
+		const repositoryPath = path.posix.join(packageRoot, mutant.filePath.replaceAll("\\", "/"))
+		const group = grouped.get(repositoryPath) ?? []
+		group.push(mutant)
+		grouped.set(repositoryPath, group)
+	}
+
+	const lines = []
+	for (const [filePath, mutants] of grouped) {
+		lines.push(
+			`#### \`${filePath}\``,
+			"",
+			"| Line | Status | Mutator | Replacement |",
+			"| ---: | --- | --- | --- |",
+		)
+		for (const mutant of mutants) {
+			lines.push(
+				`| ${mutant.location.start.line} | ${markdownCell(mutant.status)} | ${markdownCell(mutant.mutatorName)} | ${markdownCell(mutant.replacement)} |`,
+			)
+		}
+		lines.push("")
+	}
+	return lines
+}
+
+export function formatSummary(rows, failures, manifest = {}) {
 	const lines = [
 		"## Changed-code mutation testing",
 		"",
@@ -478,8 +518,89 @@ function appendSummary(rows, failures) {
 		)
 	}
 	if (rows.length === 0) lines.push("| — | 0 | 0 | 0 | 0 | 0 | 0 | Not applicable |")
-	if (failures.length > 0) lines.push("", ...failures.map((failure) => `- ${failure}`))
-	fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`)
+
+	if (rows.length > 0) {
+		lines.push("", "### Focused tests")
+		for (const row of rows) {
+			const cwd = row.runRoot ?? row.root
+			if (row.testFiles?.length > 0) {
+				lines.push(`- **${row.id}** (cwd \`${cwd}\`): ${row.testFiles.map((file) => `\`${file}\``).join(", ")}`)
+			} else {
+				lines.push(
+					`- **${row.id}** (cwd \`${cwd}\`): the mutation run did not complete far enough to report its selected tests; use the exact reproduction command below.`,
+				)
+			}
+		}
+	}
+
+	const blockingRows = rows.filter((row) => row.blocking?.length > 0)
+	if (blockingRows.length > 0) {
+		lines.push(
+			"",
+			"### All surviving and uncovered mutants",
+			"",
+			"Annotations highlight up to 20 unique locations (maximum 7 per file). This summary lists every blocking mutant.",
+			"",
+		)
+		for (const row of blockingRows) {
+			lines.push(`### ${row.id}`, "", ...formatBlockingMutants(row.blocking, row.runRoot ?? row.root))
+		}
+		lines.push(
+			"### Resolve a mutation gap",
+			"",
+			"Add or strengthen a focused test that fails under the mutation. If the mutant is equivalent, request maintainer approval for the narrowest mutator-specific exclusion and explain why it cannot change behavior:",
+			"",
+			"```ts",
+			"// Stryker disable next-line ConditionalExpression: normalized input cannot reach the alternate branch",
+			"const result = condition ? value : fallback",
+			"```",
+			"",
+			"Broad `all` exclusions and exclusions without a concrete reason are rejected by the gate.",
+		)
+	}
+
+	if (manifest.baseSha && manifest.headSha) {
+		lines.push(
+			"",
+			"### Reproduce locally",
+			"",
+			"From a full checkout containing both commits:",
+			"",
+			"```bash",
+			"pnpm install --frozen-lockfile",
+			`node scripts/stryker-diff.mjs ci --base ${manifest.baseSha} --head ${manifest.headSha}`,
+			"```",
+		)
+	}
+
+	if (rows.length > 0) {
+		lines.push("", "### Mutation reports", "")
+		for (const row of rows) lines.push(`- **${row.id}:** \`${row.reportPath}\``)
+		lines.push(
+			"",
+			"The workflow uploads generated reports in the `changed-code-mutation-report` artifact. A direct artifact link appears below after upload.",
+		)
+	}
+
+	if (failures.length > 0) {
+		lines.push(
+			"",
+			"### Failures",
+			"",
+			...failures.map((failure) => {
+				const detail =
+					failure.length > 4_000 ? `${failure.slice(0, 4_000)}\n[truncated; see the step log]` : failure
+				return `- ${detail.replaceAll("\n", "\n  ")}`
+			}),
+		)
+	}
+
+	return `${lines.join("\n")}\n`
+}
+
+function appendSummary(rows, failures, manifest) {
+	if (!process.env.GITHUB_STEP_SUMMARY) return
+	fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatSummary(rows, failures, manifest))
 }
 
 export function evaluateReport(report, packageEntry) {
@@ -508,9 +629,13 @@ export function evaluateReport(report, packageEntry) {
 export function runManifest(repoRoot, manifest, reportRoot) {
 	const rows = []
 	const failures = []
+	const annotationState = { total: 0, perFile: new Map() }
 
 	for (const packageEntry of manifest.packages) {
 		let counts
+		const reportPath = path
+			.relative(repoRoot, path.join(reportRoot, packageEntry.id, "mutation.html"))
+			.replaceAll("\\", "/")
 		try {
 			const reportDirectory = path.join(reportRoot, packageEntry.id)
 			fs.mkdirSync(reportDirectory, { recursive: true })
@@ -531,6 +656,11 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			if (generatedMutants === 0) {
 				rows.push({
 					id: packageEntry.id,
+					root: packageEntry.root,
+					runRoot: packageEntry.runRoot,
+					selectors: packageEntry.selectors,
+					testFiles: packageEntry.testFiles ?? [],
+					reportPath,
 					changedLines: packageEntry.changedExecutableLines,
 					valid: 0,
 					killed: 0,
@@ -543,10 +673,15 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			}
 
 			runStryker(repoRoot, packageEntry, reportRoot, false)
-			const reportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
-			const report = JSON.parse(fs.readFileSync(reportPath, "utf8"))
+			const jsonReportPath = path.join(reportRoot, packageEntry.id, "mutation.json")
+			const report = JSON.parse(fs.readFileSync(jsonReportPath, "utf8"))
+			packageEntry.testFiles = testsFromMutationReport(report, packageEntry.testFiles)
 			counts = mutantCounts(report)
-			for (const annotation of formatAnnotations(counts.blocking, packageEntry.runRoot ?? packageEntry.root)) {
+			for (const annotation of formatAnnotations(
+				counts.blocking,
+				packageEntry.runRoot ?? packageEntry.root,
+				annotationState,
+			)) {
 				console.log(
 					`::error file=${escapeWorkflowValue(annotation.file)},line=${annotation.line},title=Mutation test gap::${escapeWorkflowValue(annotation.message)}`,
 				)
@@ -554,6 +689,11 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			evaluateReport(report, packageEntry)
 			rows.push({
 				id: packageEntry.id,
+				root: packageEntry.root,
+				runRoot: packageEntry.runRoot,
+				selectors: packageEntry.selectors,
+				testFiles: packageEntry.testFiles ?? [],
+				reportPath,
 				changedLines: packageEntry.changedExecutableLines,
 				...counts,
 				result: "Passed",
@@ -562,18 +702,24 @@ export function runManifest(repoRoot, manifest, reportRoot) {
 			failures.push(error.message)
 			rows.push({
 				id: packageEntry.id,
+				root: packageEntry.root,
+				runRoot: packageEntry.runRoot,
+				selectors: packageEntry.selectors,
+				testFiles: packageEntry.testFiles ?? [],
+				reportPath,
 				changedLines: packageEntry.changedExecutableLines,
 				valid: counts?.valid ?? 0,
 				killed: counts?.killed ?? 0,
 				timeout: counts?.timeout ?? 0,
 				survived: counts?.survived ?? 0,
 				noCoverage: counts?.noCoverage ?? 0,
+				blocking: counts?.blocking ?? [],
 				result: "Failed",
 			})
 		}
 	}
 
-	appendSummary(rows, failures)
+	appendSummary(rows, failures, manifest)
 	if (failures.length > 0) throw new Error(failures.join("\n"))
 	return rows
 }
@@ -596,7 +742,7 @@ function main() {
 	const reportRoot = path.resolve(repoRoot, argument("--reports") ?? "reports/mutation")
 	const manifest = selectFromGit(repoRoot, baseSha, headSha)
 	if (manifest.packages.length === 0) {
-		appendSummary([], [])
+		appendSummary([], [], manifest)
 		console.log("No changed executable lines in mutation-tested packages; mutation testing is not applicable.")
 		return
 	}
