@@ -34,9 +34,9 @@ test("renders Azure OpenAI endpoint and deployment guidance in the VS Code dark 
 
 for (const theme of visualThemes) {
 	test(`renders a populated Extra Body editor in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
-		await applyVisualTheme(page, theme)
 		await page.evaluate(() => Object.assign(globalThis, { z: undefined, z$1: undefined }))
 		const component = mountedStory(await mount("openai-compatible-extra-body"))
+		await applyVisualTheme(page, theme)
 
 		await expect.poll(() => component.getByTestId("openai-extra-body-input").isVisible()).toBe(true)
 
