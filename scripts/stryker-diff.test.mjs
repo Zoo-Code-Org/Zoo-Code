@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url"
 import {
 	MAX_CHANGED_LINES,
 	MAX_MUTANTS,
+	PACKAGE_CONFIGS,
 	buildManifest,
+	discoverRelatedTestFiles,
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
@@ -18,6 +20,7 @@ import {
 	parseNameStatus,
 	parseVitestTestFiles,
 	preferDirectTestFiles,
+	resolveVitestBinary,
 	packageForPath,
 	selectFromGit,
 	validateDisableDirectives,
@@ -29,8 +32,13 @@ describe("mutation testing workflow", () => {
 	it("checks out the pull request merge result from the base repository", () => {
 		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
 
+		assert.ok(workflow.includes("    pull_request:"))
+		assert.ok(!workflow.includes("pull_request_target:"))
+		assert.ok(workflow.includes("    contents: read"))
 		assert.ok(workflow.includes("- name: Checkout pull request merge result"))
 		assert.ok(workflow.includes("ref: refs/pull/${{ github.event.pull_request.number }}/merge"))
+		assert.ok(workflow.includes("fetch-depth: 0"))
+		assert.ok(workflow.includes("persist-credentials: false"))
 		assert.ok(!workflow.includes("repository: ${{ github.event.pull_request.head.repo.full_name }}"))
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
 	})
@@ -189,6 +197,55 @@ describe("preferDirectTestFiles", () => {
 			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
 		])
 		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
+	})
+})
+
+describe("related-test discovery", () => {
+	it("resolves Vitest from each package before falling back to the repository", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-vitest-"))
+		const extension = PACKAGE_CONFIGS.find(({ id }) => id === "extension")
+		const webview = PACKAGE_CONFIGS.find(({ id }) => id === "webview")
+		const extensionBinary = path.join(repo, "src/node_modules/.bin/vitest")
+		const webviewBinary = path.join(repo, "webview-ui/node_modules/.bin/vitest")
+		const rootBinary = path.join(repo, "node_modules/.bin/vitest")
+
+		try {
+			fs.mkdirSync(path.dirname(extensionBinary), { recursive: true })
+			fs.mkdirSync(path.dirname(webviewBinary), { recursive: true })
+			fs.writeFileSync(extensionBinary, "")
+			fs.writeFileSync(webviewBinary, "")
+
+			assert.equal(resolveVitestBinary(repo, extension), extensionBinary)
+			assert.equal(resolveVitestBinary(repo, webview), webviewBinary)
+
+			fs.rmSync(extensionBinary)
+			fs.mkdirSync(path.dirname(rootBinary), { recursive: true })
+			fs.writeFileSync(rootBinary, "")
+			assert.equal(resolveVitestBinary(repo, extension), rootBinary)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("reports a Vitest launch error when no binary exists", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-vitest-"))
+		const reportDirectory = path.join(repo, "reports")
+		const packageEntry = {
+			id: "extension",
+			root: "src",
+			vitestConfig: "vitest.config.ts",
+			selectors: ["utils/value.ts:1-1"],
+		}
+
+		try {
+			fs.mkdirSync(path.join(repo, "src"), { recursive: true })
+			assert.throws(
+				() => discoverRelatedTestFiles(repo, packageEntry, reportDirectory),
+				/extension related-test discovery could not start:.*ENOENT/,
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
 	})
 })
 

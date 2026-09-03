@@ -304,14 +304,23 @@ export function preferDirectTestFiles(testFiles, sourceFiles) {
 	return direct.length > 0 ? direct : testFiles
 }
 
-function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
+export function resolveVitestBinary(repoRoot, packageEntry) {
+	const packageRoot = path.join(repoRoot, packageEntry.root)
+	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
+	const candidates = [...new Set([runRoot, packageRoot, repoRoot])].map((root) =>
+		path.join(root, "node_modules/.bin/vitest"),
+	)
+	return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates.at(-1)
+}
+
+export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
 	const outputFile = path.join(reportDirectory, "vitest-related.json")
 	const configFile = path.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig)).replaceAll("\\", "/")
 	const sourceFiles = [...new Set(packageEntry.selectors.map(selectorFile))]
 	const result = spawnSync(
-		path.join(repoRoot, "node_modules/.bin/vitest"),
+		resolveVitestBinary(repoRoot, packageEntry),
 		["related", ...sourceFiles, "--run", "--config", configFile, "--reporter=json", `--outputFile=${outputFile}`],
 		{
 			cwd: runRoot,
@@ -324,6 +333,9 @@ function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
 
 	if (result.error?.code === "ETIMEDOUT") {
 		throw new Error(`${packageEntry.id} related-test discovery exceeded 5 minutes`)
+	}
+	if (result.error) {
+		throw new Error(`${packageEntry.id} related-test discovery could not start: ${result.error.message}`)
 	}
 	if (result.status !== 0) {
 		throw new Error(
@@ -376,6 +388,11 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 	if (result.error?.code === "ETIMEDOUT") {
 		throw new Error(
 			`${packageEntry.id} mutation run exceeded 12 minutes. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
+		)
+	}
+	if (result.error) {
+		throw new Error(
+			`${packageEntry.id} Stryker ${dryRunOnly ? "preflight" : "run"} could not start: ${result.error.message}`,
 		)
 	}
 	if (result.status !== 0) {
