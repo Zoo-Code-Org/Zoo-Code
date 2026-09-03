@@ -6,9 +6,10 @@ import * as os from "os"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { TaskHistoryStore, assertValidTransition } from "../TaskHistoryStore"
+import { TaskHistoryStore, assertValidTransition, type AtomicUpdatePairOptions } from "../TaskHistoryStore"
 import { GlobalFileNames } from "../../../shared/globalFileNames"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { lockJsonFile, safeWriteJson } from "../../../utils/safeWriteJson"
 
 vi.mock("../../../utils/storage", () => ({
 	getStorageBasePath: vi.fn().mockImplementation((defaultPath: string) => {
@@ -578,7 +579,78 @@ describe("TaskHistoryStore", () => {
 		})
 	})
 
+	describe("withTaskFileLock()", () => {
+		it("releases the file lock when the callback rejects", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "locked-callback", status: "active" }))
+			const release = vi.fn().mockResolvedValue(undefined)
+			vi.mocked(lockJsonFile).mockResolvedValueOnce(release)
+			const callbackError = new Error("locked callback failed")
+
+			await expect(
+				store.withTaskFileLock("locked-callback", async () => {
+					throw callbackError
+				}),
+			).rejects.toBe(callbackError)
+			expect(release).toHaveBeenCalledTimes(1)
+		})
+
+		it("treats an explicit active status as a no-op for a legacy record", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "legacy-active", status: undefined }))
+
+			await expect(
+				store.atomicReadAndUpdate("legacy-active", (current) => ({ ...current, status: "active" })),
+			).resolves.toEqual([expect.objectContaining({ id: "legacy-active", status: "active" })])
+		})
+	})
+
 	describe("atomicUpdatePair()", () => {
+		it("does not claim the first file lock when no lock-scoped option is enabled", async () => {
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "first-unlocked", status: "active" }))
+			await store.upsert(makeHistoryItem({ id: "second-unlocked", status: "active" }))
+			vi.mocked(lockJsonFile).mockClear()
+			vi.mocked(safeWriteJson).mockClear()
+
+			await store.atomicUpdatePair(
+				"first-unlocked",
+				"second-unlocked",
+				(first) => ({ ...first, status: "completed" }),
+				(second) => ({ ...second, status: "completed" }),
+			)
+
+			expect(lockJsonFile).not.toHaveBeenCalled()
+			expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]).toMatchObject({ lockAcquired: undefined })
+		})
+
+		it.each([
+			["disk guard", { firstDiskGuard: () => {} }],
+			["second-write rollback", { rollbackFirstOnSecondFailure: true }],
+			["callback compensation", { rollbackBothOnCallbackFailure: true }],
+			["lock-scoped callback", { whileFirstFileLocked: async () => {} }],
+		] satisfies Array<[string, AtomicUpdatePairOptions]>)(
+			"holds the first file lock when only the %s option is enabled",
+			async (_description, options) => {
+				await store.initialize()
+				await store.upsert(makeHistoryItem({ id: "first-locked", status: "active" }))
+				await store.upsert(makeHistoryItem({ id: "second-locked", status: "active" }))
+				vi.mocked(lockJsonFile).mockClear()
+				vi.mocked(safeWriteJson).mockClear()
+
+				await store.atomicUpdatePair(
+					"first-locked",
+					"second-locked",
+					(first) => ({ ...first, status: "completed" }),
+					(second) => ({ ...second, status: "completed" }),
+					options,
+				)
+
+				expect(lockJsonFile).toHaveBeenCalledTimes(1)
+				expect(vi.mocked(safeWriteJson).mock.calls[0]?.[2]).toMatchObject({ lockAcquired: true })
+			},
+		)
+
 		it("updates both records and both files are written before lock releases", async () => {
 			await store.initialize()
 

@@ -35,7 +35,65 @@ const getWriteTaskFile = (store: TaskHistoryStore): WriteTaskFile => {
 	return (item, delta, diskGuard, options) => Reflect.apply(writeTaskFile, store, [item, delta, diskGuard, options])
 }
 
+type RestoreTaskFilePreImage = (
+	taskId: string,
+	preImage: HistoryItem,
+	expectedWritten: HistoryItem,
+	lockAcquired: boolean,
+) => Promise<void>
+
+const getRestoreTaskFilePreImage = (store: TaskHistoryStore): RestoreTaskFilePreImage => {
+	const restoreTaskFilePreImage: unknown = Reflect.get(store, "restoreTaskFilePreImage")
+	if (typeof restoreTaskFilePreImage !== "function") {
+		throw new TypeError("TaskHistoryStore.restoreTaskFilePreImage is not callable")
+	}
+	return (taskId, preImage, expectedWritten, lockAcquired) =>
+		Reflect.apply(restoreTaskFilePreImage, store, [taskId, preImage, expectedWritten, lockAcquired])
+}
+
 describe("TaskHistoryStore cross-instance delegation", () => {
+	it("unions child IDs by default and replaces them only when explicitly requested", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-child-id-merge-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			const task = makeHistoryItem("parent", { childIds: ["cached-child"], tokensIn: 1 })
+			await store.upsert(task)
+			const taskFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const writeTaskFile = getWriteTaskFile(store)
+
+			await fs.writeFile(taskFile, JSON.stringify({ ...task, childIds: ["peer-child"] }))
+			const unioned = await writeTaskFile(
+				{ ...task, childIds: ["local-child"] },
+				{ id: task.id, childIds: ["local-child"] },
+			)
+			expect(unioned.childIds).toEqual(["peer-child", "local-child"])
+			expect(JSON.parse(await fs.readFile(taskFile, "utf8")).childIds).toEqual(["peer-child", "local-child"])
+
+			await fs.writeFile(taskFile, JSON.stringify({ ...task, childIds: ["new-peer-child"] }))
+			const replaced = await writeTaskFile(
+				{ ...task, childIds: ["replacement-child"] },
+				{ id: task.id, childIds: ["replacement-child"] },
+				undefined,
+				{ mergeChildIds: false },
+			)
+			expect(replaced.childIds).toEqual(["replacement-child"])
+
+			await fs.writeFile(taskFile, JSON.stringify({ ...task, childIds: ["preserved-child"] }))
+			const unrelatedUpdate = await writeTaskFile(
+				{ ...task, tokensIn: 2 },
+				{ id: task.id, tokensIn: 2 },
+				undefined,
+				{ mergeChildIds: false },
+			)
+			expect(unrelatedUpdate).toMatchObject({ tokensIn: 2, childIds: ["preserved-child"] })
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
 	it("rejects a stale child completion before either delegation record is written", async () => {
 		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-delegation-"))
 		const hostA = new TaskHistoryStore(storage)
@@ -129,6 +187,9 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				}),
 			)
 			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const persistedParentBeforeFailure = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			await fs.writeFile(parentFile, JSON.stringify({ ...persistedParentBeforeFailure, tokensIn: 99 }))
 
 			const childDirectory = path.join(storage, "tasks", "child")
 			await fs.rm(childDirectory, { recursive: true })
@@ -156,7 +217,6 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 				),
 			).rejects.toThrow()
 
-			await store.invalidate("parent")
 			expect(store.get("parent")).toMatchObject({
 				status: "delegated",
 				awaitingChildId: "child",
@@ -164,6 +224,9 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			})
 			expect(store.get("parent")?.completedByChildId).toBeUndefined()
 			expect(store.get("parent")?.childIds).toEqual([])
+			expect(store.get("parent")?.tokensIn).toBe(99)
+			const persistedParent = JSON.parse(await fs.readFile(parentFile, "utf8"))
+			expect(persistedParent).toEqual(store.get("parent"))
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })
@@ -281,6 +344,12 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			const childFile = path.join(storage, "tasks", "child", "history_item.json")
 			const parentBefore = JSON.parse(await fs.readFile(parentFile, "utf8"))
 			const childBefore = JSON.parse(await fs.readFile(childFile, "utf8"))
+			const restoreTaskFilePreImage = getRestoreTaskFilePreImage(store)
+			const compensationLockStates: Array<[string, boolean]> = []
+			Reflect.set(store, "restoreTaskFilePreImage", async (...args: Parameters<RestoreTaskFilePreImage>) => {
+				compensationLockStates.push([args[0], args[3]])
+				await restoreTaskFilePreImage(...args)
+			})
 			onWrite.mockClear()
 
 			await expect(
@@ -308,6 +377,10 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			expect(JSON.parse(await fs.readFile(childFile, "utf8"))).toEqual(childBefore)
 			expect(store.get("parent")).toEqual(parentBefore)
 			expect(store.get("child")).toEqual(childBefore)
+			expect(compensationLockStates).toEqual([
+				["child", false],
+				["parent", true],
+			])
 			expect(onWrite).toHaveBeenCalledTimes(2)
 			expect(onWrite.mock.calls[0][0]).toEqual(
 				expect.arrayContaining([
@@ -415,6 +488,226 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 		}
 	})
 
+	it.each([
+		["missing", undefined],
+		["primitive", 42],
+		["object without an id", { status: "completed" }],
+	] as const)("rejects compensation when the second record is %s", async (_description, invalidRecord) => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-invalid-compensation-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("completion handoff failed")
+
+		try {
+			await store.initialize()
+			const parent = makeHistoryItem("parent", {
+				status: "delegated",
+				awaitingChildId: "child",
+				delegatedToId: "child",
+			})
+			const child = makeHistoryItem("child", { status: "active", parentTaskId: "parent" })
+			await store.upsert(parent)
+			await store.upsert(child)
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+
+			const result = store.atomicUpdatePair(
+				"parent",
+				"child",
+				(current) => ({ ...current, status: "active", awaitingChildId: undefined, delegatedToId: undefined }),
+				(current) => ({ ...current, status: "completed" }),
+				{
+					rollbackBothOnCallbackFailure: true,
+					whileFirstFileLocked: async () => {
+						if (invalidRecord === undefined) {
+							await fs.unlink(childFile)
+						} else {
+							await fs.writeFile(childFile, JSON.stringify(invalidRecord))
+						}
+						throw callbackError
+					},
+				},
+			)
+
+			const aggregate = await result.catch((error: unknown) => error)
+			expect(aggregate).toBeInstanceOf(AggregateError)
+			expect((aggregate as AggregateError).message).toBe(
+				"[TaskHistoryStore] atomicUpdatePair: callback and compensation failed",
+			)
+			expect((aggregate as AggregateError).errors[0]).toBe(callbackError)
+			expect((aggregate as AggregateError).errors[1]).toMatchObject({
+				message: "[TaskHistoryStore] atomicUpdatePair: child missing during compensation",
+			})
+			expect(store.get("parent")).toEqual(parent)
+			expect(store.get("child")).toBeUndefined()
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("reports failures from compensating both records and refreshes both cache entries", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-double-compensation-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("completion handoff failed")
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "delegated", awaitingChildId: "child" }))
+			await store.upsert(makeHistoryItem("child", { status: "active", tokensIn: 1 }))
+			const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+			const childFile = path.join(storage, "tasks", "child", "history_item.json")
+
+			const result = store.atomicUpdatePair(
+				"parent",
+				"child",
+				(parent) => ({ ...parent, status: "active", awaitingChildId: undefined }),
+				(child) => ({ ...child, status: "completed" }),
+				{
+					rollbackBothOnCallbackFailure: true,
+					whileFirstFileLocked: async () => {
+						const persistedParent = JSON.parse(await fs.readFile(parentFile, "utf8"))
+						const persistedChild = JSON.parse(await fs.readFile(childFile, "utf8"))
+						await fs.writeFile(parentFile, JSON.stringify({ ...persistedParent, tokensOut: 8 }))
+						await fs.writeFile(childFile, JSON.stringify({ ...persistedChild, tokensIn: 9 }))
+						throw callbackError
+					},
+				},
+			)
+
+			await expect(result).rejects.toMatchObject({
+				name: "AggregateError",
+				errors: [
+					callbackError,
+					expect.objectContaining({ message: expect.stringContaining("cannot compensate child") }),
+					expect.objectContaining({ message: expect.stringContaining("cannot compensate parent") }),
+				],
+			})
+			expect(store.get("parent")).toMatchObject({ status: "active", tokensOut: 8 })
+			expect(store.get("child")).toMatchObject({ status: "completed", tokensIn: 9 })
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps both writes committed when callback compensation was not requested", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-no-callback-compensation-"))
+		const store = new TaskHistoryStore(storage)
+		const callbackError = new Error("handoff failed without compensation")
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "delegated" }))
+			await store.upsert(makeHistoryItem("child", { status: "active" }))
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({ ...parent, status: "active" }),
+					(child) => ({ ...child, status: "completed" }),
+					{
+						whileFirstFileLocked: async () => {
+							throw callbackError
+						},
+					},
+				),
+			).rejects.toBe(callbackError)
+			expect(store.get("parent")?.status).toBe("active")
+			expect(store.get("child")?.status).toBe("completed")
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("recreates a missing first record when no disk guard or rollback was requested", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-unguarded-create-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "delegated" }))
+			await store.upsert(makeHistoryItem("child", { status: "active" }))
+			await fs.unlink(path.join(storage, "tasks", "parent", "history_item.json"))
+
+			await store.atomicUpdatePair(
+				"parent",
+				"child",
+				(parent) => ({ ...parent, status: "active" }),
+				(child) => ({ ...child, status: "completed" }),
+			)
+
+			const persistedParent = JSON.parse(
+				await fs.readFile(path.join(storage, "tasks", "parent", "history_item.json"), "utf8"),
+			)
+			expect(persistedParent).toMatchObject({ id: "parent", status: "active" })
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("preserves a write-through error without options and leaves both writes committed", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-onwrite-no-options-"))
+		const onWrite = vi.fn().mockResolvedValue(undefined)
+		const store = new TaskHistoryStore(storage, { onWrite })
+		const writeThroughError = new Error("write-through failed without options")
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "delegated" }))
+			await store.upsert(makeHistoryItem("child", { status: "active" }))
+			onWrite.mockRejectedValueOnce(writeThroughError)
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({ ...parent, status: "active" }),
+					(child) => ({ ...child, status: "completed" }),
+				),
+			).rejects.toBe(writeThroughError)
+			expect(store.get("parent")?.status).toBe("active")
+			expect(store.get("child")?.status).toBe("completed")
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("keeps the first write committed when only a disk guard was requested", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-guard-without-rollback-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(makeHistoryItem("parent", { status: "delegated", awaitingChildId: "child" }))
+			await store.upsert(makeHistoryItem("child", { status: "active" }))
+			const writeTaskFile = getWriteTaskFile(store)
+			let writeCount = 0
+			Reflect.set(store, "writeTaskFile", async (...args: Parameters<WriteTaskFile>) => {
+				writeCount++
+				if (writeCount === 2) throw new Error("child write failed")
+				return writeTaskFile(...args)
+			})
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({ ...parent, status: "active", awaitingChildId: undefined }),
+					(child) => ({ ...child, status: "completed" }),
+					{ firstDiskGuard: () => {} },
+				),
+			).rejects.toThrow("child write failed")
+			expect(store.get("parent")?.status).toBe("active")
+			expect(store.get("parent")?.awaitingChildId).toBeUndefined()
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
 	it("refreshes stale parent state before a lock-scoped update without re-entering either lock", async () => {
 		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-lock-refresh-"))
 		const hostA = new TaskHistoryStore(storage)
@@ -480,26 +773,36 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			}
 			Reflect.set(store, "writeTaskFile", replacement)
 
-			await expect(
-				store.atomicUpdatePair(
-					"parent",
-					"child",
-					(parent) => ({
-						...parent,
-						status: "active",
-						awaitingChildId: undefined,
-						delegatedToId: undefined,
-						completedByChildId: "child",
+			const result = store.atomicUpdatePair(
+				"parent",
+				"child",
+				(parent) => ({
+					...parent,
+					status: "active",
+					awaitingChildId: undefined,
+					delegatedToId: undefined,
+					completedByChildId: "child",
+				}),
+				(child) => ({ ...child, status: "completed" }),
+				{ rollbackFirstOnSecondFailure: true },
+			)
+			await expect(result).rejects.toMatchObject({
+				name: "AggregateError",
+				message: "[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed",
+				errors: [
+					expect.objectContaining({ message: "child write failed" }),
+					expect.objectContaining({
+						message:
+							"[TaskHistoryStore] atomicUpdatePair: cannot roll back parent after a concurrent update",
 					}),
-					(child) => ({ ...child, status: "completed" }),
-					{ rollbackFirstOnSecondFailure: true },
-				),
-			).rejects.toBeInstanceOf(AggregateError)
+				],
+			})
 
 			const persistedParent = JSON.parse(
 				await fs.readFile(path.join(storage, "tasks", "parent", "history_item.json"), "utf8"),
 			)
 			expect(persistedParent.completedByChildId).toBe("peer-child")
+			expect(store.get("parent")).toMatchObject({ status: "active", completedByChildId: "child" })
 		} finally {
 			store.dispose()
 			await fs.rm(storage, { recursive: true, force: true })
@@ -690,49 +993,67 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 		}
 	})
 
-	it("surfaces rollback failure when the first record disappears after its write", async () => {
-		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missing-rollback-"))
-		const store = new TaskHistoryStore(storage)
+	it.each([
+		["disappears", undefined],
+		["becomes a primitive", 42],
+		["loses its id", { status: "active" }],
+	] as const)(
+		"surfaces rollback failure when the first record %s after its write",
+		async (_description, invalidRecord) => {
+			const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-missing-rollback-"))
+			const store = new TaskHistoryStore(storage)
 
-		try {
-			await store.initialize()
-			await store.upsert(
-				makeHistoryItem("parent", {
-					status: "delegated",
-					awaitingChildId: "child",
-					delegatedToId: "child",
-				}),
-			)
-			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+			try {
+				await store.initialize()
+				await store.upsert(
+					makeHistoryItem("parent", {
+						status: "delegated",
+						awaitingChildId: "child",
+						delegatedToId: "child",
+					}),
+				)
+				await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
 
-			const writeTaskFile = getWriteTaskFile(store)
-			let pairWrite = 0
-			const replacement: WriteTaskFile = async (item, delta, diskGuard, options) => {
-				pairWrite++
-				if (pairWrite === 1) {
-					const written = await writeTaskFile(item, delta, diskGuard, options)
-					await fs.unlink(path.join(storage, "tasks", "parent", "history_item.json"))
-					return written
+				const writeTaskFile = getWriteTaskFile(store)
+				let pairWrite = 0
+				const replacement: WriteTaskFile = async (item, delta, diskGuard, options) => {
+					pairWrite++
+					if (pairWrite === 1) {
+						const written = await writeTaskFile(item, delta, diskGuard, options)
+						const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+						if (invalidRecord === undefined) {
+							await fs.unlink(parentFile)
+						} else {
+							await fs.writeFile(parentFile, JSON.stringify(invalidRecord))
+						}
+						return written
+					}
+					throw new Error("child write failed")
 				}
-				throw new Error("child write failed")
-			}
-			Reflect.set(store, "writeTaskFile", replacement)
+				Reflect.set(store, "writeTaskFile", replacement)
 
-			await expect(
-				store.atomicUpdatePair(
+				const result = store.atomicUpdatePair(
 					"parent",
 					"child",
 					(parent) => ({ ...parent, status: "active", awaitingChildId: undefined }),
 					(child) => ({ ...child, status: "completed" }),
 					{ rollbackFirstOnSecondFailure: true },
-				),
-			).rejects.toMatchObject({
-				name: "AggregateError",
-				message: expect.stringContaining("second write and first-record rollback failed"),
-			})
-		} finally {
-			store.dispose()
-			await fs.rm(storage, { recursive: true, force: true })
-		}
-	})
+				)
+				await expect(result).rejects.toMatchObject({
+					name: "AggregateError",
+					message: "[TaskHistoryStore] atomicUpdatePair: second write and first-record rollback failed",
+					errors: [
+						expect.objectContaining({ message: "child write failed" }),
+						expect.objectContaining({
+							message: "[TaskHistoryStore] atomicUpdatePair: parent missing during rollback",
+						}),
+					],
+				})
+				expect(store.get("parent")?.status).toBe("active")
+			} finally {
+				store.dispose()
+				await fs.rm(storage, { recursive: true, force: true })
+			}
+		},
+	)
 })
