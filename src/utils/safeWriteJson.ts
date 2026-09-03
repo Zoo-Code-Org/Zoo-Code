@@ -33,11 +33,12 @@ export interface SafeWriteJsonOptions {
 export async function lockJsonFile(filePath: string): Promise<() => Promise<void>> {
 	const absoluteFilePath = path.resolve(filePath)
 	const dirPath = path.dirname(absoluteFilePath)
+	let compromisedError: Error | undefined
 
 	await fs.mkdir(dirPath, { recursive: true })
 	await fs.access(dirPath)
 
-	return lockfile.lock(absoluteFilePath, {
+	const release = await lockfile.lock(absoluteFilePath, {
 		stale: LOCK_STALE_MS,
 		update: 10000,
 		realpath: false,
@@ -48,10 +49,27 @@ export async function lockJsonFile(filePath: string): Promise<() => Promise<void
 			maxTimeout: 1000,
 		},
 		onCompromised: (err) => {
-			console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
-			throw err
+			if (!compromisedError) {
+				compromisedError = err
+				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
+			}
 		},
 	})
+
+	return async () => {
+		try {
+			await release()
+		} catch (releaseError) {
+			if (!compromisedError) {
+				throw releaseError
+			}
+			console.error(`Failed to release compromised lock for ${absoluteFilePath}:`, releaseError)
+		}
+
+		if (compromisedError) {
+			throw compromisedError
+		}
+	}
 }
 
 /**
@@ -72,6 +90,10 @@ export async function lockJsonFile(filePath: string): Promise<() => Promise<void
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
+	let operationFailed = false
+	let operationError: unknown
+	let unlockFailed = false
+	let unlockError: unknown
 
 	if (!options?.lockAcquired) {
 		try {
@@ -156,6 +178,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 	} catch (originalError) {
+		operationFailed = true
+		operationError = originalError
 		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
@@ -199,17 +223,26 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				)
 			}
 		}
-		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
 		try {
 			// releaseLock will be the actual unlock function if lock was acquired,
 			// or the initial no-op if acquisition failed.
 			await releaseLock()
-		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
-			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+		} catch (error) {
+			unlockFailed = true
+			unlockError = error
+			if (operationFailed) {
+				console.error(`Failed to release lock for ${absoluteFilePath}:`, error)
+			}
 		}
+	}
+
+	if (operationFailed) {
+		throw operationError
+	}
+	if (unlockFailed) {
+		throw unlockError
 	}
 }
 

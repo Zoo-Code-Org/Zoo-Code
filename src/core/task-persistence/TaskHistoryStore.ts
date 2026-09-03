@@ -91,10 +91,12 @@ export interface AtomicUpdatePairOptions {
 	firstDiskGuard?: (current: HistoryItem) => void
 	/** Restore the first record's exact guarded pre-image if writing the second record fails. */
 	rollbackFirstOnSecondFailure?: boolean
+	/** Restore both exact guarded pre-images if post-write callback work fails. */
+	rollbackBothOnCallbackFailure?: boolean
 	/**
 	 * Run finite handoff work after both writes and `onWrite`, before releasing the first file lock.
 	 * The callback runs inside the non-reentrant store lock and must not call store mutation,
-	 * invalidation, or reconciliation methods. Rejection occurs after both records are durable.
+	 * invalidation, or reconciliation methods. Rejection occurs after both records are initially durable.
 	 */
 	whileFirstFileLocked?: () => Promise<void>
 	/** The caller already holds the first record's cross-process lock. */
@@ -906,6 +908,36 @@ export class TaskHistoryStore {
 		}
 	}
 
+	private async restoreTaskFilePreImage(
+		taskId: string,
+		preImage: HistoryItem,
+		expectedWritten: HistoryItem,
+		lockAcquired: boolean,
+	): Promise<void> {
+		try {
+			await safeWriteJson(await this.getTaskFilePath(taskId), preImage, {
+				lockAcquired,
+				merge: (existing) => {
+					if (!existing || typeof existing !== "object" || !("id" in existing)) {
+						throw new Error(`[TaskHistoryStore] atomicUpdatePair: ${taskId} missing during compensation`)
+					}
+					if (!deepEqual(existing, expectedWritten)) {
+						throw new Error(
+							`[TaskHistoryStore] atomicUpdatePair: cannot compensate ${taskId} after a concurrent update`,
+						)
+					}
+					return preImage
+				},
+			})
+			this.cache.set(taskId, structuredClone(preImage))
+		} catch (error) {
+			const current = await this.readTaskFile(taskId)
+			if (current) this.cache.set(taskId, current)
+			else this.cache.delete(taskId)
+			throw error
+		}
+	}
+
 	/**
 	 * Read a HistoryItem from its per-task `history_item.json` file.
 	 */
@@ -1065,7 +1097,7 @@ export class TaskHistoryStore {
 	 * updaters are synchronous and both writes finish before the store lock releases.
 	 *
 	 * By default each record write takes only its own file lock, so cross-process
-	 * atomicity is not guaranteed. Supplying a first-record guard, rollback, or
+	 * atomicity is not guaranteed. Supplying a first-record guard, rollback, compensation, or
 	 * `whileFirstFileLocked` holds the first record's lock across both writes,
 	 * `onWrite`, and the callback; the second record's lock still covers only its own
 	 * write. `firstFileLockAcquired` and `storeLockAcquired` reuse locks held by
@@ -1117,7 +1149,10 @@ export class TaskHistoryStore {
 			const mergedFirst = { ...first, ...updatedFirst }
 			const mergedSecond = { ...second, ...updatedSecond }
 			const holdFirstFileLock = Boolean(
-				options?.firstDiskGuard || options?.rollbackFirstOnSecondFailure || options?.whileFirstFileLocked,
+				options?.firstDiskGuard ||
+				options?.rollbackFirstOnSecondFailure ||
+				options?.rollbackBothOnCallbackFailure ||
+				options?.whileFirstFileLocked,
 			)
 			const releaseFirstFileLock = options?.firstFileLockAcquired
 				? async () => {}
@@ -1128,7 +1163,9 @@ export class TaskHistoryStore {
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
 				const captureAndGuardFirst =
-					options?.firstDiskGuard || options?.rollbackFirstOnSecondFailure
+					options?.firstDiskGuard ||
+					options?.rollbackFirstOnSecondFailure ||
+					options?.rollbackBothOnCallbackFailure
 						? (current: HistoryItem) => {
 								options?.firstDiskGuard?.(current)
 								firstDiskSnapshot = structuredClone(current)
@@ -1138,12 +1175,16 @@ export class TaskHistoryStore {
 				const writtenFirst = await this.writeTaskFile(mergedFirst, firstDelta, captureAndGuardFirst, {
 					lockAcquired: holdFirstFileLock || options?.firstFileLockAcquired,
 				})
+				let secondDiskSnapshot: HistoryItem | undefined
+				const secondDelta = this.buildDelta(secondId, second, updatedSecond)
+				const captureSecond = options?.rollbackBothOnCallbackFailure
+					? (current: HistoryItem) => {
+							secondDiskSnapshot = structuredClone(current)
+						}
+					: undefined
 				let writtenSecond: HistoryItem
 				try {
-					writtenSecond = await this.writeTaskFile(
-						mergedSecond,
-						this.buildDelta(secondId, second, updatedSecond),
-					)
+					writtenSecond = await this.writeTaskFile(mergedSecond, secondDelta, captureSecond)
 				} catch (error) {
 					if (options?.rollbackFirstOnSecondFailure && firstDiskSnapshot) {
 						try {
@@ -1191,9 +1232,64 @@ export class TaskHistoryStore {
 				this.cache.set(secondId, writtenSecond)
 
 				const all = this.getAll()
-				if (this.onWrite) await this.onWrite(all)
-				await options?.whileFirstFileLocked?.()
-				return all
+				try {
+					if (this.onWrite) await this.onWrite(all)
+					await options?.whileFirstFileLocked?.()
+					return all
+				} catch (error) {
+					if (!options?.rollbackBothOnCallbackFailure) throw error
+
+					const compensationErrors: unknown[] = []
+					const persistedWrittenSecond = JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem
+					const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
+
+					if (secondDiskSnapshot) {
+						try {
+							await this.restoreTaskFilePreImage(
+								secondId,
+								secondDiskSnapshot,
+								persistedWrittenSecond,
+								false,
+							)
+						} catch (compensationError) {
+							compensationErrors.push(compensationError)
+						}
+					} else {
+						compensationErrors.push(
+							new Error(
+								`[TaskHistoryStore] atomicUpdatePair: missing ${secondId} compensation pre-image`,
+							),
+						)
+					}
+
+					if (firstDiskSnapshot) {
+						try {
+							await this.restoreTaskFilePreImage(firstId, firstDiskSnapshot, persistedWrittenFirst, true)
+						} catch (compensationError) {
+							compensationErrors.push(compensationError)
+						}
+					} else {
+						compensationErrors.push(
+							new Error(`[TaskHistoryStore] atomicUpdatePair: missing ${firstId} compensation pre-image`),
+						)
+					}
+
+					if (this.onWrite) {
+						try {
+							await this.onWrite(this.getAll())
+						} catch (compensationError) {
+							compensationErrors.push(compensationError)
+						}
+					}
+
+					if (compensationErrors.length > 0) {
+						throw new AggregateError(
+							[error, ...compensationErrors],
+							`[TaskHistoryStore] atomicUpdatePair: callback and compensation failed`,
+						)
+					}
+					throw error
+				}
 			} finally {
 				await releaseFirstFileLock()
 			}

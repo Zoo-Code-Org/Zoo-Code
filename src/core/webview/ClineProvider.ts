@@ -244,9 +244,16 @@ export class ClineProvider
 		parentTaskId: string,
 		transition: () => Promise<T>,
 		afterUnlock?: (result: T) => Promise<void>,
+		afterUnlockError?: (error: unknown) => Promise<void>,
 	): Promise<T> {
 		return this.runDelegationTransition(parentTaskId, async () => {
-			const result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
+			let result: T
+			try {
+				result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
+			} catch (error) {
+				await afterUnlockError?.(error)
+				throw error
+			}
 			await afterUnlock?.(result)
 			return result
 		})
@@ -3987,6 +3994,7 @@ export class ClineProvider
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
 		let parentToResume: Task | undefined
+		let childToRestore: HistoryItem | undefined
 		const transition = async () => {
 			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
 			const { historyItem } = await this.getTaskWithId(parentTaskId)
@@ -4017,25 +4025,15 @@ export class ClineProvider
 				return false
 			}
 
-			let originalParentClineMessages: ClineMessage[] = []
-			try {
-				originalParentClineMessages = await readTaskMessages({
-					taskId: parentTaskId,
-					globalStoragePath,
-				})
-			} catch {
-				originalParentClineMessages = []
-			}
+			const originalParentClineMessages: ClineMessage[] = await readTaskMessages({
+				taskId: parentTaskId,
+				globalStoragePath,
+			})
 
-			let originalParentApiMessages: ApiMessage[] = []
-			try {
-				originalParentApiMessages = await readApiMessages({
-					taskId: parentTaskId,
-					globalStoragePath,
-				})
-			} catch {
-				originalParentApiMessages = []
-			}
+			const originalParentApiMessages: ApiMessage[] = await readApiMessages({
+				taskId: parentTaskId,
+				globalStoragePath,
+			})
 
 			const parentClineMessages = structuredClone(originalParentClineMessages)
 			const parentApiMessages = structuredClone(originalParentApiMessages)
@@ -4191,6 +4189,36 @@ export class ClineProvider
 			try {
 				let parentInstance: Task | undefined
 				let completingParent!: HistoryItem
+				let completingChild!: HistoryItem
+				const completionOptions = {
+					firstDiskGuard: assertCurrentDelegation,
+					rollbackFirstOnSecondFailure: true,
+					rollbackBothOnCallbackFailure: true,
+					firstFileLockAcquired: true,
+					storeLockAcquired: true,
+					whileFirstFileLocked: async () => {
+						const current = this.getCurrentTask()
+						if (current?.taskId === childTaskId) {
+							childToRestore = completingChild
+							await this.removeClineFromStack({ saveMessages: false })
+						}
+						parentInstance = await this.createTaskWithHistoryItem(updatedHistory, {
+							startTask: false,
+						})
+						try {
+							await parentInstance.overwriteClineMessages(parentClineMessages, { persist: false })
+						} catch {
+							// non-fatal
+						}
+						try {
+							await parentInstance.overwriteApiConversationHistory(parentApiMessages, {
+								persist: false,
+							})
+						} catch {
+							// non-fatal
+						}
+					},
+				}
 				await this.taskHistoryStore.atomicUpdatePair(
 					parentTaskId,
 					childTaskId,
@@ -4202,6 +4230,7 @@ export class ClineProvider
 						return updatedHistory
 					},
 					(child) => {
+						completingChild = { ...child }
 						if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
 							throw new Error(
 								`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`,
@@ -4218,33 +4247,7 @@ export class ClineProvider
 								child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
 						}
 					},
-					{
-						firstDiskGuard: assertCurrentDelegation,
-						rollbackFirstOnSecondFailure: true,
-						firstFileLockAcquired: true,
-						storeLockAcquired: true,
-						whileFirstFileLocked: async () => {
-							const current = this.getCurrentTask()
-							if (current?.taskId === childTaskId) {
-								await this.removeClineFromStack({ saveMessages: false })
-							}
-							parentInstance = await this.createTaskWithHistoryItem(updatedHistory, {
-								startTask: false,
-							})
-							try {
-								await parentInstance.overwriteClineMessages(parentClineMessages, { persist: false })
-							} catch {
-								// non-fatal
-							}
-							try {
-								await parentInstance.overwriteApiConversationHistory(parentApiMessages, {
-									persist: false,
-								})
-							} catch {
-								// non-fatal
-							}
-						},
-					},
+					completionOptions,
 				)
 
 				parentToResume = parentInstance
@@ -4296,9 +4299,31 @@ export class ClineProvider
 			this.cancelledDelegationChildIds.delete(childTaskId)
 			return true
 		}
-		return this.runLockedDelegationTransition(parentTaskId, transition, async () => {
-			await parentToResume?.resumeAfterDelegation()
-		})
+		return this.runLockedDelegationTransition(
+			parentTaskId,
+			transition,
+			async () => {
+				await parentToResume?.resumeAfterDelegation()
+			},
+			async (error) => {
+				if (!childToRestore) {
+					return
+				}
+				try {
+					if (this.getCurrentTask()?.taskId === parentTaskId) {
+						await this.removeClineFromStack({ saveMessages: false })
+					}
+					if (!this.getCurrentTask()) {
+						await this.createTaskWithHistoryItem(childToRestore, { startTask: false })
+					}
+				} catch (restoreError) {
+					throw new AggregateError(
+						[error, restoreError],
+						`[reopenParentFromDelegation] Failed to restore child ${childTaskId} after parent handoff failure`,
+					)
+				}
+			},
+		)
 	}
 
 	/**
