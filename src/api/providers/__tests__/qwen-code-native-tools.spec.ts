@@ -336,18 +336,26 @@ describe("QwenCodeHandler Native Tools", () => {
 
 			const collectAndTrack = async (stream: ReturnType<QwenCodeHandler["createMessage"]>) => {
 				const chunks = []
+				const parserEvents = []
+				const parserScope = NativeToolCallParser.createScope()
 				for await (const chunk of stream) {
 					if (chunk.type === "tool_call_partial") {
-						NativeToolCallParser.processRawChunk({
-							index: chunk.index,
-							id: chunk.id,
-							name: chunk.name,
-							arguments: chunk.arguments,
-						})
+						parserEvents.push(
+							...NativeToolCallParser.processRawChunk(
+								{
+									index: chunk.index,
+									id: chunk.id,
+									name: chunk.name,
+									arguments: chunk.arguments,
+								},
+								parserScope,
+							),
+						)
 					}
 					chunks.push(chunk)
 				}
-				return chunks
+				NativeToolCallParser.clearRawChunkState(parserScope)
+				return { chunks, parserEvents }
 			}
 
 			const firstChunksPromise = collectAndTrack(
@@ -360,12 +368,14 @@ describe("QwenCodeHandler Native Tools", () => {
 			releaseFirstStream?.()
 			const firstChunks = await firstChunksPromise
 
-			expect(secondChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+			expect(secondChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
 				{ type: "tool_call_end", id: "call_qwen_b" },
 			])
-			expect(firstChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
 				{ type: "tool_call_end", id: "call_qwen_a" },
 			])
+			expect(firstChunks.parserEvents.map((event) => event.id)).toEqual(["call_qwen_a", "call_qwen_a"])
+			expect(secondChunks.parserEvents.map((event) => event.id)).toEqual(["call_qwen_b", "call_qwen_b"])
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {

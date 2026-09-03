@@ -293,6 +293,39 @@ describe("NativeToolCallParser", () => {
 		})
 	})
 
+	describe("processFinishReason", () => {
+		it("keeps finish-reason events scoped while preserving default-scope compatibility", () => {
+			const firstScope = NativeToolCallParser.createScope()
+			const secondScope = NativeToolCallParser.createScope()
+
+			NativeToolCallParser.processRawChunk({ index: 0, id: "call_first_finish", name: "read_file" }, firstScope)
+			NativeToolCallParser.processRawChunk({ index: 0, id: "call_second_finish", name: "read_file" }, secondScope)
+
+			expect(NativeToolCallParser.processFinishReason(null, firstScope)).toEqual([])
+			expect(NativeToolCallParser.processFinishReason(undefined, firstScope)).toEqual([])
+			expect(NativeToolCallParser.processFinishReason("stop", firstScope)).toEqual([])
+			expect(NativeToolCallParser.processFinishReason("tool_calls", firstScope)).toEqual([
+				{ type: "tool_call_end", id: "call_first_finish" },
+			])
+			expect(NativeToolCallParser.processFinishReason("tool_calls", secondScope)).toEqual([
+				{ type: "tool_call_end", id: "call_second_finish" },
+			])
+
+			NativeToolCallParser.processRawChunk({
+				index: 0,
+				id: "call_default_finish",
+				name: "read_file",
+			})
+			expect(NativeToolCallParser.processFinishReason("tool_calls")).toEqual([
+				{ type: "tool_call_end", id: "call_default_finish" },
+			])
+
+			NativeToolCallParser.clearRawChunkState(firstScope)
+			NativeToolCallParser.clearRawChunkState(secondScope)
+			NativeToolCallParser.clearRawChunkState()
+		})
+	})
+
 	describe("processStreamingChunk", () => {
 		it("keeps interleaved task streams isolated", () => {
 			const firstScope = NativeToolCallParser.createScope()

@@ -610,18 +610,26 @@ describe("OpenRouterHandler", () => {
 
 			const collectAndTrack = async (stream: ReturnType<OpenRouterHandler["createMessage"]>) => {
 				const chunks = []
+				const parserEvents = []
+				const parserScope = NativeToolCallParser.createScope()
 				for await (const chunk of stream) {
 					if (chunk.type === "tool_call_partial") {
-						NativeToolCallParser.processRawChunk({
-							index: chunk.index,
-							id: chunk.id,
-							name: chunk.name,
-							arguments: chunk.arguments,
-						})
+						parserEvents.push(
+							...NativeToolCallParser.processRawChunk(
+								{
+									index: chunk.index,
+									id: chunk.id,
+									name: chunk.name,
+									arguments: chunk.arguments,
+								},
+								parserScope,
+							),
+						)
 					}
 					chunks.push(chunk)
 				}
-				return chunks
+				NativeToolCallParser.clearRawChunkState(parserScope)
+				return { chunks, parserEvents }
 			}
 
 			const firstChunksPromise = collectAndTrack(handler.createMessage("first", []))
@@ -630,11 +638,19 @@ describe("OpenRouterHandler", () => {
 			releaseFirstStream?.()
 			const firstChunks = await firstChunksPromise
 
-			expect(secondChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+			expect(secondChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
 				{ type: "tool_call_end", id: "call_openrouter_b" },
 			])
-			expect(firstChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
 				{ type: "tool_call_end", id: "call_openrouter_a" },
+			])
+			expect(firstChunks.parserEvents.map((event) => event.id)).toEqual([
+				"call_openrouter_a",
+				"call_openrouter_a",
+			])
+			expect(secondChunks.parserEvents.map((event) => event.id)).toEqual([
+				"call_openrouter_b",
+				"call_openrouter_b",
 			])
 		})
 	})
