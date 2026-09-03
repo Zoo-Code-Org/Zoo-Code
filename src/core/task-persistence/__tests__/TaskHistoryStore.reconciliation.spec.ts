@@ -28,9 +28,11 @@ safeWriteJsonMock.mockImplementation(writeJson)
 // typed accessor; this casts through `unknown` (not `as any`) following the
 // same private-member access pattern used by
 // "removes the repair-intent file after successful replay" below.
-const LIVE_CHILD_MTIME_THRESHOLD_MS = (TaskHistoryStore as unknown as {
-	LIVE_CHILD_MTIME_THRESHOLD_MS: number
-}).LIVE_CHILD_MTIME_THRESHOLD_MS
+const LIVE_CHILD_MTIME_THRESHOLD_MS = (
+	TaskHistoryStore as unknown as {
+		LIVE_CHILD_MTIME_THRESHOLD_MS: number
+	}
+).LIVE_CHILD_MTIME_THRESHOLD_MS
 
 function makeItem(overrides: Partial<HistoryItem> = {}): HistoryItem {
 	return {
@@ -181,11 +183,11 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	}
 
 	/**
-		* Deterministic wall clock for liveness-boundary tests. `fs.utimes` accepts
-		* ms-precision Date values and the store's `Date.now()` is spied to return
-		* this same instant, so `Date.now() - mtimeMs` is exact regardless of how
-		* long the test body takes to run.
-		*/
+	 * Deterministic wall clock for liveness-boundary tests. `fs.utimes` accepts
+	 * ms-precision Date values and the store's `Date.now()` is spied to return
+	 * this same instant, so `Date.now() - mtimeMs` is exact regardless of how
+	 * long the test body takes to run.
+	 */
 	const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z
 
 	async function setChildMtimeAge(taskId: string, ageMs: number): Promise<void> {
@@ -333,11 +335,26 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		expect(persistedParent.delegatedToId).toBeUndefined()
 	})
 
-	it("pins LIVE_CHILD_MTIME_THRESHOLD_MS to exactly 5 minutes in milliseconds", () => {
+	it("pins LIVE_CHILD_MTIME_THRESHOLD_MS to exactly 5 minutes in milliseconds", async () => {
 		// Kills the TaskHistoryStore.ts line-105 ArithmeticOperator mutants
 		// directly: every mutated expression (5 * 60 / 1000 → 0.3,
-		// 5 + 60 * 1000 → 60005, 5 * 60 % 1000 → 300, ...) changes the
-		// constant's own value, so this assertion fails under all of them.
+		// 5 / 60 * 1000 → 83.33, ...) changes the constant's own value.
+		//
+		// Stryker treats the static-initializer mutants as "static" (no test
+		// covers the module-load line under perTest analysis) and runs them
+		// against all tests with the mutant active. The threshold is captured
+		// at spec import time — before the mutant env switch is observed — so
+		// a stale-cached read never sees the mutated initializer. Re-import
+		// the module under test so the initializer re-executes while the
+		// mutant is active, making the mutated value observable here.
+		vi.resetModules()
+		const { TaskHistoryStore: FreshTaskHistoryStore } = await import("../TaskHistoryStore")
+		const freshThreshold = (
+			FreshTaskHistoryStore as unknown as {
+				LIVE_CHILD_MTIME_THRESHOLD_MS: number
+			}
+		).LIVE_CHILD_MTIME_THRESHOLD_MS
+		expect(freshThreshold).toBe(5 * 60 * 1000)
 		expect(LIVE_CHILD_MTIME_THRESHOLD_MS).toBe(5 * 60 * 1000)
 	})
 
@@ -385,9 +402,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// Kills the line-484/485 StringLiteral mutants: the two concatenated
 		// fragments of the skip message are asserted independently, so either
 		// fragment mutated to '' breaks its matching stringContaining check.
-		expect(logSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Skipping repair for live child child-live"),
-		)
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Skipping repair for live child child-live"))
 		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("owned by another window"))
 
 		logSpy.mockRestore()
