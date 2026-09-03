@@ -100,6 +100,7 @@ export const OpenRouter = ({
 	const handleRefreshModels = useCallback(() => {
 		errorJustReceived.current = false
 		setRefreshStatus(RefreshStatus.Loading)
+		// Stryker disable next-line CallExpression : refreshError is unobservable outside Error status; every Error transition re-sets it in the same batch
 		setRefreshError(undefined)
 
 		vscode.postMessage({
@@ -109,6 +110,7 @@ export const OpenRouter = ({
 				refresh: true,
 			},
 		})
+		// Stryker disable next-line ArrayDeclaration : constant deps array replacement is memoization-equivalent
 	}, [])
 
 	const handleInputChange = useCallback(
