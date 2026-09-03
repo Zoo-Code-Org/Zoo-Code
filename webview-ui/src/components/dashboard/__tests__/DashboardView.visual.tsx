@@ -1,7 +1,7 @@
 /* v8 ignore file -- Playwright component visual test. */
 import React from "react"
 
-import type { DashboardTaskStatsSnapshot, StatsBucket, StatsQuery } from "@roo-code/types"
+import { providerIdentifiers, type DashboardTaskStatsSnapshot, type StatsBucket, type StatsQuery } from "@roo-code/types"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
 
@@ -214,7 +214,7 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 		}
 	})
 
-	const component = await mount(<DashboardViewFixture />)
+	const component = await (mount as any)(<DashboardViewFixture />)
 
 	// Wait for the subscription post to be captured, then deliver the snapshot.
 	const subscription = await page

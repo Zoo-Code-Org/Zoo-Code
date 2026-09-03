@@ -10,7 +10,7 @@ import { DashboardSummaryFixture } from "./DashboardSummary.visual.fixture"
 // reduced motion is active (Playwright CT runs with reduced motion), so the
 // screenshot shows the final formatted values.
 test("renders the summary cards with token and cost totals in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<DashboardSummaryFixture />)
+	const component = await (mount as any)(<DashboardSummaryFixture />)
 
 	await component.evaluate(async () => {
 		await document.fonts.ready

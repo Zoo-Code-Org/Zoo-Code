@@ -1,6 +1,6 @@
 import React from "react"
 
-import type { DashboardTaskSummary } from "@roo-code/types"
+import { providerIdentifiers, type DashboardTaskSummary } from "@roo-code/types"
 
 import TaskList from "../TaskList"
 

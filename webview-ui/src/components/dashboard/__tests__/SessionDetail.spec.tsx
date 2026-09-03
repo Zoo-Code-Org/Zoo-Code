@@ -3,7 +3,7 @@
 import React from "react"
 import { render } from "@/utils/test-utils"
 
-import type { SessionDetail as SessionDetailType, APICallRecord } from "@roo-code/types"
+import { providerIdentifiers, type SessionDetail as SessionDetailType, type APICallRecord } from "@roo-code/types"
 
 import SessionDetail from "../SessionDetail"
 

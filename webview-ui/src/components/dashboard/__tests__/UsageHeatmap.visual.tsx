@@ -9,7 +9,7 @@ import { UsageHeatmapFixture } from "./UsageHeatmap.visual.fixture"
 // active. A non-empty `values` array guarantees the grid + legend render
 // instead of the "no activity" empty state.
 test("renders the 60-day usage heatmap in the VS Code dark theme", async ({ mount }) => {
-	const component = await mount(<UsageHeatmapFixture />)
+	const component = await (mount as any)(<UsageHeatmapFixture />)
 
 	await component.evaluate(async () => {
 		await document.fonts.ready

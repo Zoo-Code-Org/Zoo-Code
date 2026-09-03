@@ -1,6 +1,6 @@
 import React from "react"
 
-import type { DashboardTaskSummary } from "@roo-code/types"
+import { providerIdentifiers, type DashboardTaskSummary } from "@roo-code/types"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
 
@@ -53,7 +53,7 @@ function renderTaskList(tasks: DashboardTaskSummary[], allTasks: DashboardTaskSu
 }
 
 test("renders task rows with a definite, capped scroller height", async ({ mount }) => {
-	const component = await mount(renderTaskList(makeTasks(50)))
+	const component = await (mount as any)(renderTaskList(makeTasks(50)))
 
 	// Rows must actually reach the DOM and be laid out.
 	await expect(component.getByTestId("dashboard-task-row").first()).toBeVisible()
@@ -61,26 +61,26 @@ test("renders task rows with a definite, capped scroller height", async ({ mount
 	// The scroller must grow to the 400px cap (not collapse to 0).
 	const scroller = component.locator("[data-virtuoso-scroller]")
 	await expect
-		.poll(async () => scroller.evaluate((el) => el.clientHeight), { message: "scroller height reaches cap" })
+		.poll(async () => scroller.evaluate((el: HTMLElement) => el.clientHeight), { message: "scroller height reaches cap" })
 		.toBe(400)
 })
 
 test("shrinks the scroller to the content height when only a few tasks exist", async ({ mount }) => {
-	const component = await mount(renderTaskList(makeTasks(3)))
+	const component = await (mount as any)(renderTaskList(makeTasks(3)))
 
 	const scroller = component.locator("[data-virtuoso-scroller]")
 	await expect
-		.poll(async () => scroller.evaluate((el) => el.clientHeight), { message: "scroller height is non-zero" })
+		.poll(async () => scroller.evaluate((el: HTMLElement) => el.clientHeight), { message: "scroller height is non-zero" })
 		.toBeGreaterThan(0)
 
-	const height = await scroller.evaluate((el) => el.clientHeight)
+	const height = await scroller.evaluate((el: HTMLElement) => el.clientHeight)
 	expect(height).toBeLessThan(400)
 
 	await expect(component.getByTestId("dashboard-task-row")).toHaveCount(3)
 })
 
 test("root rows expand into subtask rows, and subtask rows toggle their detail", async ({ mount }) => {
-	const component = await mount(<HierarchyFixture />)
+	const component = await (mount as any)(<HierarchyFixture />)
 
 	// Initially only the root row is visible; subtask titles are not rendered.
 	await expect(component.getByTestId("dashboard-task-row")).toHaveCount(1)

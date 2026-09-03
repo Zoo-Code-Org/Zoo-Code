@@ -2,12 +2,13 @@
 
 import { renderHook, act } from "@/utils/test-utils"
 
-import type {
-	DashboardTaskStatsDelta,
-	DashboardTaskStatsSnapshot,
-	DashboardStatsError,
-	DashboardTaskPage,
-	StatsQuery,
+import {
+	providerIdentifiers,
+	type DashboardTaskStatsDelta,
+	type DashboardTaskStatsSnapshot,
+	type DashboardStatsError,
+	type DashboardTaskPage,
+	type StatsQuery,
 } from "@roo-code/types"
 
 import { useDashboardStatsStream } from "../useDashboardStatsStream"

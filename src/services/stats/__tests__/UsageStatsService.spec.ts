@@ -1098,16 +1098,16 @@ describe("UsageStatsService", () => {
 			await fs.mkdir(statsDir, { recursive: true })
 			await fs.writeFile(segmentPath, JSON.stringify(event) + "\n", "utf-8")
 
-			const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+			const debugSpy = vi.spyOn(console, "debug").mockImplementation(() => {})
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			const svc = new UsageStatsService(freshDir)
 			await svc.initialize()
 
 			// Migration should run and log success
-			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Migrated 1 events from NDJSON to SQLite"))
+			expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining("Migrated 1 events from NDJSON to SQLite"))
 
-			logSpy.mockRestore()
+			debugSpy.mockRestore()
 			warnSpy.mockRestore()
 			svc.dispose()
 			await fs.rm(freshDir, { recursive: true, force: true })

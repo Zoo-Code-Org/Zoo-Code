@@ -1,17 +1,18 @@
 // npx vitest run src/components/dashboard/__tests__/dashboardStreamReducer.spec.ts
 
-import type {
-	DashboardStatsSubscription,
-	DashboardTaskStatsSnapshot,
-	DashboardTaskStatsDelta,
-	DashboardStatsError,
-	DashboardTaskPage,
-	StatsBucket,
-	StatsBucketDelta,
-	StatsSnapshot,
-	StatsQuery,
-	DashboardTaskSummary,
-	DashboardTaskUpsert,
+import {
+	providerIdentifiers,
+	type DashboardStatsSubscription,
+	type DashboardTaskStatsSnapshot,
+	type DashboardTaskStatsDelta,
+	type DashboardStatsError,
+	type DashboardTaskPage,
+	type StatsBucket,
+	type StatsBucketDelta,
+	type StatsSnapshot,
+	type StatsQuery,
+	type DashboardTaskSummary,
+	type DashboardTaskUpsert,
 } from "@roo-code/types"
 
 import {

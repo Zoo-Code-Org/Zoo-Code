@@ -3,7 +3,7 @@
 import React from "react"
 import { render, fireEvent } from "@/utils/test-utils"
 
-import type { DashboardTaskDetail, DashboardTaskSummary } from "@roo-code/types"
+import { providerIdentifiers, type DashboardTaskDetail, type DashboardTaskSummary } from "@roo-code/types"
 
 import TaskList from "../TaskList"
 

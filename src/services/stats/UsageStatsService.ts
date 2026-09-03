@@ -226,7 +226,7 @@ export class UsageStatsService {
 				)
 				const result = migration.migrate()
 				if (result.totalMigrated > 0) {
-					console.log(
+					console.debug(
 						`[UsageStatsService] Migrated ${result.totalMigrated} events from NDJSON to SQLite (${result.totalSkipped} duplicates skipped)`,
 					)
 				}
