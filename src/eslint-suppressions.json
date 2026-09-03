@@ -396,7 +396,7 @@
 	},
 	"api/providers/openai-native.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 31
+			"count": 28
 		}
 	},
 	"api/providers/openai.ts": {
