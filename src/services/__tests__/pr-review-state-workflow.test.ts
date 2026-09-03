@@ -331,28 +331,33 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	const payload =
 		eventName === "schedule"
 			? {}
-			: eventName === "workflow_dispatch"
-				? { inputs: { pull_request_number: String(options.workflowDispatchPrNumber ?? 1437) } }
-				: eventName === "workflow_run"
-					? {
-							workflow_run: {
-								pull_requests: options.workflowRunAssociated === false ? [] : [{ number: 1437 }],
-								head_repository:
-									options.workflowRunMissing === "repository"
-										? null
-										: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
-								head_branch:
-									options.workflowRunMissing === "branch"
-										? null
-										: (options.workflowRunHeadBranch ?? "feature/test"),
-								head_sha: options.workflowRunMissing === "sha" ? null : SHA,
-								id: 123456,
-							},
-						}
-					: {
-							action: "ready_for_review",
-							pull_request: pullRequestPayload,
-						}
+			: eventName === "issue_comment"
+				? {
+						issue: { number: 1437, pull_request: {} },
+						comment: { user: { login: "coderabbitai[bot]" } },
+					}
+				: eventName === "workflow_dispatch"
+					? { inputs: { pull_request_number: String(options.workflowDispatchPrNumber ?? 1437) } }
+					: eventName === "workflow_run"
+						? {
+								workflow_run: {
+									pull_requests: options.workflowRunAssociated === false ? [] : [{ number: 1437 }],
+									head_repository:
+										options.workflowRunMissing === "repository"
+											? null
+											: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
+									head_branch:
+										options.workflowRunMissing === "branch"
+											? null
+											: (options.workflowRunHeadBranch ?? "feature/test"),
+									head_sha: options.workflowRunMissing === "sha" ? null : SHA,
+									id: 123456,
+								},
+							}
+						: {
+								action: "ready_for_review",
+								pull_request: pullRequestPayload,
+							}
 	const context = {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
@@ -426,6 +431,32 @@ describe("PR review-state workflow", () => {
 		expect(result.createCommitStatus).toHaveBeenCalled()
 	})
 
+	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
+		expect(workflow.on.issue_comment.types).toEqual(["created", "edited"])
+		expect(workflow.jobs.reconcile.if).toContain("github.event.comment.user.login == 'coderabbitai[bot]'")
+
+		const result = await runWorkflow({
+			eventName: "issue_comment",
+			fork: true,
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "CHANGES_REQUESTED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.getPullRequest).toHaveBeenCalledTimes(1)
+		expect(result.listPullRequests).not.toHaveBeenCalled()
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
 	it("reconciles fork PRs from pull_request_target", async () => {
 		const result = await runWorkflow({ eventName: "pull_request_target", fork: true })
 
@@ -455,6 +486,7 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).not.toHaveBeenCalled()
 		expect(latestGuide(result)).toContain("Mark the PR ready")
+		expect(latestGuide(result)).toContain("Review-state labels are managed by this workflow")
 	})
 
 	it("routes bot-authored PRs directly to maintainer review", async () => {
@@ -844,6 +876,9 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		expect(latestGuide(result)).toContain(
+			"After pushing fixes and required CI passes, comment `@coderabbitai review` if automatic review is paused.",
+		)
 	})
 
 	it("moves approved ready PRs to maintainer review", async () => {
@@ -859,7 +894,21 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(latestGuide(result)).toContain("CodeRabbit approved the latest commit")
 	})
+
+	it.each([
+		["in_progress", undefined, "Wait for required CI checks"],
+		["completed", "failure", "Fix the failing required CI checks"],
+	] as const)(
+		"explains why %s required CI blocks maintainer handoff",
+		async (requiredStatus, requiredConclusion, text) => {
+			const result = await runWorkflow({ requiredStatus, requiredConclusion })
+
+			expect(latestGuide(result)).toContain(text)
+			expect(latestGuide(result)).toContain("awaiting-maintainer")
+		},
+	)
 
 	it("recognizes CodeRabbit regardless of login casing", async () => {
 		const result = await runWorkflow({

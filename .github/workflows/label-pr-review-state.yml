@@ -15,6 +15,10 @@ on:
     types: [opened, reopened, ready_for_review, synchronize, review_requested, labeled, unlabeled]
   pull_request_review:
     types: [submitted, dismissed]
+  # Fork review events have a read-only token. CodeRabbit's status-comment update
+  # provides a trusted base-repository event that can reconcile those PRs promptly.
+  issue_comment:
+    types: [created, edited]
   workflow_run:
     workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
     types: [completed]
@@ -32,6 +36,9 @@ concurrency:
 jobs:
   reconcile:
     name: Zoo Code / reconcile PR review state
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')
     runs-on: ubuntu-latest
     steps:
       - name: Reconcile PR review state labels
@@ -83,6 +90,8 @@ jobs:
             let eventPrNumbers = [];
             if (context.payload.pull_request?.number) {
               eventPrNumbers = [context.payload.pull_request.number];
+            } else if (context.eventName === 'issue_comment') {
+              eventPrNumbers = [context.payload.issue.number];
             } else if (context.eventName === 'workflow_dispatch') {
               eventPrNumbers = [Number(context.payload.inputs.pull_request_number)];
             } else if (context.payload.workflow_run?.pull_requests) {
@@ -305,16 +314,16 @@ jobs:
 
             function phaseMessage(phase) {
               const messages = {
-                draft: 'Mark the PR ready to start CodeRabbit after required CI passes.',
+                draft: 'Mark the PR ready. Required CI must pass before CodeRabbit starts.',
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
-                'ci-pending': 'Wait for the required CI checks to finish.',
-                'ci-failed': 'Fix the failing required CI checks and push an update.',
+                'ci-pending': 'Wait for required CI checks; awaiting-maintainer requires passing CI and CodeRabbit approval.',
+                'ci-failed': 'Fix the failing required CI checks; awaiting-maintainer requires passing CI and CodeRabbit approval.',
                 'configuration-error': 'Repository rules must not require this advisory workflow\'s own gate or reconciliation job.',
-                'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
+                'coderabbit-changes': 'Address CodeRabbit findings and push fixes.',
                 coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
                 'draft-approved': 'CodeRabbit approved the latest commit. Mark the draft ready.',
                 'maintainer-changes': 'Address the maintainer feedback, push an update, and request another review.',
-                maintainer: 'Ready for human maintainer review and approval.',
+                maintainer: 'CodeRabbit approved the latest commit. Ready for human maintainer review.',
                 approved: 'The required review sequence passed. Remaining merge requirements apply.',
               };
               return messages[phase];
@@ -373,12 +382,16 @@ jobs:
                 ? `\n${codeRabbitLabelMarkerPrefix}${pr.head.sha}${activationPending ? ':pending' : ''} -->`
                 : '';
 
-              return `${guideMarker}\n### Review process\n\n${authorNote}\n\n` +
-                '1. Required CI checks pass.\n' +
-                '2. The workflow starts CodeRabbit automatically.\n' +
-                '3. For eligible human-authored PRs, CodeRabbit reviews and approves the latest commit.\n' +
-                '4. A human maintainer reviews and approves after CodeRabbit.\n\n' +
-                `**Current step:** ${phaseMessage(phase)}${labelMarker}`;
+              const codeRabbitHelp = phase === 'coderabbit-changes'
+                ? '\n\nAfter pushing fixes and required CI passes, comment `@coderabbitai review` if automatic review is paused.'
+                : phase === 'coderabbit'
+                  ? '\n\nIf CodeRabbit is paused, comment `@coderabbitai resume` or `@coderabbitai review`.'
+                  : '';
+
+              return `${guideMarker}\n### Review status\n\n${authorNote}\n\n` +
+                `**Current step:** ${phaseMessage(phase)}${codeRabbitHelp}\n\n` +
+                'Review-state labels are managed by this workflow; do not edit them manually.' +
+                labelMarker;
             }
 
             async function updateReviewGuide(pr, phase, existingGuide = null, activationPending = false) {
