@@ -90,7 +90,12 @@ describe("Opencode Go Fetchers", () => {
 		it("uses native model info when the endpoint returns only an OpenCode Go model ID", async () => {
 			mockedAxios.get.mockResolvedValue({
 				data: {
-					data: [{ id: "gpt-5.6-luna" }, { id: "hy4-preview" }, { id: "deepseek-v4-flash-vision-exp" }],
+					data: [
+						{ id: "gpt-5.6-luna" },
+						{ id: "hy4-preview" },
+						{ id: "deepseek-v4-flash-vision-exp" },
+						{ id: "muse-spark-1.3-contributor" },
+					],
 				},
 			})
 
@@ -101,6 +106,16 @@ describe("Opencode Go Fetchers", () => {
 			expect(models["deepseek-v4-flash-vision-exp"]).toMatchObject({
 				contextWindow: 1_000_000,
 				maxTokens: 384_000,
+			})
+			expect(models["muse-spark-1.3-contributor"]).toMatchObject({
+				contextWindow: 1_048_576,
+				maxTokens: 131_072,
+				supportsImages: true,
+				supportsMaxTokens: true,
+				supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+				inputPrice: 0.1,
+				outputPrice: 0.2,
+				cacheReadsPrice: 0.002,
 			})
 		})
 
@@ -172,6 +187,7 @@ describe("Opencode Go Fetchers", () => {
 				"gpt-5.6-luna",
 				"grok-4.5",
 				"grok-4.6",
+				"muse-spark-1.3-contributor",
 				"muse-spark-1.2-contributor",
 			]
 			expect(Object.keys(opencodeGoModels).sort()).toEqual([...modelIds].sort())

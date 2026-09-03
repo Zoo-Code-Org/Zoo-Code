@@ -1362,8 +1362,12 @@ describe("OpencodeGoHandler", () => {
 			}).rejects.toThrow("Opencode Go completion error: internal server error")
 		})
 
-		it("classifies gpt-5.6-luna as Responses-format and other models as not", () => {
+		it("classifies documented Responses models as Responses-format and other models as not", () => {
 			expect(isOpencodeGoResponsesFormatModel("gpt-5.6-luna")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.5")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("grok-4.6")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.3-contributor")).toBe(true)
+			expect(isOpencodeGoResponsesFormatModel("muse-spark-1.2-contributor")).toBe(true)
 			expect(isOpencodeGoResponsesFormatModel("glm-5.3")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("qwen3.7-max")).toBe(false)
 			expect(isOpencodeGoResponsesFormatModel("some-unknown-model")).toBe(false)
