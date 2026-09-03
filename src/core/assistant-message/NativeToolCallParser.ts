@@ -335,6 +335,7 @@ export class NativeToolCallParser {
 
 		// Clean up streaming state
 		streamingToolCalls.delete(id)
+		// Stryker disable next-line ConditionalExpression: retaining an empty WeakMap value is only observable as GC eligibility.
 		if (streamingToolCalls.size === 0) {
 			// Stryker disable next-line CallExpression: deleting an empty WeakMap value is only observable as GC eligibility.
 			this.streamingToolCallsByScope.delete(scope)
