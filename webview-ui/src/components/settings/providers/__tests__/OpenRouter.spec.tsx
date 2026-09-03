@@ -371,6 +371,24 @@ describe("OpenRouter", () => {
 			expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
 		})
 
+		it("does not show an error message when a failed fetch response arrives outside loading state", () => {
+			renderComponent()
+
+			// No refresh click: status stays Idle, so the `refreshStatus === Loading`
+			// guard must block the error transition. Mutating that sub-expression to
+			// true would flip the idle component into Error and render the payload.
+			dispatchMessage({
+				type: RouterModelsMessageType.singleRouterModelFetchResponse,
+				success: false,
+				values: { provider: providerIdentifiers.openrouter },
+				error: "not loading",
+			})
+
+			expect(screen.queryByText("not loading")).not.toBeInTheDocument()
+			expect(screen.queryByText("settings:providers.refreshModels.error")).not.toBeInTheDocument()
+			expect(getRefreshButton()).not.toBeDisabled()
+		})
+
 		it("ignores fetch failures carrying no values", () => {
 			renderComponent()
 
@@ -431,6 +449,24 @@ describe("OpenRouter", () => {
 
 			expect(screen.queryByText("settings:providers.refreshModels.success")).not.toBeInTheDocument()
 			expect(screen.queryByText("settings:providers.refreshModels.loading")).not.toBeInTheDocument()
+		})
+
+		it("ignores non-routerModels messages while refreshing", () => {
+			renderComponent()
+
+			fireEvent.click(getRefreshButton())
+			// A successful single-model fetch response is NOT a routerModels message,
+			// so it must not resolve the refresh. Mutating the else-if type test to
+			// true would enter the success branch (provider stays undefined) and
+			// invalidate the model caches.
+			dispatchMessage({
+				type: RouterModelsMessageType.singleRouterModelFetchResponse,
+				success: true,
+			})
+
+			expect(screen.queryByText("settings:providers.refreshModels.success")).not.toBeInTheDocument()
+			expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+			expect(invalidateQueriesSpy).not.toHaveBeenCalled()
 		})
 
 		it("stops listening for messages after unmount", () => {
