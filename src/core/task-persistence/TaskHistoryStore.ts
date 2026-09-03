@@ -1006,9 +1006,7 @@ export class TaskHistoryStore {
 			const releaseFileLock = await lockJsonFile(await this.getTaskFilePath(taskId))
 			try {
 				const current = await this.readTaskFile(taskId)
-				if (current) {
-					this.cache.set(taskId, current)
-				}
+				if (current) this.cache.set(taskId, current)
 				return await callback()
 			} finally {
 				await releaseFileLock()
@@ -1057,9 +1055,7 @@ export class TaskHistoryStore {
 				})
 				this.cache.set(taskId, written)
 				const all = this.getAll()
-				if (this.onWrite) {
-					await this.onWrite(all)
-				}
+				if (this.onWrite) await this.onWrite(all)
 				return all
 			} finally {
 				await releaseFileLock()
@@ -1199,9 +1195,7 @@ export class TaskHistoryStore {
 				this.cache.set(secondId, writtenSecond)
 
 				const all = this.getAll()
-				if (this.onWrite) {
-					await this.onWrite(all)
-				}
+				if (this.onWrite) await this.onWrite(all)
 				await options?.whileFirstFileLocked?.()
 				return all
 			} finally {
