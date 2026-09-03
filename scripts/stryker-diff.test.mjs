@@ -25,6 +25,7 @@ import {
 	preferDirectTestFiles,
 	resolveVitestBinary,
 	packageForPath,
+	runManifest,
 	selectFromGit,
 	testsFromMutationReport,
 	validateDisableDirectives,
@@ -40,11 +41,14 @@ describe("mutation testing workflow", () => {
 		assert.ok(!workflow.includes("pull_request_target:"))
 		assert.ok(workflow.includes("    contents: read"))
 		assert.ok(workflow.includes("- name: Checkout pull request merge result"))
-		assert.ok(workflow.includes("ref: refs/pull/${{ github.event.pull_request.number }}/merge"))
+		assert.ok(workflow.includes("ref: ${{ github.sha }}"))
+		assert.ok(!workflow.includes("ref: refs/pull/${{ github.event.pull_request.number }}/merge"))
 		assert.ok(workflow.includes("fetch-depth: 0"))
 		assert.ok(workflow.includes("persist-credentials: false"))
 		assert.ok(!workflow.includes("repository: ${{ github.event.pull_request.head.repo.full_name }}"))
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
+		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
 		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
 		assert.ok(workflow.includes("open the package's mutation.html file"))
 	})
@@ -291,6 +295,43 @@ describe("selectFromGit", () => {
 			fs.rmSync(repo, { recursive: true, force: true })
 		}
 	})
+
+	it("uses merge-result line coordinates when the base shifts a pull request edit", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-merge-diff-"))
+		const runGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim()
+
+		try {
+			runGit("init", "--initial-branch=main")
+			runGit("config", "user.name", "Mutation Test")
+			runGit("config", "user.email", "mutation@example.com")
+			fs.mkdirSync(path.join(repo, "packages/core/src"), { recursive: true })
+			fs.writeFileSync(path.join(repo, "packages/core/src/value.ts"), "const first = 1\nconst changed = true\n")
+			runGit("add", ".")
+			runGit("commit", "-m", "initial")
+
+			runGit("checkout", "-b", "feature")
+			fs.writeFileSync(path.join(repo, "packages/core/src/value.ts"), "const first = 1\nconst changed = false\n")
+			runGit("commit", "-am", "change value")
+
+			runGit("checkout", "main")
+			fs.writeFileSync(
+				path.join(repo, "packages/core/src/value.ts"),
+				"const inserted = 0\nconst first = 1\nconst changed = true\n",
+			)
+			runGit("commit", "-am", "shift source lines")
+			const baseSha = runGit("rev-parse", "HEAD")
+			runGit("merge", "--no-ff", "feature", "-m", "merge feature")
+			const mergeSha = runGit("rev-parse", "HEAD")
+
+			const manifest = selectFromGit(repo, baseSha, mergeSha)
+			assert.deepEqual(
+				manifest.packages.map(({ id, selectors }) => ({ id, selectors })),
+				[{ id: "core", selectors: ["src/value.ts:3-3"] }],
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
 })
 
 describe("mutation exclusions", () => {
@@ -444,6 +485,36 @@ describe("failure output", () => {
 			command,
 			"::error file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test gap::Survived mutant (replacement: left, right). 100%25 reproducible.",
 		)
+	})
+
+	it("reports a Stryker preflight launch error when the binary is missing", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-launch-"))
+		const reportRoot = path.join(repo, "reports")
+
+		try {
+			fs.mkdirSync(path.join(repo, "packages/core"), { recursive: true })
+			assert.throws(
+				() =>
+					runManifest(
+						repo,
+						{
+							packages: [
+								{
+									id: "core",
+									root: "packages/core",
+									vitestConfig: "vitest.unit.config.ts",
+									selectors: ["src/value.ts:1-1"],
+									changedExecutableLines: 1,
+								},
+							],
+						},
+						reportRoot,
+					),
+				/core Stryker preflight could not start:.*ENOENT/,
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
 	})
 
 	it("uses the actual tests recorded by Stryker", () => {
