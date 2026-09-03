@@ -608,8 +608,7 @@ describe("ZooGatewayHandler", () => {
 				(e: unknown) => e,
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
-			expect((error as Error).message.endsWith("aborted")).toBe(true)
-			expect((error as Error).message).not.toContain("completion error")
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
 		})
 
 		it("should surface request timeouts as an AbortError", async () => {
@@ -628,8 +627,38 @@ describe("ZooGatewayHandler", () => {
 				(e: unknown) => e,
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
-			expect((error as Error).message.endsWith("aborted")).toBe(true)
-			expect((error as Error).message).not.toContain("completion error")
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("should preserve abort identity when the signal is pre-aborted with a plain error", async () => {
+			// The aborted-signal disjunct alone must normalize a plain
+			// rejection (not just SDK abort classes) to the DOM-standard
+			// AbortError.
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+			const controller = new AbortController()
+			controller.abort()
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
+		})
+
+		it("should preserve abort identity for a name-based AbortError rejection", async () => {
+			// No aborted signal and no SDK abort class: only the DOM-standard
+			// name === "AbortError" check marks a cancelled request.
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("raw"), { name: "AbortError" }))
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt").then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
 		})
 		it("should work without options (backward compatible)", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
@@ -644,8 +673,10 @@ describe("ZooGatewayHandler", () => {
 
 	describe("createMessage abort signal bridging", () => {
 		it("rejects with an AbortError when the external signal is already aborted", async () => {
-			mockCreate.mockImplementation(async () => {
-				throw new DOMException("The operation was aborted.", "AbortError")
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
+				throw new Error("boom")
 			})
 
 			const handler = new ZooGatewayHandler(mockOptions)
@@ -658,22 +689,34 @@ describe("ZooGatewayHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
 
-			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+			// An already-aborted external signal must abort the INTERNAL
+			// controller before the request starts; the catch path then
+			// normalizes the rejection to the DOM-standard AbortError before
+			// the gateway error surfacing path.
+			const error = await collectStream(stream).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
 		})
 
 		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
+			// The mock polls the INTERNAL controller signal (bounded 40x5ms)
+			// instead of waiting for an "abort" event, so the test can never
+			// hang if the bridge stops forwarding aborts.
 			let capturedSignal: AbortSignal | undefined
 			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
 				return (async function* () {
-					yield {
-						choices: [{ delta: { content: "partial" }, index: 0 }],
-						index: 0,
+					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
+					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 5))
 					}
-					await new Promise((_resolve, reject) => {
-						const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
-						options?.signal?.addEventListener("abort", onAbort, { once: true })
-					})
+					if (capturedSignal?.aborted) {
+						throw new DOMException("The operation was aborted.", "AbortError")
+					}
 				})()
 			})
 
@@ -692,8 +735,13 @@ describe("ZooGatewayHandler", () => {
 			await new Promise((resolve) => setTimeout(resolve, 25))
 			controller.abort()
 
-			await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
 			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Zoo Gateway request was aborted")
 		})
 
 		it("detaches the bridged abort listener when the request completes normally", async () => {
@@ -718,6 +766,7 @@ describe("ZooGatewayHandler", () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 			const controller = new AbortController()
 			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
 
 			const stream = handler.createMessage(
 				"prompt",
@@ -728,6 +777,10 @@ describe("ZooGatewayHandler", () => {
 			const chunks = await collectStream(stream)
 			expect(chunks).toContainEqual({ type: "text", text: "ok" })
 			expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// The listener is registered with { once: true } — assert the exact
+			// options so a bridge that drops them (and relies on the finally
+			// block alone for single-shot semantics) is caught.
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
 			expect(controller.signal.aborted).toBe(false)
 		})
 	})

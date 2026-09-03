@@ -273,6 +273,55 @@ describe("VercelAiGatewayHandler", () => {
 			}).rejects.toThrow("Vercel AI Gateway stream error")
 		})
 
+		it("throws the default message when an in-stream error chunk has an empty message", async () => {
+			// An empty message must not be forwarded — it would become
+			// Error("") with no diagnostic at all.
+			mockCreate.mockImplementation(async () => asyncStreamFrom([{ error: { message: "" } }]))
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const stream = handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }])
+
+			await expect(async () => {
+				await collectStream(stream)
+			}).rejects.toThrow("Vercel AI Gateway stream error")
+		})
+
+		it("treats a present-but-undefined error key as no error", async () => {
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([{ error: undefined, choices: [{ delta: { content: "hi" }, index: 0 }], index: 0 }]),
+			)
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const stream = handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }])
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toEqual([{ type: "text", text: "hi" }])
+		})
+
+		it("skips frames without a delta and tool calls without a function field", async () => {
+			// Full-list assertion: a frame without choices[0], a choice without
+			// a delta, and a tool call missing function must each contribute
+			// nothing except the partial tool call with undefined name/arguments
+			// (toEqual ignores undefined-valued keys).
+			mockCreate.mockImplementation(async () =>
+				asyncStreamFrom([
+					{ choices: [], index: 0 },
+					{ choices: [{}], index: 0 },
+					{ choices: [{ delta: { content: "hi" }, index: 0 }], index: 0 },
+					{ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1" }] }, index: 0 }], index: 0 },
+				]),
+			)
+
+			const handler = new VercelAiGatewayHandler(mockOptions)
+			const stream = handler.createMessage("You are a helpful assistant.", [{ role: "user", content: "Hello" }])
+
+			const chunks = await collectStream(stream)
+			expect(chunks).toEqual([
+				{ type: "text", text: "hi" },
+				{ type: "tool_call_partial", index: 0, id: "call_1" },
+			])
+		})
+
 		it("uses correct temperature from options", async () => {
 			const customTemp = 0.5
 			const handler = new VercelAiGatewayHandler(
@@ -802,8 +851,7 @@ describe("VercelAiGatewayHandler", () => {
 				(e: unknown) => e,
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
-			expect((error as Error).message.endsWith("aborted")).toBe(true)
-			expect((error as Error).message).not.toContain("completion error")
+			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
 
 		it("should surface request timeouts as an AbortError", async () => {
@@ -822,8 +870,38 @@ describe("VercelAiGatewayHandler", () => {
 				(e: unknown) => e,
 			)
 			expect(error).toMatchObject({ name: "AbortError" })
-			expect((error as Error).message.endsWith("aborted")).toBe(true)
-			expect((error as Error).message).not.toContain("completion error")
+			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
+		})
+
+		it("should preserve abort identity when the signal is pre-aborted with a plain error", async () => {
+			// The aborted-signal disjunct alone must normalize a plain
+			// rejection (not just SDK abort classes) to the DOM-standard
+			// AbortError.
+			mockCreate.mockRejectedValueOnce(new Error("boom"))
+			const controller = new AbortController()
+			controller.abort()
+			const handler = new VercelAiGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt", { abortSignal: controller.signal }).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
+		})
+
+		it("should preserve abort identity for a name-based AbortError rejection", async () => {
+			// No aborted signal and no SDK abort class: only the DOM-standard
+			// name === "AbortError" check marks a cancelled request.
+			mockCreate.mockRejectedValueOnce(Object.assign(new Error("raw"), { name: "AbortError" }))
+			const handler = new VercelAiGatewayHandler(mockOptions)
+
+			const error = await handler.completePrompt("test prompt").then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
 		it("should work without options (backward compatible)", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
@@ -844,7 +922,9 @@ describe("VercelAiGatewayHandler", () => {
 
 	describe("createMessage abort signal bridging", () => {
 		it("rejects with an AbortError when the external signal is already aborted", async () => {
-			mockCreate.mockImplementation(async () => {
+			let capturedSignal: AbortSignal | undefined
+			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
+				capturedSignal = options?.signal
 				throw new DOMException("The operation was aborted.", "AbortError")
 			})
 
@@ -858,22 +938,32 @@ describe("VercelAiGatewayHandler", () => {
 				makeCreateMessageMetadata({ abortSignal: controller.signal }),
 			)
 
-			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+			// An already-aborted external signal must abort the INTERNAL
+			// controller before the request starts.
+			const error = await collectStream(stream).then(
+				() => undefined,
+				(e: unknown) => e,
+			)
+			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
 
 		it("aborts the in-flight request when the external signal fires mid-stream", async () => {
+			// The mock polls the INTERNAL controller signal (bounded 40x5ms)
+			// instead of waiting for an "abort" event, so the test can never
+			// hang if the bridge stops forwarding aborts.
 			let capturedSignal: AbortSignal | undefined
 			mockCreate.mockImplementation(async (_params: unknown, options: { signal?: AbortSignal }) => {
 				capturedSignal = options?.signal
 				return (async function* () {
-					yield {
-						choices: [{ delta: { content: "partial" }, index: 0 }],
-						index: 0,
+					yield { choices: [{ delta: { content: "partial" }, index: 0 }], index: 0 }
+					for (let i = 0; i < 40 && !capturedSignal?.aborted; i++) {
+						await new Promise((resolve) => setTimeout(resolve, 5))
 					}
-					await new Promise((_resolve, reject) => {
-						const onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"))
-						options?.signal?.addEventListener("abort", onAbort, { once: true })
-					})
+					if (capturedSignal?.aborted) {
+						throw new DOMException("The operation was aborted.", "AbortError")
+					}
 				})()
 			})
 
@@ -892,8 +982,13 @@ describe("VercelAiGatewayHandler", () => {
 			await new Promise((resolve) => setTimeout(resolve, 25))
 			controller.abort()
 
-			await expect(consumed).rejects.toMatchObject({ name: "AbortError" })
+			const error = await consumed.then(
+				() => undefined,
+				(e: unknown) => e,
+			)
 			expect(capturedSignal?.aborted).toBe(true)
+			expect(error).toMatchObject({ name: "AbortError" })
+			expect((error as Error).message).toBe("The Vercel AI Gateway request was aborted")
 		})
 
 		it("detaches the bridged abort listener when the request completes normally", async () => {
@@ -918,6 +1013,7 @@ describe("VercelAiGatewayHandler", () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)
 			const controller = new AbortController()
 			const removeListenerSpy = vi.spyOn(controller.signal, "removeEventListener")
+			const addEventListenerSpy = vi.spyOn(controller.signal, "addEventListener")
 
 			const stream = handler.createMessage(
 				"test prompt",
@@ -928,6 +1024,10 @@ describe("VercelAiGatewayHandler", () => {
 			const chunks = await collectStream(stream)
 			expect(chunks).toContainEqual({ type: "text", text: "ok" })
 			expect(removeListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function))
+			// The listener is registered with { once: true } — assert the exact
+			// options so a bridge that drops them (and relies on the finally
+			// block alone for single-shot semantics) is caught.
+			expect(addEventListenerSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
 			expect(controller.signal.aborted).toBe(false)
 		})
 	})

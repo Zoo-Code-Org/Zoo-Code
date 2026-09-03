@@ -130,6 +130,7 @@ describe("abort-signal utilities", () => {
 
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("This operation was aborted")
 		})
 	})
 
