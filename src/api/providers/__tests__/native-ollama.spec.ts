@@ -140,6 +140,30 @@ describe("NativeOllamaHandler", () => {
 			expect(text).toBe("hi")
 		})
 
+		// The matcher only opens a top-level tag at the start of the stream
+		// (TagMatcher position 0), so the thought tag needs its own stream to
+		// exercise the second entry of the tag list.
+		it("should classify reasoning chunks by the thought tag when it opens the stream", async () => {
+			mockChat.mockImplementation(async function* () {
+				yield { message: { content: "<thought>plan</thought>done" } }
+			})
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+			const parts: { type: string; text: string }[] = []
+			for await (const part of stream) {
+				parts.push(part as { type: string; text: string })
+			}
+			const reasoning = parts
+				.filter((p) => p.type === "reasoning")
+				.map((p) => p.text)
+				.join("")
+			const text = parts
+				.filter((p) => p.type === "text")
+				.map((p) => p.text)
+				.join("")
+			expect(reasoning).toBe("plan")
+			expect(text).toBe("done")
+		})
+
 		it("should send the system prompt as the first message of the chat request", async () => {
 			mockChat.mockImplementation(async function* () {
 				yield { message: { content: "ok" } }
@@ -1253,10 +1277,12 @@ describe("NativeOllamaHandler", () => {
 			try {
 				const settledStream = expect(consume).rejects.toMatchObject({ name: "AbortError" })
 				await withDeadline(settledStream, 500)
+				// Assert before mockRestore(): restoring the spy resets its call
+				// history, which would make the assertion below a no-op.
+				expect(consoleError).not.toHaveBeenCalled()
 			} finally {
 				consoleError.mockRestore()
 			}
-			expect(consoleError).not.toHaveBeenCalled()
 		})
 	})
 

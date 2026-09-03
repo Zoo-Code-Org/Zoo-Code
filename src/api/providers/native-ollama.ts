@@ -688,7 +688,9 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					onAbort = () => {
 						requestController.abort()
 						client.abort()
-						clearTimeout(timeoutId)
+						// The per-request timeout is cleared by the finally block when this prompt
+						// settles; an external abort always settles it promptly (the discovery race
+						// or the injected transport rejects), so no timer clear is needed here.
 					}
 					abortSignal.addEventListener("abort", onAbort, { once: true })
 				}
