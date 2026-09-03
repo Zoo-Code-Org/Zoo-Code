@@ -203,13 +203,19 @@ describe("preferDirectTestFiles", () => {
 			"webview-ui/src/__tests__/App.spec.tsx",
 			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
 			"src/api/providers/__tests__/lmstudio-native-tools.spec.ts",
+			"src/api/providers/__tests__/qwen-code-native-tools.spec.ts",
 			"webview-ui/src/components/chat/__tests__/ChatView.spec.tsx",
 		]
 		assert.deepEqual(
-			preferDirectTestFiles(related, ["webview-ui/src/utils/path-mentions.ts", "src/api/providers/lm-studio.ts"]),
+			preferDirectTestFiles(related, [
+				"webview-ui/src/utils/path-mentions.ts",
+				"src/api/providers/lm-studio.ts",
+				"src/api/providers/qwen-code.ts",
+			]),
 			[
 				"webview-ui/src/utils/__tests__/path-mentions.test.ts",
 				"src/api/providers/__tests__/lmstudio-native-tools.spec.ts",
+				"src/api/providers/__tests__/qwen-code-native-tools.spec.ts",
 			],
 		)
 		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
