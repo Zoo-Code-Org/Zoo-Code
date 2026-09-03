@@ -1155,8 +1155,9 @@ export class TaskHistoryStore {
 				} catch (error) {
 					if (options?.rollbackFirstOnSecondFailure && firstDiskSnapshot) {
 						try {
-							let restoredFirst = firstDiskSnapshot
-							await safeWriteJson(await this.getTaskFilePath(firstId), firstDiskSnapshot, {
+							const rollbackSnapshot = firstDiskSnapshot
+							let restoredFirst = rollbackSnapshot
+							await safeWriteJson(await this.getTaskFilePath(firstId), rollbackSnapshot, {
 								lockAcquired: holdFirstFileLock || options?.firstFileLockAcquired,
 								merge: (existing) => {
 									if (!existing || typeof existing !== "object" || !("id" in existing)) {
@@ -1173,7 +1174,7 @@ export class TaskHistoryStore {
 											`[TaskHistoryStore] atomicUpdatePair: cannot roll back ${firstId} after a concurrent update`,
 										)
 									}
-									restoredFirst = structuredClone(firstDiskSnapshot)
+									restoredFirst = structuredClone(rollbackSnapshot)
 									return restoredFirst
 								},
 							})
