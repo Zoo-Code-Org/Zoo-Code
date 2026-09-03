@@ -246,4 +246,97 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 			await fs.rm(storage, { recursive: true, force: true })
 		}
 	})
+
+	it("refreshes stale parent state before a lock-scoped update without re-entering either lock", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-lock-refresh-"))
+		const hostA = new TaskHistoryStore(storage)
+		const hostB = new TaskHistoryStore(storage)
+
+		try {
+			await hostA.initialize()
+			await hostB.initialize()
+			await hostA.upsert(makeHistoryItem("parent", { status: "active", tokensIn: 1 }))
+			await hostB.reconcile({ forceRefresh: true })
+			await hostB.atomicReadAndUpdate("parent", (parent) => ({ ...parent, tokensIn: 2 }))
+
+			expect(hostA.get("parent")?.tokensIn).toBe(1)
+			await hostA.withTaskFileLock("parent", async () => {
+				expect(hostA.get("parent")?.tokensIn).toBe(2)
+				await hostA.atomicReadAndUpdate(
+					"parent",
+					(parent) => ({ ...parent, status: "delegated", awaitingChildId: "child" }),
+					{ fileLockAcquired: true, storeLockAcquired: true },
+				)
+			})
+
+			await hostB.invalidate("parent")
+			expect(hostB.get("parent")).toMatchObject({
+				tokensIn: 2,
+				status: "delegated",
+				awaitingChildId: "child",
+			})
+		} finally {
+			hostA.dispose()
+			hostB.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
+
+	it("refuses to roll back the parent over an intervening first-record change", async () => {
+		const storage = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-rollback-guard-"))
+		const store = new TaskHistoryStore(storage)
+
+		try {
+			await store.initialize()
+			await store.upsert(
+				makeHistoryItem("parent", {
+					status: "delegated",
+					awaitingChildId: "child",
+					delegatedToId: "child",
+					childIds: ["child"],
+				}),
+			)
+			await store.upsert(makeHistoryItem("child", { status: "active", parentTaskId: "parent" }))
+
+			const storeAccess = store as unknown as {
+				writeTaskFile: (...args: unknown[]) => Promise<HistoryItem>
+			}
+			const writeTaskFile = storeAccess.writeTaskFile.bind(store)
+			let pairWrite = 0
+			vi.spyOn(storeAccess, "writeTaskFile").mockImplementation(async (...args) => {
+				pairWrite++
+				if (pairWrite === 1) {
+					const written = await writeTaskFile(...args)
+					const parentFile = path.join(storage, "tasks", "parent", "history_item.json")
+					await fs.writeFile(parentFile, JSON.stringify({ ...written, completedByChildId: "peer-child" }))
+					return written
+				}
+				throw new Error("child write failed")
+			})
+
+			await expect(
+				store.atomicUpdatePair(
+					"parent",
+					"child",
+					(parent) => ({
+						...parent,
+						status: "active",
+						awaitingChildId: undefined,
+						delegatedToId: undefined,
+						completedByChildId: "child",
+					}),
+					(child) => ({ ...child, status: "completed" }),
+					{ rollbackFirstOnSecondFailure: true },
+				),
+			).rejects.toBeInstanceOf(AggregateError)
+
+			const persistedParent = JSON.parse(
+				await fs.readFile(path.join(storage, "tasks", "parent", "history_item.json"), "utf8"),
+			)
+			expect(persistedParent.completedByChildId).toBe("peer-child")
+		} finally {
+			store.dispose()
+			await fs.rm(storage, { recursive: true, force: true })
+		}
+	})
 })
