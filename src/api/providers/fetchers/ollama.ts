@@ -99,12 +99,21 @@ export async function getOllamaModels(
 		// Prepare headers with optional API key. The credential is only attached
 		// when the endpoint is HTTPS or loopback; sending it over plaintext HTTP
 		// to a remote host would leak it (CWE-319).
+		const credentialGated = Boolean(apiKey && isSecureOllamaEndpoint(baseUrl))
 		const headers: Record<string, string> = {}
-		if (apiKey && isSecureOllamaEndpoint(baseUrl)) {
+		if (credentialGated) {
 			headers["Authorization"] = `Bearer ${apiKey}`
 		}
 
-		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers })
+		// A loopback HTTP endpoint carrying the key must bypass any HTTP proxy,
+		// otherwise the proxy would see the bearer token in cleartext (CWE-319).
+		// HTTPS endpoints keep normal proxy behavior (traffic stays encrypted).
+		// Parsing is safe here: baseUrl is normalized ("" → default) above and
+		// the !URL.canParse(baseUrl) guard returned early.
+		const cleartextLoopback = credentialGated && new URL(baseUrl).protocol === "http:"
+		const proxyConfig: { proxy?: false } = cleartextLoopback ? { proxy: false } : {}
+
+		const response = await axios.get<OllamaModelsResponse>(`${baseUrl}/api/tags`, { headers, ...proxyConfig })
 		const parsedResponse = OllamaModelsResponseSchema.safeParse(response.data)
 		const modelInfoPromises = []
 
@@ -117,7 +126,7 @@ export async function getOllamaModels(
 							{
 								model: ollamaModel.model,
 							},
-							{ headers },
+							{ headers, ...proxyConfig },
 						)
 						.then((ollamaModelInfo) => {
 							const modelInfo = parseOllamaModel(ollamaModelInfo.data)
