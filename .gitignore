@@ -59,3 +59,14 @@ qdrant_storage/
 plans/
 
 roo-cli-*.tar.gz*
+
+# Local worktrees (multi-branch development)
+.wt-*/
+
+# Temporary scratch files
+.tmp-*
+.zoo-status.txt
+untracked-*.txt
+class_*.txt
+check-dup2-result.txt
+*.tsbuildinfo
