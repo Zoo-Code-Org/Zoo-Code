@@ -1078,11 +1078,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const currentPersistence = this.assistantMessagePersistencePromise
 			const currentCancellation = this.assistantMessagePersistenceCancellation!
 			this.completionPersistenceReadyPromise = (async () => {
-				const result = await Promise.race([
-					currentPersistence,
-					currentCancellation.promise.then(() => ASSISTANT_MESSAGE_PERSISTENCE_CANCELLED),
-				])
-				if (result === ASSISTANT_MESSAGE_PERSISTENCE_CANCELLED) return false
+				const result = await Promise.race([currentPersistence, currentCancellation.promise])
+				if (currentCancellation.cancelled) return false
 				if (result) return true
 
 				const retryResult = await this.retrySaveApiConversationHistoryWithCancellation(currentCancellation)
@@ -1222,14 +1219,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		for (let attempt = 0; attempt < delays.length; attempt++) {
 			if (cancellation) {
-				const delayCompleted = await new Promise<boolean>((resolve) => {
-					const timer = setTimeout(() => resolve(true), delays[attempt])
+				await new Promise<void>((resolve) => {
+					const timer = setTimeout(resolve, delays[attempt])
 					void cancellation.promise.then(() => {
 						clearTimeout(timer)
-						resolve(false)
+						resolve()
 					})
 				})
-				if (!delayCompleted) return ASSISTANT_MESSAGE_PERSISTENCE_CANCELLED
 			} else {
 				await new Promise<void>((resolve) => setTimeout(resolve, delays[attempt]))
 			}
