@@ -27,6 +27,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions } from "../../mentions/processUserContentMentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 
 type TaskTestAccess = {
 	getSystemPrompt: () => Promise<string>
@@ -462,6 +463,93 @@ describe("Cline", () => {
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })
+		})
+	})
+
+	describe("native tool-call request isolation", () => {
+		it("keeps overlapping Task parser state scoped to each request", async () => {
+			const firstTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "first task",
+				startTask: false,
+			})
+			const secondTask = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "second task",
+				startTask: false,
+			})
+
+			let releaseFirstStream: (() => void) | undefined
+			let markFirstStreamPaused: (() => void) | undefined
+			const firstStreamRelease = new Promise<void>((resolve) => {
+				releaseFirstStream = resolve
+			})
+			const firstStreamPaused = new Promise<void>((resolve) => {
+				markFirstStreamPaused = resolve
+			})
+			const firstStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield {
+					type: "tool_call_partial",
+					index: 0,
+					id: "call_first",
+					name: "read_file",
+				}
+				yield { type: "tool_call_partial", index: 0, arguments: '{"path":"first' }
+				yield { type: "usage", inputTokens: 0, outputTokens: 0 }
+				markFirstStreamPaused?.()
+				await firstStreamRelease
+				yield { type: "tool_call_partial", index: 0, arguments: 'Task.ts"}' }
+			}
+
+			for (const task of [firstTask, secondTask]) {
+				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+				vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			}
+			vi.spyOn(firstTask, "attemptApiRequest").mockImplementation(() => firstStream())
+			vi.spyOn(secondTask, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "call_second",
+						name: "read_file",
+					},
+					{ type: "tool_call_partial", index: 0, arguments: '{"path":"secondTask.ts"}' },
+				]),
+			)
+
+			const firstRequest = firstTask.recursivelyMakeClineRequests([{ type: "text", text: "first request" }])
+			await firstStreamPaused
+			await secondTask.recursivelyMakeClineRequests([{ type: "text", text: "second request" }])
+			releaseFirstStream?.()
+			await firstRequest
+
+			const firstAssistantMessage = firstTask.apiConversationHistory.find(
+				(message) => message.role === "assistant",
+			)
+			const secondAssistantMessage = secondTask.apiConversationHistory.find(
+				(message) => message.role === "assistant",
+			)
+
+			expect(firstAssistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_first",
+					name: "read_file",
+					input: { path: "firstTask.ts" },
+				},
+			])
+			expect(secondAssistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_second",
+					name: "read_file",
+					input: { path: "secondTask.ts" },
+				},
+			])
 		})
 	})
 

@@ -268,6 +268,89 @@ describe("LmStudioHandler Native Tools", () => {
 			expect(endChunks[0].id).toBe("call_lmstudio_test")
 		})
 
+		it("isolates overlapping tool-call finalization between provider streams", async () => {
+			let releaseFirstStream: (() => void) | undefined
+			let markFirstStreamPaused: (() => void) | undefined
+			const firstStreamRelease = new Promise<void>((resolve) => {
+				releaseFirstStream = resolve
+			})
+			const firstStreamPaused = new Promise<void>((resolve) => {
+				markFirstStreamPaused = resolve
+			})
+			const firstStream = async function* () {
+				yield {
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_lmstudio_a",
+										function: { name: "test_tool", arguments: '{"arg1":"a' },
+									},
+								],
+							},
+						},
+					],
+				}
+				markFirstStreamPaused?.()
+				await firstStreamRelease
+				yield { choices: [{ delta: {}, finish_reason: "tool_calls" }] }
+			}
+			const secondStream = asyncStreamFrom([
+				{
+					choices: [
+						{
+							delta: {
+								tool_calls: [
+									{
+										index: 0,
+										id: "call_lmstudio_b",
+										function: { name: "test_tool", arguments: '{"arg1":"b' },
+									},
+								],
+							},
+						},
+					],
+				},
+				{ choices: [{ delta: {}, finish_reason: "tool_calls" }] },
+			])
+			mockCreate.mockImplementationOnce(() => firstStream()).mockImplementationOnce(() => secondStream)
+
+			const collectAndTrack = async (stream: ReturnType<LmStudioHandler["createMessage"]>) => {
+				const chunks = []
+				for await (const chunk of stream) {
+					if (chunk.type === "tool_call_partial") {
+						NativeToolCallParser.processRawChunk({
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						})
+					}
+					chunks.push(chunk)
+				}
+				return chunks
+			}
+
+			const firstChunksPromise = collectAndTrack(
+				handler.createMessage("first", [], { taskId: "task-a", tools: testTools }),
+			)
+			await firstStreamPaused
+			const secondChunks = await collectAndTrack(
+				handler.createMessage("second", [], { taskId: "task-b", tools: testTools }),
+			)
+			releaseFirstStream?.()
+			const firstChunks = await firstChunksPromise
+
+			expect(secondChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_lmstudio_b" },
+			])
+			expect(firstChunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
+				{ type: "tool_call_end", id: "call_lmstudio_a" },
+			])
+		})
+
 		it("should work with parallel tool calls disabled (sends false)", async () => {
 			mockCreate.mockImplementationOnce(() =>
 				asyncStreamFrom([{ choices: [{ delta: { content: "Response" } }] }]),

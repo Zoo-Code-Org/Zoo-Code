@@ -340,11 +340,19 @@ describe("NativeToolCallParser", () => {
 			NativeToolCallParser.processStreamingChunk("call_first", firstDelta[0].delta, firstScope)
 			NativeToolCallParser.processStreamingChunk("call_second", secondDelta[0].delta, secondScope)
 
-			NativeToolCallParser.finalizeRawChunks(firstScope)
-			NativeToolCallParser.finalizeRawChunks(secondScope)
+			const firstFinalizeEvents = NativeToolCallParser.finalizeRawChunks(firstScope)
+			expect(firstFinalizeEvents).toEqual([{ type: "tool_call_end", id: "call_first" }])
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(firstScope)).toBe(true)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(secondScope)).toBe(true)
 
 			const firstResult = NativeToolCallParser.finalizeStreamingToolCall("call_first", firstScope)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(firstScope)).toBe(false)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(secondScope)).toBe(true)
+
+			const secondFinalizeEvents = NativeToolCallParser.finalizeRawChunks(secondScope)
+			expect(secondFinalizeEvents).toEqual([{ type: "tool_call_end", id: "call_second" }])
 			const secondResult = NativeToolCallParser.finalizeStreamingToolCall("call_second", secondScope)
+			expect(NativeToolCallParser.hasActiveStreamingToolCalls(secondScope)).toBe(false)
 			expect(firstResult?.type).toBe("tool_use")
 			expect(secondResult?.type).toBe("tool_use")
 			if (firstResult?.type !== "tool_use" || secondResult?.type !== "tool_use") {
@@ -352,6 +360,15 @@ describe("NativeToolCallParser", () => {
 			}
 			expect(firstResult.nativeArgs).toEqual({ path: "first.ts" })
 			expect(secondResult.nativeArgs).toEqual({ path: "second.ts" })
+
+			expect(NativeToolCallParser.finalizeRawChunks(firstScope)).toEqual([])
+			expect(NativeToolCallParser.finalizeStreamingToolCall("call_first", firstScope)).toBeNull()
+			expect(
+				NativeToolCallParser.processRawChunk({ index: 0, arguments: "ignored-after-cleanup" }, firstScope),
+			).toEqual([])
+			expect(
+				NativeToolCallParser.processRawChunk({ index: 0, id: "call_reprobe", name: "read_file" }, firstScope),
+			).toEqual([{ type: "tool_call_start", id: "call_reprobe", name: "read_file" }])
 		})
 
 		describe("read_file tool", () => {
