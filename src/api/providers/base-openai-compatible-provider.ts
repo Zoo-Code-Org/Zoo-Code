@@ -174,15 +174,15 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				const delta = chunk.choices?.[0]?.delta
 				const finishReason = chunk.choices?.[0]?.finish_reason
 
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
 				if (delta?.content) {
 					for (const processedChunk of matcher.update(delta.content)) {
 						yield processedChunk
 					}
-				}
-
-				const reasoningText = extractReasoningFromDelta(delta)
-				if (reasoningText) {
-					yield { type: "reasoning", text: reasoningText }
 				}
 
 				// Emit raw tool call chunks - NativeToolCallParser handles state management

@@ -214,15 +214,15 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					const delta = chunk.choices?.[0]?.delta ?? {}
 					const finishReason = chunk.choices?.[0]?.finish_reason
 
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
+
 					if (delta.content) {
 						for (const chunk of matcher.update(delta.content)) {
 							yield chunk
 						}
-					}
-
-					const reasoningText = extractReasoningFromDelta(delta)
-					if (reasoningText) {
-						yield { type: "reasoning", text: reasoningText }
 					}
 
 					yield* this.processToolCalls(delta, finishReason, activeToolCallIds)

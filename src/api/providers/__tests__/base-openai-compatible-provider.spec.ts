@@ -239,6 +239,25 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			// Should yield reasoning with spaces (only pure whitespace is filtered)
 			expect(chunks).toEqual([{ type: "reasoning", text: "  content with spaces  " }])
 		})
+
+		it("should yield reasoning chunks BEFORE text chunks when both are present in the exact same delta", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { reasoning_content: "thinking...", content: "answer" } }],
+					},
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = await collectStream(stream)
+
+			const contentChunks = chunks.filter((c) => c.type === "reasoning" || c.type === "text")
+			expect(contentChunks).toEqual([
+				{ type: "reasoning", text: "thinking..." },
+				{ type: "text", text: "answer" },
+			])
+		})
 	})
 
 	describe("Basic functionality", () => {
