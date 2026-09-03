@@ -1037,11 +1037,7 @@ export class TaskHistoryStore {
 			try {
 				const current = (await this.readTaskFile(taskId)) ?? cached
 				const updated = updater(structuredClone(current))
-				if (updated.id !== taskId) {
-					throw new Error(
-						`[TaskHistoryStore] atomicReadAndUpdate: updater changed task id from ${taskId} to ${updated.id}`,
-					)
-				}
+				if (updated.id !== taskId) throw new Error(`Task updater changed id from ${taskId} to ${updated.id}`)
 				if (updated.status !== undefined) {
 					const currentStatus: HistoryItemStatus = current.status ?? "active"
 					if (updated.status !== currentStatus) {

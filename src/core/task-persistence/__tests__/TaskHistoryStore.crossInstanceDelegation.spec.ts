@@ -383,7 +383,7 @@ describe("TaskHistoryStore cross-instance delegation", () => {
 
 			await expect(
 				store.atomicReadAndUpdate("parent", (parent) => ({ ...parent, id: "replacement" })),
-			).rejects.toThrow("updater changed task id from parent to replacement")
+			).rejects.toThrow("changed id from parent to replacement")
 			expect(store.get("parent")?.id).toBe("parent")
 			expect(store.get("replacement")).toBeUndefined()
 		} finally {
