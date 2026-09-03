@@ -183,22 +183,49 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	}
 
 	/**
-	 * Deterministic wall clock for liveness-boundary tests. `fs.utimes` accepts
-	 * ms-precision Date values and the store's `Date.now()` is spied to return
-	 * this same instant, so `Date.now() - mtimeMs` is exact regardless of how
-	 * long the test body takes to run.
+	 * Deterministic wall clock for liveness-boundary tests. The store's
+	 * `Date.now()` is spied to return this same instant, and `setChildMtimeAge`
+	 * additionally injects the exact mtime the store observes, so
+	 * `Date.now() - mtimeMs` is exact regardless of how long the test body
+	 * takes to run or how much millisecond precision the filesystem keeps.
 	 */
 	const FIXED_NOW = 1_756_886_400_000 // 2025-09-03T08:00:00.000Z
 
+	// Restored in afterEach so a leaked spy can never poison the direct
+	// `getChildFileMtimeMs` probe test.
+	let mtimeSpy: { mockRestore(): void } | undefined
+
+	/**
+	 * Stamps a child's history file so the store observes a mtime of exactly
+	 * `FIXED_NOW - ageMs`, independent of filesystem mtime precision.
+	 *
+	 * Two layers:
+	 * 1. Best-effort `fs.utimes` keeps the on-disk file realistic, but tests
+	 *    must NOT depend on it: some filesystems and CI runners truncate mtime
+	 *    to seconds, which would silently flip live/stale expectations.
+	 * 2. A spy on the private `TaskHistoryStore.prototype.getChildFileMtimeMs`
+	 *    (the exact call path used by the cross-instance liveness guard)
+	 *    injects the intended millisecond value. That single `mtimeMs` feeds
+	 *    BOTH the `Date.now() - mtimeMs < threshold` guard and the
+	 *    `Math.round((Date.now() - mtimeMs) / 1000)` skip-log render, so the
+	 *    `<`-vs-`<=` boundary at 300_000 ms and the 300s/299s/-100s render
+	 *    assertions stay deterministic and keep killing their mutants on any
+	 *    filesystem.
+	 *
+	 * `ageMs` may be negative (future mtime). Other child ids delegate to the
+	 * real implementation so unrelated probe paths keep exercising the FS.
+	 */
 	async function setChildMtimeAge(taskId: string, ageMs: number): Promise<void> {
 		const filePath = path.join(tmpDir, "tasks", taskId, GlobalFileNames.historyItem)
 		const stamp = new Date(FIXED_NOW - ageMs)
 		await fs.utimes(filePath, stamp, stamp)
-		// Guard the assumption that the filesystem round-trips millisecond
-		// precision, so a boundary test failure is diagnosable rather than a
-		// silent live/stale flip.
-		const written = await fs.stat(filePath)
-		expect(Math.round(written.mtimeMs)).toBe(FIXED_NOW - ageMs)
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		const original = probe.getChildFileMtimeMs
+		mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockImplementation((childId: string) =>
+			childId === taskId ? Promise.resolve(FIXED_NOW - ageMs) : original.call(store, childId),
+		)
 	}
 
 	beforeEach(async () => {
@@ -226,6 +253,8 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	})
 
 	afterEach(async () => {
+		mtimeSpy?.mockRestore()
+		mtimeSpy = undefined
 		safeWriteJsonMock.mockImplementation(writeJson)
 		for (const disposable of disposables) disposable.dispose()
 		disposables.clear()
@@ -543,10 +572,13 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// Files stamped 1970-01-01 (epoch-zero artifacts from misconfigured clocks,
 		// zip extraction, or container images) must be treated as stale orphans.
 		// Kills the ArithmeticOperator mutant `Date.now() - mtimeMs` ->
-		// `Date.now() % mtimeMs`: with mtimeMs = 1000, the real subtraction is
-		// ~56 years (stale -> repair), while FIXED_NOW % 1000 === 0 would be read
-		// as live and skip the repair. The same mutant inside the skip-path log is
-		// never reached under the mutant because the guard already diverges.
+		// `Date.now() % mtimeMs`: with the mocked mtimeMs = 1000, the real
+		// subtraction is ~56 years (stale -> repair), while FIXED_NOW % 1000 === 0
+		// would be read as live and skip the repair. The same mutant inside the
+		// skip-path log is never reached under the mutant because the guard
+		// already diverges. The exact 1000 ms stamp comes from the mocked
+		// `getChildFileMtimeMs`, so no filesystem millisecond precision is
+		// assumed.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 		try {
@@ -563,11 +595,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				delegatedToId: "child-epoch-mtime",
 			})
 			await seedItems([parent, child])
-			const childFilePath = path.join(tmpDir, "tasks", "child-epoch-mtime", GlobalFileNames.historyItem)
-			const epochStamp = new Date(1_000) // 1970-01-01T00:00:01.000Z
-			await fs.utimes(childFilePath, epochStamp, epochStamp)
-			const written = await fs.stat(childFilePath)
-			expect(Math.round(written.mtimeMs)).toBe(1_000)
+			await setChildMtimeAge("child-epoch-mtime", FIXED_NOW - 1_000) // store observes mtime 1970-01-01T00:00:01.000Z
 
 			await store.initialize()
 
@@ -587,7 +615,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		// ArithmeticOperator mutant `Date.now() % mtimeMs` would instead render
 		// the whole epoch magnitude (1756886400s), so the seconds-count
 		// assertion below kills it. The live-side status assertions also kill
-		// the same mutant on the guard subtraction in TaskHistoryStore.ts.
+		// the same mutant on the guard subtraction in TaskHistoryStore.ts. The
+		// exact future mtime is injected by the mocked `getChildFileMtimeMs`,
+		// independent of filesystem millisecond precision.
 		const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXED_NOW)
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 		try {
@@ -604,11 +634,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 				delegatedToId: "child-future-mtime",
 			})
 			await seedItems([parent, child])
-			const childFilePath = path.join(tmpDir, "tasks", "child-future-mtime", GlobalFileNames.historyItem)
-			const futureStamp = new Date(FIXED_NOW + 100_000)
-			await fs.utimes(childFilePath, futureStamp, futureStamp)
-			const written = await fs.stat(childFilePath)
-			expect(Math.round(written.mtimeMs)).toBe(FIXED_NOW + 100_000)
+			await setChildMtimeAge("child-future-mtime", -100_000) // store observes a mtime 100s in the future
 
 			await store.initialize()
 
