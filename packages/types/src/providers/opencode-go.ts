@@ -595,6 +595,20 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		description:
 			"Grok 4.6 is xAI's multimodal reasoning and agent model with a 500k context window. Available via the Opencode Go plan.",
 	},
+	"muse-spark-1.3-contributor": {
+		maxTokens: 131_072,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsMaxTokens: true,
+		supportsReasoningEffort: ["minimal", "low", "medium", "high", "xhigh"],
+		reasoningEffort: "medium",
+		inputPrice: 0.1,
+		outputPrice: 0.2,
+		cacheReadsPrice: 0.002,
+		description:
+			"Muse Spark 1.3 Contributor is Meta's multimodal reasoning model for coding and agentic workflows. Available via the Opencode Go plan.",
+	},
 	"muse-spark-1.2-contributor": {
 		maxTokens: 131_072,
 		contextWindow: 1_048_576,
@@ -645,10 +659,9 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
  * (`/v1/responses`), not the OpenAI-compatible Chat Completions endpoint
  * (`/v1/chat/completions`).
  *
- * The Go gateway maps every model to exactly one wire format. Some models
- * (currently only `gpt-5.6-luna`) are Responses-only and are also explicitly
- * curated in `opencodeGoModels`: the gateway's
- * `/v1/chat/completions` adapter for them fails with an opaque HTTP 500
+ * The Go gateway maps every model to exactly one wire format. Responses-only
+ * models are explicitly curated in `opencodeGoModels`: the gateway's
+ * `/v1/chat/completions` adapter for these models can fail with an opaque HTTP 500
  * (`{"type":"error","error":{"type":"error","message":"Internal server error"}}`),
  * while `/v1/responses` succeeds (Zoo-Code-Org/Zoo-Code#1431).
  *
@@ -660,6 +673,12 @@ export const OPENCODE_GO_ANTHROPIC_FORMAT_MODELS = new Set<string>([
 export const OPENCODE_GO_RESPONSES_FORMAT_MODELS = new Set<string>([
 	// --- OpenAI ---
 	"gpt-5.6-luna",
+	// --- xAI ---
+	"grok-4.5",
+	"grok-4.6",
+	// --- Meta ---
+	"muse-spark-1.3-contributor",
+	"muse-spark-1.2-contributor",
 ])
 
 /**
