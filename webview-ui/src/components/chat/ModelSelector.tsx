@@ -4,6 +4,7 @@ import { Fzf } from "fzf"
 import {
 	type ModelInfo,
 	type ModelRecord,
+	type OrganizationAllowList,
 	type ProviderSettings,
 	isDynamicProvider,
 	isRetiredProvider,
@@ -19,6 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger, StandardTooltip } from "@/comp
 import { useAppTranslation } from "@/i18n/TranslationContext"
 import { vscode } from "@/utils/vscode"
 
+import { filterModels } from "../settings/utils/organizationFilters"
 import {
 	getProviderModelConfig,
 	getStaticModelsForProvider,
@@ -33,6 +35,7 @@ interface ModelSelectorProps {
 	disabled?: boolean
 	title: string
 	triggerClassName?: string
+	organizationAllowList?: OrganizationAllowList
 }
 
 export const ModelSelector = ({
@@ -41,6 +44,7 @@ export const ModelSelector = ({
 	disabled = false,
 	title,
 	triggerClassName = "",
+	organizationAllowList,
 }: ModelSelectorProps) => {
 	const { t } = useAppTranslation()
 	const [open, setOpen] = useState(false)
@@ -61,18 +65,23 @@ export const ModelSelector = ({
 			return {}
 		}
 
-		if (dynamicProvider) {
-			return routerModels.data?.[dynamicProvider] ?? {}
-		}
+		let resolved: ModelRecord
 
-		if (isStaticModelProvider(provider)) {
+		if (dynamicProvider) {
+			resolved = routerModels.data?.[dynamicProvider] ?? {}
+		} else if (isStaticModelProvider(provider)) {
 			const staticModels = getStaticModelsForProvider(provider, undefined, apiConfiguration)
 			const { "custom-arn": _customArn, ...rest } = staticModels
-			return rest
+			resolved = rest
+		} else {
+			resolved = {}
 		}
 
-		return {}
-	}, [modelConfig, dynamicProvider, routerModels.data, provider, apiConfiguration])
+		// Apply the organization allowlist so the inline selector never exposes
+		// or activates models the organization has not approved. Mirrors the
+		// filtering performed by ModelPicker in the settings view.
+		return filterModels(resolved, provider, organizationAllowList) ?? {}
+	}, [modelConfig, dynamicProvider, routerModels.data, provider, apiConfiguration, organizationAllowList])
 
 	const modelIds = useMemo(() => Object.keys(models), [models])
 
@@ -145,28 +154,35 @@ export const ModelSelector = ({
 			const label = getModelLabel(modelId, models[modelId])
 
 			return (
-				<div
+				<button
 					key={modelId}
+					type="button"
+					role="option"
+					aria-selected={isCurrentModel}
 					onClick={() => handleSelect(modelId)}
 					className={cn(
-						"px-3 py-1.5 text-sm cursor-pointer flex items-center group",
-						"hover:bg-vscode-list-hoverBackground",
+						"w-full text-left px-3 py-1.5 text-sm cursor-pointer flex items-center group",
+						"hover:bg-vscode-list-hoverBackground focus-visible:outline-0 focus-visible:bg-vscode-list-hoverBackground",
 						isCurrentModel &&
 							"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
 					)}>
-					<div className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</div>
+					<span className="flex-1 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{label}</span>
 					{isCurrentModel && (
-						<div className="size-5 p-1 flex items-center justify-center">
+						<span className="size-5 p-1 flex items-center justify-center">
 							<span className="codicon codicon-check text-xs" />
-						</div>
+						</span>
 					)}
-				</div>
+				</button>
 			)
 		},
 		[selectedModelId, models, getModelLabel, handleSelect],
 	)
 
-	if (!isSupported) {
+	// While a dynamic provider's model list is still loading, keep the trigger
+	// visible (showing the loading label) instead of falling back to the
+	// unsupported-provider shortcut. Only show the unsupported fallback once we
+	// know the provider genuinely has no selectable models.
+	if (!isSupported && !isLoading) {
 		return (
 			<StandardTooltip content={t("chat:selectModelUnsupported")}>
 				<button
