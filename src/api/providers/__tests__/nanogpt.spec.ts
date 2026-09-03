@@ -123,8 +123,8 @@ describe("NanoGptHandler", () => {
 			new NanoGptHandler({ nanoGptModelId: "model:thinking" }).createMessage("sys", messages),
 		)
 		expect(chunks).toEqual([
-			{ type: "text", text: "answer" },
 			{ type: "reasoning", text: "modern" },
+			{ type: "text", text: "answer" },
 			{ type: "reasoning", text: "legacy" },
 			{ type: "tool_call_partial", index: 0, id: "call-1", name: "read_file", arguments: '{"path":' },
 			{ type: "tool_call_partial", index: 1, id: "call-2", name: "search_files", arguments: '{"query":' },

@@ -5,6 +5,10 @@ tone_instructions: >-
     Prioritize correctness, security, data loss, lifecycle, and regressions; avoid speculative style
     comments and unrelated refactors.
 
+knowledge_base:
+    web_search:
+        enabled: true
+
 reviews:
     profile: assertive
     request_changes_workflow: true
@@ -36,13 +40,16 @@ reviews:
     path_instructions:
         - path: "**/*"
           instructions: >-
-              Act as an adversarial second-opinion reviewer. Verify PR claims against implementation,
-              contracts, and tests. Trace changed inputs through normal, boundary, error, cancellation,
-              retry, and default paths and their consumers. Seek plausible counterexamples and regressions
-              from removed safeguards. Report only concrete, actionable findings grounded in changed code
-              and repository conventions. Prioritize correctness, security, data loss, lifecycle, and test
-              gaps. Avoid speculative style comments and unrelated refactors. Search for existing helpers
-              before suggesting abstractions, and distinguish actual defects from unsupported checks.
+              Act as an adversarial second-opinion reviewer. Verify PR claims against implementation and
+              contracts. Trace changed inputs through normal, boundary, error, cancellation, retry, and
+              default paths and their consumers. Seek plausible counterexamples and regressions from removed
+              safeguards. Identify assumptions in changed code that depend on facts outside the diff. First
+              verify repository conventions, tests, and related implementations. When a potential finding
+              depends on external behavior, use web search and prefer official documentation, specifications,
+              or upstream repositories. Report only concrete, actionable conflicts or failure modes, citing
+              the relevant repository location or external source. Prioritize correctness, security, data loss,
+              lifecycle, and test gaps. Do not report generic best practices, unsupported concerns, speculative
+              style comments, or unrelated refactors. Search for existing helpers before suggesting abstractions.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
@@ -58,6 +65,13 @@ reviews:
               Check cleanup and deterministic async behavior and prefer shared typed test helpers.
               Visible webview changes require a durable Playwright component snapshot; behavior-only
               changes do not.
+              Reject weak assertions on values that could take multiple forms: .toBeDefined() or
+              .toHaveBeenCalled() alone are not sufficient when the actual type, value, or object
+              identity is verifiable. For listener registration and removal, assert the same function
+              reference was added and removed (not expect.any(Function)).
+              Flag tests that assert in-flight behavior only after the call completes — these cannot
+              prove the behavior fires during execution. Check that describe block names match the
+              actual subjects of the tests they contain.
 
         - path: "apps/vscode-e2e/**"
           instructions: >-
