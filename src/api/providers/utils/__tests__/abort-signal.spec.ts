@@ -130,6 +130,9 @@ describe("abort-signal utilities", () => {
 
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("AbortError")
+			// The exact message is part of the abort contract: callers (Task.ts,
+			// provider guards) must be able to recognize this error shape.
+			expect((caught as Error).message).toBe("This operation was aborted")
 		})
 	})
 
