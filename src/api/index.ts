@@ -235,6 +235,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new BasetenHandler(options)
 		case providerIdentifiers.poe:
 			return new PoeHandler(options)
+		case providerIdentifiers.geminiCli:
+		// Intentionally falls through to the Anthropic handler pending a dedicated Gemini CLI handler implementation.
 		default:
 			return new AnthropicHandler(options)
 	}

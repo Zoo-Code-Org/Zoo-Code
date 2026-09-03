@@ -221,13 +221,14 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 				for await (const chunk of stream) {
 					const delta = chunk.choices[0]?.delta
 
-					if (delta?.content) {
-						yield { type: "text", text: delta.content }
-					}
-
+					// Yield reasoning chunks before content chunks so consumers see them in model order.
 					const reasoningText = extractReasoningFromDelta(delta)
 					if (reasoningText) {
 						yield { type: "reasoning", text: reasoningText }
+					}
+
+					if (delta?.content) {
+						yield { type: "text", text: delta.content }
 					}
 
 					// Handle native tool calls
