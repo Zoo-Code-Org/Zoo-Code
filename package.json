@@ -12,7 +12,7 @@
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
-		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-task-store-concurrency.ts",
+		"lifecycle:model-check": "tsx scripts/check-task-lifecycle.ts && tsx scripts/check-provider-handoff.ts && tsx scripts/check-task-store-concurrency.ts",
 		"test:coverage": "turbo test:coverage --log-order grouped --output-logs new-only",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",

@@ -37,6 +37,16 @@ The model has three fixed task slots, enough to cover competing siblings and a n
 
 Production completion also accepts a recovery-compatible `active` parent that still awaits the returning child, then clears the stale pointers. Normal model transitions never create that intermediate state, so it is covered by a focused reducer test rather than admitted as a generally valid reachable state.
 
+## Provider handoff refinement model
+
+The same command runs `scripts/check-provider-handoff.ts`, a separate bounded model for the concrete provider steps that refine the atomic `delegate(parent, child)` lifecycle operation. It imports the production handoff policy and profile decision functions from `src/core/task-persistence/providerHandoff.ts`; its single persistence step calls `delegateTaskToChild` rather than duplicating the persisted transition.
+
+The model covers both a sole live parent and a nested parent whose removal exposes an unrelated root task. For each topology it checks saved, unsaved, and workspace-locked profile paths through these observable phases: remove parent, prepare child profile, create the paused child, persist delegation, start the child, and publish the child state. It enforces that pending preparation publishes no intermediate state, cannot mutate the exposed root task, creates the child with the requested mode and selected profile, and starts the child only after exactly one atomic delegation commit.
+
+An injected legacy policy retains the pre-fix implicit-current-task targeting and intermediate publication behavior without modifying repository history. The checker requires shortest counterexamples for both an empty publication after removing a sole parent and mutation of an exposed root during nested delegation. These witnesses are regression ratchets for the provider handoff policy, not generally allowed lifecycle states.
+
+This model deliberately keeps profile identities as opaque names/IDs and does not model API secrets, provider construction, VS Code transport latency, filesystem durability, scheduler fairness, or rollback cleanup. Focused provider tests remain responsible for proving that `ClineProvider` interprets the shared production policy correctly.
+
 ## Shared-store concurrency model
 
 The same `pnpm lifecycle:model-check` command also runs a second bounded explorer over two `TaskHistoryStore` hosts. It imports the production `computeHistoryDelta` and `mergeHistoryDelta` functions, so its semantics match the store rather than assuming coherent caches or transactional pair writes:
