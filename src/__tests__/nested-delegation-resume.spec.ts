@@ -178,6 +178,9 @@ describe("Nested delegation resume (A → B → C)", () => {
 			createTaskWithHistoryItem,
 			updateTaskHistory,
 			taskHistoryStore,
+			emitDelegatedTaskCompleted: vi.fn((taskId, tokenUsage, toolUsage) => {
+				ClineProvider.prototype.emitDelegatedTaskCompleted.call(provider, taskId, tokenUsage, toolUsage)
+			}),
 			// Wire through provider method so attemptCompletionTool can call it
 			reopenParentFromDelegation: vi.fn(async (params: any) => {
 				return await (ClineProvider.prototype as any).reopenParentFromDelegation.call(provider, params)
@@ -285,8 +288,10 @@ describe("Nested delegation resume (A → B → C)", () => {
 			(c: any[]) => c[0] === RooCodeEventName.TaskDelegationCompleted,
 		)
 		const resumedEvents = emitSpy.mock.calls.filter((c: any[]) => c[0] === RooCodeEventName.TaskDelegationResumed)
+		const taskCompletedEvents = emitSpy.mock.calls.filter((call) => call[0] === RooCodeEventName.TaskCompleted)
 		expect(completedEvents.length).toBeGreaterThanOrEqual(2)
 		expect(resumedEvents.length).toBeGreaterThanOrEqual(2)
+		expect(taskCompletedEvents).toHaveLength(2)
 
 		// Verify second hop used parentId = A
 		// Find a TaskDelegationCompleted matching A <- B
