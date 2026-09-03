@@ -251,7 +251,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		// The parent has already been removed, so the mode switch must not publish a
 		// transient empty-task state before the child is created.
-		expect(handleModeSwitch).toHaveBeenCalledWith("code", undefined, { preparePendingTask: true })
+		expect(handleModeSwitch).toHaveBeenCalledWith("code", null, { preparePendingTask: true })
 	})
 
 	it("posts taskHistoryItemUpdated to the webview when isViewLaunched is true", async () => {

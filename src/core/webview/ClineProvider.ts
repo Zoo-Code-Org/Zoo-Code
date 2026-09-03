@@ -1798,19 +1798,16 @@ export class ClineProvider
 				const hasActualSettings = !!fullProfile.apiProvider
 
 				if (hasActualSettings) {
-					await this.activateProviderProfileUnlocked(
-						{ name: profile.name },
-						targetTask === null
+					const activationOptions = options.preparePendingTask
+						? {
+								skipCurrentTaskRebuild: true,
+								applyProviderSettingsToContext: true,
+								suppressStatePost: true,
+							}
+						: targetTask === null
 							? { skipCurrentTaskRebuild: true }
-							: options.preparePendingTask
-								? {
-										skipCurrentTaskRebuild: true,
-										applyProviderSettingsToContext: true,
-										suppressStatePost: true,
-									}
-								: undefined,
-						signal,
-					)
+							: undefined
+					await this.activateProviderProfileUnlocked({ name: profile.name }, activationOptions, signal)
 				} else {
 					// The task will continue with the current/default configuration.
 				}
@@ -3921,7 +3918,7 @@ export class ClineProvider
 		//    The mode switch must happen before createTask() because the Task constructor
 		//    initializes its mode from provider.getState() during initializeTaskMode().
 		try {
-			await this.handleModeSwitch(mode as any, undefined, { preparePendingTask: true })
+			await this.handleModeSwitch(mode, null, { preparePendingTask: true })
 		} catch (e) {
 			this.log(
 				`[delegateParentAndOpenChild] handleModeSwitch failed for mode '${mode}': ${
