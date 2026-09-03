@@ -447,7 +447,17 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 			)
 
 			const input = screen.getByTestId("openai-extra-body-input")
+			expect(screen.getByText("settings:providers.extraBody")).toHaveAttribute("id", "openai-extra-body-label")
+			expect(screen.getByText("settings:providers.extraBodyDescription")).toHaveAttribute(
+				"id",
+				"openai-extra-body-description",
+			)
 			expect(input).toHaveValue("")
+			expect(input).toHaveAttribute(
+				"placeholder",
+				'{\n  "metadata": {\n    "completion_window": "balanced"\n  }\n}',
+			)
+			expect(input).toHaveAttribute("aria-describedby", "openai-extra-body-description")
 			expect(input).not.toHaveAttribute("aria-invalid", "true")
 			expect(screen.queryByRole("alert")).not.toBeInTheDocument()
 
@@ -486,6 +496,7 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 
 			const input = screen.getByTestId("openai-extra-body-input")
 			expect(input).toHaveAttribute("aria-invalid", "true")
+			expect(input).toHaveAttribute("aria-describedby", "openai-extra-body-description openai-extra-body-error")
 			expect(screen.getByText("settings:validation.openAiExtraBody.invalidJson")).toBeInTheDocument()
 		})
 	})

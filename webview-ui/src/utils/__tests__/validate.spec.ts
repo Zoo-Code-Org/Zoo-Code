@@ -22,6 +22,7 @@ vi.mock("i18next", () => ({
 }))
 
 import {
+	formatOpenAiExtraBodyValidationError,
 	getModelValidationError,
 	validateApiConfiguration,
 	validateApiConfigurationExcludingModelErrors,
@@ -312,6 +313,35 @@ describe("Model Validation Functions", () => {
 			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(
 				"settings:validation.openAi",
 			)
+		})
+
+		it("formats a reserved-key result without a key list", () => {
+			const t = vi.fn((_key, options) => options?.keys ?? "missing")
+
+			expect(formatOpenAiExtraBodyValidationError({ success: false, reason: "reservedKeys" }, t)).toBe("")
+			expect(t).toHaveBeenCalledWith("settings:validation.openAiExtraBody.reservedKeys", { keys: "" })
+		})
+
+		it("separates multiple reserved keys in the validation message", () => {
+			const t = vi.fn((_key, options) => options?.keys ?? "missing")
+
+			expect(
+				formatOpenAiExtraBodyValidationError(
+					{ success: false, reason: "reservedKeys", reservedKeys: ["model", "stream"] },
+					t,
+				),
+			).toBe("model, stream")
+		})
+
+		it("ignores Extra Body fields for non-OpenAI-compatible providers", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "valid-key",
+				openRouterModelId: "valid-model",
+				openAiExtraBody: "not json",
+			}
+
+			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBeUndefined()
 		})
 	})
 
