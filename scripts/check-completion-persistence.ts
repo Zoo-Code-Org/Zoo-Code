@@ -2,6 +2,7 @@ type TaskKind = "standalone" | "delegated"
 type HistoryPhase = "idle" | "writing" | "failed" | "durable" | "exhausted"
 type RetryPhase = "idle" | "waiting" | "ready"
 type WriteStarts = 0 | 1 | 2
+type DelegationPhase = "not-applicable" | "awaiting-reopen" | "reopened" | "reopen-failed"
 
 interface ModelState {
 	kind: TaskKind
@@ -13,6 +14,7 @@ interface ModelState {
 	cancelled: boolean
 	waitSettled: boolean
 	cancelledAtRetryBoundary: boolean
+	delegation: DelegationPhase
 }
 
 interface Transition {
@@ -38,13 +40,47 @@ const expectedActions = [
 	"start-retry-write",
 	"exhaust-retries",
 	"cancel",
+	"reopen-parent",
+	"fail-parent-reopen",
 	"emit-completion",
 ] as const
-const invariantNames = [
-	"completion requires restart-visible history",
-	"delayed and failed persistence keep completion pending",
-	"cancellation settles waits without later writes or completion",
-] as const
+const stateInvariants = {
+	"completion requires accepted restart-visible history": (state: ModelState) =>
+		state.completionEmitted && (!state.completionAccepted || state.history !== "durable" || !state.waitSettled)
+			? "completion emitted before accepted assistant history became restart-visible"
+			: undefined,
+	"delayed and failed persistence keep completion pending": (state: ModelState) => {
+		if (state.cancelled || !state.completionAccepted) return undefined
+		if ((state.history === "writing" || state.history === "failed") && state.waitSettled) {
+			return "completion wait settled while persistence could still retry"
+		}
+		if (state.history === "exhausted" && (!state.waitSettled || state.completionEmitted)) {
+			return "exhausted persistence did not settle without completion"
+		}
+		return state.history !== "durable" && state.completionEmitted
+			? "delayed or failed persistence allowed completion"
+			: undefined
+	},
+	"cancellation settles waits and suppresses retry/completion": (state: ModelState) =>
+		state.cancelled && (!state.waitSettled || state.retry !== "idle" || state.completionEmitted)
+			? "cancellation did not settle the wait and suppress retry/completion"
+			: undefined,
+	"delegated completion requires successful parent reopen": (state: ModelState) =>
+		state.kind === "delegated" && state.completionEmitted && state.delegation !== "reopened"
+			? "delegated completion emitted before the parent reopened"
+			: undefined,
+} satisfies Record<string, (state: ModelState) => string | undefined>
+const transitionInvariants = {
+	"cancellation starts no later write or completion": (previous: ModelState, transition: Transition) => {
+		if (previous.cancelled && transition.next.writeStarts > previous.writeStarts) {
+			return `cancelled task started a stale history write after ${transition.name}`
+		}
+		if (previous.cancelled && !previous.completionEmitted && transition.next.completionEmitted) {
+			return `cancelled task emitted completion after ${transition.name}`
+		}
+		return undefined
+	},
+} satisfies Record<string, (previous: ModelState, transition: Transition) => string | undefined>
 const semanticLandmarks = {
 	"delayed-completion-pending": (state: ModelState) =>
 		state.completionAccepted && state.history === "writing" && !state.completionEmitted,
@@ -57,7 +93,12 @@ const semanticLandmarks = {
 	"standalone-durable-completion": (state: ModelState) =>
 		state.kind === "standalone" && state.history === "durable" && state.completionEmitted,
 	"delegated-durable-completion": (state: ModelState) =>
-		state.kind === "delegated" && state.history === "durable" && state.completionEmitted,
+		state.kind === "delegated" &&
+		state.history === "durable" &&
+		state.delegation === "reopened" &&
+		state.completionEmitted,
+	"delegated-reopen-failure-pending": (state: ModelState) =>
+		state.kind === "delegated" && state.delegation === "reopen-failed" && !state.completionEmitted,
 } satisfies Record<string, (state: ModelState) => boolean>
 
 function initialState(kind: TaskKind): ModelState {
@@ -71,6 +112,7 @@ function initialState(kind: TaskKind): ModelState {
 		cancelled: false,
 		waitSettled: false,
 		cancelledAtRetryBoundary: false,
+		delegation: kind === "delegated" ? "awaiting-reopen" : "not-applicable",
 	}
 }
 
@@ -130,9 +172,21 @@ function transitions(state: ModelState): Transition[] {
 		})
 	}
 	if (
+		state.kind === "delegated" &&
+		state.delegation === "awaiting-reopen" &&
 		state.completionAccepted &&
 		state.history === "durable" &&
 		state.waitSettled &&
+		!state.cancelled
+	) {
+		result.push({ name: "reopen-parent", next: { ...state, delegation: "reopened" } })
+		result.push({ name: "fail-parent-reopen", next: { ...state, delegation: "reopen-failed" } })
+	}
+	if (
+		state.completionAccepted &&
+		state.history === "durable" &&
+		state.waitSettled &&
+		(state.kind === "standalone" || state.delegation === "reopened") &&
 		!state.completionEmitted &&
 		!state.cancelled
 	) {
@@ -146,32 +200,17 @@ function transitions(state: ModelState): Transition[] {
 }
 
 function invariantViolations(state: ModelState): string[] {
-	const violations: string[] = []
-	if (state.completionEmitted && state.history !== "durable") {
-		violations.push("completion emitted before assistant history became restart-visible")
-	}
-	if (
-		state.completionAccepted &&
-		(state.history === "writing" || state.history === "failed" || state.history === "exhausted") &&
-		state.completionEmitted
-	) {
-		violations.push("delayed or failed persistence allowed completion")
-	}
-	if (state.cancelled && (!state.waitSettled || state.retry !== "idle" || state.completionEmitted)) {
-		violations.push("cancellation did not settle the wait and suppress retry/completion")
-	}
-	return violations
+	return Object.entries(stateInvariants).flatMap(([name, check]) => {
+		const violation = check(state)
+		return violation ? [`${name}: ${violation}`] : []
+	})
 }
 
 function transitionViolations(previous: ModelState, transition: Transition): string[] {
-	const violations: string[] = []
-	if (previous.cancelled && transition.next.writeStarts > previous.writeStarts) {
-		violations.push(`cancelled task started a stale history write after ${transition.name}`)
-	}
-	if (previous.cancelled && !previous.completionEmitted && transition.next.completionEmitted) {
-		violations.push(`cancelled task emitted completion after ${transition.name}`)
-	}
-	return violations
+	return Object.entries(transitionInvariants).flatMap(([name, check]) => {
+		const violation = check(previous, transition)
+		return violation ? [`${name}: ${violation}`] : []
+	})
 }
 
 function canonical(state: ModelState): string {
@@ -243,6 +282,7 @@ function runModelCheck(): number {
 }
 
 const checkedStates = runModelCheck()
+const invariantCount = Object.keys(stateInvariants).length + Object.keys(transitionInvariants).length
 console.log(
-	`Completion persistence model check passed: ${checkedStates} states, ${expectedActions.length}/${expectedActions.length} actions reachable, ${invariantNames.length} invariants, ${Object.keys(semanticLandmarks).length}/${Object.keys(semanticLandmarks).length} landmarks reached, depth <= ${MAX_DEPTH}, writes <= 2`,
+	`Completion persistence model check passed: ${checkedStates} states, ${expectedActions.length}/${expectedActions.length} actions reachable, ${invariantCount} invariants, ${Object.keys(semanticLandmarks).length}/${Object.keys(semanticLandmarks).length} landmarks reached, depth <= ${MAX_DEPTH}, writes <= 2`,
 )

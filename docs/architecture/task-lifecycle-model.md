@@ -25,7 +25,7 @@ Executable cross-model composition should be added only when a correctness claim
 The models use small explicit-state explorers rather than adding Quint, TLA+/TLC, or Alloy. This is deliberate:
 
 - Zoo's current risks are finite safety properties over a small persisted state machine, not yet temporal liveness or fairness properties.
-- The explorer calls the production transition functions in `src/core/task-persistence/taskLifecycle.ts`. `ClineProvider` uses those same functions inside serialized and atomic store operations, reducing specification drift.
+- The delegation and shared-store explorers call production transition functions from `src/core/task-persistence`. `ClineProvider` uses those same functions inside serialized and atomic store operations, reducing specification drift for those protocols.
 - Breadth-first exploration gives a deterministic, shortest-by-event counterexample with no Java or separate specification toolchain.
 - Bounds and budget exhaustion are explicit. CI never reports a truncated exploration as a pass.
 
@@ -87,12 +87,13 @@ The umbrella command also runs a separate bounded child model for in-memory abor
 - accepting completion before, during, or after persistence;
 - scheduling a bounded retry, completing its delay, and starting the retry write;
 - exhausting retries;
-- cancellation or disposal at every reachable non-completed state; and
+- cancellation or disposal at every reachable non-completed state;
+- delegated parent reopen success or failure after durable child history; and
 - emitting completion.
 
 The model abstracts restart visibility as the `durable` history phase. It allows an already-started write to finish after cancellation because the filesystem operation itself is not cancellable, but it forbids starting a retry write or emitting completion after cancellation. The retry bound is two write starts (the initial attempt plus one retry), which is sufficient to cover the ordering and cancellation state classes without mirroring the production retry count.
 
-Six semantic landmarks keep the intended positive and negative paths reachable: delayed completion remains pending, failed completion remains pending, exhausted retries settle without completion, cancellation can win after retry delay but before persistence, and both standalone and delegated tasks can complete after durable history. The checker explores all reachable states through depth 10 and fails rather than reporting a truncated pass if an unseen successor remains.
+Seven semantic landmarks keep the intended positive and negative paths reachable: delayed completion remains pending, failed completion remains pending, exhausted retries settle without completion, cancellation can win after retry delay but before persistence, delegated reopen failure emits no delegated completion, and both standalone and delegated tasks can complete after durable history. The checker explores all reachable states through depth 10 and fails rather than reporting a truncated pass if an unseen successor remains.
 
 ## Invariants
 
@@ -111,9 +112,10 @@ The completion persistence checker additionally enforces:
 1. `TaskCompleted` requires accepted completion and restart-visible assistant history.
 2. Delayed, failed, and retry-exhausted persistence cannot emit completion.
 3. Cancellation or disposal settles the modeled readiness wait, clears pending retry state, starts no later retry write, and emits no completion.
-4. Delegated completion crosses the same durability boundary as standalone completion.
+4. Delegated completion crosses the same durability boundary as standalone completion and requires successful parent reopen.
+5. A failed delegated parent reopen cannot emit the delegated completion event.
 
-These are safety claims within the documented bounds. The checks do not claim liveness, fairness, power-loss durability, filesystem-lock correctness, or exhaustive coverage of arbitrary task counts or retry counts. The completion explorer specifies the event contract rather than importing `Task` or `AttemptCompletionTool`; focused unit tests and the restart E2E verify that concrete production paths implement the modeled guards. The lifecycle checker also does not distinguish a delayed pre-interruption completion from a legitimate post-resume completion for the same child ID; that requires a persisted attempt/generation token before it can become a sound invariant.
+These are safety claims within the documented bounds. The checks do not claim liveness, fairness, power-loss durability, filesystem-lock correctness, or exhaustive coverage of arbitrary task counts or retry counts. The completion explorer specifies the event contract rather than importing `Task` or `AttemptCompletionTool`; focused unit tests and the restart E2E verify that concrete production paths implement the modeled guards. Delegated reopen is abstracted as one success-or-failure event after durable child history; fallback from a failed reopen into the normal standalone completion flow remains production-test coverage rather than part of this model. The lifecycle checker also does not distinguish a delayed pre-interruption completion from a legitimate post-resume completion for the same child ID; that requires a persisted attempt/generation token before it can become a sound invariant.
 
 ## Open-issue traceability
 
