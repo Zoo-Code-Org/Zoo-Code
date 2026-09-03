@@ -129,6 +129,11 @@ describe("KimiCodeHandler", () => {
 		await expect(handler.completePrompt("test")).resolves.toBe("retried")
 		expect(mockForceRefreshAccessToken).toHaveBeenCalledOnce()
 		expect(createCompletion).toHaveBeenCalledTimes(2)
+		expect(createCompletion).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ thinking: { type: "enabled", keep: "all" } }),
+			expect.anything(),
+		)
 	})
 
 	it("does not retry on 401 when using API key auth", async () => {
@@ -214,18 +219,33 @@ describe("KimiCodeHandler", () => {
 		expect(model.info.maxTokens).toBe(8000)
 	})
 
-	it("defaults to max reasoning effort and advertises low/high/max support", () => {
+	it("uses preserved thinking instead of reasoning effort for the default K2.7 model", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "key" })
 		const model = handler.getModel()
-		expect(model.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
-		expect(model.info.requiredReasoningEffort).toBe(true)
-		expect(model.reasoning).toEqual({ reasoning_effort: "max" })
+		expect(model.info.supportsReasoningEffort).toBe(false)
+		expect(model.info.requiredReasoningEffort).toBe(false)
+		expect(model.info.preserveReasoning).toBe(true)
+		expect(model.reasoning).toBeUndefined()
 	})
 
-	it("sends the user-selected reasoning effort", () => {
+	it("defaults K3 to high reasoning effort and advertises low/high/max support", () => {
 		const handler = new KimiCodeHandler({
 			kimiCodeAuthMethod: "api-key",
 			kimiCodeApiKey: "key",
+			apiModelId: "k3",
+		})
+		const model = handler.getModel()
+		expect(model.info.supportsReasoningEffort).toEqual(["low", "high", "max"])
+		expect(model.info.requiredReasoningEffort).toBe(true)
+		expect(model.info.supportsTemperature).toBe(false)
+		expect(model.reasoning).toEqual({ reasoning_effort: "high" })
+	})
+
+	it("sends the user-selected K3 reasoning effort", () => {
+		const handler = new KimiCodeHandler({
+			kimiCodeAuthMethod: "api-key",
+			kimiCodeApiKey: "key",
+			apiModelId: "k3",
 			reasoningEffort: "low",
 		})
 		expect(handler.getModel().reasoning).toEqual({ reasoning_effort: "low" })
@@ -235,8 +255,94 @@ describe("KimiCodeHandler", () => {
 		const handler = new KimiCodeHandler({
 			kimiCodeAuthMethod: "api-key",
 			kimiCodeApiKey: "key",
+			apiModelId: "k3",
 			reasoningEffort: "medium",
 		})
-		expect(handler.getModel().reasoning).toEqual({ reasoning_effort: "max" })
+		expect(handler.getModel().reasoning).toEqual({ reasoning_effort: "high" })
 	})
+
+	it.each(["k3", "k3-256k"])(
+		"sends the K3 reasoning protocol without temperature or thinking for %s",
+		async (modelId) => {
+			const handler = new KimiCodeHandler({
+				kimiCodeAuthMethod: "api-key",
+				kimiCodeApiKey: "key",
+				apiModelId: modelId,
+				modelTemperature: 0.7,
+			})
+			const createCompletion = vi.spyOn(handler["client"].chat.completions, "create").mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }
+				},
+			} as never)
+
+			for await (const _chunk of handler.createMessage("system", [{ role: "user", content: "test" }])) {
+				// consume
+			}
+
+			expect(createCompletion).toHaveBeenCalledWith(
+				expect.objectContaining({ model: modelId, reasoning_effort: "high" }),
+				expect.anything(),
+			)
+			const request = createCompletion.mock.calls[0][0]
+			expect(request).not.toHaveProperty("temperature")
+			expect(request).not.toHaveProperty("thinking")
+		},
+	)
+
+	it.each(["kimi-for-coding", "kimi-for-coding-highspeed"])(
+		"sends K2.7 preserved thinking without reasoning effort or temperature for %s",
+		async (modelId) => {
+			const handler = new KimiCodeHandler({
+				kimiCodeAuthMethod: "api-key",
+				kimiCodeApiKey: "key",
+				apiModelId: modelId,
+				reasoningEffort: "low",
+				modelTemperature: 0.7,
+			})
+			const createCompletion = vi.spyOn(handler["client"].chat.completions, "create").mockResolvedValue({
+				async *[Symbol.asyncIterator]() {
+					yield { choices: [{ delta: { content: "ok" }, finish_reason: "stop" }] }
+				},
+			} as never)
+
+			for await (const _chunk of handler.createMessage("system", [
+				{ role: "user", content: "inspect the project" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "reasoning", text: "I should inspect the files.", summary: [] } as never,
+						{ type: "tool_use", id: "call_1", name: "read_file", input: { path: "README.md" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "call_1", content: "# Project" },
+						{ type: "text", text: "Continue with the result." },
+					],
+				},
+			])) {
+				// consume
+			}
+
+			expect(createCompletion).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: modelId,
+					thinking: { type: "enabled", keep: "all" },
+				}),
+				expect.anything(),
+			)
+			const request = createCompletion.mock.calls[0][0]
+			expect(request).not.toHaveProperty("reasoning_effort")
+			expect(request).not.toHaveProperty("temperature")
+			expect(request.messages).toContainEqual(
+				expect.objectContaining({ role: "assistant", reasoning_content: "I should inspect the files." }),
+			)
+			expect(request.messages).toContainEqual(
+				expect.objectContaining({ role: "tool", content: "# Project\n\nContinue with the result." }),
+			)
+			expect(request.messages.filter((message) => message.role === "user")).toHaveLength(1)
+		},
+	)
 })

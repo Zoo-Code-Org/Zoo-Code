@@ -4,7 +4,7 @@ describe("Kimi Code model discovery", () => {
 	beforeEach(() => vi.restoreAllMocks())
 	afterEach(() => vi.useRealTimers())
 
-	it("maps official model fields", () => {
+	it("maps server-reported capacity and display fields without guessing an unknown reasoning protocol", () => {
 		expect(
 			mapKimiCodeModel({
 				id: "kimi-test",
@@ -15,13 +15,41 @@ describe("Kimi Code model discovery", () => {
 			}),
 		).toMatchObject({
 			contextWindow: 131072,
-			supportsReasoningEffort: ["low", "high", "max"],
-			requiredReasoningEffort: true,
-			reasoningEffort: "max",
+			supportsReasoningEffort: false,
+			requiredReasoningEffort: false,
 			supportsImages: true,
 			displayName: "Kimi Test",
 		})
 	})
+
+	it.each(["k3", "k3-256k"])("applies the K3 reasoning-effort profile to %s", (modelId) => {
+		const mapped = mapKimiCodeModel({ id: modelId, supports_reasoning: true })
+
+		expect(mapped).toMatchObject({
+			maxTokens: 131_072,
+			supportsReasoningEffort: ["low", "high", "max"],
+			requiredReasoningEffort: true,
+			reasoningEffort: "high",
+			supportsTemperature: false,
+			preserveReasoning: true,
+		})
+	})
+
+	it.each(["kimi-for-coding", "kimi-for-coding-highspeed"])(
+		"applies the K2.7 preserved-thinking profile to %s",
+		(modelId) => {
+			const mapped = mapKimiCodeModel({ id: modelId, supports_reasoning: true })
+
+			expect(mapped).toMatchObject({
+				maxTokens: 131_072,
+				supportsReasoningEffort: false,
+				requiredReasoningEffort: false,
+				supportsTemperature: false,
+				preserveReasoning: true,
+			})
+			expect(mapped.reasoningEffort).toBeUndefined()
+		},
+	)
 
 	it("uses bearer auth for GET /models", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -80,7 +108,7 @@ describe("Kimi Code model discovery", () => {
 		const models = await getKimiCodeModels("token")
 		expect(Object.keys(models)).toHaveLength(2)
 		expect(models["model-a"].contextWindow).toBe(100000)
-		expect(models["model-b"].supportsReasoningEffort).toEqual(["low", "high", "max"])
+		expect(models["model-b"].supportsReasoningEffort).toBe(false)
 	})
 
 	it("aborts model discovery after its deadline", async () => {

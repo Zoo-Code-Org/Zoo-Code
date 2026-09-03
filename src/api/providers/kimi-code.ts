@@ -1,9 +1,11 @@
 import type { Anthropic } from "@anthropic-ai/sdk"
+import type OpenAI from "openai"
 
 import {
 	KIMI_CODE_BASE_URL,
+	getKimiCodeModelInfo,
+	getKimiCodeRequestProtocol,
 	kimiCodeDefaultModelId,
-	kimiCodeDefaultModelInfo,
 	providerIdentifiers,
 	type KimiCodeAuthMethod,
 	type ModelInfo,
@@ -14,6 +16,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { kimiCodeOAuthManager } from "../../integrations/kimi-code/oauth"
 
 import type { ApiHandlerCreateMessageMetadata } from "../index"
+import { convertToOpenAiMessages } from "../transform/openai-format"
 import type { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
@@ -111,7 +114,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 
 	override getModel() {
 		const id = this.kimiOptions.apiModelId || kimiCodeDefaultModelId
-		const info: ModelInfo = this.models[id] ?? kimiCodeDefaultModelInfo
+		const info: ModelInfo = this.models[id] ?? getKimiCodeModelInfo(id)
 		const params = getModelParams({
 			format: "openai",
 			modelId: id,
@@ -120,5 +123,31 @@ export class KimiCodeHandler extends OpenAiHandler {
 			defaultTemperature: 0,
 		})
 		return { id, info, ...params }
+	}
+
+	protected override transformChatCompletionRequest<T extends OpenAI.Chat.Completions.ChatCompletionCreateParams>(
+		requestOptions: T,
+	): T {
+		const transformed = { ...requestOptions } as T & {
+			thinking?: { type: "enabled"; keep: "all" }
+		}
+		delete transformed.temperature
+
+		const protocol = getKimiCodeRequestProtocol(requestOptions.model)
+		if (protocol === "reasoning-effort") {
+			const effort = this.getModel().reasoning?.reasoning_effort
+			if (effort) transformed.reasoning_effort = effort
+		} else if (protocol === "thinking") {
+			delete transformed.reasoning_effort
+			transformed.thinking = { type: "enabled", keep: "all" }
+		}
+
+		return transformed
+	}
+
+	protected override convertMessagesForRequest(
+		messages: Anthropic.Messages.MessageParam[],
+	): OpenAI.Chat.ChatCompletionMessageParam[] {
+		return convertToOpenAiMessages(messages, { mergeToolResultText: true })
 	}
 }

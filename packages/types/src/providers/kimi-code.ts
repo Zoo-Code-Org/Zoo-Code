@@ -5,23 +5,56 @@ export const kimiCodeDefaultModelId = "kimi-for-coding"
 
 export const kimiCodeReasoningEfforts = ["low", "high", "max"] as const
 
-export const kimiCodeDefaultModelInfo: ModelInfo = {
+const kimiCodeK3ModelIds = new Set(["k3", "k3-256k"])
+const kimiCodeK27ModelIds = new Set(["kimi-for-coding", "kimi-for-coding-highspeed"])
+
+export type KimiCodeRequestProtocol = "reasoning-effort" | "thinking"
+
+const kimiCodeBaseModelInfo: ModelInfo = {
 	contextWindow: 262_144,
 	maxTokens: 131_072,
 	supportsImages: false,
 	supportsPromptCache: false,
-	supportsReasoningEffort: [...kimiCodeReasoningEfforts],
-	requiredReasoningEffort: true,
-	reasoningEffort: "max",
-	description: "Kimi Code's coding model for subscription and API-key access.",
+	supportsReasoningEffort: false,
+	requiredReasoningEffort: false,
+	supportsTemperature: false,
+	description: "Kimi Code model for subscription and API-key access.",
 }
 
-export const kimiCodeModelDefaults: Record<string, { maxTokens: number }> = {
-	k3: { maxTokens: 131_072 },
-	"k3-256k": { maxTokens: 131_072 },
-	"kimi-for-coding": { maxTokens: 131_072 },
-	"kimi-for-coding-highspeed": { maxTokens: 131_072 },
+export function getKimiCodeRequestProtocol(modelId: string): KimiCodeRequestProtocol | undefined {
+	if (kimiCodeK3ModelIds.has(modelId)) return "reasoning-effort"
+	if (kimiCodeK27ModelIds.has(modelId)) return "thinking"
+	return undefined
 }
+
+export function getKimiCodeModelInfo(modelId: string): ModelInfo {
+	const protocol = getKimiCodeRequestProtocol(modelId)
+
+	if (protocol === "reasoning-effort") {
+		return {
+			...kimiCodeBaseModelInfo,
+			supportsImages: true,
+			supportsReasoningEffort: [...kimiCodeReasoningEfforts],
+			requiredReasoningEffort: true,
+			reasoningEffort: "high",
+			preserveReasoning: true,
+			description: "Kimi K3 coding model with configurable reasoning effort.",
+		}
+	}
+
+	if (protocol === "thinking") {
+		return {
+			...kimiCodeBaseModelInfo,
+			supportsImages: true,
+			preserveReasoning: true,
+			description: "Kimi K2.7 Code model with preserved thinking.",
+		}
+	}
+
+	return { ...kimiCodeBaseModelInfo }
+}
+
+export const kimiCodeDefaultModelInfo = getKimiCodeModelInfo(kimiCodeDefaultModelId)
 
 export const kimiCodeModels = {
 	[kimiCodeDefaultModelId]: kimiCodeDefaultModelInfo,
