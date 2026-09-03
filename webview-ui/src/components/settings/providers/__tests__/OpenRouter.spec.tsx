@@ -341,6 +341,31 @@ describe("OpenRouter", () => {
 			expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
 		})
 
+		it("ignores fetch failures carrying no values", () => {
+			renderComponent()
+
+			fireEvent.click(getRefreshButton())
+			// No `values` at all: `message.values?.provider` must short-circuit to
+			// undefined so the provider match fails and the error branch is skipped.
+			// fireEvent rethrows listener exceptions, so an OptionalChaining mutant
+			// (`?.` replaced by `.`) crashes here and is killed by this assertion.
+			expect(() =>
+				fireEvent(
+					window,
+					new MessageEvent("message", {
+						data: {
+							type: RouterModelsMessageType.singleRouterModelFetchResponse,
+							success: false,
+							error: "should not show",
+						} satisfies ExtensionMessage,
+					}),
+				),
+			).not.toThrow()
+
+			expect(screen.queryByText("should not show")).not.toBeInTheDocument()
+			expect(screen.getByText("settings:providers.refreshModels.loading")).toBeInTheDocument()
+		})
+
 		it("does not override an error with success when routerModels arrives after a failure", () => {
 			renderComponent()
 
