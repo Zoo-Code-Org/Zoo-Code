@@ -24,6 +24,8 @@ import type { AttemptCompletionToolUse } from "../../../shared/tools"
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
 	resetAssistantMessagePersistence: () => void
+	resolveAssistantMessagePersistence: (result: boolean) => void
+	assistantMessagePersistenceCancellation?: { resolve: () => void }
 	resumeTaskFromHistory: () => Promise<void>
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
@@ -463,6 +465,22 @@ describe("Task persistence", () => {
 			expect(second).toBe(first)
 			task.dispose()
 			await expect(first).resolves.toBe(false)
+		})
+
+		it("lets same-turn cancellation win over a successful persistence result", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const privateTask = getTaskPersistenceAccess(task)
+			const waiting = task.waitForCurrentAssistantMessagePersistence()
+
+			privateTask.resolveAssistantMessagePersistence(true)
+			privateTask.assistantMessagePersistenceCancellation?.resolve()
+
+			await expect(waiting).resolves.toBe(false)
 		})
 
 		it("emits TaskCompleted only after API history persistence succeeds", async () => {
