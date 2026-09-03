@@ -39,7 +39,7 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@types/node": "22.20.1",
-		"globals": "16.3.0",
+		"globals": "16.5.0",
 		"tsup": "8.5.1",
 		"ajv": "8.20.0",
 		"vitest": "4.1.9",
