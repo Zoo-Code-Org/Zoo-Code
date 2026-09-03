@@ -661,6 +661,42 @@ describe("RequestyHandler", () => {
 			await expect(iteration).rejects.toMatchObject({ name: "AbortError" })
 			expect(chunks).toContainEqual({ type: "text", text: "first" })
 		})
+		it("rejects with AbortError when the stream ends normally after a mid-stream abort (swallowed AbortError)", async () => {
+			const handler = new RequestyHandler(mockOptions)
+			const controller = new AbortController()
+
+			// Simulate openai@5.23.2: the SDK stream iterator swallows the mid-stream
+			// AbortError and returns normally instead of throwing, so the catch in
+			// createMessage never runs. The per-request signal (second argument) is the
+			// one the SDK observes.
+			let requestSignal: AbortSignal | undefined
+			mockCreate.mockImplementationOnce(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
+				return (async function* () {
+					yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+					// Wait for the abort instead of polling: the iterator ends gracefully
+					// (no throw) once the request signal aborts.
+					await new Promise<void>((resolve) => {
+						if (requestSignal?.aborted) {
+							resolve()
+						} else {
+							requestSignal?.addEventListener("abort", () => resolve(), { once: true })
+						}
+					})
+				})()
+			})
+
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+			const generator = handler.createMessage("sys", [{ role: "user", content: "hi" }], metadata)
+
+			const first = await generator.next()
+			expect(first.value).toEqual({ type: "text", text: "partial" })
+			// Abort mid-stream, after the first chunk has been yielded.
+			controller.abort()
+
+			// The stream ended normally, but createMessage must still reject with AbortError.
+			await expect(generator.next()).rejects.toMatchObject({ name: "AbortError" })
+		})
 		it("rejects with AbortError when the external signal aborts during request creation", async () => {
 			const handler = new RequestyHandler(mockOptions)
 			const controller = new AbortController()

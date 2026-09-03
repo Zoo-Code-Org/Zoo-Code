@@ -249,6 +249,13 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 					}
 				}
 
+				// openai@5.23.2's stream iterator swallows a mid-stream AbortError and returns
+				// normally instead of throwing, so the catch below would never run: without this
+				// check, createMessage completes silently after yielding partial output.
+				if (controller.signal.aborted) {
+					throw createAbortError(this.providerName)
+				}
+
 				if (lastUsage) {
 					yield this.processUsageMetrics(lastUsage, info)
 				}
