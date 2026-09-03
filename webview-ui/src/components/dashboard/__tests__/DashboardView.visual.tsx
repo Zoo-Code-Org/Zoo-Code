@@ -1,31 +1,32 @@
 /* v8 ignore file -- Playwright component visual test. */
-import React from "react"
-
-import { providerIdentifiers, type DashboardTaskStatsSnapshot, type StatsBucket, type StatsQuery } from "@roo-code/types"
+import {
+	providerIdentifiers,
+	type DashboardTaskStatsSnapshot,
+	type StatsBucket,
+	type StatsQuery,
+} from "@roo-code/types"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
-
-import { DashboardViewFixture } from "./DashboardView.visual.fixture"
 
 // Regression/visual coverage for the full Dashboard view: header controls,
 // summary cards, heatmap, cache-ratio input, breakdown table, and task list.
 //
 // The dashboard is stream-driven: `useDashboardStatsStream` posts
-// `subscribeDashboardStats` via `vscode.postMessage`. Under Playwright CT the
-// vscode alias is `src/__mocks__/vscode.js` and `acquireVsCodeApi` is absent,
-// so `postMessage` falls back to `console.log(message)`. The test installs a
-// window-level `console.log` interceptor BEFORE mount that stores the
-// subscription message, then replays a full snapshot with the matching
-// requestId so the reducer's stale-epoch check passes and real data renders
-// (not the loading/empty state).
+// `subscribeDashboardStats` via `vscode.postMessage`. In the Playwright gallery
+// the page's inline `acquireVsCodeApi` stub exists, so posts are captured into
+// `window.__vscodeMessages` (see playwright/gallery/index.html). After mount
+// the test reads the subscription message from that buffer and replays a full
+// snapshot with the matching requestId so the reducer's stale-epoch check
+// passes and real data renders (not the loading/empty state).
 //
-// NOTE: the mounted component (`DashboardViewFixture`) lives in the sibling
-// `.visual.fixture.tsx` module (Playwright CT requires mounted components to be
-// exported from a module). The `makeFixtureSnapshot` data builder lives HERE,
-// not in the fixture module — exporting a non-component helper alongside the
-// component caused the CT Vite pipeline to instantiate the fixture module
-// twice, producing `SyntaxError: Identifier 'DashboardViewFixture' has already
-// been declared` at collection time.
+// NOTE: the mounted component (`DashboardViewFixture`) lives in
+// playwright/gallery/stories.tsx ("dashboard-view" story), which wires the
+// fixture from the sibling `.visual.fixture.tsx` module. The
+// `makeFixtureSnapshot` data builder lives HERE, not in the fixture module —
+// exporting a non-component helper alongside the component caused the CT Vite
+// pipeline to instantiate the fixture module twice, producing
+// `SyntaxError: Identifier 'DashboardViewFixture' has already been declared`
+// at collection time.
 
 // ── Mock data ────────────────────────────────────────────────────────────────
 
@@ -45,13 +46,6 @@ function makeBucket(overrides: Partial<StatsBucket> = {}): StatsBucket {
 		costUsd: 0.15,
 		unknownEventCount: 0,
 		...overrides,
-	}
-}
-
-declare global {
-	interface Window {
-		__dashboardSubscriptions__?: unknown[]
-		__originalConsoleLog__?: typeof window.console.log
 	}
 }
 
@@ -194,38 +188,24 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 }) => {
 	await page.clock.install({ time: FIXED_EPOCH })
 
-	// Intercept `console.log` inside the page before the component mounts. The
-	// vscode browser fallback (`src/utils/vscode.ts`) logs the posted message
-	// object; we store it on `window` so the test can read the requestId.
-	await page.evaluate(() => {
-		const originalLog = window.console.log.bind(window.console)
-		window.__originalConsoleLog__ = originalLog
-		window.__dashboardSubscriptions__ = []
-		window.console.log = (...args: unknown[]) => {
-			const message = args[0]
-			if (
-				message &&
-				typeof message === "object" &&
-				(message as { type?: string }).type === "subscribeDashboardStats"
-			) {
-				window.__dashboardSubscriptions__?.push(message)
-			}
-			originalLog(...args)
-		}
-	})
+	const component = await mount("dashboard-view")
 
-	const component = await (mount as any)(<DashboardViewFixture />)
-
-	// Wait for the subscription post to be captured, then deliver the snapshot.
+	// Wait for the subscription post to land in the gallery's vscode message
+	// capture (`window.__vscodeMessages`, populated by the inline
+	// `acquireVsCodeApi` stub in playwright/gallery/index.html), then read the
+	// requestId.
 	const subscription = await page
 		.waitForFunction(() => {
-			const subs = window.__dashboardSubscriptions__
-			return subs && subs.length > 0 ? subs[0] : undefined
+			const messages = window.__vscodeMessages
+			const first = messages?.find((message) => message.type === "subscribeDashboardStats")
+			return first ?? undefined
 		})
 		.then((handle) => handle.jsonValue())
 
-	const requestId = (subscription as { dashboardStatsSubscription?: { requestId?: string } })
-		.dashboardStatsSubscription?.requestId
+	// `waitForFunction` only resolves once a matching message exists, so the
+	// subscription payload is non-null here; the type simply hasn't narrowed.
+	const subscriptionMessage = subscription as { dashboardStatsSubscription?: { requestId?: string } } | undefined
+	const requestId = subscriptionMessage?.dashboardStatsSubscription?.requestId
 	expect(requestId).toBeDefined()
 
 	// The stream hook reads `message.dashboardStatsStreamSnapshot` (and checks
@@ -252,13 +232,4 @@ test("renders the dashboard with summary, heatmap, breakdown, and tasks in the V
 	})
 
 	await expect(component).toHaveScreenshot("dashboard-view-dark.png")
-
-	// Restore console.log and clean up subscription buffer (test isolation)
-	await page.evaluate(() => {
-		if (window.__originalConsoleLog__) {
-			window.console.log = window.__originalConsoleLog__
-			delete window.__originalConsoleLog__
-		}
-		delete window.__dashboardSubscriptions__
-	})
 })

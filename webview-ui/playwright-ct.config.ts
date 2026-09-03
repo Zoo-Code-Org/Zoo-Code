@@ -9,6 +9,25 @@ const dirname = path.dirname(fileURLToPath(import.meta.url))
 const galleryUrl = "http://127.0.0.1:4173"
 
 const TRANSLATION_CONTEXT_STUB = path.resolve(dirname, "./playwright/TranslationContext.ts")
+/**
+ * Node-side (Playwright test-runner process) TypeScript resolution config.
+ *
+ * Playwright does NOT use `ctViteConfig` to load test files. It transpiles and
+ * `require()`s them inside the Node runner, resolving bare specifiers from the
+ * nearest `tsconfig.json` to the importing file. For everything under
+ * `webview-ui/src/**` and `src/shared/**` that ends up resolving
+ * `@roo-code/types` through `node_modules/@roo-code/types` -> `main:
+ * ./dist/index.cjs`, and CI never builds `packages/types`, so module load
+ * crashes with `Cannot find module .../@roo-code/types/dist/index.cjs`.
+ *
+ * This file supplies one explicit tsconfig for all Node-side resolution so
+ * `@roo-code/types` maps to the TypeScript SOURCE (exactly like
+ * `webview-ui/vitest.config.ts` does for the unit suite), instead of the
+ * unbuilt `dist`. It also re-declares the `@`, `@src` and `@roo` path aliases
+ * from `webview-ui/tsconfig.json`, because a single `tsconfig` overrides the
+ * per-folder lookup entirely.
+ */
+const NODE_TSCONFIG = path.resolve(dirname, "./playwright/node-tsconfig.json")
 
 const monocartReporter: ReporterDescription = [
 	"monocart-reporter",
@@ -32,6 +51,10 @@ const monocartReporter: ReporterDescription = [
 export default defineConfig({
 	testDir: "./src",
 	testMatch: "**/*.visual.tsx",
+	// See NODE_TSCONFIG above: overrides Playwright's per-file `tsconfig.json`
+	// lookup for every Node-side module resolution (test files, the
+	// `@roo/*` shared modules, and the real `ExtensionStateContext` graph).
+	tsconfig: NODE_TSCONFIG,
 	outputDir: path.resolve(dirname, "test-results"),
 	snapshotPathTemplate: "{testDir}/{testFileDir}/__screenshots__/{arg}{ext}",
 	fullyParallel: true,

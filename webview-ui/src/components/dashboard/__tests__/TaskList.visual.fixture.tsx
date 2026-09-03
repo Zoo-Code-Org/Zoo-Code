@@ -8,6 +8,62 @@ function toTasksById(tasks: DashboardTaskSummary[]): Record<string, DashboardTas
 	return Object.fromEntries(tasks.map((task) => [task.taskId, task]))
 }
 
+export function makeTasks(count: number): DashboardTaskSummary[] {
+	return Array.from({ length: count }, (_, i) => ({
+		taskId: `task-${i}`,
+		rootTaskId: `task-${i}`,
+		title: `Task ${i}`,
+		taskTimestamp: Date.now() - i * 60_000,
+		lastUsageAt: Date.now() - i * 60_000,
+		totalCost: 0.01 * (i + 1),
+		totalTokens: 1000 * (i + 1),
+		inputTokens: 700 * (i + 1),
+		outputTokens: 300 * (i + 1),
+		model: "claude-sonnet-4-20250514",
+		provider: providerIdentifiers.anthropic,
+		models: ["claude-sonnet-4-20250514"],
+		modes: ["code"],
+		eventCount: i + 1,
+		childTaskIds: [],
+	}))
+}
+
+/**
+ * Gallery story fixture: 50 rows so the Virtuoso scroller reaches its 400px cap.
+ */
+export function TaskListManyFixture() {
+	const tasks = makeTasks(50)
+	return (
+		<TaskList
+			tasks={tasks}
+			tasksById={toTasksById(tasks)}
+			taskDetails={{}}
+			taskDetailErrors={{}}
+			taskDetailLoading={new Set()}
+			onToggleTask={() => {}}
+			totalEstimate={tasks.length}
+		/>
+	)
+}
+
+/**
+ * Gallery story fixture: only 3 rows so the Virtuoso scroller shrinks to fit.
+ */
+export function TaskListFewFixture() {
+	const tasks = makeTasks(3)
+	return (
+		<TaskList
+			tasks={tasks}
+			tasksById={toTasksById(tasks)}
+			taskDetails={{}}
+			taskDetailErrors={{}}
+			taskDetailLoading={new Set()}
+			onToggleTask={() => {}}
+			totalEstimate={tasks.length}
+		/>
+	)
+}
+
 // ── Hierarchy (root > subtask) ───────────────────────────────────────────────
 
 export function HierarchyFixture() {
