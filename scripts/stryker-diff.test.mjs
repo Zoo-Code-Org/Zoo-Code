@@ -4,6 +4,7 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
+import { fileURLToPath } from "node:url"
 
 import {
 	MAX_CHANGED_LINES,
@@ -21,6 +22,19 @@ import {
 	selectFromGit,
 	validateDisableDirectives,
 } from "./stryker-diff.mjs"
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+
+describe("mutation testing workflow", () => {
+	it("checks out the pull request merge result from the base repository", () => {
+		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+
+		assert.ok(workflow.includes("- name: Checkout pull request merge result"))
+		assert.ok(workflow.includes("ref: refs/pull/${{ github.event.pull_request.number }}/merge"))
+		assert.ok(!workflow.includes("repository: ${{ github.event.pull_request.head.repo.full_name }}"))
+		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
+	})
+})
 
 describe("parseNameStatus", () => {
 	it("parses added, modified, and renamed paths", () => {
