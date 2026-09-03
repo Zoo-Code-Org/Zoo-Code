@@ -419,7 +419,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
-	private completionPersistenceReadyPromise?: Promise<boolean>
+	private completionPersistenceReadyPromise?: Promise<void>
 
 	/**
 	 * Fire-and-forget wrapper around `presentAssistantMessage` that swallows the
@@ -1078,19 +1078,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const currentPersistence = this.assistantMessagePersistencePromise
 			this.completionPersistenceReadyPromise = (async () => {
 				const result = await Promise.race([currentPersistence, currentCancellation.promise])
-				if (result) return true
+				if (result) return
 
 				const retrySaved = await this.retrySaveApiConversationHistoryWithCancellation(currentCancellation)
 				if (!retrySaved) {
-					if (currentCancellation.cancelled) return false
-					throw new Error("Failed to persist API conversation history before task completion")
+					if (!currentCancellation.cancelled) {
+						throw new Error("Failed to persist API conversation history before task completion")
+					}
+					return
 				}
 				this.assistantMessageSavedToHistory = true
-				return true
 			})()
 		}
 
-		return this.completionPersistenceReadyPromise.then((ready) => ready && !currentCancellation.cancelled)
+		return this.completionPersistenceReadyPromise.then(() => !currentCancellation.cancelled)
 	}
 
 	// NOTE: We intentionally do NOT mutate stored messages to merge consecutive user turns.
