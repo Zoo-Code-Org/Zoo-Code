@@ -158,6 +158,14 @@ export const EXA_MCP_SERVER_CONFIG = {
 	alwaysAllow: [],
 } as const
 
+const isExaServerEntry = (name: string, config: unknown): boolean =>
+	name.toLowerCase() === "exa" ||
+	(typeof config === "object" &&
+		config !== null &&
+		!Array.isArray(config) &&
+		"url" in config &&
+		config.url === EXA_MCP_SERVER_CONFIG.url)
+
 export class McpHub {
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
@@ -518,20 +526,11 @@ export class McpHub {
 
 	public hasExaServer(): boolean {
 		return this.connections.some((connection) => {
-			if (connection.server.name.toLowerCase() === "exa") {
-				return true
-			}
-
 			try {
 				const config: unknown = JSON.parse(connection.server.config)
-				return (
-					typeof config === "object" &&
-					config !== null &&
-					"url" in config &&
-					config.url === EXA_MCP_SERVER_CONFIG.url
-				)
+				return isExaServerEntry(connection.server.name, config)
 			} catch {
-				return false
+				return isExaServerEntry(connection.server.name, undefined)
 			}
 		})
 	}
@@ -562,7 +561,7 @@ export class McpHub {
 
 		const currentServers = mcpSettings.mcpServers as Record<string, unknown>
 
-		if (Object.keys(currentServers).some((name) => name.toLowerCase() === "exa")) {
+		if (Object.entries(currentServers).some(([name, server]) => isExaServerEntry(name, server))) {
 			return
 		}
 
@@ -593,7 +592,7 @@ export class McpHub {
 						}
 
 						const servers = (existingServers ?? {}) as Record<string, unknown>
-						if (Object.keys(servers).some((name) => name.toLowerCase() === "exa")) {
+						if (Object.entries(servers).some(([name, server]) => isExaServerEntry(name, server))) {
 							updatedServers = servers
 							return { mcpServers: servers }
 						}

@@ -353,6 +353,28 @@ describe("McpHub", () => {
 			expect(safeWriteJson).not.toHaveBeenCalled()
 		})
 
+		it("does not add Exa when the locked merge finds its endpoint under a custom name", async () => {
+			const initialServers = { existing: { type: "stdio", command: "node" } }
+			const serversAtMerge = {
+				...initialServers,
+				"web-search": { type: "streamable-http", url: "https://mcp.exa.ai/mcp" },
+			}
+			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({ mcpServers: initialServers }))
+			vi.mocked(safeWriteJson).mockImplementationOnce(async (_filePath, data, options) => {
+				const merged = options?.merge?.({ mcpServers: serversAtMerge }, data)
+				expect(merged).toEqual({ mcpServers: serversAtMerge })
+			})
+			const updateConnectionsSpy = vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
+
+			await mcpHub.installExaServer()
+
+			expect(updateConnectionsSpy).toHaveBeenCalledWith(serversAtMerge, "global")
+			expect(updateConnectionsSpy).not.toHaveBeenCalledWith(
+				expect.objectContaining({ exa: expect.anything() }),
+				"global",
+			)
+		})
+
 		it("creates the MCP servers object when installing into a valid empty config", async () => {
 			vi.mocked(fs.readFile).mockResolvedValue(JSON.stringify({}))
 			vi.spyOn(mcpHub, "updateServerConnections").mockResolvedValue(undefined)
