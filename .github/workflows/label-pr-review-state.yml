@@ -88,6 +88,30 @@ jobs:
             } else if (context.payload.workflow_run?.pull_requests) {
               eventPrNumbers = context.payload.workflow_run.pull_requests.map(pr => pr.number);
             }
+            if (context.eventName === 'workflow_run' && eventPrNumbers.length === 0) {
+              const run = context.payload.workflow_run;
+              const headOwner = run.head_repository?.owner?.login;
+              if (headOwner && run.head_branch && run.head_sha) {
+                const candidates = await github.paginate(github.rest.pulls.list, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  head: `${headOwner}:${run.head_branch}`,
+                  per_page: 100,
+                });
+                const baseRepository = `${owner}/${repo}`.toLowerCase();
+                eventPrNumbers = candidates
+                  .filter(pr =>
+                    pr.head?.sha === run.head_sha &&
+                    pr.base?.repo?.full_name?.toLowerCase() === baseRepository
+                  )
+                  .map(pr => pr.number);
+                core.info(
+                  `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
+                  `${eventPrNumbers.length} PR(s) by exact head owner, branch, and SHA`
+                );
+              }
+            }
             if (eventPrNumbers.length > 0) {
               prs = await Promise.all(eventPrNumbers.map(async pull_number => {
                 const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });

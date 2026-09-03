@@ -235,11 +235,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new BasetenHandler(options)
 		case providerIdentifiers.poe:
 			return new PoeHandler(options)
-		// Gemini CLI has no dedicated handler yet. Route it explicitly to the
-		// Anthropic handler (the current runtime behavior) so the fallback is
-		// documented instead of falling through the default implicitly (#1029).
 		case providerIdentifiers.geminiCli:
-			return new AnthropicHandler(options)
+		// Intentionally falls through to the Anthropic handler pending a dedicated Gemini CLI handler implementation.
 		default:
 			return new AnthropicHandler(options)
 	}
