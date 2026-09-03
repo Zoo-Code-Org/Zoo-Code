@@ -57,12 +57,26 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 	it("forwards provider completion exactly once after a delegated child is disposed", async () => {
 		vi.mocked(mockProvider.taskHistoryStore.get).mockReturnValue({ parentTaskId: "parent-1" } as never)
 		const listener = vi.fn()
+		const fileLog = vi
+			.spyOn(api as unknown as { fileLog: (message: string) => Promise<void> }, "fileLog")
+			.mockResolvedValue(undefined)
 		api.on(RooCodeEventName.TaskCompleted, listener)
 
 		await providerListeners.get(RooCodeEventName.TaskCompleted)?.("child-1", {}, {})
 
 		expect(listener).toHaveBeenCalledTimes(1)
 		expect(listener).toHaveBeenCalledWith("child-1", {}, {}, { isSubtask: true })
+		expect(fileLog).toHaveBeenCalledWith(expect.stringContaining("taskCompleted -> child-1"))
+	})
+
+	it("forwards provider completion for a task absent from local history", async () => {
+		vi.mocked(mockProvider.taskHistoryStore.get).mockReturnValue(undefined)
+		const listener = vi.fn()
+		api.on(RooCodeEventName.TaskCompleted, listener)
+
+		await providerListeners.get(RooCodeEventName.TaskCompleted)?.("task-1", {}, {})
+
+		expect(listener).toHaveBeenCalledWith("task-1", {}, {}, { isSubtask: false })
 	})
 
 	it("finds the expected persisted user and assistant turns in order", async () => {

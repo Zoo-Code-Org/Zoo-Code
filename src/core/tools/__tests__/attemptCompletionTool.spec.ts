@@ -549,6 +549,7 @@ describe("attemptCompletionTool", () => {
 				})
 				expect(mockTask.ask).not.toHaveBeenCalled()
 				expect(mockPushToolResult).toHaveBeenCalledWith("")
+				expect(mockTask.emitFinalTokenUsageUpdate).toHaveBeenCalledTimes(1)
 				expect(mockProvider.emitDelegatedTaskCompleted).toHaveBeenCalledTimes(1)
 				expect(mockTask.emit).not.toHaveBeenCalledWith(
 					RooCodeEventName.TaskCompleted,
