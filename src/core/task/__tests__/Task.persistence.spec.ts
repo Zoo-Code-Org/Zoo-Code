@@ -451,20 +451,18 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
 		})
 
-		it("shares one completion persistence result per assistant generation", async () => {
+		it("invalidates a cached successful persistence result when the generation is disposed", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
 				task: "test task",
 				startTask: false,
 			})
+			await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "assistant", content: "done" })
 
-			const first = task.waitForCurrentAssistantMessagePersistence()
-			const second = task.waitForCurrentAssistantMessagePersistence()
-
-			expect(second).toBe(first)
+			await expect(task.waitForCurrentAssistantMessagePersistence()).resolves.toBe(true)
 			task.dispose()
-			await expect(first).resolves.toBe(false)
+			await expect(task.waitForCurrentAssistantMessagePersistence()).resolves.toBe(false)
 		})
 
 		it("lets same-turn cancellation win over a successful persistence result", async () => {

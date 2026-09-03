@@ -649,6 +649,58 @@ describe("attemptCompletionTool", () => {
 				)
 			})
 
+			it("does not reopen the parent when persistence is cancelled during approval", async () => {
+				const block: AttemptCompletionToolUse = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "9" },
+					nativeArgs: { result: "9" },
+					partial: false,
+				}
+				const mockProvider = {
+					log: vi.fn(),
+					getTaskWithId: vi.fn().mockImplementation((id: string) =>
+						Promise.resolve({
+							historyItem:
+								id === "child-1"
+									? { id, status: "active" }
+									: { id, status: "active", awaitingChildId: "child-1" },
+						}),
+					),
+					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
+					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+				}
+
+				Object.assign(mockTask, {
+					taskId: "child-1",
+					parentTaskId: "parent-1",
+					providerRef: { deref: () => mockProvider },
+					waitForCurrentAssistantMessagePersistence: vi
+						.fn()
+						.mockResolvedValueOnce(true)
+						.mockResolvedValueOnce(false),
+				})
+				mockAskFinishSubTaskApproval.mockResolvedValue(true)
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+					toolCallId: "call-attempt-completion",
+				})
+
+				expect(mockTask.waitForCurrentAssistantMessagePersistence).toHaveBeenCalledTimes(2)
+				expect(mockProvider.reopenParentFromDelegation).not.toHaveBeenCalled()
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
+			})
+
 			it("falls through to standalone completion when parent delegation becomes stale after approval", async () => {
 				const block: AttemptCompletionToolUse = {
 					type: "tool_use",

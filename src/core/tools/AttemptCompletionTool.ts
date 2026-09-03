@@ -246,6 +246,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	 * Returns:
 	 * - "delegated" when completion was approved and parent resumed
 	 * - "denied" when user denied finishing the subtask
+	 * - "cancelled" when the persistence generation ended during approval
 	 * - "continue" when caller should fall through to normal completion ask flow
 	 */
 	private async delegateToParent(
@@ -255,12 +256,15 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 		pendingActionId: string | undefined,
 		askFinishSubTaskApproval: () => Promise<boolean>,
 		pushToolResult: (result: string) => void,
-	): Promise<"delegated" | "denied" | "continue"> {
+	): Promise<"delegated" | "denied" | "cancelled" | "continue"> {
 		const didApprove = await askFinishSubTaskApproval()
 
 		if (!didApprove) {
 			pushToolResult(formatResponse.toolDenied())
 			return "denied"
+		}
+		if (!(await task.waitForCurrentAssistantMessagePersistence())) {
+			return "cancelled"
 		}
 
 		const didReopen = await provider.reopenParentFromDelegation({

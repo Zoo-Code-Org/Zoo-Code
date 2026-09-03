@@ -1074,9 +1074,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * A public completion event must not be emitted before this boundary succeeds.
 	 */
 	public waitForCurrentAssistantMessagePersistence(): Promise<boolean> {
+		const currentCancellation = this.assistantMessagePersistenceCancellation!
 		if (!this.completionPersistenceReadyPromise) {
 			const currentPersistence = this.assistantMessagePersistencePromise
-			const currentCancellation = this.assistantMessagePersistenceCancellation!
 			this.completionPersistenceReadyPromise = (async () => {
 				const result = await Promise.race([currentPersistence, currentCancellation.promise])
 				if (currentCancellation.cancelled) return false
@@ -1092,7 +1092,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})()
 		}
 
-		return this.completionPersistenceReadyPromise
+		return this.completionPersistenceReadyPromise.then((ready) => ready && !currentCancellation.cancelled)
 	}
 
 	// NOTE: We intentionally do NOT mutate stored messages to merge consecutive user turns.
