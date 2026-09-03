@@ -240,6 +240,18 @@ export class ClineProvider
 		return runDelegationTransition(this.delegationTransitionLocks, parentTaskId, fn)
 	}
 
+	private runLockedDelegationTransition<T>(
+		parentTaskId: string,
+		transition: () => Promise<T>,
+		afterUnlock?: (result: T) => Promise<void>,
+	): Promise<T> {
+		return this.runDelegationTransition(parentTaskId, async () => {
+			const result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, transition)
+			await afterUnlock?.(result)
+			return result
+		})
+	}
+
 	private enqueueProviderProfileMutation<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
@@ -3974,331 +3986,318 @@ export class ClineProvider
 		pendingActionId?: string
 	}): Promise<boolean> {
 		const { parentTaskId, childTaskId, completionResultSummary, pendingActionId } = params
-		return this.runDelegationTransition(parentTaskId, async () => {
-			let parentToResume: Task | undefined
-			const result = await this.taskHistoryStore.withTaskFileLock(parentTaskId, async () => {
-				const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
-				const { historyItem } = await this.getTaskWithId(parentTaskId)
-				const refreshedParent = this.taskHistoryStore.get(parentTaskId)
-				const childHistory = this.taskHistoryStore.get(childTaskId)
-				if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
-					this.log(
-						`[reopenParentFromDelegation] Aborting: child ${childTaskId} pending action does not match ${pendingActionId}`,
-					)
-					return false
-				}
+		let parentToResume: Task | undefined
+		const transition = async () => {
+			const globalStoragePath = this.contextProxy.globalStorageUri.fsPath
+			const { historyItem } = await this.getTaskWithId(parentTaskId)
+			const refreshedParent = this.taskHistoryStore.get(parentTaskId)
+			const childHistory = this.taskHistoryStore.get(childTaskId)
+			if (pendingActionId && childHistory?.pendingAction?.actionId !== pendingActionId) {
+				this.log(
+					`[reopenParentFromDelegation] Aborting: child ${childTaskId} pending action does not match ${pendingActionId}`,
+				)
+				return false
+			}
 
-				// Guard: re-validate delegation state after the async approval gap.
-				// cancelTask() or removeClineFromStack() may have already detached the parent
-				// (setting status → "active", awaitingChildId → undefined) while the user was
-				// approving the subtask finish.  If the parent no longer awaits this child,
-				// routing output back would corrupt an unrelated task.
-				if (
-					this.cancelledDelegationChildIds.has(childTaskId) ||
-					(refreshedParent?.status === "delegated" && refreshedParent.awaitingChildId !== childTaskId) ||
-					(historyItem.status !== "delegated" && historyItem.status !== "active") ||
-					historyItem.awaitingChildId !== childTaskId
-				) {
-					this.log(
-						`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId} ` +
-							`(status=${historyItem.status}, awaitingChildId=${historyItem.awaitingChildId})`,
-					)
-					return false
-				}
+			// Guard: re-validate delegation state after the async approval gap.
+			// cancelTask() or removeClineFromStack() may have already detached the parent
+			// (setting status → "active", awaitingChildId → undefined) while the user was
+			// approving the subtask finish.  If the parent no longer awaits this child,
+			// routing output back would corrupt an unrelated task.
+			if (
+				this.cancelledDelegationChildIds.has(childTaskId) ||
+				(refreshedParent?.status === "delegated" && refreshedParent.awaitingChildId !== childTaskId) ||
+				(historyItem.status !== "delegated" && historyItem.status !== "active") ||
+				historyItem.awaitingChildId !== childTaskId
+			) {
+				this.log(
+					`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId} ` +
+						`(status=${historyItem.status}, awaitingChildId=${historyItem.awaitingChildId})`,
+				)
+				return false
+			}
 
-				let originalParentClineMessages: ClineMessage[] = []
-				try {
-					originalParentClineMessages = await readTaskMessages({
-						taskId: parentTaskId,
-						globalStoragePath,
-					})
-				} catch {
-					originalParentClineMessages = []
-				}
+			let originalParentClineMessages: ClineMessage[] = []
+			try {
+				originalParentClineMessages = await readTaskMessages({
+					taskId: parentTaskId,
+					globalStoragePath,
+				})
+			} catch {
+				originalParentClineMessages = []
+			}
 
-				let originalParentApiMessages: ApiMessage[] = []
-				try {
-					originalParentApiMessages = await readApiMessages({
-						taskId: parentTaskId,
-						globalStoragePath,
-					})
-				} catch {
-					originalParentApiMessages = []
-				}
+			let originalParentApiMessages: ApiMessage[] = []
+			try {
+				originalParentApiMessages = await readApiMessages({
+					taskId: parentTaskId,
+					globalStoragePath,
+				})
+			} catch {
+				originalParentApiMessages = []
+			}
 
-				const parentClineMessages = structuredClone(originalParentClineMessages)
-				const parentApiMessages = structuredClone(originalParentApiMessages)
-				const ts = Date.now()
+			const parentClineMessages = structuredClone(originalParentClineMessages)
+			const parentApiMessages = structuredClone(originalParentApiMessages)
+			const ts = Date.now()
 
-				const subtaskUiMessage: ClineMessage = {
-					type: "say",
-					say: "subtask_result",
-					text: completionResultSummary,
-					ts,
-				}
-				const lastParentClineMessage = parentClineMessages.at(-1)
-				if (
-					lastParentClineMessage?.type !== "say" ||
-					lastParentClineMessage.say !== "subtask_result" ||
-					lastParentClineMessage.text !== completionResultSummary
-				) {
-					parentClineMessages.push(subtaskUiMessage)
-				}
-				// Find the tool_use_id from the last assistant message's new_task tool_use
-				let toolUseId: string | undefined
-				for (let i = parentApiMessages.length - 1; i >= 0; i--) {
-					const msg = parentApiMessages[i]
-					if (msg.role === "assistant" && Array.isArray(msg.content)) {
-						for (const block of msg.content) {
-							if (block.type === "tool_use" && block.name === "new_task") {
-								toolUseId = block.id
-								break
-							}
-						}
-						if (toolUseId) break
-					}
-				}
-
-				// Preferred: if the parent history contains the native tool_use for new_task,
-				// inject a matching tool_result for the Anthropic message contract:
-				// user → assistant (tool_use) → user (tool_result)
-				if (toolUseId) {
-					// Check if the last message is already a user message with a tool_result for this tool_use_id
-					// (in case this is a retry or the history was already updated)
-					const lastMsg = parentApiMessages[parentApiMessages.length - 1]
-					let alreadyHasToolResult = false
-					if (lastMsg?.role === "user" && Array.isArray(lastMsg.content)) {
-						for (const block of lastMsg.content) {
-							if (block.type === "tool_result" && block.tool_use_id === toolUseId) {
-								// Update the existing tool_result content
-								block.content = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
-								alreadyHasToolResult = true
-								break
-							}
+			const subtaskUiMessage: ClineMessage = {
+				type: "say",
+				say: "subtask_result",
+				text: completionResultSummary,
+				ts,
+			}
+			const lastParentClineMessage = parentClineMessages.at(-1)
+			if (
+				lastParentClineMessage?.type !== "say" ||
+				lastParentClineMessage.say !== "subtask_result" ||
+				lastParentClineMessage.text !== completionResultSummary
+			) {
+				parentClineMessages.push(subtaskUiMessage)
+			}
+			// Find the tool_use_id from the last assistant message's new_task tool_use
+			let toolUseId: string | undefined
+			for (let i = parentApiMessages.length - 1; i >= 0; i--) {
+				const msg = parentApiMessages[i]
+				if (msg.role === "assistant" && Array.isArray(msg.content)) {
+					for (const block of msg.content) {
+						if (block.type === "tool_use" && block.name === "new_task") {
+							toolUseId = block.id
+							break
 						}
 					}
+					if (toolUseId) break
+				}
+			}
 
-					// If no existing tool_result found, create a NEW user message with the tool_result
-					if (!alreadyHasToolResult) {
-						parentApiMessages.push({
-							role: "user",
-							content: [
-								{
-									type: "tool_result" as const,
-									tool_use_id: toolUseId,
-									content: `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`,
-								},
-							],
-							ts,
-						})
-					}
-
-					// Validate the newly injected tool_result against the preceding assistant message.
-					// This ensures the tool_result's tool_use_id matches a tool_use in the immediately
-					// preceding assistant message (Anthropic API requirement).
-					const lastMessage = parentApiMessages[parentApiMessages.length - 1]
-					if (lastMessage?.role === "user") {
-						const validatedMessage = validateAndFixToolResultIds(
-							lastMessage,
-							parentApiMessages.slice(0, -1),
-						)
-						parentApiMessages[parentApiMessages.length - 1] = validatedMessage
-					}
-				} else {
-					// If there is no corresponding tool_use in the parent API history, we cannot emit a
-					// tool_result. Fall back to a plain user text note so the parent can still resume.
-					const fallbackText = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
-					const lastParentApiMessage = parentApiMessages.at(-1)
-					const alreadyHasFallback =
-						lastParentApiMessage?.role === "user" &&
-						Array.isArray(lastParentApiMessage.content) &&
-						lastParentApiMessage.content.some(
-							(block: { type?: string; text?: string }) =>
-								block.type === "text" && block.text === fallbackText,
-						)
-					if (!alreadyHasFallback) {
-						parentApiMessages.push({
-							role: "user",
-							content: [
-								{
-									type: "text" as const,
-									text: fallbackText,
-								},
-							],
-							ts,
-						})
+			// Preferred: if the parent history contains the native tool_use for new_task,
+			// inject a matching tool_result for the Anthropic message contract:
+			// user → assistant (tool_use) → user (tool_result)
+			if (toolUseId) {
+				// Check if the last message is already a user message with a tool_result for this tool_use_id
+				// (in case this is a retry or the history was already updated)
+				const lastMsg = parentApiMessages[parentApiMessages.length - 1]
+				let alreadyHasToolResult = false
+				if (lastMsg?.role === "user" && Array.isArray(lastMsg.content)) {
+					for (const block of lastMsg.content) {
+						if (block.type === "tool_result" && block.tool_use_id === toolUseId) {
+							// Update the existing tool_result content
+							block.content = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
+							alreadyHasToolResult = true
+							break
+						}
 					}
 				}
 
-				const restoreConversationFiles = async (cause: unknown): Promise<void> => {
-					const restorationResults = await Promise.allSettled([
-						saveTaskMessages({
-							messages: originalParentClineMessages,
-							taskId: parentTaskId,
-							globalStoragePath,
-						}),
-						saveApiMessages({
-							messages: originalParentApiMessages,
-							taskId: parentTaskId,
-							globalStoragePath,
-						}),
-					])
-					const restorationErrors = restorationResults.flatMap((restorationResult) =>
-						restorationResult.status === "rejected" ? [restorationResult.reason] : [],
-					)
-					if (restorationErrors.length > 0) {
-						throw new AggregateError(
-							[cause, ...restorationErrors],
-							`[reopenParentFromDelegation] Failed to restore parent ${parentTaskId} conversation files`,
-						)
-					}
-				}
-
-				try {
-					await saveTaskMessages({
-						messages: parentClineMessages,
-						taskId: parentTaskId,
-						globalStoragePath,
-					})
-					await saveApiMessages({
-						messages: parentApiMessages,
-						taskId: parentTaskId,
-						globalStoragePath,
-					})
-				} catch (error) {
-					await restoreConversationFiles(error)
-					throw error
-				}
-
-				let updatedHistory!: typeof historyItem
-				const staleDelegationError = new Error("stale cross-instance delegation")
-				const assertCurrentDelegation = (parent: HistoryItem) => {
-					if (
-						(parent.status !== "delegated" && parent.status !== "active") ||
-						parent.awaitingChildId !== childTaskId
-					) {
-						throw staleDelegationError
-					}
-				}
-				try {
-					let parentInstance: Task | undefined
-					let completingParent!: HistoryItem
-					await this.taskHistoryStore.atomicUpdatePair(
-						parentTaskId,
-						childTaskId,
-						(parent) => {
-							assertCurrentDelegation(parent)
-							completingParent = { ...parent }
-							const reducerChild = { ...parent, id: childTaskId, status: "active" as const }
-							updatedHistory = completeDelegatedChild(
-								parent,
-								reducerChild,
-								completionResultSummary,
-							).parent
-							return updatedHistory
-						},
-						(child) => {
-							if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
-								throw new Error(
-									`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`,
-								)
-							}
-							const completedChild = completeDelegatedChild(
-								completingParent,
-								child,
-								completionResultSummary,
-							).child
-							return {
-								...completedChild,
-								pendingAction:
-									child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
-							}
-						},
-						{
-							firstDiskGuard: assertCurrentDelegation,
-							rollbackFirstOnSecondFailure: true,
-							firstFileLockAcquired: true,
-							storeLockAcquired: true,
-							whileFirstFileLocked: async () => {
-								const current = this.getCurrentTask()
-								if (current?.taskId === childTaskId) {
-									await this.removeClineFromStack({ saveMessages: false })
-								}
-								parentInstance = await this.createTaskWithHistoryItem(updatedHistory, {
-									startTask: false,
-								})
-								try {
-									await parentInstance.overwriteClineMessages(parentClineMessages, { persist: false })
-								} catch {
-									// non-fatal
-								}
-								try {
-									await parentInstance.overwriteApiConversationHistory(parentApiMessages, {
-										persist: false,
-									})
-								} catch {
-									// non-fatal
-								}
+				// If no existing tool_result found, create a NEW user message with the tool_result
+				if (!alreadyHasToolResult) {
+					parentApiMessages.push({
+						role: "user",
+						content: [
+							{
+								type: "tool_result" as const,
+								tool_use_id: toolUseId,
+								content: `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`,
 							},
+						],
+						ts,
+					})
+				}
+
+				// Validate the newly injected tool_result against the preceding assistant message.
+				// This ensures the tool_result's tool_use_id matches a tool_use in the immediately
+				// preceding assistant message (Anthropic API requirement).
+				const lastMessage = parentApiMessages[parentApiMessages.length - 1]
+				if (lastMessage?.role === "user") {
+					const validatedMessage = validateAndFixToolResultIds(lastMessage, parentApiMessages.slice(0, -1))
+					parentApiMessages[parentApiMessages.length - 1] = validatedMessage
+				}
+			} else {
+				// If there is no corresponding tool_use in the parent API history, we cannot emit a
+				// tool_result. Fall back to a plain user text note so the parent can still resume.
+				const fallbackText = `Subtask ${childTaskId} completed.\n\nResult:\n${completionResultSummary}`
+				const lastParentApiMessage = parentApiMessages.at(-1)
+				const alreadyHasFallback =
+					lastParentApiMessage?.role === "user" &&
+					Array.isArray(lastParentApiMessage.content) &&
+					lastParentApiMessage.content.some(
+						(block: { type?: string; text?: string }) =>
+							block.type === "text" && block.text === fallbackText,
+					)
+				if (!alreadyHasFallback) {
+					parentApiMessages.push({
+						role: "user",
+						content: [
+							{
+								type: "text" as const,
+								text: fallbackText,
+							},
+						],
+						ts,
+					})
+				}
+			}
+
+			const restoreConversationFiles = async (cause: unknown): Promise<void> => {
+				const restorationResults = await Promise.allSettled([
+					saveTaskMessages({
+						messages: originalParentClineMessages,
+						taskId: parentTaskId,
+						globalStoragePath,
+					}),
+					saveApiMessages({
+						messages: originalParentApiMessages,
+						taskId: parentTaskId,
+						globalStoragePath,
+					}),
+				])
+				const restorationErrors = restorationResults.flatMap((restorationResult) =>
+					restorationResult.status === "rejected" ? [restorationResult.reason] : [],
+				)
+				if (restorationErrors.length > 0) {
+					throw new AggregateError(
+						[cause, ...restorationErrors],
+						`[reopenParentFromDelegation] Failed to restore parent ${parentTaskId} conversation files`,
+					)
+				}
+			}
+
+			try {
+				await saveTaskMessages({
+					messages: parentClineMessages,
+					taskId: parentTaskId,
+					globalStoragePath,
+				})
+				await saveApiMessages({
+					messages: parentApiMessages,
+					taskId: parentTaskId,
+					globalStoragePath,
+				})
+			} catch (error) {
+				await restoreConversationFiles(error)
+				throw error
+			}
+
+			let updatedHistory!: typeof historyItem
+			const staleDelegationError = new Error("stale cross-instance delegation")
+			const assertCurrentDelegation = (parent: HistoryItem) => {
+				if (
+					(parent.status !== "delegated" && parent.status !== "active") ||
+					parent.awaitingChildId !== childTaskId
+				) {
+					throw staleDelegationError
+				}
+			}
+			try {
+				let parentInstance: Task | undefined
+				let completingParent!: HistoryItem
+				await this.taskHistoryStore.atomicUpdatePair(
+					parentTaskId,
+					childTaskId,
+					(parent) => {
+						assertCurrentDelegation(parent)
+						completingParent = { ...parent }
+						const reducerChild = { ...parent, id: childTaskId, status: "active" as const }
+						updatedHistory = completeDelegatedChild(parent, reducerChild, completionResultSummary).parent
+						return updatedHistory
+					},
+					(child) => {
+						if (pendingActionId && child.pendingAction?.actionId !== pendingActionId) {
+							throw new Error(
+								`[reopenParentFromDelegation] Pending action mismatch for child ${childTaskId}`,
+							)
+						}
+						const completedChild = completeDelegatedChild(
+							completingParent,
+							child,
+							completionResultSummary,
+						).child
+						return {
+							...completedChild,
+							pendingAction:
+								child.pendingAction?.actionId === pendingActionId ? undefined : child.pendingAction,
+						}
+					},
+					{
+						firstDiskGuard: assertCurrentDelegation,
+						rollbackFirstOnSecondFailure: true,
+						firstFileLockAcquired: true,
+						storeLockAcquired: true,
+						whileFirstFileLocked: async () => {
+							const current = this.getCurrentTask()
+							if (current?.taskId === childTaskId) {
+								await this.removeClineFromStack({ saveMessages: false })
+							}
+							parentInstance = await this.createTaskWithHistoryItem(updatedHistory, {
+								startTask: false,
+							})
+							try {
+								await parentInstance.overwriteClineMessages(parentClineMessages, { persist: false })
+							} catch {
+								// non-fatal
+							}
+							try {
+								await parentInstance.overwriteApiConversationHistory(parentApiMessages, {
+									persist: false,
+								})
+							} catch {
+								// non-fatal
+							}
 						},
+					},
+				)
+
+				parentToResume = parentInstance
+			} catch (error) {
+				await restoreConversationFiles(error)
+				if (error === staleDelegationError) {
+					this.log(
+						`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId}`,
 					)
-
-					parentToResume = parentInstance
-				} catch (error) {
-					await restoreConversationFiles(error)
-					if (error === staleDelegationError) {
-						this.log(
-							`[reopenParentFromDelegation] Aborting: parent ${parentTaskId} is no longer delegated to child ${childTaskId}`,
-						)
-						return false
-					}
-					throw error
+					return false
 				}
+				throw error
+			}
 
-				this.recentTasksCache = undefined
+			this.recentTasksCache = undefined
 
-				// Notify the webview of both updated items so its in-memory history stays current.
-				if (this.isViewLaunched) {
-					const updatedChild = this.taskHistoryStore.get(childTaskId)
-					const updatedParent = this.taskHistoryStore.get(parentTaskId)
-					if (updatedChild) {
-						await this.postMessageToWebview({
-							type: "taskHistoryItemUpdated",
-							taskHistoryItem: updatedChild,
-						})
-					}
-					if (updatedParent) {
-						await this.postMessageToWebview({
-							type: "taskHistoryItemUpdated",
-							taskHistoryItem: updatedParent,
-						})
-					}
+			// Notify the webview of both updated items so its in-memory history stays current.
+			if (this.isViewLaunched) {
+				const updatedChild = this.taskHistoryStore.get(childTaskId)
+				const updatedParent = this.taskHistoryStore.get(parentTaskId)
+				if (updatedChild) {
+					await this.postMessageToWebview({
+						type: "taskHistoryItemUpdated",
+						taskHistoryItem: updatedChild,
+					})
 				}
-
-				// 6) Emit TaskDelegationCompleted (provider-level)
-				try {
-					this.emit(
-						RooCodeEventName.TaskDelegationCompleted,
-						parentTaskId,
-						childTaskId,
-						completionResultSummary,
-					)
-				} catch {
-					// non-fatal
+				if (updatedParent) {
+					await this.postMessageToWebview({
+						type: "taskHistoryItemUpdated",
+						taskHistoryItem: updatedParent,
+					})
 				}
+			}
 
-				// 9) Emit TaskDelegationResumed (provider-level)
-				try {
-					this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
-				} catch {
-					// non-fatal
-				}
+			// 6) Emit TaskDelegationCompleted (provider-level)
+			try {
+				this.emit(RooCodeEventName.TaskDelegationCompleted, parentTaskId, childTaskId, completionResultSummary)
+			} catch {
+				// non-fatal
+			}
 
-				this.cancelledDelegationChildIds.delete(childTaskId)
-				return true
-			})
+			// 9) Emit TaskDelegationResumed (provider-level)
+			try {
+				this.emit(RooCodeEventName.TaskDelegationResumed, parentTaskId, childTaskId)
+			} catch {
+				// non-fatal
+			}
+
+			this.cancelledDelegationChildIds.delete(childTaskId)
+			return true
+		}
+		return this.runLockedDelegationTransition(parentTaskId, transition, async () => {
 			await parentToResume?.resumeAfterDelegation()
-			return result
 		})
 	}
 
