@@ -465,6 +465,31 @@ describe("Task persistence", () => {
 			await expect(task.waitForCurrentAssistantMessagePersistence()).resolves.toBe(false)
 		})
 
+		it("shares one retry operation across concurrent persistence waiters", async () => {
+			vi.useFakeTimers()
+			mockSaveApiMessages
+				.mockRejectedValueOnce(new Error("initial write failed"))
+				.mockResolvedValueOnce(undefined)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			try {
+				await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "assistant", content: "done" })
+				const first = task.waitForCurrentAssistantMessagePersistence()
+				const second = task.waitForCurrentAssistantMessagePersistence()
+
+				await vi.runAllTimersAsync()
+				await expect(Promise.all([first, second])).resolves.toEqual([true, true])
+				expect(mockSaveApiMessages).toHaveBeenCalledTimes(2)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("lets same-turn cancellation win over a successful persistence result", async () => {
 			const task = new Task({
 				provider: mockProvider,
