@@ -4306,9 +4306,7 @@ export class ClineProvider
 				await parentToResume?.resumeAfterDelegation()
 			},
 			async (error) => {
-				if (!childToRestore) {
-					return
-				}
+				if (!childToRestore) return
 				try {
 					if (this.getCurrentTask()?.taskId === parentTaskId) {
 						await this.removeClineFromStack({ saveMessages: false })

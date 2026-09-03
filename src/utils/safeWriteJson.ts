@@ -60,15 +60,11 @@ export async function lockJsonFile(filePath: string): Promise<() => Promise<void
 		try {
 			await release()
 		} catch (releaseError) {
-			if (!compromisedError) {
-				throw releaseError
-			}
+			if (!compromisedError) throw releaseError
 			console.error(`Failed to release compromised lock for ${absoluteFilePath}:`, releaseError)
 		}
 
-		if (compromisedError) {
-			throw compromisedError
-		}
+		if (compromisedError) throw compromisedError
 	}
 }
 
@@ -232,18 +228,12 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 		} catch (error) {
 			unlockFailed = true
 			unlockError = error
-			if (operationFailed) {
-				console.error(`Failed to release lock for ${absoluteFilePath}:`, error)
-			}
+			if (operationFailed) console.error(`Failed to release lock for ${absoluteFilePath}:`, error)
 		}
 	}
 
-	if (operationFailed) {
-		throw operationError
-	}
-	if (unlockFailed) {
-		throw unlockError
-	}
+	if (operationFailed) throw operationError
+	if (unlockFailed) throw unlockError
 }
 
 /**
