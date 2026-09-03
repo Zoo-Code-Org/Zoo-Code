@@ -97,21 +97,24 @@ export const OpenRouter = ({
 		return () => window.removeEventListener("message", handleMessage)
 	}, [refreshStatus, queryClient])
 
-	const handleRefreshModels = useCallback(() => {
-		errorJustReceived.current = false
-		setRefreshStatus(RefreshStatus.Loading)
-		// Stryker disable next-line CallExpression : refreshError is unobservable outside Error status; every Error transition re-sets it in the same batch
-		setRefreshError(undefined)
+	const handleRefreshModels = useCallback(
+		() => {
+			errorJustReceived.current = false
+			setRefreshStatus(RefreshStatus.Loading)
+			// Stryker disable next-line CallExpression : refreshError is unobservable outside Error status; every Error transition re-sets it in the same batch
+			setRefreshError(undefined)
 
-		vscode.postMessage({
-			type: RouterModelsMessageType.requestRouterModels,
-			values: {
-				provider: providerIdentifiers.openrouter,
-				refresh: true,
-			},
-		})
-		// Stryker disable next-line ArrayDeclaration : constant deps array replacement is memoization-equivalent
-	}, [])
+			vscode.postMessage({
+				type: RouterModelsMessageType.requestRouterModels,
+				values: {
+					provider: providerIdentifiers.openrouter,
+					refresh: true,
+				},
+			})
+		},
+		// Stryker disable next-line ArrayDeclaration : deps array is constant; replacing it with any constant array is memoization-equivalent
+		[],
+	)
 
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
