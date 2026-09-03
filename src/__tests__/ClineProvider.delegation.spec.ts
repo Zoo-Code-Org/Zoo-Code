@@ -1,4 +1,4 @@
-// npx vitest run __tests__/provider-delegation.spec.ts
+// npx vitest run __tests__/ClineProvider.delegation.spec.ts
 
 import { describe, it, expect, vi } from "vitest"
 import type { HistoryItem } from "@roo-code/types"
