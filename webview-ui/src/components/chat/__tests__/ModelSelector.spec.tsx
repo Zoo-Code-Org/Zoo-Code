@@ -2,6 +2,7 @@ import { type ReactNode } from "react"
 
 import {
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	type ModelInfo,
 	type OrganizationAllowList,
 	type ProviderSettings,
@@ -9,7 +10,6 @@ import {
 } from "@roo-code/types"
 
 import { render, screen, fireEvent, within } from "@/utils/test-utils"
-import userEvent from "@testing-library/user-event"
 import { vscode } from "@/utils/vscode"
 
 import { ModelSelector } from "../ModelSelector"
@@ -281,8 +281,12 @@ describe("ModelSelector", () => {
 	})
 
 	it("shows the loading trigger instead of the unsupported fallback while a dynamic provider's models are loading", () => {
+		// Isolate the router-model loading scenario: the router-models query is
+		// still loading while selected-model resolution has already completed.
+		// This verifies the component gates the unsupported fallback on
+		// router-model loading, not just on selected-model loading.
 		useRouterModelsMock.mockReturnValue({ data: undefined, isLoading: true })
-		useSelectedModelMock.mockReturnValue({ id: "", isLoading: true })
+		useSelectedModelMock.mockReturnValue({ id: "", isLoading: false })
 
 		render(
 			<ModelSelector
@@ -394,9 +398,7 @@ describe("ModelSelector", () => {
 		expect(content.getByText("openrouter/hotel")).toBeInTheDocument()
 	})
 
-	it("selects a model via keyboard activation", async () => {
-		const user = userEvent.setup()
-
+	it("selects a model via keyboard activation", () => {
 		render(
 			<ModelSelector
 				apiConfiguration={
@@ -412,13 +414,23 @@ describe("ModelSelector", () => {
 		)
 
 		// Open the popover.
-		await user.click(screen.getByTestId("model-selector-trigger"))
+		fireEvent.click(screen.getByTestId("model-selector-trigger"))
 
-		// The model option is a keyboard-accessible button (role="option").
-		// user.click focuses the element first, then activates it — mirroring
-		// what happens when a keyboard user tabs to a button and presses Enter.
+		// The model option is a keyboard-accessible native button (role="option").
+		// Native <button> elements are focusable and fire a click event on Enter
+		// or Space as a browser default action, enabling keyboard activation
+		// without a pointer device.
+		//
+		// NOTE: vitest.setup.ts mocks HTMLElement.prototype.focus as a no-op for
+		// FAST Foundation compatibility, so user.tab()/user.keyboard("{Enter}")
+		// cannot drive focus. We simulate the keyboard path directly: dispatch
+		// keyDown(Enter) then the click event the browser would fire as the
+		// default action on a focused <button>.
 		const option = screen.getAllByRole("option", { name: /claude-3-5-haiku/i })[0]
-		await user.click(option)
+		expect(option.tagName).toBe("BUTTON")
+
+		fireEvent.keyDown(option, { key: "Enter", code: "Enter", charCode: 13 })
+		fireEvent.click(option)
 
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -469,5 +481,95 @@ describe("ModelSelector", () => {
 		const content = openPopover()
 		expect(content.getByText("openrouter/allowed")).toBeInTheDocument()
 		expect(content.queryByText("openrouter/blocked")).not.toBeInTheDocument()
+	})
+
+	it("excludes the custom-arn pseudo-model from the Bedrock model list while keeping real models selectable", () => {
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.bedrock,
+						apiModelId: "claude-3-5-sonnet-20241022-v2:0",
+					} as ProviderSettings
+				}
+				currentApiConfigName="default"
+				title="Select model"
+				organizationAllowList={allowAllList}
+			/>,
+		)
+
+		const content = openPopover()
+
+		// The custom-arn pseudo-model must not appear as a selectable option.
+		expect(content.queryByText(/custom-arn/i)).not.toBeInTheDocument()
+
+		// Normal Bedrock models remain selectable.
+		expect(content.queryAllByRole("option")).not.toHaveLength(0)
+	})
+
+	it("shows the unsupported fallback for a retired provider and navigates to settings on click", () => {
+		useSelectedModelMock.mockReturnValue({ id: "", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: retiredProviderIdentifiers.groq,
+					} as ProviderSettings
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		// A retired provider has no model config, so the unsupported shortcut renders.
+		expect(screen.queryByTestId("model-selector-trigger")).not.toBeInTheDocument()
+		expect(screen.getByTestId("model-selector-disabled")).toBeInTheDocument()
+
+		fireEvent.click(screen.getByTestId("model-selector-disabled"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "switchTab", tab: "settings" }))
+	})
+
+	it("shows the unsupported fallback when the organization allowlist filters out every model", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: {
+				openrouter: {
+					"openrouter/allowed": modelInfo(),
+					"openrouter/blocked": modelInfo(),
+				},
+			},
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/allowed", isLoading: false })
+
+		// An allowlist that blocks every model for this provider.
+		const blockAllList: OrganizationAllowList = {
+			allowAll: false,
+			providers: {
+				openrouter: {
+					allowAll: false,
+					models: [],
+				},
+			},
+		}
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/allowed",
+					} as ProviderSettings
+				}
+				currentApiConfigName="default"
+				title="Select model"
+				organizationAllowList={blockAllList}
+			/>,
+		)
+
+		// With zero models after filtering, the unsupported shortcut renders.
+		expect(screen.queryByTestId("model-selector-trigger")).not.toBeInTheDocument()
+		expect(screen.getByTestId("model-selector-disabled")).toBeInTheDocument()
 	})
 })

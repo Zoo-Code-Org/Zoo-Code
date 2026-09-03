@@ -181,8 +181,11 @@ export const ModelSelector = ({
 	// While a dynamic provider's model list is still loading, keep the trigger
 	// visible (showing the loading label) instead of falling back to the
 	// unsupported-provider shortcut. Only show the unsupported fallback once we
-	// know the provider genuinely has no selectable models.
-	if (!isSupported && !isLoading) {
+	// know the provider genuinely has no selectable models. The loading gate
+	// checks both the selected-model resolution (useSelectedModel) and the
+	// router-models query (useRouterModels) so a dynamic provider whose model
+	// list hasn't resolved yet never flashes the unsupported shortcut.
+	if (!isSupported && !isLoading && !routerModels.isLoading) {
 		return (
 			<StandardTooltip content={t("chat:selectModelUnsupported")}>
 				<button
@@ -212,7 +215,9 @@ export const ModelSelector = ({
 						isDisabled ? "opacity-50 cursor-not-allowed" : enabledSelectorTriggerClassName,
 						triggerClassName,
 					)}>
-					<span className="truncate">{isLoading ? t("common:ui.loading") : selectedModelLabel}</span>
+					<span className="truncate">
+						{isLoading || routerModels.isLoading ? t("common:ui.loading") : selectedModelLabel}
+					</span>
 				</PopoverTrigger>
 			</StandardTooltip>
 			<PopoverContent
