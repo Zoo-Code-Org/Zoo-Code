@@ -15,6 +15,15 @@ export { taskMetadata } from "./taskMetadata"
 export { ensureMessageIdentifiers } from "./mergeMessageSnapshots"
 export { TaskHistoryStore } from "./TaskHistoryStore"
 export {
+	createProviderHandoffPlan,
+	decideProviderHandoffProfile,
+	getProviderHandoffActivationOptions,
+	PRODUCTION_PROVIDER_HANDOFF_POLICY,
+	type ProviderHandoffPolicy,
+	type ProviderHandoffProfileDecision,
+	type ProviderProfileRef,
+} from "./providerHandoff"
+export {
 	abandonDelegatedChild,
 	assertValidTransition,
 	completeDelegatedChild,

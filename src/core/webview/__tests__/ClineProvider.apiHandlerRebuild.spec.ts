@@ -8,6 +8,7 @@ import { getModelId, RooCodeEventName } from "@roo-code/types"
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
 import { Task, TaskOptions } from "../../task/Task"
+import { PRODUCTION_PROVIDER_HANDOFF_POLICY } from "../../task-persistence/providerHandoff"
 import { ClineProvider } from "../ClineProvider"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -638,7 +639,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 			postStateSpy.mockClear()
 
-			await provider.handleModeSwitch("ask" as Mode, null, { preparePendingTask: true })
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
 
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
@@ -655,13 +658,17 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const unrelatedTask = new Task(defaultTaskOptions)
 			unrelatedTask["_taskMode"] = "code" as Mode
 			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("currentApiConfigName", "test-config")
 			const activateProfileSpy = vi.spyOn(provider["providerSettingsManager"], "activateProfile")
 			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			postStateSpy.mockClear()
 
-			await provider.handleModeSwitch("ask" as Mode, null, { preparePendingTask: true })
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
 
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
+			expect(provider["providerSettingsManager"].setModeConfig).toHaveBeenCalledWith("ask", "test-id")
 			expect(activateProfileSpy).not.toHaveBeenCalled()
 			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
 			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
@@ -679,7 +686,9 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			postStateSpy.mockClear()
 
-			await provider.handleModeSwitch("ask" as Mode, null, { preparePendingTask: true })
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
 
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "ask")
 			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
