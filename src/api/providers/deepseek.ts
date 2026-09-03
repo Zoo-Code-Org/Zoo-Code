@@ -166,19 +166,19 @@ export class DeepSeekHandler extends OpenAiHandler {
 		for await (const chunk of stream) {
 			const delta = chunk.choices?.[0]?.delta ?? {}
 
+			// Handle reasoning_content from DeepSeek's interleaved thinking
+			// This is the proper way DeepSeek sends thinking content in streaming
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
 			// Handle regular text content
 			if (delta.content) {
 				yield {
 					type: "text",
 					text: delta.content,
 				}
-			}
-
-			// Handle reasoning_content from DeepSeek's interleaved thinking
-			// This is the proper way DeepSeek sends thinking content in streaming
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
 			}
 
 			// Handle tool calls
