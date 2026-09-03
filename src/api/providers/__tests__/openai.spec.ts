@@ -658,6 +658,26 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.max_completion_tokens).toBe(4096)
 		})
 
+		it("should yield reasoning chunks BEFORE text chunks when both are present in the exact same delta", async () => {
+			mockCreate.mockImplementationOnce(() =>
+				asyncStreamFrom([
+					{
+						choices: [{ delta: { reasoning_content: "thinking...", content: "answer" } }],
+						usage: { prompt_tokens: 10, completion_tokens: 10 },
+					},
+				]),
+			)
+
+			const stream = handler.createMessage("system prompt", [])
+			const chunks = await collectStream(stream)
+
+			const contentChunks = chunks.filter((c) => c.type === "reasoning" || c.type === "text")
+			expect(contentChunks).toEqual([
+				{ type: "reasoning", text: "thinking..." },
+				{ type: "text", text: "answer" },
+			])
+		})
+
 		describe("TagMatcher reasoning tags", () => {
 			it("should treat stray closing tag as plain text when no tag is open", async () => {
 				mockCreate.mockImplementationOnce(() =>
