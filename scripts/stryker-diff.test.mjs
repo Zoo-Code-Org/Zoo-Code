@@ -15,6 +15,8 @@ import {
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
+	formatBlockingMutants,
+	formatSummary,
 	mutantCounts,
 	parseChangedLines,
 	parseNameStatus,
@@ -23,6 +25,7 @@ import {
 	resolveVitestBinary,
 	packageForPath,
 	selectFromGit,
+	testsFromMutationReport,
 	validateDisableDirectives,
 } from "./stryker-diff.mjs"
 
@@ -41,6 +44,8 @@ describe("mutation testing workflow", () => {
 		assert.ok(workflow.includes("persist-credentials: false"))
 		assert.ok(!workflow.includes("repository: ${{ github.event.pull_request.head.repo.full_name }}"))
 		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
+		assert.ok(workflow.includes("open the package's mutation.html file"))
 	})
 })
 
@@ -317,6 +322,155 @@ describe("mutation exclusions", () => {
 				),
 			/broad or unreasoned exclusions are not allowed/,
 		)
+	})
+})
+
+describe("failure output", () => {
+	const blocking = [
+		{
+			filePath: "core/value.ts",
+			status: "Survived",
+			mutatorName: "ConditionalExpression",
+			replacement: "true",
+			location: { start: { line: 4 } },
+		},
+		{
+			filePath: "core/value.ts",
+			status: "NoCoverage",
+			mutatorName: "StringLiteral",
+			replacement: '"left | right"',
+			location: { start: { line: 4 } },
+		},
+		{
+			filePath: "utils/other.ts",
+			status: "Survived",
+			mutatorName: "BooleanLiteral",
+			replacement: "false",
+			location: { start: { line: 9 } },
+		},
+	]
+
+	it("lists every blocking mutant with tests, reproduction, exclusion, and report guidance", () => {
+		const baseSha = "a".repeat(40)
+		const headSha = "b".repeat(40)
+		const summary = formatSummary(
+			[
+				{
+					id: "extension",
+					root: "src",
+					selectors: ["core/value.ts:4-4"],
+					testFiles: ["core/__tests__/value.test.ts"],
+					reportPath: "reports/mutation/extension/mutation.html",
+					changedLines: 1,
+					valid: 3,
+					killed: 0,
+					timeout: 0,
+					survived: 2,
+					noCoverage: 1,
+					blocking,
+					result: "Failed",
+				},
+			],
+			["extension has blocking mutants"],
+			{ baseSha, headSha },
+		)
+
+		assert.ok(summary.includes("`core/__tests__/value.test.ts`"))
+		assert.ok(summary.includes("#### `src/core/value.ts`"))
+		assert.ok(summary.includes("#### `src/utils/other.ts`"))
+		for (const mutant of blocking) assert.ok(summary.includes(mutant.mutatorName))
+		assert.ok(summary.includes('"left \\| right"'))
+		assert.ok(summary.includes(`node scripts/stryker-diff.mjs ci --base ${baseSha} --head ${headSha}`))
+		assert.ok(summary.includes("Stryker disable next-line ConditionalExpression:"))
+		assert.ok(summary.includes("`reports/mutation/extension/mutation.html`"))
+		assert.ok(summary.includes("`changed-code-mutation-report` artifact"))
+	})
+
+	it("caps annotations without truncating the grouped summary", () => {
+		const manyMutants = Array.from({ length: 30 }, (_, index) => ({
+			filePath: `file-${Math.floor(index / 10)}.ts`,
+			status: "Survived",
+			mutatorName: `Mutator${index}`,
+			replacement: `replacement-${index}`,
+			location: { start: { line: (index % 10) + 1 } },
+		}))
+		const annotations = formatAnnotations(manyMutants, "src")
+		const grouped = formatBlockingMutants(manyMutants, "src").join("\n")
+
+		assert.equal(annotations.length, 20)
+		for (const file of new Set(annotations.map(({ file }) => file))) {
+			assert.ok(annotations.filter((annotation) => annotation.file === file).length <= 7)
+		}
+		for (const mutant of manyMutants) assert.ok(grouped.includes(mutant.mutatorName))
+	})
+
+	it("shares annotation limits across packages", () => {
+		const state = { total: 0, perFile: new Map() }
+		const first = formatAnnotations(
+			Array.from({ length: 15 }, (_, index) => ({
+				filePath: `first-${index}.ts`,
+				status: "Survived",
+				mutatorName: "BooleanLiteral",
+				location: { start: { line: 1 } },
+			})),
+			"packages/core",
+			state,
+		)
+		const second = formatAnnotations(
+			Array.from({ length: 15 }, (_, index) => ({
+				filePath: `second-${index}.ts`,
+				status: "NoCoverage",
+				mutatorName: "StringLiteral",
+				location: { start: { line: 1 } },
+			})),
+			"packages/cloud",
+			state,
+		)
+
+		assert.equal(first.length, 15)
+		assert.equal(second.length, 5)
+		assert.equal(state.total, 20)
+	})
+
+	it("uses the actual tests recorded by Stryker", () => {
+		assert.deepEqual(
+			testsFromMutationReport({ testFiles: { "src/value.test.ts": {}, "src/other.spec.ts": {} } }, [
+				"fallback.test.ts",
+			]),
+			["src/value.test.ts", "src/other.spec.ts"],
+		)
+		assert.deepEqual(testsFromMutationReport({}, ["fallback.test.ts"]), ["fallback.test.ts"])
+	})
+
+	it("keeps the maximum blocking-mutant inventory within GitHub's summary limit", () => {
+		const rows = Array.from({ length: 6 }, (_, packageIndex) => ({
+			id: `package-${packageIndex}`,
+			root: `packages/package-${packageIndex}`,
+			selectors: ["src/value.ts:1-500"],
+			testFiles: ["src/value.test.ts"],
+			reportPath: `reports/mutation/package-${packageIndex}/mutation.html`,
+			changedLines: 500,
+			valid: MAX_MUTANTS,
+			killed: 0,
+			timeout: 0,
+			survived: MAX_MUTANTS,
+			noCoverage: 0,
+			blocking: Array.from({ length: MAX_MUTANTS }, (_, mutantIndex) => ({
+				filePath: `src/file-${mutantIndex}.ts`,
+				status: "Survived",
+				mutatorName: `Package${packageIndex}Mutator${mutantIndex}`,
+				replacement: "x".repeat(1_000),
+				location: { start: { line: 1 } },
+			})),
+			result: "Failed",
+		}))
+		const summary = formatSummary(rows, ["mutation failure"], {
+			baseSha: "a".repeat(40),
+			headSha: "b".repeat(40),
+		})
+
+		assert.equal(new Set(summary.match(/Package\dMutator\d+/g)).size, 6 * MAX_MUTANTS)
+		assert.ok(Buffer.byteLength(summary) < 1024 * 1024)
 	})
 })
 
