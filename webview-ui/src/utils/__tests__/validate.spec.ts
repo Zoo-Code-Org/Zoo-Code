@@ -318,7 +318,9 @@ describe("Model Validation Functions", () => {
 		it("formats a reserved-key result without a key list", () => {
 			const t = vi.fn((_key, options) => options?.keys ?? "missing")
 
-			expect(formatOpenAiExtraBodyValidationError({ success: false, reason: "reservedKeys" }, t)).toBe("")
+			expect(formatOpenAiExtraBodyValidationError({ success: false, reason: "reservedKeys", data: {} }, t)).toBe(
+				"",
+			)
 			expect(t).toHaveBeenCalledWith("settings:validation.openAiExtraBody.reservedKeys", { keys: "" })
 		})
 
@@ -327,7 +329,7 @@ describe("Model Validation Functions", () => {
 
 			expect(
 				formatOpenAiExtraBodyValidationError(
-					{ success: false, reason: "reservedKeys", reservedKeys: ["model", "stream"] },
+					{ success: false, reason: "reservedKeys", data: {}, reservedKeys: ["model", "stream"] },
 					t,
 				),
 			).toBe("model, stream")
