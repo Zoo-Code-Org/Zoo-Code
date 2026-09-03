@@ -1019,9 +1019,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	async overwriteApiConversationHistory(newHistory: ApiMessage[], options: { persist?: boolean } = {}) {
 		this.apiConversationHistory = newHistory
-		if (options.persist !== false) {
-			await this.saveApiConversationHistory()
-		}
+		if (options.persist !== false) await this.saveApiConversationHistory()
 	}
 
 	/**
@@ -1183,9 +1181,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public async overwriteClineMessages(newMessages: ClineMessage[], options: { persist?: boolean } = {}) {
 		this.clineMessages = newMessages
 		restoreTodoListForTask(this)
-		if (options.persist !== false) {
-			await this.saveClineMessages()
-		}
+		if (options.persist !== false) await this.saveClineMessages()
 
 		// When overwriting messages (e.g., during task resume), repopulate the cloud sync tracking Set
 		// with timestamps from all non-partial messages to prevent re-syncing previously synced messages
@@ -2502,9 +2498,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
 			// Don't rethrow - we want abort to always succeed
 		}
-		if (options.saveMessages === false) {
-			return
-		}
+		if (options.saveMessages === false) return
 		// Guard: a history task whose message load has not finished yet has
 		// clineMessages = []. Saving now would call taskMetadata() with an
 		// empty array, which writes the "no messages" placeholder as the
