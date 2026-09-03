@@ -123,13 +123,13 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 			const completion = await this.client.chat.completions.create(body, { signal: metadata?.abortSignal })
 			for await (const chunk of completion) {
 				const delta = chunk.choices[0]?.delta
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
-
 				const reasoning = extractReasoningFromDelta(delta)
 				if (reasoning) {
 					yield { type: "reasoning", text: reasoning }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
 				}
 
 				for (const toolCall of delta?.tool_calls ?? []) {
