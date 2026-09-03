@@ -100,6 +100,9 @@ export function createAbortError(providerName: string): Error {
  * discovery) yet must still settle promptly on cancellation. The underlying
  * promise keeps running (its settlement is ignored) — cancellation is
  * cooperative at this boundary.
+ *
+ * The abort listener is detached once `pending` settles (success or
+ * failure), so repeated calls on one signal do not accumulate listeners.
  */
 export function rejectOnAbort<T>(pending: Promise<T>, signal: AbortSignal, providerName: string): Promise<T> {
 	if (signal.aborted) {
