@@ -399,8 +399,14 @@ describe("LmStudioHandler Native Tools", () => {
 			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
 				{ type: "tool_call_end", id: "call_lmstudio_a" },
 			])
-			expect(firstChunks.parserEvents.map((event) => event.id)).toEqual(["call_lmstudio_a", "call_lmstudio_a"])
-			expect(secondChunks.parserEvents.map((event) => event.id)).toEqual(["call_lmstudio_b", "call_lmstudio_b"])
+			expect(firstChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_lmstudio_a", name: "test_tool" },
+				{ type: "tool_call_delta", id: "call_lmstudio_a", delta: '{"arg1":"a' },
+			])
+			expect(secondChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_lmstudio_b", name: "test_tool" },
+				{ type: "tool_call_delta", id: "call_lmstudio_b", delta: '{"arg1":"b' },
+			])
 		})
 
 		it("should work with parallel tool calls disabled (sends false)", async () => {

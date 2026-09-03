@@ -413,8 +413,14 @@ describe("QwenCodeHandler Native Tools", () => {
 			expect(firstChunks.chunks.filter((chunk) => chunk.type === "tool_call_end")).toEqual([
 				{ type: "tool_call_end", id: "call_qwen_a" },
 			])
-			expect(firstChunks.parserEvents.map((event) => event.id)).toEqual(["call_qwen_a", "call_qwen_a"])
-			expect(secondChunks.parserEvents.map((event) => event.id)).toEqual(["call_qwen_b", "call_qwen_b"])
+			expect(firstChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_qwen_a", name: "test_tool" },
+				{ type: "tool_call_delta", id: "call_qwen_a", delta: '{"arg1":"a' },
+			])
+			expect(secondChunks.parserEvents).toEqual([
+				{ type: "tool_call_start", id: "call_qwen_b", name: "test_tool" },
+				{ type: "tool_call_delta", id: "call_qwen_b", delta: '{"arg1":"b' },
+			])
 		})
 
 		it("streams reasoning chunks from delta.reasoning_content", async () => {
