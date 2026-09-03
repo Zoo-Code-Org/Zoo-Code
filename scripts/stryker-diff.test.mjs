@@ -4,23 +4,55 @@ import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { describe, it } from "node:test"
+import { fileURLToPath } from "node:url"
 
 import {
 	MAX_CHANGED_LINES,
 	MAX_MUTANTS,
+	PACKAGE_CONFIGS,
 	buildManifest,
+	discoverRelatedTestFiles,
 	evaluateReport,
 	executableChangedLines,
 	formatAnnotations,
+	formatAnnotationCommand,
+	formatBlockingMutants,
+	formatSummary,
 	mutantCounts,
 	parseChangedLines,
 	parseNameStatus,
 	parseVitestTestFiles,
 	preferDirectTestFiles,
+	resolveVitestBinary,
 	packageForPath,
+	runManifest,
 	selectFromGit,
+	testsFromMutationReport,
 	validateDisableDirectives,
 } from "./stryker-diff.mjs"
+
+const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
+
+describe("mutation testing workflow", () => {
+	it("checks out the pull request merge result from the base repository", () => {
+		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+
+		assert.ok(workflow.includes("    pull_request:"))
+		assert.ok(!workflow.includes("pull_request_target:"))
+		assert.ok(workflow.includes("    contents: read"))
+		assert.ok(workflow.includes("- name: Checkout pull request merge result"))
+		assert.ok(workflow.includes("ref: ${{ github.sha }}"))
+		assert.ok(!workflow.includes("ref: refs/pull/${{ github.event.pull_request.number }}/merge"))
+		assert.ok(workflow.includes("fetch-depth: 0"))
+		assert.ok(workflow.includes("persist-credentials: false"))
+		assert.ok(!workflow.includes("repository: ${{ github.event.pull_request.head.repo.full_name }}"))
+		assert.ok(!workflow.includes("ref: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes("HEAD_SHA: ${{ github.sha }}"))
+		assert.ok(!workflow.includes("HEAD_SHA: ${{ github.event.pull_request.head.sha }}"))
+		assert.ok(workflow.includes("steps.mutation_report.outputs.artifact-url"))
+		assert.ok(workflow.includes("open the package's mutation.html file"))
+	})
+})
 
 describe("parseNameStatus", () => {
 	it("parses added, modified, and renamed paths", () => {
@@ -178,6 +210,55 @@ describe("preferDirectTestFiles", () => {
 	})
 })
 
+describe("related-test discovery", () => {
+	it("resolves Vitest from each package before falling back to the repository", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-vitest-"))
+		const extension = PACKAGE_CONFIGS.find(({ id }) => id === "extension")
+		const webview = PACKAGE_CONFIGS.find(({ id }) => id === "webview")
+		const extensionBinary = path.join(repo, "src/node_modules/.bin/vitest")
+		const webviewBinary = path.join(repo, "webview-ui/node_modules/.bin/vitest")
+		const rootBinary = path.join(repo, "node_modules/.bin/vitest")
+
+		try {
+			fs.mkdirSync(path.dirname(extensionBinary), { recursive: true })
+			fs.mkdirSync(path.dirname(webviewBinary), { recursive: true })
+			fs.writeFileSync(extensionBinary, "")
+			fs.writeFileSync(webviewBinary, "")
+
+			assert.equal(resolveVitestBinary(repo, extension), extensionBinary)
+			assert.equal(resolveVitestBinary(repo, webview), webviewBinary)
+
+			fs.rmSync(extensionBinary)
+			fs.mkdirSync(path.dirname(rootBinary), { recursive: true })
+			fs.writeFileSync(rootBinary, "")
+			assert.equal(resolveVitestBinary(repo, extension), rootBinary)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("reports a Vitest launch error when no binary exists", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-vitest-"))
+		const reportDirectory = path.join(repo, "reports")
+		const packageEntry = {
+			id: "extension",
+			root: "src",
+			vitestConfig: "vitest.config.ts",
+			selectors: ["utils/value.ts:1-1"],
+		}
+
+		try {
+			fs.mkdirSync(path.join(repo, "src"), { recursive: true })
+			assert.throws(
+				() => discoverRelatedTestFiles(repo, packageEntry, reportDirectory),
+				/extension related-test discovery could not start:.*ENOENT/,
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
 describe("selectFromGit", () => {
 	it("derives changed executable ranges from the base/head merge base", () => {
 		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-diff-"))
@@ -209,6 +290,43 @@ describe("selectFromGit", () => {
 			assert.deepEqual(
 				manifest.packages.map(({ id, selectors }) => ({ id, selectors })),
 				[{ id: "core", selectors: ["src/value.ts:2-2"] }],
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("uses merge-result line coordinates when the base shifts a pull request edit", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-merge-diff-"))
+		const runGit = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim()
+
+		try {
+			runGit("init", "--initial-branch=main")
+			runGit("config", "user.name", "Mutation Test")
+			runGit("config", "user.email", "mutation@example.com")
+			fs.mkdirSync(path.join(repo, "packages/core/src"), { recursive: true })
+			fs.writeFileSync(path.join(repo, "packages/core/src/value.ts"), "const first = 1\nconst changed = true\n")
+			runGit("add", ".")
+			runGit("commit", "-m", "initial")
+
+			runGit("checkout", "-b", "feature")
+			fs.writeFileSync(path.join(repo, "packages/core/src/value.ts"), "const first = 1\nconst changed = false\n")
+			runGit("commit", "-am", "change value")
+
+			runGit("checkout", "main")
+			fs.writeFileSync(
+				path.join(repo, "packages/core/src/value.ts"),
+				"const inserted = 0\nconst first = 1\nconst changed = true\n",
+			)
+			runGit("commit", "-am", "shift source lines")
+			const baseSha = runGit("rev-parse", "HEAD")
+			runGit("merge", "--no-ff", "feature", "-m", "merge feature")
+			const mergeSha = runGit("rev-parse", "HEAD")
+
+			const manifest = selectFromGit(repo, baseSha, mergeSha)
+			assert.deepEqual(
+				manifest.packages.map(({ id, selectors }) => ({ id, selectors })),
+				[{ id: "core", selectors: ["src/value.ts:3-3"] }],
 			)
 		} finally {
 			fs.rmSync(repo, { recursive: true, force: true })
@@ -246,6 +364,198 @@ describe("mutation exclusions", () => {
 				),
 			/broad or unreasoned exclusions are not allowed/,
 		)
+	})
+})
+
+describe("failure output", () => {
+	const blocking = [
+		{
+			filePath: "core/value.ts",
+			status: "Survived",
+			mutatorName: "ConditionalExpression",
+			replacement: "true",
+			location: { start: { line: 4 } },
+		},
+		{
+			filePath: "core/value.ts",
+			status: "NoCoverage",
+			mutatorName: "StringLiteral",
+			replacement: '"left | right"',
+			location: { start: { line: 4 } },
+		},
+		{
+			filePath: "utils/other.ts",
+			status: "Survived",
+			mutatorName: "BooleanLiteral",
+			replacement: "false",
+			location: { start: { line: 9 } },
+		},
+	]
+
+	it("lists every blocking mutant with tests, reproduction, exclusion, and report guidance", () => {
+		const baseSha = "a".repeat(40)
+		const headSha = "b".repeat(40)
+		const summary = formatSummary(
+			[
+				{
+					id: "extension",
+					root: "src",
+					selectors: ["core/value.ts:4-4"],
+					testFiles: ["core/__tests__/value.test.ts"],
+					reportPath: "reports/mutation/extension/mutation.html",
+					changedLines: 1,
+					valid: 3,
+					killed: 0,
+					timeout: 0,
+					survived: 2,
+					noCoverage: 1,
+					blocking,
+					result: "Failed",
+				},
+			],
+			["extension has blocking mutants"],
+			{ baseSha, headSha },
+		)
+
+		assert.ok(summary.includes("`core/__tests__/value.test.ts`"))
+		assert.ok(summary.includes("#### `src/core/value.ts`"))
+		assert.ok(summary.includes("#### `src/utils/other.ts`"))
+		for (const mutant of blocking) assert.ok(summary.includes(mutant.mutatorName))
+		assert.ok(summary.includes('"left \\| right"'))
+		assert.ok(summary.includes(`node scripts/stryker-diff.mjs ci --base ${baseSha} --head ${headSha}`))
+		assert.ok(summary.includes("Stryker disable next-line ConditionalExpression:"))
+		assert.ok(summary.includes("`reports/mutation/extension/mutation.html`"))
+		assert.ok(summary.includes("`changed-code-mutation-report` artifact"))
+	})
+
+	it("caps annotations without truncating the grouped summary", () => {
+		const manyMutants = Array.from({ length: 30 }, (_, index) => ({
+			filePath: `file-${Math.floor(index / 10)}.ts`,
+			status: "Survived",
+			mutatorName: `Mutator${index}`,
+			replacement: `replacement-${index}`,
+			location: { start: { line: (index % 10) + 1 } },
+		}))
+		const annotations = formatAnnotations(manyMutants, "src")
+		const grouped = formatBlockingMutants(manyMutants, "src").join("\n")
+
+		assert.equal(annotations.length, 20)
+		for (const file of new Set(annotations.map(({ file }) => file))) {
+			assert.ok(annotations.filter((annotation) => annotation.file === file).length <= 7)
+		}
+		for (const mutant of manyMutants) assert.ok(grouped.includes(mutant.mutatorName))
+	})
+
+	it("shares annotation limits across packages", () => {
+		const state = { total: 0, perFile: new Map() }
+		const first = formatAnnotations(
+			Array.from({ length: 15 }, (_, index) => ({
+				filePath: `first-${index}.ts`,
+				status: "Survived",
+				mutatorName: "BooleanLiteral",
+				location: { start: { line: 1 } },
+			})),
+			"packages/core",
+			state,
+		)
+		const second = formatAnnotations(
+			Array.from({ length: 15 }, (_, index) => ({
+				filePath: `second-${index}.ts`,
+				status: "NoCoverage",
+				mutatorName: "StringLiteral",
+				location: { start: { line: 1 } },
+			})),
+			"packages/cloud",
+			state,
+		)
+
+		assert.equal(first.length, 15)
+		assert.equal(second.length, 5)
+		assert.equal(state.total, 20)
+	})
+
+	it("preserves punctuation in annotation messages while escaping properties", () => {
+		const command = formatAnnotationCommand({
+			file: "src/value:one,two.ts",
+			line: 4,
+			message: "Survived mutant (replacement: left, right). 100% reproducible.",
+		})
+
+		assert.equal(
+			command,
+			"::error file=src/value%3Aone%2Ctwo.ts,line=4,title=Mutation test gap::Survived mutant (replacement: left, right). 100%25 reproducible.",
+		)
+	})
+
+	it("reports a Stryker preflight launch error when the binary is missing", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-launch-"))
+		const reportRoot = path.join(repo, "reports")
+
+		try {
+			fs.mkdirSync(path.join(repo, "packages/core"), { recursive: true })
+			assert.throws(
+				() =>
+					runManifest(
+						repo,
+						{
+							packages: [
+								{
+									id: "core",
+									root: "packages/core",
+									vitestConfig: "vitest.unit.config.ts",
+									selectors: ["src/value.ts:1-1"],
+									changedExecutableLines: 1,
+								},
+							],
+						},
+						reportRoot,
+					),
+				/core Stryker preflight could not start:.*ENOENT/,
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("uses the actual tests recorded by Stryker", () => {
+		assert.deepEqual(
+			testsFromMutationReport({ testFiles: { "src/value.test.ts": {}, "src/other.spec.ts": {} } }, [
+				"fallback.test.ts",
+			]),
+			["src/value.test.ts", "src/other.spec.ts"],
+		)
+		assert.deepEqual(testsFromMutationReport({}, ["fallback.test.ts"]), ["fallback.test.ts"])
+	})
+
+	it("keeps the maximum blocking-mutant inventory within GitHub's summary limit", () => {
+		const rows = Array.from({ length: 6 }, (_, packageIndex) => ({
+			id: `package-${packageIndex}`,
+			root: `packages/package-${packageIndex}`,
+			selectors: ["src/value.ts:1-500"],
+			testFiles: ["src/value.test.ts"],
+			reportPath: `reports/mutation/package-${packageIndex}/mutation.html`,
+			changedLines: 500,
+			valid: MAX_MUTANTS,
+			killed: 0,
+			timeout: 0,
+			survived: MAX_MUTANTS,
+			noCoverage: 0,
+			blocking: Array.from({ length: MAX_MUTANTS }, (_, mutantIndex) => ({
+				filePath: `src/file-${mutantIndex}.ts`,
+				status: "Survived",
+				mutatorName: `Package${packageIndex}Mutator${mutantIndex}`,
+				replacement: "x".repeat(1_000),
+				location: { start: { line: 1 } },
+			})),
+			result: "Failed",
+		}))
+		const summary = formatSummary(rows, ["mutation failure"], {
+			baseSha: "a".repeat(40),
+			headSha: "b".repeat(40),
+		})
+
+		assert.equal(new Set(summary.match(/Package\dMutator\d+/g)).size, 6 * MAX_MUTANTS)
+		assert.ok(Buffer.byteLength(summary) < 1024 * 1024)
 	})
 })
 
