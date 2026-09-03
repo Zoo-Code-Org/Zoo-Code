@@ -1,6 +1,6 @@
 import axios from "axios"
 
-import { getOllamaModels, isSecureOllamaEndpoint, parseOllamaModel } from "../ollama"
+import { getOllamaModels, isIpv4LoopbackHost, isSecureOllamaEndpoint, parseOllamaModel } from "../ollama"
 import ollamaModelsData from "./fixtures/ollama-model-details.json"
 
 // Mock axios
@@ -130,6 +130,8 @@ describe("Ollama Fetcher", () => {
 			expect(isSecureOllamaEndpoint("http://127.99.99.99:11434")).toBe(true) // rest of 127.0.0.0/8
 			expect(isSecureOllamaEndpoint("http://127.0.0.255:11434")).toBe(true) // range edge
 			expect(isSecureOllamaEndpoint("http://1270.0.0.1:11434")).toBe(false) // 1270 is not a valid octet
+			expect(isSecureOllamaEndpoint("http://127.256.0.1:11434")).toBe(false)
+			expect(isSecureOllamaEndpoint("http://one.two.three.four:11434")).toBe(false)
 		})
 
 		it("should treat any HTTPS endpoint as safe", () => {
@@ -144,6 +146,31 @@ describe("Ollama Fetcher", () => {
 
 		it("should treat unparseable endpoints as unsafe", () => {
 			expect(isSecureOllamaEndpoint("not a url")).toBe(false)
+		})
+	})
+
+	describe("isIpv4LoopbackHost", () => {
+		it("should accept only four-octet 127/8 literals", () => {
+			expect(isIpv4LoopbackHost("127.0.0.1")).toBe(true)
+			expect(isIpv4LoopbackHost("127.255.255.255")).toBe(true)
+			expect(isIpv4LoopbackHost("0.0.0.1")).toBe(false)
+		})
+
+		it("should reject hosts with the wrong octet count", () => {
+			expect(isIpv4LoopbackHost("127.0.0")).toBe(false)
+			expect(isIpv4LoopbackHost("127.0.0.0.1")).toBe(false)
+		})
+
+		it("should reject non-numeric octets even when they parse as numbers", () => {
+			// Number("0x4") === 4 and Number("1e2") === 100, so only the anchored
+			// octet regex rejects these inputs.
+			expect(isIpv4LoopbackHost("127.0.0.0x4")).toBe(false)
+			expect(isIpv4LoopbackHost("127.1e2.0.1")).toBe(false)
+		})
+
+		it("should reject out-of-range octets", () => {
+			expect(isIpv4LoopbackHost("127.999.0.1")).toBe(false)
+			expect(isIpv4LoopbackHost("0127.0.0.1")).toBe(false)
 		})
 	})
 

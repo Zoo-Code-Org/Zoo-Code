@@ -82,7 +82,7 @@ export function isSecureOllamaEndpoint(baseUrl: string): boolean {
 		return true
 	}
 	const host = url.hostname
-	return host === "localhost" || host === "::1" || host === "[::1]" || isIpv4LoopbackHost(host)
+	return host === "localhost" || host === "[::1]" || isIpv4LoopbackHost(host)
 }
 
 /**
@@ -92,7 +92,7 @@ export function isSecureOllamaEndpoint(baseUrl: string): boolean {
  * /^127\./ prefix would also match DNS names like `127.example.com`, letting
  * the key leak over cleartext HTTP (CWE-319).
  */
-function isIpv4LoopbackHost(host: string): boolean {
+export function isIpv4LoopbackHost(host: string): boolean {
 	const octets = host.split(".")
 	if (octets.length !== 4) {
 		return false
@@ -101,7 +101,7 @@ function isIpv4LoopbackHost(host: string): boolean {
 		return false
 	}
 	const values = octets.map((octet) => Number(octet))
-	return values[0] === 127 && values.every((value) => value >= 0 && value <= 255)
+	return values[0] === 127 && values.every((value) => value <= 255)
 }
 
 export async function getOllamaModels(

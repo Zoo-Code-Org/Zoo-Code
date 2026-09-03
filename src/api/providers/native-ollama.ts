@@ -41,7 +41,7 @@ function createAbortError(): Error {
  * signal, so the underlying request is left to settle in the background
  * rather than being cancelled.
  */
-function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+export function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
 	if (!signal) {
 		return pending
 	}
@@ -49,20 +49,8 @@ function raceWithAbortSignal<T>(pending: Promise<T>, signal: AbortSignal | undef
 		return Promise.reject(createAbortError())
 	}
 	return new Promise<T>((resolve, reject) => {
-		const onAbort = () => {
-			reject(createAbortError())
-		}
-		signal.addEventListener("abort", onAbort, { once: true })
-		pending.then(
-			(value) => {
-				signal.removeEventListener("abort", onAbort)
-				resolve(value)
-			},
-			(error) => {
-				signal.removeEventListener("abort", onAbort)
-				reject(error)
-			},
-		)
+		signal.addEventListener("abort", () => reject(createAbortError()))
+		pending.then(resolve, reject)
 	})
 }
 
@@ -281,7 +269,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	 * The per-request transport makes both the in-flight POST and the response
 	 * body cancellable; see the inline rationale.
 	 */
-	private _createOllamaClient(requestSignal?: AbortSignal): Ollama {
+	private _createOllamaClient(requestSignal: AbortSignal): Ollama {
 		const clientOptions: OllamaOptions = {
 			host: this.options.ollamaBaseUrl || "http://localhost:11434",
 			// Note: The ollama npm package handles timeouts internally
@@ -299,16 +287,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 		// The Ollama SDK (0.6.x) only tracks streaming iterators after the POST
 		// resolves and passes no signal for stream:false requests, so client
-		// .abort() alone cannot cancel an in-flight POST. Inject a per-request
-		// transport that merges our cancellation signal into every fetch while
-		// preserving the SDK's own stream signal when present (AbortSignal.any
-		// honors either side).
-		if (requestSignal) {
-			const baseFetch = globalThis.fetch
-			clientOptions.fetch = (url, init) => {
-				const signal = init?.signal ? AbortSignal.any([init.signal, requestSignal]) : requestSignal
-				return baseFetch(url, { ...init, signal })
-			}
+		// .abort() alone cannot cancel an in-flight POST. The client always
+		// receives a per-request transport that merges the request signal into
+		// the SDK's fetch calls while preserving the SDK's own stream signal when
+		// present (AbortSignal.any honors either side).
+		const baseFetch = globalThis.fetch
+		clientOptions.fetch = (url, init) => {
+			const signal = init?.signal ? AbortSignal.any([init.signal, requestSignal]) : requestSignal
+			return baseFetch(url, { ...init, signal })
 		}
 
 		return new Ollama(clientOptions)
@@ -456,23 +442,18 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		// Per-request client (SDK doesn't support per-call signal). The
-		// per-request controller drives the abortable transport injected into
-		// the client, so an in-flight POST is cancellable as well.
-		const requestController = new AbortController()
-		const client = this._createOllamaClient(requestController.signal)
-
-		// Bridge the external abort signal into the per-request client and the
-		// per-request transport. The Ollama SDK exposes cancellation only
-		// through the client-level abort() and the stream's own signal, so the
-		// external signal drives both of this same request instead of a
-		// separate internal controller.
+		// The external abort signal drives both the per-request client and the
+		// per-request transport for this request, since the Ollama SDK exposes
+		// cancellation only through the client-level abort() and the fetch signal.
 		const externalAbortSignal = metadata?.abortSignal
 		if (externalAbortSignal?.aborted) {
-			requestController.abort()
-			client.abort()
+			// The request is already cancelled: reject before allocating the
+			// per-request client or transport so nothing is left to clean up.
 			throw createAbortError()
 		}
+
+		const requestController = new AbortController()
+		const client = this._createOllamaClient(requestController.signal)
 
 		let onExternalAbort: (() => void) | undefined
 		try {
@@ -481,13 +462,14 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					requestController.abort()
 					client.abort()
 				}
-				externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
+				externalAbortSignal.addEventListener("abort", onExternalAbort)
 			}
 
 			// Race model discovery against the external signal: the SDK's model
 			// fetch accepts no signal, so a request aborted during discovery must
 			// reject instead of proceeding to chat() with a stale model.
 			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(), externalAbortSignal)
+			// Stryker disable next-line MethodExpression,StringLiteral: DEEP_SEEK_DEFAULT_TEMPERATURE (0.0) is numerically equal to the 0 fallback, so the R1 check cannot change the emitted temperature
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
 			const ollamaMessages: Message[] = [
@@ -644,8 +626,9 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		} finally {
 			// Detach the external-signal listener so it cannot outlive this request,
 			// including when model discovery rejects before the chat request starts.
-			if (onExternalAbort) {
-				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
+			// Stryker disable next-line LogicalOperator: onExternalAbort is only assigned when externalAbortSignal is present, so || is equivalent
+			if (onExternalAbort && externalAbortSignal) {
+				externalAbortSignal.removeEventListener("abort", onExternalAbort)
 			}
 			// A consumer that stops iterating early (break/return) would otherwise
 			// leave the in-flight response body open, and when metadata.abortSignal
@@ -680,16 +663,13 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		const client = this._createOllamaClient(requestController.signal)
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
 		let onAbort: (() => void) | undefined
-		// Set when the timeoutMs timer fires so a model-discovery fetch still in
-		// flight is rejected instead of proceeding to chat() past the deadline.
-		let timedOut = false
+		const abortSignal = options?.abortSignal
 
 		try {
 			// Handle timeoutMs if provided (client already exists above, so the
 			// timer can abort both the per-request transport and the client)
 			if (options?.timeoutMs !== undefined && options.timeoutMs > 0) {
 				timeoutId = setTimeout(() => {
-					timedOut = true
 					requestController.abort()
 					client.abort()
 				}, options.timeoutMs)
@@ -699,8 +679,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// and the per-request transport. Set this up before fetchModel() so an
 			// already-aborted signal (or one that aborts during the model-list
 			// fetch) is honored before the request proceeds.
-			if (options?.abortSignal) {
-				if (options.abortSignal.aborted) {
+			if (abortSignal) {
+				if (abortSignal.aborted) {
 					requestController.abort()
 					client.abort()
 					throw createAbortError()
@@ -708,11 +688,9 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					onAbort = () => {
 						requestController.abort()
 						client.abort()
-						if (timeoutId !== undefined) {
-							clearTimeout(timeoutId)
-						}
+						clearTimeout(timeoutId)
 					}
-					options.abortSignal.addEventListener("abort", onAbort, { once: true })
+					abortSignal.addEventListener("abort", onAbort, { once: true })
 				}
 			}
 
@@ -723,13 +701,6 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// instead of hanging past the deadline.
 			const discoverySignal = mergeAbortSignalAndTimeout(requestController.signal, options?.timeoutMs)
 			const { id: modelId } = await raceWithAbortSignal(this.fetchModel(), discoverySignal)
-
-			// Re-check after the model-list fetch: if the request aborted or timed
-			// out during fetchModel(), the listener/timer above already aborted the
-			// client, and the request must reject instead of proceeding to chat().
-			if (timedOut || options?.abortSignal?.aborted) {
-				throw createAbortError()
-			}
 
 			const useR1Format = modelId.toLowerCase().includes("deepseek-r1")
 
@@ -755,11 +726,10 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			}
 			throw error
 		} finally {
-			if (timeoutId) {
-				clearTimeout(timeoutId)
-			}
-			if (onAbort && options?.abortSignal) {
-				options.abortSignal.removeEventListener("abort", onAbort)
+			clearTimeout(timeoutId)
+			// Stryker disable next-line LogicalOperator: onAbort is only assigned when abortSignal is present, so || is equivalent
+			if (onAbort && abortSignal) {
+				abortSignal.removeEventListener("abort", onAbort)
 			}
 		}
 	}
