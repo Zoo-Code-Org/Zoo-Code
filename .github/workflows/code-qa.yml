@@ -90,7 +90,7 @@ jobs:
               run: pnpm lint
             - name: Check types
               run: pnpm check-types
-            - name: Model-check concurrent task lifecycle
+            - name: Model-check task lifecycle protocols
               run: pnpm lifecycle:model-check
 
     build-vsix:
