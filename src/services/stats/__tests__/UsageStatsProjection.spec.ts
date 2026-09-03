@@ -1,4 +1,5 @@
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types"
 import * as fs from "fs"
 import * as os from "os"
 
@@ -35,7 +36,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-20250514",
 		mode: "code",
 		usage: {
@@ -189,7 +190,7 @@ describe("UsageStatsProjection", () => {
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
 						outputTokens: { value: 500, source: "provider" },
@@ -200,7 +201,7 @@ describe("UsageStatsProjection", () => {
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
 					occurredAt: "2026-07-20T10:00:00.000Z",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					usage: {
 						inputTokens: { value: 2000, source: "provider" },
 						outputTokens: { value: 1000, source: "provider" },
@@ -595,7 +596,7 @@ describe("UsageStatsProjection", () => {
 				eventId: "evt-1",
 				idempotencyKey: "idem-1",
 				occurredAt: new Date().toISOString(),
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -769,14 +770,14 @@ describe("UsageStatsProjection", () => {
 
 	describe("stable bucket-key serialization", () => {
 		it("should produce consistent keys regardless of insertion order", () => {
-			const key1 = { day: "2026-07-19", provider: "anthropic" }
-			const key2 = { provider: "anthropic", day: "2026-07-19" }
+			const key1 = { day: "2026-07-19", provider: providerIdentifiers.anthropic }
+			const key2 = { provider: providerIdentifiers.anthropic, day: "2026-07-19" }
 			expect(serializeBucketKey(key1)).toBe(serializeBucketKey(key2))
 		})
 
 		it("should produce unique keys for different values", () => {
-			const key1 = { day: "2026-07-19", provider: "anthropic" }
-			const key2 = { day: "2026-07-19", provider: "openai" }
+			const key1 = { day: "2026-07-19", provider: providerIdentifiers.anthropic }
+			const key2 = { day: "2026-07-19", provider: providerIdentifiers.openai }
 			expect(serializeBucketKey(key1)).not.toBe(serializeBucketKey(key2))
 		})
 
@@ -790,8 +791,8 @@ describe("UsageStatsProjection", () => {
 		})
 
 		it("should handle three-axis keys consistently", () => {
-			const key1 = { day: "2026-07-19", provider: "anthropic", model: "claude-sonnet-4" }
-			const key2 = { model: "claude-sonnet-4", day: "2026-07-19", provider: "anthropic" }
+			const key1 = { day: "2026-07-19", provider: providerIdentifiers.anthropic, model: "claude-sonnet-4" }
+			const key2 = { model: "claude-sonnet-4", day: "2026-07-19", provider: providerIdentifiers.anthropic }
 			expect(serializeBucketKey(key1)).toBe(serializeBucketKey(key2))
 		})
 	})
@@ -919,7 +920,7 @@ describe("UsageStatsProjection", () => {
 			const event = makeEvent({
 				eventId: "evt-custom-1",
 				idempotencyKey: "idem-custom-1",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 10000, source: "provider" },
@@ -950,7 +951,7 @@ describe("UsageStatsProjection", () => {
 			const event = makeEvent({
 				eventId: "evt-custom-2",
 				idempotencyKey: "idem-custom-2",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 10000, source: "provider" },
@@ -977,7 +978,7 @@ describe("UsageStatsProjection", () => {
 			const event = makeEvent({
 				eventId: "evt-anthropic-1",
 				idempotencyKey: "idem-anthropic-1",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				usage: {
 					inputTokens: { value: 10000, source: "provider" },
@@ -1008,7 +1009,7 @@ describe("UsageStatsProjection", () => {
 			const event = makeEvent({
 				eventId: "evt-custom-3",
 				idempotencyKey: "idem-custom-3",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 20000, source: "provider" },
@@ -1044,7 +1045,7 @@ describe("UsageStatsProjection", () => {
 				eventId: "evt-custom-day-1",
 				idempotencyKey: "idem-custom-day-1",
 				occurredAt: "2026-08-20T10:00:00.000Z",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -1149,7 +1150,7 @@ describe("UsageStatsProjection", () => {
 			const evtPriced = makeEvent({
 				eventId: "evt-priced",
 				idempotencyKey: "idem-priced",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "priced-custom-model",
 				usage: {
 					inputTokens: { value: 10000, source: "provider" },
@@ -1162,7 +1163,7 @@ describe("UsageStatsProjection", () => {
 			const evtUnpriced = makeEvent({
 				eventId: "evt-unpriced",
 				idempotencyKey: "idem-unpriced",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "unpriced-custom-model",
 				usage: {
 					inputTokens: { value: 50000, source: "provider" },
@@ -1208,7 +1209,7 @@ describe("UsageStatsProjection", () => {
 				eventId: "evt-p1",
 				idempotencyKey: "idem-p1",
 				occurredAt: "2026-07-19T10:00:00.000Z",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "model-1",
 				usage: {
 					inputTokens: { value: 10000, source: "provider" },
@@ -1220,7 +1221,7 @@ describe("UsageStatsProjection", () => {
 				eventId: "evt-p2",
 				idempotencyKey: "idem-p2",
 				occurredAt: "2026-07-20T10:00:00.000Z",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				usage: {
 					inputTokens: { value: 20000, source: "provider" },

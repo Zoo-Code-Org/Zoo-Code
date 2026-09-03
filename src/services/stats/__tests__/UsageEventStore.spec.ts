@@ -1,4 +1,5 @@
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types"
 import * as fs from "fs/promises"
 import * as os from "os"
 
@@ -31,7 +32,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-20250514",
 		mode: "code",
 		usage: {

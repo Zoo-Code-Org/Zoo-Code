@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import { providerIdentifiers } from "@roo-code/types"
 import * as path from "path"
 import * as os from "os"
 
@@ -91,7 +92,11 @@ export function buildCustomPricingMap(contextProxy: {
 	const map: CustomModelPricingMap = new Map()
 
 	// OpenAI Compatible provider: openAiCustomModelInfo + openAiModelId
-	if (settings.apiProvider === "openai" && settings.openAiModelId && settings.openAiCustomModelInfo) {
+	if (
+		settings.apiProvider === providerIdentifiers.openai &&
+		settings.openAiModelId &&
+		settings.openAiCustomModelInfo
+	) {
 		const info = settings.openAiCustomModelInfo
 		const pricing: CustomModelPricing = {}
 		if (typeof info.inputPrice === "number") pricing.inputPrice = info.inputPrice

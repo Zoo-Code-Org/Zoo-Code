@@ -16,6 +16,7 @@ import {
 	HeatmapSnapshot,
 	StatsBucketDelta,
 } from "../usage-stats.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ const validSessionSummary: DashboardSessionSummary = {
 	totalCost: 0.15,
 	totalTokens: 12000,
 	model: "claude-sonnet-4-20250514",
-	provider: "anthropic",
+	provider: providerIdentifiers.anthropic,
 	lastActivity: 1722259200000,
 	eventCount: 5,
 }
@@ -76,7 +77,7 @@ const validTaskSummary: DashboardTaskSummary = {
 	inputTokens: 8000,
 	outputTokens: 4000,
 	model: "claude-sonnet-4-20250514",
-	provider: "anthropic",
+	provider: providerIdentifiers.anthropic,
 	models: ["claude-sonnet-4-20250514"],
 	modes: ["code"],
 	eventCount: 5,

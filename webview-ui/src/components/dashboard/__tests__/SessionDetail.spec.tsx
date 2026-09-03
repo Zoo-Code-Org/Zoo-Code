@@ -44,7 +44,7 @@ function makeDetail(overrides: Partial<SessionDetailType> = {}): SessionDetailTy
 		title: "Test session",
 		timestamp: Date.now(),
 		model: "gpt-4",
-		provider: "openai",
+		provider: providerIdentifiers.openai,
 		mode: "code",
 		models: ["gpt-4"],
 		modes: ["code"],

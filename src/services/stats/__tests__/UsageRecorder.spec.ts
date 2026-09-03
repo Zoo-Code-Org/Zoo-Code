@@ -3,6 +3,7 @@
 // Tests for UsageRecorder finalization/idempotency helpers.
 
 import { describe, it, expect, vi } from "vitest"
+import { providerIdentifiers } from "@roo-code/types"
 
 import { UsageRecorder } from "../UsageRecorder"
 
@@ -11,7 +12,7 @@ import { UsageRecorder } from "../UsageRecorder"
 function makeContext(overrides: Partial<Parameters<UsageRecorder["finalizeUsageEvent"]>[2]> = {}) {
 	return {
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-5",
 		mode: "code",
 		attempt: 1,

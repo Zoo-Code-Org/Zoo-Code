@@ -1,4 +1,5 @@
 import type * as vscode from "vscode"
+import { providerIdentifiers } from "@roo-code/types"
 
 import type { HistoryItem, UsageEventV1 } from "@roo-code/types"
 
@@ -66,7 +67,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet",
 		mode: "code",
 		usage: {
@@ -562,7 +563,7 @@ describe("DashboardTaskProjection", () => {
 						totalTokens: 15_000,
 						eventCount: 1,
 						model: "my-custom-model",
-						provider: "openai",
+						provider: providerIdentifiers.openai,
 					}),
 				],
 			]),
@@ -581,7 +582,7 @@ describe("DashboardTaskProjection", () => {
 			[
 				{
 					taskId: "task-custom",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					model: "my-custom-model",
 					inputTokens: 10_000,
 					outputTokens: 5_000,

@@ -3,6 +3,7 @@
 // Tests for Feature 1: Recalculate cost for old usage events at query time.
 
 import { describe, it, expect } from "vitest"
+import { providerIdentifiers } from "@roo-code/types"
 
 import type { UsageEventV1 } from "@roo-code/types"
 
@@ -29,7 +30,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-5",
 		mode: "code",
 		usage: {
@@ -121,7 +122,7 @@ describe("costRecalculation", () => {
 
 		it("should compute cost for Anthropic event with missing costUsd", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },
@@ -136,7 +137,7 @@ describe("costRecalculation", () => {
 
 		it("should compute cost for OpenAI event with missing costUsd", () => {
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "gpt-5.6-sol",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -164,7 +165,7 @@ describe("costRecalculation", () => {
 
 		it("should return 0 when all token counts are zero", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					// All tokens zero/missing
@@ -175,7 +176,7 @@ describe("costRecalculation", () => {
 
 		it("should include cache costs for Anthropic-semantic providers", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 0, source: "provider" },
@@ -196,7 +197,7 @@ describe("costRecalculation", () => {
 			// Fix: costRecalculation.ts maps "openai-codex" → openAiNativeModels
 			// so users see the equivalent API cost.
 			const event = makeEvent({
-				provider: "openai-codex",
+				provider: providerIdentifiers.openaiCodex,
 				model: "gpt-5.6-sol",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -214,7 +215,7 @@ describe("costRecalculation", () => {
 
 		it("should compute non-zero cost for openai-codex with output tokens", () => {
 			const event = makeEvent({
-				provider: "openai-codex",
+				provider: providerIdentifiers.openaiCodex,
 				model: "gpt-5.6-sol",
 				usage: {
 					// Use 100K each (200K total < 272K long-context threshold)
@@ -232,7 +233,7 @@ describe("costRecalculation", () => {
 
 		it("should compute non-zero cost for anthropic event with missing costUsd", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-3-5-sonnet-20241022",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -249,7 +250,7 @@ describe("costRecalculation", () => {
 
 		it("should compute non-zero cost for anthropic with input + output tokens", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-3-5-sonnet-20241022",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -267,7 +268,7 @@ describe("costRecalculation", () => {
 			// Vertex Gemini uses OpenAI semantics: inputTokens includes cacheReadTokens and cacheWriteTokens.
 			// gemini-3.7-flash: inputPrice=$0.75/1M, outputPrice=$3.75/1M, cacheReadsPrice=$0.075/1M, cacheWritesPrice=$0.5/1M
 			const event = makeEvent({
-				provider: "vertex",
+				provider: providerIdentifiers.vertex,
 				model: "gemini-3.7-flash",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },
@@ -287,7 +288,7 @@ describe("costRecalculation", () => {
 			// Vertex Claude uses Anthropic semantics: inputTokens does NOT include cached tokens.
 			// claude-sonnet-4-5@20250929: inputPrice=$3.0/1M, outputPrice=$15.0/1M, cacheReadsPrice=$0.30/1M, cacheWritesPrice=$3.75/1M
 			const event = makeEvent({
-				provider: "vertex",
+				provider: providerIdentifiers.vertex,
 				model: "claude-sonnet-4-5@20250929",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -316,7 +317,7 @@ describe("costRecalculation", () => {
 
 		it("should compute cost when costUsd is missing", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },
@@ -341,7 +342,7 @@ describe("costRecalculation", () => {
 
 		it("should return 0 when costUsd is undefined (not just missing value)", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -358,7 +359,7 @@ describe("costRecalculation", () => {
 			// getEffectiveCost must fall through to computeEventCost and return
 			// a non-zero value from openAiNativeModels pricing.
 			const event = makeEvent({
-				provider: "openai-codex",
+				provider: providerIdentifiers.openaiCodex,
 				model: "gpt-5.6-sol",
 				usage: {
 					inputTokens: { value: 100_000, source: "provider" },
@@ -378,7 +379,7 @@ describe("costRecalculation", () => {
 	describe("computeCacheDiscountBase", () => {
 		it("should return 0 when cacheReadTokens are server-reported", () => {
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -403,7 +404,7 @@ describe("costRecalculation", () => {
 		it("should return 0 when the model has no cache-read pricing", () => {
 			// mistralModels["magistral-medium-latest"] has inputPrice but no cacheReadsPrice.
 			const event = makeEvent({
-				provider: "mistral",
+				provider: providerIdentifiers.mistral,
 				model: "magistral-medium-latest",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -416,7 +417,7 @@ describe("costRecalculation", () => {
 			// Bug 1 fix: anthropic reports cache. cacheRead=0 is a TRUE cache miss,
 			// not "unreported". The slider must NOT vary the cost.
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -429,7 +430,7 @@ describe("costRecalculation", () => {
 		it("should return 0 when inputPrice is not cheaper than cacheReadsPrice", () => {
 			// A synthetic event with zero input tokens always has a zero base.
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 0, source: "provider" },
@@ -446,7 +447,7 @@ describe("costRecalculation", () => {
 			// Bug 1: anthropic reports cache. cacheRead=0 is a true cache miss.
 			// The slider must NOT vary the cost, and tokens must NOT be estimated.
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -491,7 +492,7 @@ describe("costRecalculation", () => {
 			// This is tested at the computeEventDelta level in UsageAggregator.spec.ts.
 			// Here we verify the discount base is 0, which prevents estimation.
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -561,16 +562,16 @@ describe("costRecalculation", () => {
 			// define cacheReadsPrice, the provider's API doesn't report
 			// cacheReadTokens. The slider should work for these models.
 			const pricing = { inputPrice: 2.0, cacheReadsPrice: 0.5 }
-			expect(providerReportsCache("openai", "my-custom-model", pricing)).toBe(false)
+			expect(providerReportsCache(providerIdentifiers.openai, "my-custom-model", pricing)).toBe(false)
 		})
 
 		it("providerReportsCache should return false for custom model without cacheReadsPrice", () => {
 			const pricing = { inputPrice: 2.0, outputPrice: 6.0 }
-			expect(providerReportsCache("openai", "my-custom-model", pricing)).toBe(false)
+			expect(providerReportsCache(providerIdentifiers.openai, "my-custom-model", pricing)).toBe(false)
 		})
 
 		it("providerReportsCache should return false for custom model with undefined modelPricing", () => {
-			expect(providerReportsCache("openai", "my-custom-model", undefined)).toBe(false)
+			expect(providerReportsCache(providerIdentifiers.openai, "my-custom-model", undefined)).toBe(false)
 		})
 
 		it("computeCacheDiscountBase should return positive discount for custom model with cacheReadsPrice (non-reporting)", () => {
@@ -578,7 +579,7 @@ describe("costRecalculation", () => {
 			// → discountBase = (inputTokens/1M) × (inputPrice − cacheReadsPrice)
 			// = (1000/1M) × (2.0 − 0.5) = 0.001 × 1.5 = 0.0015
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				modelPricing: { inputPrice: 2.0, outputPrice: 6.0, cacheReadsPrice: 0.5 },
 				usage: {
@@ -594,7 +595,7 @@ describe("costRecalculation", () => {
 			// but computeCacheDiscountBase guard checks `typeof cacheReadsPrice !== "number"`
 			// which fails → returns 0
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				modelPricing: { inputPrice: 2.0, outputPrice: 6.0 },
 				usage: {
@@ -610,7 +611,7 @@ describe("costRecalculation", () => {
 			// OpenAI semantic: inputTokens includes cached tokens
 			// cost = (1000 / 1M) * 2.0 + (500 / 1M) * 6.0 = 0.002 + 0.003 = 0.005
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				modelPricing: { inputPrice: 2.0, outputPrice: 6.0, cacheReadsPrice: 0.5 },
 				usage: {
@@ -624,7 +625,7 @@ describe("costRecalculation", () => {
 
 		it("getEffectiveCost should use modelPricing when costUsd is missing", () => {
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				modelPricing: { inputPrice: 2.0, outputPrice: 6.0 },
 				usage: {
@@ -642,7 +643,7 @@ describe("costRecalculation", () => {
 			// Even if the event carries modelPricing, the static registry
 			// value must be used.
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-5",
 				modelPricing: { inputPrice: 99.0, outputPrice: 99.0, cacheReadsPrice: 99.0 },
 				usage: {
@@ -687,7 +688,7 @@ describe("costRecalculation", () => {
 			// Custom model NOT in static registry → providerReportsCache returns false
 			// → discountBase = (1_000_000/1M) × (2.0 − 0.5) = 1.5
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				// modelPricing intentionally absent — simulating post-revert events
 				usage: {
@@ -703,7 +704,7 @@ describe("costRecalculation", () => {
 			// Custom model NOT in static registry → providerReportsCache returns false
 			// → discountBase = (1_000_000/1M) × (2.0 − 0.5) = 1.5
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-reporting-model",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },
@@ -716,7 +717,7 @@ describe("costRecalculation", () => {
 
 		it("computeCacheDiscountBase should return 0 when customPricing has no cacheReadsPrice", () => {
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },
@@ -730,7 +731,7 @@ describe("costRecalculation", () => {
 
 		it("computeCacheDiscountBase should return 0 when customPricing is absent", () => {
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },
@@ -743,7 +744,7 @@ describe("costRecalculation", () => {
 
 		it("getEffectiveCost should use customPricing when costUsd is missing", () => {
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -766,7 +767,7 @@ describe("costRecalculation", () => {
 			// inputPrice=3.0, cacheReadsPrice=0.3 (same as anthropic, but custom)
 			// inputTokens=1_000_000, no costUsd, no modelPricing on event
 			const event = makeEvent({
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 1_000_000, source: "provider" },

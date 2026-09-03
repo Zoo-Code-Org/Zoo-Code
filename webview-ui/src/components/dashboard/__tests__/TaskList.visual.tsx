@@ -26,7 +26,7 @@ function makeTasks(count: number): DashboardTaskSummary[] {
 		inputTokens: 700 * (i + 1),
 		outputTokens: 300 * (i + 1),
 		model: "claude-sonnet-4-20250514",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		models: ["claude-sonnet-4-20250514"],
 		modes: ["code"],
 		eventCount: i + 1,

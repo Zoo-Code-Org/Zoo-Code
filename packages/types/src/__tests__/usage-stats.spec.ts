@@ -9,6 +9,7 @@ import {
 	StatsSnapshot,
 	DashboardTaskSummary,
 } from "../usage-stats.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
 
 describe("usage-stats schemas", () => {
 	// ── Enums ────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ describe("usage-stats schemas", () => {
 			status: "completed",
 			attempt: 1,
 			taskId: "task-001",
-			provider: "anthropic",
+			provider: providerIdentifiers.anthropic,
 			model: "claude-sonnet-4-20250514",
 			mode: "code",
 			usage: {
@@ -345,7 +346,7 @@ describe("usage-stats schemas", () => {
 			inputTokens: 8000,
 			outputTokens: 4000,
 			model: "claude-sonnet-4-20250514",
-			provider: "anthropic",
+			provider: providerIdentifiers.anthropic,
 			models: ["claude-sonnet-4-20250514", "gpt-4"],
 			modes: ["code", "architect"],
 			eventCount: 5,

@@ -1,4 +1,5 @@
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types"
 import * as fs from "fs"
 import * as os from "os"
 
@@ -27,7 +28,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-20250514",
 		mode: "code",
 		usage: {
@@ -83,7 +84,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -94,7 +95,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					model: "gpt-4o",
 					usage: {
 						inputTokens: { value: 2000, source: "provider" },
@@ -105,7 +106,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 500, source: "provider" },
@@ -145,7 +146,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
 						outputTokens: { value: 500, source: "provider" },
@@ -155,7 +156,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					usage: {
 						inputTokens: { value: 2000, source: "provider" },
 						outputTokens: { value: 1000, source: "provider" },
@@ -319,7 +320,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
 					status: "completed",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					usage: {
 						inputTokens: { value: 3000, source: "provider" },
 						outputTokens: { value: 1500, source: "provider" },
@@ -456,7 +457,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-cr-1",
 					idempotencyKey: "idem-cr-1",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					model: "gpt-4o",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -467,7 +468,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-cr-2",
 					idempotencyKey: "idem-cr-2",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					model: "gpt-4o",
 					usage: {
 						inputTokens: { value: 2000, source: "provider" },
@@ -505,7 +506,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-cr-3",
 					idempotencyKey: "idem-cr-3",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -517,7 +518,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-cr-4",
 					idempotencyKey: "idem-cr-4",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 2000, source: "provider" },
@@ -560,7 +561,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-cr-5",
 					idempotencyKey: "idem-cr-5",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -572,7 +573,7 @@ describe("Dashboard Stats Performance (ST-1: Rollup-backed Read Path)", () => {
 				makeEvent({
 					eventId: "evt-cr-6",
 					idempotencyKey: "idem-cr-6",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },

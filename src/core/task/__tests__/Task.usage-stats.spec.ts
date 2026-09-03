@@ -7,6 +7,7 @@
 // - Store errors do not affect existing task results
 
 import * as os from "os"
+import { providerIdentifiers } from "@roo-code/types"
 import * as path from "path"
 import * as vscode from "vscode"
 
@@ -210,7 +211,7 @@ function makeMockExtensionContext(): vscode.ExtensionContext {
 
 function makeMockApiConfig(): ProviderSettings {
 	return {
-		apiProvider: "anthropic",
+		apiProvider: providerIdentifiers.anthropic,
 		apiModelId: "claude-3-5-sonnet-20241022",
 		apiKey: "test-api-key",
 	}
@@ -230,7 +231,7 @@ function makeMockOutputChannel() {
 function makeRecordingContext(overrides?: Partial<UsageRecordingContext>): UsageRecordingContext {
 	return {
 		taskId: "test-task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-3-5-sonnet-20241022",
 		mode: "code",
 		attempt: 0,

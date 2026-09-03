@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest"
+import { providerIdentifiers } from "@roo-code/types"
 
 import type { UsageEventV1, StatsQuery, StatsSnapshot } from "@roo-code/types"
 
@@ -28,7 +29,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-20250514",
 		mode: "code",
 		usage: {
@@ -203,9 +204,9 @@ describe("UsageAggregator", () => {
 	describe("query - provider/model/mode grouping", () => {
 		it("should group by provider", () => {
 			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: "anthropic" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: "anthropic" }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: "openai" }),
+				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: providerIdentifiers.anthropic }),
+				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: providerIdentifiers.anthropic }),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: providerIdentifiers.openai }),
 			]
 			const query = makeQuery({ groupBy: ["provider"] })
 
@@ -218,13 +219,23 @@ describe("UsageAggregator", () => {
 
 		it("should separate provider buckets by endpoint domain", () => {
 			const events = [
-				makeEvent({ eventId: "evt-1", idempotencyKey: "idem-1", provider: "openai", endpoint: "kimi.ai" }),
-				makeEvent({ eventId: "evt-2", idempotencyKey: "idem-2", provider: "openai", endpoint: "kimi.ai" }),
-				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: "openai" }), // default endpoint
+				makeEvent({
+					eventId: "evt-1",
+					idempotencyKey: "idem-1",
+					provider: providerIdentifiers.openai,
+					endpoint: "kimi.ai",
+				}),
+				makeEvent({
+					eventId: "evt-2",
+					idempotencyKey: "idem-2",
+					provider: providerIdentifiers.openai,
+					endpoint: "kimi.ai",
+				}),
+				makeEvent({ eventId: "evt-3", idempotencyKey: "idem-3", provider: providerIdentifiers.openai }), // default endpoint
 				makeEvent({
 					eventId: "evt-4",
 					idempotencyKey: "idem-4",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					endpoint: "localhost:1234",
 				}),
 			]
@@ -269,19 +280,19 @@ describe("UsageAggregator", () => {
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 				}),
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 				}),
 				makeEvent({
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
 					occurredAt: "2026-07-20T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 				}),
 			]
 			const query = makeQuery({ groupBy: ["day", "provider"] })
@@ -297,21 +308,21 @@ describe("UsageAggregator", () => {
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 				}),
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-opus-4-20250514",
 				}),
 				makeEvent({
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					model: "gpt-4o",
 				}),
 			]
@@ -522,7 +533,7 @@ describe("UsageAggregator", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
 						totalTokens: { value: 1000, source: "provider" },
@@ -531,7 +542,7 @@ describe("UsageAggregator", () => {
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					usage: {
 						inputTokens: { value: 3000, source: "provider" },
 						totalTokens: { value: 3000, source: "provider" },
@@ -900,7 +911,7 @@ describe("UsageAggregator", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-5",
 					usage: {
 						inputTokens: { value: 1_000_000, source: "provider" },
@@ -928,19 +939,19 @@ describe("UsageAggregator", () => {
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
 					occurredAt: "2026-07-20T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 				}),
 				makeEvent({
 					eventId: "evt-2",
 					idempotencyKey: "idem-2",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 				}),
 				makeEvent({
 					eventId: "evt-3",
 					idempotencyKey: "idem-3",
 					occurredAt: "2026-07-19T10:00:00.000Z",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 				}),
 			]
 			const query = makeQuery({ groupBy: ["day", "provider"] })
@@ -1257,7 +1268,7 @@ describe("UsageAggregator", () => {
 			// Bug 1 fix: anthropic reports cache. cacheRead=0 is a true cache miss.
 			// The slider must NOT vary the cost.
 			const event = makeEvent({
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -1365,7 +1376,7 @@ describe("UsageAggregator", () => {
 		})
 
 		it("should compute provider bucket key with endpoint", () => {
-			const event = makeEvent({ provider: "openai", endpoint: "kimi.ai" })
+			const event = makeEvent({ provider: providerIdentifiers.openai, endpoint: "kimi.ai" })
 			const keys = computeGroupKeys(event, ["provider"], "Asia/Seoul")
 			expect(keys[0].provider).toBe("openai (kimi.ai)")
 		})
@@ -1373,7 +1384,7 @@ describe("UsageAggregator", () => {
 		it("should compute multi-axis keys (Cartesian product)", () => {
 			const event = makeEvent({
 				occurredAt: "2026-07-19T10:00:00.000Z",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 			})
 			const keys = computeGroupKeys(event, ["day", "provider", "model"], "Asia/Seoul")
@@ -1661,7 +1672,7 @@ describe("UsageAggregator", () => {
 		it("should produce the same results for each supported group axis", () => {
 			const event = makeEvent({
 				occurredAt: "2026-07-19T10:00:00.000Z",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				mode: "code",
 				status: "completed",

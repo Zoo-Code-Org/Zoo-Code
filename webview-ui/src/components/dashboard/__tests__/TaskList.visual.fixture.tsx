@@ -23,7 +23,7 @@ export function HierarchyFixture() {
 		inputTokens: 300,
 		outputTokens: 200,
 		model: "claude-sonnet-4-20250514",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		models: ["claude-sonnet-4-20250514"],
 		modes: ["code"],
 		eventCount: 1,

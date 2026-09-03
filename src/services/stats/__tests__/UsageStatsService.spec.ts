@@ -1,4 +1,5 @@
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types"
 import * as fs from "fs/promises"
 import * as os from "os"
 
@@ -36,7 +37,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-20250514",
 		mode: "code",
 		usage: {
@@ -332,7 +333,7 @@ describe("UsageStatsService", () => {
 				makeEvent({
 					eventId: "evt-1",
 					idempotencyKey: "idem-1",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1500, source: "provider" },
@@ -1260,7 +1261,7 @@ describe("UsageStatsService", () => {
 	describe("custom pricing refresh and coordinator notification", () => {
 		it("awaits refreshPricing during doInitialize so coordinator receives populated pricing", async () => {
 			const mockManager = {
-				listConfig: vi.fn().mockResolvedValue([{ name: "profile1", apiProvider: "openai" }]),
+				listConfig: vi.fn().mockResolvedValue([{ name: "profile1", apiProvider: providerIdentifiers.openai }]),
 				getProfile: vi.fn().mockResolvedValue({
 					openAiModelId: "custom-gpt",
 					openAiCustomModelInfo: { inputPrice: 2.5, outputPrice: 10.0 },
@@ -1281,7 +1282,7 @@ describe("UsageStatsService", () => {
 
 		it("calls coordinator.notifyUsageMutated when refreshPricing updates", async () => {
 			const mockManager = {
-				listConfig: vi.fn().mockResolvedValue([{ name: "profile1", apiProvider: "openai" }]),
+				listConfig: vi.fn().mockResolvedValue([{ name: "profile1", apiProvider: providerIdentifiers.openai }]),
 				getProfile: vi.fn().mockResolvedValue({
 					openAiModelId: "custom-gpt",
 					openAiCustomModelInfo: { inputPrice: 2.5, outputPrice: 10.0 },

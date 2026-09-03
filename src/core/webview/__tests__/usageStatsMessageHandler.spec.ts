@@ -1,5 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-floating-promises */
 import type { WebviewMessage, StatsQuery, StatsSnapshot, UsageEventV1 } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types"
 import type { ClineProvider } from "../ClineProvider"
 import type { UsageStatsService, JsonExport } from "../../../services/stats"
 import { StatsServiceError } from "../../../services/stats"
@@ -675,7 +676,7 @@ describe("usageStatsMessageHandler", () => {
 			status: "completed",
 			attempt: 1,
 			taskId: "task-001",
-			provider: "openai",
+			provider: providerIdentifiers.openai,
 			model: "gpt-4",
 			mode: "code",
 			usage: {
@@ -737,7 +738,7 @@ describe("usageStatsMessageHandler", () => {
 					occurredAt: "2026-07-19T10:00:00.000Z",
 					model: "gpt-4",
 					mode: "code",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					usage: {
 						inputTokens: { value: 100, source: "provider" },
 						outputTokens: { value: 50, source: "provider" },
@@ -750,7 +751,7 @@ describe("usageStatsMessageHandler", () => {
 					occurredAt: "2026-07-19T11:00:00.000Z",
 					model: "claude-3",
 					mode: "architect",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					usage: {
 						inputTokens: { value: 200, source: "provider" },
 						outputTokens: { value: 100, source: "provider" },
@@ -787,7 +788,7 @@ describe("usageStatsMessageHandler", () => {
 			expect(sessions?.[0]).toMatchObject({
 				taskId: "task-B",
 				model: "claude-3",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				mode: "architect",
 				models: ["claude-3"],
 				modes: ["architect"],
@@ -876,12 +877,12 @@ describe("usageStatsMessageHandler", () => {
 			const events: UsageEventV1[] = [
 				makeEvent({
 					taskId: "task-A",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					occurredAt: "2026-07-19T10:00:00.000Z",
 				}),
 				makeEvent({
 					taskId: "task-B",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					occurredAt: "2026-07-19T11:00:00.000Z",
 				}),
 			]
@@ -894,7 +895,7 @@ describe("usageStatsMessageHandler", () => {
 				type: "getDashboardSessions",
 				requestId: "req-sessions-5",
 				usageStatsQuery: validQuery,
-				dashboardSessionFilters: { provider: "anthropic" },
+				dashboardSessionFilters: { provider: providerIdentifiers.anthropic },
 			}
 
 			await handleGetDashboardSessions(provider, message)
@@ -1019,7 +1020,7 @@ describe("usageStatsMessageHandler", () => {
 			status: "completed",
 			attempt: 1,
 			taskId: "task-001",
-			provider: "openai",
+			provider: providerIdentifiers.openai,
 			model: "gpt-4",
 			mode: "code",
 			usage: {
@@ -1757,7 +1758,7 @@ describe("usageStatsMessageHandler", () => {
 				getCoordinator: () => coordinator,
 			} as any)
 			;(provider as any)._streamSink = { marker: "sink" }
-	
+
 			await handleGetDashboardTaskDetail(provider, {
 				type: "getDashboardTaskDetail",
 				requestId: "task-detail-2",
@@ -1835,7 +1836,7 @@ describe("usageStatsMessageHandler", () => {
 				getCoordinator: () => coordinator,
 			} as any)
 			;(provider as any)._streamSink = { marker: "sink" }
-	
+
 			await handleGetDashboardTaskPage(provider, {
 				type: "getDashboardTaskPage",
 				requestId: "task-page-2",

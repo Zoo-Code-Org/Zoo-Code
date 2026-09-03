@@ -158,11 +158,6 @@ export class TaskHistoryStore {
 			this.fsWatcher.close()
 			this.fsWatcher = null
 		}
-
-		// Synchronously flush the index (best-effort)
-		this.flushIndex().catch((err) => {
-			console.error("[TaskHistoryStore] Error flushing index on dispose:", err)
-		})
 	}
 
 	// ────────────────────────────── Reads ──────────────────────────────
@@ -282,8 +277,6 @@ export class TaskHistoryStore {
 				// File may already be deleted
 			}
 
-			this.scheduleIndexWrite()
-
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
 				await this.onWrite(this.getAll())
@@ -307,8 +300,6 @@ export class TaskHistoryStore {
 					// File may already be deleted
 				}
 			}
-
-			this.scheduleIndexWrite()
 
 			// Call onWrite callback inside the lock for serialized write-through
 			if (this.onWrite) {
@@ -388,10 +379,6 @@ export class TaskHistoryStore {
 					this.cache.delete(taskId)
 					this.taskFileMtimes.delete(taskId)
 				}
-			}
-
-			if (changed) {
-				this.scheduleIndexWrite()
 			}
 		})
 	}
@@ -834,9 +821,6 @@ export class TaskHistoryStore {
 					this.cache.set(item.id, item)
 				}
 			}
-
-			// Write the index
-			await this.writeIndex()
 
 			// Repair any delegation inconsistencies introduced by the migrated entries.
 			// Run the lock-free core because migration already holds the store lock.

@@ -1,4 +1,5 @@
 import type { ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types"
 
 // ── Usage Stats: endpoint domain extraction ──────────────────────────────────
 
@@ -8,15 +9,15 @@ import type { ProviderSettings } from "@roo-code/types"
  * default, `endpoint` is left undefined to keep events clean.
  */
 const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
-	openai: "https://api.openai.com/v1",
-	"openai-native": "https://api.openai.com",
-	openrouter: "https://openrouter.ai/api/v1",
-	deepseek: "https://api.deepseek.com",
-	litellm: "http://localhost:4000",
-	ollama: "http://127.0.0.1:11434",
-	lmstudio: "http://localhost:1234/v1",
-	requesty: "https://router.requesty.ai/v1",
-	mimo: "https://token-plan-sgp.xiaomimimo.com/v1",
+	[providerIdentifiers.openai]: "https://api.openai.com/v1",
+	[providerIdentifiers.openaiNative]: "https://api.openai.com",
+	[providerIdentifiers.openrouter]: "https://openrouter.ai/api/v1",
+	[providerIdentifiers.deepseek]: "https://api.deepseek.com",
+	[providerIdentifiers.litellm]: "http://localhost:4000",
+	[providerIdentifiers.ollama]: "http://127.0.0.1:11434",
+	[providerIdentifiers.lmstudio]: "http://localhost:1234/v1",
+	[providerIdentifiers.requesty]: "https://router.requesty.ai/v1",
+	[providerIdentifiers.mimo]: "https://token-plan-sgp.xiaomimimo.com/v1",
 }
 
 /**
@@ -26,27 +27,27 @@ const PROVIDER_DEFAULT_BASE_URLS: Partial<Record<string, string>> = {
  */
 function getProviderBaseUrlField(provider: string, config: ProviderSettings): string | undefined {
 	switch (provider) {
-		case "anthropic":
+		case providerIdentifiers.anthropic:
 			return config.anthropicBaseUrl
-		case "openai":
+		case providerIdentifiers.openai:
 			return config.openAiBaseUrl
-		case "openai-native":
+		case providerIdentifiers.openaiNative:
 			return config.openAiNativeBaseUrl
-		case "openrouter":
+		case providerIdentifiers.openrouter:
 			return config.openRouterBaseUrl
-		case "deepseek":
+		case providerIdentifiers.deepseek:
 			return config.deepSeekBaseUrl
-		case "litellm":
+		case providerIdentifiers.litellm:
 			return config.litellmBaseUrl
-		case "ollama":
+		case providerIdentifiers.ollama:
 			return config.ollamaBaseUrl
-		case "lmstudio":
+		case providerIdentifiers.lmstudio:
 			return config.lmStudioBaseUrl
-		case "requesty":
+		case providerIdentifiers.requesty:
 			return config.requestyBaseUrl
-		case "mimo":
+		case providerIdentifiers.mimo:
 			return config.mimoBaseUrl
-		case "zoo-gateway":
+		case providerIdentifiers.zooGateway:
 			return config.zooGatewayBaseUrl
 		default:
 			return undefined
@@ -74,7 +75,7 @@ export function resolveEndpoint(config: ProviderSettings): string | undefined {
 	if (configuredUrl === defaultUrl) return undefined
 
 	// zoo-gateway default is dynamic — skip when it matches the derived default.
-	if (provider === "zoo-gateway") {
+	if (provider === providerIdentifiers.zooGateway) {
 		// The dynamic default is `${getZooCodeBaseUrl()}/api/gateway/v1`.
 		// We can't import getZooCodeBaseUrl here without a circular dependency,
 		// so we compare against the known suffix pattern. If the configured URL

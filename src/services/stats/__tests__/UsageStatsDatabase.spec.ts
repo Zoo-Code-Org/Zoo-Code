@@ -1,4 +1,5 @@
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types"
 import * as fs from "fs"
 import * as os from "os"
 
@@ -25,7 +26,7 @@ function makeEvent(overrides: Partial<UsageEventV1> = {}): UsageEventV1 {
 		status: "completed",
 		attempt: 1,
 		taskId: "task-001",
-		provider: "anthropic",
+		provider: providerIdentifiers.anthropic,
 		model: "claude-sonnet-4-20250514",
 		mode: "code",
 		usage: {
@@ -726,7 +727,7 @@ describe("UsageStatsDatabase", () => {
 				makeEvent({
 					eventId: "evt-v7-1",
 					idempotencyKey: "idem-v7-1",
-					provider: "openai",
+					provider: providerIdentifiers.openai,
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
 						outputTokens: { value: 500, source: "provider" },
@@ -778,7 +779,7 @@ describe("UsageStatsDatabase", () => {
 					eventId: "evt-v8-1",
 					idempotencyKey: "idem-v8-1",
 					taskId: "task-v8-1",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -840,7 +841,7 @@ describe("UsageStatsDatabase", () => {
 				eventId: "evt-v9-1",
 				idempotencyKey: "idem-v9-1",
 				taskId: "task-v9-1",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "gpt-4o",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -947,7 +948,7 @@ describe("UsageStatsDatabase", () => {
 				eventId: "evt-v9-3",
 				idempotencyKey: "idem-v9-3",
 				taskId: "task-v9-3",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "gpt-4o",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -1001,7 +1002,7 @@ describe("UsageStatsDatabase", () => {
 					eventId: "evt-cdb-1",
 					idempotencyKey: "idem-cdb-1",
 					taskId: "task-cdb-1",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -1016,7 +1017,7 @@ describe("UsageStatsDatabase", () => {
 					eventId: "evt-cdb-2",
 					idempotencyKey: "idem-cdb-2",
 					taskId: "task-cdb-2",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -1075,7 +1076,7 @@ describe("UsageStatsDatabase", () => {
 				makeEvent({
 					taskId: "task-A",
 					rootTaskId: "task-A",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					model: "claude-sonnet-4-20250514",
 					usage: {
 						inputTokens: { value: 1000, source: "provider" },
@@ -1201,7 +1202,7 @@ describe("UsageStatsDatabase", () => {
 				taskId: "child-task",
 				rootTaskId: "root-task",
 				occurredAt: "2026-08-03T10:00:00.000Z",
-				provider: "openrouter",
+				provider: providerIdentifiers.openrouter,
 				model: "model-child",
 				usage: {
 					totalTokens: { value: 321, source: "provider" },
@@ -1219,7 +1220,7 @@ describe("UsageStatsDatabase", () => {
 				totalTokens: 321,
 				eventCount: 1,
 				model: "model-child",
-				provider: "openrouter",
+				provider: providerIdentifiers.openrouter,
 			})
 			expect(taskRows.get("no-usage-task")).toEqual({
 				taskId: "no-usage-task",
@@ -1367,7 +1368,7 @@ describe("UsageStatsDatabase", () => {
 					eventCount: 3,
 					lastActivity: Date.parse("2026-08-02T12:00:00.000Z"),
 					model: "model-in-3",
-					provider: "anthropic",
+					provider: providerIdentifiers.anthropic,
 					cacheDiscountBase: 0,
 				})
 				// A task without in-range events stays a zero row.
@@ -2038,7 +2039,7 @@ describe("UsageStatsDatabase", () => {
 				eventId: "evt-rebuild-bd-1",
 				idempotencyKey: "idem-rebuild-bd-1",
 				rootTaskId: "task-rebuild-bd-1",
-				provider: "anthropic",
+				provider: providerIdentifiers.anthropic,
 				model: "claude-sonnet-4-20250514",
 				mode: "code",
 				occurredAt: "2026-07-30T10:00:00Z",
@@ -2214,7 +2215,7 @@ describe("UsageStatsDatabase", () => {
 			const event1 = makeEvent({
 				eventId: "evt-dt-1",
 				occurredAt: "2026-08-20T10:15:00.000Z",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 1000, source: "provider" },
@@ -2226,7 +2227,7 @@ describe("UsageStatsDatabase", () => {
 			const event2 = makeEvent({
 				eventId: "evt-dt-2",
 				occurredAt: "2026-08-20T10:45:00.000Z",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "my-custom-model",
 				usage: {
 					inputTokens: { value: 2000, source: "provider" },
@@ -2259,7 +2260,7 @@ describe("UsageStatsDatabase", () => {
 				eventId: "evt-it-1",
 				taskId: "task-token-test",
 				occurredAt: "2026-08-20T10:00:00.000Z",
-				provider: "openai",
+				provider: providerIdentifiers.openai,
 				model: "custom-token-model",
 				usage: {
 					inputTokens: { value: 5000, source: "provider" },

@@ -347,11 +347,6 @@ describe("extension.ts", () => {
 			const { activate } = await import("../extension")
 			await activate(mockContext)
 
-			const provider = (
-				ClineProvider as unknown as {
-					getVisibleInstance(): { postStateToWebviewWithoutClineMessages: ReturnType<typeof vi.fn> }
-				}
-			).getVisibleInstance()
 			provider.postStateToWebviewWithoutClineMessages.mockClear()
 			const refreshError = new Error("state refresh failed")
 			provider.postStateToWebviewWithoutClineMessages.mockRejectedValueOnce(refreshError)

@@ -13,6 +13,7 @@
 // computes a derived cost value at query/display time.
 
 import type { ModelInfo, UsageEventV1, ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers } from "@roo-code/types"
 
 // ── Custom Model Pricing (query-time) ──────────────────────────────────────
 
@@ -76,7 +77,7 @@ export async function buildCustomPricingMapFromAllProfiles(
 		const profiles = await providerSettingsManager.listConfig()
 		for (const entry of profiles) {
 			// Skip profiles without a provider or with non-openai providers
-			if (!entry.apiProvider || entry.apiProvider !== "openai") continue
+			if (!entry.apiProvider || entry.apiProvider !== providerIdentifiers.openai) continue
 
 			try {
 				const settings = await providerSettingsManager.getProfile({ name: entry.name })
@@ -139,29 +140,29 @@ import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/
  * task spec: "If pricing info is not available for the model, leave cost as 0").
  */
 const PROVIDER_MODEL_REGISTRIES: Record<string, Record<string, ModelInfo>> = {
-	anthropic: anthropicModels,
-	openai: openAiNativeModels,
-	"openai-native": openAiNativeModels,
+	[providerIdentifiers.anthropic]: anthropicModels,
+	[providerIdentifiers.openai]: openAiNativeModels,
+	[providerIdentifiers.openaiNative]: openAiNativeModels,
 	// openai-codex uses ChatGPT Plus/Pro subscription (no per-token billing),
 	// but we map to openAiNativeModels so users can see the equivalent API cost
 	// for comparison purposes. The actual charge is covered by the subscription.
-	"openai-codex": openAiNativeModels,
-	bedrock: bedrockModels,
-	deepseek: deepSeekModels,
-	fireworks: fireworksModels,
-	friendli: friendliModels,
-	gemini: geminiModels,
-	vertex: vertexModels,
-	mistral: mistralModels,
-	moonshot: moonshotModels,
-	minimax: minimaxModels,
-	mimo: mimoModels,
-	"qwen-code": qwenCodeModels,
-	sambanova: sambaNovaModels,
-	xai: xaiModels,
-	zai: { ...internationalZAiModels, ...mainlandZAiModels },
-	"vscode-llm": vscodeLlmModels,
-	"opencode-go": opencodeGoModels,
+	[providerIdentifiers.openaiCodex]: openAiNativeModels,
+	[providerIdentifiers.bedrock]: bedrockModels,
+	[providerIdentifiers.deepseek]: deepSeekModels,
+	[providerIdentifiers.fireworks]: fireworksModels,
+	[providerIdentifiers.friendli]: friendliModels,
+	[providerIdentifiers.gemini]: geminiModels,
+	[providerIdentifiers.vertex]: vertexModels,
+	[providerIdentifiers.mistral]: mistralModels,
+	[providerIdentifiers.moonshot]: moonshotModels,
+	[providerIdentifiers.minimax]: minimaxModels,
+	[providerIdentifiers.mimo]: mimoModels,
+	[providerIdentifiers.qwenCode]: qwenCodeModels,
+	[providerIdentifiers.sambanova]: sambaNovaModels,
+	[providerIdentifiers.xai]: xaiModels,
+	[providerIdentifiers.zai]: { ...internationalZAiModels, ...mainlandZAiModels },
+	[providerIdentifiers.vscodeLm]: vscodeLlmModels,
+	[providerIdentifiers.opencodeGo]: opencodeGoModels,
 }
 
 /**
@@ -181,7 +182,7 @@ const ANTHROPIC_SEMANTIC_PROVIDERS = new Set(["anthropic", "bedrock"])
 
 function isAnthropicSemantic(provider: string, model: string): boolean {
 	if (ANTHROPIC_SEMANTIC_PROVIDERS.has(provider)) return true
-	if (provider === "vertex") {
+	if (provider === providerIdentifiers.vertex) {
 		// Vertex AI serves both Gemini and Claude models.
 		// Gemini models use OpenAI semantics (inputTokens includes cached tokens).
 		// Claude models use Anthropic semantics (inputTokens excludes cached tokens).

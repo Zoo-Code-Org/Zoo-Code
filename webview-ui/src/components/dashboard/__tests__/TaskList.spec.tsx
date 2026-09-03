@@ -60,7 +60,7 @@ function makeTask(overrides: Partial<DashboardTaskSummary> = {}): DashboardTaskS
 		inputTokens: 1000,
 		outputTokens: 500,
 		model: "gpt-4",
-		provider: "openai",
+		provider: providerIdentifiers.openai,
 		models: ["gpt-4"],
 		modes: ["code"],
 		lastUsageAt: Date.now(),
