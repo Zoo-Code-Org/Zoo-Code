@@ -290,14 +290,14 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			for await (const chunk of completion) {
 				const delta = chunk.choices[0]?.delta
 
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
-
 				// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
 					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
 				}
 
 				// Emit raw tool call chunks - NativeToolCallParser handles state management.
