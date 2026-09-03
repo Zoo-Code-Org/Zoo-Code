@@ -29,6 +29,11 @@ interface DelegationProvider {
 	getTaskWithId(id: string): Promise<{ historyItem: HistoryItem }>
 	setPendingTaskAction(taskId: string, pendingAction: PendingTaskAction): Promise<void>
 	clearPendingTaskAction(taskId: string, actionId: string): Promise<boolean>
+	emitDelegatedTaskCompleted(
+		taskId: string,
+		tokenUsage: ReturnType<Task["getTokenUsage"]>,
+		toolUsage: Task["toolUsage"],
+	): void
 	reopenParentFromDelegation(params: {
 		parentTaskId: string
 		childTaskId: string
@@ -159,7 +164,12 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 									pushToolResult,
 								)
 								if (delegation === "delegated") {
-									await this.emitPublicTaskCompleted(task)
+									task.emitFinalTokenUsageUpdate()
+									provider.emitDelegatedTaskCompleted(
+										task.taskId,
+										task.getTokenUsage(),
+										task.toolUsage,
+									)
 								}
 								if (delegation !== "continue") return
 							} else {

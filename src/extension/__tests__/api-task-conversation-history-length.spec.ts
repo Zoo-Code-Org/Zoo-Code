@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as vscode from "vscode"
+import { RooCodeEventName } from "@roo-code/types"
 
 import { API } from "../api"
 import { ClineProvider } from "../../core/webview/ClineProvider"
@@ -17,6 +18,7 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let mockProvider: ClineProvider
 	let mockGetTaskWithId: ReturnType<typeof vi.fn>
+	let providerListeners: Map<string, (...args: unknown[]) => unknown>
 
 	beforeEach(() => {
 		mockOutputChannel = {
@@ -24,11 +26,15 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 		} as unknown as vscode.OutputChannel
 
 		mockGetTaskWithId = vi.fn()
+		providerListeners = new Map()
 
 		mockProvider = {
 			context: {} as vscode.ExtensionContext,
 			getTaskWithId: mockGetTaskWithId,
-			on: vi.fn(),
+			taskHistoryStore: { get: vi.fn() },
+			on: vi.fn((event: string, listener: (...args: unknown[]) => unknown) => {
+				providerListeners.set(event, listener)
+			}),
 		} as unknown as ClineProvider
 
 		api = new API(mockOutputChannel, mockProvider, undefined, true)
@@ -46,6 +52,17 @@ describe("API#getTaskApiConversationHistoryLength", () => {
 		mockGetTaskWithId.mockRejectedValue(new Error("Task not found"))
 
 		await expect(api.getTaskApiConversationHistoryLength("missing-task")).resolves.toBe(0)
+	})
+
+	it("forwards provider completion exactly once after a delegated child is disposed", async () => {
+		vi.mocked(mockProvider.taskHistoryStore.get).mockReturnValue({ parentTaskId: "parent-1" } as never)
+		const listener = vi.fn()
+		api.on(RooCodeEventName.TaskCompleted, listener)
+
+		await providerListeners.get(RooCodeEventName.TaskCompleted)?.("child-1", {}, {})
+
+		expect(listener).toHaveBeenCalledTimes(1)
+		expect(listener).toHaveBeenCalledWith("child-1", {}, {}, { isSubtask: true })
 	})
 
 	it("finds the expected persisted user and assistant turns in order", async () => {

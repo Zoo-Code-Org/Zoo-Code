@@ -506,6 +506,7 @@ describe("attemptCompletionTool", () => {
 					setPendingTaskAction: vi.fn().mockResolvedValue(undefined),
 					clearPendingTaskAction: vi.fn().mockResolvedValue(true),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+					emitDelegatedTaskCompleted: vi.fn(),
 				}
 
 				Object.assign(mockTask, {
@@ -548,6 +549,13 @@ describe("attemptCompletionTool", () => {
 				})
 				expect(mockTask.ask).not.toHaveBeenCalled()
 				expect(mockPushToolResult).toHaveBeenCalledWith("")
+				expect(mockProvider.emitDelegatedTaskCompleted).toHaveBeenCalledTimes(1)
+				expect(mockTask.emit).not.toHaveBeenCalledWith(
+					RooCodeEventName.TaskCompleted,
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+				)
 			})
 
 			it("does not delegate or emit completion when child history persistence fails", async () => {
@@ -832,6 +840,7 @@ describe("attemptCompletionTool", () => {
 						throw new Error(`unexpected task id ${id}`)
 					}),
 					reopenParentFromDelegation: vi.fn().mockResolvedValue(true),
+					emitDelegatedTaskCompleted: vi.fn(),
 				}
 
 				Object.assign(mockTask, {
@@ -859,6 +868,7 @@ describe("attemptCompletionTool", () => {
 				})
 				expect(mockTask.ask).not.toHaveBeenCalled()
 				expect(mockPushToolResult).toHaveBeenCalledWith("")
+				expect(mockProvider.emitDelegatedTaskCompleted).toHaveBeenCalledTimes(1)
 			})
 
 			it("does not resume the parent when the parent is active but awaiting a different child", async () => {

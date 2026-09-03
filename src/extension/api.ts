@@ -375,22 +375,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	}
 
 	private registerListeners(provider: ClineProvider) {
+		provider.on(RooCodeEventName.TaskCompleted, async (taskId, tokenUsage, toolUsage) => {
+			const historyItem = provider.taskHistoryStore.get(taskId)
+			this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage, {
+				isSubtask: !!historyItem?.parentTaskId,
+			})
+
+			await this.fileLog(
+				`[${new Date().toISOString()}] taskCompleted -> ${taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
+			)
+		})
+
 		provider.on(RooCodeEventName.TaskCreated, (task) => {
 			// Task Lifecycle
 
 			task.on(RooCodeEventName.TaskStarted, async () => {
 				this.emit(RooCodeEventName.TaskStarted, task.taskId)
 				await this.fileLog(`[${new Date().toISOString()}] taskStarted -> ${task.taskId}\n`)
-			})
-
-			task.on(RooCodeEventName.TaskCompleted, async (_, tokenUsage, toolUsage) => {
-				this.emit(RooCodeEventName.TaskCompleted, task.taskId, tokenUsage, toolUsage, {
-					isSubtask: !!task.parentTaskId,
-				})
-
-				await this.fileLog(
-					`[${new Date().toISOString()}] taskCompleted -> ${task.taskId} | ${JSON.stringify(tokenUsage, null, 2)} | ${JSON.stringify(toolUsage, null, 2)}\n`,
-				)
 			})
 
 			task.on(RooCodeEventName.TaskAborted, () => {
