@@ -19,6 +19,8 @@ export {
 	decideProviderHandoffProfile,
 	getProviderHandoffActivationOptions,
 	PRODUCTION_PROVIDER_HANDOFF_POLICY,
+	publishProviderHandoffState,
+	shouldPublishProviderHandoffState,
 	type ProviderHandoffPolicy,
 	type ProviderHandoffProfileDecision,
 	type ProviderProfileRef,

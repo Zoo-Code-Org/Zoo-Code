@@ -644,6 +644,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "ask-profile")
+			expect(setValueSpy).toHaveBeenCalledWith(
+				"listApiConfigMeta",
+				expect.arrayContaining([expect.objectContaining({ name: "ask-profile", id: "ask-id" })]),
+			)
+			expect(setValueSpy.mock.calls.filter(([key]) => key === "listApiConfigMeta")).toHaveLength(2)
 			expect(setProviderSettingsSpy).toHaveBeenCalledWith(
 				expect.objectContaining({ openRouterModelId: "openai/gpt-4.1-mini" }),
 			)
@@ -659,6 +664,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			unrelatedTask["_taskMode"] = "code" as Mode
 			await provider.addClineToStack(unrelatedTask)
 			await provider.contextProxy.setValue("currentApiConfigName", "test-config")
+			provider["providerSettingsManager"].listConfig = vi.fn().mockResolvedValue([
+				{ name: "other-config", id: "other-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.openrouter },
+			])
 			const activateProfileSpy = vi.spyOn(provider["providerSettingsManager"], "activateProfile")
 			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			postStateSpy.mockClear()
@@ -672,6 +681,24 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(activateProfileSpy).not.toHaveBeenCalled()
 			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
 			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(unrelatedTask["_taskMode"]).toBe("code")
+			expect(postStateSpy).not.toHaveBeenCalled()
+		})
+
+		test("pending child preparation leaves an unsaved mode unassigned without a current profile", async () => {
+			const unrelatedTask = new Task(defaultTaskOptions)
+			unrelatedTask["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(unrelatedTask)
+			await provider.contextProxy.setValue("currentApiConfigName", undefined)
+			const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			postStateSpy.mockClear()
+
+			await provider.handleModeSwitch("ask" as Mode, null, {
+				pendingHandoff: PRODUCTION_PROVIDER_HANDOFF_POLICY,
+			})
+
+			expect(provider["providerSettingsManager"].setModeConfig).not.toHaveBeenCalled()
+			expect(unrelatedTask.updateApiConfiguration).not.toHaveBeenCalled()
 			expect(unrelatedTask["_taskMode"]).toBe("code")
 			expect(postStateSpy).not.toHaveBeenCalled()
 		})
@@ -697,6 +724,12 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(unrelatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
 			expect(unrelatedTask["_taskMode"]).toBe("code")
 			expect(postStateSpy).not.toHaveBeenCalled()
+
+			await provider.handleModeSwitch("architect" as Mode, null)
+			expect(postStateSpy).not.toHaveBeenCalled()
+
+			await provider.handleModeSwitch("architect" as Mode, unrelatedTask)
+			expect(postStateSpy).toHaveBeenCalledOnce()
 		})
 
 		test("calls updateApiConfiguration when provider/model unchanged but settings differ (explicit profile switch)", async () => {
