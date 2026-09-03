@@ -5,6 +5,7 @@ import type { HistoryItem } from "@roo-code/types"
 import { RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskScheduler } from "../core/task/TaskScheduler"
+import { createProviderHandoffPlan } from "../core/task-persistence/providerHandoff"
 
 const parentHistoryItem: HistoryItem = {
 	id: "parent-1",
@@ -251,7 +252,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 
 		// The parent has already been removed, so the mode switch must not publish a
 		// transient empty-task state before the child is created.
-		expect(handleModeSwitch).toHaveBeenCalledWith("code", null, { preparePendingTask: true })
+		const handoff = createProviderHandoffPlan("code")
+		expect(handleModeSwitch).toHaveBeenCalledWith(handoff.requestedMode, handoff.policy.targetTask, {
+			pendingHandoff: handoff.policy,
+		})
 	})
 
 	it("posts taskHistoryItemUpdated to the webview when isViewLaunched is true", async () => {
