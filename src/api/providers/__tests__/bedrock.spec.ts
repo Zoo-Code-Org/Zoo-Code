@@ -829,6 +829,39 @@ describe("AwsBedrockHandler", () => {
 			expect(model.maxTokens).toBe(8192)
 		})
 
+		it("should return Claude Fable 5.1 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5-1",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-fable-5-1")
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.cacheReadsPrice).toBe(0.25)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Fable 5.1 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-fable-5-1",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("global.anthropic.claude-fable-5-1")
+		})
+
 		it("should apply global inference prefix for Claude Fable 5 when awsUseGlobalInference is true", () => {
 			const handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-fable-5",
