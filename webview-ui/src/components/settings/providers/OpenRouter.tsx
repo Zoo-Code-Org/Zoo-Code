@@ -60,6 +60,7 @@ export const OpenRouter = ({
 	const queryClient = useQueryClient()
 	const [refreshStatus, setRefreshStatus] = useState<RefreshStatus>(RefreshStatus.Idle)
 	const [refreshError, setRefreshError] = useState<string | undefined>()
+	// Stryker disable next-line BooleanLiteral : initial value never read before reset in handleRefreshModels
 	const errorJustReceived = useRef(false)
 
 	useEffect(() => {

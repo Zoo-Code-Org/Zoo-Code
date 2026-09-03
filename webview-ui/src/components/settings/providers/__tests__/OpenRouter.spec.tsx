@@ -233,6 +233,7 @@ describe("OpenRouter", () => {
 			expect(button).not.toBeDisabled()
 			expect(button.querySelector(".codicon-refresh")).not.toBeNull()
 			expect(screen.getByText("settings:providers.refreshModels.label")).toBeInTheDocument()
+			expect(screen.queryByText("settings:providers.refreshModels.error")).not.toBeInTheDocument()
 		})
 
 		it("sends requestRouterModels for the openrouter provider when clicked", () => {
@@ -267,6 +268,7 @@ describe("OpenRouter", () => {
 			})
 
 			expect(screen.getByText("settings:providers.refreshModels.success")).toBeInTheDocument()
+			expect(screen.queryByText("settings:providers.refreshModels.error")).not.toBeInTheDocument()
 			expect(invalidateQueriesSpy).toHaveBeenCalledTimes(2)
 			expect(invalidateQueriesSpy).toHaveBeenNthCalledWith(1, {
 				queryKey: [RouterModelsMessageType.routerModels, providerIdentifiers.openrouter],
@@ -324,6 +326,34 @@ describe("OpenRouter", () => {
 			})
 
 			expect(screen.getByText("settings:providers.refreshModels.error")).toBeInTheDocument()
+		})
+
+		it("does not show a stale error after re-clicking refresh", () => {
+			renderComponent()
+
+			fireEvent.click(getRefreshButton())
+			dispatchMessage({
+				type: RouterModelsMessageType.singleRouterModelFetchResponse,
+				success: false,
+				values: { provider: providerIdentifiers.openrouter },
+				error: "boom1",
+			})
+
+			expect(screen.getByText("boom1")).toBeInTheDocument()
+
+			// After an Error the button is re-enabled (only Loading disables it),
+			// so the user can retry. This second refresh must clear the previous
+			// error string, otherwise the stale "boom1" lingers even though the
+			// follow-up failure carries no error payload.
+			fireEvent.click(getRefreshButton())
+			dispatchMessage({
+				type: RouterModelsMessageType.singleRouterModelFetchResponse,
+				success: false,
+				values: { provider: providerIdentifiers.openrouter },
+			})
+
+			expect(screen.getByText("settings:providers.refreshModels.error")).toBeInTheDocument()
+			expect(screen.queryByText("boom1")).not.toBeInTheDocument()
 		})
 
 		it("ignores fetch failures for other providers", () => {

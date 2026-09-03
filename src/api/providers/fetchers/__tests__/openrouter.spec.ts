@@ -572,5 +572,29 @@ describe("OpenRouter API", () => {
 			expect(resultWithoutReasoningParam.supportsReasoningEffort).toBeUndefined()
 			expect(resultWithoutSupportedParameters.supportsReasoningEffort).toBeUndefined()
 		})
+
+		it("sets supportsReasoningEffort when supportedParameters includes reasoning", () => {
+			const mockModel = {
+				name: "Reasoning Effort Model",
+				description: "Model with reasoning parameter support",
+				context_length: 128000,
+				max_completion_tokens: 8192,
+				pricing: {
+					prompt: "0.000003",
+					completion: "0.000015",
+				},
+			}
+
+			const resultWithReasoningParam = parseOpenRouterModel({
+				id: "test/reasoning-effort-model",
+				model: mockModel,
+				inputModality: ["text"],
+				outputModality: ["text"],
+				maxTokens: 8192,
+				supportedParameters: ["reasoning", "max_tokens", "temperature"],
+			})
+
+			expect(resultWithReasoningParam.supportsReasoningEffort).toEqual(["low", "medium", "high", "xhigh", "max"])
+		})
 	})
 })
