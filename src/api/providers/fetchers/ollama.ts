@@ -69,6 +69,9 @@ export const parseOllamaModel = (rawModel: OllamaModelInfoResponse): ModelInfo |
  * the norm. API keys are secrets, though, and must not be sent in cleartext to
  * a remote host (CWE-319). Only HTTPS or a loopback host is considered safe
  * enough to attach the Authorization header.
+ *
+ * Shared by the axios fetcher (getOllamaModels) and the native provider
+ * (NativeOllamaHandler), so this strict check gates credentials on both paths.
  */
 export function isSecureOllamaEndpoint(baseUrl: string): boolean {
 	if (!URL.canParse(baseUrl)) {
@@ -79,7 +82,26 @@ export function isSecureOllamaEndpoint(baseUrl: string): boolean {
 		return true
 	}
 	const host = url.hostname
-	return host === "localhost" || host === "::1" || host === "[::1]" || /^127\./.test(host)
+	return host === "localhost" || host === "::1" || host === "[::1]" || isIpv4LoopbackHost(host)
+}
+
+/**
+ * Strict 127.0.0.0/8 IPv4-loopback literal check. `host` comes from
+ * `URL.hostname`, which is WHATWG-normalized (IPv4 literals carry no brackets
+ * and no leading zeros), so the anchored octet check is exact. A loose
+ * /^127\./ prefix would also match DNS names like `127.example.com`, letting
+ * the key leak over cleartext HTTP (CWE-319).
+ */
+function isIpv4LoopbackHost(host: string): boolean {
+	const octets = host.split(".")
+	if (octets.length !== 4) {
+		return false
+	}
+	if (!octets.every((octet) => /^\d{1,3}$/.test(octet))) {
+		return false
+	}
+	const values = octets.map((octet) => Number(octet))
+	return values[0] === 127 && values.every((value) => value >= 0 && value <= 255)
 }
 
 export async function getOllamaModels(

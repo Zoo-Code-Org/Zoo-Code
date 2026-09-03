@@ -2082,6 +2082,20 @@ describe("NativeOllamaHandler", () => {
 	})
 
 	describe("per-request abortable transport", () => {
+		// Earlier tests in this file install a persistent global setTimeout spy
+		// (vi.spyOn; vi.clearAllMocks does not restore spy implementations), so
+		// restore the native mocks before each test to keep this suite
+		// order-independent.
+		beforeEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		// Drop stubbed globals (the injected fetch) after each test so a fake
+		// transport cannot leak into later tests.
+		afterEach(() => {
+			vi.unstubAllGlobals()
+		})
+
 		// The vi.fn() OllamaMock is untyped, so the constructor options read
 		// from mock.calls need one documented narrow cast to reach the injected
 		// per-request transport.
@@ -2155,16 +2169,38 @@ describe("NativeOllamaHandler", () => {
 				[Symbol.asyncIterator]: async function* () {},
 			})
 			await expect(consume).rejects.toMatchObject({ name: "AbortError" })
+		})
 
-			vi.unstubAllGlobals()
+		it("should abort the per-request transport when the consumer stops iterating early", async () => {
+			const fetchSpy = heldOpenFetch()
+			vi.stubGlobal("fetch", fetchSpy)
+			mockChat.mockResolvedValue({
+				message: { content: "Response" },
+				abort: vi.fn(),
+				[Symbol.asyncIterator]: async function* () {
+					yield { message: { content: "first" } }
+					yield { message: { content: "second" } }
+				},
+			})
+
+			// No metadata → no external abort bridge: finalization must still
+			// release the transport.
+			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
+			const iterator = stream[Symbol.asyncIterator]()
+			await iterator.next()
+
+			const clientOptions = OllamaMock.mock.calls[0][0] as ConstructorOptions
+			const heldPost = clientOptions.fetch!("http://localhost:11434/api/chat", {})
+			// Finalization aborts the per-request controller, which must reject
+			// the held POST. Attach the expectation before the finalization
+			// triggers the rejection so it cannot surface as an unhandled
+			// rejection.
+			const released = expect(heldPost).rejects.toMatchObject({ name: "AbortError" })
+			await iterator.return?.(undefined)
+			await released
 		})
 
 		it("should abort a held-open POST via the per-request transport when timeoutMs fires", async () => {
-			// Earlier tests in this file leave a persistent global setTimeout mock
-			// (vi.clearAllMocks does not restore spy implementations); the real
-			// 100ms timer is the point of this test, so restore native timers.
-			vi.restoreAllMocks()
-
 			const fetchSpy = heldOpenFetch()
 			vi.stubGlobal("fetch", fetchSpy)
 
@@ -2195,8 +2231,6 @@ describe("NativeOllamaHandler", () => {
 			// completion surfaces the AbortError unmodified.
 			rejectChat?.(new DOMException("This operation was aborted", "AbortError"))
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
-
-			vi.unstubAllGlobals()
 		})
 
 		it("should preserve the SDK stream signal when merging it with the per-request signal", async () => {
@@ -2239,8 +2273,6 @@ describe("NativeOllamaHandler", () => {
 			// preserved-signal side of the merge).
 			sdkController.abort()
 			await expect(post).rejects.toMatchObject({ name: "AbortError" })
-
-			vi.unstubAllGlobals()
 		})
 	})
 

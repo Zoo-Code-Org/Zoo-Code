@@ -647,6 +647,12 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			if (onExternalAbort) {
 				externalAbortSignal?.removeEventListener("abort", onExternalAbort)
 			}
+			// A consumer that stops iterating early (break/return) would otherwise
+			// leave the in-flight response body open, and when metadata.abortSignal
+			// is undefined no abort bridge exists at all. The per-request controller
+			// drives the injected fetch transport, so aborting it here releases the
+			// body; after normal completion the abort is a no-op.
+			requestController.abort()
 		}
 	}
 
