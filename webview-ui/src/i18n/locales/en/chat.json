@@ -125,6 +125,7 @@
 	},
 	"scrollToBottom": "Scroll to bottom of chat",
 	"scrollToLatestCheckpoint": "Scroll to previous checkpoint",
+	"jumpToPreviousUserMessage": "Jump to previous message you sent",
 	"about": "Zoo is a whole AI dev team in your editor",
 	"docs": "Check our <DocsLink>docs</DocsLink> to get started",
 	"onboarding": "What would you like to do?",

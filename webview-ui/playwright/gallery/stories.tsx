@@ -83,6 +83,23 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/providers/__tests__/OpenAICompatible.visual.fixture")
 		return <OpenAICompatibleAzureFixture />
 	},
+	"previous-user-message-button": async () => {
+		const [{ PreviousUserMessageButton }, { TooltipProvider }] = await Promise.all([
+			import("@/components/chat/PreviousUserMessageButton"),
+			import("@/components/ui/tooltip"),
+		])
+		return (
+			<TooltipProvider>
+				<div className="flex w-72 bg-vscode-editor-background p-3">
+					<PreviousUserMessageButton
+						title="Jump to previous message you sent"
+						className="flex-1"
+						onClick={() => undefined}
+					/>
+				</div>
+			</TooltipProvider>
+		)
+	},
 	"rendered-content-contrast": async () => {
 		const [{ AppProviders }, { RenderedContentContrastFixture }] = await Promise.all([
 			import("../AppProviders"),

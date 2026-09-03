@@ -52,6 +52,7 @@ import { CheckpointWarning } from "./CheckpointWarning"
 import { QueuedMessages } from "./QueuedMessages"
 import { WorktreeSelector } from "./WorktreeSelector"
 import FileChangesPanel from "./FileChangesPanel"
+import { PreviousUserMessageButton } from "./PreviousUserMessageButton"
 import { useScrollLifecycle } from "@src/hooks/useScrollLifecycle"
 
 export interface ChatViewProps {
@@ -1334,13 +1335,29 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		}
 		return indices
 	}, [groupedMessages])
+	const userMessageIndices = useMemo(() => {
+		const indices: number[] = []
+		for (let i = 0; i < groupedMessages.length; i++) {
+			const message = groupedMessages[i]
+			if (message?.type === "say" && message.say === "user_feedback") {
+				indices.push(i)
+			}
+		}
+		return indices
+	}, [groupedMessages])
 
 	const hasLatestCheckpoint = checkpointIndices.length > 0
+	const hasUserMessages = userMessageIndices.length > 0
 	const checkpointJumpCursorRef = useRef<number | null>(null)
+	const userMessageJumpCursorRef = useRef<number | null>(null)
 
 	useEffect(() => {
 		checkpointJumpCursorRef.current = null
 	}, [task?.ts, checkpointIndices.length])
+
+	useEffect(() => {
+		userMessageJumpCursorRef.current = null
+	}, [task?.ts, userMessageIndices.length])
 
 	// Scroll lifecycle is managed by a dedicated hook to keep ChatView focused
 	// on message handling and UI orchestration.
@@ -1480,10 +1497,28 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		vscode.postMessage({ type: "cancelAutoApproval" })
 	}, [])
 
-	const handleScrollToBottomAndResetCheckpointCursor = useCallback(() => {
+	const handleScrollToBottomAndResetNavigationCursors = useCallback(() => {
 		checkpointJumpCursorRef.current = null
+		userMessageJumpCursorRef.current = null
 		handleScrollToBottomClick()
 	}, [handleScrollToBottomClick])
+
+	const handleScrollToPreviousUserMessage = useCallback(() => {
+		if (userMessageIndices.length === 0 || userMessageJumpCursorRef.current === 0) {
+			return
+		}
+
+		const previousCursor = userMessageJumpCursorRef.current
+		const nextCursor = previousCursor === null ? userMessageIndices.length - 1 : previousCursor - 1
+		userMessageJumpCursorRef.current = nextCursor
+
+		enterUserBrowsingHistory("keyboard-nav-up")
+		virtuosoRef.current?.scrollToIndex({
+			index: userMessageIndices[nextCursor],
+			align: "center",
+			behavior: "smooth",
+		})
+	}, [enterUserBrowsingHistory, userMessageIndices])
 
 	const handleScrollToLatestCheckpoint = useCallback(() => {
 		if (checkpointIndices.length === 0) {
@@ -1642,7 +1677,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	}
 
 	const hasApprovalButtons = Boolean(primaryButtonText || secondaryButtonText)
-	const areButtonsVisible = showScrollToBottom || hasApprovalButtons
+	const areButtonsVisible = showScrollToBottom || hasApprovalButtons || hasUserMessages
 	const currentTaskAggregatedCosts = currentTaskId ? aggregatedCostsMap.get(currentTaskId) : undefined
 
 	return (
@@ -1734,38 +1769,58 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					{areButtonsVisible && (
 						<div
 							className={`flex h-9 items-center mb-1 px-[15px] ${
-								showScrollToBottom ? "opacity-100" : enableButtons ? "opacity-100" : "opacity-50"
+								showScrollToBottom || hasUserMessages
+									? "opacity-100"
+									: enableButtons
+										? "opacity-100"
+										: "opacity-50"
 							}`}>
-							{showScrollToBottom && !hasApprovalButtons ? (
-								<>
-									<StandardTooltip content={t("chat:scrollToBottom")}>
-										<Button
-											variant="secondary"
-											className={hasLatestCheckpoint ? "flex-1 mr-[6px]" : "flex-[2]"}
-											onClick={handleScrollToBottomAndResetCheckpointCursor}>
-											<span className="codicon codicon-chevron-down"></span>
-										</Button>
-									</StandardTooltip>
+							{!hasApprovalButtons ? (
+								<div className="flex flex-1 gap-3">
+									{hasUserMessages && (
+										<PreviousUserMessageButton
+											title={t("chat:jumpToPreviousUserMessage")}
+											className="flex-1"
+											onClick={handleScrollToPreviousUserMessage}
+										/>
+									)}
+									{showScrollToBottom && (
+										<StandardTooltip content={t("chat:scrollToBottom")}>
+											<Button
+												variant="secondary"
+												className="flex-1"
+												onClick={handleScrollToBottomAndResetNavigationCursors}>
+												<span className="codicon codicon-chevron-down"></span>
+											</Button>
+										</StandardTooltip>
+									)}
 									{hasLatestCheckpoint && (
 										<StandardTooltip content={t("chat:scrollToLatestCheckpoint")}>
 											<Button
 												variant="secondary"
-												className="flex-1 ml-[6px]"
+												className="flex-1"
 												onClick={handleScrollToLatestCheckpoint}
 												aria-label={t("chat:scrollToLatestCheckpoint")}>
 												<span className="codicon codicon-history"></span>
 											</Button>
 										</StandardTooltip>
 									)}
-								</>
+								</div>
 							) : (
 								<>
+									{hasUserMessages && (
+										<PreviousUserMessageButton
+											title={t("chat:jumpToPreviousUserMessage")}
+											className="w-9 shrink-0 mr-[6px]"
+											onClick={handleScrollToPreviousUserMessage}
+										/>
+									)}
 									{showScrollToBottom && (
 										<StandardTooltip content={t("chat:scrollToBottom")}>
 											<Button
 												variant="secondary"
 												className="w-9 shrink-0 mr-[6px]"
-												onClick={handleScrollToBottomAndResetCheckpointCursor}>
+												onClick={handleScrollToBottomAndResetNavigationCursors}>
 												<span className="codicon codicon-chevron-down"></span>
 											</Button>
 										</StandardTooltip>
