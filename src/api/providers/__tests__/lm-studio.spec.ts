@@ -175,15 +175,43 @@ describe("LmStudioHandler abort wiring", () => {
 			expect(create).toHaveBeenCalledTimes(1)
 		})
 
+		it("normalizes an abort-shaped create rejection without an external signal", async () => {
+			// Without an external signal the outer catch cannot normalize via the
+			// signal, so the inner catch's own abort decision alone determines
+			// whether the SDK abort error is normalized to the abort contract.
+			const handler = new LmStudioHandler(options)
+			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
+			const create = lastCreate()
+			create.mockRejectedValue(sdkAbortError())
+
+			let caught: unknown
+			try {
+				await collectStream(handler.createMessage("system", []))
+			} catch (error) {
+				caught = error
+			}
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The LM Studio request was aborted")
+		})
+
 		it("fast-fails when the external signal aborts while the input token count is pending", async () => {
 			const handler = new LmStudioHandler(options)
 			let resolveCountTokens!: (tokens: number) => void
-			vitest.spyOn(handler, "countTokens").mockImplementation(
-				() =>
-					new Promise<number>((resolve) => {
-						resolveCountTokens = resolve
-					}),
-			)
+			// The first (input) count stays pending so the abort can land while
+			// it is; any later count (the output count) resolves, so a mutant
+			// that slips past the fast-fail guard fails fast instead of hanging
+			// the mutation-test run at the pending output count.
+			vitest
+				.spyOn(handler, "countTokens")
+				.mockImplementationOnce(
+					() =>
+						new Promise<number>((resolve) => {
+							resolveCountTokens = resolve
+						}),
+				)
+				.mockResolvedValue(1)
 			const create = lastCreate()
 			create.mockResolvedValue(asyncStreamFrom([])) // must never be reached
 

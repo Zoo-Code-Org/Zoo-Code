@@ -259,6 +259,9 @@ describe("QwenCodeHandler abort wiring", () => {
 			mockCreate.mockResolvedValueOnce(
 				asyncStreamFrom([
 					{ choices: [{ delta: { content: "Hello" } }] },
+					// A full duplicate chunk strips to empty content and must
+					// emit no chunk (it exercises the empty newText guard).
+					{ choices: [{ delta: { content: "Hello" } }] },
 					{ choices: [{ delta: { content: "Hello world" } }] },
 					{ choices: [{ delta: { content: "bye" } }] },
 					{ choices: [{ delta: { content: "a<think>b</think>c" } }] },
