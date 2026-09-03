@@ -318,9 +318,11 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 
 					if (newText) {
 						// Check for thinking blocks
+						// Stryker disable next-line ConditionalExpression,StringLiteral: for tag-free content split(/<\/?think>/g) yields a single even-indexed part producing the identical text chunk as the else branch, and think-tagged content already takes this branch
 						if (newText.includes("<think>") || newText.includes("</think>")) {
 							// Simple parsing for thinking blocks
 							const parts = newText.split(/<\/?think>/g)
+							// Stryker disable next-line EqualityOperator: the extra i === parts.length iteration reads undefined, which the existing parts[i] guard on the next line skips
 							for (let i = 0; i < parts.length; i++) {
 								if (parts[i]) {
 									if (i % 2 === 0) {
@@ -361,6 +363,7 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 				}
 
 				// Process finish_reason to emit tool_call_end events
+				// Stryker disable next-line ConditionalExpression: processFinishReason only emits end events when finishReason is exactly "tool_calls" and the raw chunk tracker is non-empty, so entering the block with a falsy finishReason yields nothing
 				if (finishReason) {
 					const endEvents = NativeToolCallParser.processFinishReason(finishReason)
 					for (const event of endEvents) {
