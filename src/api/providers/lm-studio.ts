@@ -148,6 +148,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				results = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, externalSignal)) {
+					// Stryker disable next-line StringLiteral: inner abort throw is re-normalized by the outer catch's createAbortError (name "AbortError" always matches isRequestAborted), so this literal is unobservable
 					throw createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
@@ -294,6 +295,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				response = await this.client.chat.completions.create(params, createOptions)
 			} catch (error) {
 				if (isRequestAborted(error, requestSignal)) {
+					// Stryker disable next-line StringLiteral: inner abort throw is re-normalized by the outer catch's createAbortError (name "AbortError" always matches isRequestAborted), so this literal is unobservable
 					throw createAbortError("LM Studio")
 				}
 				throw handleOpenAIError(error, this.providerName)
