@@ -43,7 +43,8 @@
 		"rimraf": "6.0.1",
 		"tsx": "4.22.4",
 		"turbo": "2.10.0",
-		"typescript": "5.9.3"
+		"typescript": "5.9.3",
+		"vitest": "4.1.9"
 	},
 	"lint-staged": {
 		"*.{js,jsx,ts,tsx,json,css,md}": [
