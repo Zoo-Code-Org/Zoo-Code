@@ -891,7 +891,7 @@ export class TaskHistoryStore {
 				lockAcquired: options?.lockAcquired,
 				merge: (existing, incoming) => {
 					if (diskGuard) {
-						if (!existing || typeof existing !== "object" || !("id" in existing)) {
+						if (Object(existing) !== existing || !("id" in (existing as object))) {
 							throw new Error(`[TaskHistoryStore] guarded write: task ${item.id} not found on disk`)
 						}
 						diskGuard(existing as HistoryItem)
@@ -1162,12 +1162,11 @@ export class TaskHistoryStore {
 
 			try {
 				let firstDiskSnapshot: HistoryItem | undefined
+				const firstDiskGuard = options?.firstDiskGuard
 				const captureAndGuardFirst =
-					options?.firstDiskGuard ||
-					options?.rollbackFirstOnSecondFailure ||
-					options?.rollbackBothOnCallbackFailure
+					firstDiskGuard || options?.rollbackFirstOnSecondFailure || options?.rollbackBothOnCallbackFailure
 						? (current: HistoryItem) => {
-								options?.firstDiskGuard?.(current)
+								if (firstDiskGuard) firstDiskGuard(current)
 								firstDiskSnapshot = structuredClone(current)
 							}
 						: undefined
