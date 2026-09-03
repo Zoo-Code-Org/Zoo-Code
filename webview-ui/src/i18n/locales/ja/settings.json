@@ -460,6 +460,8 @@
 		"headerName": "ヘッダー名",
 		"headerValue": "ヘッダー値",
 		"noCustomHeaders": "カスタムヘッダーが定義されていません。+ ボタンをクリックして追加してください。",
+		"extraBody": "追加ボディ",
+		"extraBodyDescription": "APIリクエストボディにマージされる任意のJSONオブジェクトです。model、messages、tools、streamなど、Zoo Codeが管理するフィールドは上書きできません。機密情報を含めないでください。",
 		"unboundApiKey": "Unbound API キー",
 		"getUnboundApiKey": "Unbound APIキーを取得",
 		"requestyApiKey": "Requesty APIキー",
@@ -1036,6 +1038,11 @@
 		"modelId": "有効なモデルIDを入力してください。",
 		"modelSelector": "有効なモデルセレクターを入力してください。",
 		"openAi": "有効なベースURL、APIキー、モデルIDを入力してください。",
+		"openAiExtraBody": {
+			"invalidJson": "追加ボディには有効なJSONを指定してください。",
+			"objectRequired": "追加ボディはJSONオブジェクトである必要があります。",
+			"reservedKeys": "追加ボディではZoo Codeが管理するフィールドを上書きできません：{{keys}}。"
+		},
 		"arn": {
 			"invalidFormat": "ARNの形式が無効です。フォーマット要件を確認してください。",
 			"regionMismatch": "警告：ARN内のリージョン（{{arnRegion}}）が選択したリージョン（{{region}}）と一致しません。これによりアクセスの問題が発生する可能性があります。プロバイダーはARNのリージョンを使用します。"

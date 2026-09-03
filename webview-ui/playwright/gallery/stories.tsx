@@ -83,6 +83,11 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/providers/__tests__/OpenAICompatible.visual.fixture")
 		return <OpenAICompatibleAzureFixture />
 	},
+	"openai-compatible-extra-body": async () => {
+		const { OpenAICompatibleExtraBodyFixture } =
+			await import("@/components/settings/providers/__tests__/OpenAICompatible.visual.fixture")
+		return <OpenAICompatibleExtraBodyFixture />
+	},
 	"rendered-content-contrast": async () => {
 		const [{ AppProviders }, { RenderedContentContrastFixture }] = await Promise.all([
 			import("../AppProviders"),
