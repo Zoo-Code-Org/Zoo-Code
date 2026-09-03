@@ -1243,35 +1243,27 @@ export class TaskHistoryStore {
 					const persistedWrittenSecond = JSON.parse(JSON.stringify(writtenSecond)) as HistoryItem
 					const persistedWrittenFirst = JSON.parse(JSON.stringify(writtenFirst)) as HistoryItem
 
-					if (secondDiskSnapshot) {
-						try {
-							await this.restoreTaskFilePreImage(
-								secondId,
-								secondDiskSnapshot,
-								persistedWrittenSecond,
-								false,
-							)
-						} catch (compensationError) {
-							compensationErrors.push(compensationError)
-						}
-					} else {
-						compensationErrors.push(
-							new Error(
-								`[TaskHistoryStore] atomicUpdatePair: missing ${secondId} compensation pre-image`,
-							),
+					// Both snapshots are captured by guarded writes before callback work can run.
+					try {
+						await this.restoreTaskFilePreImage(
+							secondId,
+							secondDiskSnapshot as HistoryItem,
+							persistedWrittenSecond,
+							false,
 						)
+					} catch (compensationError) {
+						compensationErrors.push(compensationError)
 					}
 
-					if (firstDiskSnapshot) {
-						try {
-							await this.restoreTaskFilePreImage(firstId, firstDiskSnapshot, persistedWrittenFirst, true)
-						} catch (compensationError) {
-							compensationErrors.push(compensationError)
-						}
-					} else {
-						compensationErrors.push(
-							new Error(`[TaskHistoryStore] atomicUpdatePair: missing ${firstId} compensation pre-image`),
+					try {
+						await this.restoreTaskFilePreImage(
+							firstId,
+							firstDiskSnapshot as HistoryItem,
+							persistedWrittenFirst,
+							true,
 						)
+					} catch (compensationError) {
+						compensationErrors.push(compensationError)
 					}
 
 					if (this.onWrite) {
