@@ -30,6 +30,26 @@ export type ProviderHandoffProfileDecision =
 	| { source: "unsaved-current"; profile?: ProviderProfileRef; persistModeProfileId?: string }
 
 export function decideProviderHandoffProfile(params: {
+	locked: true
+	currentProfile?: ProviderProfileRef
+	savedProfile?: ProviderProfileRef
+}): Extract<ProviderHandoffProfileDecision, { source: "locked-current" }>
+export function decideProviderHandoffProfile(params: {
+	locked: false
+	currentProfile?: ProviderProfileRef
+	savedProfile: ProviderProfileRef
+}): Extract<ProviderHandoffProfileDecision, { source: "saved" }>
+export function decideProviderHandoffProfile(params: {
+	locked: false
+	currentProfile?: ProviderProfileRef
+	savedProfile?: undefined
+}): Extract<ProviderHandoffProfileDecision, { source: "unsaved-current" }>
+export function decideProviderHandoffProfile(params: {
+	locked: boolean
+	currentProfile?: ProviderProfileRef
+	savedProfile?: ProviderProfileRef
+}): ProviderHandoffProfileDecision
+export function decideProviderHandoffProfile(params: {
 	locked: boolean
 	currentProfile?: ProviderProfileRef
 	savedProfile?: ProviderProfileRef
@@ -50,4 +70,19 @@ export function getProviderHandoffActivationOptions(policy: ProviderHandoffPolic
 		applyProviderSettingsToContext: policy.applyProviderSettingsToContext,
 		suppressStatePost: !policy.publishWhilePending,
 	}
+}
+
+export function shouldPublishProviderHandoffState(
+	targetTaskIsNotNull: boolean,
+	policy?: ProviderHandoffPolicy,
+): boolean {
+	return targetTaskIsNotNull && (policy?.publishWhilePending ?? true)
+}
+
+export async function publishProviderHandoffState(
+	targetTaskIsNotNull: boolean,
+	policy: ProviderHandoffPolicy | undefined,
+	publish: () => Promise<void>,
+): Promise<void> {
+	if (shouldPublishProviderHandoffState(targetTaskIsNotNull, policy)) await publish()
 }

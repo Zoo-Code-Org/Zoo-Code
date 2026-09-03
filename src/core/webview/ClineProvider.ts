@@ -123,6 +123,7 @@ import {
 	delegateTaskToChild,
 	getProviderHandoffActivationOptions,
 	interruptDelegatedChild,
+	publishProviderHandoffState,
 	type ProviderHandoffPolicy,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
@@ -1770,19 +1771,9 @@ export class ClineProvider
 		// If workspace lock is on, keep the current API config — don't load mode-specific config
 		const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		if (lockApiConfigAcrossModes) {
-			if (options.pendingHandoff) {
-				const currentProfileName = this.getGlobalState("currentApiConfigName")
-				const decision = decideProviderHandoffProfile({
-					locked: true,
-					currentProfile: currentProfileName ? { name: currentProfileName } : undefined,
-				})
-				if (decision.source !== "locked-current") {
-					throw new Error("Expected locked child profile decision")
-				}
-			}
-			if (targetTask !== null && (options.pendingHandoff?.publishWhilePending ?? true)) {
-				await this.postStateToWebview()
-			}
+			await publishProviderHandoffState(targetTask !== null, options.pendingHandoff, () =>
+				this.postStateToWebview(),
+			)
 			return
 		}
 
@@ -1812,15 +1803,12 @@ export class ClineProvider
 				const hasActualSettings = !!fullProfile.apiProvider
 
 				if (hasActualSettings) {
-					let profileName = profile.name
-					if (options.pendingHandoff) {
-						const decision = decideProviderHandoffProfile({
-							locked: false,
-							savedProfile: { name: profile.name, id: profile.id },
-						})
-						if (decision.source !== "saved") throw new Error("Expected saved child profile decision")
-						profileName = decision.profile.name
-					}
+					const profileName = options.pendingHandoff
+						? decideProviderHandoffProfile({
+								locked: false,
+								savedProfile: { name: profile.name, id: profile.id },
+							}).profile.name
+						: profile.name
 					const activationOptions = options.pendingHandoff
 						? getProviderHandoffActivationOptions(options.pendingHandoff)
 						: targetTask === null
@@ -1837,29 +1825,22 @@ export class ClineProvider
 			// If no saved config for this mode, save current config as default.
 			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
-			if (currentApiConfigNameAfter) {
-				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
-				let configId = config?.id
-				if (options.pendingHandoff) {
-					const decision = decideProviderHandoffProfile({
+			const config = listApiConfig.find((candidate) => candidate.name === currentApiConfigNameAfter)
+			const configId = options.pendingHandoff
+				? decideProviderHandoffProfile({
 						locked: false,
-						currentProfile: { name: currentApiConfigNameAfter, id: config?.id },
-					})
-					if (decision.source !== "unsaved-current") {
-						throw new Error("Expected unsaved child profile decision")
-					}
-					configId = decision.persistModeProfileId
-				}
+						currentProfile: currentApiConfigNameAfter
+							? { name: currentApiConfigNameAfter, id: config?.id }
+							: undefined,
+					}).persistModeProfileId
+				: config?.id
 
-				if (configId) {
-					await this.providerSettingsManager.setModeConfig(newMode, configId)
-				}
+			if (configId) {
+				await this.providerSettingsManager.setModeConfig(newMode, configId)
 			}
 		}
 
-		if (targetTask !== null && (options.pendingHandoff?.publishWhilePending ?? true)) {
-			await this.postStateToWebview()
-		}
+		await publishProviderHandoffState(targetTask !== null, options.pendingHandoff, () => this.postStateToWebview())
 	}
 
 	// Provider Profile Management
