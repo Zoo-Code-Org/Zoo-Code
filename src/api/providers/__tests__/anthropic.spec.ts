@@ -1040,6 +1040,30 @@ describe("AnthropicHandler", () => {
 			)
 		})
 
+		it.each([
+			["required", "required" as const],
+			["named", { type: "function" as const, function: { name: "get_weather" } }],
+		])("should normalize %s tool_choice to auto for Claude Fable 5.1", async (_, toolChoice) => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const stream = fableHandler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+				tool_choice: toolChoice,
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					tool_choice: { type: "auto", disable_parallel_tool_use: false },
+				}),
+				expect.anything(),
+			)
+		})
+
 		it("should enable parallel tool calls when parallelToolCalls is true", async () => {
 			// Handler uses native protocol by default
 			const stream = handler.createMessage(systemPrompt, messages, {

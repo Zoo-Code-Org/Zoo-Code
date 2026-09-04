@@ -253,7 +253,7 @@ export const bedrockModels = {
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
 	"anthropic.claude-fable-5-1": {
-		maxTokens: 8192,
+		maxTokens: 128_000,
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
