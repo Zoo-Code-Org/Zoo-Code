@@ -9,12 +9,13 @@ import {
 	NeuronPoolHandler,
 	NEURONPOOL_DEFAULT_BASE_URL,
 	neuronpoolDefaultBaseUrl,
+	resolveNeuronpoolBaseUrl,
 	stripTrailingSlashes,
 } from "../neuronpool"
 
 const LIVE_WORKER_BASE_URL = ["https://neuronpool.damnknee.workers.dev", "v1"].join("/")
 
-const mockCreate = vi.fn()
+const mockCreate = vi.hoisted(() => vi.fn())
 
 vi.mock("openai", () => ({
 	default: vi.fn(function () {
@@ -57,6 +58,37 @@ describe("stripTrailingSlashes", () => {
 	})
 })
 
+describe("resolveNeuronpoolBaseUrl", () => {
+	it("uses the live Worker URL when the custom value is empty", () => {
+		expect(resolveNeuronpoolBaseUrl()).toBe(LIVE_WORKER_BASE_URL)
+		expect(resolveNeuronpoolBaseUrl("")).toBe(LIVE_WORKER_BASE_URL)
+		expect(resolveNeuronpoolBaseUrl("   ")).toBe(LIVE_WORKER_BASE_URL)
+	})
+
+	it("rejects slash-only custom URLs that normalize to empty", () => {
+		expect(() => resolveNeuronpoolBaseUrl("/")).toThrow("NeuronPool base URL is required")
+		expect(() => resolveNeuronpoolBaseUrl("///")).toThrow("NeuronPool base URL is required")
+	})
+
+	it("rejects values that are not absolute URLs", () => {
+		expect(() => resolveNeuronpoolBaseUrl("not-a-url")).toThrow("NeuronPool base URL is invalid")
+	})
+
+	it("rejects non-HTTPS remote endpoints", () => {
+		expect(() => resolveNeuronpoolBaseUrl("http://evil.example/v1")).toThrow("NeuronPool base URL must use HTTPS")
+		expect(() => resolveNeuronpoolBaseUrl("ftp://example.test/v1")).toThrow("NeuronPool base URL must use HTTPS")
+	})
+
+	it("allows HTTP on loopback for local workers", () => {
+		expect(resolveNeuronpoolBaseUrl("http://127.0.0.1:8787/v1/")).toBe("http://127.0.0.1:8787/v1")
+		expect(resolveNeuronpoolBaseUrl("http://localhost:8787/v1")).toBe("http://localhost:8787/v1")
+	})
+
+	it("honors a custom HTTPS URL", () => {
+		expect(resolveNeuronpoolBaseUrl("https://example.test/v1/")).toBe("https://example.test/v1")
+	})
+})
+
 describe("NeuronPoolHandler", () => {
 	let handler: NeuronPoolHandler
 
@@ -86,6 +118,28 @@ describe("NeuronPoolHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: "https://example.test/v1" }))
 	})
 
+	it("does not construct the OpenAI client for slash-only custom URLs", () => {
+		vi.mocked(OpenAI).mockClear()
+		expect(() =>
+			new NeuronPoolHandler({
+				neuronpoolApiKey: "test-neuronpool-api-key",
+				neuronpoolBaseUrl: "///",
+			}),
+		).toThrow("NeuronPool base URL is required")
+		expect(OpenAI).not.toHaveBeenCalled()
+	})
+
+	it("does not construct the OpenAI client for remote HTTP URLs", () => {
+		vi.mocked(OpenAI).mockClear()
+		expect(() =>
+			new NeuronPoolHandler({
+				neuronpoolApiKey: "test-neuronpool-api-key",
+				neuronpoolBaseUrl: "http://evil.example/v1",
+			}),
+		).toThrow("NeuronPool base URL must use HTTPS")
+		expect(OpenAI).not.toHaveBeenCalled()
+	})
+
 	it("should use the provided API key", () => {
 		const neuronpoolApiKey = "test-neuronpool-api-key"
 		new NeuronPoolHandler({ neuronpoolApiKey })
@@ -102,7 +156,7 @@ describe("NeuronPoolHandler", () => {
 	})
 
 	it("sets the provider name to NeuronPool", () => {
-		expect((handler as unknown as { providerName: string }).providerName).toBe("NeuronPool")
+		expect(handler["providerName"]).toBe("NeuronPool")
 	})
 
 	it("should return default model when no model is specified", () => {
@@ -178,8 +232,19 @@ describe("NeuronPoolHandler", () => {
 			}
 		})
 
+		const echoTool = {
+			type: "function" as const,
+			function: {
+				name: "echo",
+				description: "Echo text",
+				parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] },
+			},
+		}
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
-		const stream = handler.createMessage("You are a helpful assistant", messages)
+		const stream = handler.createMessage("You are a helpful assistant", messages, {
+			taskId: "neuronpool-tool-test",
+			tools: [echoTool],
+		})
 		for await (const _chunk of stream) {
 			// drain
 		}
@@ -188,5 +253,15 @@ describe("NeuronPoolHandler", () => {
 		expect(callArgs.model).toBe(neuronpoolDefaultModelId)
 		expect(callArgs.stream).toBe(true)
 		expect(callArgs.temperature).toBe(0)
+		expect(callArgs.tools).toEqual([
+			expect.objectContaining({
+				type: "function",
+				function: expect.objectContaining({
+					name: "echo",
+					description: "Echo text",
+					strict: true,
+				}),
+			}),
+		])
 	})
 })
