@@ -157,6 +157,11 @@ function validateModelsAndKeysProvided(
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
+		case providerIdentifiers.neuronpool:
+			if (!apiConfiguration.neuronpoolApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case providerIdentifiers.qwenCode:
 			if (!apiConfiguration.qwenCodeOauthPath) {
 				return i18next.t("settings:validation.qwenCodeOauthPath")
