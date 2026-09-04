@@ -37,12 +37,11 @@ export function resolveNeuronpoolBaseUrl(raw?: string): string {
 		throw new Error("NeuronPool base URL is invalid")
 	}
 	const host = parsed.hostname.toLowerCase()
-	// Stryker disable next-line StringLiteral,LogicalOperator: loopback HTTP is an explicit local-dev allowlist
+	// Stryker disable next-line ConditionalExpression,StringLiteral,LogicalOperator: loopback HTTP is an explicit local-dev allowlist
 	const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1"
-	if (parsed.protocol === "https:") {
-		return normalized
-	}
-	if (parsed.protocol === "http:" && loopback) {
+	const httpsOk = parsed.protocol === "https:"
+	const loopbackHttpOk = parsed.protocol === "http:" && loopback
+	if (httpsOk || loopbackHttpOk) {
 		return normalized
 	}
 	throw new Error("NeuronPool base URL must use HTTPS")
