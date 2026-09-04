@@ -247,6 +247,11 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			const delta = apiChunk.choices[0]?.delta ?? {}
 			const finishReason = apiChunk.choices[0]?.finish_reason
 
+			const reasoningText = extractReasoningFromDelta(delta)
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
 			if (delta.content) {
 				let newText = delta.content
 				if (newText.startsWith(fullContent)) {
@@ -283,11 +288,6 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 						}
 					}
 				}
-			}
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
 			}
 
 			// Handle tool calls in stream - emit partial chunks for NativeToolCallParser

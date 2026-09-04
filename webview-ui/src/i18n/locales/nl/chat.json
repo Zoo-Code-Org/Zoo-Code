@@ -317,9 +317,9 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is nieuw:",
-			"highlight1": "Veiligere bestandstoegang — gebruik afzonderlijke toelatingslijsten voor lezen en schrijven om te bepalen tot welke paden Zoo Code toegang heeft.",
-			"highlight2": "Meer modelkeuze — GLM 5.3 is nu beschikbaar via Z.ai en Gemini 3.5 Flash Lite en Gemini 3.1 Flash Lite zijn toegevoegd aan de Gemini-provider.",
-			"highlight3": "Betrouwbaardere dagelijkse workflows — verbeteringen versterken taakherstel en -geschiedenis, streaming en toolgebruik van providers, het importeren van instellingen en de leesbaarheid in verschillende IDE-thema's."
+			"highlight1": "🤖 Probeer GLM-5.3-Flash en Gemini 3.7 Flash 2 weken lang met 50% korting en MiniMax M3 helemaal gratis voor gebruikers met een saldo op de nieuwe Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "Nieuw model — GLM-5.3-Flash is nu beschikbaar via Z AI.",
+			"highlight3": "Betrouwbaarheidsfixes — herstelde goedkeuringen voor subtaken en oplossingen voor lege tooloutput bij Vertex Gemini 3.7, opstartfouten van de terminal, fouten in achtergrondservices en de leesbaarheid in verschillende IDE-thema's."
 		},
 		"cloudAgents": {
 			"heading": "Nieuw in de Cloud:",
