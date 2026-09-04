@@ -39,6 +39,7 @@ import {
 	ZAiHandler,
 	FireworksHandler,
 	FriendliHandler,
+	NeuronPoolHandler,
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
 	KenariHandler,
@@ -219,6 +220,8 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new FireworksHandler(options)
 		case providerIdentifiers.friendli:
 			return new FriendliHandler(options)
+		case providerIdentifiers.neuronpool:
+			return new NeuronPoolHandler(options)
 		case providerIdentifiers.vercelAiGateway:
 			return new VercelAiGatewayHandler(options)
 		case providerIdentifiers.opencodeGo:
