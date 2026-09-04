@@ -112,31 +112,26 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({ t: (key: string) => key }),
 }))
 
+const renderApiOptions = (apiProvider: typeof providerIdentifiers.friendli | typeof providerIdentifiers.neuronpool) =>
+	render(
+		<ApiOptions
+			errorMessage={undefined}
+			setErrorMessage={() => undefined}
+			uriScheme={undefined}
+			apiConfiguration={{ apiProvider }}
+			setApiConfigurationField={vi.fn()}
+		/>,
+	)
+
 describe("ApiOptions NeuronPool branch", () => {
 	it("does not render NeuronPool when another provider is selected", () => {
-		const setApiConfigurationField = vi.fn()
-		const uriHandler = vi.fn()
-		render(
-			<ApiOptions
-				apiConfiguration={{ apiProvider: providerIdentifiers.friendli }}
-				setApiConfigurationField={setApiConfigurationField}
-				uriHandler={uriHandler}
-			/>,
-		)
+		renderApiOptions(providerIdentifiers.friendli)
 		expect(screen.getByTestId("provider-friendli")).toBeInTheDocument()
 		expect(screen.queryByTestId("provider-neuronpool")).not.toBeInTheDocument()
 	})
 
 	it("renders NeuronPool when that provider is selected", () => {
-		const setApiConfigurationField = vi.fn()
-		const uriHandler = vi.fn()
-		render(
-			<ApiOptions
-				apiConfiguration={{ apiProvider: providerIdentifiers.neuronpool }}
-				setApiConfigurationField={setApiConfigurationField}
-				uriHandler={uriHandler}
-			/>,
-		)
+		renderApiOptions(providerIdentifiers.neuronpool)
 		expect(screen.getByTestId("provider-neuronpool")).toBeInTheDocument()
 		expect(screen.queryByTestId("provider-friendli")).not.toBeInTheDocument()
 	})
