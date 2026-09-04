@@ -25,7 +25,7 @@
 		"refreshing_all": "Alle MCP-servers worden vernieuwd...",
 		"all_refreshed": "Alle MCP-servers zijn vernieuwd.",
 		"project_config_deleted": "Project MCP-configuratiebestand verwijderd. Alle project MCP-servers zijn losgekoppeld.",
-		"exa_install_prompt": "Wil je de gratis Exa MCP-server installeren zodat Zoo het web kan doorzoeken en webinhoud kan ophalen?",
+		"exa_install_prompt": "Wil je de gratis, door Exa gehoste Exa MCP-server installeren zodat Zoo het web kan doorzoeken en webinhoud kan ophalen? Zoek- en ophaalverzoeken worden naar Exa verzonden.",
 		"exa_install_action": "Exa MCP installeren",
 		"exa_install_success": "Exa MCP is geïnstalleerd."
 	},

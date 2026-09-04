@@ -25,7 +25,7 @@
 		"refreshing_all": "正在重新整理所有 MCP 伺服器...",
 		"all_refreshed": "所有 MCP 伺服器已重新整理。",
 		"project_config_deleted": "專案MCP設定檔案已刪除。所有專案MCP伺服器已斷開連接。",
-		"exa_install_prompt": "要安裝免費的 Exa MCP 伺服器，讓 Zoo 能搜尋及擷取網頁內容嗎？",
+		"exa_install_prompt": "要安裝由 Exa 託管的免費 Exa MCP 伺服器，讓 Zoo 能搜尋及擷取網頁內容嗎？網頁搜尋與擷取請求將傳送給 Exa。",
 		"exa_install_action": "安裝 Exa MCP",
 		"exa_install_success": "Exa MCP 已成功安裝。"
 	},

@@ -25,7 +25,7 @@
 		"refreshing_all": "모든 MCP 서버를 새로 고치는 중...",
 		"all_refreshed": "모든 MCP 서버가 새로 고쳐졌습니다.",
 		"project_config_deleted": "프로젝트 MCP 구성 파일이 삭제되었습니다. 모든 프로젝트 MCP 서버가 연결 해제되었습니다.",
-		"exa_install_prompt": "무료 Exa MCP 서버를 설치하여 Zoo에서 웹 검색과 웹 콘텐츠 가져오기를 사용하시겠어요?",
+		"exa_install_prompt": "Exa에서 호스팅하는 무료 Exa MCP 서버를 설치하여 Zoo에서 웹 검색과 웹 콘텐츠 가져오기를 사용하시겠어요? 웹 검색 및 가져오기 요청은 Exa로 전송됩니다.",
 		"exa_install_action": "Exa MCP 설치",
 		"exa_install_success": "Exa MCP가 설치되었습니다."
 	},

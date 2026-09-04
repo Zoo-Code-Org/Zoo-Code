@@ -608,7 +608,11 @@ export class McpHub {
 				this.flagResetTimer = undefined
 			}, 600)
 		}
-		await this.updateServerConnections(updatedServers, "global")
+		const result = McpSettingsSchema.safeParse({ mcpServers: updatedServers })
+		if (!result.success) {
+			throw new Error(`Invalid MCP servers structure: ${result.error.message}`)
+		}
+		await this.updateServerConnections(result.data.mcpServers, "global")
 	}
 
 	private async watchMcpSettingsFile(): Promise<void> {

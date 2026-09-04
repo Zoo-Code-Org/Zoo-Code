@@ -25,7 +25,7 @@
 		"refreshing_all": "Tüm MCP sunucuları yenileniyor...",
 		"all_refreshed": "Tüm MCP sunucuları yenilendi.",
 		"project_config_deleted": "Proje MCP yapılandırma dosyası silindi. Tüm proje MCP sunucuları bağlantısı kesildi.",
-		"exa_install_prompt": "Zoo'ya web arama ve web içeriği getirme özellikleri kazandırmak için ücretsiz Exa MCP sunucusunu yüklemek ister misin?",
+		"exa_install_prompt": "Zoo'ya web arama ve web içeriği getirme özellikleri kazandırmak için Exa tarafından barındırılan ücretsiz Exa MCP sunucusunu yüklemek ister misin? Web arama ve getirme istekleri Exa'ya gönderilir.",
 		"exa_install_action": "Exa MCP'yi yükle",
 		"exa_install_success": "Exa MCP başarıyla yüklendi."
 	},

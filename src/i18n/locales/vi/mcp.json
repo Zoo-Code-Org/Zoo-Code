@@ -25,7 +25,7 @@
 		"refreshing_all": "Đang làm mới tất cả các máy chủ MCP...",
 		"all_refreshed": "Tất cả các máy chủ MCP đã được làm mới.",
 		"project_config_deleted": "Tệp cấu hình MCP của dự án đã bị xóa. Tất cả các máy chủ MCP của dự án đã bị ngắt kết nối.",
-		"exa_install_prompt": "Cài đặt máy chủ Exa MCP miễn phí để Zoo có thể tìm kiếm và lấy nội dung web?",
+		"exa_install_prompt": "Cài đặt máy chủ Exa MCP miễn phí do Exa lưu trữ để Zoo có thể tìm kiếm và lấy nội dung web? Các yêu cầu tìm kiếm và lấy nội dung web sẽ được gửi đến Exa.",
 		"exa_install_action": "Cài đặt Exa MCP",
 		"exa_install_success": "Đã cài đặt Exa MCP thành công."
 	},

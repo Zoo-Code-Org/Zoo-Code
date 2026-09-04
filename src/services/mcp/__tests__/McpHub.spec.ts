@@ -321,8 +321,19 @@ describe("McpHub", () => {
 			)
 			expect(updateConnectionsSpy).toHaveBeenCalledWith(
 				expect.objectContaining({
-					existing: { type: "stdio", command: "node" },
-					exa: expect.objectContaining({ url: "https://mcp.exa.ai/mcp", alwaysAllow: [] }),
+					existing: expect.objectContaining({
+						type: "stdio",
+						command: "node",
+						timeout: 60,
+						alwaysAllow: [],
+						disabledTools: [],
+					}),
+					exa: expect.objectContaining({
+						url: "https://mcp.exa.ai/mcp",
+						timeout: 60,
+						alwaysAllow: [],
+						disabledTools: [],
+					}),
 				}),
 				"global",
 			)
@@ -368,7 +379,13 @@ describe("McpHub", () => {
 
 			await mcpHub.installExaServer()
 
-			expect(updateConnectionsSpy).toHaveBeenCalledWith(serversAtMerge, "global")
+			expect(updateConnectionsSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					existing: expect.objectContaining({ timeout: 60, alwaysAllow: [], disabledTools: [] }),
+					"web-search": expect.objectContaining({ timeout: 60, alwaysAllow: [], disabledTools: [] }),
+				}),
+				"global",
+			)
 			expect(updateConnectionsSpy).not.toHaveBeenCalledWith(
 				expect.objectContaining({ exa: expect.anything() }),
 				"global",
@@ -513,6 +530,8 @@ describe("McpHub", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
 				t("mcp:errors.exa_install_failed", { errorMessage: "network unavailable" }),
 			)
+			expect(context.globalState.update).toHaveBeenNthCalledWith(1, EXA_MCP_PROMPT_SHOWN_KEY, true)
+			expect(context.globalState.update).toHaveBeenNthCalledWith(2, EXA_MCP_PROMPT_SHOWN_KEY, false)
 		})
 
 		it("formats non-Error installation failures", async () => {
@@ -528,6 +547,7 @@ describe("McpHub", () => {
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
 				t("mcp:errors.exa_install_failed", { errorMessage: "installation failed" }),
 			)
+			expect(context.globalState.update).toHaveBeenLastCalledWith(EXA_MCP_PROMPT_SHOWN_KEY, false)
 		})
 	})
 

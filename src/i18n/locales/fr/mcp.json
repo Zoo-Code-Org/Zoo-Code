@@ -25,7 +25,7 @@
 		"refreshing_all": "Rafraîchissement de tous les serveurs MCP...",
 		"all_refreshed": "Tous les serveurs MCP ont été rafraîchis.",
 		"project_config_deleted": "Fichier de configuration MCP du projet supprimé. Tous les serveurs MCP du projet ont été déconnectés.",
-		"exa_install_prompt": "Veux-tu installer le serveur MCP gratuit d'Exa pour permettre à Zoo de rechercher et récupérer du contenu web ?",
+		"exa_install_prompt": "Veux-tu installer le serveur MCP gratuit, hébergé par Exa, pour permettre à Zoo de rechercher et récupérer du contenu web ? Les requêtes de recherche et de récupération web seront envoyées à Exa.",
 		"exa_install_action": "Installer Exa MCP",
 		"exa_install_success": "Exa MCP a été installé."
 	},

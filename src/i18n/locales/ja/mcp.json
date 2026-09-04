@@ -25,7 +25,7 @@
 		"refreshing_all": "すべてのMCPサーバーを更新しています...",
 		"all_refreshed": "すべてのMCPサーバーが更新されました。",
 		"project_config_deleted": "プロジェクトMCP設定ファイルが削除されました。すべてのプロジェクトMCPサーバーが切断されました。",
-		"exa_install_prompt": "無料のExa MCPサーバーをインストールして、ZooでWeb検索とWebコンテンツ取得を利用しますか？",
+		"exa_install_prompt": "Exaがホストする無料のExa MCPサーバーをインストールして、ZooでWeb検索とWebコンテンツ取得を利用しますか？Web検索と取得のリクエストはExaに送信されます。",
 		"exa_install_action": "Exa MCPをインストール",
 		"exa_install_success": "Exa MCPをインストールしました。"
 	},

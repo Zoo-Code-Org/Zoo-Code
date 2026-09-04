@@ -29,6 +29,7 @@ async function promptToInstallExaMcpOnce(context: ExaMcpPromptContext, mcpHub: M
 		await mcpHub.installExaServer()
 		void vscode.window.showInformationMessage(t("mcp:info.exa_install_success"))
 	} catch (error) {
+		await context.globalState.update(EXA_MCP_PROMPT_SHOWN_KEY, false)
 		const errorMessage = error instanceof Error ? error.message : String(error)
 		void vscode.window.showErrorMessage(t("mcp:errors.exa_install_failed", { errorMessage }))
 	}

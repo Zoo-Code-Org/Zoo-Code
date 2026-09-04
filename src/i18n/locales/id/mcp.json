@@ -25,7 +25,7 @@
 		"refreshing_all": "Me-refresh semua server MCP...",
 		"all_refreshed": "Semua server MCP telah di-refresh.",
 		"project_config_deleted": "File konfigurasi MCP proyek dihapus. Semua server MCP proyek telah diputus koneksinya.",
-		"exa_install_prompt": "Instal server MCP Exa gratis agar Zoo dapat mencari dan mengambil konten web?",
+		"exa_install_prompt": "Instal server MCP Exa gratis yang dihosting oleh Exa agar Zoo dapat mencari dan mengambil konten web? Permintaan pencarian dan pengambilan web akan dikirim ke Exa.",
 		"exa_install_action": "Instal Exa MCP",
 		"exa_install_success": "Exa MCP berhasil diinstal."
 	},
