@@ -544,6 +544,30 @@ describe("ModelSelector", () => {
 		expect(list.queryByText("Zebra Special")).not.toBeInTheDocument()
 	})
 
+	it("does not search a model's id against itself twice when it has no displayName", () => {
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		// A search term that only fuzzy-matches if the id were searched as "id id" (i.e. searched
+		// against itself twice) must not match, since a model without a displayName is only
+		// searched against its raw id once.
+		fireEvent.change(screen.getByLabelText("common:ui.search_placeholder"), {
+			target: { value: "3 openrouter" },
+		})
+
+		expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
+	})
+
 	it("shows a no-results message when the search does not match any model", () => {
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
@@ -604,5 +628,128 @@ describe("ModelSelector", () => {
 		)
 
 		expect(within(screen.getByTestId("popover-content")).getByText("chat:selectModel")).toBeInTheDocument()
+	})
+
+	it("re-derives the search index when the model list changes on rerender", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: { "openrouter/model-a": {}, ...manyDynamicModels } },
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		const { rerender } = render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
+		fireEvent.change(searchInput, { target: { value: "brand-new-model" } })
+		expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
+
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: { "openrouter/brand-new-model": {}, ...manyDynamicModels } },
+			isLoading: false,
+		})
+
+		rerender(
+			<ModelSelector
+				apiConfiguration={
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openrouter/brand-new-model",
+					} as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		// The search index must be rebuilt from the new model list, not reused from the first
+		// render, for the newly-added model to be findable and the removed one to disappear.
+		expect(
+			within(screen.getByTestId("popover-content")).getByText("openrouter/brand-new-model"),
+		).toBeInTheDocument()
+	})
+
+	it("re-renders the model list with fresh click handlers and highlighting when the selection changes", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		const { rerender } = render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-b", isLoading: false })
+		rerender(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-b" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const list = within(screen.getByTestId("popover-content"))
+		expect(list.getByText("openrouter/model-a").parentElement).not.toHaveClass(
+			"bg-vscode-list-activeSelectionBackground",
+		)
+		expect(list.getByText("openrouter/model-b").parentElement).toHaveClass(
+			"bg-vscode-list-activeSelectionBackground",
+		)
+
+		fireEvent.click(list.getByText("openrouter/model-a"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				apiConfiguration: expect.objectContaining({ openRouterModelId: "openrouter/model-a" }),
+			}),
+		)
+	})
+
+	it("sends the current config name on select even after it changes on rerender", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: { openrouter: { "openrouter/model-a": {}, "openrouter/model-b": {} } },
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		const { rerender } = render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="config-one"
+				title="Select model"
+			/>,
+		)
+
+		rerender(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="config-two"
+				title="Select model"
+			/>,
+		)
+
+		fireEvent.click(within(screen.getByTestId("popover-content")).getByText("openrouter/model-b"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(expect.objectContaining({ text: "config-two" }))
 	})
 })

@@ -120,10 +120,9 @@ export const ModelSelector = ({
 
 	const handleEditClick = useCallback(() => {
 		vscode.postMessage({ type: "switchTab", tab: "settings" })
-		// Stryker disable next-line BooleanLiteral: this button only renders while the popover
-		// (and its `open` state) doesn't exist, so this call has no observable effect either way.
+		// Stryker disable next-line BooleanLiteral,CallExpression: this button only renders while
+		// the popover (and its `open` state) doesn't exist, so this call has no observable effect.
 		setOpen(false)
-		// Stryker disable next-line ArrayDeclaration: this callback closes over no props or state.
 	}, [])
 
 	const handleSelect = useCallback(
