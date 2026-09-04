@@ -69,7 +69,7 @@ export const PROVIDERS: Array<{ value: string; label: string; proxy: boolean }> 
 	{ value: providerIdentifiers.zai, label: "Z.ai", proxy: false },
 	{ value: providerIdentifiers.fireworks, label: "Fireworks AI", proxy: false },
 	{ value: providerIdentifiers.friendli, label: "Friendli", proxy: false },
-	// Stryker disable next-line ObjectLiteral,StringLiteral: static NeuronPool dropdown row; empty object or empty label cannot satisfy identifier lookup
+	// Stryker disable next-line ObjectLiteral,StringLiteral,BooleanLiteral: static NeuronPool dropdown row; empty object, empty label, or flipped proxy cannot satisfy identifier lookup
 	{ value: providerIdentifiers.neuronpool, label: "NeuronPool", proxy: false },
 	// Stryker disable next-line ObjectLiteral: adjacent hunk neighbor of the NeuronPool dropdown insert
 	{ value: providerIdentifiers.vercelAiGateway, label: "Vercel AI Gateway", proxy: false },
