@@ -10,6 +10,7 @@ import type { Mock } from "vitest"
 import {
 	providerIdentifiers,
 	RooCodeEventName,
+	type ClineMessage,
 	type GlobalState,
 	type ProviderSettings,
 	type ModelInfo,
@@ -3811,6 +3812,83 @@ describe("Cline", () => {
 				"[Task#finalizePartialToolAsk] updateClineMessage failed:",
 				boom,
 			)
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk ignores partial asks that match only some predicate clauses", async () => {
+			// Each distractor below satisfies a strict subset of the findLast predicate
+			// clauses, so no single clause (or a wrong combination of clauses) may select
+			// it: partial, type, ask kind, and text must all hold together.
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(true)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk: ClineMessage = {
+				ts: Date.now() - 4,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+			// Completed (non-partial) tool ask with the same text.
+			const completedToolAsk: ClineMessage = {
+				ts: Date.now() - 3,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: false,
+			}
+			// Partial ask of a different kind.
+			const nonToolAsk: ClineMessage = {
+				ts: Date.now() - 2,
+				type: "ask" as const,
+				ask: "completion_result" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+			// Deliberately malformed: a "say" message that still carries the tool ask
+			// fields. The ClineMessage schema allows both fields, and the predicate under
+			// test reads message.ask on any message, so this is exactly the distractor
+			// the type clause exists to filter out.
+			const sayWithToolAsk: ClineMessage = {
+				ts: Date.now() - 1,
+				type: "say" as const,
+				say: "error" as const,
+				text: "partial tool message",
+				partial: true,
+				ask: "tool" as const,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+			task.clineMessages.push(completedToolAsk)
+			task.clineMessages.push(nonToolAsk)
+			task.clineMessages.push(sayWithToolAsk)
+
+			await task.finalizePartialToolAsk("partial tool message")
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(partialToolAsk.isAnswered).toBe(true)
+			// Every distractor stays untouched: only the genuine partial tool ask is
+			// finalized.
+			expect(completedToolAsk.partial).toBe(false)
+			expect(completedToolAsk.isAnswered).toBeUndefined()
+			expect(nonToolAsk.partial).toBe(true)
+			expect(nonToolAsk.isAnswered).toBeUndefined()
+			expect(sayWithToolAsk.partial).toBe(true)
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
 
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()
