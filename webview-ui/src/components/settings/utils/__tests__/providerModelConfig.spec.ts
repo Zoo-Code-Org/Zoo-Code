@@ -6,6 +6,7 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
+import { PROVIDERS } from "../../constants"
 import {
 	PROVIDER_SERVICE_CONFIG,
 	PROVIDER_DEFAULT_MODEL_IDS,
@@ -21,6 +22,16 @@ import {
 } from "../providerModelConfig"
 
 describe("providerModelConfig", () => {
+	describe("PROVIDERS dropdown", () => {
+		it("keeps the NeuronPool settings row intact", () => {
+			expect(PROVIDERS.find((provider) => provider.value === providerIdentifiers.neuronpool)).toEqual({
+				value: providerIdentifiers.neuronpool,
+				label: "NeuronPool",
+				proxy: false,
+			})
+		})
+	})
+
 	describe("PROVIDER_SERVICE_CONFIG", () => {
 		it("uses canonical provider identifiers as registry keys", () => {
 			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.openaiNative]?.serviceName).toBe("OpenAI")
