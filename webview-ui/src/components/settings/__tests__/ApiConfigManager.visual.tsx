@@ -9,6 +9,7 @@ test("keeps profile actions visible at narrow editor widths", async ({ mount, pa
 	const addButton = story.getByTestId("add-profile-button")
 	const actionRow = story.getByTestId("select-component").locator("..")
 
+	await expect(story).toHaveScreenshot("api-config-manager-320.png")
 	await expect.poll(() => story.evaluate(collectBoundedLayoutFailures)).toEqual([])
 	await expect
 		.poll(() =>
@@ -30,5 +31,6 @@ test("keeps profile actions visible at desktop editor widths", async ({ mount, p
 	const component = mountedStory(await mount("api-config-manager"))
 	const story = component.getByTestId("api-config-manager-story")
 
+	await expect(story).toHaveScreenshot("api-config-manager-640.png")
 	await expect.poll(() => story.evaluate(collectBoundedLayoutFailures)).toEqual([])
 })
