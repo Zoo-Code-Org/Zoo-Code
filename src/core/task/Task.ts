@@ -2530,23 +2530,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return this.disposalPromise
 		}
 
-		let resolveDisposal!: () => void
-		let rejectDisposal!: (error: unknown) => void
-		this.disposalPromise = new Promise<void>((resolve, reject) => {
-			resolveDisposal = resolve
-			rejectDisposal = reject
-		})
-
-		try {
-			void this.disposeOnce().then(resolveDisposal, rejectDisposal)
-		} catch (error) {
-			rejectDisposal(error)
-		}
-
+		this.disposalPromise = this.disposeOnce()
 		return this.disposalPromise
 	}
 
-	private disposeOnce(): Promise<void> {
+	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 
 		// Stop the idle telemetry check and report any unflushed activity as a
@@ -2629,7 +2617,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error reverting diff changes:", error)
 		}
 
-		return pendingCleanup.then(() => this.diffReversionPromise)
+		await pendingCleanup
+		await this.diffReversionPromise
 	}
 
 	// Subtasks
