@@ -24,6 +24,7 @@ interface HarnessOptions {
 	conflict?: boolean
 	mergeable?: boolean | null
 	mergeableState?: string
+	mergeabilitySequence?: Array<{ mergeable: boolean | null; mergeableState: string }>
 	fork?: boolean
 	eventName?: string
 	workflowRunAssociated?: boolean
@@ -244,7 +245,15 @@ async function runWorkflow(options: HarnessOptions = {}) {
 		}
 		return [pr]
 	})
-	const getPullRequest = vi.fn(async () => ({ data: pr }))
+	let mergeabilityIndex = 0
+	const getPullRequest = vi.fn(async () => {
+		const mergeability = options.mergeabilitySequence?.[mergeabilityIndex++]
+		return {
+			data: mergeability
+				? { ...pr, mergeable: mergeability.mergeable, mergeable_state: mergeability.mergeableState }
+				: pr,
+		}
+	})
 
 	const github = {
 		paginate: vi.fn(async (target: unknown, args: unknown) => {
@@ -323,11 +332,14 @@ async function runWorkflow(options: HarnessOptions = {}) {
 			},
 		},
 	}
-	const pullRequestPayload = {
-		number: 1437,
-		head: { repo: { full_name: headRepository } },
-		base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
-	}
+	const pullRequestPayload =
+		eventName === "push"
+			? undefined
+			: {
+					number: 1437,
+					head: { repo: { full_name: headRepository } },
+					base: { repo: { full_name: "Zoo-Code-Org/Zoo-Code" } },
+				}
 	const payload =
 		eventName === "schedule"
 			? {}
@@ -827,6 +839,64 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	it("clears awaiting-maintainer when a main push introduces conflicts", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			conflict: true,
+			labels: ["awaiting-maintainer"],
+		})
+
+		expect(workflow.on.push.branches).toContain("main")
+		expect(result.listPullRequests).toHaveBeenCalledWith(expect.objectContaining({ state: "open" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	it("rechecks mergeability before tagging a PR awaiting maintainer", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: false, mergeableState: "dirty" },
+			],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+	})
+
+	it("does not tag a PR awaiting maintainer while mergeability is unknown", async () => {
+		const result = await runWorkflow({
+			eventName: "push",
+			labels: ["awaiting-maintainer"],
+			mergeabilitySequence: [
+				{ mergeable: null, mergeableState: "unknown" },
+				{ mergeable: null, mergeableState: "unknown" },
+			],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(latestGateStatus(result)?.description).toContain("calculating mergeability")
 	})
 
 	it("routes CodeRabbit change requests back to the author", async () => {

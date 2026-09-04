@@ -3,6 +3,8 @@ name: Label PR review state
 on:
   schedule:
     - cron: "0 * * * *" # hourly fallback
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       pull_request_number:
@@ -79,7 +81,7 @@ jobs:
             const reconciliationCheckName = 'Zoo Code / reconcile PR review state';
 
             // When triggered by a single PR event, only reconcile that PR.
-            // The hourly schedule and workflow_dispatch reconcile all open PRs.
+            // Main-branch pushes, the hourly schedule, and workflow_dispatch reconcile all open PRs.
             let prs;
             let eventPrNumbers = [];
             if (context.payload.pull_request?.number) {
@@ -310,6 +312,7 @@ jobs:
                 conflict: 'Resolve the merge conflicts. The review sequence resumes after the branch is mergeable.',
                 'ci-pending': 'Wait for the required CI checks to finish.',
                 'ci-failed': 'Fix the failing required CI checks and push an update.',
+                'mergeability-pending': 'Wait for GitHub to finish calculating mergeability.',
                 'configuration-error': 'Repository rules must not require this advisory workflow\'s own gate or reconciliation job.',
                 'coderabbit-changes': 'Address CodeRabbit findings and push an update. Review restarts after CI passes.',
                 coderabbit: 'Required CI passed. Wait for CodeRabbit to approve the latest commit.',
@@ -676,6 +679,24 @@ jobs:
                 } else {
                   desiredLabel = null;
                   phase = 'approved';
+                }
+
+                if (desiredLabel === 'awaiting-maintainer') {
+                  const { data: latestPrDetail } = await github.rest.pulls.get({
+                    owner, repo, pull_number: pr.number,
+                  });
+                  if (latestPrDetail.mergeable === false && latestPrDetail.mergeable_state === 'dirty') {
+                    core.info(`PR #${pr.number}: has merge conflicts — labeling has-conflicts`);
+                    await updateReviewGate(pr, 'conflict', false);
+                    await setCodeRabbitReviewActive(pr, false);
+                    await reconcileLabels(pr, 'has-conflicts');
+                    await updateReviewGuide(pr, 'conflict', existingGuide);
+                    continue;
+                  }
+                  if (latestPrDetail.mergeable === null || latestPrDetail.mergeable_state === 'unknown') {
+                    desiredLabel = null;
+                    phase = 'mergeability-pending';
+                  }
                 }
 
                 core.info(
