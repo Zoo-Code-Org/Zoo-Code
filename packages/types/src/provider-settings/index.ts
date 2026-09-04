@@ -26,6 +26,7 @@ import { sambaNovaProviderDefinition } from "./sambanova.js"
 import { zaiProviderDefinition } from "./zai.js"
 import { fireworksProviderDefinition } from "./fireworks.js"
 import { friendliProviderDefinition } from "./friendli.js"
+import { neuronpoolProviderDefinition } from "./neuronpool.js"
 import { qwenCodeProviderDefinition } from "./qwen-code.js"
 import { vercelAiGatewayProviderDefinition } from "./vercel-ai-gateway.js"
 import { opencodeGoProviderDefinition } from "./opencode-go.js"
@@ -77,6 +78,7 @@ export const providerDefinitionList = [
 	zaiProviderDefinition,
 	fireworksProviderDefinition,
 	friendliProviderDefinition,
+	neuronpoolProviderDefinition,
 	qwenCodeProviderDefinition,
 	vercelAiGatewayProviderDefinition,
 	opencodeGoProviderDefinition,

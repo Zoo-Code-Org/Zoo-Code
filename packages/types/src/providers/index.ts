@@ -31,6 +31,7 @@ export * from "./zai.js"
 export * from "./minimax.js"
 export * from "./mimo.js"
 export * from "./zoo-gateway.js"
+export * from "./neuronpool.js"
 
 import { anthropicDefaultModelId } from "./anthropic.js"
 import { basetenDefaultModelId } from "./baseten.js"
@@ -61,6 +62,7 @@ import { internationalZAiDefaultModelId, mainlandZAiDefaultModelId } from "./zai
 import { minimaxDefaultModelId } from "./minimax.js"
 import { mimoDefaultModelId } from "./mimo.js"
 import { zooGatewayDefaultModelId } from "./zoo-gateway.js"
+import { neuronpoolDefaultModelId } from "./neuronpool.js"
 
 // Import the ProviderName type from provider-settings to avoid duplication
 import type { ProviderName } from "../provider-settings.js"
@@ -123,6 +125,8 @@ export function getProviderDefaultModelId(
 			return fireworksDefaultModelId
 		case providerIdentifiers.friendli:
 			return friendliDefaultModelId
+		case providerIdentifiers.neuronpool:
+			return neuronpoolDefaultModelId
 		case providerIdentifiers.qwenCode:
 			return qwenCodeDefaultModelId
 		case providerIdentifiers.poe:

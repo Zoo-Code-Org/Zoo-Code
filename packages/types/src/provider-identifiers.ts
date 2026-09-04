@@ -25,6 +25,7 @@ export const providerIdentifiers = {
 	baseten: "baseten",
 	fireworks: "fireworks",
 	friendli: "friendli",
+	neuronpool: "neuronpool",
 	gemini: "gemini",
 	geminiCli: "gemini-cli",
 	mistral: "mistral",
