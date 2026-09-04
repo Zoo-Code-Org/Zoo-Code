@@ -366,9 +366,9 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "新增功能：",
-			"highlight1": "更安全的檔案存取 — 使用獨立的讀取與寫入允許清單，控制 Zoo Code 可以存取的路徑。",
-			"highlight2": "更多模型選擇 — GLM 5.3 現已透過 Z.ai 提供，Gemini provider 也新增了 Gemini 3.5 Flash Lite 和 Gemini 3.1 Flash Lite。",
-			"highlight3": "更可靠的日常工作流程 — 改善強化了任務復原與歷史記錄、provider 串流與工具使用、設定匯入，以及不同 IDE 主題下的可讀性。"
+			"highlight1": "🤖 在全新的 Zoo Gateway 上，有餘額的使用者可在 2 週內以 5 折優惠試用 GLM-5.3-Flash 和 Gemini 3.7 Flash，並可完全免費使用 MiniMax M3：<modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "新模型 — GLM-5.3-Flash 現已透過 Z AI 提供。",
+			"highlight3": "可靠性修正 — 恢復了子任務核准，解決了 Vertex Gemini 3.7 工具輸出為空、終端機啟動失敗和背景服務錯誤問題，並提升了不同 IDE 主題下的可讀性。"
 		},
 		"cloudAgents": {
 			"heading": "雲端的新功能：",
