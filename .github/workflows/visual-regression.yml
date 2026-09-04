@@ -1,4 +1,4 @@
-name: Webview Visual Regression
+name: Visual Regression
 
 on:
     workflow_dispatch:
@@ -7,6 +7,8 @@ on:
         paths:
             - "apps/vscode-e2e/package.json"
             - "apps/vscode-e2e/src/theme-fixtures/**"
+            - "apps/vscode-e2e/src/visual/**"
+            - "apps/vscode-e2e/playwright-electron.config.ts"
             - "packages/types/src/api.ts"
             - "packages/types/src/vscode-extension-host.ts"
             - "src/core/webview/ClineProvider.ts"
@@ -32,7 +34,7 @@ jobs:
         runs-on: ubuntu-latest
         timeout-minutes: 10
         container:
-            image: mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948
+            image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
             options: --ipc=host
         steps:
             - name: Checkout code
@@ -91,3 +93,44 @@ jobs:
               run: pnpm --filter @roo-code/vscode-e2e themes:test
             - name: Check generated VS Code theme fixtures
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e themes:check
+
+    extension-host-visual:
+        runs-on: ubuntu-latest
+        timeout-minutes: 20
+        container:
+            image: mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e
+            options: --ipc=host
+        env:
+            LANG: en_US.UTF-8
+            LC_ALL: en_US.UTF-8
+            TZ: UTC
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+              with:
+                  persist-credentials: false
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  install-args: "--frozen-lockfile"
+            - name: Get pinned VS Code version
+              id: vscode-version
+              run: |
+                  VERSION=$(node -p 'require("./apps/vscode-e2e/package.json").devDependencies["@types/vscode"]')
+                  echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+            - name: Cache pinned VS Code
+              uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+              with:
+                  path: apps/vscode-e2e/.vscode-test/
+                  key: vscode-electron-visual-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}-v1
+            - name: Run Extension Host visual tests
+              run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:visual:electron
+            - name: Upload Extension Host visual artifacts
+              if: failure()
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+              with:
+                  name: extension-host-visual-regression
+                  path: |
+                      apps/vscode-e2e/playwright-report-electron
+                      apps/vscode-e2e/test-results-electron
+                  if-no-files-found: ignore

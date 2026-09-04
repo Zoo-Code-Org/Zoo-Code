@@ -263,6 +263,15 @@ export const parseOpenRouterModel = ({
 		modelInfo.maxTokens = anthropicModels["claude-opus-4-6"].maxTokens
 	}
 
+	// Set claude-fable-5.1 model to use the correct Anthropic configuration.
+	// OpenRouter uses a dotted version suffix, unlike Anthropic's direct API.
+	if (id === "anthropic/claude-fable-5.1") {
+		modelInfo.maxTokens = anthropicModels["claude-fable-5-1"].maxTokens
+		modelInfo.supportsReasoningBudget = true
+		modelInfo.supportsReasoningBinary = true
+		modelInfo.supportsTemperature = false
+	}
+
 	// Set claude-fable-5 model to use the correct Anthropic configuration
 	if (id === "anthropic/claude-fable-5") {
 		modelInfo.maxTokens = anthropicModels["claude-fable-5"].maxTokens
