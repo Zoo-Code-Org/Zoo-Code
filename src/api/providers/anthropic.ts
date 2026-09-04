@@ -99,7 +99,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		)
 		let toolChoice = convertedToolChoice
 		if (modelId === "claude-fable-5-1") {
-			if (metadata?.tool_choice === undefined) {
+			if (metadata?.tool_choice === undefined && metadata?.parallelToolCalls !== false) {
 				toolChoice = undefined
 			} else if (metadata.tool_choice === "required" || typeof metadata.tool_choice === "object") {
 				toolChoice = {

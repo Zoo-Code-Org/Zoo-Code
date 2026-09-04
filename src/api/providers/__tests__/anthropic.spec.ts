@@ -1013,7 +1013,17 @@ describe("AnthropicHandler", () => {
 			// Explicitly disable tool use while preserving the available tool definitions.
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					tools: expect.any(Array),
+					tools: [
+						{
+							name: "get_weather",
+							description: "Get the current weather",
+							input_schema: {
+								type: "object",
+								properties: { location: { type: "string" } },
+								required: ["location"],
+							},
+						},
+					],
 					tool_choice: { type: "none" },
 				}),
 				expect.anything(),
@@ -1100,6 +1110,27 @@ describe("AnthropicHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ tool_choice: undefined }),
+				expect.anything(),
+			)
+		})
+
+		it("should disable parallel tool calls when tool_choice is omitted for Claude Fable 5.1", async () => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const stream = fableHandler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+				parallelToolCalls: false,
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					tool_choice: { type: "auto", disable_parallel_tool_use: true },
+				}),
 				expect.anything(),
 			)
 		})
