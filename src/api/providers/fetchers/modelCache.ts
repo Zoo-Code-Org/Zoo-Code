@@ -44,6 +44,11 @@ const modelRecordSchema = z.record(z.string(), modelInfoSchema)
 // deduplicate each other's in-flight refreshes.
 const inFlightRefresh = new Map<string, Promise<ModelRecord>>()
 
+// Same single-flight guard for auth-scoped providers. Without this, two concurrent getModels()
+// calls (e.g. two panels opening on startup) both miss the session cache and each fire their own
+// provider fetch. Keyed on the same compound cache key as authSessionCache.
+const inFlightAuthScopedFetch = new Map<string, Promise<ModelRecord>>()
+
 // Cache keys (see getCacheKey) for which we've already reported an empty model response this
 // session. A persistently-empty endpoint (e.g. misconfigured server) would otherwise re-fire this
 // event on every cache refresh; gate it to at most once per distinct provider+server+key identity
@@ -237,44 +242,62 @@ async function resolveAuthScopedModels(
 		return existing.models
 	}
 
-	try {
-		const fetched = await fetchAuthScopedModelsFromProvider(
-			assertAuthScopedGetModelsOptions(options),
-			existing?.etag,
-		)
+	// Coalesce concurrent fetches for the same session identity so two panels
+	// opening simultaneously don't each fire their own provider request.
+	const existingFlight = inFlightAuthScopedFetch.get(cacheKey)
+	if (existingFlight && !forceRefresh) {
+		return existingFlight
+	}
 
-		if (fetched.notModified) {
+	const fetchPromise = (async () => {
+		try {
+			const fetched = await fetchAuthScopedModelsFromProvider(
+				assertAuthScopedGetModelsOptions(options),
+				existing?.etag,
+			)
+
+			if (fetched.notModified) {
+				// Re-read from the Map: a concurrent sign-out could have cleared
+				// the entry between when we captured `existing` and now.
+				const current = getAuthSessionEntry(cacheKey)
+				if (current && Object.keys(current.models).length > 0) {
+					touchAuthSessionEntry(cacheKey, current)
+					reportedEmptyModelResponse.delete(cacheKey)
+					return current.models
+				}
+			} else {
+				const modelCount = Object.keys(fetched.models).length
+				if (modelCount > 0) {
+					setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
+					reportedEmptyModelResponse.delete(cacheKey)
+					return fetched.models
+				}
+
+				captureModelCacheEmptyResponseOnce(provider, cacheKey, {
+					context: forceRefresh ? "refreshModels" : "getModels",
+					hasExistingCache: Boolean(existing && Object.keys(existing.models).length > 0),
+					...(existing ? { existingCacheSize: Object.keys(existing.models).length } : {}),
+				})
+			}
+
 			if (existing && Object.keys(existing.models).length > 0) {
-				touchAuthSessionEntry(cacheKey, existing)
-				reportedEmptyModelResponse.delete(cacheKey)
 				return existing.models
 			}
-		} else {
-			const modelCount = Object.keys(fetched.models).length
-			if (modelCount > 0) {
-				setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
-				reportedEmptyModelResponse.delete(cacheKey)
-				return fetched.models
+
+			return fetched.models
+		} catch (error) {
+			if (existing && Object.keys(existing.models).length > 0) {
+				return existing.models
 			}
-
-			captureModelCacheEmptyResponseOnce(provider, cacheKey, {
-				context: forceRefresh ? "refreshModels" : "getModels",
-				hasExistingCache: Boolean(existing && Object.keys(existing.models).length > 0),
-				...(existing ? { existingCacheSize: Object.keys(existing.models).length } : {}),
-			})
+			throw error
 		}
+	})()
 
-		if (existing && Object.keys(existing.models).length > 0) {
-			return existing.models
-		}
-
-		return fetched.models
-	} catch (error) {
-		if (existing && Object.keys(existing.models).length > 0) {
-			return existing.models
-		}
-		throw error
-	}
+	// Wrap cleanup in the promise itself so the stored value IS what callers await —
+	// a detached .finally() would produce an unhandled rejection when the fetch fails.
+	const fetchWithCleanup = fetchPromise.finally(() => inFlightAuthScopedFetch.delete(cacheKey))
+	inFlightAuthScopedFetch.set(cacheKey, fetchWithCleanup)
+	return fetchWithCleanup
 }
 
 // Memoize derived digests so the deliberately-structureless KDF runs at most once per
@@ -389,6 +412,12 @@ async function readModels(cacheKey: string): Promise<ModelRecord | undefined> {
 async function fetchModelsFromProvider(options: GetModelsOptions): Promise<ModelRecord> {
 	const { provider } = options
 
+	if (isAuthScopedProvider(provider)) {
+		throw new Error(
+			`fetchModelsFromProvider must not be called for auth-scoped provider "${provider}" — use resolveAuthScopedModels instead`,
+		)
+	}
+
 	let models: ModelRecord
 
 	switch (provider) {
@@ -431,21 +460,6 @@ async function fetchModelsFromProvider(options: GetModelsOptions): Promise<Model
 			break
 		case providerIdentifiers.moonshot:
 			models = await getMoonshotModels(options.baseUrl, options.apiKey)
-			break
-		case providerIdentifiers.zooGateway: {
-			const result = await getZooGatewayModels({
-				zooSessionToken: options.apiKey,
-				zooGatewayBaseUrl: options.baseUrl,
-			})
-			if (result.kind === "not_modified") {
-				models = {}
-				break
-			}
-			models = result.models
-			break
-		}
-		case providerIdentifiers.kimiCode:
-			models = await getKimiCodeModels(options.apiKey)
 			break
 		default: {
 			// Ensures router is exhaustively checked if RouterName is a strict union.

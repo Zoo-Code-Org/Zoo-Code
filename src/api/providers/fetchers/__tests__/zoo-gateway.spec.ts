@@ -108,7 +108,22 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(result.etag).toBe('"catalog-abc"')
 		})
 
-		it("reads ETag from the capitalized response header", async () => {
+		it("reads etag from the lowercase response header (Node.js normalises headers)", async () => {
+			mockAxiosGet.mockResolvedValueOnce({
+				...mockResponse,
+				headers: { etag: '"catalog-lower"' },
+			})
+
+			const result = await getZooGatewayModels(gatewayOptions())
+
+			expect(result.kind).toBe("ok")
+			if (result.kind !== "ok") return
+			expect(result.etag).toBe('"catalog-lower"')
+		})
+
+		it("returns undefined etag when only the capitalized ETag header is present (unreachable in real HTTP)", async () => {
+			// Node.js lowercases all HTTP response headers before they reach userland,
+			// so response.headers.ETag is always undefined in production.
 			mockAxiosGet.mockResolvedValueOnce({
 				...mockResponse,
 				headers: { ETag: '"catalog-capital"' },
@@ -118,7 +133,7 @@ describe("Zoo Gateway Fetchers", () => {
 
 			expect(result.kind).toBe("ok")
 			if (result.kind !== "ok") return
-			expect(result.etag).toBe('"catalog-capital"')
+			expect(result.etag).toBeUndefined()
 		})
 
 		it("sends If-None-Match when provided and returns not_modified on 304", async () => {

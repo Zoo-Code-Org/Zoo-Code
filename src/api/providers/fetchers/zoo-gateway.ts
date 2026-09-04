@@ -53,12 +53,7 @@ export async function getZooGatewayModels(
 			return { kind: "not_modified" }
 		}
 
-		const etag =
-			typeof response.headers.etag === "string"
-				? response.headers.etag
-				: typeof response.headers.ETag === "string"
-					? response.headers.ETag
-					: undefined
+		const etag = typeof response.headers.etag === "string" ? response.headers.etag : undefined
 
 		const result = vercelAiGatewayModelsResponseSchema.safeParse(response.data)
 

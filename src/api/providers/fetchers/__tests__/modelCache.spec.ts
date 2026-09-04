@@ -1019,10 +1019,9 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 		expect(resultB).toEqual(accountBModels)
 	})
 
-	it("never deduplicates concurrent zoo-gateway fetches, even for the same token", async () => {
-		// Auth-scoped providers skip dedupedFetch unconditionally, so even two calls carrying
-		// an identical token each fire their own provider fetch -- there is no in-flight sharing
-		// to key correctly or incorrectly for these providers.
+	it("deduplicates concurrent zoo-gateway fetches for the same session token", async () => {
+		// Auth-scoped providers use inFlightAuthScopedFetch to coalesce concurrent calls
+		// for the same cache key so two panels opening simultaneously share one fetch.
 		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk({}))
 
 		await Promise.all([
@@ -1030,7 +1029,7 @@ describe("MODEL_CACHE_EMPTY_RESPONSE throttling", () => {
 			freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "same-token" }),
 		])
 
-		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 	})
 })
 
@@ -1292,6 +1291,17 @@ describe("auth session cache", () => {
 		expect(mockSet).not.toHaveBeenCalled()
 	})
 
+	it("concurrent getModels calls for the same session key share one fetch", async () => {
+		freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		const [first, second] = await Promise.all([freshGetModels(options), freshGetModels(options)])
+
+		expect(first).toEqual(zooModels)
+		expect(second).toEqual(zooModels)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+	})
+
 	it("revalidates with ETag after TTL expires and keeps the prior catalog on 304", async () => {
 		vi.useFakeTimers()
 		try {
@@ -1311,6 +1321,12 @@ describe("auth session cache", () => {
 			expect(freshMockGetZooGatewayModels).toHaveBeenLastCalledWith(
 				expect.objectContaining({ ifNoneMatch: '"v1"' }),
 			)
+
+			// A third call within the refreshed TTL window must not trigger another fetch,
+			// proving touchAuthSessionEntry actually updated fetchedAt.
+			const third = await freshGetModels(options)
+			expect(third).toEqual(zooModels)
+			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1344,6 +1360,13 @@ describe("auth session cache", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("getModels throws on the first call when the provider fetch fails and there is no prior cache", async () => {
+		freshMockGetZooGatewayModels.mockRejectedValue(new Error("network down"))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await expect(freshGetModels(options)).rejects.toThrow("network down")
 	})
 
 	it("refreshModels returns an empty catalog when refresh throws and no session cache exists", async () => {
