@@ -2,6 +2,7 @@ import {
 	anthropicDefaultModelId,
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
+	neuronpoolDefaultModelId,
 	providerIdentifiers,
 } from "@roo-code/types"
 
@@ -60,6 +61,13 @@ describe("providerModelConfig", () => {
 				serviceUrl: "https://code.visualstudio.com/api/extension-guides/language-model",
 			})
 		})
+
+		it("contains service config for neuronpool", () => {
+			expect(PROVIDER_SERVICE_CONFIG[providerIdentifiers.neuronpool]).toEqual({
+				serviceName: "NeuronPool",
+				serviceUrl: "https://neuronpool.damnknee.workers.dev/dashboard",
+			})
+		})
 	})
 
 	describe("getProviderServiceConfig", () => {
@@ -74,6 +82,13 @@ describe("providerModelConfig", () => {
 			expect(config.serviceName).toBe("unknown-provider")
 			expect(config.serviceUrl).toBe("")
 		})
+
+		it("returns NeuronPool dashboard URL for neuronpool", () => {
+			expect(getProviderServiceConfig(providerIdentifiers.neuronpool)).toEqual({
+				serviceName: "NeuronPool",
+				serviceUrl: "https://neuronpool.damnknee.workers.dev/dashboard",
+			})
+		})
 	})
 
 	describe("PROVIDER_DEFAULT_MODEL_IDS", () => {
@@ -82,6 +97,7 @@ describe("providerModelConfig", () => {
 			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.bedrock]).toBeDefined()
 			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.gemini]).toBeDefined()
 			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.openaiNative]).toBeDefined()
+			expect(PROVIDER_DEFAULT_MODEL_IDS[providerIdentifiers.neuronpool]).toBe(neuronpoolDefaultModelId)
 		})
 	})
 
@@ -151,6 +167,10 @@ describe("providerModelConfig", () => {
 			expect(chinaDefault.length).toBeGreaterThan(0)
 			expect(internationalDefault.length).toBeGreaterThan(0)
 		})
+
+		it("returns the NeuronPool static default", () => {
+			expect(getDefaultModelIdForProvider(providerIdentifiers.neuronpool)).toBe(neuronpoolDefaultModelId)
+		})
 	})
 
 	describe("getProviderModelConfig", () => {
@@ -179,6 +199,13 @@ describe("providerModelConfig", () => {
 			expect(getProviderModelConfig(providerIdentifiers.nanogpt)).toEqual({
 				field: "nanoGptModelId",
 				default: nanoGptDefaultModelId,
+			})
+		})
+
+		it("returns NeuronPool's static apiModelId field and default", () => {
+			expect(getProviderModelConfig(providerIdentifiers.neuronpool)).toEqual({
+				field: "apiModelId",
+				default: neuronpoolDefaultModelId,
 			})
 		})
 	})
