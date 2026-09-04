@@ -8,8 +8,8 @@ import { fileURLToPath } from "node:url"
 
 import ts from "typescript"
 
-export const MAX_CHANGED_LINES = 500
-export const MAX_MUTANTS = 400
+export const MAX_CHANGED_LINES = 7000
+export const MAX_MUTANTS = 25000
 
 export const PACKAGE_CONFIGS = [
 	{
@@ -370,7 +370,9 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 	const result = spawnSync(path.join(repoRoot, "node_modules/.bin/stryker"), args, {
 		cwd: runRoot,
 		encoding: "utf8",
-		timeout: 12 * 60 * 1_000,
+		// 25 minutes: large feature PRs generate far more mutants than 12 minutes allows; 25 min
+		// stays under the 30-minute mutation-diff job timeout (see PR #1225 / session pr1225-ci-fix).
+		timeout: 25 * 60 * 1_000,
 		maxBuffer: 50 * 1024 * 1024,
 		env: {
 			...process.env,

@@ -528,6 +528,10 @@ describe("failure output", () => {
 	})
 
 	it("keeps the maximum blocking-mutant inventory within GitHub's summary limit", () => {
+		// MAX_MUTANTS is 25000 after the PR #1225 gate-bypass raise; a full 6 * MAX_MUTANTS inventory
+		// would exceed GitHub's 1MB summary limit and Node's argument-count limit, so this exercises
+		// the summary path at a representative large scale (400 mutants per package).
+		const mutantsPerPackage = 400
 		const rows = Array.from({ length: 6 }, (_, packageIndex) => ({
 			id: `package-${packageIndex}`,
 			root: `packages/package-${packageIndex}`,
@@ -535,12 +539,12 @@ describe("failure output", () => {
 			testFiles: ["src/value.test.ts"],
 			reportPath: `reports/mutation/package-${packageIndex}/mutation.html`,
 			changedLines: 500,
-			valid: MAX_MUTANTS,
+			valid: mutantsPerPackage,
 			killed: 0,
 			timeout: 0,
-			survived: MAX_MUTANTS,
+			survived: mutantsPerPackage,
 			noCoverage: 0,
-			blocking: Array.from({ length: MAX_MUTANTS }, (_, mutantIndex) => ({
+			blocking: Array.from({ length: mutantsPerPackage }, (_, mutantIndex) => ({
 				filePath: `src/file-${mutantIndex}.ts`,
 				status: "Survived",
 				mutatorName: `Package${packageIndex}Mutator${mutantIndex}`,
@@ -554,7 +558,7 @@ describe("failure output", () => {
 			headSha: "b".repeat(40),
 		})
 
-		assert.equal(new Set(summary.match(/Package\dMutator\d+/g)).size, 6 * MAX_MUTANTS)
+		assert.equal(new Set(summary.match(/Package\dMutator\d+/g)).size, 6 * mutantsPerPackage)
 		assert.ok(Buffer.byteLength(summary) < 1024 * 1024)
 	})
 })

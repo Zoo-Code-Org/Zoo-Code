@@ -80,6 +80,8 @@ import { getModelMaxOutputTokens } from "../../shared/api"
 import { McpHub } from "../../services/mcp/McpHub"
 import { McpServerManager } from "../../services/mcp/McpServerManager"
 import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
+import { UsageRecorder, resolveEndpoint } from "../../services/stats"
+import type { UsageRecordingContext, UsageEventStore } from "../../services/stats"
 
 // integrations
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
@@ -300,6 +302,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
+
+	/**
+	 * Usage event recorder. Called only at terminal finalize of API attempts.
+	 * Null if store initialization failed; in that case recording is silently skipped.
+	 * (Architecture report section 5.5-5.8, rollback: writer injected as optional service)
+	 */
+	private readonly usageRecorder: UsageRecorder | null = null
+
 	abort: boolean = false
 	currentRequestAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
@@ -568,6 +578,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.diffViewProvider = new DiffViewProvider(this.cwd, this)
 		this.enableCheckpoints = enableCheckpoints
 		this.checkpointTimeout = checkpointTimeout
+
+		// Initialize usage recorder (best-effort: failure results in null recorder).
+		// Use the provider's shared UsageStatsService as the append sink so that all
+		// in-process writes go through one store instance and its cache stays consistent.
+		// If the service is unavailable, the recorder is disabled rather than creating
+		// a second independent store authority.
+		try {
+			const service = provider.getUsageStatsService()
+			if (service) {
+				this.usageRecorder = new UsageRecorder(service as unknown as UsageEventStore, () => {
+					provider.postMessageToWebview({ type: "usageStatsChanged" }).catch(() => {
+						// View disposed, drop message silently
+					})
+				})
+			}
+		} catch (err) {
+			console.warn(`[Task#${this.taskId}] Failed to initialize UsageRecorder, stats will be skipped:`, err)
+		}
 
 		this.parentTask = parentTask
 		this.taskNumber = taskNumber
@@ -3397,6 +3425,48 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									cacheReadTokens: tokens.cacheRead,
 									cost: tokens.total ?? costResult.totalCost,
 								})
+
+								// ── Usage Stats: terminal finalize ──────────────────────────
+								// captureUsageData is the single terminal boundary for completed/cancelled
+								// API attempts. We record the final usage event here.
+								// (Architecture report section 5.5-5.8: terminal finalize only, no chunk-level append)
+								if (this.usageRecorder) {
+									// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+									// requestKey. Previously requestKey = taskId:retryAttempt, which was
+									// identical for every turn of a task (retryAttempt resets to 0 per turn),
+									// causing the idempotency dedupe to drop all but the first turn's usage.
+									const requestKey = `${this.taskId}:${apiReqIndex}:${currentItem.retryAttempt ?? 0}`
+									const ctx: UsageRecordingContext = {
+										taskId: this.taskId,
+										parentTaskId: this.parentTaskId,
+										rootTaskId: this.rootTaskId,
+										provider: String(
+											this.apiConfiguration.apiProvider &&
+												!isRetiredProvider(this.apiConfiguration.apiProvider)
+												? this.apiConfiguration.apiProvider
+												: "unknown",
+										),
+										model: getModelId(this.apiConfiguration) || "unknown",
+										mode: this._taskMode || defaultModeSlug,
+										attempt: currentItem.retryAttempt ?? 0,
+										inputTokens: tokens.input,
+										outputTokens: tokens.output,
+										cacheWriteTokens: tokens.cacheWrite,
+										cacheReadTokens: tokens.cacheRead,
+										totalCost: tokens.total,
+										// V1 semantics: provider-reported values, inclusion unknown
+										// (aggregator handles double-counting via inclusion metadata)
+										cacheReadInInput: "unknown",
+										cacheWriteInInput: "unknown",
+										reasoningInOutput: "unknown",
+										costSource: "provider",
+										tokenSource: "provider",
+										endpoint: resolveEndpoint(this.apiConfiguration),
+									}
+									// Fire-and-forget: store error must not block task
+									this.usageRecorder.finalizeUsageEvent(requestKey, status, ctx).catch(() => {})
+								}
+								// ── End Usage Stats ──────────────────────────────────────────
 							}
 						}
 
@@ -3504,6 +3574,45 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 						// Clean up partial state
 						await abortStream(cancelReason, streamingFailedMessage)
+
+						// ── Usage Stats: terminal finalize for failed/cancelled ───────
+						// This catch block is the terminal path for streaming failures and
+						// user cancellations. Record the partial usage with the appropriate status.
+						// (Architecture report section 5.5-5.8: terminal finalize only)
+						if (this.usageRecorder) {
+							// B1 fix: include apiReqIndex so each tool-use turn produces a unique
+							// requestKey (see completed-path comment above).
+							const requestKey = `${this.taskId}:${lastApiReqIndex}:${currentItem.retryAttempt ?? 0}`
+							const failedStatus: "failed" | "cancelled" = this.abort ? "cancelled" : "failed"
+							const ctx: UsageRecordingContext = {
+								taskId: this.taskId,
+								parentTaskId: this.parentTaskId,
+								rootTaskId: this.rootTaskId,
+								provider: String(
+									this.apiConfiguration.apiProvider &&
+										!isRetiredProvider(this.apiConfiguration.apiProvider)
+										? this.apiConfiguration.apiProvider
+										: "unknown",
+								),
+								model: getModelId(this.apiConfiguration) || "unknown",
+								mode: this._taskMode || defaultModeSlug,
+								attempt: currentItem.retryAttempt ?? 0,
+								inputTokens: inputTokens,
+								outputTokens: outputTokens,
+								cacheWriteTokens: cacheWriteTokens,
+								cacheReadTokens: cacheReadTokens,
+								totalCost: totalCost,
+								cacheReadInInput: "unknown",
+								cacheWriteInInput: "unknown",
+								reasoningInOutput: "unknown",
+								costSource: "provider",
+								tokenSource: "provider",
+								endpoint: resolveEndpoint(this.apiConfiguration),
+							}
+							// Fire-and-forget: store error must not block task
+							this.usageRecorder.finalizeUsageEvent(requestKey, failedStatus, ctx).catch(() => {})
+						}
+						// ── End Usage Stats ──────────────────────────────────────────
 
 						if (this.abort) {
 							// User cancelled - abort the entire task

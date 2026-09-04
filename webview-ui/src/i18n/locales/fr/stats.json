@@ -1,0 +1,82 @@
+{
+	"title": "Statistiques d'utilisation",
+	"done": "Retour au chat",
+	"range": {
+		"today": "Aujourd'hui",
+		"7d": "7 derniers jours",
+		"30d": "30 derniers jours",
+		"all": "Tout l'historique"
+	},
+	"summary": {
+		"totalTokens": "Total des jetons",
+		"inputTokens": "Jetons d'entrée",
+		"outputTokens": "Jetons de sortie",
+		"cacheTokens": "Jetons de cache",
+		"costUsd": "Coût total"
+	},
+	"breakdown": {
+		"title": "Répartition",
+		"groupBy": "Regrouper par",
+		"model": "Modèle",
+		"provider": "Fournisseur",
+		"mode": "Mode",
+		"status": "Statut",
+		"day": "Jour",
+		"week": "Semaine",
+		"month": "Mois",
+		"events": "Événements",
+		"completed": "Terminés",
+		"failed": "Échoués",
+		"cancelled": "Annulés",
+		"inputTokens": "Entrée",
+		"outputTokens": "Sortie",
+		"cacheReadTokens": "Lecture du cache",
+		"cacheWriteTokens": "Écriture du cache",
+		"reasoningTokens": "Raisonnement",
+		"totalTokens": "Total",
+		"costUsd": "Coût (USD)",
+		"unknown": "Inconnu",
+		"empty": "Aucune donnée d'utilisation pour cette période."
+	},
+	"heatmap": {
+		"title": "Activité quotidienne",
+		"30d": "30 jours",
+		"60d": "60 jours",
+		"120d": "120 jours",
+		"360d": "360 jours",
+		"less": "Moins",
+		"more": "Plus",
+		"noData": "Aucune donnée",
+		"loading": "Chargement..."
+	},
+	"coverage": {
+		"title": "Couverture des données",
+		"liveFrom": "Enregistrement depuis",
+		"backfilledEvents": "Événements rétroactifs",
+		"paused": "L'enregistrement est en pause",
+		"notAvailable": "Non disponible"
+	},
+	"actions": {
+		"exportJson": "Exporter JSON",
+		"exportCsv": "Exporter CSV",
+		"clear": "Effacer toutes les données",
+		"refresh": "Actualiser"
+	},
+	"clearDialog": {
+		"title": "Effacer toutes les statistiques d'utilisation ?",
+		"description": "Cela supprimera définitivement tous les événements d'utilisation enregistrés du stockage local. Cette action est irréversible.",
+		"confirm": "Supprimer",
+		"cancel": "Annuler"
+	},
+	"states": {
+		"loading": "Chargement des statistiques...",
+		"error": "Échec du chargement des statistiques",
+		"empty": "Pas encore de données d'utilisation. Les statistiques apparaîtront ici après vos appels d'API LLM.",
+		"emptyHint": "Essayez d'envoyer un message à votre assistant IA pour commencer à collecter des données d'utilisation."
+	},
+	"source": {
+		"provider": "Signalé par le fournisseur",
+		"estimated": "Estimé",
+		"backfilled": "Rétroactif"
+	}
+}

@@ -8,6 +8,7 @@ import { defineConfig } from "vite"
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const webviewRoot = path.resolve(dirname, "..")
 const rooCodeTypesShim = path.resolve(dirname, "roo-code-types.ts")
+const nodeBuiltinStubs = path.resolve(dirname, "node-builtin-browser-stubs.ts")
 const rooCodeTypesShimImporters = [
 	"/src/shared/modes.ts",
 	"/webview-ui/src/components/chat/CodeIndexPopover.tsx",
@@ -40,6 +41,17 @@ export default defineConfig({
 	],
 	resolve: {
 		alias: [
+			// `src/i18n/setup.ts` imports `node:fs`/`node:path`/`node:url` at top
+			// level for its Node-side disk fallback. Vite dev externalizes those
+			// builtins to a proxy that THROWS the moment the browser evaluates the
+			// eager CJS-interop access (`node:url.fileURLToPath`), which crashes
+			// every gallery story that loads i18n. Aliasing them to plain stub
+			// modules keeps the browser graph importable; the disk-fallback branch
+			// never executes there (Vite rewrites `import.meta.glob` instead).
+			{ find: "node:url", replacement: nodeBuiltinStubs },
+			{ find: "node:fs/promises", replacement: nodeBuiltinStubs },
+			{ find: "node:fs", replacement: nodeBuiltinStubs },
+			{ find: "node:path", replacement: nodeBuiltinStubs },
 			{
 				find: "@/context/ExtensionStateContext",
 				replacement: path.resolve(dirname, "ExtensionStateContext.tsx"),

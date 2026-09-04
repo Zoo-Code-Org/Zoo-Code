@@ -1,0 +1,82 @@
+{
+	"title": "使用量統計",
+	"done": "返回聊天",
+	"range": {
+		"today": "今天",
+		"7d": "最近7天",
+		"30d": "最近30天",
+		"all": "全部時間"
+	},
+	"summary": {
+		"totalTokens": "總詞元數",
+		"inputTokens": "輸入詞元",
+		"outputTokens": "輸出詞元",
+		"cacheTokens": "快取詞元",
+		"costUsd": "總費用"
+	},
+	"breakdown": {
+		"title": "明細",
+		"groupBy": "分組依據",
+		"model": "模型",
+		"provider": "供應商",
+		"mode": "模式",
+		"status": "狀態",
+		"day": "日",
+		"week": "週",
+		"month": "月",
+		"events": "事件",
+		"completed": "已完成",
+		"failed": "失敗",
+		"cancelled": "已取消",
+		"inputTokens": "輸入",
+		"outputTokens": "輸出",
+		"cacheReadTokens": "快取讀取",
+		"cacheWriteTokens": "快取寫入",
+		"reasoningTokens": "推理",
+		"totalTokens": "總計",
+		"costUsd": "費用 (USD)",
+		"unknown": "未知",
+		"empty": "此範圍內沒有使用量資料。"
+	},
+	"heatmap": {
+		"title": "每日活動",
+		"30d": "30天",
+		"60d": "60天",
+		"120d": "120天",
+		"360d": "360天",
+		"less": "較少",
+		"more": "較多",
+		"noData": "無資料",
+		"loading": "載入中..."
+	},
+	"coverage": {
+		"title": "資料涵蓋範圍",
+		"liveFrom": "記錄開始",
+		"backfilledEvents": "回填事件",
+		"paused": "記錄已暫停",
+		"notAvailable": "無法使用"
+	},
+	"actions": {
+		"exportJson": "匯出 JSON",
+		"exportCsv": "匯出 CSV",
+		"clear": "清除所有資料",
+		"refresh": "重新整理"
+	},
+	"clearDialog": {
+		"title": "清除所有使用量統計？",
+		"description": "這將永久刪除本機儲存中記錄的所有使用量事件。此操作無法復原。",
+		"confirm": "刪除",
+		"cancel": "取消"
+	},
+	"states": {
+		"loading": "正在載入統計資料...",
+		"error": "載入統計資料失敗",
+		"empty": "尚無使用量資料。LLM API 呼叫後統計資料將顯示在此處。",
+		"emptyHint": "嘗試向您的 AI 助理傳送訊息以開始收集使用量資料。"
+	},
+	"source": {
+		"provider": "供應商回報",
+		"estimated": "估算",
+		"backfilled": "回填"
+	}
+}

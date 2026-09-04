@@ -33,6 +33,31 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"dashboard-view": async () => {
+		const { DashboardViewFixture } = await import("@/components/dashboard/__tests__/DashboardView.visual.fixture")
+		return <DashboardViewFixture />
+	},
+	"dashboard-summary": async () => {
+		const { DashboardSummaryFixture } =
+			await import("@/components/dashboard/__tests__/DashboardSummary.visual.fixture")
+		return <DashboardSummaryFixture />
+	},
+	"dashboard-heatmap": async () => {
+		const { UsageHeatmapFixture } = await import("@/components/dashboard/__tests__/UsageHeatmap.visual.fixture")
+		return <UsageHeatmapFixture />
+	},
+	"dashboard-task-list-many": async () => {
+		const { TaskListManyFixture } = await import("@/components/dashboard/__tests__/TaskList.visual.fixture")
+		return <TaskListManyFixture />
+	},
+	"dashboard-task-list-few": async () => {
+		const { TaskListFewFixture } = await import("@/components/dashboard/__tests__/TaskList.visual.fixture")
+		return <TaskListFewFixture />
+	},
+	"dashboard-task-list-hierarchy": async () => {
+		const { HierarchyFixture } = await import("@/components/dashboard/__tests__/TaskList.visual.fixture")
+		return <HierarchyFixture />
+	},
 	"chat-text-area": async () => {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />

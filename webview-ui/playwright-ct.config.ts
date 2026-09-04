@@ -1,10 +1,33 @@
 import path from "path"
 import { fileURLToPath } from "url"
 
+import tailwindcss from "@tailwindcss/vite"
+import react from "@vitejs/plugin-react"
 import { defineConfig, type ReporterDescription } from "@playwright/test"
 
 const dirname = path.dirname(fileURLToPath(import.meta.url))
 const galleryUrl = "http://127.0.0.1:4173"
+
+const TRANSLATION_CONTEXT_STUB = path.resolve(dirname, "./playwright/TranslationContext.ts")
+/**
+ * Node-side (Playwright test-runner process) TypeScript resolution config.
+ *
+ * Playwright does NOT use `ctViteConfig` to load test files. It transpiles and
+ * `require()`s them inside the Node runner, resolving bare specifiers from the
+ * nearest `tsconfig.json` to the importing file. For everything under
+ * `webview-ui/src/**` and `src/shared/**` that ends up resolving
+ * `@roo-code/types` through `node_modules/@roo-code/types` -> `main:
+ * ./dist/index.cjs`, and CI never builds `packages/types`, so module load
+ * crashes with `Cannot find module .../@roo-code/types/dist/index.cjs`.
+ *
+ * This file supplies one explicit tsconfig for all Node-side resolution so
+ * `@roo-code/types` maps to the TypeScript SOURCE (exactly like
+ * `webview-ui/vitest.config.ts` does for the unit suite), instead of the
+ * unbuilt `dist`. It also re-declares the `@`, `@src` and `@roo` path aliases
+ * from `webview-ui/tsconfig.json`, because a single `tsconfig` overrides the
+ * per-folder lookup entirely.
+ */
+const NODE_TSCONFIG = path.resolve(dirname, "./playwright/node-tsconfig.json")
 
 const monocartReporter: ReporterDescription = [
 	"monocart-reporter",
@@ -28,6 +51,10 @@ const monocartReporter: ReporterDescription = [
 export default defineConfig({
 	testDir: "./src",
 	testMatch: "**/*.visual.tsx",
+	// See NODE_TSCONFIG above: overrides Playwright's per-file `tsconfig.json`
+	// lookup for every Node-side module resolution (test files, the
+	// `@roo/*` shared modules, and the real `ExtensionStateContext` graph).
+	tsconfig: NODE_TSCONFIG,
 	outputDir: path.resolve(dirname, "test-results"),
 	snapshotPathTemplate: "{testDir}/{testFileDir}/__screenshots__/{arg}{ext}",
 	fullyParallel: true,
@@ -45,13 +72,80 @@ export default defineConfig({
 			],
 	use: {
 		baseURL: galleryUrl,
+		...({
+			ctTemplateDir: "./playwright",
+			ctViteConfig: {
+				plugins: [
+					react({
+						babel: {
+							plugins: [["babel-plugin-react-compiler", { target: "18" }]],
+						},
+					}),
+					tailwindcss(),
+				],
+				resolve: {
+					// Use the array form so exact-match entries are guaranteed to win
+					// over the `@`/`@src` prefix aliases regardless of evaluation order.
+					alias: [
+						// Only the `@src/` spelling of the translation context is stubbed
+						// (used by TaskList). The dashboard tests intentionally use the REAL
+						// `@/i18n/TranslationContext` to render real locale labels, so it is
+						// NOT aliased here.
+						{
+							find: /^@src\/i18n\/TranslationContext$/,
+							replacement: TRANSLATION_CONTEXT_STUB,
+						},
+						// `TabContent` (rendered by DashboardView) and the real
+						// `TranslationContext` both call `useExtensionState()`. The real
+						// `ExtensionStateContext` module imports `@roo-code/types` → Zod,
+						// which crashes the Playwright CT browser bundle with
+						// `ReferenceError: z is not defined`. Redirect BOTH spellings of the
+						// context module to a lightweight browser-safe mock so the whole
+						// Zod chain is severed at the source.
+						{
+							find: /^@\/context\/ExtensionStateContext$/,
+							replacement: path.resolve(dirname, "./playwright/ExtensionStateContext.mock.tsx"),
+						},
+						{
+							find: /^@src\/context\/ExtensionStateContext$/,
+							replacement: path.resolve(dirname, "./playwright/ExtensionStateContext.mock.tsx"),
+						},
+						{ find: "@", replacement: path.resolve(dirname, "./src") },
+						{ find: "@src", replacement: path.resolve(dirname, "./src") },
+						{ find: "@roo", replacement: path.resolve(dirname, "../src/shared") },
+						{
+							find: "@vscode/webview-ui-toolkit/react",
+							replacement: path.resolve(dirname, "./src/__mocks__/@vscode/webview-ui-toolkit/react.tsx"),
+						},
+						{ find: "vscode", replacement: path.resolve(dirname, "../src/__mocks__/vscode.js") },
+					],
+				},
+				define: {
+					"process.platform": JSON.stringify(process.platform),
+					"process.env.NODE_ENV": JSON.stringify(process.env.NODE_ENV ?? "test"),
+					"process.env.PKG_NAME": JSON.stringify("zoo-code"),
+					"process.env.PKG_VERSION": JSON.stringify("0.0.0-test"),
+					"process.env.PKG_OUTPUT_CHANNEL": JSON.stringify("Zoo-Code"),
+					"process.env.PKG_RELEASE_CHANNEL": JSON.stringify("stable"),
+				},
+				optimizeDeps: {
+					exclude: ["@vscode/codicons"],
+				},
+				publicDir: path.resolve(dirname, "../src/assets/images"),
+			},
+		} as any),
 		viewport: { width: 520, height: 360 },
 		deviceScaleFactor: 1,
 		colorScheme: "dark",
+		video: "retain-on-failure",
+		trace: "retain-on-failure",
 	},
 	expect: {
 		toHaveScreenshot: {
 			animations: "disabled",
+			// Allow 1% pixel diff to tolerate cross-platform rendering
+			// differences (Windows ↔ Linux font anti-aliasing).
+			maxDiffPixelRatio: 0.01,
 		},
 	},
 	projects: [
