@@ -257,13 +257,13 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				const delta = chunk.choices[0]?.delta
 				const usage = chunk.usage as LiteLLMUsage
 
-				if (delta?.content) {
-					yield { type: "text", text: delta.content }
-				}
-
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
 					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
