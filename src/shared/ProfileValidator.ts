@@ -64,6 +64,7 @@ export class ProfileValidator {
 			case providerIdentifiers.sambanova:
 			case providerIdentifiers.fireworks:
 			case providerIdentifiers.friendli:
+			case providerIdentifiers.neuronpool:
 				return profile.apiModelId
 			case providerIdentifiers.litellm:
 				return profile.litellmModelId
