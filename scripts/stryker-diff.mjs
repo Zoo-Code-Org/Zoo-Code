@@ -298,7 +298,8 @@ export function preferDirectTestFiles(testFiles, sourceFiles) {
 		const testName = path.posix.basename(testFile)
 		return sourceNames.some(
 			(sourceName) =>
-				testName.startsWith(`${sourceName}.`) && /\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
+				(testName.startsWith(`${sourceName}.`) || testName.startsWith(`${sourceName}-`)) &&
+				/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
 		)
 	})
 	return direct.length > 0 ? direct : testFiles

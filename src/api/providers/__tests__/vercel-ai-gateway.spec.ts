@@ -17,6 +17,8 @@ import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { vercelAiGatewayDefaultModelId, VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import type { ModelInfo } from "@roo-code/types"
+import type { ApiHandlerOptions } from "../../../shared/api"
 
 // Mock dependencies
 vitest.mock("openai")
@@ -432,6 +434,72 @@ describe("VercelAiGatewayHandler", () => {
 			expect(call.temperature).toBeUndefined()
 		})
 
+		it.each([
+			["boolean support", { reasoningEffort: "high" }, { supportsReasoningEffort: true }, "high"],
+			["array support", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low", "high"] }, "high"],
+			["unsupported effort", { reasoningEffort: "high" }, { supportsReasoningEffort: ["low"] }, undefined],
+			["disabled effort", { reasoningEffort: "disable" }, { supportsReasoningEffort: ["low"] }, undefined],
+			["none effort", { reasoningEffort: "none" }, { supportsReasoningEffort: ["low"] }, undefined],
+			[
+				"disabled toggle",
+				{ reasoningEffort: "high", enableReasoningEffort: false },
+				{ supportsReasoningEffort: ["low", "high"] },
+				undefined,
+			],
+			["minimal effort", { reasoningEffort: "minimal" }, { supportsReasoningEffort: ["minimal"] }, undefined],
+			[
+				"required fallback",
+				{ reasoningEffort: "high" },
+				{
+					supportsReasoningEffort: ["low", "medium"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+				},
+				"medium",
+			],
+			[
+				"required default",
+				{},
+				{
+					supportsReasoningEffort: ["low", "medium"],
+					requiredReasoningEffort: true,
+					reasoningEffort: "medium",
+				},
+				"medium",
+			],
+			[
+				"invalid required fallback",
+				{},
+				{ supportsReasoningEffort: ["low"], requiredReasoningEffort: true, reasoningEffort: "none" },
+				undefined,
+			],
+			[
+				"optional fallback",
+				{},
+				{ supportsReasoningEffort: ["low", "medium"], reasoningEffort: "medium" },
+				undefined,
+			],
+		] satisfies ReadonlyArray<
+			readonly [string, Partial<ApiHandlerOptions>, Partial<ModelInfo>, string | undefined]
+		>)("normalizes %s", async (_case, options, modelOverrides, expectedEffort) => {
+			const handler = new VercelAiGatewayHandler(makeApiHandlerOptions({ ...mockOptions, ...options }))
+			vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: "reasoning-model",
+				info: {
+					maxTokens: 8_192,
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					...modelOverrides,
+				},
+			})
+
+			await handler.createMessage("system", [{ role: "user", content: "Hello" }]).next()
+
+			const request = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			if (expectedEffort) expect(request.reasoning_effort).toBe(expectedEffort)
+			else expect(request).not.toHaveProperty("reasoning_effort")
+		})
+
 		it("adds cache breakpoints for supported models", async () => {
 			const { addCacheBreakpoints } = await import("../../transform/caching/vercel-ai-gateway")
 			const handler = new VercelAiGatewayHandler(
@@ -741,6 +809,33 @@ describe("VercelAiGatewayHandler", () => {
 				}),
 			)
 		})
+
+		it.each([
+			["max", "max"],
+			["none", "medium"],
+		] as const)(
+			"uses safe Astra completion parameters for %s reasoning",
+			async (reasoningEffort, expectedEffort) => {
+				const handler = new VercelAiGatewayHandler(
+					makeApiHandlerOptions({
+						...mockOptions,
+						vercelAiGatewayModelId: "openai/gpt-6-astra",
+						modelTemperature: 0.7,
+						reasoningEffort,
+					}),
+				)
+
+				await handler.completePrompt("Test prompt")
+
+				const request = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+				expect(request).toMatchObject({
+					model: "openai/gpt-6-astra",
+					max_completion_tokens: 128000,
+					reasoning_effort: expectedEffort,
+				})
+				expect(request).not.toHaveProperty("temperature")
+			},
+		)
 
 		it("handles completion errors correctly", async () => {
 			const handler = new VercelAiGatewayHandler(mockOptions)

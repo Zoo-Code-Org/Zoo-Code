@@ -3,7 +3,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import { LiteLLMHandler } from "../lite-llm"
 import { ApiHandlerOptions } from "../../../shared/api"
-import { litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
+import { litellmDefaultModelId, litellmDefaultModelInfo, type ModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -87,6 +87,54 @@ describe("LiteLLMHandler", () => {
 			litellmModelId: litellmDefaultModelId,
 		}
 		handler = new LiteLLMHandler(mockOptions)
+	})
+
+	describe("reasoning effort normalization", () => {
+		const baseInfo: ModelInfo = {
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			supportsPromptCache: false,
+		}
+
+		it.each([
+			["non-array support", "max", { supportsReasoningEffort: true }, undefined],
+			[
+				"supported configured effort",
+				"max",
+				{ supportsReasoningEffort: ["low", "medium", "max"], reasoningEffort: "medium" },
+				"max",
+			],
+			[
+				"unsupported configured effort",
+				"high",
+				{ supportsReasoningEffort: ["low", "medium"], reasoningEffort: "medium" },
+				"medium",
+			],
+			[
+				"disabled configured effort",
+				"disable",
+				{ supportsReasoningEffort: ["low", "medium"], reasoningEffort: "medium" },
+				"medium",
+			],
+			[
+				"unset configured effort",
+				undefined,
+				{ supportsReasoningEffort: ["low", "medium"], reasoningEffort: "medium" },
+				"medium",
+			],
+			["missing fallback", undefined, { supportsReasoningEffort: ["low", "medium"] }, undefined],
+			[
+				"unsupported fallback",
+				undefined,
+				{ supportsReasoningEffort: ["low"], reasoningEffort: "medium" },
+				undefined,
+			],
+		] as const)("handles %s", (_case, reasoningEffort, overrides, expected) => {
+			const currentHandler = new LiteLLMHandler({ ...mockOptions, reasoningEffort })
+			const info = { ...baseInfo, ...overrides } as ModelInfo
+
+			expect(currentHandler["getReasoningEffort"](info)).toBe(expected)
+		})
 	})
 
 	describe("prompt caching", () => {
@@ -402,6 +450,7 @@ describe("LiteLLMHandler", () => {
 			handler = new LiteLLMHandler({
 				...mockOptions,
 				litellmModelId: "gpt-6-astra",
+				litellmUsePromptCache: true,
 				reasoningEffort: "none",
 				modelTemperature: 0.7,
 			})
@@ -441,6 +490,41 @@ describe("LiteLLMHandler", () => {
 			})
 			expect(request.max_tokens).toBeUndefined()
 			expect(request.temperature).toBeUndefined()
+			expect(request.messages[0]).toEqual({ role: "system", content: "You are helpful" })
+		})
+
+		it("keeps manual cache controls for non-Responses models", async () => {
+			handler = new LiteLLMHandler({ ...mockOptions, litellmUsePromptCache: true })
+			vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: "cache-model",
+				info: { ...litellmDefaultModelInfo, supportsPromptCache: true, requiresResponsesApi: false },
+			})
+			mockCreate.mockReturnValue({ withResponse: vi.fn().mockResolvedValue({ data: asyncStreamFrom([]) }) })
+
+			await collectStream(handler.createMessage("System", [{ role: "user", content: "Hello" }]))
+
+			const request = mockCreate.mock.calls[0][0]
+			expect(request.messages[0].content).toEqual([
+				expect.objectContaining({ type: "text", text: "System", cache_control: { type: "ephemeral" } }),
+			])
+		})
+
+		it.each(["streaming", "completion"] as const)("omits temperature for metadata-disabled %s", async (mode) => {
+			handler = new LiteLLMHandler({ ...mockOptions, modelTemperature: 0.7 })
+			vi.spyOn(handler, "fetchModel").mockResolvedValue({
+				id: "custom-model",
+				info: { ...litellmDefaultModelInfo, supportsTemperature: false },
+			})
+
+			if (mode === "streaming") {
+				mockCreate.mockReturnValue({ withResponse: vi.fn().mockResolvedValue({ data: asyncStreamFrom([]) }) })
+				await collectStream(handler.createMessage("System", []))
+			} else {
+				mockCreate.mockResolvedValue({ choices: [{ message: { content: "Response" } }] })
+				await handler.completePrompt("Hello")
+			}
+
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
 
 		it("uses safe Astra parameters for completePrompt", async () => {

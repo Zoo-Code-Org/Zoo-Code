@@ -276,6 +276,13 @@ describe("getLiteLLMModels", () => {
 			reasoningEffort: "medium",
 			supportsTemperature: false,
 			requiresResponsesApi: true,
+			longContextPricing: {
+				thresholdTokens: 272_000,
+				inputPriceMultiplier: 2,
+				outputPriceMultiplier: 1.5,
+				cacheWritesPriceMultiplier: 2,
+				cacheReadsPriceMultiplier: 2,
+			},
 			inputPrice: 10,
 			outputPrice: 50,
 			cacheWritesPrice: 12.5,

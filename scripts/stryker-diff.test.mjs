@@ -201,10 +201,12 @@ describe("preferDirectTestFiles", () => {
 		const related = [
 			"webview-ui/src/__tests__/App.spec.tsx",
 			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
+			"webview-ui/src/utils/__tests__/path-mentions-edge-cases.spec.ts",
 			"webview-ui/src/components/chat/__tests__/ChatView.spec.tsx",
 		]
 		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/path-mentions.ts"]), [
 			"webview-ui/src/utils/__tests__/path-mentions.test.ts",
+			"webview-ui/src/utils/__tests__/path-mentions-edge-cases.spec.ts",
 		])
 		assert.deepEqual(preferDirectTestFiles(related, ["webview-ui/src/utils/unmatched.ts"]), related)
 	})
