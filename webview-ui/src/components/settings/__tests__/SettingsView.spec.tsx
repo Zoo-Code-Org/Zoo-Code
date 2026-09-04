@@ -812,28 +812,41 @@ describe("SettingsView - Experimental Settings", () => {
 	})
 
 	it("includes the dynamic thinking effort toggle in the updateSettings payload on save", () => {
-		// Start from the shared contract default, where dynamicThinkingEffort is off.
 		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: experimentDefault })
-
 		activateTab("experimental")
-
 		const content = getSettingsContent()
 		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
 		const checkbox = within(label).getByRole("checkbox")
 		expect(checkbox).not.toBeChecked()
-
 		fireEvent.click(checkbox)
-
-		// Click Save to save settings
-		const saveButton = screen.getByTestId("save-button")
-		fireEvent.click(saveButton)
-
-		// The toggled experiment must reach the host inside the updateSettings payload
+		fireEvent.click(screen.getByTestId("save-button"))
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "updateSettings",
 				updatedSettings: expect.objectContaining({
 					experiments: expect.objectContaining({ dynamicThinkingEffort: true }),
+				}),
+			}),
+		)
+	})
+
+	it("persists the unset representation of dynamicThinkingEffort as false on save", () => {
+		const experiments: Record<string, boolean> = { ...experimentDefault }
+		delete experiments.dynamicThinkingEffort
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments })
+		activateTab("experimental")
+		const content = getSettingsContent()
+		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
+		const checkbox = within(label).getByRole("checkbox")
+		expect(checkbox).not.toBeChecked()
+		fireEvent.click(checkbox)
+		fireEvent.click(checkbox)
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					experiments: expect.objectContaining({ dynamicThinkingEffort: false }),
 				}),
 			}),
 		)
