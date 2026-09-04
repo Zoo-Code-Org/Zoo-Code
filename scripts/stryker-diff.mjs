@@ -313,6 +313,10 @@ export function resolveVitestBinary(repoRoot, packageEntry) {
 	return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates.at(-1)
 }
 
+export function resolveStrykerTempDir(repoRoot, runRoot) {
+	return path.relative(runRoot, path.join(repoRoot, ".stryker-tmp")) || ".stryker-tmp"
+}
+
 export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
@@ -378,7 +382,7 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 				.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig))
 				.replaceAll("\\", "/"),
 			STRYKER_REPORT_DIR: reportDirectory,
-			STRYKER_TEMP_DIR: path.join(repoRoot, ".stryker-tmp", packageEntry.id),
+			STRYKER_TEMP_DIR: resolveStrykerTempDir(repoRoot, runRoot),
 			STRYKER_IN_PLACE: "false",
 			STRYKER_VITEST_RELATED: packageEntry.vitestRelated === false ? "false" : "true",
 			STRYKER_TEST_FILES: JSON.stringify(packageEntry.testFiles ?? []),
