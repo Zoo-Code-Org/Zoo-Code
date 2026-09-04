@@ -285,7 +285,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		}
 
 		try {
-			const completion = await this.client.chat.completions.create(body, { signal: controller.signal })
+			const completion = metadata?.taskId
+				? await this.client.chat.completions.create(body, {
+						signal: controller.signal,
+						headers: { "x-opencode-session": metadata.taskId },
+					})
+				: await this.client.chat.completions.create(body, { signal: controller.signal })
 
 			for await (const chunk of completion) {
 				const delta = chunk.choices[0]?.delta
@@ -427,7 +432,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 
 		let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
 		try {
-			stream = await this.client.responses.create(requestBody, { signal: metadata?.abortSignal })
+			stream = await this.client.responses.create(requestBody, {
+				signal: metadata?.abortSignal,
+				headers: metadata?.taskId ? { "x-opencode-session": metadata.taskId } : undefined,
+			})
 		} catch (error) {
 			if (error instanceof Error) {
 				throw new Error(`Opencode Go completion error: ${error.message}`)
@@ -555,7 +563,12 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// errors propagate unchanged, matching the OpenAI streaming path.
 		let stream
 		try {
-			stream = await this.anthropicClient.messages.create(requestParams, { signal: abortSignal })
+			stream = metadata?.taskId
+				? await this.anthropicClient.messages.create(requestParams, {
+						signal: abortSignal,
+						headers: { "x-opencode-session": metadata.taskId },
+					})
+				: await this.anthropicClient.messages.create(requestParams, { signal: abortSignal })
 		} catch (error) {
 			// Preserve abort identity (series standard): a cancelled request
 			// must surface as a DOM-standard AbortError, not a wrapped
