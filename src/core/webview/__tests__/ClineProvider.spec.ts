@@ -1181,9 +1181,11 @@ describe("ClineProvider", () => {
 		let shutdownComplete = false
 
 		const shutdown = provider.dispose()
-		void shutdown.then(() => {
-			shutdownComplete = true
-		})
+		void shutdown
+			.then(() => {
+				shutdownComplete = true
+			})
+			.catch(() => {})
 		await vi.waitFor(() => expect(currentTask.abortTask).toHaveBeenCalledOnce())
 		expect(currentTask.dispose).not.toHaveBeenCalled()
 		expect(remainingTask.abortTask).not.toHaveBeenCalled()
@@ -1233,6 +1235,33 @@ describe("ClineProvider", () => {
 		expect(logSpy).toHaveBeenCalledWith(
 			"[ClineProvider#dispose] Task cleanup failed for current-task.current-instance: cleanup failed",
 		)
+	})
+
+	test("dispose continues draining tasks after abort rejects", async () => {
+		const abortError = new Error("abort failed")
+		const remainingTask = {
+			taskId: "remaining-task",
+			instanceId: "remaining-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		const currentTask = {
+			taskId: "current-task",
+			instanceId: "current-instance",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockRejectedValue(abortError),
+			dispose: vi.fn().mockResolvedValue(undefined),
+		}
+		Object.assign(provider, { taskRegistry: new TaskRegistry() })
+		provider["taskRegistry"].push(remainingTask as unknown as Task)
+		provider["taskRegistry"].push(currentTask as unknown as Task)
+
+		await expect(provider.dispose()).resolves.toBeUndefined()
+
+		expect(currentTask.dispose).toHaveBeenCalledOnce()
+		expect(remainingTask.abortTask).toHaveBeenCalledOnce()
+		expect(remainingTask.dispose).toHaveBeenCalledOnce()
 	})
 
 	test("handles webviewDidLaunch message", async () => {

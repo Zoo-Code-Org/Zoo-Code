@@ -250,6 +250,23 @@ describe("Task dispose method", () => {
 		expect(disposalComplete).toBe(true)
 	})
 
+	test("should log rejected diff reversion and continue final abort persistence", async () => {
+		const reversionError = new Error("reversion failed")
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		task.isStreaming = true
+		task.diffViewProvider.isEditing = true
+		vi.spyOn(task.diffViewProvider, "revertChanges").mockRejectedValue(reversionError)
+		const saveMessages = vi.fn().mockResolvedValue(true)
+		Object.defineProperty(task, "saveClineMessages", { value: saveMessages })
+
+		await expect(task.abortTask()).resolves.toBeUndefined()
+		await expect(task.dispose()).resolves.toBeUndefined()
+
+		expect(consoleErrorSpy).toHaveBeenCalledWith(reversionError)
+		expect(saveMessages).toHaveBeenCalledOnce()
+		consoleErrorSpy.mockRestore()
+	})
+
 	test("should remove all event listeners when dispose is called", () => {
 		// Add some event listeners using type assertion to bypass strict typing for testing
 		const listener1 = vi.fn(() => {})
