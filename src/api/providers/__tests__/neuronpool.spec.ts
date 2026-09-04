@@ -7,6 +7,8 @@ import { type NeuronPoolModelId, neuronpoolDefaultModelId, neuronpoolModels } fr
 
 import { NeuronPoolHandler, NEURONPOOL_DEFAULT_BASE_URL, stripTrailingSlashes } from "../neuronpool"
 
+const LIVE_WORKER_BASE_URL = "https://neuronpool.damnknee.workers.dev/v1"
+
 const mockCreate = vi.fn()
 
 vi.mock("openai", () => ({
@@ -23,7 +25,7 @@ vi.mock("openai", () => ({
 
 describe("stripTrailingSlashes", () => {
 	it("leaves a URL without trailing slashes unchanged", () => {
-		expect(stripTrailingSlashes(NEURONPOOL_DEFAULT_BASE_URL)).toBe(NEURONPOOL_DEFAULT_BASE_URL)
+		expect(stripTrailingSlashes(LIVE_WORKER_BASE_URL)).toBe(LIVE_WORKER_BASE_URL)
 	})
 
 	it("strips one or many trailing slashes without regex backtracking", () => {
@@ -51,9 +53,13 @@ describe("NeuronPoolHandler", () => {
 		handler = new NeuronPoolHandler({ neuronpoolApiKey: "test-neuronpool-api-key" })
 	})
 
+	it("exports the live Worker base URL", () => {
+		expect(NEURONPOOL_DEFAULT_BASE_URL).toBe(LIVE_WORKER_BASE_URL)
+	})
+
 	it("should use the live Worker base URL by default", () => {
 		new NeuronPoolHandler({ neuronpoolApiKey: "test-neuronpool-api-key" })
-		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: NEURONPOOL_DEFAULT_BASE_URL }))
+		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: LIVE_WORKER_BASE_URL }))
 	})
 
 	it("should fall back to the live Worker URL when the custom base URL is empty", () => {
@@ -61,7 +67,7 @@ describe("NeuronPoolHandler", () => {
 			neuronpoolApiKey: "test-neuronpool-api-key",
 			neuronpoolBaseUrl: "",
 		})
-		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: NEURONPOOL_DEFAULT_BASE_URL }))
+		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: LIVE_WORKER_BASE_URL }))
 	})
 
 	it("should honor a custom base URL", () => {
@@ -85,6 +91,10 @@ describe("NeuronPoolHandler", () => {
 
 	it("should throw when neither neuronpoolApiKey nor apiKey is set", () => {
 		expect(() => new NeuronPoolHandler({})).toThrow("API key is required")
+	})
+
+	it("sets the provider name to NeuronPool", () => {
+		expect((handler as unknown as { providerName: string }).providerName).toBe("NeuronPool")
 	})
 
 	it("should return default model when no model is specified", () => {
