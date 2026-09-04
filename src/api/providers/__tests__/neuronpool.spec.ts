@@ -30,6 +30,17 @@ describe("stripTrailingSlashes", () => {
 		expect(stripTrailingSlashes("https://example.test/v1/")).toBe("https://example.test/v1")
 		expect(stripTrailingSlashes("https://example.test/v1" + "/".repeat(64))).toBe("https://example.test/v1")
 	})
+
+	it("treats empty and slash-only strings as empty", () => {
+		expect(stripTrailingSlashes("")).toBe("")
+		expect(stripTrailingSlashes("/")).toBe("")
+		expect(stripTrailingSlashes("///")).toBe("")
+	})
+
+	it("does not strip trailing characters that are not slashes", () => {
+		expect(stripTrailingSlashes("https://example.test/v1 ")).toBe("https://example.test/v1 ")
+		expect(stripTrailingSlashes("https://example.test/v1.")).toBe("https://example.test/v1.")
+	})
 })
 
 describe("NeuronPoolHandler", () => {
@@ -42,6 +53,14 @@ describe("NeuronPoolHandler", () => {
 
 	it("should use the live Worker base URL by default", () => {
 		new NeuronPoolHandler({ neuronpoolApiKey: "test-neuronpool-api-key" })
+		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: NEURONPOOL_DEFAULT_BASE_URL }))
+	})
+
+	it("should fall back to the live Worker URL when the custom base URL is empty", () => {
+		new NeuronPoolHandler({
+			neuronpoolApiKey: "test-neuronpool-api-key",
+			neuronpoolBaseUrl: "",
+		})
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ baseURL: NEURONPOOL_DEFAULT_BASE_URL }))
 	})
 
@@ -59,6 +78,15 @@ describe("NeuronPoolHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: neuronpoolApiKey }))
 	})
 
+	it("should fall back to apiKey when neuronpoolApiKey is omitted", () => {
+		new NeuronPoolHandler({ apiKey: "fallback-api-key" })
+		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "fallback-api-key" }))
+	})
+
+	it("should throw when neither neuronpoolApiKey nor apiKey is set", () => {
+		expect(() => new NeuronPoolHandler({})).toThrow("API key is required")
+	})
+
 	it("should return default model when no model is specified", () => {
 		const model = handler.getModel()
 		expect(model.id).toBe(neuronpoolDefaultModelId)
@@ -74,6 +102,16 @@ describe("NeuronPoolHandler", () => {
 		const model = handlerWithModel.getModel()
 		expect(model.id).toBe(testModelId)
 		expect(model.info).toEqual(neuronpoolModels[testModelId])
+	})
+
+	it("should fall back to the default model when the id is unknown", () => {
+		const handlerWithUnknown = new NeuronPoolHandler({
+			apiModelId: "not-a-neuronpool-model",
+			neuronpoolApiKey: "test-neuronpool-api-key",
+		})
+		const model = handlerWithUnknown.getModel()
+		expect(model.id).toBe(neuronpoolDefaultModelId)
+		expect(model.info).toEqual(neuronpoolModels[neuronpoolDefaultModelId])
 	})
 
 	it("completePrompt method should return text from NeuronPool API", async () => {
@@ -131,5 +169,6 @@ describe("NeuronPoolHandler", () => {
 		const callArgs = mockCreate.mock.calls[0][0]
 		expect(callArgs.model).toBe(neuronpoolDefaultModelId)
 		expect(callArgs.stream).toBe(true)
+		expect(callArgs.temperature).toBe(0)
 	})
 })

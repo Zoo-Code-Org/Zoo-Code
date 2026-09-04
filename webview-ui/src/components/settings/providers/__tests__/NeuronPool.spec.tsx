@@ -12,12 +12,18 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 }))
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeTextField: ({ children, value, onInput, type }: any) => {
+	VSCodeTextField: ({ children, value, onInput, type, placeholder }: any) => {
 		const testId = type === "password" ? "neuronpool-api-key" : "neuronpool-base-url"
 		return (
 			<div data-testid={`${testId}-field`}>
 				{children}
-				<input type={type || "text"} value={value || ""} data-testid={`${testId}-input`} onInput={onInput} />
+				<input
+					type={type || "text"}
+					value={value || ""}
+					placeholder={placeholder}
+					data-testid={`${testId}-input`}
+					onInput={onInput}
+				/>
 			</div>
 		)
 	},
@@ -43,13 +49,34 @@ describe("NeuronPool provider settings", () => {
 			"href",
 			"https://neuronpool.damnknee.workers.dev/dashboard",
 		)
+		expect(screen.getByText("settings:providers.apiKeyStorageNotice")).toBeInTheDocument()
+		expect(screen.getByTestId("neuronpool-base-url-input")).toHaveAttribute(
+			"placeholder",
+			"https://neuronpool.damnknee.workers.dev/v1",
+		)
+	})
+
+	it("shows the get-key link when the stored key is an empty string", () => {
+		render(
+			<NeuronPool
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.neuronpool, neuronpoolApiKey: "" } as ProviderSettings
+				}
+				setApiConfigurationField={vi.fn()}
+			/>,
+		)
+		expect(screen.getByTestId("neuronpool-get-key-link")).toBeInTheDocument()
 	})
 
 	it("hides the 'Get NeuronPool API Key' link once a key is set", () => {
 		render(
 			<NeuronPool
 				apiConfiguration={
-					{ apiProvider: providerIdentifiers.neuronpool, neuronpoolApiKey: "stored-key" } as ProviderSettings
+					{
+						apiProvider: providerIdentifiers.neuronpool,
+						neuronpoolApiKey: "stored-key",
+						neuronpoolBaseUrl: "http://127.0.0.1:8787/v1",
+					} as ProviderSettings
 				}
 				setApiConfigurationField={vi.fn()}
 			/>,
@@ -57,6 +84,8 @@ describe("NeuronPool provider settings", () => {
 		expect(screen.queryByTestId("neuronpool-get-key-link")).not.toBeInTheDocument()
 		expect(screen.getByTestId("neuronpool-api-key-field")).toBeInTheDocument()
 		expect(screen.getByTestId("neuronpool-base-url-field")).toBeInTheDocument()
+		expect(screen.getByTestId("neuronpool-api-key-input")).toHaveValue("stored-key")
+		expect(screen.getByTestId("neuronpool-base-url-input")).toHaveValue("http://127.0.0.1:8787/v1")
 	})
 
 	it("calls setApiConfigurationField with the API key when the input changes", () => {
