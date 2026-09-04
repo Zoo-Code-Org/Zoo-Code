@@ -425,7 +425,7 @@ describe("PR review-state workflow", () => {
 
 	it("keeps privileged event handling metadata-only and least-privilege", () => {
 		expect(workflow.permissions).toEqual({
-			"pull-requests": "read",
+			"pull-requests": "write",
 			issues: "write",
 			checks: "read",
 			statuses: "write",

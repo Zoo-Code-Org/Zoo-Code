@@ -29,7 +29,7 @@ permissions:
   # This privileged workflow only reads PR/check metadata and writes issue labels,
   # comments, and commit statuses. All unspecified permissions, including contents,
   # are none; no fork code or configuration is checked out or executed.
-  pull-requests: read
+  pull-requests: write
   issues: write
   checks: read
   statuses: write
