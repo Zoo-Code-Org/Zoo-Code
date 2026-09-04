@@ -139,7 +139,7 @@ describe("NeuronPoolHandler", () => {
 		expect(result).toBe(expectedResponse)
 	})
 
-	it("should handle errors in completePrompt", () => {
+	it("should handle errors in completePrompt", async () => {
 		const errorMessage = "NeuronPool API error"
 		mockCreate.mockRejectedValueOnce(new Error(errorMessage))
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow()
