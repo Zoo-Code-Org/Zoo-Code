@@ -10,6 +10,7 @@ const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url))
 const workflow = parse(
 	fs.readFileSync(path.join(repositoryRoot, ".github/workflows/label-pr-review-state.yml"), "utf8"),
 )
+const codeRabbitConfig = parse(fs.readFileSync(path.join(repositoryRoot, ".coderabbit.yaml"), "utf8"))
 const workflowScript = workflow.jobs.reconcile.steps[0].with.script as string
 
 const SHA = "a".repeat(40)
@@ -27,6 +28,7 @@ interface HarnessOptions {
 	mergeabilitySequence?: Array<{ mergeable: boolean | null; mergeableState: string }>
 	fork?: boolean
 	eventName?: string
+	issueCommentActor?: string
 	workflowRunAssociated?: boolean
 	workflowRunFallback?: "match" | "sha-mismatch" | "base-mismatch" | "none"
 	workflowRunHeadBranch?: string
@@ -343,28 +345,33 @@ async function runWorkflow(options: HarnessOptions = {}) {
 	const payload =
 		eventName === "schedule"
 			? {}
-			: eventName === "workflow_dispatch"
-				? { inputs: { pull_request_number: String(options.workflowDispatchPrNumber ?? 1437) } }
-				: eventName === "workflow_run"
-					? {
-							workflow_run: {
-								pull_requests: options.workflowRunAssociated === false ? [] : [{ number: 1437 }],
-								head_repository:
-									options.workflowRunMissing === "repository"
-										? null
-										: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
-								head_branch:
-									options.workflowRunMissing === "branch"
-										? null
-										: (options.workflowRunHeadBranch ?? "feature/test"),
-								head_sha: options.workflowRunMissing === "sha" ? null : SHA,
-								id: 123456,
-							},
-						}
-					: {
-							action: "ready_for_review",
-							pull_request: pullRequestPayload,
-						}
+			: eventName === "issue_comment"
+				? {
+						issue: { number: 1437, pull_request: {} },
+						comment: { user: { login: options.issueCommentActor ?? "coderabbitai[bot]" } },
+					}
+				: eventName === "workflow_dispatch"
+					? { inputs: { pull_request_number: String(options.workflowDispatchPrNumber ?? 1437) } }
+					: eventName === "workflow_run"
+						? {
+								workflow_run: {
+									pull_requests: options.workflowRunAssociated === false ? [] : [{ number: 1437 }],
+									head_repository:
+										options.workflowRunMissing === "repository"
+											? null
+											: { owner: { login: options.fork ? "contributor" : "Zoo-Code-Org" } },
+									head_branch:
+										options.workflowRunMissing === "branch"
+											? null
+											: (options.workflowRunHeadBranch ?? "feature/test"),
+									head_sha: options.workflowRunMissing === "sha" ? null : SHA,
+									id: 123456,
+								},
+							}
+						: {
+								action: "ready_for_review",
+								pull_request: pullRequestPayload,
+							}
 	const context = {
 		eventName,
 		repo: { owner: "Zoo-Code-Org", repo: "Zoo-Code" },
@@ -409,6 +416,24 @@ function latestGateStatus(result: Awaited<ReturnType<typeof runWorkflow>>) {
 }
 
 describe("PR review-state workflow", () => {
+	it("uses supported CodeRabbit access and review controls", () => {
+		expect(codeRabbitConfig.chat.allow_non_org_members).toBe(false)
+		expect(codeRabbitConfig.reviews.pre_merge_checks.override_requested_reviewers_only).toBe(true)
+		expect(codeRabbitConfig.reviews.auto_review.auto_pause_after_reviewed_commits).toBe(0)
+		expect(codeRabbitConfig.reviews.auto_review.labels).toEqual(["coderabbit-review-active"])
+	})
+
+	it("keeps privileged event handling metadata-only and least-privilege", () => {
+		expect(workflow.permissions).toEqual({
+			"pull-requests": "read",
+			issues: "write",
+			checks: "read",
+			statuses: "write",
+		})
+		expect(JSON.stringify(workflow.jobs.reconcile.steps)).not.toMatch(/actions\/checkout|\bpnpm\b|\bnpm\b/)
+		expect(workflowScript).not.toContain("@coderabbitai")
+	})
+
 	it("ignores events for closed pull requests", async () => {
 		const result = await runWorkflow({ prState: "closed" })
 
@@ -436,6 +461,48 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(result.createCommitStatus).toHaveBeenCalled()
+	})
+
+	it("reconciles CodeRabbit status comments with the canonical bot identity", async () => {
+		expect(workflow.on.issue_comment.types).toEqual(["created", "edited"])
+		expect(workflow.jobs.reconcile.if).toContain("github.event.comment.user.login == 'coderabbitai[bot]'")
+
+		const result = await runWorkflow({
+			eventName: "issue_comment",
+			fork: true,
+			labels: ["awaiting-maintainer", "coderabbit-review-active"],
+			reviews: [
+				{
+					login: "coderabbitai[bot]",
+					type: "Bot",
+					state: "CHANGES_REQUESTED",
+					submittedAt: REVIEWED_AT,
+				},
+			],
+		})
+
+		expect(result.getPullRequest).toHaveBeenCalledTimes(1)
+		expect(result.listPullRequests).not.toHaveBeenCalled()
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		expect(result.setFailed).not.toHaveBeenCalled()
+	})
+
+	it("ignores contributor comments before privileged reconciliation", async () => {
+		const result = await runWorkflow({
+			eventName: "issue_comment",
+			issueCommentActor: "outside-contributor",
+			fork: true,
+			labels: ["awaiting-maintainer"],
+		})
+
+		expect(result.getPullRequest).not.toHaveBeenCalled()
+		expect(result.listPullRequests).not.toHaveBeenCalled()
+		expect(result.addLabels).not.toHaveBeenCalled()
+		expect(result.removeLabel).not.toHaveBeenCalled()
+		expect(result.createComment).not.toHaveBeenCalled()
+		expect(result.createCommitStatus).not.toHaveBeenCalled()
 	})
 
 	it("reconciles fork PRs from pull_request_target", async () => {
@@ -467,6 +534,7 @@ describe("PR review-state workflow", () => {
 
 		expect(result.addLabels).not.toHaveBeenCalled()
 		expect(latestGuide(result)).toContain("Mark the PR ready")
+		expect(latestGuide(result)).toContain("Review-state labels are managed by this workflow")
 	})
 
 	it("routes bot-authored PRs directly to maintainer review", async () => {
@@ -479,7 +547,7 @@ describe("PR review-state workflow", () => {
 			expect.objectContaining({ labels: ["coderabbit-review-active"] }),
 		)
 		expect(latestGateStatus(result)?.state).toBe("success")
-		expect(latestGateStatus(result)?.description).toContain("Ready for human maintainer")
+		expect(latestGateStatus(result)?.description).toContain("Awaiting fresh human maintainer")
 	})
 
 	it("completes bot-authored PR review after human maintainer approval", async () => {
@@ -539,6 +607,7 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
 		expect(latestGuide(result)).toContain(`coderabbit-review-label:${SHA}`)
+		expect(latestGuide(result)).toContain("a maintainer must restart it")
 	})
 
 	it("invalidates the gate before fallible metadata updates", async () => {
@@ -914,9 +983,13 @@ describe("PR review-state workflow", () => {
 
 		expect(result.removeLabel).toHaveBeenCalledWith(expect.objectContaining({ name: "coderabbit-review-active" }))
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-author"] }))
+		expect(latestGuide(result)).toContain(
+			"After fixes are pushed and required CI passes, automated review restarts.",
+		)
+		expect(latestGuide(result)).not.toContain("@coderabbitai")
 	})
 
-	it("moves approved ready PRs to maintainer review", async () => {
+	it("treats a fresh bot approval as automated review completion only", async () => {
 		const result = await runWorkflow({
 			reviews: [
 				{
@@ -929,7 +1002,22 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(latestGuide(result)).toContain("Automated review is complete for the latest commit")
+		expect(latestGuide(result)).toContain("does not replace human approval")
 	})
+
+	it.each([
+		["in_progress", undefined, "Wait for required CI checks"],
+		["completed", "failure", "Fix the failing required CI checks"],
+	] as const)(
+		"explains why %s required CI blocks maintainer handoff",
+		async (requiredStatus, requiredConclusion, text) => {
+			const result = await runWorkflow({ requiredStatus, requiredConclusion })
+
+			expect(latestGuide(result)).toContain(text)
+			expect(latestGuide(result)).toContain("awaiting-maintainer")
+		},
+	)
 
 	it.each([
 		{ login: "CodeRabbitAI[bot]", type: "Bot" },
@@ -1211,7 +1299,7 @@ describe("PR review-state workflow", () => {
 				{
 					context: "Zoo Code / PR review gate",
 					state: "pending",
-					description: "Required CI passed. Wait for CodeRabbit to approve the latest commit.",
+					description: "Required CI passed. Waiting for automated review of the latest commit.",
 					targetUrl: "https://github.com/Zoo-Code-Org/Zoo-Code/pull/1437",
 				},
 			],
@@ -1503,7 +1591,7 @@ describe("PR review-state workflow", () => {
 		})
 
 		expect(latestGateStatus(result)?.state).toBe("success")
-		expect(latestGateStatus(result)?.description).toContain("Ready for human maintainer")
+		expect(latestGateStatus(result)?.description).toContain("Awaiting fresh human maintainer")
 	})
 
 	it("fails closed when branch rules are unavailable", async () => {
@@ -1639,8 +1727,9 @@ describe("PR review-state workflow", () => {
 		expect(result.createCommitStatus).not.toHaveBeenCalled()
 	})
 
-	it("ignores CodeRabbit reviews from an older head", async () => {
+	it("invalidates prior automated and human reviews after a new push", async () => {
 		const result = await runWorkflow({
+			permissions: { maintainer: "write" },
 			reviews: [
 				{
 					login: "coderabbitai[bot]",
@@ -1649,9 +1738,19 @@ describe("PR review-state workflow", () => {
 					submittedAt: REVIEWED_AT,
 					commitId: OLD_SHA,
 				},
+				{
+					login: "maintainer",
+					type: "User",
+					state: "APPROVED",
+					submittedAt: REVIEWED_AT + 1_000,
+					commitId: OLD_SHA,
+				},
 			],
 		})
 
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["coderabbit-review-active"] }))
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-coderabbit"] }))
+		expect(result.addLabels).not.toHaveBeenCalledWith(expect.objectContaining({ labels: ["awaiting-maintainer"] }))
+		expect(latestGateStatus(result)?.state).toBe("pending")
 	})
 })
