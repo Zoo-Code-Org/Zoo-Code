@@ -1048,6 +1048,13 @@ describe("AnthropicHandler", () => {
 				undefined,
 				false,
 			],
+			["required with parallel calls", "required" as const, true, false],
+			[
+				"named with parallel calls",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				true,
+				false,
+			],
 			["required without parallel calls", "required" as const, false, true],
 			[
 				"named without parallel calls",
@@ -1088,7 +1095,6 @@ describe("AnthropicHandler", () => {
 			const stream = fableHandler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
 				tools: mockTools,
-				tool_choice: "none",
 			})
 
 			await collectStream(stream)

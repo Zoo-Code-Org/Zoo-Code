@@ -98,13 +98,15 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			metadata?.parallelToolCalls,
 		)
 		const toolChoice =
-			modelId === "claude-fable-5-1" &&
-			(convertedToolChoice?.type === "any" || convertedToolChoice?.type === "tool")
-				? {
-						type: "auto" as const,
-						disable_parallel_tool_use: convertedToolChoice.disable_parallel_tool_use,
-					}
-				: convertedToolChoice
+			modelId === "claude-fable-5-1" && metadata?.tool_choice === undefined
+				? undefined
+				: modelId === "claude-fable-5-1" &&
+					  (convertedToolChoice?.type === "any" || convertedToolChoice?.type === "tool")
+					? {
+							type: "auto" as const,
+							disable_parallel_tool_use: convertedToolChoice.disable_parallel_tool_use,
+						}
+					: convertedToolChoice
 		const nativeToolParams = {
 			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
 			tool_choice: toolChoice,
