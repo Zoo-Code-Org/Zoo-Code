@@ -78,6 +78,7 @@ import {
 	ZAi,
 	Fireworks,
 	Friendli,
+	NeuronPool,
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
@@ -713,6 +714,13 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.friendli && (
 						<Friendli
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.neuronpool && (
+						<NeuronPool
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 						/>
