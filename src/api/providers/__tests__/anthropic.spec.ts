@@ -1041,14 +1041,54 @@ describe("AnthropicHandler", () => {
 		})
 
 		it.each([
-			["required", "required" as const],
-			["named", { type: "function" as const, function: { name: "get_weather" } }],
-		])("should normalize %s tool_choice to auto for Claude Fable 5.1", async (_, toolChoice) => {
-			const fableHandler = new AnthropicHandler({
-				apiKey: "test-api-key",
-				apiModelId: "claude-fable-5-1",
-			})
-			const stream = fableHandler.createMessage(systemPrompt, messages, {
+			["required with default parallel calls", "required" as const, undefined, false],
+			[
+				"named with default parallel calls",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				undefined,
+				false,
+			],
+			["required without parallel calls", "required" as const, false, true],
+			[
+				"named without parallel calls",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				false,
+				true,
+			],
+		])(
+			"should normalize %s tool_choice to auto for Claude Fable 5.1",
+			async (_, toolChoice, parallelToolCalls, disableParallelToolUse) => {
+				const fableHandler = new AnthropicHandler({
+					apiKey: "test-api-key",
+					apiModelId: "claude-fable-5-1",
+				})
+				const stream = fableHandler.createMessage(systemPrompt, messages, {
+					taskId: "test-task",
+					tools: mockTools,
+					tool_choice: toolChoice,
+					parallelToolCalls,
+				})
+
+				await collectStream(stream)
+
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({
+						tool_choice: { type: "auto", disable_parallel_tool_use: disableParallelToolUse },
+					}),
+					expect.anything(),
+				)
+			},
+		)
+
+		it.each([
+			["required", "required" as const, { type: "any", disable_parallel_tool_use: false }],
+			[
+				"named",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				{ type: "tool", name: "get_weather", disable_parallel_tool_use: false },
+			],
+		])("should preserve %s tool_choice for non-Fable models", async (_, toolChoice, expectedToolChoice) => {
+			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
 				tools: mockTools,
 				tool_choice: toolChoice,
@@ -1057,9 +1097,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					tool_choice: { type: "auto", disable_parallel_tool_use: false },
-				}),
+				expect.objectContaining({ tool_choice: expectedToolChoice }),
 				expect.anything(),
 			)
 		})
