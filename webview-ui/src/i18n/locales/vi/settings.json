@@ -978,7 +978,7 @@
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Nỗ lực suy nghĩ động",
-			"description": "Bật công cụ set_thinking_effort để model tự quyết định nỗ lực suy nghĩ của từng bước. Điều chỉnh thủ công trong trò chuyện luôn khả dụng. (thực nghiệm)"
+			"description": "Bật công cụ set_thinking_effort để mô hình tự quyết định nỗ lực suy nghĩ của từng bước. Điều chỉnh thủ công trong trò chuyện luôn khả dụng. (thực nghiệm)"
 		}
 	},
 	"promptCaching": {

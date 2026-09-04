@@ -5,6 +5,7 @@ import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
 import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS } from "@roo-code/types"
+import { experimentDefault } from "@roo/experiments"
 
 import SettingsView from "../SettingsView"
 
@@ -802,5 +803,39 @@ describe("SettingsView - Duplicate Commands", () => {
 		// The buffered edit must be reverted before leaving Settings
 		expect(within(getSettingsContent()).queryByText("npm test")).not.toBeInTheDocument()
 		expect(onDone).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("SettingsView - Experimental Settings", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("includes the dynamic thinking effort toggle in the updateSettings payload on save", () => {
+		// Start from the shared contract default, where dynamicThinkingEffort is off.
+		const { activateTab, getSettingsContent } = renderSettingsView({ experiments: experimentDefault })
+
+		activateTab("experimental")
+
+		const content = getSettingsContent()
+		const label = within(content).getByText("settings:experimental.DYNAMIC_THINKING_EFFORT.name").closest("label")!
+		const checkbox = within(label).getByRole("checkbox")
+		expect(checkbox).not.toBeChecked()
+
+		fireEvent.click(checkbox)
+
+		// Click Save to save settings
+		const saveButton = screen.getByTestId("save-button")
+		fireEvent.click(saveButton)
+
+		// The toggled experiment must reach the host inside the updateSettings payload
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					experiments: expect.objectContaining({ dynamicThinkingEffort: true }),
+				}),
+			}),
+		)
 	})
 })
