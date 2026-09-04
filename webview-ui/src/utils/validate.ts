@@ -158,7 +158,7 @@ function validateModelsAndKeysProvided(
 			}
 			break
 		case providerIdentifiers.neuronpool:
-			if (!apiConfiguration.neuronpoolApiKey) {
+			if (!(apiConfiguration.neuronpoolApiKey ?? apiConfiguration.apiKey)) {
 				return i18next.t("settings:validation.apiKey")
 			}
 			break
