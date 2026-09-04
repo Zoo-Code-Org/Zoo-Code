@@ -199,6 +199,9 @@ export function clearAuthSessionModelsForProvider(provider: RouterName): void {
 	for (const key of authSessionCache.keys()) {
 		if (key === provider || key.startsWith(`${provider}:`)) {
 			authSessionCache.delete(key)
+			// Also invalidate any in-flight fetch for this key so a pending request
+			// cannot repopulate the session cache after sign-out.
+			inFlightAuthScopedFetch.delete(key)
 		}
 	}
 }
@@ -268,8 +271,12 @@ async function resolveAuthScopedModels(
 			} else {
 				const modelCount = Object.keys(fetched.models).length
 				if (modelCount > 0) {
-					setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
-					reportedEmptyModelResponse.delete(cacheKey)
+					// Guard against re-populating the cache after a sign-out invalidated
+					// this key between when we started the fetch and when it resolved.
+					if (inFlightAuthScopedFetch.has(cacheKey)) {
+						setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
+						reportedEmptyModelResponse.delete(cacheKey)
+					}
 					return fetched.models
 				}
 
@@ -515,7 +522,7 @@ export const getModels = async (options: GetModelsOptions): Promise<ModelRecord>
 		const modelCount = Object.keys(fetched).length
 
 		// Only cache non-empty results so a failed API response doesn't get persisted
-		// as if the provider had no models. Auth-scoped providers skip caching entirely.
+		// as if the provider had no models.
 		if (modelCount > 0) {
 			// Clear the empty-response throttle for any non-empty response, including from
 			// auth-scoped providers that skip disk/memory cache, so a later empty response

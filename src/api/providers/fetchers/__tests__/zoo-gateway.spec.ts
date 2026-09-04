@@ -104,7 +104,10 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(result.kind).toBe("ok")
 			if (result.kind !== "ok") return
 			expect(Object.keys(result.models)).toHaveLength(1)
-			expect(result.models["anthropic/claude-sonnet-4"]).toBeDefined()
+			expect(result.models["anthropic/claude-sonnet-4"]).toMatchObject({
+				maxTokens: expect.any(Number),
+				contextWindow: expect.any(Number),
+			})
 			expect(result.etag).toBe('"catalog-abc"')
 		})
 
