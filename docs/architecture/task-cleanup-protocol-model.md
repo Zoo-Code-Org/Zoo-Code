@@ -16,7 +16,7 @@ This is a separate child model from the persisted task lifecycle and shared-stor
 
 ## Bounds and environment actions
 
-The model uses two tasks and explores every reachable interleaving through depth 20, with an explicit 50,000-state budget. Abort, disposal, final-save, provider-drain, and shutdown-cursor state are modeled directly. Cleanup and editor-reversion settlement or rejection are environment actions, so the explorer does not assume they eventually occur.
+The model uses two tasks and explores every reachable interleaving through depth 20, with an explicit 100,000-state budget. Abort, disposal, final-save, provider abort/drain phases, and shutdown-cursor state are modeled directly. Independent abort and disposal calls may interleave freely, while provider-initiated calls are gated to the current shutdown task. Cleanup and editor-reversion settlement or rejection are environment actions, so the explorer does not assume they eventually occur.
 
 The model checks these finite safety properties:
 

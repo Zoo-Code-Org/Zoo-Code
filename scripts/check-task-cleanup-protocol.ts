@@ -18,7 +18,7 @@ interface TaskState {
 
 interface ModelState {
 	tasks: Record<TaskId, TaskState>
-	shutdown: "idle" | "draining" | "done"
+	shutdown: "idle" | "call-abort" | "wait-abort" | "wait-disposal" | "done"
 	shutdownIndex: number
 	drained: Record<TaskId, boolean>
 }
@@ -29,7 +29,7 @@ interface Step {
 }
 
 const MAX_DEPTH = 20
-const MAX_STATES = 50_000
+const MAX_STATES = 100_000
 const expectedActions = [
 	"abort",
 	"dispose",
@@ -44,6 +44,8 @@ const expectedActions = [
 	"skip-final-save",
 	"complete-disposal",
 	"start-shutdown",
+	"shutdown-abort",
+	"shutdown-dispose",
 	"advance-shutdown",
 ] as const
 
@@ -171,17 +173,25 @@ function transitions(state: ModelState): Step[] {
 
 	if (state.shutdown === "idle") {
 		const next = clone(state)
-		next.shutdown = "draining"
+		next.shutdown = "call-abort"
 		result.push({ action: "start-shutdown()", state: next })
-	} else if (state.shutdown === "draining") {
+	} else if (state.shutdown !== "done") {
 		const taskId = taskIds[state.shutdownIndex]
 		if (taskId) {
 			const current = state.tasks[taskId]
-			if (isTerminal(current.abort) && isTerminal(current.disposal)) {
+			if (state.shutdown === "call-abort") {
+				const next = callAbort(state, taskId)
+				next.shutdown = "wait-abort"
+				result.push({ action: `shutdown-abort(${taskId})`, state: next })
+			} else if (state.shutdown === "wait-abort" && isTerminal(current.abort)) {
+				const next = callDispose(state, taskId)
+				next.shutdown = "wait-disposal"
+				result.push({ action: `shutdown-dispose(${taskId})`, state: next })
+			} else if (state.shutdown === "wait-disposal" && isTerminal(current.disposal)) {
 				const next = clone(state)
 				next.drained[taskId] = true
 				next.shutdownIndex += 1
-				if (next.shutdownIndex === taskIds.length) next.shutdown = "done"
+				next.shutdown = next.shutdownIndex === taskIds.length ? "done" : "call-abort"
 				result.push({ action: `advance-shutdown(${taskId})`, state: next })
 			}
 		}
@@ -222,6 +232,9 @@ function invariantViolations(state: ModelState): string[] {
 		violations.push("shutdown cursor must match the drained task prefix")
 	}
 	if (state.drained.B && !state.drained.A) violations.push("provider drained tasks out of order")
+	if (state.shutdownIndex === 1 && !state.drained.A) {
+		violations.push("provider advanced to the second task before draining the first")
+	}
 	if ((state.shutdown === "done") !== taskIds.every((taskId) => state.drained[taskId])) {
 		violations.push("shutdown is done exactly when every modeled task is drained")
 	}
