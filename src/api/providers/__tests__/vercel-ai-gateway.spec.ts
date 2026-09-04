@@ -51,6 +51,18 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 1,
 				description: "Claude Fable 5",
 			},
+			"anthropic/claude-fable-5.1": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsTemperature: false,
+				inputPrice: 10,
+				outputPrice: 50,
+				cacheWritesPrice: 12.5,
+				cacheReadsPrice: 0.25,
+				description: "Claude Fable 5.1",
+			},
 			"anthropic/claude-sonnet-5": {
 				maxTokens: 128000,
 				contextWindow: 1000000,
@@ -324,6 +336,24 @@ describe("VercelAiGatewayHandler", () => {
 					model: "anthropic/claude-fable-5",
 					temperature: undefined,
 					max_completion_tokens: 128000,
+				}),
+			)
+		})
+
+		it("omits temperature for Claude Fable 5.1", async () => {
+			const handler = new VercelAiGatewayHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					vercelAiGatewayModelId: "anthropic/claude-fable-5.1",
+				}),
+			)
+
+			await collectStream(handler.createMessage("system prompt", [{ role: "user", content: "test" }]))
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-fable-5.1",
+					temperature: undefined,
 				}),
 			)
 		})
