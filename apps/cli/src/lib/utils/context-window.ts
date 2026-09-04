@@ -66,6 +66,7 @@ function getModelIdForProvider(config: ProviderSettings): string | undefined {
 		case providerIdentifiers.deepseek:
 		case providerIdentifiers.fireworks:
 		case providerIdentifiers.friendli:
+		case providerIdentifiers.neuronpool:
 		case providerIdentifiers.gemini:
 		case providerIdentifiers.geminiCli:
 		case providerIdentifiers.mistral:

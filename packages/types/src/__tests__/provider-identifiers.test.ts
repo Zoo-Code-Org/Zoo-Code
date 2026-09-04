@@ -43,6 +43,7 @@ const expectedProviderIdentifiers = [
 	"baseten",
 	"fireworks",
 	"friendli",
+	"neuronpool",
 	"gemini",
 	"gemini-cli",
 	"mistral",
