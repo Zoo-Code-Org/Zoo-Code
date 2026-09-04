@@ -1259,6 +1259,7 @@ describe("ClineProvider", () => {
 
 		await expect(provider.dispose()).resolves.toBeUndefined()
 
+		expect(currentTask.abortTask).toHaveBeenCalledOnce()
 		expect(currentTask.dispose).toHaveBeenCalledOnce()
 		expect(remainingTask.abortTask).toHaveBeenCalledOnce()
 		expect(remainingTask.dispose).toHaveBeenCalledOnce()
