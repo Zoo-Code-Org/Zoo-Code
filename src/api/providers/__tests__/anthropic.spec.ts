@@ -1105,6 +1105,25 @@ describe("AnthropicHandler", () => {
 			)
 		})
 
+		it("should preserve an explicit none tool_choice for Claude Fable 5.1", async () => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const stream = fableHandler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+				tool_choice: "none",
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ tool_choice: undefined }),
+				expect.anything(),
+			)
+		})
+
 		it.each([
 			["required", "required" as const, { type: "any", disable_parallel_tool_use: false }],
 			[
