@@ -223,9 +223,11 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
 		}
 		const original = probe.getChildFileMtimeMs
-		mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockImplementation((childId: string) =>
-			childId === taskId ? Promise.resolve(FIXED_NOW - ageMs) : original.call(store, childId),
-		)
+		mtimeSpy = vi
+			.spyOn(probe, "getChildFileMtimeMs")
+			.mockImplementation((childId: string) =>
+				childId === taskId ? Promise.resolve(FIXED_NOW - ageMs) : original.call(store, childId),
+			)
 	}
 
 	beforeEach(async () => {
@@ -890,6 +892,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await seedItems([parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		// Keep this a crash-orphan replay: the child file must not look live in
+		// another window, or the cross-window liveness guard quarantines the intent.
+		await markStaleMtime(child.id)
 		await store.reconcile({ forceRefresh: true })
 
 		const storeInternals = store as unknown as {
@@ -1016,6 +1021,168 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		).toBe(true)
 	})
 
+	it("quarantines a replay intent whose child is live in another window (recent mtime)", async () => {
+		// Reviewer scenario: this window crashed mid-repair (the intent is durable
+		// but the child write never landed), and another window then restarted the
+		// same child. The child's history file mtime is recent, so replaying the
+		// intent here would overwrite a live child as "interrupted". The intent must
+		// be quarantined instead, and the startup reconciliation liveness guard must
+		// likewise leave the delegation untouched.
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+		const child = makeItem({
+			id: "child-replay-live",
+			status: "active",
+			parentTaskId: "parent-replay-live",
+			rootTaskId: "parent-replay-live",
+		})
+		const parent = makeItem({
+			id: "parent-replay-live",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+
+		// Another live window has just persisted the child.
+		const childFilePath = path.join(tasksDir, child.id, GlobalFileNames.historyItem)
+		const now = new Date()
+		await fs.utimes(childFilePath, now, now)
+
+		await store.initialize()
+
+		// Nothing may be written as "interrupted": child stays active and the
+		// parent keeps its delegation links.
+		expect(store.get(child.id)?.status).toBe("active")
+		expect(store.get(parent.id)?.status).toBe("delegated")
+		expect(store.get(parent.id)?.awaitingChildId).toBe(child.id)
+		expect(store.get(parent.id)?.delegatedToId).toBe(child.id)
+
+		const persistedChild = JSON.parse(await fs.readFile(childFilePath, "utf8")) as HistoryItem
+		expect(persistedChild.status).toBe("active")
+		const persistedParent = JSON.parse(
+			await fs.readFile(path.join(tasksDir, parent.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedParent.status).toBe("delegated")
+		expect(persistedParent.awaitingChildId).toBe(child.id)
+
+		// The intent is moved out of the way rather than applied or left to retry.
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(true)
+		// Kills the StringLiteral mutant on the new quarantine reason.
+		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("child live in another window (recent mtime)"))
+
+		warnSpy.mockRestore()
+	})
+
+	it("replays a repair intent whose child mtime is stale (crash orphan still repaired)", async () => {
+		// Regression guard for the replay liveness guard: a child file untouched for
+		// longer than the threshold is a genuine crash orphan, so the durable intent
+		// must still complete on restart — child → interrupted, parent → active.
+		const child = makeItem({
+			id: "child-replay-stale",
+			status: "active",
+			parentTaskId: "parent-replay-stale",
+			rootTaskId: "parent-replay-stale",
+		})
+		const parent = makeItem({
+			id: "parent-replay-stale",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		await markStaleMtime(child.id)
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)?.status).toBe("active")
+		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
+		expect(store.get(parent.id)?.delegatedToId).toBeUndefined()
+		const persistedChild = JSON.parse(
+			await fs.readFile(path.join(tasksDir, child.id, GlobalFileNames.historyItem), "utf8"),
+		) as HistoryItem
+		expect(persistedChild.status).toBe("interrupted")
+		await expect(fs.access(intentPath)).rejects.toThrow()
+		expect(
+			(await fs.readdir(tasksDir)).some((name) =>
+				name.startsWith(`${GlobalFileNames.delegationRepairIntent}.quarantine-`),
+			),
+		).toBe(false)
+	})
+
+	it("completes a parent-only replay while the child is live in another window (child already at target)", async () => {
+		// The guard must gate only actual child writes. Here the child is already at
+		// intent.target.childStatus, so no child write happens and the recent (live)
+		// mtime must not block the parent-side completion of the repair.
+		const child = makeItem({
+			id: "child-replay-parent-only",
+			status: "interrupted",
+			parentTaskId: "parent-replay-parent-only",
+		})
+		const parent = makeItem({
+			id: "parent-replay-parent-only",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		const now = new Date()
+		await fs.utimes(path.join(tasksDir, child.id, GlobalFileNames.historyItem), now, now)
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)?.status).toBe("active")
+		expect(store.get(parent.id)?.awaitingChildId).toBeUndefined()
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
+	it("proceeds with a replay when the child history file mtime is unreadable", async () => {
+		// Matches the reconcile-path convention: getChildFileMtimeMs returns
+		// undefined for a missing/unreadable history file, which conservatively
+		// proceeds with the repair instead of treating the child as live.
+		const probe = TaskHistoryStore.prototype as unknown as {
+			getChildFileMtimeMs: (childId: string) => Promise<number | undefined>
+		}
+		mtimeSpy = vi.spyOn(probe, "getChildFileMtimeMs").mockResolvedValue(undefined)
+
+		const child = makeItem({
+			id: "child-replay-unreadable",
+			status: "active",
+			parentTaskId: "parent-replay-unreadable",
+		})
+		const parent = makeItem({
+			id: "parent-replay-unreadable",
+			status: "delegated",
+			awaitingChildId: child.id,
+			delegatedToId: child.id,
+		})
+		await seedItems([parent, child])
+		const tasksDir = path.join(tmpDir, "tasks")
+		const intentPath = path.join(tasksDir, GlobalFileNames.delegationRepairIntent)
+		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+
+		await store.initialize()
+
+		expect(store.get(child.id)?.status).toBe("interrupted")
+		expect(store.get(parent.id)?.status).toBe("active")
+		await expect(fs.access(intentPath)).rejects.toThrow()
+	})
+
 	it("repairs invalid delegation: delegated parent with no awaitingChildId → active (clears delegatedToId and awaitingChildId)", async () => {
 		// awaitingChildId is falsy but explicitly set (empty string), delegatedToId is stale
 		const parent = makeItem({
@@ -1105,6 +1272,9 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await seedItems([grandparent, parent, child])
 		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
 		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+		// Crash-orphan scenario: the child must not look live in another window, or
+		// the replay/startup liveness guards would skip the repair entirely.
+		await markStaleMtime(child.id)
 
 		await store.initialize()
 

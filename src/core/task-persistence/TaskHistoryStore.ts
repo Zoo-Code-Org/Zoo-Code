@@ -534,7 +534,10 @@ export class TaskHistoryStore {
 	 * Replay the durable active-child repair intent, if one was left by a crash.
 	 * The expected fields are guards: an intent may update only the missing side
 	 * when the other side is already at its target, or when both records still
-	 * describe the original delegated handoff.
+	 * describe the original delegated handoff. Before writing the child, the same
+	 * cross-window liveness guard as `reconcileDelegationStateCore` applies: a
+	 * child whose history file was touched recently belongs to another live
+	 * window, so the stale intent is quarantined instead of replayed.
 	 *
 	 * This method acquires the store's non-reentrant promise-chain lock. It must be
 	 * called outside an existing `withLock` callback; locked callers must use the
@@ -568,6 +571,24 @@ export class TaskHistoryStore {
 			if ((!childAtTarget && !childMatchesExpected) || (!parentMatchesTargetState && !parentMatchesExpected)) {
 				await this.quarantineDelegationRepairIntent(intent, "task state no longer matches its guards")
 				return
+			}
+
+			// Cross-instance liveness guard (same convention as reconcileDelegationStateCore):
+			// if this window crashed mid-repair and another window restarted the same child,
+			// the child's history file is being actively persisted there. Replaying the stale
+			// intent would overwrite the live child as "interrupted", so quarantine it instead.
+			// Only enforced when the replay would actually write the child record: a child
+			// already at its target needs no write, and parent-only completion must not be
+			// blocked by child liveness. An unreadable mtime conservatively proceeds.
+			if (!childAtTarget) {
+				const mtimeMs = await this.getChildFileMtimeMs(child.id)
+				const isLiveElsewhere =
+					// Stryker disable next-line ConditionalExpression: replacing `mtimeMs !== undefined` with `true` is mutation-equivalent; with a defined mtimeMs `true && X === X`, and with undefined the right operand is `NaN < threshold === false`, identical to the short-circuit result.
+					mtimeMs !== undefined && Date.now() - mtimeMs < TaskHistoryStore.LIVE_CHILD_MTIME_THRESHOLD_MS
+				if (isLiveElsewhere) {
+					await this.quarantineDelegationRepairIntent(intent, "child live in another window (recent mtime)")
+					return
+				}
 			}
 
 			const repairedChild = childAtTarget ? child : { ...child, status: intent.target.childStatus }
