@@ -998,7 +998,7 @@ describe("AnthropicHandler", () => {
 			)
 		})
 
-		it("should set tool_choice to undefined when tool_choice is 'none' (tools are still passed)", async () => {
+		it("should set tool_choice to 'none' when tool_choice is 'none' (tools are still passed)", async () => {
 			// Handler uses native protocol by default
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -1010,12 +1010,11 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			// Tools are now always present (minimum 6 from ALWAYS_AVAILABLE_TOOLS)
-			// When tool_choice is 'none', the converter returns undefined for tool_choice
-			// but tools are still passed since they're always present
+			// Explicitly disable tool use while preserving the available tool definitions.
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					tools: expect.any(Array),
-					tool_choice: undefined,
+					tool_choice: { type: "none" },
 				}),
 				expect.anything(),
 			)
@@ -1119,7 +1118,7 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({ tool_choice: undefined }),
+				expect.objectContaining({ tool_choice: { type: "none" } }),
 				expect.anything(),
 			)
 		})
