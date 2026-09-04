@@ -211,4 +211,33 @@ describe("LiteLLM", () => {
 
 		expect(screen.queryByText("settings:providers.enablePromptCaching")).not.toBeInTheDocument()
 	})
+
+	it("shows manual cache controls for cache-capable chat completion models", () => {
+		mockUseExtensionState.mockReturnValue({
+			routerModels: {
+				[providerIdentifiers.litellm]: {
+					"cache-capable-model": {
+						contextWindow: 128_000,
+						supportsPromptCache: true,
+					},
+				},
+			},
+		})
+		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+
+		render(
+			<QueryClientProvider client={queryClient}>
+				<LiteLLM
+					apiConfiguration={{
+						apiProvider: providerIdentifiers.litellm,
+						litellmModelId: "cache-capable-model",
+					}}
+					setApiConfigurationField={vi.fn()}
+					organizationAllowList={organizationAllowList}
+				/>
+			</QueryClientProvider>,
+		)
+
+		expect(screen.getByText("settings:providers.enablePromptCaching")).toBeInTheDocument()
+	})
 })

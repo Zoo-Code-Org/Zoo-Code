@@ -463,6 +463,19 @@ describe("LiteLLMHandler", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBeUndefined()
 		})
 
+		it("uses Astra's required default when reasoning is disabled", async () => {
+			handler = new LiteLLMHandler({
+				...mockOptions,
+				litellmModelId: "gpt-6-astra",
+				reasoningEffort: "disable",
+			})
+			mockCreate.mockResolvedValue({ choices: [{ message: { content: "Astra response" } }] })
+
+			await handler.completePrompt("Hello")
+
+			expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("medium")
+		})
+
 		it("reports nested LiteLLM cache-write tokens", async () => {
 			handler = new LiteLLMHandler({ ...mockOptions, litellmModelId: "gpt-6-astra" })
 			mockCreate.mockReturnValue({

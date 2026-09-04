@@ -179,6 +179,19 @@ describe("OpenAiNativeHandler", () => {
 			},
 		)
 
+		it.each([
+			["the configured effort is disabled", { reasoningEffort: "disable" as const }],
+			["the reasoning toggle is disabled", { enableReasoningEffort: false }],
+		])("uses Astra's required default when %s", (_description, options) => {
+			const astraHandler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-6-astra",
+				...options,
+			})
+
+			expect(astraHandler["getReasoningEffort"](astraHandler.getModel())).toBe("medium")
+		})
+
 		it.each(serviceTiers)("should include the selected %s service tier", async (serviceTier) => {
 			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
 			handler = new OpenAiNativeHandler({
