@@ -331,8 +331,7 @@ async function resolveAuthScopedModels(
 	// a detached .finally() would produce an unhandled rejection when the fetch fails.
 	// Only remove our own entry: if sign-out cleared us and a new fetch registered a
 	// fresh promise under the same key, we must not delete that newer entry.
-	let fetchWithCleanup: Promise<ModelRecord>
-	fetchWithCleanup = fetchPromise.finally(() => {
+	const fetchWithCleanup = fetchPromise.finally(() => {
 		if (inFlightAuthScopedFetch.get(cacheKey) === fetchWithCleanup) {
 			inFlightAuthScopedFetch.delete(cacheKey)
 		}
