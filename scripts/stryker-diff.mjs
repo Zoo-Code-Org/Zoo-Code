@@ -378,6 +378,7 @@ function runStryker(repoRoot, packageEntry, reportRoot, dryRunOnly) {
 				.relative(runRoot, path.join(packageRoot, packageEntry.vitestConfig))
 				.replaceAll("\\", "/"),
 			STRYKER_REPORT_DIR: reportDirectory,
+			STRYKER_TEMP_DIR: path.join(repoRoot, ".stryker-tmp", packageEntry.id),
 			STRYKER_IN_PLACE: "false",
 			STRYKER_VITEST_RELATED: packageEntry.vitestRelated === false ? "false" : "true",
 			STRYKER_TEST_FILES: JSON.stringify(packageEntry.testFiles ?? []),
