@@ -1,3 +1,5 @@
+import path from "node:path"
+
 import { type ProviderSettings, RooCodeEventName } from "@roo-code/types"
 
 import { Task } from "../Task"
@@ -107,8 +109,21 @@ describe("Task dispose method", () => {
 		resolveTaskDirectory!("/test/path/tasks/test-task")
 		await disposal
 
-		expect(OutputInterceptor.cleanup).toHaveBeenCalledWith("/test/path/tasks/test-task/command-output")
+		expect(OutputInterceptor.cleanup).toHaveBeenCalledWith(
+			path.join("/test/path/tasks/test-task", "command-output"),
+		)
 		expect(disposalComplete).toBe(true)
+	})
+
+	test("should report command output cleanup failures before disposal completes", async () => {
+		const cleanupError = new Error("cleanup failed")
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(getTaskDirectoryPath).mockRejectedValueOnce(cleanupError)
+
+		await task.dispose()
+
+		expect(consoleErrorSpy).toHaveBeenCalledWith("Error cleaning up command output artifacts:", cleanupError)
+		consoleErrorSpy.mockRestore()
 	})
 
 	test("should expose completion of deferred diff reversion", async () => {
@@ -118,15 +133,17 @@ describe("Task dispose method", () => {
 		})
 		task.isStreaming = true
 		task.diffViewProvider.isEditing = true
-		vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(reversion)
+		const revertChangesSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(reversion)
 
 		const disposal = task.dispose()
+		await vi.waitFor(() => expect(OutputInterceptor.cleanup).toHaveBeenCalled())
 		let disposalComplete = false
 		void disposal.then(() => {
 			disposalComplete = true
 		})
 		await Promise.resolve()
 		expect(disposalComplete).toBe(false)
+		expect(revertChangesSpy).toHaveBeenCalledOnce()
 
 		resolveReversion!()
 		await disposal

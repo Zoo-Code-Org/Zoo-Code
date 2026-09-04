@@ -2516,7 +2516,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public dispose(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
-		const pendingCleanup: Promise<void>[] = []
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -2564,16 +2563,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Cleanup command output artifacts
-		pendingCleanup.push(
-			getTaskDirectoryPath(this.globalStoragePath, this.taskId)
-				.then((taskDir) => {
-					const outputDir = path.join(taskDir, "command-output")
-					return OutputInterceptor.cleanup(outputDir)
-				})
-				.catch((error) => {
-					console.error("Error cleaning up command output artifacts:", error)
-				}),
-		)
+		let pendingCleanup = getTaskDirectoryPath(this.globalStoragePath, this.taskId)
+			.then((taskDir) => {
+				const outputDir = path.join(taskDir, "command-output")
+				return OutputInterceptor.cleanup(outputDir)
+			})
+			.catch((error) => {
+				console.error("Error cleaning up command output artifacts:", error)
+			})
 
 		try {
 			if (this.rooIgnoreController) {
@@ -2594,13 +2591,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// If we're not streaming then `abortStream` won't be called.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				pendingCleanup.push(this.diffViewProvider.revertChanges().catch(console.error))
+				const pendingReversion = this.diffViewProvider.revertChanges().catch(console.error)
+				pendingCleanup = pendingCleanup.then(() => pendingReversion)
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
 		}
 
-		return Promise.all(pendingCleanup).then(() => undefined)
+		return pendingCleanup
 	}
 
 	// Subtasks
