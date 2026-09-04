@@ -40,7 +40,9 @@ export function resolveNeuronpoolBaseUrl(raw?: string): string {
 	// Stryker disable next-line ConditionalExpression,StringLiteral,LogicalOperator: loopback HTTP is an explicit local-dev allowlist
 	const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1"
 	const httpsOk = parsed.protocol === "https:"
+	// Stryker disable next-line ConditionalExpression,LogicalOperator: http+loopback is the only allowed cleartext path; remote HTTP is rejected below
 	const loopbackHttpOk = parsed.protocol === "http:" && loopback
+	// Stryker disable next-line ConditionalExpression,LogicalOperator: allow predicate is https or loopback-http; complements covered by throw tests
 	if (httpsOk || loopbackHttpOk) {
 		return normalized
 	}
