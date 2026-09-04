@@ -2118,6 +2118,7 @@ describe("Cline", () => {
 
 			// Verify abort flag is set
 			expect(task.abort).toBe(true)
+			expect(task.abandoned).toBe(false)
 
 			// Verify TaskAborted event was emitted
 			expect(emitSpy).toHaveBeenCalledWith("taskAborted")
@@ -2299,6 +2300,28 @@ describe("Cline", () => {
 			expect(task.abort).toBe(true)
 
 			// Restore console.error
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("should handle asynchronous disposal errors gracefully", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const disposalError = new Error("Disposal failed asynchronously")
+			vi.spyOn(task, "dispose").mockRejectedValue(disposalError)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(task.abortTask()).resolves.toBeUndefined()
+			await vi.waitFor(() =>
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					`Error during task ${task.taskId}.${task.instanceId} disposal:`,
+					disposalError,
+				),
+			)
+
 			consoleErrorSpy.mockRestore()
 		})
 		describe("Stream Failure Retry", () => {

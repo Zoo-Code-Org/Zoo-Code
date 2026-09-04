@@ -85,7 +85,7 @@ describe("Task dispose method", () => {
 
 	afterEach(async () => {
 		if (task) {
-			await task.dispose()
+			await task.dispose().catch(() => {})
 		}
 	})
 
@@ -114,6 +114,18 @@ describe("Task dispose method", () => {
 			path.join("/test/path/tasks/test-task", "command-output"),
 		)
 		expect(disposalComplete).toBe(true)
+	})
+
+	test("should reject the memoized completion promise when disposal cannot start", async () => {
+		const disposalError = new Error("disposal failed")
+		vi.spyOn(console, "log").mockImplementationOnce(() => {
+			throw disposalError
+		})
+
+		const disposal = task.dispose()
+
+		await expect(disposal).rejects.toBe(disposalError)
+		expect(task.dispose()).toBe(disposal)
 	})
 
 	test("should report command output cleanup failures before disposal completes", async () => {
