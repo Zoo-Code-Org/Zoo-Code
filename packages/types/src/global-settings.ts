@@ -335,6 +335,7 @@ export const SECRET_STATE_KEYS = [
 	"zaiApiKey",
 	"fireworksApiKey",
 	"friendliApiKey",
+	"neuronpoolApiKey",
 	"vercelAiGatewayApiKey",
 	"opencodeGoApiKey",
 	"kenariApiKey",
