@@ -118,12 +118,17 @@ export const ModelSelector = ({
 		return fzfInstance.find(searchValue).map((result) => result.item.original)
 	}, [modelIds, searchValue, fzfInstance])
 
-	const handleEditClick = useCallback(() => {
-		vscode.postMessage({ type: "switchTab", tab: "settings" })
-		// Stryker disable next-line BooleanLiteral,CallExpression: this button only renders while
-		// the popover (and its `open` state) doesn't exist, so this call has no observable effect.
-		setOpen(false)
-	}, [])
+	const handleEditClick = useCallback(
+		() => {
+			vscode.postMessage({ type: "switchTab", tab: "settings" })
+			// Stryker disable next-line BooleanLiteral,CallExpression: this button only renders
+			// while the popover (and its `open` state) doesn't exist, so this call has no
+			// observable effect either way.
+			setOpen(false)
+		},
+		// Stryker disable next-line ArrayDeclaration: this callback closes over no props or state.
+		[],
+	)
 
 	const handleSelect = useCallback(
 		(modelId: string) => {
