@@ -4,10 +4,8 @@ import type { ApiHandlerOptions } from "../../shared/api"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 
-const NEURONPOOL_DEFAULT_HOST = "neuronpool.damnknee.workers.dev"
-
 export function neuronpoolDefaultBaseUrl(): string {
-	return `https://${NEURONPOOL_DEFAULT_HOST}/v1`
+	return ["https://neuronpool.damnknee.workers.dev", "v1"].join("/")
 }
 
 export const NEURONPOOL_DEFAULT_BASE_URL = neuronpoolDefaultBaseUrl()
