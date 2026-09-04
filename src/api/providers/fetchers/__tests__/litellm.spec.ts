@@ -765,7 +765,7 @@ describe("getLiteLLMModels", () => {
 				data: {
 					data: [
 						{
-							model_name: "glm-5.3",
+							model_name: "glm-5.3-flash",
 							model_info: {
 								max_tokens: 8192,
 								max_input_tokens: 128000,
@@ -782,7 +782,7 @@ describe("getLiteLLMModels", () => {
 
 			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
 
-			expect(result["glm-5.3"]).toMatchObject({ preserveReasoning: true })
+			expect(result["glm-5.3-flash"]).toMatchObject({ preserveReasoning: true })
 		})
 
 		it("does not match a model id that merely contains a known family as a substring", async () => {

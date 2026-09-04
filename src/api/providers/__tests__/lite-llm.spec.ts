@@ -731,6 +731,31 @@ describe("LiteLLMHandler", () => {
 			expect(textChunk).toMatchObject({ type: "text", text: "The answer is 42." })
 		})
 
+		it("should yield reasoning chunks BEFORE text chunks when both are present in the exact same delta", async () => {
+			const mockStream = asyncStreamFrom([
+				{
+					choices: [{ delta: { reasoning_content: "thinking...", content: "answer" } }],
+					usage: { prompt_tokens: 10, completion_tokens: 10 },
+				},
+			])
+
+			mockCreate.mockReturnValue({
+				withResponse: vi.fn().mockResolvedValue({ data: mockStream }),
+			})
+
+			const generator = handler.createMessage("system", [{ role: "user", content: "Test simultaneous." }])
+			const results = await collectStream(generator)
+
+			// Filter out usage chunks to focus on ordering of content
+			const contentResults = results.filter((r) => r.type === "reasoning" || r.type === "text")
+
+			// The order is strictly enforced here
+			expect(contentResults).toEqual([
+				{ type: "reasoning", text: "thinking..." },
+				{ type: "text", text: "answer" },
+			])
+		})
+
 		it("should yield reasoning chunks from reasoning delta field", async () => {
 			const mockStream = asyncStreamFrom([
 				{

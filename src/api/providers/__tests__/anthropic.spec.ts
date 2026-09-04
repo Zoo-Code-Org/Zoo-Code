@@ -406,6 +406,31 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
 
+		it("should use adaptive thinking for Claude Fable 5.1 when reasoning is enabled", async () => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+				enableReasoningEffort: true,
+				modelMaxTokens: 32768,
+			})
+
+			const stream = fableHandler.createMessage(systemPrompt, [
+				{
+					role: "user",
+					content: [{ type: "text" as const, text: "Hello" }],
+				},
+			])
+
+			await collectStream(stream)
+
+			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
+			expect(requestBody?.thinking).toEqual({ type: "adaptive" })
+			expect(requestBody?.temperature).toBeUndefined()
+			expect(requestBody?.max_tokens).toBe(32768)
+			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
+		})
+
 		it("should use adaptive thinking for Claude Sonnet 5 when reasoning is enabled", async () => {
 			const sonnetHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
@@ -630,6 +655,27 @@ describe("AnthropicHandler", () => {
 			expect(model.info.maxTokens).toBe(128000)
 			expect(model.info.contextWindow).toBe(1000000)
 			expect(model.maxTokens).toBe(8192)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.reasoningBudget).toBeUndefined()
+		})
+
+		it("should handle Claude Fable 5.1 model correctly", () => {
+			const handler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const model = handler.getModel()
+			expect(model.id).toBe("claude-fable-5-1")
+			expect(model.info.maxTokens).toBe(128000)
+			expect(model.info.contextWindow).toBe(1000000)
+			expect(model.maxTokens).toBe(8192)
+			expect(model.info.inputPrice).toBe(10)
+			expect(model.info.outputPrice).toBe(50)
+			expect(model.info.cacheWritesPrice).toBe(12.5)
+			expect(model.info.cacheReadsPrice).toBe(0.25)
 			expect(model.info.supportsReasoningBinary).toBe(true)
 			expect(model.info.supportsReasoningBudget).toBe(true)
 			expect(model.info.supportsPromptCache).toBe(true)
@@ -952,7 +998,7 @@ describe("AnthropicHandler", () => {
 			)
 		})
 
-		it("should set tool_choice to undefined when tool_choice is 'none' (tools are still passed)", async () => {
+		it("should set tool_choice to 'none' when tool_choice is 'none' (tools are still passed)", async () => {
 			// Handler uses native protocol by default
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -964,12 +1010,21 @@ describe("AnthropicHandler", () => {
 			await collectStream(stream)
 
 			// Tools are now always present (minimum 6 from ALWAYS_AVAILABLE_TOOLS)
-			// When tool_choice is 'none', the converter returns undefined for tool_choice
-			// but tools are still passed since they're always present
+			// Explicitly disable tool use while preserving the available tool definitions.
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					tools: expect.any(Array),
-					tool_choice: undefined,
+					tools: [
+						{
+							name: "get_weather",
+							description: "Get the current weather",
+							input_schema: {
+								type: "object",
+								properties: { location: { type: "string" } },
+								required: ["location"],
+							},
+						},
+					],
+					tool_choice: { type: "none" },
 				}),
 				expect.anything(),
 			)
@@ -990,6 +1045,133 @@ describe("AnthropicHandler", () => {
 				expect.objectContaining({
 					tool_choice: { type: "tool", name: "get_weather", disable_parallel_tool_use: false },
 				}),
+				expect.anything(),
+			)
+		})
+
+		it.each([
+			["required with default parallel calls", "required" as const, undefined, false],
+			[
+				"named with default parallel calls",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				undefined,
+				false,
+			],
+			["required with parallel calls", "required" as const, true, false],
+			[
+				"named with parallel calls",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				true,
+				false,
+			],
+			["required without parallel calls", "required" as const, false, true],
+			[
+				"named without parallel calls",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				false,
+				true,
+			],
+		])(
+			"should normalize %s tool_choice to auto for Claude Fable 5.1",
+			async (_, toolChoice, parallelToolCalls, disableParallelToolUse) => {
+				const fableHandler = new AnthropicHandler({
+					apiKey: "test-api-key",
+					apiModelId: "claude-fable-5-1",
+				})
+				const stream = fableHandler.createMessage(systemPrompt, messages, {
+					taskId: "test-task",
+					tools: mockTools,
+					tool_choice: toolChoice,
+					parallelToolCalls,
+				})
+
+				await collectStream(stream)
+
+				expect(mockCreate).toHaveBeenCalledWith(
+					expect.objectContaining({
+						tool_choice: { type: "auto", disable_parallel_tool_use: disableParallelToolUse },
+					}),
+					expect.anything(),
+				)
+			},
+		)
+
+		it("should preserve an omitted tool_choice for Claude Fable 5.1", async () => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const stream = fableHandler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ tool_choice: undefined }),
+				expect.anything(),
+			)
+		})
+
+		it("should disable parallel tool calls when tool_choice is omitted for Claude Fable 5.1", async () => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const stream = fableHandler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+				parallelToolCalls: false,
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					tool_choice: { type: "auto", disable_parallel_tool_use: true },
+				}),
+				expect.anything(),
+			)
+		})
+
+		it("should preserve an explicit none tool_choice for Claude Fable 5.1", async () => {
+			const fableHandler = new AnthropicHandler({
+				apiKey: "test-api-key",
+				apiModelId: "claude-fable-5-1",
+			})
+			const stream = fableHandler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+				tool_choice: "none",
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ tool_choice: { type: "none" } }),
+				expect.anything(),
+			)
+		})
+
+		it.each([
+			["required", "required" as const, { type: "any", disable_parallel_tool_use: false }],
+			[
+				"named",
+				{ type: "function" as const, function: { name: "get_weather" } },
+				{ type: "tool", name: "get_weather", disable_parallel_tool_use: false },
+			],
+		])("should preserve %s tool_choice for non-Fable models", async (_, toolChoice, expectedToolChoice) => {
+			const stream = handler.createMessage(systemPrompt, messages, {
+				taskId: "test-task",
+				tools: mockTools,
+				tool_choice: toolChoice,
+			})
+
+			await collectStream(stream)
+
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ tool_choice: expectedToolChoice }),
 				expect.anything(),
 			)
 		})
