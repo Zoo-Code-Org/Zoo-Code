@@ -923,6 +923,18 @@ describe("PR review-state workflow", () => {
 		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
 	})
 
+	it("preserves awaiting-maintainer when adding has-conflicts fails", async () => {
+		const result = await runWorkflow({
+			conflict: true,
+			labels: ["awaiting-maintainer"],
+			addLabelsStatus: 500,
+		})
+
+		expect(result.addLabels).toHaveBeenCalledWith(expect.objectContaining({ labels: ["has-conflicts"] }))
+		expect(result.removeLabel).not.toHaveBeenCalledWith(expect.objectContaining({ name: "awaiting-maintainer" }))
+		expect(result.setFailed).toHaveBeenCalledWith(expect.stringContaining("Could not add desired label"))
+	})
+
 	it("rechecks mergeability before tagging a PR awaiting maintainer", async () => {
 		const result = await runWorkflow({
 			eventName: "push",

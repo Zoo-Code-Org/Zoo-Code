@@ -183,6 +183,19 @@ jobs:
               }
               const currentLabels = new Set(pr.labels.map(l => l.name));
               const labelErrors = [];
+              if (desiredLabel && !currentLabels.has(desiredLabel)) {
+                try {
+                  await github.rest.issues.addLabels({
+                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
+                  });
+                  currentLabels.add(desiredLabel);
+                  pr.labels.push({ name: desiredLabel });
+                } catch (err) {
+                  const error = new Error(`Could not add desired label: ${err.message}`);
+                  error.preserveStateLabels = true;
+                  throw error;
+                }
+              }
               for (const label of stateLabels) {
                 if (label !== desiredLabel && currentLabels.has(label)) {
                   try {
@@ -199,17 +212,6 @@ jobs:
                       labelErrors.push(err);
                     }
                   }
-                }
-              }
-              if (desiredLabel && !currentLabels.has(desiredLabel)) {
-                try {
-                  await github.rest.issues.addLabels({
-                    owner, repo, issue_number: pr.number, labels: [desiredLabel],
-                  });
-                  currentLabels.add(desiredLabel);
-                  pr.labels.push({ name: desiredLabel });
-                } catch (err) {
-                  labelErrors.push(err);
                 }
               }
               if (desiredLabel !== 'awaiting-author' && currentLabels.has('stale-awaiting-author')) {
@@ -763,10 +765,12 @@ jobs:
                 } catch (cleanupError) {
                   metadataErrors.push(cleanupError);
                 }
-                try {
-                  await reconcileLabels(pr, null);
-                } catch (cleanupError) {
-                  metadataErrors.push(cleanupError);
+                if (!error.preserveStateLabels) {
+                  try {
+                    await reconcileLabels(pr, null);
+                  } catch (cleanupError) {
+                    metadataErrors.push(cleanupError);
+                  }
                 }
                 const detail = error.status
                   ? `${error.message} (HTTP ${error.status}${error.response?.data?.message ? `: ${error.response.data.message}` : ''})`
