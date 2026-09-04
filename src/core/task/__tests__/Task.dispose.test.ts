@@ -54,10 +54,12 @@ describe("Task dispose method", () => {
 	}
 	let mockApiConfiguration: ProviderSettings
 	let task: Task
+	let skipCleanup: boolean
 
 	beforeEach(() => {
 		// Reset all mocks
 		vi.clearAllMocks()
+		skipCleanup = false
 
 		// Mock provider
 		mockProvider = {
@@ -84,7 +86,7 @@ describe("Task dispose method", () => {
 	})
 
 	afterEach(async () => {
-		if (task) {
+		if (task && !skipCleanup) {
 			await task.dispose().catch(() => {})
 		}
 	})
@@ -118,13 +120,19 @@ describe("Task dispose method", () => {
 
 	test("should reject the memoized completion promise when disposal cannot start", async () => {
 		const disposalError = new Error("disposal failed")
+		skipCleanup = true
 		vi.spyOn(console, "log").mockImplementationOnce(() => {
 			throw disposalError
 		})
 
 		const disposal = task.dispose()
+		let rejection: unknown
+		void disposal.catch((error) => {
+			rejection = error
+		})
+		await Promise.resolve()
 
-		await expect(disposal).rejects.toBe(disposalError)
+		expect(rejection).toBe(disposalError)
 		expect(task.dispose()).toBe(disposal)
 	})
 
