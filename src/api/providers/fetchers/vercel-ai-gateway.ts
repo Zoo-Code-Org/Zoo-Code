@@ -116,7 +116,7 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		description: model.description ?? model.name,
 	}
 
-	if (id === "anthropic/claude-fable-5") {
+	if (id === "anthropic/claude-fable-5.1" || id === "anthropic/claude-fable-5") {
 		modelInfo.supportsTemperature = false
 	}
 
