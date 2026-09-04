@@ -721,3 +721,484 @@ if (missingLandmarks.length) {
 console.log(
 	`Shared-store model check passed: ${totalStates} states, ${scenarios.length} scenarios, ${commonInvariantNames.length} invariants, ${expectedPhases.length}/${expectedPhases.length} phases reachable, ${Object.keys(semanticLandmarks).length}/${Object.keys(semanticLandmarks).length} landmarks reached`,
 )
+
+type HandoffMode = "unsafe" | "fixed"
+type HandoffLockOwner = "A" | "B"
+type CompletionPhase =
+	| "idle"
+	| "scheduled"
+	| "begun"
+	| "ui-written"
+	| "api-written"
+	| "parent-record-written"
+	| "c-record-written"
+	| "c-removed"
+	| "parent-installed"
+	| "callback-failed"
+	| "records-compensated"
+	| "conversations-compensated"
+	| "c-restored"
+	| "rejected"
+	| "done"
+	| "failed"
+type ReplacementPhase = "idle" | "locked" | "c-interrupted" | "d-written" | "parent-written" | "d-installed" | "done"
+type ParentRecordState = "awaiting-c" | "awaiting-d" | "completed-c"
+type CRecordState = "active" | "interrupted" | "completed"
+type DRecordState = "missing" | "active"
+type ConversationState = "original" | "c-result"
+type LiveHandoffState = "c" | "none" | "d" | "parent"
+
+interface HandoffState {
+	mode: HandoffMode
+	lockOwner?: HandoffLockOwner
+	completionPhase: CompletionPhase
+	replacementPhase: ReplacementPhase
+	scheduledOwnership?: "c" | "d"
+	uiConversation: ConversationState
+	apiConversation: ConversationState
+	parentRecord: ParentRecordState
+	cRecord: CRecordState
+	dRecord: DRecordState
+	live: LiveHandoffState
+	dOwnershipEstablished: boolean
+	compensationCompleted: boolean
+}
+
+interface HandoffTraceStep {
+	action: string
+	state: HandoffState
+}
+
+const HANDOFF_MAX_DEPTH = 20
+const HANDOFF_MAX_STATES = 25_000
+const handoffMechanicalInvariantNames = [
+	"parent transition lock ownership",
+	"completion phase lock discipline",
+	"replacement phase lock discipline",
+] as const
+const handoffFixedInvariantNames = [
+	...handoffMechanicalInvariantNames,
+	"active linked child exact ownership",
+	"replacement ownership monotonicity",
+	"lock-free handoff bundle coherence",
+] as const
+const unsafeHandoffLandmarks = {
+	"internal partial handoff while locked": (state: HandoffState) =>
+		state.lockOwner !== undefined && !isCoherentHandoff(state),
+	"stale schedule after D ownership": (state: HandoffState) =>
+		state.dOwnershipEstablished && state.completionPhase === "scheduled" && state.scheduledOwnership === "d",
+	"successful callback compensation": (state: HandoffState) => state.compensationCompleted,
+} satisfies Record<string, (state: HandoffState) => boolean>
+const fixedHandoffLandmarks = {
+	...unsafeHandoffLandmarks,
+	"stale completion rejection": (state: HandoffState) => state.completionPhase === "rejected",
+} satisfies Record<string, (state: HandoffState) => boolean>
+const expectedUnsafe1469Actions = [
+	"handoff.stale-completion.schedule",
+	"handoff.unsafe-completion.begin",
+	"handoff.completion.write-UI",
+	"handoff.completion.write-API",
+	"handoff.B.acquire-parent-lock",
+	"handoff.B.interrupt-C",
+	"handoff.B.write-D",
+	"handoff.B.write-parent-awaiting-D",
+	"handoff.B.install-D",
+	"handoff.B.release",
+	"handoff.completion.write-parent-record",
+	"handoff.completion.write-C-record",
+	"handoff.completion.remove-C",
+	"handoff.completion.install-parent",
+	"handoff.completion.release",
+] as const
+
+function initialHandoffState(mode: HandoffMode): HandoffState {
+	return {
+		mode,
+		completionPhase: "idle",
+		replacementPhase: "idle",
+		uiConversation: "original",
+		apiConversation: "original",
+		parentRecord: "awaiting-c",
+		cRecord: "active",
+		dRecord: "missing",
+		live: "c",
+		dOwnershipEstablished: false,
+		compensationCompleted: false,
+	}
+}
+
+function handoffTransition(
+	state: HandoffState,
+	action: string,
+	mutate: (next: HandoffState) => void,
+): HandoffTraceStep {
+	const next = clone(state)
+	mutate(next)
+	return { action, state: next }
+}
+
+function nextHandoffSteps(state: HandoffState): HandoffTraceStep[] {
+	const steps: HandoffTraceStep[] = []
+
+	if (state.completionPhase === "idle") {
+		steps.push(
+			handoffTransition(state, "handoff.stale-completion.schedule", (next) => {
+				next.completionPhase = "scheduled"
+				next.scheduledOwnership = next.parentRecord === "awaiting-d" ? "d" : "c"
+			}),
+		)
+	} else if (state.completionPhase === "scheduled") {
+		if (state.mode === "unsafe") {
+			steps.push(
+				handoffTransition(state, "handoff.unsafe-completion.begin", (next) => {
+					next.completionPhase = "begun"
+				}),
+			)
+		} else if (!state.lockOwner) {
+			steps.push(
+				handoffTransition(state, "handoff.fixed-completion.begin", (next) => {
+					next.lockOwner = "A"
+					// withTaskFileLock refreshes the authoritative parent before this exact-child guard.
+					next.completionPhase =
+						next.parentRecord === "awaiting-c" && next.cRecord !== "completed" ? "begun" : "rejected"
+				}),
+			)
+		}
+	} else if (state.completionPhase === "begun") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.write-UI", (next) => {
+				next.uiConversation = "c-result"
+				next.completionPhase = "ui-written"
+			}),
+		)
+	} else if (state.completionPhase === "ui-written") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.write-API", (next) => {
+				next.apiConversation = "c-result"
+				next.completionPhase = "api-written"
+			}),
+		)
+	} else if (state.completionPhase === "api-written") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.write-parent-record", (next) => {
+				next.parentRecord = "completed-c"
+				next.completionPhase = "parent-record-written"
+			}),
+		)
+	} else if (state.completionPhase === "parent-record-written") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.write-C-record", (next) => {
+				next.cRecord = "completed"
+				next.completionPhase = "c-record-written"
+			}),
+		)
+	} else if (state.completionPhase === "c-record-written") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.remove-C", (next) => {
+				if (next.live === "c") next.live = "none"
+				next.completionPhase = "c-removed"
+			}),
+		)
+	} else if (state.completionPhase === "c-removed") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.install-parent", (next) => {
+				next.live = "parent"
+				next.completionPhase = "parent-installed"
+			}),
+			handoffTransition(state, "handoff.completion.callback-fail", (next) => {
+				next.completionPhase = "callback-failed"
+			}),
+		)
+	} else if (state.completionPhase === "parent-installed") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.release", (next) => {
+				if (next.mode === "fixed") delete next.lockOwner
+				next.completionPhase = "done"
+			}),
+		)
+	} else if (state.completionPhase === "callback-failed") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.compensate-records", (next) => {
+				next.parentRecord = "awaiting-c"
+				next.cRecord = "active"
+				next.completionPhase = "records-compensated"
+			}),
+		)
+	} else if (state.completionPhase === "records-compensated") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.compensate-conversations", (next) => {
+				next.uiConversation = "original"
+				next.apiConversation = "original"
+				next.completionPhase = "conversations-compensated"
+			}),
+		)
+	} else if (state.completionPhase === "conversations-compensated") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.restore-C", (next) => {
+				next.live = "c"
+				next.completionPhase = "c-restored"
+			}),
+		)
+	} else if (state.completionPhase === "c-restored") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.release", (next) => {
+				if (next.mode === "fixed") delete next.lockOwner
+				next.completionPhase = "failed"
+				next.compensationCompleted = true
+			}),
+		)
+	} else if (state.completionPhase === "rejected") {
+		steps.push(
+			handoffTransition(state, "handoff.completion.release", (next) => {
+				delete next.lockOwner
+				next.completionPhase = "done"
+			}),
+		)
+	}
+
+	if (
+		state.replacementPhase === "idle" &&
+		!state.lockOwner &&
+		state.parentRecord === "awaiting-c" &&
+		state.cRecord === "active"
+	) {
+		steps.push(
+			handoffTransition(state, "handoff.B.acquire-parent-lock", (next) => {
+				next.lockOwner = "B"
+				next.replacementPhase = "locked"
+			}),
+		)
+	} else if (state.replacementPhase === "locked") {
+		steps.push(
+			handoffTransition(state, "handoff.B.interrupt-C", (next) => {
+				next.cRecord = "interrupted"
+				if (next.live === "c") next.live = "none"
+				next.replacementPhase = "c-interrupted"
+			}),
+		)
+	} else if (state.replacementPhase === "c-interrupted") {
+		steps.push(
+			handoffTransition(state, "handoff.B.write-D", (next) => {
+				next.dRecord = "active"
+				next.replacementPhase = "d-written"
+			}),
+		)
+	} else if (state.replacementPhase === "d-written") {
+		steps.push(
+			handoffTransition(state, "handoff.B.write-parent-awaiting-D", (next) => {
+				next.parentRecord = "awaiting-d"
+				next.replacementPhase = "parent-written"
+			}),
+		)
+	} else if (state.replacementPhase === "parent-written") {
+		steps.push(
+			handoffTransition(state, "handoff.B.install-D", (next) => {
+				next.live = "d"
+				next.replacementPhase = "d-installed"
+			}),
+		)
+	} else if (state.replacementPhase === "d-installed") {
+		steps.push(
+			handoffTransition(state, "handoff.B.release", (next) => {
+				delete next.lockOwner
+				next.replacementPhase = "done"
+				if (next.parentRecord === "awaiting-d" && next.dRecord === "active" && next.live === "d") {
+					next.dOwnershipEstablished = true
+				}
+			}),
+		)
+	}
+
+	return steps
+}
+
+function isOriginalCOwnership(state: HandoffState): boolean {
+	return (
+		state.uiConversation === "original" &&
+		state.apiConversation === "original" &&
+		state.parentRecord === "awaiting-c" &&
+		state.cRecord === "active" &&
+		state.dRecord === "missing" &&
+		state.live === "c"
+	)
+}
+
+function isCompletedCOwnership(state: HandoffState): boolean {
+	return (
+		state.uiConversation === "c-result" &&
+		state.apiConversation === "c-result" &&
+		state.parentRecord === "completed-c" &&
+		state.cRecord === "completed" &&
+		state.dRecord === "missing" &&
+		state.live === "parent"
+	)
+}
+
+function isDOwnership(state: HandoffState): boolean {
+	return (
+		state.uiConversation === "original" &&
+		state.apiConversation === "original" &&
+		state.parentRecord === "awaiting-d" &&
+		state.cRecord === "interrupted" &&
+		state.dRecord === "active" &&
+		state.live === "d"
+	)
+}
+
+function isCoherentHandoff(state: HandoffState): boolean {
+	return isOriginalCOwnership(state) || isCompletedCOwnership(state) || isDOwnership(state)
+}
+
+function handoffMechanicalViolations(state: HandoffState): string[] {
+	const violations: string[] = []
+	const replacementHoldsLock = ["locked", "c-interrupted", "d-written", "parent-written", "d-installed"].includes(
+		state.replacementPhase,
+	)
+	const completionHoldsLock = [
+		"begun",
+		"ui-written",
+		"api-written",
+		"parent-record-written",
+		"c-record-written",
+		"c-removed",
+		"parent-installed",
+		"callback-failed",
+		"records-compensated",
+		"conversations-compensated",
+		"c-restored",
+		"rejected",
+	].includes(state.completionPhase)
+
+	if (replacementHoldsLock !== (state.lockOwner === "B")) {
+		violations.push("B replacement phase and parent transition lock ownership disagree")
+	}
+	if (state.mode === "fixed" && completionHoldsLock !== (state.lockOwner === "A")) {
+		violations.push("fixed completion phase and parent transition lock ownership disagree")
+	}
+	if (state.mode === "unsafe" && state.lockOwner === "A") {
+		violations.push("unsafe completion unexpectedly acquired the parent transition lock")
+	}
+	return violations
+}
+
+function fixedHandoffViolations(state: HandoffState): string[] {
+	const violations = handoffMechanicalViolations(state)
+	if (state.lockOwner) return violations
+
+	if (state.cRecord === "active" && state.parentRecord !== "awaiting-c") {
+		violations.push("active linked C is not the exact child awaited by the delegated parent")
+	}
+	if (state.dRecord === "active" && state.parentRecord !== "awaiting-d") {
+		violations.push("active linked D is not the exact child awaited by the delegated parent")
+	}
+	if (
+		state.dOwnershipEstablished &&
+		(state.parentRecord !== "awaiting-d" || state.dRecord !== "active" || state.live !== "d")
+	) {
+		violations.push("established D ownership was not preserved")
+	}
+	if (!isCoherentHandoff(state)) violations.push("a partial handoff bundle is observable without the parent lock")
+	return violations
+}
+
+function isUnsafe1469Violation(state: HandoffState): boolean {
+	return (
+		state.mode === "unsafe" &&
+		state.completionPhase === "done" &&
+		state.replacementPhase === "done" &&
+		state.scheduledOwnership === "c" &&
+		state.dOwnershipEstablished &&
+		state.parentRecord === "completed-c" &&
+		state.dRecord === "active"
+	)
+}
+
+function formatHandoffTrace(message: string, trace: HandoffTraceStep[]): string {
+	return [
+		message,
+		`Bounds: depth=${HANDOFF_MAX_DEPTH}, states=${HANDOFF_MAX_STATES}`,
+		...trace.map((step, index) => `${index}. ${step.action}\n${JSON.stringify(step.state, null, 2)}`),
+	].join("\n")
+}
+
+function runHandoffExplorer(mode: HandoffMode): {
+	states: number
+	maxDepth: number
+	errors: number
+	landmarks: Set<string>
+	witness?: HandoffTraceStep[]
+} {
+	const start = initialHandoffState(mode)
+	const queue: Array<{ state: HandoffState; trace: HandoffTraceStep[] }> = [
+		{ state: start, trace: [{ action: "initial", state: start }] },
+	]
+	const visited = new Set([canonical(start)])
+	const frontier: HandoffState[] = []
+	const landmarks = new Set<string>()
+	const landmarkPredicates = mode === "fixed" ? fixedHandoffLandmarks : unsafeHandoffLandmarks
+	let maxDepth = 0
+	let witness: HandoffTraceStep[] | undefined
+
+	for (let index = 0; index < queue.length; index++) {
+		const node = queue[index]!
+		const depth = node.trace.length - 1
+		maxDepth = Math.max(maxDepth, depth)
+		for (const [name, predicate] of Object.entries(landmarkPredicates)) {
+			if (predicate(node.state)) landmarks.add(name)
+		}
+		const violations =
+			mode === "fixed" ? fixedHandoffViolations(node.state) : handoffMechanicalViolations(node.state)
+		if (violations.length) {
+			throw new Error(
+				formatHandoffTrace(`Cross-host ${mode} handoff violation: ${violations.join("; ")}`, node.trace),
+			)
+		}
+		if (isUnsafe1469Violation(node.state) && !witness) witness = node.trace
+		if (depth === HANDOFF_MAX_DEPTH) {
+			frontier.push(node.state)
+			continue
+		}
+
+		for (const step of nextHandoffSteps(node.state)) {
+			const key = canonical(step.state)
+			if (visited.has(key)) continue
+			visited.add(key)
+			queue.push({ state: step.state, trace: [...node.trace, step] })
+			if (visited.size > HANDOFF_MAX_STATES) {
+				throw new Error(`Cross-host ${mode} handoff exceeded ${HANDOFF_MAX_STATES} states`)
+			}
+		}
+	}
+
+	const unseen = frontier
+		.flatMap((state) => nextHandoffSteps(state))
+		.find((step) => !visited.has(canonical(step.state)))
+	if (unseen) throw new Error(`Cross-host ${mode} handoff truncated before unseen action ${unseen.action}`)
+	const missingLandmarks = Object.keys(landmarkPredicates).filter((name) => !landmarks.has(name))
+	if (missingLandmarks.length) {
+		throw new Error(`Cross-host ${mode} handoff has unreachable landmarks: ${missingLandmarks.join(", ")}`)
+	}
+	if (mode === "unsafe" && !witness) {
+		throw new Error("Cross-host unsafe handoff no longer reproduces #1469; promote it to an invariant")
+	}
+	return { states: visited.size, maxDepth, errors: witness ? 1 : 0, landmarks, witness }
+}
+
+const unsafeHandoff = runHandoffExplorer("unsafe")
+const unsafeHandoffActions = unsafeHandoff.witness!.slice(1).map((step) => step.action)
+if (canonical(unsafeHandoffActions) !== canonical(expectedUnsafe1469Actions)) {
+	throw new Error(
+		formatHandoffTrace("Cross-host unsafe handoff #1469 shortest causal witness changed", unsafeHandoff.witness!),
+	)
+}
+console.log(
+	`Known unsafe #1469 protocol: stale child completion cleared replacement D ownership\n  ${unsafeHandoffActions.join(" -> ")}`,
+)
+console.log(
+	`Cross-host unsafe handoff explored: ${unsafeHandoff.states} states, max depth ${unsafeHandoff.maxDepth}, ${unsafeHandoff.errors} expected error, ${handoffMechanicalInvariantNames.length} invariants, ${unsafeHandoff.landmarks.size}/${Object.keys(unsafeHandoffLandmarks).length} landmarks reached`,
+)
+
+const fixedHandoff = runHandoffExplorer("fixed")
+console.log(
+	`Cross-host fixed handoff model check passed: ${fixedHandoff.states} states, max depth ${fixedHandoff.maxDepth}, ${fixedHandoff.errors} errors, ${handoffFixedInvariantNames.length} invariants, ${fixedHandoff.landmarks.size}/${Object.keys(fixedHandoffLandmarks).length} landmarks reached`,
+)
