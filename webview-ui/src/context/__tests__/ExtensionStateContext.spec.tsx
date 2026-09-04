@@ -146,6 +146,22 @@ describe("ExtensionStateContext", () => {
 		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: "view-a" })
 	})
 
+	it("posts webviewDidLaunch without a viewStateId when getViewStateId is unavailable", () => {
+		const savedGetViewStateId = vscode.getViewStateId
+		Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: undefined })
+		try {
+			render(
+				<ExtensionStateContextProvider>
+					<TestComponent />
+				</ExtensionStateContextProvider>,
+			)
+
+			expect(vscode.postMessage).toHaveBeenCalledWith({ type: "webviewDidLaunch", viewStateId: undefined })
+		} finally {
+			Object.defineProperty(vscode, "getViewStateId", { configurable: true, value: savedGetViewStateId })
+		}
+	})
+
 	it("reseeds view-local mode and API profile from a new state payload after local edits", () => {
 		render(
 			<ExtensionStateContextProvider>

@@ -87,6 +87,7 @@ export class VSCodeAPIWrapper {
 		}
 
 		try {
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both return this.fallbackState from this catch
 			if (typeof localStorage?.getItem === "function") {
 				const state = localStorage.getItem("vscodeState")
 				return state ? JSON.parse(state) : this.fallbackState
@@ -117,6 +118,7 @@ export class VSCodeAPIWrapper {
 		this.fallbackState = newState
 
 		try {
+			// Stryker disable next-line ConditionalExpression,OptionalChaining: equivalent mutant - when localStorage is unavailable the guard-false path and the throwing body both return newState from this catch
 			if (typeof localStorage?.setItem === "function") {
 				localStorage.setItem("vscodeState", JSON.stringify(newState))
 			}

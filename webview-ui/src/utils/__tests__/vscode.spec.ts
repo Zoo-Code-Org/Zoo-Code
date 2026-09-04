@@ -122,4 +122,74 @@ describe("VSCodeAPIWrapper", () => {
 		expect(wrapper.getViewStateId()).toBe("loyw3v28-zk00000ytu")
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
 	})
+
+	it("falls back to a timestamp-random id when the crypto global is undefined", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: undefined,
+		})
+		vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+		vi.spyOn(Math, "random").mockReturnValue(0.987654321)
+		const storage = createMockStorage()
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// 1700000000000.toString(36) === "loyw3v28" and (0.987654321).toString(36) ===
+		// "0.zk00000ytu", so the deterministic fallback id drops the "0." prefix.
+		expect(wrapper.getViewStateId()).toBe("loyw3v28-zk00000ytu")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
+	})
+
+	it("creates a new viewStateId when the stored state parses to JSON null", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "after-null-view") },
+		})
+		const storage = createMockStorage({ vscodeState: "null" })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("after-null-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "after-null-view" })
+	})
+
+	it("replaces an empty persisted viewStateId with a freshly created one", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "refilled-view") },
+		})
+		const storage = createMockStorage({ vscodeState: JSON.stringify({ viewStateId: "" }) })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("refilled-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "refilled-view" })
+	})
+
+	it("replaces a non-object persisted state with a freshly created viewStateId", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { randomUUID: vi.fn(() => "replaced-string-view") },
+		})
+		// A persisted JSON string is truthy but not an object: the guard must keep it out of
+		// the fresh state, so the persisted record contains only the new viewStateId.
+		const storage = createMockStorage({ vscodeState: JSON.stringify("stale-string-state") })
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		expect(wrapper.getViewStateId()).toBe("replaced-string-view")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toEqual({ viewStateId: "replaced-string-view" })
+	})
 })
