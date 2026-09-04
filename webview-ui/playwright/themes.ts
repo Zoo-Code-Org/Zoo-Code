@@ -17,12 +17,25 @@ export const visualThemes: VisualTheme[] = [
 	},
 ]
 
+/**
+ * Apply a theme with color transitions temporarily disabled (see the
+ * `.visual-theme-applying` rule in `vscode-theme-base.css`). Without this,
+ * the theme class swap starts ~150ms color transitions and assertions run
+ * right after can sample intermediate colors and fail contrast checks.
+ */
 export async function applyVisualTheme(page: Page, theme: VisualTheme) {
 	await page.evaluate(({ bodyClass, themeId }) => {
-		document.documentElement.className = bodyClass
-		document.documentElement.removeAttribute("style")
-		document.body.className = bodyClass
-		document.body.removeAttribute("style")
-		document.body.dataset.vscodeThemeId = themeId
+		const root = document.documentElement
+		const body = document.body
+		root.className = `${bodyClass} visual-theme-applying`
+		body.className = `${bodyClass} visual-theme-applying`
+		root.removeAttribute("style")
+		body.removeAttribute("style")
+		body.dataset.vscodeThemeId = themeId
+		// Force a style flush while transitions are disabled so every animated
+		// property snaps to its final value, then re-enable transitions.
+		void root.offsetHeight
+		root.classList.remove("visual-theme-applying")
+		body.classList.remove("visual-theme-applying")
 	}, theme)
 }

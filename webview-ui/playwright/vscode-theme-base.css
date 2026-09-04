@@ -53,3 +53,15 @@ button[appearance="secondary"] {
 	color: var(--vscode-button-secondaryForeground);
 	background: var(--vscode-button-secondaryBackground);
 }
+
+/* Theme switches in visual tests must settle instantly: while
+   `.visual-theme-applying` is present (one style flush, see
+   playwright/themes.ts), color transitions are disabled so assertions and
+   screenshots observe the final theme values instead of mid-transition
+   colors. */
+.visual-theme-applying,
+.visual-theme-applying *,
+.visual-theme-applying *::before,
+.visual-theme-applying *::after {
+	transition-duration: 0ms !important;
+}
