@@ -21,7 +21,7 @@ import { batchNearby } from "@src/utils/batchNearby"
 import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
 import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
-import { getCompletionCheckpoint, getSuggestionMode, isRetiredProvider } from "@roo-code/types"
+import { getCompletionCheckpoint, getSuggestionMode, hasUsableAnswer, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
 import { combineApiRequests } from "@roo/combineApiRequests"
@@ -1434,7 +1434,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// The model may emit suggestions with missing or blank answers (issue #1226).
 			// Ignore them instead of pushing an undefined value into the input, which
 			// would crash the text area (inputValue.trim on undefined).
-			const answer = typeof suggestion?.answer === "string" ? suggestion.answer.trim() : ""
+			const answer = hasUsableAnswer(suggestion) ? suggestion.answer.trim() : ""
 			if (!answer) {
 				return
 			}

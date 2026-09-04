@@ -1,4 +1,5 @@
 import {
+	hasUsableAnswer,
 	type ClineAsk,
 	type ClineSayTool,
 	type McpServerUse,
@@ -185,9 +186,7 @@ export async function checkAutoApproval({
 				// content after the timeout (issue #1226), so pick the first suggestion
 				// with a usable answer. This mirrors the webview's visible-suggestions
 				// filter in FollowUpSuggest.
-				const suggestion = suggestions.find(
-					(item) => typeof item?.answer === "string" && item.answer.trim().length > 0,
-				)
+				const suggestion = suggestions.find(hasUsableAnswer)
 
 				if (
 					suggestion &&

@@ -49,6 +49,20 @@ describe("Follow-up question auto-approval", () => {
 		}
 	})
 
+	it("skips a non-string first answer and uses the next valid suggestion (issue #1226)", async () => {
+		// A malformed payload may carry a non-string `answer`; the first usable
+		// suggestion still wins, so the auto-answer must not be dropped.
+		const result = await run(baseState, followupText([{ answer: 42 }, { answer: "Valid answer" }]))
+
+		expect(result.decision).toBe("timeout")
+		if (result.decision === "timeout") {
+			expect(result.fn()).toEqual({
+				askResponse: "messageResponse",
+				text: "Valid answer",
+			})
+		}
+	})
+
 	it("falls back to asking when every suggestion answer is blank or missing (issue #1226)", async () => {
 		// Before the #1226 fix this scheduled a timeout that auto-answered the
 		// follow-up with `undefined` text, silently accepting an empty answer.

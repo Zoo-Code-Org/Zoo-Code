@@ -714,16 +714,17 @@ describe("FollowUpSuggest", () => {
 		 * Malformed follow-up payloads as they can arrive from the model: the
 		 * extension-host transport does not validate `FollowUpData`, so a
 		 * suggestion item may be missing `answer` or carry a blank value.
-		 * `SuggestionItem` cannot model that, so the fixtures keep their
-		 * malformed shape and cross into the component prop at one documented
-		 * boundary instead of disabling type checks with `any`.
+		 * `SuggestionItem` models a missing or blank `answer` (see
+		 * `hasUsableAnswer`) but not a non-string one, so the fixtures keep
+		 * their malformed shape and cross into the component prop at one
+		 * documented boundary instead of disabling type checks with `any`.
 		 */
 		type MalformedSuggestionPayload = { answer?: unknown }
 
 		const renderWithMalformedSuggestions = (payloads: MalformedSuggestionPayload[]) => {
 			// Documented double assertion at the component boundary: FollowUpSuggest
 			// must tolerate malformed transport data, which `SuggestionItem`
-			// cannot express (issue #1226).
+			// cannot fully express (issue #1226).
 			const suggestions = payloads as unknown as SuggestionItem[]
 
 			return renderWithTestProviders(
@@ -737,11 +738,12 @@ describe("FollowUpSuggest", () => {
 			)
 		}
 
-		it("should not render anything when all answers are blank or missing", () => {
+		it("should not render anything when all answers are blank, missing, or non-string", () => {
 			const { container } = renderWithMalformedSuggestions([
 				{ answer: "" },
 				{ answer: "   \n\t " },
 				{ answer: undefined },
+				{ answer: 42 },
 			])
 
 			// Blank suggestions are filtered out, so no buttons or countdown render.

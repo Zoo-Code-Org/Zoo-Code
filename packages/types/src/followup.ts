@@ -16,8 +16,15 @@ export interface FollowUpData {
  * Interface for a suggestion item with optional mode switching
  */
 export interface SuggestionItem {
-	/** The text of the suggestion */
-	answer: string
+	/**
+	 * The text of the suggestion.
+	 *
+	 * Optional because the model can emit malformed follow-up payloads with a
+	 * missing or blank answer (issue #1226) and the extension-host transport
+	 * does not validate `FollowUpData`. Guard with `hasUsableAnswer()` before
+	 * treating the value as usable text.
+	 */
+	answer?: string
 	/** Optional mode to switch to when selecting this suggestion */
 	mode?: string
 }
@@ -36,10 +43,24 @@ export const getSuggestionMode = (mode: unknown): string | undefined => {
 }
 
 /**
+ * Whether a follow-up suggestion carries a usable answer: a non-blank string.
+ *
+ * `SuggestionItem.answer` is optional because a malformed model payload may
+ * omit it (issue #1226), and the unvalidated transport may deliver a
+ * non-string value at runtime. The extension-host auto-approval
+ * (`checkAutoApproval`), the `FollowUpSuggest` visible-suggestions filter, and
+ * `ChatView`'s suggestion click handler all guard through this helper so the
+ * definition of "usable answer" stays in one place.
+ */
+export const hasUsableAnswer = (
+	suggestion: { answer?: unknown } | null | undefined,
+): suggestion is { answer: string } => typeof suggestion?.answer === "string" && suggestion.answer.trim().length > 0
+
+/**
  * Zod schema for SuggestionItem
  */
 export const suggestionItemSchema = z.object({
-	answer: z.string(),
+	answer: z.string().optional(),
 	mode: z.string().optional(),
 })
 

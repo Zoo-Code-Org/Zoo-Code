@@ -5,7 +5,7 @@ import { Button, StandardTooltip } from "@/components/ui"
 
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
-import { getSuggestionMode, type SuggestionItem } from "@roo-code/types"
+import { getSuggestionMode, hasUsableAnswer, type SuggestionItem } from "@roo-code/types"
 import { cn } from "@/lib/utils"
 
 const DEFAULT_FOLLOWUP_TIMEOUT_MS = 60000
@@ -37,10 +37,7 @@ export const FollowUpSuggest = ({
 	// as empty buttons, and clicking "Copy to input" on one pushes an undefined
 	// string into the chat input and crashes the text area (issue #1226), so hide them.
 	const visibleSuggestions = useMemo(
-		() =>
-			suggestions.filter(
-				(suggestion) => typeof suggestion?.answer === "string" && suggestion.answer.trim().length > 0,
-			),
+		() => suggestions.filter((suggestion) => hasUsableAnswer(suggestion)),
 		[suggestions],
 	)
 
