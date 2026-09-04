@@ -266,6 +266,7 @@ vi.mock("../../task/Task", () => ({
 		return {
 			api: undefined,
 			abortTask: vi.fn(),
+			dispose: vi.fn().mockResolvedValue(undefined),
 			handleWebviewAskResponse: vi.fn(),
 			clineMessages: [],
 			apiConversationHistory: [],
@@ -413,6 +414,7 @@ describe("ClineProvider", () => {
 			const task: any = {
 				api: undefined,
 				abortTask: vi.fn(),
+				dispose: vi.fn().mockResolvedValue(undefined),
 				handleWebviewAskResponse: vi.fn(),
 				clineMessages: [],
 				apiConversationHistory: [],
@@ -1136,6 +1138,33 @@ describe("ClineProvider", () => {
 			([msg]) => typeof msg === "string" && msg.includes("Disposing ClineProvider..."),
 		)
 		expect(disposeCalls).toHaveLength(1)
+	})
+
+	test("dispose drains task cleanup after abort completes", async () => {
+		let resolveCleanup!: () => void
+		const cleanup = new Promise<void>((resolve) => {
+			resolveCleanup = resolve
+		})
+		const task = {
+			taskId: "shutdown-task",
+			emit: vi.fn(),
+			abortTask: vi.fn().mockResolvedValue(undefined),
+			dispose: vi.fn().mockReturnValue(cleanup),
+		}
+		Object.assign(provider, { taskRegistry: new TaskRegistry() })
+		provider["taskRegistry"].push(task as unknown as Task)
+		let shutdownComplete = false
+
+		const shutdown = provider.dispose()
+		void shutdown.then(() => {
+			shutdownComplete = true
+		})
+		await vi.waitFor(() => expect(task.dispose).toHaveBeenCalledOnce())
+
+		expect(shutdownComplete).toBe(false)
+		resolveCleanup()
+		await shutdown
+		expect(shutdownComplete).toBe(true)
 	})
 
 	test("handles webviewDidLaunch message", async () => {

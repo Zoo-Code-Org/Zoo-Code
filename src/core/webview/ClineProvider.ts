@@ -827,10 +827,14 @@ export class ClineProvider
 		// so an active delegated child is marked interrupted before the extension shuts down,
 		// rather than being left persisted as "active" across the reload.
 		if (this.taskRegistry.length > 0) {
+			const task = this.taskRegistry.current
 			await this.evictCurrentTask()
+			await task?.dispose()
 		}
 		while (this.taskRegistry.length > 0) {
+			const task = this.taskRegistry.current
 			await this.removeClineFromStack()
+			await task?.dispose()
 		}
 
 		this.log("Cleared all tasks")

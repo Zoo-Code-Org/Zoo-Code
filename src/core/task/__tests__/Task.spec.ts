@@ -2142,7 +2142,7 @@ describe("Cline", () => {
 			expect(disposeSpy).toHaveBeenCalled()
 		})
 
-		it("waits for disposal cleanup before abort resolves", async () => {
+		it("does not wait for ancillary disposal cleanup before abort resolves", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2157,16 +2157,32 @@ describe("Cline", () => {
 
 			const abort = task.abortTask()
 			await vi.waitFor(() => expect(disposeSpy).toHaveBeenCalledOnce())
-			let abortComplete = false
-			void abort.then(() => {
-				abortComplete = true
-			})
-			await Promise.resolve()
-			expect(abortComplete).toBe(false)
-
-			resolveDisposal!()
 			await abort
-			expect(abortComplete).toBe(true)
+
+			expect(disposeSpy).toHaveBeenCalledOnce()
+			resolveDisposal!()
+			await disposal
+		})
+
+		it("memoizes concurrent aborts while preserving abandoned state", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const emitSpy = vi.spyOn(task, "emit")
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+			const firstAbort = task.abortTask()
+			const secondAbort = task.abortTask(true)
+
+			expect(secondAbort).toBe(firstAbort)
+			expect(task.abandoned).toBe(true)
+			await firstAbort
+			expect(
+				(emitSpy.mock.calls as unknown[][]).filter(([event]) => event === RooCodeEventName.TaskAborted),
+			).toHaveLength(1)
 		})
 
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
