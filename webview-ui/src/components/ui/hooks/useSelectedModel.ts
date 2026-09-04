@@ -24,6 +24,7 @@ import {
 	zaiApiLineConfigs,
 	fireworksModels,
 	friendliModels,
+	neuronpoolModels,
 	basetenModels,
 	qwenCodeModels,
 	kimiCodeDefaultModelInfo,
@@ -387,6 +388,11 @@ function getSelectedModel({
 		case providerIdentifiers.friendli: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const info = friendliModels[id as keyof typeof friendliModels]
+			return { id, info }
+		}
+		case providerIdentifiers.neuronpool: {
+			const id = apiConfiguration.apiModelId ?? defaultModelId
+			const info = neuronpoolModels[id as keyof typeof neuronpoolModels]
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {
