@@ -2,15 +2,23 @@ import { memo, useEffect, useRef, useCallback, useState } from "react"
 import styled from "styled-components"
 import { useCopyToClipboard } from "@src/utils/clipboard"
 import { getHighlighter, isLanguageLoaded, normalizeLanguage } from "@src/utils/highlighter"
-import type { ShikiTransformer } from "shiki"
+import type { BundledTheme, ShikiTransformer } from "shiki"
 import { toJsxRuntime } from "hast-util-to-jsx-runtime"
 import { Fragment, jsx, jsxs } from "react/jsx-runtime"
 import { ChevronDown, ChevronUp, Copy, Check } from "lucide-react"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { StandardTooltip } from "@/components/ui"
 
-export const CODE_BLOCK_BG_COLOR = "var(--vscode-editor-background, --vscode-sideBar-background, rgb(30 30 30))"
-export const WRAPPER_ALPHA = "cc" // 80% opacity
+export const CODE_BLOCK_BG_COLOR =
+	"var(--vscode-textCodeBlock-background, var(--vscode-editor-background, var(--vscode-sideBar-background, rgb(30 30 30))))"
+export const CODE_BLOCK_TOOLBAR_BG_COLOR =
+	"color-mix(in srgb, var(--vscode-editor-background, var(--vscode-sideBar-background, rgb(30 30 30))) 90%, transparent)"
+
+export function getCodeBlockTheme(bodyClass: string): BundledTheme {
+	if (bodyClass.toLowerCase().includes("high-contrast-light")) return "github-light-high-contrast"
+	if (bodyClass.toLowerCase().includes("high-contrast")) return "github-dark-high-contrast"
+	return bodyClass.toLowerCase().includes("light") ? "github-light-high-contrast" : "github-dark-high-contrast"
+}
 
 // Configuration constants
 export const WINDOW_SHADE_SETTINGS = {
@@ -42,14 +50,14 @@ interface CodeBlockProps {
 const CodeBlockButton = styled.button`
 	background: transparent;
 	border: none;
-	color: var(--vscode-foreground);
+	color: var(--vscode-icon-foreground, var(--vscode-foreground));
 	cursor: var(--copy-button-cursor, default);
 	padding: 4px;
 	margin: 0 0px;
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	opacity: 0.4;
+	opacity: 1;
 	border-radius: 3px;
 	pointer-events: var(--copy-button-events, none);
 	margin-left: 4px;
@@ -73,7 +81,7 @@ const CodeBlockButtonWrapper = styled.div`
 	right: var(--copy-button-right, 8px);
 	height: auto;
 	z-index: 40;
-	background: ${CODE_BLOCK_BG_COLOR}${WRAPPER_ALPHA};
+	background: ${CODE_BLOCK_TOOLBAR_BG_COLOR};
 	overflow: visible;
 	pointer-events: none;
 	opacity: var(--copy-button-opacity, 0);
@@ -181,6 +189,7 @@ const CodeBlock = memo(
 		const currentLanguage = normalizeLanguage(language)
 		const [highlightedCode, setHighlightedCode] = useState<React.ReactNode>(null)
 		const [showCollapseButton, setShowCollapseButton] = useState(true)
+		const [codeTheme, setCodeTheme] = useState(() => getCodeBlockTheme(document.body.className))
 		const codeBlockRef = useRef<HTMLDivElement>(null)
 		const preRef = useRef<HTMLDivElement>(null)
 		const copyButtonWrapperRef = useRef<HTMLDivElement>(null)
@@ -190,6 +199,19 @@ const CodeBlock = memo(
 		const buttonPositionTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 		const collapseTimeout1Ref = useRef<NodeJS.Timeout | null>(null)
 		const collapseTimeout2Ref = useRef<NodeJS.Timeout | null>(null)
+
+		useEffect(() => {
+			const updateTheme = () => setCodeTheme(getCodeBlockTheme(document.body.className))
+			const observer = new MutationObserver(updateTheme)
+			const options: MutationObserverInit = {
+				attributes: true,
+				attributeFilter: ["class", "data-vscode-theme-id", "data-vscode-theme-kind"],
+			}
+
+			observer.observe(document.documentElement, options)
+			observer.observe(document.body, options)
+			return () => observer.disconnect()
+		}, [])
 
 		// Syntax highlighting with cached Shiki instance and mounted state management
 		useEffect(() => {
@@ -216,16 +238,17 @@ const CodeBlock = memo(
 
 				const hast = await highlighter.codeToHast(source || "", {
 					lang: currentLanguage || "txt",
-					theme: document.body.className.toLowerCase().includes("light") ? "github-light" : "github-dark",
+					theme: codeTheme,
 					transformers: [
 						{
 							pre(node) {
-								node.properties.style = "padding: 0; margin: 0;"
+								node.properties.style = `padding: 0; margin: 0; background-color: ${CODE_BLOCK_BG_COLOR}; background-image: none;`
 								return node
 							},
 							code(node) {
 								// Add hljs classes for consistent styling
 								node.properties.class = `hljs language-${currentLanguage}`
+								node.properties.style = "background-color: transparent; background-image: none;"
 								return node
 							},
 							line(node) {
@@ -283,7 +306,7 @@ const CodeBlock = memo(
 					collapseTimeout2Ref.current = null
 				}
 			}
-		}, [source, currentLanguage, collapsedHeight])
+		}, [source, currentLanguage, collapsedHeight, codeTheme])
 
 		// Check if content height exceeds collapsed height whenever content changes
 		useEffect(() => {
@@ -291,9 +314,9 @@ const CodeBlock = memo(
 
 			if (codeBlock) {
 				const actualHeight = codeBlock.scrollHeight
-				setShowCollapseButton(actualHeight >= WINDOW_SHADE_SETTINGS.collapsedHeight)
+				setShowCollapseButton(actualHeight >= (collapsedHeight || WINDOW_SHADE_SETTINGS.collapsedHeight))
 			}
-		}, [highlightedCode])
+		}, [highlightedCode, collapsedHeight])
 
 		// Ref to track if user was scrolled up *before* the source update
 		// potentially changes scrollHeight
@@ -322,15 +345,18 @@ const CodeBlock = memo(
 
 		// Store whether we should scroll after highlighting completes
 		const shouldScrollAfterHighlightRef = useRef(false)
+		const previousSourceRef = useRef(source)
 
 		// Check if we should scroll when source changes
 		useEffect(() => {
-			// Only set the flag if we're at the bottom when source changes
-			if (preRef.current && source && !wasScrolledUpRef.current) {
+			const sourceChanged = previousSourceRef.current !== source
+			// Follow streaming updates when the user was already at the bottom, but keep initial content at the top.
+			if (sourceChanged && preRef.current && source && !wasScrolledUpRef.current) {
 				shouldScrollAfterHighlightRef.current = true
 			} else {
 				shouldScrollAfterHighlightRef.current = false
 			}
+			previousSourceRef.current = source
 		}, [source])
 
 		const updateCodeBlockButtonPosition = useCallback((forceHide = false) => {
@@ -622,6 +648,7 @@ const CodeBlock = memo(
 								content={t(`chat:codeblock.tooltips.${windowShade ? "expand" : "collapse"}`)}
 								side="top">
 								<CodeBlockButton
+									aria-label={t(`chat:codeblock.tooltips.${windowShade ? "expand" : "collapse"}`)}
 									onClick={() => {
 										// Get the current code block element
 										const codeBlock = codeBlockRef.current // Capture ref early
@@ -656,7 +683,7 @@ const CodeBlock = memo(
 							</StandardTooltip>
 						)}
 						<StandardTooltip content={t("chat:codeblock.tooltips.copy_code")} side="top">
-							<CodeBlockButton onClick={handleCopy}>
+							<CodeBlockButton aria-label={t("chat:codeblock.tooltips.copy_code")} onClick={handleCopy}>
 								{showCopyFeedback ? <Check size={16} /> : <Copy size={16} />}
 							</CodeBlockButton>
 						</StandardTooltip>

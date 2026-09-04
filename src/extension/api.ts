@@ -319,6 +319,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		return this.sidebarProvider.requestWebviewThemeFixture()
 	}
 
+	public getLatestAnnouncementId(): string {
+		return this.sidebarProvider.latestAnnouncementId
+	}
+
 	private async waitForWebviewLaunch(timeoutMs: number): Promise<boolean> {
 		try {
 			await pWaitFor(() => this.sidebarProvider.viewLaunched, {
