@@ -129,8 +129,11 @@ describe("buildManifest", () => {
 		assert.equal(webview.runRoot, ".")
 		assert.equal(webview.discoverRelatedTests, true)
 		assert.equal(webview.vitestRelated, false)
-		assert.equal(extension.discoverRelatedTests, true)
-		assert.equal(extension.vitestRelated, false)
+		// The extension entry uses plugin-side related discovery while stryker-js 10.0.0
+		// plans static mutants with runtime activation when given explicit test files
+		// (stryker-mutator/stryker-js#6144, #6209); see the entry comment in stryker-diff.mjs.
+		assert.equal(extension.discoverRelatedTests, false)
+		assert.equal(extension.vitestRelated, true)
 	})
 
 	it("returns no packages for tests, barrels, unsupported packages, and type-only changes", () => {
