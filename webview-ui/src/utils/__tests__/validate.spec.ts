@@ -470,6 +470,29 @@ describe("Model Validation Functions", () => {
 		})
 	})
 
+	describe("NeuronPool validation", () => {
+		it("returns an apiKey error when the NeuronPool API key is missing", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.neuronpool,
+				apiModelId: "gpt-oss-20b",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBe("settings:validation.apiKey")
+		})
+
+		it("returns undefined for a valid NeuronPool configuration", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.neuronpool,
+				neuronpoolApiKey: "valid-key",
+				apiModelId: "gpt-oss-20b",
+			}
+
+			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			expect(result).toBeUndefined()
+		})
+	})
+
 	describe("Zoo Gateway validation", () => {
 		describe("validateApiConfiguration (welcome-view entry point)", () => {
 			it("returns a sign-in error when neither profile token nor Zoo auth is present", () => {

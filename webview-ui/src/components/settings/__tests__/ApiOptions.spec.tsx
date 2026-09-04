@@ -251,6 +251,12 @@ vi.mock("../providers/Friendli", () => ({
 	),
 }))
 
+vi.mock("../providers/NeuronPool", () => ({
+	NeuronPool: ({ apiConfiguration }: any) => (
+		<div data-testid="neuronpool-provider" data-key={apiConfiguration?.neuronpoolApiKey || ""} />
+	),
+}))
+
 vi.mock("@src/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: vi.fn((apiConfiguration: ProviderSettings) => {
 		if (apiConfiguration.apiModelId?.includes("thinking")) {
@@ -348,6 +354,18 @@ describe("ApiOptions", () => {
 
 		expect(screen.getByTestId("friendli-provider")).toBeInTheDocument()
 		expect(screen.getByTestId("friendli-provider")).toHaveAttribute("data-key", "k")
+	})
+
+	it("renders the NeuronPool provider form when neuronpool is selected", () => {
+		renderApiOptions({
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.neuronpool,
+				neuronpoolApiKey: "k",
+			},
+		})
+
+		expect(screen.getByTestId("neuronpool-provider")).toBeInTheDocument()
+		expect(screen.getByTestId("neuronpool-provider")).toHaveAttribute("data-key", "k")
 	})
 
 	it("shows temperature and rate limit controls by default", () => {

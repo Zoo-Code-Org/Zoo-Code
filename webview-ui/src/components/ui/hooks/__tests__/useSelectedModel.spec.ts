@@ -22,6 +22,8 @@ import {
 	minimaxModels,
 	friendliDefaultModelId,
 	friendliModels,
+	neuronpoolDefaultModelId,
+	neuronpoolModels,
 	deepSeekDefaultModelId,
 	deepSeekModels,
 	openRouterDefaultModelId,
@@ -1324,6 +1326,53 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+	})
+
+	describe("neuronpool provider", () => {
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue({
+				data: {
+					openrouter: {},
+					requesty: {},
+					litellm: {},
+				},
+				isLoading: false,
+				isError: false,
+			} as any)
+
+			mockUseOpenRouterModelProviders.mockReturnValue({
+				data: {},
+				isLoading: false,
+				isError: false,
+			} as any)
+		})
+
+		it("should return default NeuronPool model when no custom model is specified", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.neuronpool,
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe(providerIdentifiers.neuronpool)
+			expect(result.current.id).toBe(neuronpoolDefaultModelId)
+			expect(result.current.info).toEqual(neuronpoolModels[neuronpoolDefaultModelId])
+		})
+
+		it("should use custom model ID and info when model exists in neuronpoolModels", () => {
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.neuronpool,
+				apiModelId: "llama-3.2-1b-instruct",
+			}
+
+			const wrapper = createWrapper()
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper })
+
+			expect(result.current.provider).toBe(providerIdentifiers.neuronpool)
+			expect(result.current.id).toBe("llama-3.2-1b-instruct")
+			expect(result.current.info).toEqual(neuronpoolModels["llama-3.2-1b-instruct"])
 		})
 	})
 

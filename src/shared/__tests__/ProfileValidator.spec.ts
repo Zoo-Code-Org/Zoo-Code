@@ -19,6 +19,7 @@ describe("ProfileValidator", () => {
 			["sambanova", { apiModelId: "model" }],
 			["fireworks", { apiModelId: "model" }],
 			["friendli", { apiModelId: "model" }],
+			["neuronpool", { apiModelId: "model" }],
 			["litellm", { litellmModelId: "model" }],
 			["lmstudio", { lmStudioModelId: "model" }],
 			["vscodeLm", { vsCodeLmModelSelector: { id: "model" } }],
@@ -246,6 +247,7 @@ describe("ProfileValidator", () => {
 			providerIdentifiers.sambanova,
 			providerIdentifiers.fireworks,
 			providerIdentifiers.friendli,
+			providerIdentifiers.neuronpool,
 		]
 
 		apiModelProviders.forEach((provider) => {

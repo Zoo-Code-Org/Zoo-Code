@@ -101,6 +101,7 @@ vi.mock("../providers", () => {
 		ZAi: provider("provider-zai"),
 		Fireworks: provider("provider-fireworks"),
 		Friendli: provider("provider-friendli"),
+		NeuronPool: provider("provider-neuronpool"),
 		VercelAiGateway: provider("provider-vercel-ai-gateway"),
 		OpenCodeGo: provider("provider-opencode-go"),
 		Kenari: provider("provider-kenari"),
@@ -355,6 +356,7 @@ describe("ApiOptions interactions", () => {
 		providerIdentifiers.zooGateway,
 		providerIdentifiers.fireworks,
 		providerIdentifiers.friendli,
+		providerIdentifiers.neuronpool,
 		providerIdentifiers.poe,
 	])("renders the %s provider branch when selected", (apiProvider) => {
 		renderApiOptions({ apiConfiguration: { apiProvider } })
