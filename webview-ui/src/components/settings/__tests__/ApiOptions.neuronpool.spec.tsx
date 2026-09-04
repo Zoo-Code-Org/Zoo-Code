@@ -1,7 +1,10 @@
+import type { ReactNode } from "react"
 import { render, screen } from "@/utils/test-utils"
 import { providerIdentifiers } from "@roo-code/types"
 
 import ApiOptions from "../ApiOptions"
+
+type ChildrenProps = { children?: ReactNode }
 
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	useExtensionState: () => ({
@@ -87,22 +90,22 @@ vi.mock("../RateLimitSecondsControl", () => ({ RateLimitSecondsControl: () => nu
 vi.mock("../ConsecutiveMistakeLimitControl", () => ({ ConsecutiveMistakeLimitControl: () => null }))
 
 vi.mock("@vscode/webview-ui-toolkit/react", () => ({
-	VSCodeTextField: ({ children }: { children?: unknown }) => <label>{children}</label>,
-	VSCodeLink: ({ children }: { children?: unknown }) => <span>{children}</span>,
+	VSCodeTextField: ({ children }: ChildrenProps) => <label>{children}</label>,
+	VSCodeLink: ({ children }: ChildrenProps) => <span>{children}</span>,
 }))
 
 vi.mock("@/components/ui", () => ({
 	SearchableSelect: () => <div data-testid="searchable-select" />,
-	Collapsible: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	CollapsibleTrigger: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	CollapsibleContent: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	Select: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	SelectTrigger: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	SelectValue: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	SelectContent: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	SelectItem: ({ children }: { children?: unknown }) => <div>{children}</div>,
-	Button: ({ children }: { children?: unknown }) => <button>{children}</button>,
-	StandardTooltip: ({ children }: { children?: unknown }) => <div>{children}</div>,
+	Collapsible: ({ children }: ChildrenProps) => <div>{children}</div>,
+	CollapsibleTrigger: ({ children }: ChildrenProps) => <div>{children}</div>,
+	CollapsibleContent: ({ children }: ChildrenProps) => <div>{children}</div>,
+	Select: ({ children }: ChildrenProps) => <div>{children}</div>,
+	SelectTrigger: ({ children }: ChildrenProps) => <div>{children}</div>,
+	SelectValue: ({ children }: ChildrenProps) => <div>{children}</div>,
+	SelectContent: ({ children }: ChildrenProps) => <div>{children}</div>,
+	SelectItem: ({ children }: ChildrenProps) => <div>{children}</div>,
+	Button: ({ children }: ChildrenProps) => <button>{children}</button>,
+	StandardTooltip: ({ children }: ChildrenProps) => <div>{children}</div>,
 }))
 
 vi.mock("@src/i18n/TranslationContext", () => ({
@@ -110,7 +113,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 }))
 
 describe("ApiOptions NeuronPool branch", () => {
-	it("renders NeuronPool only when that provider is selected", () => {
+	it("does not render NeuronPool when another provider is selected", () => {
 		const setApiConfigurationField = vi.fn()
 		const uriHandler = vi.fn()
 		render(
@@ -122,5 +125,19 @@ describe("ApiOptions NeuronPool branch", () => {
 		)
 		expect(screen.getByTestId("provider-friendli")).toBeInTheDocument()
 		expect(screen.queryByTestId("provider-neuronpool")).not.toBeInTheDocument()
+	})
+
+	it("renders NeuronPool when that provider is selected", () => {
+		const setApiConfigurationField = vi.fn()
+		const uriHandler = vi.fn()
+		render(
+			<ApiOptions
+				apiConfiguration={{ apiProvider: providerIdentifiers.neuronpool }}
+				setApiConfigurationField={setApiConfigurationField}
+				uriHandler={uriHandler}
+			/>,
+		)
+		expect(screen.getByTestId("provider-neuronpool")).toBeInTheDocument()
+		expect(screen.queryByTestId("provider-friendli")).not.toBeInTheDocument()
 	})
 })

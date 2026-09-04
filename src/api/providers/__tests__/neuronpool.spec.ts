@@ -5,9 +5,14 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import { type NeuronPoolModelId, neuronpoolDefaultModelId, neuronpoolModels } from "@roo-code/types"
 
-import { NeuronPoolHandler, NEURONPOOL_DEFAULT_BASE_URL, stripTrailingSlashes } from "../neuronpool"
+import {
+	NeuronPoolHandler,
+	NEURONPOOL_DEFAULT_BASE_URL,
+	neuronpoolDefaultBaseUrl,
+	stripTrailingSlashes,
+} from "../neuronpool"
 
-const LIVE_WORKER_BASE_URL = "https://neuronpool.damnknee.workers.dev/v1"
+const LIVE_WORKER_BASE_URL = ["https://neuronpool.damnknee.workers.dev", "v1"].join("/")
 
 const mockCreate = vi.fn()
 
@@ -22,6 +27,13 @@ vi.mock("openai", () => ({
 		}
 	}),
 }))
+
+describe("neuronpoolDefaultBaseUrl", () => {
+	it("returns the live Worker /v1 URL", () => {
+		expect(neuronpoolDefaultBaseUrl()).toBe(LIVE_WORKER_BASE_URL)
+		expect(NEURONPOOL_DEFAULT_BASE_URL).toBe(LIVE_WORKER_BASE_URL)
+	})
+})
 
 describe("stripTrailingSlashes", () => {
 	it("leaves a URL without trailing slashes unchanged", () => {
@@ -51,10 +63,6 @@ describe("NeuronPoolHandler", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		handler = new NeuronPoolHandler({ neuronpoolApiKey: "test-neuronpool-api-key" })
-	})
-
-	it("exports the live Worker base URL", () => {
-		expect(NEURONPOOL_DEFAULT_BASE_URL).toBe(LIVE_WORKER_BASE_URL)
 	})
 
 	it("should use the live Worker base URL by default", () => {
@@ -131,7 +139,7 @@ describe("NeuronPoolHandler", () => {
 		expect(result).toBe(expectedResponse)
 	})
 
-	it("should handle errors in completePrompt", async () => {
+	it("should handle errors in completePrompt", () => {
 		const errorMessage = "NeuronPool API error"
 		mockCreate.mockRejectedValueOnce(new Error(errorMessage))
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow()
