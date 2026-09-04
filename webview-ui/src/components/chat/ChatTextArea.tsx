@@ -27,6 +27,7 @@ import { StandardTooltip } from "@src/components/ui"
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
+import { ModelSelector } from "./ModelSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -87,6 +88,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const {
 			filePaths,
 			openedTabs,
+			apiConfiguration,
 			currentApiConfigName,
 			listApiConfigMeta,
 			customModes,
@@ -1310,6 +1312,12 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							togglePinnedApiConfig={togglePinnedApiConfig}
 							lockApiConfigAcrossModes={!!lockApiConfigAcrossModes}
 							onToggleLockApiConfig={handleToggleLockApiConfig}
+						/>
+						<ModelSelector
+							apiConfiguration={apiConfiguration}
+							currentApiConfigName={currentApiConfigName}
+							title={t("chat:selectModel")}
+							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0"
 						/>
 						<AutoApproveDropdown triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0" />
 					</div>

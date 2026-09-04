@@ -1206,4 +1206,12 @@ describe("ChatTextArea", () => {
 			expect(sendButton).toHaveClass("pointer-events-auto")
 		})
 	})
+
+	describe("model selector", () => {
+		it("passes the responsive trigger class name to the model selector", () => {
+			render(<ChatTextArea {...defaultProps} />)
+
+			expect(screen.getByTestId("model-selector-trigger")).toHaveClass("min-w-[28px]")
+		})
+	})
 })
