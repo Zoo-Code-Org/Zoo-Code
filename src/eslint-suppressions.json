@@ -391,7 +391,7 @@
 	},
 	"api/providers/openai-codex.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 34
+			"count": 31
 		}
 	},
 	"api/providers/openai-native.ts": {
