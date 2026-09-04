@@ -252,6 +252,24 @@ export const bedrockModels = {
 		cachableFields: ["system", "messages", "tools"],
 		description: "Claude Opus 5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"anthropic.claude-fable-5-1": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		inputPrice: 10.0,
+		outputPrice: 50.0,
+		cacheWritesPrice: 12.5,
+		cacheReadsPrice: 0.25,
+		minTokensPerCachePoint: 512,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description:
+			"Claude Fable 5.1 extends Fable 5 with stronger long-running agentic coding, multistep research, and document work.",
+	},
 	"anthropic.claude-fable-5": {
 		maxTokens: 8192,
 		contextWindow: 1_000_000,
@@ -643,7 +661,7 @@ export const BEDROCK_1M_CONTEXT_MODEL_IDS = [
 // - Claude Opus 4.6
 // - Claude Opus 4.7
 // - Claude Opus 5
-// - Claude Fable 5 (cross-region inference only — can only be used through an inference profile)
+// - Claude Fable 5 and 5.1 (cross-region inference only — can only be used through an inference profile)
 export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-20250514-v1:0",
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -655,6 +673,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-opus-4-7",
 	"anthropic.claude-opus-4-8",
 	"anthropic.claude-opus-5",
+	"anthropic.claude-fable-5-1",
 	"anthropic.claude-fable-5",
 ] as const
 
