@@ -20,12 +20,40 @@ export function stripTrailingSlashes(url: string): string {
 	return url.slice(0, end)
 }
 
+/** Resolve a custom NeuronPool URL. Empty input uses the default; slash-only and non-HTTPS remote URLs are rejected. */
+export function resolveNeuronpoolBaseUrl(raw?: string): string {
+	const trimmed = typeof raw === "string" ? raw.trim() : ""
+	if (trimmed.length === 0) {
+		return neuronpoolDefaultBaseUrl()
+	}
+	const normalized = stripTrailingSlashes(trimmed)
+	if (normalized.length === 0) {
+		throw new Error("NeuronPool base URL is required")
+	}
+	let parsed: URL
+	try {
+		parsed = new URL(normalized)
+	} catch {
+		throw new Error("NeuronPool base URL is invalid")
+	}
+	const host = parsed.hostname.toLowerCase()
+	// Stryker disable next-line StringLiteral,LogicalOperator: loopback HTTP is an explicit local-dev allowlist
+	const loopback = host === "localhost" || host === "127.0.0.1" || host === "::1"
+	if (parsed.protocol === "https:") {
+		return normalized
+	}
+	if (parsed.protocol === "http:" && loopback) {
+		return normalized
+	}
+	throw new Error("NeuronPool base URL must use HTTPS")
+}
+
 export class NeuronPoolHandler extends BaseOpenAiCompatibleProvider<NeuronPoolModelId> {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
 			providerName: "NeuronPool",
-			baseURL: stripTrailingSlashes(options.neuronpoolBaseUrl || neuronpoolDefaultBaseUrl()),
+			baseURL: resolveNeuronpoolBaseUrl(options.neuronpoolBaseUrl),
 			apiKey: options.neuronpoolApiKey ?? options.apiKey,
 			defaultProviderModelId: neuronpoolDefaultModelId,
 			providerModels: neuronpoolModels,
