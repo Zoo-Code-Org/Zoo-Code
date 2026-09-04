@@ -3,6 +3,7 @@
 // Mock OpenAI client - must come before other imports
 const mockCreate = vi.fn()
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
@@ -359,35 +360,11 @@ describe("LmStudioHandler Native Tools", () => {
 			])
 			mockCreate.mockImplementationOnce(() => firstStream()).mockImplementationOnce(() => secondStream)
 
-			const collectAndTrack = async (stream: ReturnType<LmStudioHandler["createMessage"]>) => {
-				const chunks = []
-				const parserEvents = []
-				const parserScope = NativeToolCallParser.createScope()
-				for await (const chunk of stream) {
-					if (chunk.type === "tool_call_partial") {
-						parserEvents.push(
-							...NativeToolCallParser.processRawChunk(
-								{
-									index: chunk.index,
-									id: chunk.id,
-									name: chunk.name,
-									arguments: chunk.arguments,
-								},
-								parserScope,
-							),
-						)
-					}
-					chunks.push(chunk)
-				}
-				NativeToolCallParser.clearRawChunkState(parserScope)
-				return { chunks, parserEvents }
-			}
-
-			const firstChunksPromise = collectAndTrack(
+			const firstChunksPromise = collectStreamAndParseToolCalls(
 				handler.createMessage("first", [], { taskId: "task-a", tools: testTools }),
 			)
 			await firstStreamPaused
-			const secondChunks = await collectAndTrack(
+			const secondChunks = await collectStreamAndParseToolCalls(
 				handler.createMessage("second", [], { taskId: "task-b", tools: testTools }),
 			)
 			releaseFirstStream?.()

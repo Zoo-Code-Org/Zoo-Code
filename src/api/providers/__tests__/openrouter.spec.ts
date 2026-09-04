@@ -23,6 +23,7 @@ import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 vitest.mock("openai")
@@ -660,33 +661,9 @@ describe("OpenRouterHandler", () => {
 			})
 			const handler = new OpenRouterHandler(mockOptions)
 
-			const collectAndTrack = async (stream: ReturnType<OpenRouterHandler["createMessage"]>) => {
-				const chunks = []
-				const parserEvents = []
-				const parserScope = NativeToolCallParser.createScope()
-				for await (const chunk of stream) {
-					if (chunk.type === "tool_call_partial") {
-						parserEvents.push(
-							...NativeToolCallParser.processRawChunk(
-								{
-									index: chunk.index,
-									id: chunk.id,
-									name: chunk.name,
-									arguments: chunk.arguments,
-								},
-								parserScope,
-							),
-						)
-					}
-					chunks.push(chunk)
-				}
-				NativeToolCallParser.clearRawChunkState(parserScope)
-				return { chunks, parserEvents }
-			}
-
-			const firstChunksPromise = collectAndTrack(handler.createMessage("first", []))
+			const firstChunksPromise = collectStreamAndParseToolCalls(handler.createMessage("first", []))
 			await firstStreamPaused
-			const secondChunks = await collectAndTrack(handler.createMessage("second", []))
+			const secondChunks = await collectStreamAndParseToolCalls(handler.createMessage("second", []))
 			releaseFirstStream?.()
 			const firstChunks = await firstChunksPromise
 
