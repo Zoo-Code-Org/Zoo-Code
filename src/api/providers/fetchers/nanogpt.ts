@@ -5,7 +5,8 @@ import { NANOGPT_BASE_URL, nanoGptDefaultModelInfo, type ModelInfo, type ModelRe
 
 const nanoGptReasoningEfforts: NonNullable<ModelInfo["supportsReasoningEffort"]> = ["low", "medium", "high"]
 const nanoGptReasoningEffortSchema = z.enum(["none", "minimal", "low", "medium", "high", "xhigh", "max"])
-const nanoGptAstraModelIds = new Set(["openai/gpt-6-astra", "openai/gpt-6-astra-pro"])
+const isNanoGptAstra = (modelId: string): boolean =>
+	modelId === "openai/gpt-6-astra" || modelId === "openai/gpt-6-astra-pro"
 
 const nanoGptPricingSchema = z.object({
 	prompt: z.number().nonnegative().optional(),
@@ -64,7 +65,7 @@ export const parseNanoGptModel = (model: NanoGptModel): ModelInfo => ({
 	...(model.pricing?.cacheWriteInputPer1kTokens !== undefined
 		? { cacheWritesPrice: model.pricing.cacheWriteInputPer1kTokens * 1_000 }
 		: {}),
-	...(nanoGptAstraModelIds.has(model.id)
+	...(isNanoGptAstra(model.id)
 		? {
 				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"] as const,
 				requiredReasoningEffort: true,
