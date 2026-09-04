@@ -521,6 +521,7 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 			setModeConfig: vi.fn().mockResolvedValue(undefined),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
 	}),
 }))
@@ -1160,6 +1161,22 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		it("should drop an unknown mode from setValues while keeping valid modes", async () => {
+			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+
+			await provider.setValues({ mode: "not-a-real-mode" })
+
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await provider.setValues({ mode: "architect" })
+
+			expect(provider.contextProxy.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			await provider.dispose()
+		})
+
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
 
@@ -1233,7 +1250,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// Simulate a concurrent writer (another view's provider) updating the shared
 			// map directly in storage, bypassing this proxy's cache.
 			const stored = (await mockContext.globalState.get<Record<string, unknown>>("viewStates")) ?? {}
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				...stored,
 				"view-b": { mode: "debug", updatedAt: 1 },
 			})
@@ -1413,6 +1430,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				currentApiConfigName: "deleted-profile",
 				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			}
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
+			])
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "replacement-profile",
+				id: "replacement-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "replacement-key",
+			} as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>)
 
 			await provider.deleteProviderProfile({
 				id: "deleted-id",
@@ -1425,6 +1451,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(state.listApiConfigMeta).toEqual([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
+			// The view-local buffer must hold the replacement profile's settings rather
+			// than the deleted profile's.
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "replacement-key",
+			})
+			expect(vi.mocked(provider.providerSettingsManager.deleteConfig)).toHaveBeenCalledWith("deleted-profile")
 
 			await provider.dispose()
 		})
@@ -1437,7 +1470,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.openrouter },
 			])
 			// Two views have durable pins; one pins the profile about to be deleted.
-			mockContext.globalState.update("viewStates", {
+			await mockContext.globalState.update("viewStates", {
 				"view-keeps": { mode: "code", currentApiConfigName: "keeper-profile", updatedAt: 1 },
 				"view-deleted": { mode: "architect", currentApiConfigName: "doomed-profile", updatedAt: 2 },
 			})

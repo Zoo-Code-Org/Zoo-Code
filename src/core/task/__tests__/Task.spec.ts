@@ -1825,6 +1825,30 @@ describe("Cline", () => {
 				expect(requireDefined(createMessage.mock.calls[0])[2]?.mode).toBe("code")
 			})
 
+			it("still delivers the user message when the mode switch fails", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const switchError = new Error("task history write failed")
+				vi.spyOn(mockProvider, "handleModeSwitch").mockRejectedValue(switchError)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await task.submitUserMessage("still delivered", undefined, "code")
+
+				// The mode-switch rejection is caught and logged locally...
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					`[Task#submitUserMessage] Mode switch to code failed (taskId=${task.taskId}):`,
+					switchError,
+				)
+				// ...and the pending ask is still answered, so the submitted text is not lost.
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
+				consoleErrorSpy.mockRestore()
+			})
+
 			it("stores a provider profile selected through submitUserMessage", async () => {
 				const selectedConfiguration: ProviderSettings = {
 					...mockApiConfig,

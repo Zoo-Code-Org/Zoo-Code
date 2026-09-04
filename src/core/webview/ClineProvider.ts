@@ -712,13 +712,13 @@ export class ClineProvider
 	 * The identifier is sanitized so it remains a safe object key in the shared viewStates map.
 	 */
 	public async setViewStateId(viewStateId: string | undefined): Promise<void> {
-		const normalizedViewStateId = viewStateId?.trim()
+		const normalizedViewStateId = viewStateId?.trim().replace(/[^A-Za-z0-9_-]/g, "_")
 
 		if (!normalizedViewStateId || normalizedViewStateId === this.viewStateId) {
 			return
 		}
 
-		this.viewStateId = normalizedViewStateId.replace(/[^A-Za-z0-9_-]/g, "_")
+		this.viewStateId = normalizedViewStateId
 
 		// Re-key any durable entry written under the temporary pre-launch id before
 		// loading, so the load sees the view's own pre-registration selections.
@@ -2254,6 +2254,29 @@ export class ClineProvider
 			throw new Error("You cannot delete the last profile")
 		}
 
+		// Remove the profile from the settings store (context.secrets) so it cannot be
+		// resurrected by a later listApiConfigMeta sync.
+		await this.providerSettingsManager.deleteConfig(profileToDelete.name)
+
+		// Re-point any persisted view pin that referenced the deleted profile so views
+		// do not rehydrate a missing profile name after a reload.
+		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+
+		const viewPinsDeletedProfile =
+			this.viewLocalState.currentApiConfigName === undefined ||
+			this.viewLocalState.currentApiConfigName === profileToDelete.name
+
+		if (viewPinsDeletedProfile) {
+			// Apply the replacement through the activation path so this view's
+			// viewLocalState.apiConfiguration and the current task's api handler are
+			// refreshed; a name-only update would leave the deleted profile's settings
+			// behind in both.
+			await this.activateProviderProfile({ name: profileToActivate })
+			return
+		}
+
+		// This view pins an unrelated profile, which must survive the deletion: sync the
+		// shared profile list and post the updated state only.
 		const entries = this.getProviderProfileEntries().filter(({ name }) => name !== profileToDelete.name)
 
 		await this.contextProxy.setValues({
@@ -2261,22 +2284,6 @@ export class ClineProvider
 			currentApiConfigName: profileToActivate,
 			listApiConfigMeta: entries,
 		})
-
-		// Sync this view's in-memory buffer only when it was pointing at the deleted
-		// profile (or had no pin of its own): an unrelated pin must survive the deletion.
-		if (
-			this.viewLocalState.currentApiConfigName === undefined ||
-			this.viewLocalState.currentApiConfigName === profileToDelete.name
-		) {
-			this._updateViewLocalStateFromMutation({
-				currentApiConfigName: profileToActivate,
-				listApiConfigMeta: entries,
-			})
-		}
-
-		// Re-point any persisted view pin that referenced the deleted profile so views
-		// do not rehydrate a missing profile name after a reload.
-		await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
 
 		await this.postStateToWebview()
 	}
@@ -3543,8 +3550,20 @@ export class ClineProvider
 	}
 
 	public async setValues(values: RooCodeSettings) {
-		await this.contextProxy.setValues(values)
-		await this._saveViewLocalStateFromMutation(values)
+		const sanitizedValues = { ...values }
+
+		if (
+			typeof sanitizedValues.mode === "string" &&
+			!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
+		) {
+			// An unknown mode (e.g. from an API payload) must not be persisted: a new Task
+			// would read it from getState() and persist it into task history.
+			this.log(`[ClineProvider#setValues] Ignoring unknown mode "${sanitizedValues.mode}"`)
+			delete sanitizedValues.mode
+		}
+
+		await this.contextProxy.setValues(sanitizedValues)
+		await this._saveViewLocalStateFromMutation(sanitizedValues)
 	}
 
 	/**

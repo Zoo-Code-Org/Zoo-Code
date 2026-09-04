@@ -143,6 +143,27 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
 	})
 
+	it("falls back to a timestamp-random id when the crypto object lacks randomUUID", () => {
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: { "": 1 },
+		})
+		vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+		vi.spyOn(Math, "random").mockReturnValue(0.987654321)
+		const storage = createMockStorage()
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// A truthy crypto global without a randomUUID member must still take the
+		// deterministic fallback: 1700000000000.toString(36) === "loyw3v28" and
+		// (0.987654321).toString(36) === "0.zk00000ytu", so the id drops the "0." prefix.
+		expect(wrapper.getViewStateId()).toBe("loyw3v28-zk00000ytu")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
+	})
+
 	it("creates a new viewStateId when the stored state parses to JSON null", () => {
 		Object.defineProperty(globalThis, "crypto", {
 			configurable: true,

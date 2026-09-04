@@ -1662,7 +1662,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// durable mode pin + ModeChanged broadcast). The handler writes this
 					// task's mode only after validation and persistence, so an unknown
 					// slug leaves the task mode untouched instead of recording a bad one.
-					await provider.handleModeSwitch(mode, this)
+					// A mode-switch failure (e.g. a task-history write failure) must not
+					// swallow the submitted message: log it locally and continue delivery.
+					try {
+						await provider.handleModeSwitch(mode, this)
+					} catch (error) {
+						console.error(
+							`[Task#submitUserMessage] Mode switch to ${mode} failed (taskId=${this.taskId}):`,
+							error,
+						)
+					}
 				}
 
 				if (providerProfile) {

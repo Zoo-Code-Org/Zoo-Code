@@ -177,11 +177,18 @@ suite("Roo Code View State", function () {
 				assert.ok(suggestion, `Expected pending suggestion for task ${taskId}`)
 				pendingSuggestions.delete(taskId)
 				answeredSuggestions.add(suggestionKey(taskId, suggestion.answer))
-				void globalThis.api.selectTaskFollowupSuggestion({ taskId, ...suggestion }).then((delivered) => {
-					if (!delivered) {
-						deliveryFailures.push(`${taskId}:${suggestion.answer}`)
-					}
-				})
+				void globalThis.api
+					.selectTaskFollowupSuggestion({ taskId, ...suggestion })
+					.then((delivered) => {
+						if (!delivered) {
+							deliveryFailures.push(`${taskId}:${suggestion.answer}`)
+						}
+					})
+					.catch((error: unknown) => {
+						deliveryFailures.push(
+							`${taskId}:${suggestion.answer}:${error instanceof Error ? error.message : String(error)}`,
+						)
+					})
 			}
 		}
 
