@@ -2493,7 +2493,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.emit(RooCodeEventName.TaskAborted)
 
 		try {
-			this.dispose() // Call the centralized dispose method
+			await this.dispose() // Call the centralized dispose method
 		} catch (error) {
 			console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
 			// Don't rethrow - we want abort to always succeed
@@ -2514,8 +2514,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	public dispose(): void {
+	public dispose(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+		const pendingCleanup: Promise<void>[] = []
 
 		// Stop the idle telemetry check and report any unflushed activity as a
 		// shutdown installment, so a task torn down mid-work (panel closed, task
@@ -2563,14 +2564,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Cleanup command output artifacts
-		getTaskDirectoryPath(this.globalStoragePath, this.taskId)
-			.then((taskDir) => {
-				const outputDir = path.join(taskDir, "command-output")
-				return OutputInterceptor.cleanup(outputDir)
-			})
-			.catch((error) => {
-				console.error("Error cleaning up command output artifacts:", error)
-			})
+		pendingCleanup.push(
+			getTaskDirectoryPath(this.globalStoragePath, this.taskId)
+				.then((taskDir) => {
+					const outputDir = path.join(taskDir, "command-output")
+					return OutputInterceptor.cleanup(outputDir)
+				})
+				.catch((error) => {
+					console.error("Error cleaning up command output artifacts:", error)
+				}),
+		)
 
 		try {
 			if (this.rooIgnoreController) {
@@ -2591,11 +2594,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// If we're not streaming then `abortStream` won't be called.
 			if (this.isStreaming && this.diffViewProvider.isEditing) {
-				this.diffViewProvider.revertChanges().catch(console.error)
+				pendingCleanup.push(this.diffViewProvider.revertChanges().catch(console.error))
 			}
 		} catch (error) {
 			console.error("Error reverting diff changes:", error)
 		}
+
+		return Promise.all(pendingCleanup).then(() => undefined)
 	}
 
 	// Subtasks

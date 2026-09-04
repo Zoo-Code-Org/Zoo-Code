@@ -2111,7 +2111,7 @@ describe("Cline", () => {
 			const emitSpy = vi.spyOn(task, "emit")
 
 			// Mock the dispose method to avoid actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			// Call abortTask
 			await task.abortTask()
@@ -2132,7 +2132,7 @@ describe("Cline", () => {
 			})
 
 			// Mock the dispose method to track cleanup
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			// Call abortTask
 			await task.abortTask()
@@ -2140,6 +2140,33 @@ describe("Cline", () => {
 			// Verify the same behavior as Cancel button
 			expect(task.abort).toBe(true)
 			expect(disposeSpy).toHaveBeenCalled()
+		})
+
+		it("waits for disposal cleanup before abort resolves", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			let resolveDisposal: () => void
+			const disposal = new Promise<void>((resolve) => {
+				resolveDisposal = resolve
+			})
+			const disposeSpy = vi.spyOn(task, "dispose").mockReturnValue(disposal)
+
+			const abort = task.abortTask()
+			await vi.waitFor(() => expect(disposeSpy).toHaveBeenCalledOnce())
+			let abortComplete = false
+			void abort.then(() => {
+				abortComplete = true
+			})
+			await Promise.resolve()
+			expect(abortComplete).toBe(false)
+
+			resolveDisposal!()
+			await abort
+			expect(abortComplete).toBe(true)
 		})
 
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
@@ -2154,7 +2181,7 @@ describe("Cline", () => {
 				queuedMessagesAtFlush = task.messageQueueService.messages.length
 			})
 			const emitSpy = vi.spyOn(task, "emit")
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			task.messageQueueService.addMessage("queued text")
 			await task.abortTask()
@@ -2183,7 +2210,7 @@ describe("Cline", () => {
 			const error = new Error("state flush failed")
 			const flushSpy = vi.mocked(mockProvider.flushPostStateToWebviewThrottled).mockRejectedValueOnce(error)
 			const taskAbortedListener = vi.fn()
-			const disposeSpy = vi.spyOn(task, "dispose").mockImplementation(() => {})
+			const disposeSpy = vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 			task.on(RooCodeEventName.TaskAborted, taskAbortedListener)
@@ -2220,7 +2247,7 @@ describe("Cline", () => {
 			expect(typeof taskLike.abortTask).toBe("function")
 
 			// Mock the dispose method to avoid actual cleanup
-			vi.spyOn(task, "dispose").mockImplementation(() => {})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
 
 			// Call abortTask through interface
 			await taskLike.abortTask()
@@ -2374,7 +2401,7 @@ describe("Cline", () => {
 				vi.spyOn(task, "removeAllListeners").mockImplementation(() => task)
 
 				// Call dispose
-				task.dispose()
+				void task.dispose()
 
 				// Verify cancelCurrentRequest was called
 				expect(cancelSpy).toHaveBeenCalled()
@@ -3903,9 +3930,9 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 
 	const createdTasks: Task[] = []
 
-	afterEach(() => {
+	afterEach(async () => {
 		for (const task of createdTasks) {
-			task.dispose()
+			await task.dispose()
 		}
 		createdTasks.length = 0
 		vi.useRealTimers()
@@ -4060,7 +4087,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			task.recordToolUsage("read_file")
 			task.messageCounts = { user: 1, assistant: 1 }
 
-			task.dispose()
+			void task.dispose()
 
 			expect(captureTaskCompletedSpy).toHaveBeenCalledWith(
 				task.taskId,
@@ -4076,7 +4103,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			task.flushTelemetryInstallment("attempt_completion")
 			captureTaskCompletedSpy.mockClear()
 
-			task.dispose()
+			void task.dispose()
 
 			expect(captureTaskCompletedSpy).not.toHaveBeenCalled()
 		})
@@ -4085,7 +4112,7 @@ describe("Telemetry installments (idle/shutdown flush)", () => {
 			vi.useFakeTimers()
 			const task = createTask()
 			task.recordToolUsage("read_file")
-			task.dispose()
+			void task.dispose()
 			captureTaskCompletedSpy.mockClear()
 
 			vi.advanceTimersByTime(60 * 60 * 1000)

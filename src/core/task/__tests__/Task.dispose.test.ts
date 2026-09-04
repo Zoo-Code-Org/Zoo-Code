@@ -2,7 +2,9 @@ import { type ProviderSettings, RooCodeEventName } from "@roo-code/types"
 
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { OutputInterceptor } from "../../../integrations/terminal/OutputInterceptor"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { getTaskDirectoryPath } from "../../../utils/storage"
 
 // Mock dependencies
 vi.mock("../../webview/ClineProvider")
@@ -11,10 +13,7 @@ vi.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 		releaseTerminalsForTask: vi.fn(),
 	},
 }))
-// dispose() fires an UNawaited getTaskDirectoryPath -> OutputInterceptor.cleanup chain.
-// Mock both so it resolves immediately with no real fs and no late console.error,
-// otherwise that dangling promise logs after the test ends and trips Vitest's
-// "Closing rpc while onUserConsoleLog was pending" teardown race.
+// Keep disposal tests independent of the real filesystem and output interceptor.
 vi.mock("../../../utils/storage", () => ({
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/path/tasks/test-task"),
 }))
@@ -80,11 +79,58 @@ describe("Task dispose method", () => {
 		})
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
 		// Clean up
 		if (task && !task.abort) {
-			task.dispose()
+			await task.dispose()
 		}
+	})
+
+	test("should expose completion of deferred command output cleanup", async () => {
+		let resolveTaskDirectory: (taskDirectory: string) => void
+		vi.mocked(getTaskDirectoryPath).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveTaskDirectory = resolve
+			}),
+		)
+
+		const disposal = task.dispose()
+		let disposalComplete = false
+		void disposal.then(() => {
+			disposalComplete = true
+		})
+		await Promise.resolve()
+
+		expect(disposalComplete).toBe(false)
+		expect(OutputInterceptor.cleanup).not.toHaveBeenCalled()
+
+		resolveTaskDirectory!("/test/path/tasks/test-task")
+		await disposal
+
+		expect(OutputInterceptor.cleanup).toHaveBeenCalledWith("/test/path/tasks/test-task/command-output")
+		expect(disposalComplete).toBe(true)
+	})
+
+	test("should expose completion of deferred diff reversion", async () => {
+		let resolveReversion: () => void
+		const reversion = new Promise<void>((resolve) => {
+			resolveReversion = resolve
+		})
+		task.isStreaming = true
+		task.diffViewProvider.isEditing = true
+		vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(reversion)
+
+		const disposal = task.dispose()
+		let disposalComplete = false
+		void disposal.then(() => {
+			disposalComplete = true
+		})
+		await Promise.resolve()
+		expect(disposalComplete).toBe(false)
+
+		resolveReversion!()
+		await disposal
+		expect(disposalComplete).toBe(true)
 	})
 
 	test("should remove all event listeners when dispose is called", () => {
@@ -106,7 +152,7 @@ describe("Task dispose method", () => {
 		const removeAllListenersSpy = vi.spyOn(task, "removeAllListeners")
 
 		// Call dispose
-		task.dispose()
+		void task.dispose()
 
 		// Verify removeAllListeners was called
 		expect(removeAllListenersSpy).toHaveBeenCalledOnce()
@@ -128,7 +174,7 @@ describe("Task dispose method", () => {
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
 
 		// Call dispose - should not throw
-		expect(() => task.dispose()).not.toThrow()
+		expect(() => void task.dispose()).not.toThrow()
 
 		// Verify error was logged
 		expect(consoleErrorSpy).toHaveBeenCalledWith("Error removing event listeners:", expect.any(Error))
@@ -143,7 +189,7 @@ describe("Task dispose method", () => {
 		const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {})
 
 		// Call dispose
-		task.dispose()
+		void task.dispose()
 
 		// Verify dispose was called and logged
 		expect(consoleLogSpy).toHaveBeenCalledWith(
@@ -193,7 +239,7 @@ describe("Task dispose method", () => {
 		expect(task.listenerCount(RooCodeEventName.TaskUnpaused)).toBe(1)
 
 		// Call dispose
-		task.dispose()
+		void task.dispose()
 
 		// Verify all listeners are removed
 		expect(task.listenerCount(RooCodeEventName.TaskStarted)).toBe(0)
@@ -244,7 +290,7 @@ describe("Task.run() idempotency", () => {
 		const callsBefore = startTaskSpy.mock.calls.length // constructor fired it once
 		void t.run()
 		expect(startTaskSpy.mock.calls.length).toBe(callsBefore) // run() must not add a second call
-		t.dispose()
+		await t.dispose()
 		startTaskSpy.mockRestore()
 	})
 
@@ -262,7 +308,7 @@ describe("Task.run() idempotency", () => {
 
 		void t.run()
 		expect(startTaskSpy.mock.calls.length).toBe(callsAfterStart) // no additional call
-		t.dispose()
+		await t.dispose()
 		startTaskSpy.mockRestore()
 	})
 
@@ -280,7 +326,7 @@ describe("Task.run() idempotency", () => {
 		const p2 = t.run()
 		expect(p1).toBe(p2)
 		await p1
-		t.dispose()
+		await t.dispose()
 		startTaskSpy.mockRestore()
 	})
 })
