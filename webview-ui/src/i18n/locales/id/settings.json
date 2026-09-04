@@ -975,6 +975,10 @@
 			"refreshSuccess": "Tool berhasil direfresh",
 			"refreshError": "Gagal merefresh tool",
 			"toolParameters": "Parameter"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Usaha berpikir dinamis",
+			"description": "Mengaktifkan alat set_thinking_effort agar model dapat memutuskan usaha berpikirnya per langkah. Kontrol manual di obrolan selalu tersedia. (eksperimental)"
 		}
 	},
 	"promptCaching": {

@@ -975,6 +975,10 @@
 			"refreshSuccess": "Làm mới công cụ thành công",
 			"refreshError": "Không thể làm mới công cụ",
 			"toolParameters": "Thông số"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Nỗ lực suy nghĩ động",
+			"description": "Bật công cụ set_thinking_effort để model tự quyết định nỗ lực suy nghĩ của từng bước. Điều chỉnh thủ công trong trò chuyện luôn khả dụng. (thực nghiệm)"
 		}
 	},
 	"promptCaching": {

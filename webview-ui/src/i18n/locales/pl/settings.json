@@ -975,6 +975,10 @@
 			"refreshSuccess": "Narzędzia odświeżone pomyślnie",
 			"refreshError": "Nie udało się odświeżyć narzędzi",
 			"toolParameters": "Parametry"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamiczny wysiłek myślowy",
+			"description": "Włącza narzędzie set_thinking_effort, aby model samodzielnie decydował o wysiłku myślowym na każdym kroku. Ręczna regulacja w czacie jest zawsze dostępna. (eksperymentalne)"
 		}
 	},
 	"promptCaching": {
