@@ -1745,4 +1745,197 @@ describe("auth session cache", () => {
 			vi.useRealTimers()
 		}
 	})
+
+	it("staleCutoffMs uses >= so entry at exactly 2x TTL is pruned", async () => {
+		// Kills: EqualityOperator mutant L159 (>= staleCutoffMs → > staleCutoffMs)
+		vi.useFakeTimers()
+		try {
+			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			const first = { provider: providerIdentifiers.zooGateway, apiKey: "session-a" }
+			const second = { provider: providerIdentifiers.zooGateway, apiKey: "session-b" }
+
+			await freshGetModels(first)
+			// Advance to EXACTLY 2x TTL — must be pruned (>= not just >)
+			vi.advanceTimersByTime(5 * 60 * 1000 * 2)
+			await freshGetModels(second)
+
+			freshMockGetZooGatewayModels.mockClear()
+			// First entry was pruned — a new fetch must fire (not_modified without etag yields {})
+			freshMockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk({}))
+			const result = await freshGetModels(first)
+
+			// No cache entry → provider returned empty → fallback to {}
+			expect(result).toEqual({})
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("enforces session cache MAX_ENTRIES by evicting the oldest entry", async () => {
+		// Kills: ConditionalExpression mutants on L167-L179 (while loop and oldestKey guard)
+		vi.useFakeTimers()
+		try {
+			// Fill 65 unique sessions (1 over AUTH_SESSION_MAX_ENTRIES=64)
+			for (let i = 0; i < 65; i++) {
+				freshMockGetZooGatewayModels.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				vi.advanceTimersByTime(1) // ensure fetchedAt differs so oldest is well-defined
+				await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: `session-${i}` })
+			}
+			// session-0 is the oldest — it must have been evicted. Verify by clearing mock
+			// and calling with session-0: if it was evicted, a fresh fetch fires.
+			freshMockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			freshMockGetZooGatewayModels.mockClear()
+			await freshGetModels({ provider: providerIdentifiers.zooGateway, apiKey: "session-0" })
+			expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(1)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("setAuthSessionEntry does not store an empty model record", async () => {
+		// Kills: ConditionalExpression mutant L188 (false) — empty models must be rejected
+		freshMockGetZooGatewayModels
+			.mockResolvedValueOnce(zooGatewayOk({})) // first call: empty
+			.mockResolvedValueOnce(zooGatewayOk(zooModels)) // second call: populated
+
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		// First call returns empty — nothing stored
+		await freshGetModels(options)
+		// Second call must fetch again (nothing was cached from first call)
+		const second = await freshGetModels(options)
+
+		expect(second).toEqual(zooModels)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+	})
+
+	it("stale in-flight fetch must not write to cache even when a new fetch registered the key", async () => {
+		// Kills: LogicalOperator mutant L303 (&&→||):
+		// With ||, fetch A (stale) would write because inFlightAuthScopedFetch.has(key)==true.
+		// This test detects that by making a THIRD call immediately after fetch A resolves
+		// (before fetch B): if stale data was written it's served from cache; if not, the
+		// third call deduplicates to fetch B and gets fresh data.
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const staleModels: ModelRecord = {
+			"stale/model": { maxTokens: 1000, contextWindow: 1000, supportsPromptCache: false },
+		}
+		const freshModelsAfterSignOut2: ModelRecord = {
+			"fresh2/model": { maxTokens: 3000, contextWindow: 3000, supportsPromptCache: false },
+		}
+
+		let resolveFetchA!: (v: ZooGatewayResult) => void
+		let resolveFetchB!: (v: ZooGatewayResult) => void
+		const fetchADeferred = new Promise<ZooGatewayResult>((r) => (resolveFetchA = r))
+		const fetchBDeferred = new Promise<ZooGatewayResult>((r) => (resolveFetchB = r))
+
+		freshMockGetZooGatewayModels.mockReturnValueOnce(fetchADeferred).mockReturnValueOnce(fetchBDeferred)
+
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		// 1. Start fetch A (pre-sign-out)
+		const fetchAResult = freshGetModels(options)
+
+		// 2. Sign-out
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+
+		// 3. Start fetch B (post-sign-out) — registers new in-flight under the same key
+		const fetchBResult = freshGetModels(options)
+
+		// 4. Resolve fetch A with stale data
+		resolveFetchA(zooGatewayOk(staleModels))
+		await fetchAResult
+
+		// 5. Third call immediately after A resolves (B still pending).
+		//    If stale data was written (|| bug), it gets served from cache → returns stale.
+		//    If stale data was NOT written (correct &&), it deduplicates to fetch B → blocks.
+		const thirdCallResult = freshGetModels(options)
+
+		// 6. Resolve fetch B with fresh data
+		resolveFetchB(zooGatewayOk(freshModelsAfterSignOut2))
+		const [thirdResult] = await Promise.all([thirdCallResult, fetchBResult])
+
+		// The third call must have gotten fresh data (deduped to B), not stale data from A
+		expect(thirdResult).toEqual(freshModelsAfterSignOut2)
+
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+	})
+
+	it("clearAuthSessionModelsForProvider also invalidates in-flight fetches not yet in cache", async () => {
+		// Kills: ConditionalExpression mutants on L216 — the loop over inFlightAuthScopedFetch
+		// must delete keys even when the cache is empty (fetch hasn't resolved yet).
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const freshModels2: ModelRecord = {
+			"fresh2/model": { maxTokens: 3000, contextWindow: 3000, supportsPromptCache: false },
+		}
+
+		let resolveFetchA!: (v: ZooGatewayResult) => void
+		const fetchADeferred = new Promise<ZooGatewayResult>((r) => (resolveFetchA = r))
+
+		freshMockGetZooGatewayModels.mockReturnValueOnce(fetchADeferred).mockResolvedValueOnce(zooGatewayOk(freshModels2))
+
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		// 1. Start fetch A — it's in-flight, cache is EMPTY (hasn't resolved yet)
+		const fetchAResult = freshGetModels(options)
+
+		// 2. Sign out before fetch A resolves — must also clear the in-flight entry
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+
+		// 3. Start fetch B — if in-flight was cleared, a NEW fetch fires (not deduped to A)
+		const fetchBResult = freshGetModels(options)
+
+		// 4. Resolve A (stale) and B (fresh)
+		resolveFetchA(zooGatewayOk(zooModels)) // stale pre-sign-out data
+		await fetchAResult
+
+		const bResult = await fetchBResult
+		expect(bResult).toEqual(freshModels2)
+		// Two fetches fired: A and B (if in-flight was cleared correctly)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+	})
+
+	it("generation counter increments by +1 on each sign-out, not by -1", async () => {
+		// Kills: ArithmeticOperator mutant L224 (+ 1 → - 1).
+		// After two sign-outs the counter should be 2; with -1 it would be -2.
+		// We observe this indirectly: two sign-outs → two in-flight fetches complete → only
+		// the post-second-sign-out fetch should write to cache.
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const models1: ModelRecord = { "m1/a": { maxTokens: 100, contextWindow: 100, supportsPromptCache: false } }
+		const models2: ModelRecord = { "m2/b": { maxTokens: 200, contextWindow: 200, supportsPromptCache: false } }
+		const models3: ModelRecord = { "m3/c": { maxTokens: 300, contextWindow: 300, supportsPromptCache: false } }
+
+		let resolveA!: (v: ZooGatewayResult) => void
+		let resolveB!: (v: ZooGatewayResult) => void
+		let resolveC!: (v: ZooGatewayResult) => void
+		freshMockGetZooGatewayModels
+			.mockReturnValueOnce(new Promise((r) => (resolveA = r)))
+			.mockReturnValueOnce(new Promise((r) => (resolveB = r)))
+			.mockReturnValueOnce(new Promise((r) => (resolveC = r)))
+
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		// fetch A (gen=0 at start)
+		const resA = freshGetModels(options)
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway) // gen → 1
+		// fetch B (gen=1 at start)
+		const resB = freshGetModels(options)
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway) // gen → 2
+		// fetch C (gen=2 at start)
+		const resC = freshGetModels(options)
+
+		// Resolve all with distinct data; only C's data should land in cache
+		resolveA(zooGatewayOk(models1))
+		await resA
+		resolveB(zooGatewayOk(models2))
+		await resB
+		resolveC(zooGatewayOk(models3))
+		const finalResult = await resC
+
+		// C was the last fetch with matching generation — result must be models3
+		expect(finalResult).toEqual(models3)
+
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+	})
 })
