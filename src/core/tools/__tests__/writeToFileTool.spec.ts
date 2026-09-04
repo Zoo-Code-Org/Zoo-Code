@@ -132,6 +132,9 @@ describe("writeToFileTool", () => {
 
 		mockedPathResolve.mockReturnValue(absoluteFilePath)
 		mockedFileExistsAtPath.mockResolvedValue(false)
+		// vi.clearAllMocks() keeps the last mock implementation; reset the factory default here
+		// so no test depends on declaration order or an earlier test's rejection.
+		mockedCreateDirectoriesForFile.mockResolvedValue([])
 		mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		mockedGetReadablePath.mockReturnValue("test/path.txt")
 		mockedUnescapeHtmlEntities.mockImplementation((content) => {
@@ -245,6 +248,9 @@ describe("writeToFileTool", () => {
 				...params,
 			},
 			nativeArgs: {
+				// The missing-parameter tests inject `undefined` where
+				// NativeToolArgs["write_to_file"] declares `string`, so the casts are required to
+				// model a malformed payload.
 				path: (Object.prototype.hasOwnProperty.call(params, "path") ? params.path : testFilePath) as any,
 				content: (Object.prototype.hasOwnProperty.call(params, "content")
 					? params.content
@@ -327,6 +333,48 @@ describe("writeToFileTool", () => {
 			} finally {
 				consoleErrorSpy.mockRestore()
 			}
+		})
+	})
+
+	describe("missing-parameter early-return cleanup", () => {
+		// handlePartial() has no missing-parameter guard: two partial streaming calls
+		// stabilize the path and open the partial `tool` ask + diff view. This establishes
+		// the "partial ask is open" precondition for the missing-parameter branches below.
+		async function streamPartialAsk() {
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+		}
+
+		it("finalizes the partial ask when content is missing after partial streaming", async () => {
+			// Streaming deltas create a partial `tool` ask (partial: true), then the completed
+			// payload is missing `content`. The missing-parameter branch must finalize the ask
+			// (the spinner must not stick) and still perform the same diff-view revert / reset
+			// and per-task-state cleanup as the other early-return paths.
+			await streamPartialAsk()
+
+			await executeWriteFileTool({ content: undefined }, { fileExists: false })
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
+			// The missing-parameter path finalizes without a text match: any open partial ask is closed.
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
+
+		it("finalizes the partial ask when path is missing after partial streaming", async () => {
+			// Same scenario with the `path` field missing: the missing-`path` branch must run
+			// the identical partial-ask + diff-view + per-task-state cleanup.
+			await streamPartialAsk()
+
+			await executeWriteFileTool({ path: undefined }, { fileExists: false })
+
+			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "path")
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 	})
 
@@ -474,16 +522,21 @@ describe("writeToFileTool", () => {
 
 		it("does not report a successful write as failed when final diff reset rejects", async () => {
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-			mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
+			try {
+				mockCline.diffViewProvider.reset.mockRejectedValue(new Error("reset failed"))
 
-			await executeWriteFileTool({}, { fileExists: false })
+				await executeWriteFileTool({}, { fileExists: false })
 
-			expect(mockHandleError).not.toHaveBeenCalled()
-			expect(mockPushToolResult).toHaveBeenCalledWith("Tool result message")
-			expect(mockCline.didEditFile).toBe(true)
-			expect(consoleErrorSpy).toHaveBeenCalledWith("Error resetting write_to_file diff view:", expect.any(Error))
-
-			consoleErrorSpy.mockRestore()
+				expect(mockHandleError).not.toHaveBeenCalled()
+				expect(mockPushToolResult).toHaveBeenCalledWith("Tool result message")
+				expect(mockCline.didEditFile).toBe(true)
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error resetting write_to_file diff view:",
+					expect.any(Error),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
 		})
 	})
 
@@ -1043,9 +1096,6 @@ describe("writeToFileTool", () => {
 			// The reverse of the previous test: once the user approved the write, the diff
 			// content is their accepted edit. A late failure (e.g. saveChanges rejecting)
 			// must NOT revert it -- the document stays dirty so the user can save it manually.
-			// Restore the factory default for directory creation: the previous test left the
-			// mock rejecting, and vi.clearAllMocks() keeps the last implementation.
-			mockedCreateDirectoriesForFile.mockResolvedValue([])
 			mockCline.diffViewProvider.saveChanges.mockRejectedValueOnce(new Error("save failed"))
 
 			await executeWriteFileTool({}, { fileExists: false })
@@ -1153,75 +1203,66 @@ describe("writeToFileTool", () => {
 			}
 		})
 
-		it.skipIf(process.platform === "win32")(
-			"EROFS in handlePartial does not stall agent loop -- createDirectoriesForFile is not called",
-			async () => {
-				// Regression test: before the fix, createDirectoriesForFile was called in handlePartial
-				// with no .catch() guard. An EROFS throw escaped to BaseTool.handle(), which called
-				// handleError but did not set didRejectTool/didAlreadyUseTool, so the advancement gate
-				// in presentAssistantMessage was never reached and the agent loop stalled permanently.
-				// After the fix the call is removed entirely -- handlePartial never touches the filesystem.
-				mockedCreateDirectoriesForFile.mockRejectedValue(
-					Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
-				)
+		it("EROFS in handlePartial does not stall agent loop -- createDirectoriesForFile is not called", async () => {
+			// Regression test: before the fix, createDirectoriesForFile was called in handlePartial
+			// with no .catch() guard. An EROFS throw escaped to BaseTool.handle(), which called
+			// handleError but did not set didRejectTool/didAlreadyUseTool, so the advancement gate
+			// in presentAssistantMessage was never reached and the agent loop stalled permanently.
+			// After the fix the call is removed entirely -- handlePartial never touches the filesystem.
+			mockedCreateDirectoriesForFile.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+			)
 
-				// First call -- path not yet stabilized, returns early
-				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
-				expect(mockHandleError).not.toHaveBeenCalled()
+			// First call -- path not yet stabilized, returns early
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockHandleError).not.toHaveBeenCalled()
 
-				// Second call -- path stabilized; createDirectoriesForFile must NOT be called from
-				// handlePartial, so the mock rejection must not trigger and handleError must not be called
-				await executeWriteFileTool({}, { fileExists: false, isPartial: true })
-				expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
-				expect(mockHandleError).not.toHaveBeenCalled()
-			},
-		)
+			// Second call -- path stabilized; createDirectoriesForFile must NOT be called from
+			// handlePartial, so the mock rejection must not trigger and handleError must not be called
+			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
+			expect(mockedCreateDirectoriesForFile).not.toHaveBeenCalled()
+			expect(mockHandleError).not.toHaveBeenCalled()
+		})
 
-		it.skipIf(process.platform === "win32")(
-			"EROFS in execute() routes through handleError with cleanup rather than escaping unhandled",
-			async () => {
-				// Regression test: before the fix, createDirectoriesForFile in execute() sat outside
-				// the try block (lines 70-74), so an EROFS error escaped the catch at line 188 entirely.
-				// After the fix the call is inside the try block, so filesystem errors are caught and
-				// routed through handleError with proper diffViewProvider.reset() cleanup.
-				mockedCreateDirectoriesForFile.mockRejectedValue(
-					Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
-				)
+		it("EROFS in execute() routes through handleError with cleanup rather than escaping unhandled", async () => {
+			// Regression test: before the fix, createDirectoriesForFile in execute() sat outside
+			// the try block (lines 70-74), so an EROFS error escaped the catch at line 188 entirely.
+			// After the fix the call is inside the try block, so filesystem errors are caught and
+			// routed through handleError with proper diffViewProvider.reset() cleanup.
+			mockedCreateDirectoriesForFile.mockRejectedValue(
+				Object.assign(new Error("EROFS: read-only file system, mkdir '/scratch'"), { code: "EROFS" }),
+			)
 
-				await executeWriteFileTool({}, { fileExists: false })
+			await executeWriteFileTool({}, { fileExists: false })
 
-				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
-				expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
-				// The tool must not have proceeded to open or save
-				expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
-				expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
-			},
-		)
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// The tool must not have proceeded to open or save
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+		})
 
-		it.skipIf(process.platform === "win32")(
-			"finalizes partial tool message on error so the UI spinner does not get stuck",
-			async () => {
-				// Regression test: when a filesystem error is thrown in execute() the webview
-				// message created during handlePartial (or the early ask in execute) is stuck in
-				// partial: true state, showing an indefinite spinner alongside the error bubble.
-				// The catch block must call finalizePartialToolAsk() to close the spinner without
-				// blocking for user input.
-				mockedCreateDirectoriesForFile.mockRejectedValue(
-					Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
-				)
+		it("finalizes partial tool message on error so the UI spinner does not get stuck", async () => {
+			// Regression test: when a filesystem error is thrown in execute() the webview
+			// message created during handlePartial (or the early ask in execute) is stuck in
+			// partial: true state, showing an indefinite spinner alongside the error bubble.
+			// The catch block must call finalizePartialToolAsk() to close the spinner without
+			// blocking for user input.
+			mockedCreateDirectoriesForFile.mockRejectedValue(
+				Object.assign(new Error("EACCES: permission denied, mkdir '/ro'"), { code: "EACCES" }),
+			)
 
-				await executeWriteFileTool({}, { fileExists: false })
+			await executeWriteFileTool({}, { fileExists: false })
 
-				// handleError must still be called
-				expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
+			// handleError must still be called
+			expect(mockHandleError).toHaveBeenCalledWith("writing file", expect.any(Error))
 
-				// finalizePartialToolAsk must have been called (no text: the execute error
-				// path closes whichever partial tool ask is open) to dismiss the spinner
-				expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
-				// The write was never approved, so the diff document is reverted before reset
-				expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
-			},
-		)
+			// finalizePartialToolAsk must have been called (no text: the execute error
+			// path closes whichever partial tool ask is open) to dismiss the spinner
+			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
+			// The write was never approved, so the diff document is reverted before reset
+			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("prevent focus disruption experiment", () => {
@@ -1240,12 +1281,6 @@ describe("writeToFileTool", () => {
 				}),
 			}
 		}
-
-		beforeEach(() => {
-			// The tests before this describe leave the directory-creation mock rejecting;
-			// restore the factory default so the experiment branch runs to completion.
-			mockedCreateDirectoriesForFile.mockResolvedValue([])
-		})
 
 		it("saves through saveDirectly without diff editor interaction when the experiment is enabled", async () => {
 			enablePreventFocusDisruption()

@@ -3817,6 +3817,53 @@ describe("Cline", () => {
 			saveSpy.mockRestore()
 		})
 
+		it("finalizePartialToolAsk logs and skips the webview update when persistence fails", async () => {
+			// Pins the saveClineMessages-failure guard in finalizePartialToolAsk: while the
+			// on-disk record still carries partial: true, a webview-only update would diverge
+			// the two views (a later state resync or restart reload would flip the spinner
+			// back on). finalize must log, skip updateClineMessage, and still resolve so
+			// callers' error-path cleanup completes.
+			const saveSpy = vi.spyOn(getTaskTestAccess(Task.prototype), "saveClineMessages").mockResolvedValue(false)
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			// The in-memory message is still finalized so the ask is resolved by the system...
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// ...and the persistence failure is observed instead of silently swallowed.
+			expect(saveSpy).toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+			)
+			// ...but the webview update is skipped so disk (still partial: true) and
+			// webview do not diverge until the next save repairs the record.
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			updateSpy.mockRestore()
+			saveSpy.mockRestore()
+		})
+
 		it("finalizePartialToolAsk ignores partial asks that match only some predicate clauses", async () => {
 			// Each distractor below satisfies a strict subset of the findLast predicate
 			// clauses, so no single clause (or a wrong combination of clauses) may select

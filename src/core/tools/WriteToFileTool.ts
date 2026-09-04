@@ -161,6 +161,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "path"))
+			// handlePartial() has no missing-parameter guard, so streaming deltas for a
+			// stabilized path may already have created a partial `tool` ask (partial: true)
+			// before execute() saw the malformed payload. Finalize it so the UI spinner
+			// does not stay stuck, mirroring the rooignore and execute-error cleanups.
+			await this.finalizePartialToolAskAfterFailure(task)
 			await this.revertDiffChangesBeforeReset(task)
 			await this.resetDiffViewAfterWrite(task)
 			this.resetTaskPartialState(task)
@@ -171,6 +176,9 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			task.consecutiveMistakeCount++
 			task.recordToolError("write_to_file")
 			pushToolResult(await task.sayAndCreateMissingParamError("write_to_file", "content"))
+			// Same partial-ask cleanup as the missing-`path` branch above: a partial `tool`
+			// ask created during streaming would otherwise stay open (partial: true).
+			await this.finalizePartialToolAskAfterFailure(task)
 			await this.revertDiffChangesBeforeReset(task)
 			await this.resetDiffViewAfterWrite(task)
 			this.resetTaskPartialState(task)

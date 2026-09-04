@@ -1990,7 +1990,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		partialToolAsk.partial = false
 		partialToolAsk.progressStatus = undefined
 		partialToolAsk.isAnswered = true
-		await this.saveClineMessages()
+		const saved = await this.saveClineMessages()
+		if (!saved) {
+			// The persistence write failed: the on-disk record still carries `partial: true`
+			// while the in-memory message is finalized. Skip the webview-only update so the
+			// two views do not diverge (a later state resync or restart reload would flip the
+			// spinner back on from the stale disk record). The next saveClineMessages() call
+			// re-persists the full message array and repairs the disk record.
+			console.error("[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update")
+			return
+		}
 		await this.updateClineMessage(partialToolAsk).catch((error) => {
 			console.error("[Task#finalizePartialToolAsk] updateClineMessage failed:", error)
 		})
