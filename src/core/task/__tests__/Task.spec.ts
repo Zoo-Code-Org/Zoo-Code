@@ -1,5 +1,6 @@
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import * as fsReal from "fs"
 import * as os from "os"
 import * as path from "path"
 
@@ -3862,6 +3863,102 @@ describe("Cline", () => {
 
 			updateSpy.mockRestore()
 			saveSpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk still updates the webview when a later save stage fails", async () => {
+			// saveClineMessages() reports the message write separately from the metadata /
+			// task-history stages: the message array persisted while a later stage failed
+			// must still count as a successful save, so the finalized ask reaches the
+			// webview. A stale metadata entry is recomputed and re-emitted by the next
+			// saveClineMessages() call.
+			// saveTaskMessages() persists through safeWriteJson, which only mocks the
+			// fs/promises write helpers: its real fs.access gate and lockfile need the
+			// task directory to exist (uuid v7 is mocked to the fixed id below).
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.mkdirSync(taskDir, { recursive: true })
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+			const metadataFailure = new Error("task history stage failed")
+			const historySpy = vi.spyOn(mockProvider, "updateTaskHistory").mockRejectedValueOnce(metadataFailure)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// The message array persisted, so the webview update must run even though a
+			// later save stage failed...
+			expect(updateSpy).toHaveBeenCalledWith(partialToolAsk)
+			// ...and the later-stage failure is observed instead of silently swallowed.
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save task metadata:", expect.any(Error))
+
+			updateSpy.mockRestore()
+			historySpy.mockRestore()
+		})
+
+		it("finalizePartialToolAsk skips the webview update when the message write itself fails", async () => {
+			// Complements the later-stage-failure test above by failing the first save
+			// stage: with the real task directory removed, safeWriteJson's fs.access
+			// throws before anything is persisted, saveClineMessages() reports the
+			// failed message write, and the skip guard keeps the webview update off.
+			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
+			fsReal.rmSync(taskDir, { recursive: true, force: true })
+			const updateSpy = vi
+				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
+				.mockResolvedValue(undefined)
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const partialToolAsk = {
+				ts: Date.now() - 1,
+				type: "ask" as const,
+				ask: "tool" as const,
+				text: "partial tool message",
+				partial: true,
+			}
+
+			task.clineMessages.push(partialToolAsk)
+
+			await expect(task.finalizePartialToolAsk("partial tool message")).resolves.toBeUndefined()
+			await flushMicrotasks()
+
+			// The in-memory ask is still finalized... (the flags are set before saving)
+			expect(partialToolAsk.partial).toBe(false)
+			expect(task.clineMessages[0].isAnswered).toBe(true)
+			// ...but the failed message write skips the webview update and surfaces
+			// both failure logs instead of updating on an unpersisted save.
+			expect(updateSpy).not.toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to save Roo messages:", expect.any(Error))
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"[Task#finalizePartialToolAsk] saveClineMessages failed; skipping webview update",
+			)
+
+			// Restore the directory for sibling tests that persist through the real fs.
+			fsReal.mkdirSync(taskDir, { recursive: true })
+
+			updateSpy.mockRestore()
 		})
 
 		it("finalizePartialToolAsk ignores partial asks that match only some predicate clauses", async () => {

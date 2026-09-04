@@ -351,6 +351,15 @@ describe("writeToFileTool", () => {
 			// payload is missing `content`. The missing-parameter branch must finalize the ask
 			// (the spinner must not stick) and still perform the same diff-view revert / reset
 			// and per-task-state cleanup as the other early-return paths.
+			// Record the relative order of revertChanges() and reset(): vitest mocks expose
+			// no invocationCallOrder, so the ordering assertion uses this sequence.
+			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
 			await streamPartialAsk()
 
 			await executeWriteFileTool({ content: undefined }, { fileExists: false })
@@ -358,22 +367,33 @@ describe("writeToFileTool", () => {
 			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "content")
 			// The missing-parameter path finalizes without a text match: any open partial ask is closed.
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
-			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// The streamed content of the failed write must be reverted from the diff
+			// document before reset() clears the state revertChanges() relies on.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 
 		it("finalizes the partial ask when path is missing after partial streaming", async () => {
 			// Same scenario with the `path` field missing: the missing-`path` branch must run
 			// the identical partial-ask + diff-view + per-task-state cleanup.
+			// Record the relative order of revertChanges() and reset(): vitest mocks expose
+			// no invocationCallOrder, so the ordering assertion uses this sequence.
+			const diffViewCallOrder: string[] = []
+			mockCline.diffViewProvider.revertChanges.mockImplementation(async () => {
+				diffViewCallOrder.push("revert")
+			})
+			mockCline.diffViewProvider.reset.mockImplementation(async () => {
+				diffViewCallOrder.push("reset")
+			})
 			await streamPartialAsk()
 
 			await executeWriteFileTool({ path: undefined }, { fileExists: false })
 
 			expect(mockCline.sayAndCreateMissingParamError).toHaveBeenCalledWith("write_to_file", "path")
 			expect(mockCline.finalizePartialToolAsk).toHaveBeenCalledWith(undefined)
-			expect(mockCline.diffViewProvider.revertChanges).toHaveBeenCalled()
-			expect(mockCline.diffViewProvider.reset).toHaveBeenCalled()
+			// The diff document must be reverted before reset() clears the state
+			// revertChanges() relies on.
+			expect(diffViewCallOrder).toEqual(["revert", "reset"])
 			expect(mockHandleError).not.toHaveBeenCalled()
 		})
 	})

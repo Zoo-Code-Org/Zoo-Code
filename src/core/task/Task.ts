@@ -1212,6 +1212,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
+	/**
+	 * Persist the message array, then refresh the derived metadata / task-history entries.
+	 *
+	 * The returned boolean reflects the message write only: `saveTaskMessages` failure
+	 * leaves the on-disk record stale, so callers gating UI updates on durable state must
+	 * skip them. Metadata / task-history stage failures are logged and swallowed — the
+	 * message array is already persisted, and the next save recomputes and re-emits the
+	 * metadata.
+	 */
 	private async saveClineMessages(): Promise<boolean> {
 		try {
 			await saveTaskMessages({
@@ -1219,7 +1228,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
 			})
+		} catch (error) {
+			console.error("Failed to save Roo messages:", error)
+			return false
+		}
 
+		try {
 			if (this._taskApiConfigName === undefined) {
 				await this.taskApiConfigReady
 			}
@@ -1247,11 +1261,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const provider = this.providerRef.deref()
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
-			return true
 		} catch (error) {
-			console.error("Failed to save Roo messages:", error)
-			return false
+			// The message array was persisted above; a metadata or task-history failure must
+			// not mask that write (see the method docs). The next saveClineMessages() call
+			// recomputes and re-emits the metadata update.
+			console.error("Failed to save task metadata:", error)
 		}
+
+		return true
 	}
 
 	private findMessageByTimestamp(ts: number): ClineMessage | undefined {
