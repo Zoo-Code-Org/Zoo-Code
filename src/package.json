@@ -96,6 +96,26 @@
 				"icon": "$(settings-gear)"
 			},
 			{
+				"command": "zoo-code.plusButtonClickedInTab",
+				"title": "%command.newTask.title%",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "zoo-code.settingsButtonClickedInTab",
+				"title": "%command.settings.title%",
+				"icon": "$(settings-gear)"
+			},
+			{
+				"command": "zoo-code.marketplaceButtonClickedInTab",
+				"title": "%command.marketplace.title%",
+				"icon": "$(extensions)"
+			},
+			{
+				"command": "zoo-code.historyButtonClickedInTab",
+				"title": "%command.history.title%",
+				"icon": "$(history)"
+			},
+			{
 				"command": "zoo-code.openInNewTab",
 				"title": "%command.openInNewTab.title%",
 				"category": "%configuration.title%"
@@ -241,22 +261,22 @@
 			],
 			"editor/title": [
 				{
-					"command": "zoo-code.plusButtonClicked",
+					"command": "zoo-code.plusButtonClickedInTab",
 					"group": "navigation@1",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
 				},
 				{
-					"command": "zoo-code.settingsButtonClicked",
+					"command": "zoo-code.settingsButtonClickedInTab",
 					"group": "navigation@2",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
 				},
 				{
-					"command": "zoo-code.marketplaceButtonClicked",
+					"command": "zoo-code.marketplaceButtonClickedInTab",
 					"group": "navigation@3",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
 				},
 				{
-					"command": "zoo-code.historyButtonClicked",
+					"command": "zoo-code.historyButtonClickedInTab",
 					"group": "overflow@1",
 					"when": "activeWebviewPanelId == zoo-code.TabPanelProvider"
 				},
