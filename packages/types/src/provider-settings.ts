@@ -30,6 +30,7 @@ import {
 	deepSeekModels,
 	fireworksModels,
 	friendliModels,
+	neuronpoolModels,
 	geminiModels,
 	mistralModels,
 	moonshotModels,
@@ -429,6 +430,11 @@ export const MODELS_BY_PROVIDER: Record<
 		id: providerIdentifiers.friendli,
 		label: "Friendli",
 		models: Object.keys(friendliModels),
+	},
+	[providerIdentifiers.neuronpool]: {
+		id: providerIdentifiers.neuronpool,
+		label: "NeuronPool",
+		models: Object.keys(neuronpoolModels),
 	},
 	[providerIdentifiers.gemini]: {
 		id: providerIdentifiers.gemini,
