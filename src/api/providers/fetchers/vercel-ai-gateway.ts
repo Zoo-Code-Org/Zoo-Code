@@ -116,6 +116,13 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		description: model.description ?? model.name,
 	}
 
+	if (id === "openai/gpt-6-astra" || id === "openai/gpt-6-astra-fast") {
+		modelInfo.supportsReasoningEffort = ["low", "medium", "high", "xhigh", "max"]
+		modelInfo.requiredReasoningEffort = true
+		modelInfo.reasoningEffort = "medium"
+		modelInfo.supportsTemperature = false
+	}
+
 	if (id === "anthropic/claude-fable-5.1" || id === "anthropic/claude-fable-5") {
 		modelInfo.supportsTemperature = false
 	}
