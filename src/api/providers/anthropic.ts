@@ -101,10 +101,10 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		if (modelId === "claude-fable-5-1") {
 			if (metadata?.tool_choice === undefined) {
 				toolChoice = undefined
-			} else if (convertedToolChoice?.type === "any" || convertedToolChoice?.type === "tool") {
+			} else if (metadata.tool_choice === "required" || typeof metadata.tool_choice === "object") {
 				toolChoice = {
 					type: "auto" as const,
-					disable_parallel_tool_use: convertedToolChoice.disable_parallel_tool_use,
+					disable_parallel_tool_use: metadata.parallelToolCalls === false,
 				}
 			}
 		}
