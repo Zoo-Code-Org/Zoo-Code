@@ -93,9 +93,24 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			betas.push("context-1m-2025-08-07")
 		}
 
+		const convertedToolChoice = convertOpenAIToolChoiceToAnthropic(
+			metadata?.tool_choice,
+			metadata?.parallelToolCalls,
+		)
+		let toolChoice = convertedToolChoice
+		if (modelId === "claude-fable-5-1") {
+			if (metadata?.tool_choice === undefined && metadata?.parallelToolCalls !== false) {
+				toolChoice = undefined
+			} else if (metadata.tool_choice === "required" || typeof metadata.tool_choice === "object") {
+				toolChoice = {
+					type: "auto" as const,
+					disable_parallel_tool_use: metadata.parallelToolCalls === false,
+				}
+			}
+		}
 		const nativeToolParams = {
 			tools: convertOpenAIToolsToAnthropic(metadata?.tools ?? []),
-			tool_choice: convertOpenAIToolChoiceToAnthropic(metadata?.tool_choice, metadata?.parallelToolCalls),
+			tool_choice: toolChoice,
 		}
 
 		switch (modelId) {
@@ -107,6 +122,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			case "claude-opus-4-7":
 			case "claude-opus-4-8":
 			case "claude-opus-5":
+			case "claude-fable-5-1":
 			case "claude-fable-5":
 			case "claude-opus-4-5-20251101":
 			case "claude-opus-4-1-20250805":
@@ -179,6 +195,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 								case "claude-opus-4-7":
 								case "claude-opus-4-8":
 								case "claude-opus-5":
+								case "claude-fable-5-1":
 								case "claude-fable-5":
 								case "claude-opus-4-5-20251101":
 								case "claude-opus-4-1-20250805":

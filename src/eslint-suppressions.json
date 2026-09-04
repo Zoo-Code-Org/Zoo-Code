@@ -471,7 +471,7 @@
 	},
 	"api/transform/__tests__/gemini-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 6
+			"count": 5
 		}
 	},
 	"api/transform/__tests__/mistral-format.spec.ts": {
@@ -831,7 +831,7 @@
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 32
+			"count": 18
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
@@ -971,7 +971,7 @@
 	},
 	"core/tools/__tests__/newTaskTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 31
+			"count": 26
 		}
 	},
 	"core/tools/__tests__/readFileTool.spec.ts": {
@@ -1132,11 +1132,6 @@
 	"core/webview/webviewMessageHandler.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 5
-		}
-	},
-	"extension.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
 		}
 	},
 	"extension/__tests__/api-delete-queued-message.spec.ts": {

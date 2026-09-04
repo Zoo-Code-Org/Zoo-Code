@@ -52,14 +52,12 @@ const McpToolRow = ({ tool, serverName, serverSource, alwaysAllowMcp, isInChatCo
 						className={`codicon codicon-symbol-method mr-2 flex-shrink-0 ${
 							isToolEnabled
 								? "text-vscode-symbolIcon-methodForeground"
-								: "text-vscode-descriptionForeground opacity-60"
+								: "text-vscode-descriptionForeground"
 						}`}></span>
 					<StandardTooltip content={tool.name}>
 						<span
 							className={`font-medium truncate ${
-								isToolEnabled
-									? "text-vscode-foreground"
-									: "text-vscode-descriptionForeground opacity-60"
+								isToolEnabled ? "text-vscode-foreground" : "text-vscode-descriptionForeground"
 							}`}>
 							{tool.name}
 						</span>
@@ -98,19 +96,14 @@ const McpToolRow = ({ tool, serverName, serverSource, alwaysAllowMcp, isInChatCo
 				)}
 			</div>
 			{tool.description && (
-				<div
-					className={`mt-1 text-xs text-vscode-descriptionForeground ${
-						isToolEnabled ? "opacity-80" : "opacity-40"
-					}`}>
-					{tool.description}
-				</div>
+				<div className="mt-1 text-xs text-vscode-descriptionForeground">{tool.description}</div>
 			)}
 			{isToolEnabled &&
 				tool.inputSchema &&
 				"properties" in tool.inputSchema &&
 				Object.keys(tool.inputSchema.properties as Record<string, any>).length > 0 && (
 					<div className="mt-2 text-xs border border-vscode-panel-border rounded p-2">
-						<div className="mb-1 text-[11px] uppercase opacity-80 text-vscode-descriptionForeground">
+						<div className="mb-1 text-[11px] uppercase text-vscode-descriptionForeground">
 							{t("mcp:tool.parameters")}
 						</div>
 						{Object.entries(tool.inputSchema.properties as Record<string, any>).map(
@@ -127,7 +120,7 @@ const McpToolRow = ({ tool, serverName, serverSource, alwaysAllowMcp, isInChatCo
 											{paramName}
 											{isRequired && <span className="text-vscode-errorForeground">*</span>}
 										</code>
-										<span className="opacity-80 break-words text-vscode-descriptionForeground">
+										<span className="break-words text-vscode-descriptionForeground">
 											{schema.description || t("mcp:tool.noDescription")}
 										</span>
 									</div>

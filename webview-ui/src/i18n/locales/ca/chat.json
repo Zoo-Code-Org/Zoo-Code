@@ -344,9 +344,9 @@
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Novetats:",
-			"highlight1": "Accés als fitxers més segur — utilitza llistes de permisos de lectura i escriptura separades per controlar a quines rutes pot accedir Zoo Code.",
-			"highlight2": "Més models per triar — GLM 5.3 ja està disponible mitjançant Z.ai, i Gemini 3.5 Flash Lite i Gemini 3.1 Flash Lite s'han afegit al proveïdor Gemini.",
-			"highlight3": "Fluxos de treball quotidians més fiables — les millores reforcen la recuperació i l'historial de tasques, l'streaming i l'ús d'eines dels proveïdors, la importació de configuració i la llegibilitat en diferents temes de l'IDE."
+			"highlight1": "🤖 Prova GLM-5.3-Flash i Gemini 3.7 Flash amb un 50 % de descompte durant 2 setmanes, i MiniMax M3 totalment GRATUÏT per als usuaris amb saldo al nou Zoo Gateway: <modelsLink>https://zoocode.dev/models</modelsLink>",
+			"highlight2": "Model nou — GLM-5.3-Flash ja està disponible mitjançant Z AI.",
+			"highlight3": "Correccions de fiabilitat — aprovacions de subtasques restaurades, sortida d'eines buida de Vertex Gemini 3.7, errors d'inici del terminal, errors del servei en segon pla i la llegibilitat dels temes."
 		},
 		"cloudAgents": {
 			"heading": "Novetats al núvol:",
