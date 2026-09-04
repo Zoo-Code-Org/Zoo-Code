@@ -292,21 +292,6 @@ export function parseVitestTestFiles(report, runRoot) {
 	]
 }
 
-export function preferDirectTestFiles(testFiles, sourceFiles) {
-	const sourceNames = sourceFiles.map((sourceFile) => path.posix.basename(sourceFile, path.posix.extname(sourceFile)))
-	const direct = testFiles.filter((testFile) => {
-		const testName = path.posix.basename(testFile)
-		return sourceNames.some(
-			(sourceName) =>
-				(testName.startsWith(`${sourceName}.`) ||
-					testName.startsWith(`${sourceName}-`) ||
-					testName.startsWith(`${sourceName.replaceAll("-", "")}-`)) &&
-				/\.(?:test|spec)(?:\.[^.]+)?\.[cm]?[jt]sx?$/.test(testName),
-		)
-	})
-	return direct.length > 0 ? direct : testFiles
-}
-
 export function resolveVitestBinary(repoRoot, packageEntry) {
 	const packageRoot = path.join(repoRoot, packageEntry.root)
 	const runRoot = path.join(repoRoot, packageEntry.runRoot ?? packageEntry.root)
@@ -350,10 +335,7 @@ export function discoverRelatedTestFiles(repoRoot, packageEntry, reportDirectory
 		)
 	}
 
-	const testFiles = preferDirectTestFiles(
-		parseVitestTestFiles(JSON.parse(fs.readFileSync(outputFile, "utf8")), runRoot),
-		sourceFiles,
-	)
+	const testFiles = parseVitestTestFiles(JSON.parse(fs.readFileSync(outputFile, "utf8")), runRoot)
 	if (testFiles.length === 0)
 		throw new Error(`${packageEntry.id} has no tests related to the changed executable lines`)
 	return testFiles
