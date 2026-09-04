@@ -146,13 +146,16 @@ describe("NeuronPoolHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: neuronpoolApiKey }))
 	})
 
-	it("should fall back to apiKey when neuronpoolApiKey is omitted", () => {
-		new NeuronPoolHandler({ apiKey: "fallback-api-key" })
-		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "fallback-api-key" }))
+	it("does not use a generic apiKey as the NeuronPool credential", () => {
+		vi.mocked(OpenAI).mockClear()
+		expect(() => new NeuronPoolHandler({ apiKey: "sk-ant-should-not-leak" })).toThrow("API key is required")
+		expect(OpenAI).not.toHaveBeenCalled()
 	})
 
-	it("should throw when neither neuronpoolApiKey nor apiKey is set", () => {
+	it("should throw when neuronpoolApiKey is unset", () => {
+		vi.mocked(OpenAI).mockClear()
 		expect(() => new NeuronPoolHandler({})).toThrow("API key is required")
+		expect(OpenAI).not.toHaveBeenCalled()
 	})
 
 	it("sets the provider name to NeuronPool", () => {
@@ -193,7 +196,7 @@ describe("NeuronPoolHandler", () => {
 		expect(result).toBe(expectedResponse)
 	})
 
-	it("should handle errors in completePrompt", async () => {
+	it("should handle errors in completePrompt", () => {
 		const errorMessage = "NeuronPool API error"
 		mockCreate.mockRejectedValueOnce(new Error(errorMessage))
 		await expect(handler.completePrompt("test prompt")).rejects.toThrow()

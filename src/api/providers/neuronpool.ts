@@ -4,6 +4,7 @@ import type { ApiHandlerOptions } from "../../shared/api"
 
 import { BaseOpenAiCompatibleProvider } from "./base-openai-compatible-provider"
 
+/** Live Worker OpenAI-compatible origin (`…/v1`). */
 export function neuronpoolDefaultBaseUrl(): string {
 	return ["https://neuronpool.damnknee.workers.dev", "v1"].join("/")
 }
@@ -49,13 +50,14 @@ export function resolveNeuronpoolBaseUrl(raw?: string): string {
 	throw new Error("NeuronPool base URL must use HTTPS")
 }
 
+/** OpenAI-compatible handler. Uses only `neuronpoolApiKey` — never the shared Anthropic `apiKey`. */
 export class NeuronPoolHandler extends BaseOpenAiCompatibleProvider<NeuronPoolModelId> {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
 			providerName: "NeuronPool",
 			baseURL: resolveNeuronpoolBaseUrl(options.neuronpoolBaseUrl),
-			apiKey: options.neuronpoolApiKey ?? options.apiKey,
+			apiKey: options.neuronpoolApiKey,
 			defaultProviderModelId: neuronpoolDefaultModelId,
 			providerModels: neuronpoolModels,
 			defaultTemperature: 0,
