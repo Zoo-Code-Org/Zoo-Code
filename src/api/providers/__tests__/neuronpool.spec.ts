@@ -5,7 +5,7 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import { type NeuronPoolModelId, neuronpoolDefaultModelId, neuronpoolModels } from "@roo-code/types"
 
-import { NeuronPoolHandler, NEURONPOOL_DEFAULT_BASE_URL } from "../neuronpool"
+import { NeuronPoolHandler, NEURONPOOL_DEFAULT_BASE_URL, stripTrailingSlashes } from "../neuronpool"
 
 const mockCreate = vi.fn()
 
@@ -20,6 +20,17 @@ vi.mock("openai", () => ({
 		}
 	}),
 }))
+
+describe("stripTrailingSlashes", () => {
+	it("leaves a URL without trailing slashes unchanged", () => {
+		expect(stripTrailingSlashes(NEURONPOOL_DEFAULT_BASE_URL)).toBe(NEURONPOOL_DEFAULT_BASE_URL)
+	})
+
+	it("strips one or many trailing slashes without regex backtracking", () => {
+		expect(stripTrailingSlashes("https://example.test/v1/")).toBe("https://example.test/v1")
+		expect(stripTrailingSlashes("https://example.test/v1" + "/".repeat(64))).toBe("https://example.test/v1")
+	})
+})
 
 describe("NeuronPoolHandler", () => {
 	let handler: NeuronPoolHandler
