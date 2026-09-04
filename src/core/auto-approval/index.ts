@@ -1,5 +1,5 @@
 import {
-	hasUsableAnswer,
+	firstUsableSuggestion,
 	type ClineAsk,
 	type ClineSayTool,
 	type McpServerUse,
@@ -180,13 +180,11 @@ export async function checkAutoApproval({
 	if (ask === "followup") {
 		if (state.alwaysAllowFollowupQuestions === true) {
 			try {
-				const suggestions = (JSON.parse(text || "{}") as FollowUpData).suggest ?? []
-
 				// A missing or blank answer would auto-approve the follow-up with no
 				// content after the timeout (issue #1226), so pick the first suggestion
 				// with a usable answer. This mirrors the webview's visible-suggestions
 				// filter in FollowUpSuggest.
-				const suggestion = suggestions.find(hasUsableAnswer)
+				const suggestion = firstUsableSuggestion((JSON.parse(text || "{}") as FollowUpData).suggest)
 
 				if (
 					suggestion &&

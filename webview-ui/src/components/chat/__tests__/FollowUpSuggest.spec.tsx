@@ -771,5 +771,47 @@ describe("FollowUpSuggest", () => {
 			// Auto-approval must not select a blank suggestion.
 			expect(mockOnSuggestionClick).not.toHaveBeenCalled()
 		})
+
+		it("does not call the cancel callback on unmount when no usable suggestion starts the countdown", () => {
+			const { unmount } = renderWithMalformedSuggestions([{ answer: "" }])
+
+			unmount()
+
+			// No countdown started, so unmounting must not cancel a backend timeout.
+			expect(mockOnCancelAutoApproval).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("stale visible-suggestions memo (issue #1226)", () => {
+		it("re-renders the suggestion list when the suggestions prop changes", () => {
+			const { rerender } = renderWithTestProviders(
+				<FollowUpSuggest
+					suggestions={[{ answer: "First" }]}
+					onSuggestionClick={mockOnSuggestionClick}
+					ts={123}
+					onCancelAutoApproval={mockOnCancelAutoApproval}
+				/>,
+				defaultTestState,
+			)
+
+			expect(screen.getByText("First")).toBeInTheDocument()
+
+			// A stale memo would keep rendering the original suggestion.
+			rerender(
+				<TestExtensionStateProvider value={defaultTestState}>
+					<TooltipProvider>
+						<FollowUpSuggest
+							suggestions={[{ answer: "Second" }]}
+							onSuggestionClick={mockOnSuggestionClick}
+							ts={123}
+							onCancelAutoApproval={mockOnCancelAutoApproval}
+						/>
+					</TooltipProvider>
+				</TestExtensionStateProvider>,
+			)
+
+			expect(screen.getByText("Second")).toBeInTheDocument()
+			expect(screen.queryByText("First")).not.toBeInTheDocument()
+		})
 	})
 })

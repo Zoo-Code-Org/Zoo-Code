@@ -54,15 +54,17 @@ vi.mock("../ChatRow", () => ({
 	default: function MockChatRow({
 		message,
 		onSuggestionClick,
+		isFollowUpAnswered,
 	}: {
 		message: ClineMessage
 		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
+		isFollowUpAnswered?: boolean
 	}) {
 		if (message.type === "ask" && message.ask === "followup" && message.text) {
 			try {
 				const followUp = JSON.parse(message.text) as { suggest?: SuggestionItem[] }
 				return (
-					<div data-testid="chat-row">
+					<div data-testid="chat-row" data-answered={isFollowUpAnswered === true ? "true" : "false"}>
 						{followUp.suggest?.map((suggestion) => (
 							<button
 								key={suggestion.answer}
@@ -1505,6 +1507,8 @@ describe("ChatView - Follow-up Suggestions", () => {
 
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
+		// The ignored click must not mark the follow-up as answered either.
+		expect(suggestionButtons[0].closest('[data-testid="chat-row"]')?.getAttribute("data-answered")).toBe("false")
 
 		// The valid suggestion still sends its answer.
 		fireEvent.click(suggestionButtons[1])
@@ -1568,6 +1572,47 @@ describe("ChatView - Follow-up Suggestions", () => {
 		fireEvent.change(input, { target: { value: "" } })
 		fireEvent.click(suggestion, { shiftKey: true })
 		await waitFor(() => expect(input.value).toBe("Copy me"))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
+	})
+
+	it("trims a padded suggestion answer before appending it on shift-click (issue #1226)", async () => {
+		const { getByTestId, getByRole } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{
+					type: "say",
+					say: "task",
+					ts: Date.now() - 1000,
+					text: "Initial task",
+				},
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({
+						question: "Pick one?",
+						suggest: [{ answer: "  Padded  " }],
+					}),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Padded" }))
+		vscodePostMessageMock.cleanup()
+
+		const input = getByTestId("chat-textarea").querySelector("input")
+		if (!input) {
+			throw new Error("expected the chat input to be rendered")
+		}
+
+		// The padded answer reaches the input trimmed (issue #1226).
+		fireEvent.click(suggestion, { shiftKey: true })
+
+		await waitFor(() => expect(input.value).toBe("Padded"))
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "askResponse" }))
 	})
 })

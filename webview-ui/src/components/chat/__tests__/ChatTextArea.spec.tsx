@@ -1347,5 +1347,154 @@ describe("ChatTextArea", () => {
 			// The URL is inserted at cursor position 0, followed by a space.
 			expect(defaultProps.setInputValue).toHaveBeenCalledWith("https://example.com visit ")
 		})
+
+		it("uses the re-rendered input when inserting command text", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="hello " />)
+			rerender(<ChatTextArea {...defaultProps} inputValue="updated " />)
+			// Reset the DOM cursor: JSDOM moves the selection to the end of a
+			// re-rendered value, so anchor the insertion at position 0 explicitly.
+			getTextarea(container).setSelectionRange(0, 0)
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "insertTextIntoTextarea", text: "/command" } }),
+				)
+			})
+
+			// A stale effect would still insert into the original "hello " value.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("/command updated ")
+		})
+
+		it("posts the trimmed input on enhance and follows a re-rendered value", () => {
+			const { rerender } = render(<ChatTextArea {...defaultProps} inputValue="  Test prompt  " />)
+
+			fireEvent.click(getEnhancePromptButton())
+			// Surrounding whitespace must not reach the extension.
+			expect(mockPostMessage).toHaveBeenCalledWith({ type: "enhancePrompt", text: "Test prompt" })
+
+			rerender(<ChatTextArea {...defaultProps} inputValue="updated" />)
+			fireEvent.click(getEnhancePromptButton())
+			// A stale handler would re-post the original "Test prompt" value.
+			expect(mockPostMessage).toHaveBeenLastCalledWith({ type: "enhancePrompt", text: "updated" })
+		})
+
+		it("keeps whitespace-only input hidden from the send button and placeholder", () => {
+			const getSendButton = (container: HTMLElement) =>
+				Array.from(container.querySelectorAll("button")).find((b) => b.querySelector(".lucide-send-horizontal"))
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="   " />)
+
+			// Whitespace-only input has no sendable content, and the placeholder only
+			// renders for a truly empty value.
+			expect(getSendButton(container)).toHaveClass("opacity-0")
+			expect(container.querySelector(".left-2.z-30")).toBeNull()
+
+			// A stale content memo would keep the send button hidden for real text.
+			rerender(<ChatTextArea {...defaultProps} inputValue="Text" />)
+			expect(getSendButton(container)).toHaveClass("opacity-100")
+		})
+
+		it("moves the cursor to the end of the mention on Backspace at the end of the input", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="hello @problems " />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(16, 16)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// Nothing follows the trailing space, so the space is not deleted; the
+			// cursor moves to the end of the mention instead.
+			expect(textarea.selectionStart).toBe(15)
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("does not intercept Backspace when a word follows the mention", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="@problems done " />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(15, 15)
+			fireEvent.mouseUp(textarea)
+			fireEvent.keyDown(textarea, { key: "Backspace" })
+
+			// The mention is not at the end of the inspected prefix, so the
+			// selection is untouched.
+			expect(textarea.selectionStart).toBe(15)
+			expect(defaultProps.setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("applies the pending cursor once the pasted value commits", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="visit " />)
+			const textarea = getTextarea(container)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+				// Commit the value the paste handler produced so the pending cursor
+				// (0 + 19 + 1 = 20) is applied against the full 26-char value.
+				rerender(<ChatTextArea {...defaultProps} inputValue="https://example.com visit " />)
+			})
+
+			// A stale effect would never re-apply the intended cursor position.
+			expect(defaultProps.setInputValue).toHaveBeenLastCalledWith("https://example.com visit ")
+			expect(textarea.selectionStart).toBe(20)
+		})
+
+		it("inserts a pasted URL at the cursor and tracks re-rendered input", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="visit this" />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(6, 6)
+			fireEvent.mouseUp(textarea)
+
+			const pasteEvent = new window.Event("paste", { bubbles: true, cancelable: true })
+			Object.defineProperty(pasteEvent, "clipboardData", {
+				value: { items: [], getData: () => "https://example.com" },
+			})
+
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+
+			// The URL splits "visit this" at the cursor instead of reusing the whole
+			// value for the tail.
+			expect(defaultProps.setInputValue).toHaveBeenLastCalledWith("visit https://example.com this")
+
+			rerender(<ChatTextArea {...defaultProps} inputValue="changed " />)
+			textarea.setSelectionRange(0, 0)
+			fireEvent.mouseUp(textarea)
+			act(() => {
+				textarea.dispatchEvent(pasteEvent)
+			})
+			// A stale paste handler would repeat the original "visit this" value.
+			expect(defaultProps.setInputValue).toHaveBeenLastCalledWith("https://example.com changed ")
+		})
+
+		it("re-highlights mentions after the input changes", () => {
+			const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+			rerender(<ChatTextArea {...defaultProps} inputValue="@problems" />)
+
+			// A stale highlight effect would keep the empty highlight from the
+			// initial render.
+			expect(container.querySelector('[data-testid="highlight-layer"]')?.innerHTML).toContain("<mark")
+		})
+
+		it("inserts a dropped path at the cursor and preserves the tail", () => {
+			const { container } = render(<ChatTextArea {...defaultProps} inputValue="abcdef" />)
+			const textarea = getTextarea(container)
+
+			textarea.setSelectionRange(3, 3)
+			fireEvent.mouseUp(textarea)
+
+			fireEvent.drop(container.querySelector(".chat-text-area")!, {
+				dataTransfer: { getData: () => "/some/path", files: [] },
+				preventDefault: vi.fn(),
+			})
+
+			// The remainder after the cursor ("def") is preserved.
+			expect(defaultProps.setInputValue).toHaveBeenCalledWith("abc/some/path def")
+		})
 	})
 })

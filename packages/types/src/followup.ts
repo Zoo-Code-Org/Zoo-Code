@@ -54,7 +54,17 @@ export const getSuggestionMode = (mode: unknown): string | undefined => {
  */
 export const hasUsableAnswer = (
 	suggestion: { answer?: unknown } | null | undefined,
-): suggestion is { answer: string } => typeof suggestion?.answer === "string" && suggestion.answer.trim().length > 0
+): suggestion is SuggestionItem & { answer: string } =>
+	typeof suggestion?.answer === "string" && suggestion.answer.trim().length > 0
+
+/**
+ * The first suggestion with a usable answer, if any.
+ *
+ * Shared by the extension-host auto-approval (`checkAutoApproval`) and the
+ * webview so the "first usable suggestion" rule stays in one place.
+ */
+export const firstUsableSuggestion = (suggestions?: SuggestionItem[] | null): SuggestionItem | undefined =>
+	(suggestions ?? []).find((s) => hasUsableAnswer(s))
 
 /**
  * Zod schema for SuggestionItem

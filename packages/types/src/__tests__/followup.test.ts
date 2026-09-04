@@ -1,4 +1,10 @@
-import { followUpDataSchema, hasUsableAnswer, suggestionItemSchema, type SuggestionItem } from "../followup.js"
+import {
+	firstUsableSuggestion,
+	followUpDataSchema,
+	hasUsableAnswer,
+	suggestionItemSchema,
+	type SuggestionItem,
+} from "../followup.js"
 
 describe("hasUsableAnswer", () => {
 	it("accepts a non-blank string answer", () => {
@@ -29,6 +35,19 @@ describe("hasUsableAnswer", () => {
 	it("rejects a null or undefined suggestion item", () => {
 		expect(hasUsableAnswer(null)).toBe(false)
 		expect(hasUsableAnswer(undefined)).toBe(false)
+	})
+})
+
+describe("firstUsableSuggestion", () => {
+	it("returns undefined for missing or empty suggestions", () => {
+		expect(firstUsableSuggestion(undefined)).toBeUndefined()
+		expect(firstUsableSuggestion(null)).toBeUndefined()
+		expect(firstUsableSuggestion([])).toBeUndefined()
+	})
+
+	it("skips blank or missing answers and returns the first usable item", () => {
+		const suggestions: SuggestionItem[] = [{}, { answer: "   " }, { answer: "  ok  " }]
+		expect(firstUsableSuggestion(suggestions)).toEqual({ answer: "  ok  " })
 	})
 })
 
