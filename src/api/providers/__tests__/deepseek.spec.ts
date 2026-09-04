@@ -256,6 +256,7 @@ describe("DeepSeekHandler", () => {
 			})
 			const model = visionHandler.getModel()
 
+			expect(model.id).toBe("deepseek-v4-flash-vision-exp")
 			expect(model.info).toMatchObject({
 				maxTokens: 384_000,
 				contextWindow: 1_000_000,
@@ -741,8 +742,33 @@ describe("DeepSeekHandler", () => {
 				},
 				{
 					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "disable",
+					mappedReasoningEffort: undefined,
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "low",
+					mappedReasoningEffort: "low",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
 					rawReasoningEffort: "medium",
 					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "high",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "xhigh",
+					mappedReasoningEffort: "high",
+				},
+				{
+					modelId: "deepseek-v4-flash-vision-exp",
+					rawReasoningEffort: "max",
+					mappedReasoningEffort: "max",
 				},
 			]
 
