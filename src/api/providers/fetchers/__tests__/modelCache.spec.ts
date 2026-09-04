@@ -1308,6 +1308,65 @@ describe("auth session cache", () => {
 		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
+	it("in-flight fetch started before sign-out does not repopulate cache when a new fetch starts after sign-out", async () => {
+		// Race condition: fetch A starts → sign-out → fetch B starts → fetch A resolves.
+		// Fetch A must NOT write back its stale pre-sign-out data because the generation counter
+		// was bumped by sign-out. This test simulates the race using deferred promises.
+		const staleModels: ModelRecord = {
+			"stale/model": { maxTokens: 1000, contextWindow: 1000, supportsPromptCache: false },
+		}
+		const freshModelsAfterSignOut: ModelRecord = {
+			"fresh/model": { maxTokens: 2000, contextWindow: 2000, supportsPromptCache: false },
+		}
+
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		let resolveFetchA!: (value: ZooGatewayResult) => void
+		const fetchAPromise = new Promise<ZooGatewayResult>((resolve) => {
+			resolveFetchA = resolve
+		})
+
+		let resolveFetchB!: (value: ZooGatewayResult) => void
+		const fetchBPromise = new Promise<ZooGatewayResult>((resolve) => {
+			resolveFetchB = resolve
+		})
+
+		// First call returns fetchAPromise (hangs until we resolve)
+		// Second call returns fetchBPromise (hangs until we resolve)
+		freshMockGetZooGatewayModels.mockReturnValueOnce(fetchAPromise).mockReturnValueOnce(fetchBPromise)
+
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		// 1. Start fetch A (pre-sign-out)
+		const fetchAResult = freshGetModels(options)
+
+		// 2. Sign out — clears cache and bumps generation
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+
+		// 3. Start fetch B (post-sign-out) — this registers a NEW in-flight promise
+		const fetchBResult = freshGetModels(options)
+
+		// 4. Resolve fetch A with stale data — it should NOT write to cache
+		resolveFetchA(zooGatewayOk(staleModels))
+		await fetchAResult
+
+		// 5. Resolve fetch B with fresh data — it SHOULD write to cache
+		resolveFetchB(zooGatewayOk(freshModelsAfterSignOut))
+		const result = await fetchBResult
+
+		// The result should be the fresh post-sign-out data, not the stale pre-sign-out data
+		expect(result).toEqual(freshModelsAfterSignOut)
+
+		// Verify a subsequent getModels call returns the fresh data (proving fetch A didn't overwrite)
+		// Don't set a new mock — the call should be served from cache
+		const subsequent = await freshGetModels(options)
+		expect(subsequent).toEqual(freshModelsAfterSignOut)
+		// Should be served from cache, not trigger a new fetch (only 2 fetches: A and B)
+		expect(freshMockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+
+		// Clean up — clear cache so subsequent tests don't see stale entries
+		freshClearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+	})
+
 	it("returns cached entry within TTL without hitting the provider", async () => {
 		// Kills: AUTH_SESSION_TTL_MS arithmetic mutant (5*60/1000 would expire in <1ms)
 		vi.useFakeTimers()
@@ -1378,9 +1437,7 @@ describe("auth session cache", () => {
 			await freshGetModels(optionsA)
 
 			// The etag from the prior fetch must have been sent (entry was not pruned)
-			expect(freshMockGetZooGatewayModels).toHaveBeenCalledWith(
-				expect.objectContaining({ ifNoneMatch: '"v1"' }),
-			)
+			expect(freshMockGetZooGatewayModels).toHaveBeenCalledWith(expect.objectContaining({ ifNoneMatch: '"v1"' }))
 		} finally {
 			vi.useRealTimers()
 		}
