@@ -555,6 +555,125 @@ describe("writeToFileTool", () => {
 			await executeWriteFileTool({}, { fileExists: false, isPartial: true })
 			expect(mockCline.ask).toHaveBeenCalledTimes(2)
 		})
+
+		it("does not treat a changed path between deltas as stabilized", async () => {
+			// Delta 1 streams "alpha.txt"; delta 2 streams "beta.txt" for the same task. The path changed
+			// between deltas, so it must not count as stabilized and no partial `tool` ask may be issued for
+			// the still-changing second path.
+			await executeWriteFileTool({ path: "alpha.txt" }, { isPartial: true })
+			await executeWriteFileTool({ path: "beta.txt" }, { isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+		})
+
+		it("does not issue a partial ask when content is undefined after path stabilization", async () => {
+			// Delta 1 stabilizes the path. Delta 2 repeats it but carries no content yet: the
+			// `newContent === undefined` clause must short-circuit the ask even though the path itself has
+			// stabilized.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({ content: undefined }, { isPartial: true })
+
+			expect(mockCline.ask).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).not.toHaveBeenCalled()
+		})
+
+		it("does not reopen an already open diff view during streaming", async () => {
+			// The diff view is already open for this task (isEditing). A stabilized delta must still update
+			// the streamed content but must not call open() again -- reopening would discard the view's
+			// current state.
+			mockCline.diffViewProvider.isEditing = true
+
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(mockCline.diffViewProvider.open).not.toHaveBeenCalled()
+			expect(mockCline.diffViewProvider.update).toHaveBeenCalledWith(testContent, false)
+		})
+
+		it("logs the streaming diff view failure with the write_to_file context", async () => {
+			// The catch arm logs a context-specific message before swallowing the error (execute() reports
+			// the authoritative one). The message must keep the write_to_file context so the log is
+			// actionable.
+			mockCline.diffViewProvider.open.mockRejectedValue(new Error("EACCES: permission denied"))
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				await executeWriteFileTool({}, { isPartial: true })
+				await executeWriteFileTool({}, { isPartial: true })
+
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					"Error streaming write_to_file diff view:",
+					expect.anything(),
+				)
+			} finally {
+				consoleErrorSpy.mockRestore()
+			}
+		})
+	})
+
+	describe("path stabilization predicate", () => {
+		// The predicate is exercised directly (it is private) because not all of its branches are
+		// observable through handlePartial(): an undefined path reaches the same early return either
+		// way, so the clause-by-clause behavior must be pinned at the predicate level.
+		function makeState(lastSeenPartialPath: string | undefined) {
+			return {
+				lastSeenPartialPath,
+				streamFailed: false,
+				task: mockCline,
+				abortCleanup: () => {},
+			}
+		}
+
+		it("reports a first delta as not stabilized and records the seen path", () => {
+			const state = makeState(undefined)
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "a.txt")).toBe(false)
+			expect(state.lastSeenPartialPath).toBe("a.txt")
+		})
+
+		it("reports a repeated path as stabilized", () => {
+			const state = makeState("a.txt")
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "a.txt")).toBe(true)
+		})
+
+		it("reports a changed path as not stabilized", () => {
+			const state = makeState("a.txt")
+
+			expect(writeToFileTool["hasPathStabilizedForTask"](state, "b.txt")).toBe(false)
+			expect(state.lastSeenPartialPath).toBe("b.txt")
+		})
+	})
+
+	describe("resetPartialState", () => {
+		it("resets the base partial path and detaches every task's abort listener", async () => {
+			let abortCleanup: (() => void) | undefined
+			mockCline.once.mockImplementation((event: RooCodeEventName, listener: () => void) => {
+				if (event === RooCodeEventName.TaskAborted) {
+					abortCleanup = listener
+				}
+				return mockCline
+			})
+
+			// Seed one per-task state with an abort listener attached.
+			await executeWriteFileTool({}, { isPartial: true })
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+			expect(abortCleanup).toBeTypeOf("function")
+
+			// The base-class singleton field is reset by super.resetPartialState().
+			writeToFileTool["lastSeenPartialPath"] = "stale-path"
+			writeToFileTool.resetPartialState()
+
+			expect(writeToFileTool["lastSeenPartialPath"]).toBeUndefined()
+			expect(mockCline.off).toHaveBeenCalledWith(RooCodeEventName.TaskAborted, abortCleanup)
+
+			// The per-task map was cleared too: a fresh delta sequence starts un-stabilized, so no
+			// second partial ask is issued.
+			await executeWriteFileTool({}, { isPartial: true })
+			expect(mockCline.ask).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("user interaction", () => {
