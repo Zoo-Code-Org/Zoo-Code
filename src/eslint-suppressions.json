@@ -26,7 +26,7 @@
 	},
 	"__tests__/history-resume-delegation.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 72
+			"count": 70
 		}
 	},
 	"__tests__/migrateSettings.spec.ts": {
@@ -1026,7 +1026,7 @@
 	},
 	"core/webview/ClineProvider.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 12
+			"count": 8
 		}
 	},
 	"core/webview/__tests__/ClineProvider.apiHandlerRebuild.spec.ts": {
@@ -1716,7 +1716,7 @@
 	},
 	"utils/safeWriteJson.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 4
+			"count": 3
 		}
 	},
 	"utils/tts.ts": {

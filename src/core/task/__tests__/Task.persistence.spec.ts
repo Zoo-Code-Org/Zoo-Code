@@ -387,6 +387,74 @@ describe("Task persistence", () => {
 		})
 	})
 
+	describe("overwrite persistence options", () => {
+		it.each([
+			["omitted", undefined],
+			["true", true],
+		] as const)("persists API history when persist is %s", async (_label, persist) => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "replacement" }] }]
+
+			await task.overwriteApiConversationHistory(messages, persist === undefined ? {} : { persist })
+
+			expect(task.apiConversationHistory).toBe(messages)
+			expect(mockSaveApiMessages).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not persist API history when persist is false", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const messages = [{ role: "user" as const, content: [{ type: "text" as const, text: "replacement" }] }]
+
+			await task.overwriteApiConversationHistory(messages, { persist: false })
+
+			expect(task.apiConversationHistory).toBe(messages)
+			expect(mockSaveApiMessages).not.toHaveBeenCalled()
+		})
+
+		it.each([
+			["omitted", undefined],
+			["true", true],
+		] as const)("persists Cline messages when persist is %s", async (_label, persist) => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const messages = [{ type: "say" as const, say: "text" as const, text: "replacement", ts: 1 }]
+
+			await task.overwriteClineMessages(messages, persist === undefined ? {} : { persist })
+
+			expect(task.clineMessages).toBe(messages)
+			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
+		})
+
+		it("does not persist Cline messages when persist is false", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const messages = [{ type: "say" as const, say: "text" as const, text: "replacement", ts: 1 }]
+
+			await task.overwriteClineMessages(messages, { persist: false })
+
+			expect(task.clineMessages).toBe(messages)
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+		})
+	})
+
 	// ── saveClineMessages ────────────────────────────────────────────────
 
 	describe("saveClineMessages", () => {
@@ -495,6 +563,20 @@ describe("Task persistence", () => {
 	// ── abortTask history hydration guard ─────────────────────────────────
 
 	describe("abortTask", () => {
+		it("does not mark a normally aborted task as abandoned", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "New task",
+				startTask: false,
+			})
+
+			await task.abortTask()
+
+			expect(task.abort).toBe(true)
+			expect(task.abandoned).toBe(false)
+		})
+
 		it("skips persistence when a history task aborts before messages load", async () => {
 			const messagesDeferred = createDeferred<ClineMessage[]>()
 			mockReadTaskMessages.mockReturnValueOnce(messagesDeferred.promise)
@@ -585,6 +667,23 @@ describe("Task persistence", () => {
 
 			expect(saveClineMessagesSpy).toHaveBeenCalledTimes(1)
 			expect(mockSaveTaskMessages).toHaveBeenCalledTimes(1)
+		})
+
+		it("can abort a completed handoff without persisting stale messages", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "Completed delegated child",
+				startTask: false,
+			})
+			const saveClineMessagesSpy = vi.spyOn(getTaskPersistenceAccess(task), "saveClineMessages")
+
+			await task.abortTask(true, { saveMessages: false })
+
+			expect(saveClineMessagesSpy).not.toHaveBeenCalled()
+			expect(mockSaveTaskMessages).not.toHaveBeenCalled()
+			expect(task.abort).toBe(true)
+			expect(task.abandoned).toBe(true)
 		})
 	})
 

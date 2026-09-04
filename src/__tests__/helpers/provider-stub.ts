@@ -6,17 +6,22 @@ type ProviderStubFields = {
 	delegationTransitionLocks?: Map<string, Promise<void>>
 	cancelledDelegationChildIds?: Set<string>
 	log?: ReturnType<typeof vi.fn>
-	taskHistoryStore?: { get: (id: string) => unknown }
+	taskHistoryStore?: {
+		get: (id: string) => unknown
+		withTaskFileLock?: <T>(id: string, callback: () => Promise<T>) => Promise<T>
+	}
 	taskRegistry?: TaskRegistry
 	clineStack?: Task[]
 	tasks?: Task[]
 	runDelegationTransition?: unknown
+	runLockedDelegationTransition?: unknown
 	removeClineFromStack?: unknown
 	evictCurrentTask?: unknown
 }
 
 type PrivateProviderMethods = {
 	runDelegationTransition: (this: unknown, ...args: unknown[]) => unknown
+	runLockedDelegationTransition: (this: unknown, ...args: unknown[]) => unknown
 	removeClineFromStack: (this: unknown, ...args: unknown[]) => unknown
 	evictCurrentTask: (this: unknown, ...args: unknown[]) => unknown
 }
@@ -38,6 +43,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	s.cancelledDelegationChildIds ??= new Set()
 	s.log ??= vi.fn()
 	s.taskHistoryStore ??= { get: () => undefined }
+	s.taskHistoryStore.withTaskFileLock ??= async (_id, callback) => callback()
 
 	// Convert legacy clineStack array into a TaskRegistry
 	if (!s.taskRegistry) {
@@ -49,6 +55,7 @@ export function makeProviderStub<T extends object>(stub: T): ClineProvider {
 	delete s.clineStack
 
 	s.runDelegationTransition ??= proto.runDelegationTransition.bind(s)
+	s.runLockedDelegationTransition ??= proto.runLockedDelegationTransition.bind(s)
 	s.removeClineFromStack ??= proto.removeClineFromStack.bind(s)
 	s.evictCurrentTask ??= proto.evictCurrentTask.bind(s)
 	return s as unknown as ClineProvider

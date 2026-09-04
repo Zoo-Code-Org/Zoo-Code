@@ -25,6 +25,47 @@ export interface SafeWriteJsonOptions {
 	 * cannot be parsed.
 	 */
 	merge?: (existing: unknown, incoming: unknown) => unknown
+
+	/** The caller already holds this file's lock. Internal use only. */
+	lockAcquired?: boolean
+}
+
+export async function lockJsonFile(filePath: string): Promise<() => Promise<void>> {
+	const absoluteFilePath = path.resolve(filePath)
+	const dirPath = path.dirname(absoluteFilePath)
+	let compromisedError: Error | undefined
+
+	await fs.mkdir(dirPath, { recursive: true })
+	await fs.access(dirPath)
+
+	const release = await lockfile.lock(absoluteFilePath, {
+		stale: LOCK_STALE_MS,
+		update: 10000,
+		realpath: false,
+		retries: {
+			retries: 5,
+			factor: 2,
+			minTimeout: 100,
+			maxTimeout: 1000,
+		},
+		onCompromised: (err) => {
+			if (!compromisedError) {
+				compromisedError = err
+				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
+			}
+		},
+	})
+
+	return async () => {
+		try {
+			await release()
+		} catch (releaseError) {
+			if (!compromisedError) throw releaseError
+			console.error(`Failed to release compromised lock for ${absoluteFilePath}:`, releaseError)
+		}
+
+		if (compromisedError) throw compromisedError
+	}
 }
 
 /**
@@ -45,47 +86,18 @@ export interface SafeWriteJsonOptions {
 async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
+	let operationFailed = false
+	let operationError: unknown
+	let unlockFailed = false
+	let unlockError: unknown
 
-	// For directory creation
-	const dirPath = path.dirname(absoluteFilePath)
-
-	// Ensure directory structure exists with improved reliability
-	try {
-		// Create directory with recursive option
-		await fs.mkdir(dirPath, { recursive: true })
-
-		// Verify directory exists after creation attempt
-		await fs.access(dirPath)
-	} catch (dirError: any) {
-		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
-		throw dirError
-	}
-
-	// Acquire the lock before any file operations
-	try {
-		releaseLock = await lockfile.lock(absoluteFilePath, {
-			stale: LOCK_STALE_MS,
-			update: 10000, // Update mtime every 10 seconds to prevent staleness if operation is long
-			realpath: false, // the file may not exist yet, which is acceptable
-			retries: {
-				// Configuration for retrying lock acquisition
-				retries: 5, // Number of retries after the initial attempt
-				factor: 2, // Exponential backoff factor (e.g., 100ms, 200ms, 400ms, ...)
-				minTimeout: 100, // Minimum time to wait before the first retry (in ms)
-				maxTimeout: 1000, // Maximum time to wait for any single retry (in ms)
-			},
-			onCompromised: (err) => {
-				console.error(`Lock at ${absoluteFilePath} was compromised:`, err)
-				throw err
-			},
-		})
-	} catch (lockError) {
-		// If lock acquisition fails, we throw immediately.
-		// The releaseLock remains a no-op, so the finally block in the main file operations
-		// try-catch-finally won't try to release an unacquired lock if this path is taken.
-		console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
-		// Propagate the lock acquisition error
-		throw lockError
+	if (!options?.lockAcquired) {
+		try {
+			releaseLock = await lockJsonFile(absoluteFilePath)
+		} catch (lockError) {
+			console.error(`Failed to acquire lock for ${absoluteFilePath}:`, lockError)
+			throw lockError
+		}
 	}
 
 	// Variables to hold the actual paths of temp files if they are created.
@@ -162,6 +174,8 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 	} catch (originalError) {
+		operationFailed = true
+		operationError = originalError
 		console.error(`Operation failed for ${absoluteFilePath}: [Original Error Caught]`, originalError)
 
 		const newFileToCleanupWithinCatch = actualTempNewFilePath
@@ -205,18 +219,21 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 				)
 			}
 		}
-		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
 		try {
 			// releaseLock will be the actual unlock function if lock was acquired,
 			// or the initial no-op if acquisition failed.
 			await releaseLock()
-		} catch (unlockError) {
-			// Do not re-throw here, as the originalError from the try/catch (if any) is more important.
-			console.error(`Failed to release lock for ${absoluteFilePath}:`, unlockError)
+		} catch (error) {
+			unlockFailed = true
+			unlockError = error
+			if (operationFailed) console.error(`Failed to release lock for ${absoluteFilePath}:`, error)
 		}
 	}
+
+	if (operationFailed) throw operationError
+	if (unlockFailed) throw unlockError
 }
 
 /**

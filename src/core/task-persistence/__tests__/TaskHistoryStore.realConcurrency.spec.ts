@@ -77,24 +77,20 @@ describe("TaskHistoryStore real cross-host locking", () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-real-lock-"))
 		const storeA = new TaskHistoryStore(storagePath)
 		const storeB = new TaskHistoryStore(storagePath)
-		let writeBarrier: WriteBarrier | undefined
 
 		try {
 			await storeA.initialize()
 			await storeA.upsert(item("shared-task"))
 			await storeB.initialize()
-			writeBarrier = synchronizeNextWrites([storeA, storeB])
 
 			await Promise.all([
 				storeA.atomicReadAndUpdate("shared-task", (current) => ({ ...current, mode: "architect" })),
 				storeB.atomicReadAndUpdate("shared-task", (current) => ({ ...current, totalCost: 42 })),
 			])
 
-			expect(writeBarrier.arrivals()).toBe(2)
 			await storeA.invalidate("shared-task")
 			expect(storeA.get("shared-task")).toMatchObject({ mode: "architect", totalCost: 42 })
 		} finally {
-			writeBarrier?.dispose()
 			storeA.dispose()
 			storeB.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
