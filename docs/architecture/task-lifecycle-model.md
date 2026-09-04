@@ -3,7 +3,7 @@
 Zoo Code checks task lifecycle protocols through one compositional verification suite. Run the complete suite locally with:
 
 ```sh
-pnpm model-check
+pnpm lifecycle:model-check
 ```
 
 The command runs five independent bounded submodels in sequence:
@@ -51,7 +51,7 @@ Production completion also accepts a recovery-compatible `active` parent that st
 
 ## Shared-store concurrency model
 
-The same `pnpm model-check` command also runs a second bounded explorer over two `TaskHistoryStore` hosts. It imports the production `computeHistoryDelta` and `mergeHistoryDelta` functions, so its semantics match the store rather than assuming coherent caches or transactional pair writes:
+The same `pnpm lifecycle:model-check` command also runs a second bounded explorer over two `TaskHistoryStore` hosts. It imports the production `computeHistoryDelta` and `mergeHistoryDelta` functions, so its semantics match the store rather than assuming coherent caches or transactional pair writes:
 
 - each host has an independent cache and host-local mutex;
 - store read/update operations hold the host mutex, while live-task snapshots used by completion and message saves may outlive it;
