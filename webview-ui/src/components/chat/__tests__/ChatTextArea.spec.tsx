@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 import { providerIdentifiers } from "@roo-code/types"
 import { defaultModeSlug } from "@roo/modes"
 
@@ -33,6 +35,16 @@ const mockConvertToMentionPath = pathMentions.convertToMentionPath as ReturnType
 
 // Mock ExtensionStateContext
 vi.mock("@src/context/ExtensionStateContext")
+
+vi.mock("@src/components/ui", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@src/components/ui")>()
+	return {
+		...actual,
+		StandardTooltip: ({ children, content }: { children: ReactNode; content?: ReactNode }) => (
+			<div data-tooltip-content={content}>{children}</div>
+		),
+	}
+})
 
 // Custom query function to get the enhance prompt button
 const getEnhancePromptButton = () => {
@@ -1212,6 +1224,15 @@ describe("ChatTextArea", () => {
 			render(<ChatTextArea {...defaultProps} />)
 
 			expect(screen.getByTestId("model-selector-trigger")).toHaveClass("min-w-[28px]")
+		})
+
+		it("passes the selectModel translation as the trigger tooltip", () => {
+			render(<ChatTextArea {...defaultProps} />)
+
+			expect(screen.getByTestId("model-selector-trigger").closest("[data-tooltip-content]")).toHaveAttribute(
+				"data-tooltip-content",
+				"chat:selectModel",
+			)
 		})
 	})
 })

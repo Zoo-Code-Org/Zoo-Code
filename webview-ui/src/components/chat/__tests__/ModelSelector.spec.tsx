@@ -17,8 +17,12 @@ vi.mock("@/i18n/TranslationContext", () => ({
 	}),
 }))
 
+const { useRooPortalMock } = vi.hoisted(() => ({
+	useRooPortalMock: vi.fn(() => document.body),
+}))
+
 vi.mock("@/components/ui/hooks/useRooPortal", () => ({
-	useRooPortal: () => document.body,
+	useRooPortal: useRooPortalMock,
 }))
 
 const { useRouterModelsMock, useSelectedModelMock } = vi.hoisted(() => ({
@@ -49,7 +53,7 @@ vi.mock("@/components/ui", () => ({
 		</button>
 	),
 	PopoverContent: ({ children }: any) => <div data-testid="popover-content">{children}</div>,
-	StandardTooltip: ({ children }: any) => <>{children}</>,
+	StandardTooltip: ({ children, content }: any) => <div data-tooltip-content={content}>{children}</div>,
 }))
 
 const manyDynamicModels = Object.fromEntries(Array.from({ length: 8 }, (_, index) => [`openrouter/model-${index}`, {}]))
@@ -210,6 +214,18 @@ describe("ModelSelector", () => {
 		})
 	})
 
+	it("mounts the popover content into the roo portal container", () => {
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		expect(useRooPortalMock).toHaveBeenCalledWith("roo-portal")
+	})
+
 	it("shows the disabled view with an openrouter fallback label for a retired provider", () => {
 		useSelectedModelMock.mockReturnValue({ id: "", isLoading: false })
 
@@ -260,6 +276,26 @@ describe("ModelSelector", () => {
 		expect(screen.getByTestId("model-selector-disabled")).toHaveTextContent(providerIdentifiers.ollama)
 	})
 
+	it("shows the unsupported tooltip content and base classes on the disabled view", () => {
+		useSelectedModelMock.mockReturnValue({ id: "", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.ollama } as any}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const disabledButton = screen.getByTestId("model-selector-disabled")
+		expect(disabledButton.closest("[data-tooltip-content]")).toHaveAttribute(
+			"data-tooltip-content",
+			"chat:selectModelUnsupported",
+		)
+		expect(disabledButton).toHaveClass("min-w-0")
+		expect(disabledButton).toHaveClass("opacity-50")
+	})
+
 	it("disables the enabled selector's trigger when the disabled prop is set", () => {
 		render(
 			<ModelSelector
@@ -290,6 +326,20 @@ describe("ModelSelector", () => {
 		const trigger = screen.getByTestId("model-selector-trigger")
 		expect(trigger).toHaveTextContent("common:ui.loading")
 		expect(trigger).not.toHaveTextContent("claude-sonnet-4-5")
+	})
+
+	it("shows the title as the enabled trigger's tooltip content and applies the base trigger classes", () => {
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const trigger = screen.getByTestId("model-selector-trigger")
+		expect(trigger.closest("[data-tooltip-content]")).toHaveAttribute("data-tooltip-content", "Select model")
+		expect(trigger).toHaveClass("min-w-0")
 	})
 
 	it("does not open the popover until the user interacts with the trigger", () => {
@@ -355,6 +405,8 @@ describe("ModelSelector", () => {
 
 		expect(otherItem).not.toHaveClass("bg-vscode-list-activeSelectionBackground")
 		expect(otherItem?.querySelector(".codicon-check")).not.toBeInTheDocument()
+		expect(otherItem).toHaveClass("px-3")
+		expect(otherItem).toHaveClass("hover:bg-vscode-list-hoverBackground")
 	})
 
 	it("does not show a search box when there are few models", () => {
@@ -377,6 +429,41 @@ describe("ModelSelector", () => {
 		expect(screen.queryByLabelText("common:ui.search_placeholder")).not.toBeInTheDocument()
 	})
 
+	it("does not show a search box at exactly the search threshold, but does show it just above it", () => {
+		const atThreshold = Object.fromEntries(
+			Array.from({ length: 6 }, (_, index) => [`openrouter/model-${index}`, {}]),
+		)
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: atThreshold }, isLoading: false })
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
+
+		const { rerender } = render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		expect(screen.queryByLabelText("common:ui.search_placeholder")).not.toBeInTheDocument()
+
+		const aboveThreshold = { ...atThreshold, "openrouter/model-6": {} }
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: aboveThreshold }, isLoading: false })
+
+		rerender(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		expect(screen.getByLabelText("common:ui.search_placeholder")).toBeInTheDocument()
+	})
+
 	it("shows an empty search box above the search threshold and filters the model list as the user types", () => {
 		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
 		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
@@ -393,6 +480,7 @@ describe("ModelSelector", () => {
 
 		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
 		expect(searchInput).toHaveValue("")
+		expect(searchInput).toHaveAttribute("placeholder", "common:ui.search_placeholder")
 		const list = within(screen.getByTestId("popover-content"))
 		expect(Object.keys(manyDynamicModels).every((id) => list.getByText(id) !== null)).toBe(true)
 
@@ -400,6 +488,60 @@ describe("ModelSelector", () => {
 
 		expect(list.getByText("openrouter/model-3")).toBeInTheDocument()
 		expect(list.queryByText("openrouter/model-0")).not.toBeInTheDocument()
+	})
+
+	it("clears the search value after selecting a filtered model", () => {
+		useRouterModelsMock.mockReturnValue({ data: { openrouter: manyDynamicModels }, isLoading: false })
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-0", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-0" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
+		fireEvent.change(searchInput, { target: { value: "model-3" } })
+		fireEvent.click(within(screen.getByTestId("popover-content")).getByText("openrouter/model-3"))
+
+		expect(searchInput).toHaveValue("")
+	})
+
+	it("matches a model by its displayName, and by its raw id when it has no displayName", () => {
+		useRouterModelsMock.mockReturnValue({
+			data: {
+				openrouter: Object.fromEntries([
+					["openrouter/model-a", { displayName: "Zebra Special" }],
+					...Array.from({ length: 7 }, (_, index) => [`openrouter/model-${index}`, {}]),
+				]),
+			},
+			isLoading: false,
+		})
+		useSelectedModelMock.mockReturnValue({ id: "openrouter/model-a", isLoading: false })
+
+		render(
+			<ModelSelector
+				apiConfiguration={
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "openrouter/model-a" } as any
+				}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		const list = within(screen.getByTestId("popover-content"))
+		const searchInput = screen.getByLabelText("common:ui.search_placeholder")
+
+		fireEvent.change(searchInput, { target: { value: "Zebra" } })
+		expect(list.getByText("Zebra Special")).toBeInTheDocument()
+
+		fireEvent.change(searchInput, { target: { value: "model-3" } })
+		expect(list.getByText("openrouter/model-3")).toBeInTheDocument()
+		expect(list.queryByText("Zebra Special")).not.toBeInTheDocument()
 	})
 
 	it("shows a no-results message when the search does not match any model", () => {
@@ -450,5 +592,17 @@ describe("ModelSelector", () => {
 		expect(searchInput).toHaveValue("")
 		expect(container.querySelector(".codicon-close")).not.toBeInTheDocument()
 		expect(within(screen.getByTestId("popover-content")).getByText("openrouter/model-0")).toBeInTheDocument()
+	})
+
+	it("shows the selectModel footer heading in the popover", () => {
+		render(
+			<ModelSelector
+				apiConfiguration={{ apiProvider: providerIdentifiers.anthropic } as any}
+				currentApiConfigName="default"
+				title="Select model"
+			/>,
+		)
+
+		expect(within(screen.getByTestId("popover-content")).getByText("chat:selectModel")).toBeInTheDocument()
 	})
 })
