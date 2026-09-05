@@ -29,7 +29,6 @@ import {
 	type ContextTruncation,
 	type ClineMessage,
 	type ClineSay,
-	type ClineSayTool,
 	type ClineAsk,
 	type ToolProgressStatus,
 	type HistoryItem,
@@ -1265,19 +1264,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return undefined
 	}
 
-	private drainQueuedMessageIntoAskResponse(allowResolvedAskOverride = false): void {
-		// A synchronous auto-approval may already have resolved the ask before the
-		// entry queue snapshot is acted on. Never replace that resolved response.
-		if (this.askResponse !== undefined && !allowResolvedAskOverride) {
-			return
-		}
-
-		const message = this.messageQueueService.dequeueMessage()
-		if (message) {
-			this.handleWebviewAskResponse("messageResponse", message.text, message.images)
-		}
-	}
-
 	// Note that `partial` has three valid states true (partial message),
 	// false (completion of partial message), undefined (individual complete
 	// message).
@@ -1452,14 +1438,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Keep queued user messages intact during command_output asks. Those asks
 		// are terminal flow-control, not conversational turns.
 		const shouldDrainQueuedMessageForAsk = type !== "command_output"
-		let isFinishTaskAsk = false
-		if (type === "tool") {
-			try {
-				isFinishTaskAsk = (JSON.parse(text || "{}") as ClineSayTool).tool === "finishTask"
-			} catch {
-				// Invalid tool payloads are handled by their caller; they are not finishTask asks.
-			}
-		}
 		const isStatusMutable = !partial && isBlocking && !isMessageQueued && approval.decision === "ask"
 
 		let queuedMessageId: string | undefined
