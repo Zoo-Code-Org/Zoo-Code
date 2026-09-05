@@ -49,12 +49,14 @@ export const deepSeekModels = {
 		supportsReasoningEffort: ["disable", "low", "high", "max"], // Updated 2026-08-13
 		preserveReasoning: true,
 		reasoningEffort: "high",
+		supportsTemperature: true,
+		defaultTemperature: 1.0,
 		inputPrice: 0, // the inputs are priced as cache read/write, so `inputPrice` should be 0
 		// Static estimates use peak rates; off-peak rates are 50% lower.
 		outputPrice: 1.32,
 		cacheWritesPrice: 0.44,
 		cacheReadsPrice: 0.014,
-		description: `DeepSeek-V4-Flash-Vision-Exp is DeepSeek's experimental multimodal V4 Flash model with image understanding. It supports thinking and non-thinking modes, JSON output, tool calls, chat prefix completion (beta), and image inputs.`,
+		description: `DeepSeek-V4-Flash-Vision-Exp is DeepSeek's experimental multimodal V4 Flash model with image understanding. It supports thinking and non-thinking modes, JSON output, tool calls, chat prefix completion (beta), and image input through Chat Completions, Responses, and Anthropic-compatible APIs.`,
 	},
 } as const satisfies Record<string, ModelInfo>
 

@@ -5,6 +5,9 @@ tone_instructions: >-
     Prioritize correctness, security, data loss, lifecycle, and regressions; avoid speculative style
     comments and unrelated refactors.
 
+chat:
+    allow_non_org_members: false
+
 knowledge_base:
     web_search:
         enabled: true
@@ -24,6 +27,7 @@ reviews:
         enabled: false
         drafts: false
         auto_incremental_review: true
+        auto_pause_after_reviewed_commits: 0
         labels:
             - "coderabbit-review-active"
 
@@ -125,6 +129,7 @@ reviews:
               and deprioritize prose-only nits that do not affect correctness or usability.
 
     pre_merge_checks:
+        override_requested_reviewers_only: true
         custom_checks:
             - name: Regression evidence
               mode: warning
