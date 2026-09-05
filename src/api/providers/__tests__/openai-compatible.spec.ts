@@ -159,6 +159,9 @@ describe("OpenAICompatibleHandler", () => {
 
 			expect(result).toBe("response")
 			expect(mockGenerateText.mock.calls[0][0].abortSignal).toBeUndefined()
+			// The property must be absent entirely: an unconditional assignment would
+			// leave it present with an undefined value, which `toBeUndefined` cannot see.
+			expect("abortSignal" in mockGenerateText.mock.calls[0][0]).toBe(false)
 		})
 
 		it("should treat timeoutMs <= 0 as disabled", async () => {
@@ -239,6 +242,21 @@ describe("OpenAICompatibleHandler", () => {
 			await collectStream(stream)
 
 			expect(mockStreamText.mock.calls[0][0].abortSignal).toBeUndefined()
+			// The property must be absent entirely (an unconditional assignment would
+			// leave it present with an undefined value).
+			expect("abortSignal" in mockStreamText.mock.calls[0][0]).toBe(false)
+		})
+
+		it("should complete without metadata and leave the abortSignal property unset", async () => {
+			mockStreamText.mockReturnValue(makeEmptyStreamResult())
+
+			const stream = handler.createMessage("You are helpful.", [])
+			await collectStream(stream)
+
+			expect(mockStreamText).toHaveBeenCalledTimes(1)
+			// createMessage without metadata must not throw and must leave the
+			// property absent: metadata?.abortSignal is undefined when metadata is absent.
+			expect("abortSignal" in mockStreamText.mock.calls[0][0]).toBe(false)
 		})
 
 		it("should reject with AbortError when the external abortSignal is pre-aborted", async () => {

@@ -16,6 +16,7 @@ import OpenAI from "openai"
 import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } from "@roo-code/types"
 
 import { OpenAiNativeHandler } from "../openai-native"
+import type { ApiStreamChunk, ApiStreamTextChunk } from "../../../api/transform/stream"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
 import {
@@ -516,6 +517,522 @@ describe("OpenAiNativeHandler", () => {
 
 			const secondChunks = await secondCollected
 			expect(secondChunks.some((chunk) => chunk.type === "text" && chunk.text === "two")).toBe(true)
+		})
+
+		describe("abort-signal bridging", () => {
+			// The bedrock-pattern bridge in executeRequest and makeResponsesApiRequest forwards
+			// metadata?.abortSignal onto a request-local AbortController. These tests make every
+			// branch observable: a resolving SDK mock exercises the executeRequest bridge
+			// directly, a rejecting one exercises the fetch fallback bridge, and the
+			// request-local signal handed to the SDK/fetch is captured for assertions.
+
+			function makeAbortError(): Error {
+				const error = new Error("This operation was aborted")
+				error.name = "AbortError"
+				return error
+			}
+
+			const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+
+			function untilSignalAborted(signal: AbortSignal, timeoutMs = 200): Promise<void> {
+				return new Promise<void>((resolve) => {
+					if (signal.aborted) {
+						resolve()
+						return
+					}
+					const timer = setTimeout(() => resolve(), timeoutMs)
+					signal.addEventListener(
+						"abort",
+						() => {
+							clearTimeout(timer)
+							resolve()
+						},
+						{ once: true },
+					)
+				})
+			}
+
+			function textChunks(chunks: ApiStreamChunk[]): ApiStreamTextChunk[] {
+				return chunks.filter((chunk): chunk is ApiStreamTextChunk => chunk.type === "text")
+			}
+
+			function makeOpenStreamFetchMock() {
+				type OpenStream = {
+					controller?: ReadableStreamDefaultController<Uint8Array>
+					fetchSignal: AbortSignal
+				}
+				const openStreams: OpenStream[] = []
+				const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+					const entry: OpenStream = { fetchSignal: options?.signal as AbortSignal }
+					const body = new ReadableStream<Uint8Array>({
+						start: (controller) => {
+							entry.controller = controller
+						},
+					})
+					openStreams.push(entry)
+					return Promise.resolve({
+						ok: true,
+						body,
+					})
+				})
+				const requireController = (index: number): ReadableStreamDefaultController<Uint8Array> => {
+					const entry = openStreams[index]
+					if (!entry?.controller) {
+						throw new Error("expected fallback fetch to have started")
+					}
+					return entry.controller
+				}
+				return { openStreams, mockFetch, requireController }
+			}
+
+			it("should register a once-only abort listener on the external signal and detach it when the SDK request completes", async () => {
+				const controller = new AbortController()
+				const addSpy = vi.spyOn(controller.signal, "addEventListener")
+				const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+				let sdkSignal: AbortSignal | undefined
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkSignal = options?.signal
+					return Promise.resolve(
+						asyncStreamFrom([
+							{ type: "response.output_text.delta", delta: "one" },
+							{ type: "response.output_text.delta", delta: " two" },
+						]),
+					)
+				})
+
+				try {
+					const chunks = await collectStream(
+						handler.createMessage(
+							systemPrompt,
+							messages,
+							makeCreateMessageMetadata({ abortSignal: controller.signal }),
+						),
+					)
+
+					expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one", " two"])
+					expect(sdkSignal?.aborted).toBe(false)
+					// The bridge must listen for the "abort" event with { once: true } ...
+					expect(addSpy).toHaveBeenCalledTimes(1)
+					expect(addSpy).toHaveBeenCalledWith("abort", expect.any(Function), { once: true })
+					// ... and detach that exact listener when the request completes.
+					const registeredListener = addSpy.mock.calls.find(([type]) => type === "abort")?.[1]
+					expect(registeredListener).toBeDefined()
+					expect(removeSpy).toHaveBeenCalledTimes(1)
+					expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+					// The request-local controller is cleared once the request is done.
+					expect(handler["abortController"]).toBeUndefined()
+				} finally {
+					addSpy.mockRestore()
+					removeSpy.mockRestore()
+				}
+			})
+
+			it("should abort the SDK request immediately when the external signal is already aborted", async () => {
+				const controller = new AbortController()
+				controller.abort()
+				const addSpy = vi.spyOn(controller.signal, "addEventListener")
+				let sdkSignal: AbortSignal | undefined
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkSignal = options?.signal
+					// A real SDK rejects immediately when its request signal is pre-aborted.
+					if (options?.signal?.aborted) {
+						return Promise.reject(makeAbortError())
+					}
+					return Promise.resolve(asyncStreamFrom([{ type: "response.output_text.delta", delta: "one" }]))
+				})
+				const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+					if (options?.signal?.aborted) {
+						return Promise.reject(makeAbortError())
+					}
+					return new Promise<Response>(() => {})
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				try {
+					const stream = handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					)
+					await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+
+					// The bridge must have pre-aborted the request-local controller ...
+					expect(sdkSignal?.aborted).toBe(true)
+					// ... instead of registering a listener on the already-aborted signal.
+					expect(addSpy).not.toHaveBeenCalled()
+				} finally {
+					addSpy.mockRestore()
+				}
+			})
+
+			it("should not pre-abort the SDK request for a pending external signal and should abort it mid-flight", async () => {
+				const controller = new AbortController()
+				let sdkSignal: AbortSignal | undefined
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkSignal = options?.signal
+					const signal = options?.signal
+					return Promise.resolve(
+						(async function* () {
+							yield { type: "response.output_text.delta", delta: "one" }
+							if (signal) {
+								await untilSignalAborted(signal, 200)
+							}
+						})(),
+					)
+				})
+
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				const collected = collectStream(stream)
+				await tick()
+
+				expect(sdkSignal).toBeDefined()
+				// A pending external signal must not abort the request up front.
+				expect(sdkSignal?.aborted).toBe(false)
+
+				controller.abort()
+				await tick()
+				// ... but it must abort the request as soon as it fires.
+				expect(sdkSignal?.aborted).toBe(true)
+
+				const chunks = await collected
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one"])
+			})
+
+			it("should stop consuming the SDK stream once the external signal aborts the request", async () => {
+				const controller = new AbortController()
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					const signal = options?.signal
+					return Promise.resolve(
+						(async function* () {
+							yield { type: "response.output_text.delta", delta: "first" }
+							if (signal) {
+								await untilSignalAborted(signal, 200)
+							}
+							yield { type: "response.output_text.delta", delta: "second" }
+						})(),
+					)
+				})
+
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				const collected = collectStream(stream)
+				await tick()
+
+				controller.abort()
+
+				const chunks = await collected
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["first"])
+			})
+
+			it("should detach the external abort listener on completion so a late abort cannot abort the request signal", async () => {
+				const controller = new AbortController()
+				let openGate: (() => void) | undefined
+				const gate = new Promise<void>((resolve) => {
+					openGate = resolve
+				})
+				let sdkSignal: AbortSignal | undefined
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkSignal = options?.signal
+					return Promise.resolve(
+						(async function* () {
+							yield { type: "response.output_text.delta", delta: "one" }
+							await gate
+						})(),
+					)
+				})
+
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				const collected = collectStream(stream)
+				await tick()
+
+				// Let the request complete normally, then abort the external signal late.
+				if (!openGate) {
+					throw new Error("expected the stream gate to be ready")
+				}
+				openGate()
+				const chunks = await collected
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one"])
+
+				controller.abort()
+				await tick()
+
+				// The bridging listener must have been detached: the late abort must
+				// not reach the already-completed request's controller.
+				expect(sdkSignal?.aborted).toBe(false)
+				expect(handler["abortController"]).toBeUndefined()
+			})
+
+			it("should not call removeEventListener on the external signal when no listener was registered", async () => {
+				const controller = new AbortController()
+				controller.abort()
+				const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					if (options?.signal?.aborted) {
+						return Promise.reject(makeAbortError())
+					}
+					return Promise.resolve(asyncStreamFrom([{ type: "response.output_text.delta", delta: "one" }]))
+				})
+				const mockFetch = vitest.fn().mockImplementation((_url: string, options?: RequestInit) => {
+					if (options?.signal?.aborted) {
+						return Promise.reject(makeAbortError())
+					}
+					return new Promise<Response>(() => {})
+				})
+				global.fetch = mockFetch as typeof fetch
+
+				try {
+					const stream = handler.createMessage(
+						systemPrompt,
+						messages,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					)
+					await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+
+					// A pre-aborted signal registers no listener, so nothing may be removed.
+					expect(removeSpy).not.toHaveBeenCalled()
+				} finally {
+					removeSpy.mockRestore()
+				}
+			})
+
+			it("should preserve a later fallback request's controller when an earlier SDK request completes", async () => {
+				// Request A: SDK path, in flight. Request B: SDK fails, so its fallback
+				// fetch installs the handler's controller. When A completes, its finally
+				// must not clear the controller owned by B's fallback.
+				let aGateOpen: (() => void) | undefined
+				const aGate = new Promise<void>((resolve) => {
+					aGateOpen = resolve
+				})
+				let aSdkSignal: AbortSignal | undefined
+				let sdkCalls = 0
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkCalls += 1
+					if (sdkCalls === 1) {
+						aSdkSignal = options?.signal
+						return Promise.resolve(
+							(async function* () {
+								yield { type: "response.output_text.delta", delta: "a-one" }
+								await aGate
+							})(),
+						)
+					}
+					return Promise.reject(new Error("SDK not available"))
+				})
+				const { openStreams, mockFetch, requireController } = makeOpenStreamFetchMock()
+				global.fetch = mockFetch as typeof fetch
+
+				const streamA = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				)
+				const collectedA = collectStream(streamA)
+				await tick()
+				expect(aSdkSignal?.aborted).toBe(false)
+
+				const streamB = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				)
+				const collectedB = collectStream(streamB)
+				await tick()
+				expect(openStreams).toHaveLength(1)
+
+				// Complete A while B's fallback owns the handler's controller.
+				if (!aGateOpen) {
+					throw new Error("expected the stream gate to be ready")
+				}
+				aGateOpen()
+				const chunksA = await collectedA
+				expect(textChunks(chunksA).map((chunk) => chunk.text)).toEqual(["a-one"])
+				expect(handler["abortController"]?.signal).toBe(openStreams[0].fetchSignal)
+
+				// Let B finish; its finally chain clears the controller.
+				requireController(0).enqueue(
+					new TextEncoder().encode('data: {"type":"response.text.delta","delta":"b-one"}\n\n'),
+				)
+				requireController(0).enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+				requireController(0).close()
+				const chunksB = await collectedB
+				expect(textChunks(chunksB).map((chunk) => chunk.text)).toEqual(["b-one"])
+				expect(handler["abortController"]).toBeUndefined()
+			})
+
+			it("should not clear a later SDK request's controller when a fallback request completes", async () => {
+				// Mirror of the previous test: request B (fallback) starts first and
+				// request A (SDK) takes over the handler's controller. When B's fallback
+				// completes, its finally must not clear A's controller.
+				let aGateOpen: (() => void) | undefined
+				const aGate = new Promise<void>((resolve) => {
+					aGateOpen = resolve
+				})
+				let aSdkSignal: AbortSignal | undefined
+				let sdkCalls = 0
+				mockResponsesCreate.mockImplementation((_body: unknown, options: { signal?: AbortSignal }) => {
+					sdkCalls += 1
+					if (sdkCalls === 1) {
+						return Promise.reject(new Error("SDK not available"))
+					}
+					aSdkSignal = options?.signal
+					return Promise.resolve(
+						(async function* () {
+							yield { type: "response.output_text.delta", delta: "a-one" }
+							await aGate
+						})(),
+					)
+				})
+				const { openStreams, mockFetch, requireController } = makeOpenStreamFetchMock()
+				global.fetch = mockFetch as typeof fetch
+
+				const streamB = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				)
+				const collectedB = collectStream(streamB)
+				await tick()
+				expect(openStreams).toHaveLength(1)
+
+				const streamA = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: new AbortController().signal }),
+				)
+				const collectedA = collectStream(streamA)
+				await tick()
+				expect(aSdkSignal?.aborted).toBe(false)
+
+				// Let B's fallback complete while A owns the handler's controller.
+				requireController(0).enqueue(
+					new TextEncoder().encode('data: {"type":"response.text.delta","delta":"b-one"}\n\n'),
+				)
+				requireController(0).enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+				requireController(0).close()
+				const chunksB = await collectedB
+				expect(textChunks(chunksB).map((chunk) => chunk.text)).toEqual(["b-one"])
+				expect(handler["abortController"]?.signal).toBe(aSdkSignal)
+
+				// Let A finish; its finally clears the controller.
+				if (!aGateOpen) {
+					throw new Error("expected the stream gate to be ready")
+				}
+				aGateOpen()
+				const chunksA = await collectedA
+				expect(textChunks(chunksA).map((chunk) => chunk.text)).toEqual(["a-one"])
+				expect(handler["abortController"]).toBeUndefined()
+			})
+
+			it("should clear the handler's abortController after a fallback request completes", async () => {
+				const mockFetch = vitest.fn().mockResolvedValue({
+					ok: true,
+					body: new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				})
+				global.fetch = mockFetch as typeof fetch
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one"])
+				// The fallback installs its own controller and must clear it when done.
+				expect(handler["abortController"]).toBeUndefined()
+			})
+
+			it("should register a once-only abort listener in the fallback path and detach it on completion", async () => {
+				const controller = new AbortController()
+				const addSpy = vi.spyOn(controller.signal, "addEventListener")
+				const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+				const mockFetch = vitest.fn().mockResolvedValue({
+					ok: true,
+					body: new ReadableStream<Uint8Array>({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				})
+				global.fetch = mockFetch as typeof fetch
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+				try {
+					const chunks = await collectStream(
+						handler.createMessage(
+							systemPrompt,
+							messages,
+							makeCreateMessageMetadata({ abortSignal: controller.signal }),
+						),
+					)
+
+					expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one"])
+					// Both bridges (SDK path and fallback) listen for "abort" with
+					// { once: true }, and both detach their own listener on completion.
+					expect(addSpy).toHaveBeenCalledTimes(2)
+					expect(removeSpy).toHaveBeenCalledTimes(2)
+					for (const call of addSpy.mock.calls) {
+						expect(call[0]).toBe("abort")
+						expect(call[2]).toEqual({ once: true })
+					}
+					for (const call of removeSpy.mock.calls) {
+						expect(call[0]).toBe("abort")
+					}
+					expect(handler["abortController"]).toBeUndefined()
+				} finally {
+					addSpy.mockRestore()
+					removeSpy.mockRestore()
+				}
+			})
+
+			it("should detach the fallback's external abort listener on completion so a late abort cannot abort the fetch signal", async () => {
+				const { openStreams, mockFetch, requireController } = makeOpenStreamFetchMock()
+				global.fetch = mockFetch as typeof fetch
+				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+
+				const controller = new AbortController()
+				const stream = handler.createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				)
+				const collected = collectStream(stream)
+				await tick()
+				expect(openStreams).toHaveLength(1)
+
+				requireController(0).enqueue(
+					new TextEncoder().encode('data: {"type":"response.text.delta","delta":"one"}\n\n'),
+				)
+				requireController(0).enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+				requireController(0).close()
+
+				const chunks = await collected
+				expect(textChunks(chunks).map((chunk) => chunk.text)).toEqual(["one"])
+
+				// A late abort must not reach this request's own fetch signal.
+				controller.abort()
+				await tick()
+				expect(openStreams[0].fetchSignal.aborted).toBe(false)
+			})
 		})
 	})
 
