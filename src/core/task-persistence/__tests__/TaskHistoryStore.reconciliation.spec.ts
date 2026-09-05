@@ -1716,7 +1716,7 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 	/**
 	 * Fake only what the tick scheduling needs: the 5-minute `setTimeout` clock
 	 * and `Date` (consumed by the liveness guard). Everything else (fs I/O,
-	 * microtasks) stays real so `flushAsyncWork()` below can pump the event
+	 * microtasks) stays real so `flushUntil()` below can pump the event
 	 * loop while the timer clock advances only 1 ms per yield.
 	 */
 	function useTickClock(): void {
@@ -1724,18 +1724,49 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 	}
 
 	/**
-	 * Drain pending real fs I/O. The tick's reconcile/repair chain completes on
-	 * libuv callbacks that fake timers alone never advance, and each
-	 * `advanceTimersByTimeAsync(1)` yields one REAL macrotask turn (processing
-	 * the poll phase) while advancing the fake clock only 1 ms. The total fake
-	 * time here stays far below RECONCILE_INTERVAL_MS, so no extra tick fires
-	 * during the pump — this only lets in-flight fs callbacks settle. The count
-	 * is generous to absorb Windows antivirus/OneDrive fs latency.
+	 * Drain pending real fs I/O by polling an observable condition instead of
+	 * burning a fixed number of yields. The tick's reconcile/repair chain
+	 * completes on libuv callbacks that fake timers alone never advance, and
+	 * each `advanceTimersByTimeAsync(1)` yields one REAL macrotask turn
+	 * (processing the poll phase) while advancing the fake clock only 1 ms.
+	 * The yield count the chain needs is environment-dependent (~155 yields on
+	 * a fast local SSD; higher on contended CI runners — the old fixed
+	 * 2000-yield pumps intermittently starved on ubuntu CI, which is exactly
+	 * what this helper replaces). Polling the SAME final state the assertions
+	 * check makes the wait deterministic without weakening them. The pump
+	 * stops as soon as the condition holds, so correct-code runs stay fast,
+	 * and the generous cap costs sub-second wall time even when exhausted
+	 * because fake timers never sleep (measured ~123 ms per 55K idle yields).
+	 * On exhaustion it THROWS with a state snapshot rather than silently
+	 * proceeding, converting a future hang into a loud, diagnosable failure.
+	 *
+	 * Predicates MUST be cheap and side-effect free: poll the in-memory cache
+	 * getters (`store.get(...)`, which never touches disk) or spy call logs.
 	 */
-	async function flushAsyncWork(yields = 2000): Promise<void> {
-		for (let i = 0; i < yields; i++) {
+	async function flushUntil(
+		predicate: () => boolean,
+		options: { maxYields?: number; label?: string; snapshot?: () => string } = {},
+	): Promise<void> {
+		const { maxYields = 50_000, label = "flushUntil predicate", snapshot } = options
+		for (let i = 0; i < maxYields; i++) {
+			if (predicate()) {
+				return
+			}
 			await vi.advanceTimersByTimeAsync(1)
 		}
+		if (predicate()) {
+			return
+		}
+		let state = "snapshot unavailable"
+		try {
+			state = snapshot ? snapshot() : "no snapshot supplied"
+		} catch {
+			// A throwing snapshot must not mask the primary diagnostic below.
+		}
+		throw new Error(
+			`flushUntil: "${label}" was not satisfied within ${maxYields} yields (~${maxYields} ms of fake ` +
+				`time). The tick's async chain never settled; final state: ${state}.`,
+		)
 	}
 
 	async function seedItems(items: HistoryItem[]): Promise<void> {
@@ -1824,7 +1855,24 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		// next periodic tick its mtime is past the liveness threshold.
 		childAgeMs = 10 * 60 * 1000
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		// Compound predicate: the "Reconciled orphaned active child" warn is
+		// emitted only after repairActiveDelegation fully resolves (intent
+		// write, both task-file writes, cache updates, intent cleanup), so
+		// waiting for the cache flip AND the warn settles every observable the
+		// assertions below depend on — a cache-only predicate could return
+		// before the warnSpy assertion is satisfiable.
+		await flushUntil(
+			() =>
+				s.get(CHILD_ID)?.status === "interrupted" &&
+				warnSpy.mock.calls.some(
+					(c) => typeof c[0] === "string" && c[0].includes("Reconciled orphaned active child"),
+				),
+			{
+				label: "stale child repaired to interrupted and the repair was logged",
+				snapshot: () =>
+					`child=${s.get(CHILD_ID)?.status} parent=${s.get(PARENT_ID)?.status} warnCalls=${warnSpy.mock.calls.length}`,
+			},
+		)
 
 		// Within ONE interval, the parent window must repair: child → interrupted,
 		// parent → active with delegation links cleared.
@@ -1900,8 +1948,19 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 				childId === CHILD_ID ? Promise.resolve(Date.now() - 10 * 60 * 1000) : realProbe.call(s, childId),
 			)
 
+		// Negative test: the tick must do NOTHING to this locally-owned child,
+		// so no positive log exists to poll. Settle on the recursive re-arm
+		// instead — `startPeriodicReconciliation()` only re-runs after BOTH
+		// `reconcile()` and the delegation pass have fully finished, so a
+		// fresh timer handle proves the whole tick settled.
+		const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+		const timerBeforeTick = timerState.reconcileTimer
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		await flushUntil(() => timerState.reconcileTimer !== timerBeforeTick, {
+			label: "periodic tick completed without repairing the locally-owned child",
+			snapshot: () =>
+				`child=${s.get(CHILD_ID)?.status} parent=${s.get(PARENT_ID)?.status} awaiting=${s.get(PARENT_ID)?.awaitingChildId}`,
+		})
 
 		expect(s.get(CHILD_ID)?.status).toBe("active")
 		expect(s.get(PARENT_ID)?.status).toBe("delegated")
@@ -1927,7 +1986,19 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		// The other window keeps writing: the child stays live at tick time.
 		childAgeMs = 60_000
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		// The skip-guard warn is this test's own observable (asserted below);
+		// once it fires the liveness check has run, no repair follows, and the
+		// persisted-file read below is safe (reconcile() never writes).
+		await flushUntil(
+			() =>
+				logSpy.mock.calls.some(
+					(c) => typeof c[0] === "string" && c[0].includes(`Skipping repair for live child ${CHILD_ID}`),
+				),
+			{
+				label: "tick skipped the repair for the live child",
+				snapshot: () => `child=${s.get(CHILD_ID)?.status} warnCalls=${logSpy.mock.calls.length}`,
+			},
+		)
 
 		// Nothing may be repaired: child stays active, parent keeps its delegation links.
 		expect(s.get(CHILD_ID)?.status).toBe("active")
@@ -1964,7 +2035,18 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		await s.initialize()
 
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		// The error log happens in the tick callback's catch AFTER the throwing
+		// delegation step settles, so the spy firing means the tick is done.
+		await flushUntil(
+			() =>
+				errorSpy.mock.calls.some(
+					(c) => typeof c[0] === "string" && c[0].includes("Periodic delegation reconciliation failed"),
+				),
+			{
+				label: "tick logged the delegation failure",
+				snapshot: () => `errorCalls=${errorSpy.mock.calls.length}`,
+			},
+		)
 		expect(errorSpy).toHaveBeenCalledWith(
 			expect.stringContaining("Periodic delegation reconciliation failed"),
 			expect.objectContaining({ message: "tick delegation boom" }),
@@ -1973,7 +2055,10 @@ describe("TaskHistoryStore periodic delegation reconciliation", () => {
 		// One more interval still fires the delegation step: the recursive
 		// re-arm is preserved even though the step threw.
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		await flushUntil(() => throwingSpy.mock.calls.length >= 2, {
+			label: "second tick invoked the throwing delegation step",
+			snapshot: () => `throwingSpyCalls=${throwingSpy.mock.calls.length}`,
+		})
 		expect(throwingSpy).toHaveBeenCalledTimes(2)
 
 		errorSpy.mockRestore()
@@ -2000,10 +2085,34 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] })
 	}
 
-	async function flushAsyncWork(yields = 2000): Promise<void> {
-		for (let i = 0; i < yields; i++) {
+	// Condition-polling pump; see the full doc comment on the identical helper
+	// in the "periodic delegation reconciliation" block above for the
+	// rationale (the fixed 2000-yield pumps intermittently starved on slow
+	// ubuntu CI runners).
+	async function flushUntil(
+		predicate: () => boolean,
+		options: { maxYields?: number; label?: string; snapshot?: () => string } = {},
+	): Promise<void> {
+		const { maxYields = 50_000, label = "flushUntil predicate", snapshot } = options
+		for (let i = 0; i < maxYields; i++) {
+			if (predicate()) {
+				return
+			}
 			await vi.advanceTimersByTimeAsync(1)
 		}
+		if (predicate()) {
+			return
+		}
+		let state = "snapshot unavailable"
+		try {
+			state = snapshot ? snapshot() : "no snapshot supplied"
+		} catch {
+			// A throwing snapshot must not mask the primary diagnostic below.
+		}
+		throw new Error(
+			`flushUntil: "${label}" was not satisfied within ${maxYields} yields (~${maxYields} ms of fake ` +
+				`time). The tick's async chain never settled; final state: ${state}.`,
+		)
 	}
 
 	async function seedItems(items: HistoryItem[]): Promise<void> {
@@ -2152,7 +2261,10 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		// Step 4: tick with a now-stale mtime.
 		age = 10 * 60 * 1000
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		await flushUntil(() => s2.get(childId)?.status === "interrupted", {
+			label: "completed write released ownership so the tick repaired the orphan",
+			snapshot: () => `child=${s2.get(childId)?.status} parent=${s2.get(parentId)?.status}`,
+		})
 
 		// Ownership was deleted by the completed write, so the orphan is repaired.
 		// (Under L566->true or L569 `;` it would remain owned and stay active.)
@@ -2214,8 +2326,16 @@ describe("TaskHistoryStore mutation-gate kill tests", () => {
 		await s.atomicReadAndUpdate(childId, (c) => ({ ...c, status: "active" as const }))
 
 		installStaleChildInjector(childId)
+		// Negative test (child owned HERE via the implicit-active write): the
+		// tick must leave it alone, so settle on the recursive re-arm, which
+		// only happens after both passes fully finish.
+		const timerState = s as unknown as { reconcileTimer: ReturnType<typeof setTimeout> | null }
+		const timerBeforeTick = timerState.reconcileTimer
 		await vi.advanceTimersByTimeAsync(RECONCILE_INTERVAL_MS)
-		await flushAsyncWork()
+		await flushUntil(() => timerState.reconcileTimer !== timerBeforeTick, {
+			label: "tick completed without clobbering the locally-owned implicit-active child",
+			snapshot: () => `child=${s.get(childId)?.status} parent=${s.get(parentId)?.status}`,
+		})
 
 		// Owned here (implicit active) -> the tick must NOT tear it away from its own runner.
 		expect(s.get(childId)?.status).toBe("active")
