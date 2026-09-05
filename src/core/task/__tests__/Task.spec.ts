@@ -551,6 +551,98 @@ describe("Cline", () => {
 				},
 			])
 		})
+
+		it("uses a fresh parser scope on retry so stale partial state does not leak", async () => {
+			// First stream: starts a tool call, then throws mid-stream.
+			// Second stream (retry): completes a different tool call cleanly.
+			// If the scope were shared across retries, the old partial state for
+			// "call_stale" would still be in the WeakMap when the retry runs,
+			// and could corrupt finalization of "call_fresh".
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "retry scope test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+
+			const firstStream = async function* (): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "tool_call_partial", index: 0, id: "call_stale", name: "read_file" }
+				yield { type: "tool_call_partial", index: 0, arguments: '{"path":"stale' }
+				throw new Error("simulated mid-stream failure")
+			}
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => firstStream())
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{ type: "tool_call_partial", index: 0, id: "call_fresh", name: "write_file" },
+						{
+							type: "tool_call_partial",
+							index: 0,
+							arguments: '{"path":"new.ts","content":"hello"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "retry scope test" }])
+
+			// The assistant turn from the successful retry must contain only the
+			// fresh tool call. If scope leaked, "call_stale" partial would pollute
+			// "call_fresh" finalization (wrong args or null result).
+			const assistantMessages = task.apiConversationHistory.filter((m) => m.role === "assistant")
+			const retryAssistant = assistantMessages[assistantMessages.length - 1]
+			expect(retryAssistant?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_fresh",
+					name: "write_file",
+					input: { path: "new.ts", content: "hello" },
+				},
+			])
+		})
+
+		it("finalizes MCP tool call using the request-scoped parser state", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "mcp tool test",
+				startTask: false,
+			})
+
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call_partial",
+						index: 0,
+						id: "call_mcp",
+						name: "mcp--testServer--myTool",
+					},
+					{ type: "tool_call_partial", index: 0, arguments: '{"param":"value"}' },
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test request" }])
+
+			const assistantMessage = task.apiConversationHistory.find((m) => m.role === "assistant")
+			// Verifies that finalizeStreamingToolCall receives the request-scoped state.
+			// If the scope argument is removed, finalization returns null and the block
+			// stays as a partial tool_use with input: {} instead of the parsed arguments.
+			expect(assistantMessage?.content).toEqual([
+				{
+					type: "tool_use",
+					id: "call_mcp",
+					name: "mcp--testServer--myTool",
+					input: { param: "value" },
+				},
+			])
+		})
 	})
 
 	describe("constructor", () => {

@@ -54,9 +54,6 @@ describe("LmStudioHandler Native Tools", () => {
 			lmStudioBaseUrl: "http://localhost:1234",
 		}
 		handler = new LmStudioHandler(mockOptions)
-
-		// Clear NativeToolCallParser state before each test
-		NativeToolCallParser.clearRawChunkState()
 	})
 
 	describe("Native Tool Calling Support", () => {
@@ -245,17 +242,21 @@ describe("LmStudioHandler Native Tools", () => {
 				tools: testTools,
 			})
 
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 			for await (const chunk of stream) {
 				// Simulate what Task.ts does: when we receive tool_call_partial,
 				// process it through NativeToolCallParser to populate rawChunkTracker
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}
@@ -449,15 +450,19 @@ describe("LmStudioHandler Native Tools", () => {
 				tools: testTools,
 			})
 
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 			for await (const chunk of stream) {
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}

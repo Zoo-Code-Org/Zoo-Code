@@ -165,8 +165,6 @@ function replayAction(state: ReplayState, scheduled: ScheduledAction): void {
 				null,
 				`${scopeId} finalized its streaming call twice`,
 			)
-			NativeToolCallParser.clearRawChunkState(scope)
-			NativeToolCallParser.clearAllStreamingToolCalls(scope)
 			break
 		}
 		case "late-fragments": {

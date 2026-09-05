@@ -22,7 +22,7 @@ The source of truth is `scripts/check-native-tool-call-parser-scoping.ts`. The m
 2. start raw call index zero and its streaming accumulator;
 3. add two distinct argument fragments through both production accumulation APIs;
 4. finalize the raw call and reject duplicate raw finalization;
-5. finalize the streaming call, reject duplicate streaming finalization, and clear both kinds of state; and
+5. finalize the streaming call and reject duplicate streaming finalization; and
 6. deliver late raw and streaming fragments.
 
 The checker exhausts all 924 order-preserving interleavings of those two six-action sequences. Opening, raw start, fragment delivery, raw finalization, streaming finalization/cleanup, and late fragment delivery are independently schedulable protocol phases. Fragment delivery remains one bounded action per scope and replays both argument fragments through both production accumulation APIs; streaming cleanup remains attached to streaming finalization because late delivery is the only valid following local phase. This preserves each request's local order while keeping CI runtime bounded. The expected schedule count, maximum schedule budget, scope count, raw index, and actions per scope are explicit. It fails if schedule enumeration differs from the binomial bound or exceeds the budget, so truncated exploration cannot pass.
@@ -38,7 +38,7 @@ Every replay checks:
 3. cleanup in one scope cannot change the other scope's active streaming state;
 4. each scope emits exactly one raw end and one streaming final result;
 5. repeated finalization is empty/null rather than duplicate;
-6. late raw and streaming fragments are ignored after cleanup;
+6. modeled late argument fragments — raw chunks carrying only arguments without an ID or name, and streaming chunks for already-finalized IDs — are ignored after finalization. A late raw chunk carrying a new ID and name can recreate scope state and emit a new start event; production safety relies on Task making finalization the last parser interaction for that request;
 7. every modeled action is reachable.
 
 Named landmarks require simultaneous active scopes, B opening while A has received its fragments, either scope raw-finalizing while the other remains active, either scope streaming-finalizing and cleaning up while the other remains active, and symmetric late-fragment schedules in which the other scope is still active.

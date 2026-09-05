@@ -51,8 +51,6 @@ export type ToolCallStreamEvent = ApiStreamToolCallStartChunk | ApiStreamToolCal
  * provider-level raw chunks into start/delta/end events.
  */
 export class NativeToolCallParser {
-	private static readonly defaultScope = {}
-
 	// Streaming state management for argument accumulation (keyed by tool call id)
 	// Note: name is string to accommodate dynamic MCP tools (mcp--serverName--toolName)
 	private static streamingToolCallsByScope = new WeakMap<
@@ -70,7 +68,7 @@ export class NativeToolCallParser {
 		return {}
 	}
 
-	private static getStreamingToolCalls(scope = this.defaultScope) {
+	private static getStreamingToolCalls(scope: object) {
 		let streamingToolCalls = this.streamingToolCallsByScope.get(scope)
 		if (!streamingToolCalls) {
 			streamingToolCalls = new Map()
@@ -79,7 +77,7 @@ export class NativeToolCallParser {
 		return streamingToolCalls
 	}
 
-	private static getRawChunkTracker(scope = this.defaultScope) {
+	private static getRawChunkTracker(scope: object) {
 		let rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
 		if (!rawChunkTracker) {
 			rawChunkTracker = new Map()
@@ -118,7 +116,7 @@ export class NativeToolCallParser {
 			name?: string
 			arguments?: string
 		},
-		scope = this.defaultScope,
+		scope: object,
 	): ToolCallStreamEvent[] {
 		const events: ToolCallStreamEvent[] = []
 		const { index, id, name, arguments: args } = chunk
@@ -183,33 +181,10 @@ export class NativeToolCallParser {
 	}
 
 	/**
-	 * Process stream finish reason.
-	 * Emits end events when finish_reason is 'tool_calls'.
-	 */
-	public static processFinishReason(
-		finishReason: string | null | undefined,
-		scope = this.defaultScope,
-	): ToolCallStreamEvent[] {
-		const events: ToolCallStreamEvent[] = []
-		const rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
-
-		if (finishReason === "tool_calls" && rawChunkTracker) {
-			for (const [, tracked] of rawChunkTracker.entries()) {
-				events.push({
-					type: "tool_call_end",
-					id: tracked.id,
-				})
-			}
-		}
-
-		return events
-	}
-
-	/**
 	 * Finalize any remaining tool calls that weren't explicitly ended.
 	 * Should be called at the end of stream processing.
 	 */
-	public static finalizeRawChunks(scope = this.defaultScope): ToolCallStreamEvent[] {
+	public static finalizeRawChunks(scope: object): ToolCallStreamEvent[] {
 		const events: ToolCallStreamEvent[] = []
 		const rawChunkTracker = this.rawChunkTrackersByScope.get(scope)
 
@@ -232,7 +207,7 @@ export class NativeToolCallParser {
 	 * Clear all raw chunk tracking state.
 	 * Should be called when a new API request starts.
 	 */
-	public static clearRawChunkState(scope = this.defaultScope): void {
+	public static clearRawChunkState(scope: object): void {
 		this.rawChunkTrackersByScope.delete(scope)
 	}
 
@@ -241,7 +216,7 @@ export class NativeToolCallParser {
 	 * Initializes tracking for incremental argument parsing.
 	 * Accepts string to support both ToolName and dynamic MCP tools (mcp--serverName--toolName).
 	 */
-	public static startStreamingToolCall(id: string, name: string, scope = this.defaultScope): void {
+	public static startStreamingToolCall(id: string, name: string, scope: object): void {
 		this.getStreamingToolCalls(scope).set(id, {
 			id,
 			name,
@@ -254,7 +229,7 @@ export class NativeToolCallParser {
 	 * Should be called when a new API request starts to prevent memory leaks
 	 * from interrupted streams.
 	 */
-	public static clearAllStreamingToolCalls(scope = this.defaultScope): void {
+	public static clearAllStreamingToolCalls(scope: object): void {
 		this.streamingToolCallsByScope.delete(scope)
 	}
 
@@ -262,7 +237,7 @@ export class NativeToolCallParser {
 	 * Check if there are any active streaming tool calls.
 	 * Useful for debugging and testing.
 	 */
-	public static hasActiveStreamingToolCalls(scope = this.defaultScope): boolean {
+	public static hasActiveStreamingToolCalls(scope: object): boolean {
 		return (this.streamingToolCallsByScope.get(scope)?.size ?? 0) > 0
 	}
 
@@ -271,7 +246,7 @@ export class NativeToolCallParser {
 	 * Uses partial-json-parser to extract values from incomplete JSON immediately.
 	 * Returns a partial ToolUse with currently parsed parameters.
 	 */
-	public static processStreamingChunk(id: string, chunk: string, scope = this.defaultScope): ToolUse | null {
+	public static processStreamingChunk(id: string, chunk: string, scope: object): ToolUse | null {
 		const toolCall = this.streamingToolCallsByScope.get(scope)?.get(id)
 		if (!toolCall) {
 			return null
@@ -315,7 +290,7 @@ export class NativeToolCallParser {
 	 * Finalize a streaming tool call.
 	 * Parses the complete JSON and returns the final ToolUse or McpToolUse.
 	 */
-	public static finalizeStreamingToolCall(id: string, scope = this.defaultScope): ToolUse | McpToolUse | null {
+	public static finalizeStreamingToolCall(id: string, scope: object): ToolUse | McpToolUse | null {
 		const streamingToolCalls = this.streamingToolCallsByScope.get(scope)
 		if (!streamingToolCalls) {
 			return null
@@ -335,7 +310,6 @@ export class NativeToolCallParser {
 
 		// Clean up streaming state
 		streamingToolCalls.delete(id)
-		// Stryker disable next-line ConditionalExpression: retaining an empty WeakMap value is only observable as GC eligibility.
 		if (streamingToolCalls.size === 0) {
 			// Stryker disable next-line CallExpression: deleting an empty WeakMap value is only observable as GC eligibility.
 			this.streamingToolCallsByScope.delete(scope)

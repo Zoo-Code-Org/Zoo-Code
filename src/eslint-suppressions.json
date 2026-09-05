@@ -796,7 +796,7 @@
 	},
 	"core/task/Task.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 17
 		}
 	},
 	"core/task/__tests__/Task.dispose.test.ts": {

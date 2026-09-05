@@ -15,8 +15,6 @@ describe("OpenAiCodexHandler native tool calls", () => {
 
 	beforeEach(() => {
 		vi.restoreAllMocks()
-		NativeToolCallParser.clearRawChunkState()
-		NativeToolCallParser.clearAllStreamingToolCalls()
 
 		mockOptions = {
 			apiModelId: "gpt-5.2-2025-12-11",
@@ -76,17 +74,21 @@ describe("OpenAiCodexHandler native tool calls", () => {
 			tools: [],
 		})
 
+		const parserScope = NativeToolCallParser.createScope()
 		const chunks: any[] = []
 		for await (const chunk of stream) {
 			chunks.push(chunk)
 			if (chunk.type === "tool_call_partial") {
 				// Simulate Task.ts behavior so finish_reason handling can emit tool_call_end elsewhere
-				NativeToolCallParser.processRawChunk({
-					index: chunk.index,
-					id: chunk.id,
-					name: chunk.name,
-					arguments: chunk.arguments,
-				})
+				NativeToolCallParser.processRawChunk(
+					{
+						index: chunk.index,
+						id: chunk.id,
+						name: chunk.name,
+						arguments: chunk.arguments,
+					},
+					parserScope,
+				)
 			}
 		}
 

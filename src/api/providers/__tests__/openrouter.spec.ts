@@ -478,9 +478,6 @@ describe("OpenRouterHandler", () => {
 			// Import NativeToolCallParser to set up state
 			const { NativeToolCallParser } = await import("../../../core/assistant-message/NativeToolCallParser")
 
-			// Clear any previous state
-			NativeToolCallParser.clearRawChunkState()
-
 			const handler = new OpenRouterHandler(mockOptions)
 
 			const mockStream = asyncStreamFrom([
@@ -520,18 +517,22 @@ describe("OpenRouterHandler", () => {
 			} as any
 
 			const generator = handler.createMessage("test", [])
+			const parserScope = NativeToolCallParser.createScope()
 			const chunks = []
 
 			for await (const chunk of generator) {
 				// Simulate what Task.ts does: when we receive tool_call_partial,
 				// process it through NativeToolCallParser to populate rawChunkTracker
 				if (chunk.type === "tool_call_partial") {
-					NativeToolCallParser.processRawChunk({
-						index: chunk.index,
-						id: chunk.id,
-						name: chunk.name,
-						arguments: chunk.arguments,
-					})
+					NativeToolCallParser.processRawChunk(
+						{
+							index: chunk.index,
+							id: chunk.id,
+							name: chunk.name,
+							arguments: chunk.arguments,
+						},
+						parserScope,
+					)
 				}
 				chunks.push(chunk)
 			}
@@ -598,9 +599,6 @@ describe("OpenRouterHandler", () => {
 		})
 
 		it("isolates overlapping tool-call finalization between provider streams", async () => {
-			const { NativeToolCallParser } = await import("../../../core/assistant-message/NativeToolCallParser")
-			NativeToolCallParser.clearRawChunkState()
-
 			let releaseFirstStream: (() => void) | undefined
 			let markFirstStreamPaused: (() => void) | undefined
 			const firstStreamRelease = new Promise<void>((resolve) => {
